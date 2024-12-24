@@ -51,14 +51,11 @@ pub use optimizer_context::*;
 use plan_expr_rewriter::ConstEvalRewriter;
 use property::Order;
 use risingwave_common::bail;
-use risingwave_common::catalog::{
-    ColumnCatalog, ColumnDesc, ColumnId, ConflictBehavior, Engine, Field, Schema,
-};
+use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ConflictBehavior, Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_connector::sink::catalog::SinkFormatDesc;
-use risingwave_pb::catalog::{PbWebhookSourceInfo, WatermarkDesc};
 use risingwave_pb::stream_plan::StreamScanType;
 
 use self::heuristic_optimizer::ApplyOrder;
@@ -73,9 +70,10 @@ use self::plan_visitor::InputRefValidator;
 use self::plan_visitor::{has_batch_exchange, CardinalityVisitor, StreamKeyChecker};
 use self::property::{Cardinality, RequiredDist};
 use self::rule::*;
-use crate::catalog::table_catalog::{TableType, TableVersion};
+use crate::catalog::table_catalog::TableType;
 use crate::error::{ErrorCode, Result};
 use crate::expr::TimestamptzExprFinder;
+use crate::handler::create_table::{CreateTableInfo, CreateTableProps};
 use crate::optimizer::plan_node::generic::{SourceNodeKind, Union};
 use crate::optimizer::plan_node::{
     BatchExchange, PlanNodeType, PlanTreeNode, RewriteExprsRecursive, StreamExchange, StreamUnion,
@@ -639,25 +637,26 @@ impl PlanRoot {
     }
 
     /// Optimize and generate a create table plan.
-    #[allow(clippy::too_many_arguments)]
     pub fn gen_table_plan(
         mut self,
         context: OptimizerContextRef,
         table_name: String,
-        columns: Vec<ColumnCatalog>,
-        definition: String,
-        pk_column_ids: Vec<ColumnId>,
-        row_id_index: Option<usize>,
-        append_only: bool,
-        on_conflict: Option<OnConflict>,
-        with_version_column: Option<String>,
-        watermark_descs: Vec<WatermarkDesc>,
-        version: Option<TableVersion>,
-        with_external_source: bool,
-        retention_seconds: Option<NonZeroU32>,
-        cdc_table_id: Option<String>,
-        webhook_info: Option<PbWebhookSourceInfo>,
-        engine: Engine,
+        CreateTableInfo {
+            columns,
+            pk_column_ids,
+            row_id_index,
+            watermark_descs,
+            source_catalog,
+            version,
+        }: CreateTableInfo,
+        CreateTableProps {
+            definition,
+            append_only,
+            on_conflict,
+            with_version_column,
+            webhook_info,
+            engine,
+        }: CreateTableProps,
     ) -> Result<StreamMaterialize> {
         assert_eq!(self.phase, PlanPhase::Logical);
         assert_eq!(self.plan.convention(), Convention::Logical);
@@ -751,6 +750,7 @@ impl PlanRoot {
             None
         };
 
+        let with_external_source = source_catalog.is_some();
         let union_inputs = if with_external_source {
             let mut external_source_node = stream_plan;
             external_source_node =
@@ -868,6 +868,8 @@ impl PlanRoot {
             ))?
         }
 
+        let retention_seconds = context.with_options().retention_seconds();
+
         let table_required_dist = {
             let mut bitset = FixedBitSet::with_capacity(columns.len());
             for idx in &pk_column_indices {
@@ -891,7 +893,6 @@ impl PlanRoot {
             row_id_index,
             version,
             retention_seconds,
-            cdc_table_id,
             webhook_info,
             engine,
         )
