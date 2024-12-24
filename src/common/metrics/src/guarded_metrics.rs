@@ -86,7 +86,7 @@ macro_rules! register_guarded_int_gauge_vec_with_registry {
 #[macro_export]
 macro_rules! register_guarded_uint_gauge_vec_with_registry {
     ($NAME:expr, $HELP:expr, $LABELS_NAMES:expr, $REGISTRY:expr $(,)?) => {{
-        let inner = prometheus::core::GenericGaugeVec::<AtomicU64>::new(
+        let inner = prometheus::core::GenericGaugeVec::<prometheus::core::AtomicU64>::new(
             prometheus::opts!($NAME, $HELP),
             $LABELS_NAMES,
         );
