@@ -151,12 +151,12 @@ impl ActorBuilder {
                 }];
 
                 Ok(StreamNode {
-                    node_body: Some(NodeBody::Merge(MergeNode {
+                    node_body: Some(NodeBody::Merge(Box::new(MergeNode {
                         upstream_actor_id: upstreams.actors.as_global_ids(),
                         upstream_fragment_id: upstreams.fragment_id.as_global_id(),
                         upstream_dispatcher_type: exchange.get_strategy()?.r#type,
                         fields: stream_node.get_fields().clone(),
-                    })),
+                    }))),
                     identity: "MergeExecutor".to_owned(),
                     ..stream_node.clone()
                 })
@@ -197,12 +197,12 @@ impl ActorBuilder {
                 let input = vec![
                     // Fill the merge node body with correct upstream info.
                     StreamNode {
-                        node_body: Some(NodeBody::Merge(MergeNode {
+                        node_body: Some(NodeBody::Merge(Box::new(MergeNode {
                             upstream_actor_id,
                             upstream_fragment_id: upstreams.fragment_id.as_global_id(),
                             upstream_dispatcher_type,
                             fields: merge_node.fields.clone(),
-                        })),
+                        }))),
                         ..merge_node.clone()
                     },
                     batch_plan_node.clone(),
@@ -246,12 +246,12 @@ impl ActorBuilder {
                 let input = vec![
                     // Fill the merge node body with correct upstream info.
                     StreamNode {
-                        node_body: Some(NodeBody::Merge(MergeNode {
+                        node_body: Some(NodeBody::Merge(Box::new(MergeNode {
                             upstream_actor_id,
                             upstream_fragment_id: upstreams.fragment_id.as_global_id(),
                             upstream_dispatcher_type: DispatcherType::NoShuffle as _,
                             fields: merge_node.fields.clone(),
-                        })),
+                        }))),
                         ..merge_node.clone()
                     },
                 ];

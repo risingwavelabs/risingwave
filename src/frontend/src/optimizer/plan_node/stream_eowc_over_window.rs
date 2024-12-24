@@ -155,12 +155,12 @@ impl StreamNode for StreamEowcOverWindow {
             .with_id(state.gen_table_id_wrapped())
             .to_internal_table_prost();
 
-        PbNodeBody::EowcOverWindow(EowcOverWindowNode {
+        PbNodeBody::EowcOverWindow(Box::new(EowcOverWindowNode {
             calls,
             partition_by,
             order_by,
             state_table: Some(state_table),
-        })
+        }))
     }
 }
 
