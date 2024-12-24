@@ -375,6 +375,8 @@ sqlx = { git = "https://github.com/madsim-rs/sqlx.git", rev = "3efe6d0065963db2a
 futures-timer = { git = "https://github.com/madsim-rs/futures-timer.git", rev = "05b33b4" }
 # patch to remove preserve_order from serde_json
 bson = { git = "https://github.com/risingwavelabs/bson-rust", rev = "e5175ec" }
+# TODO: unpatch after PR merged https://github.com/tokio-rs/prost/pull/1210
+prost-build = { git = "https://github.com/xxchan/prost.git", rev = "0eb1c7b09976cf6b5231e4b8d87bb5908ae6a163" }
 
 [workspace.metadata.dylint]
 libraries = [{ path = "./lints" }]
