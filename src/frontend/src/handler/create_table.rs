@@ -589,12 +589,19 @@ pub(crate) fn gen_create_table_plan(
 
     let pk_names = bind_sql_pk_names(&column_defs, bind_table_constraints(&constraints)?)?;
 
+    let watermark_descs = bind_source_watermark(
+        context.session_ctx(),
+        table_name.real_value(),
+        source_watermarks,
+        &columns,
+    )?;
+
     gen_create_table_plan_without_source(
         context,
         table_name,
         columns,
         pk_names,
-        source_watermarks,
+        watermark_descs,
         col_id_gen.into_version(),
         props,
     )
@@ -605,19 +612,12 @@ pub(crate) fn gen_create_table_plan_without_source(
     table_name: ObjectName,
     columns: Vec<ColumnCatalog>,
     pk_names: Vec<String>,
-    source_watermarks: Vec<SourceWatermark>,
+    watermark_descs: Vec<WatermarkDesc>,
     version: TableVersion,
     props: CreateTableProps,
 ) -> Result<(PlanRef, PbTable)> {
     let (columns, pk_column_ids, row_id_index) =
         bind_pk_and_row_id_on_relation(columns, pk_names, true)?;
-
-    let watermark_descs: Vec<WatermarkDesc> = bind_source_watermark(
-        context.session_ctx(),
-        table_name.real_value(),
-        source_watermarks,
-        &columns,
-    )?;
 
     let session = context.session_ctx().clone();
 
