@@ -25,8 +25,8 @@ use tokio::sync::mpsc;
 use super::permit::Receiver;
 use crate::executor::prelude::*;
 use crate::executor::{
-    BarrierInner, DispatcherBarrier, DispatcherMessage, DispatcherMessageStream,
-    DispatcherMessageStreamItem,
+    BarrierInner, DispatcherBarrier, DispatcherMessage, DispatcherMessageBatch,
+    DispatcherMessageStream, DispatcherMessageStreamItem,
 };
 use crate::task::{FragmentId, SharedContext, UpDownActorIds, UpDownFragmentIds};
 
@@ -128,7 +128,9 @@ mod local_input {
     async fn run_inner(mut channel: Receiver, upstream_actor_id: ActorId) {
         let span: await_tree::Span = format!("LocalInput (actor {upstream_actor_id})").into();
         while let Some(msg) = channel.recv().verbose_instrument_await(span.clone()).await {
-            yield msg;
+            for m in msg.into_messages() {
+                yield m;
+            }
         }
         // Always emit an error outside the loop. This is because we use barrier as the control
         // message to stop the stream. Reaching here means the channel is closed unexpectedly.
@@ -266,12 +268,13 @@ mod remote_input {
         while let Some(data_res) = stream.next().verbose_instrument_await(span.clone()).await {
             match data_res {
                 Ok(GetStreamResponse { message, permits }) => {
+                    use crate::executor::DispatcherMessageBatch;
                     let msg = message.unwrap();
-                    let bytes = DispatcherMessage::get_encoded_len(&msg);
+                    let bytes = DispatcherMessageBatch::get_encoded_len(&msg);
 
                     exchange_frag_recv_size_metrics.inc_by(bytes as u64);
 
-                    let msg_res = DispatcherMessage::from_protobuf(&msg);
+                    let msg_res = DispatcherMessageBatch::from_protobuf(&msg);
                     if let Some(add_back_permits) = match permits.unwrap().value {
                         // For records, batch the permits we received to reduce the backward
                         // `AddPermits` messages.
@@ -294,8 +297,9 @@ mod remote_input {
                     }
 
                     let msg = msg_res.context("RemoteInput decode message error")?;
-
-                    yield msg;
+                    for m in msg.into_messages() {
+                        yield m;
+                    }
                 }
 
                 Err(e) => Err(ExchangeChannelClosed::remote_input(up_down_ids.0, Some(e)))?,
@@ -357,4 +361,17 @@ pub(crate) fn new_input(
     };
 
     Ok(input)
+}
+
+impl DispatcherMessageBatch {
+    fn into_messages(self) -> Vec<DispatcherMessage> {
+        match self {
+            DispatcherMessageBatch::BarrierBatch(barriers) => barriers
+                .into_iter()
+                .map(DispatcherMessage::Barrier)
+                .collect(),
+            DispatcherMessageBatch::Chunk(c) => vec![DispatcherMessage::Chunk(c)],
+            DispatcherMessageBatch::Watermark(w) => vec![DispatcherMessage::Watermark(w)],
+        }
+    }
 }
