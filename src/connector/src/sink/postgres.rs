@@ -576,7 +576,7 @@ fn create_delete_sql(
             format!("({row_parameters})")
         })
         .collect_vec()
-        .join("OR");
+        .join(" OR ");
     format!("DELETE FROM {table_name} WHERE {parameters}")
 }
 
@@ -639,7 +639,7 @@ mod tests {
         let sql = create_delete_sql(&schema, table_name, &[1], 3);
         check(
             sql,
-            expect!["DELETE FROM test_table WHERE (b = $1)OR(b = $2)OR(b = $3)"],
+            expect!["DELETE FROM test_table WHERE (b = $1) OR (b = $2) OR (b = $3)"],
         );
     }
 }
