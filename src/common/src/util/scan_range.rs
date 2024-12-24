@@ -164,7 +164,7 @@ impl ScanRange {
             &order_types
                 .iter()
                 .cloned()
-                .map(|o| o.reverse())
+                .map(|o| if o.is_descending() { o.reverse() } else { o })
                 .collect_vec()
         };
 
