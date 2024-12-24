@@ -525,8 +525,10 @@ mod tests {
 
     #[test]
     fn test_getter() {
-        let mut data_type: DataType = DataType::default();
-        data_type.is_nullable = true;
+        let mut data_type: DataType = DataType {
+            is_nullable: true,
+            ..Default::default()
+        };
         let field = Field {
             data_type: Some(data_type),
             name: "".to_owned(),
