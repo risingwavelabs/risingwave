@@ -34,6 +34,9 @@ cargo sort --check --workspace --grouped
 echo "--- Rust format check"
 cargo fmt --all -- --check
 
+echo "--- Check unused dependencies"
+cargo machete
+
 echo "--- Run clippy check (dev, all features)"
 cargo clippy --all-targets --all-features --locked -- -D warnings
 
