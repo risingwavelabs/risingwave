@@ -23,8 +23,9 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{
-    CdcTableDesc, ColumnCatalog, ColumnDesc, Engine, FieldLike, TableId, TableVersionId,
-    DEFAULT_SCHEMA_NAME, INITIAL_TABLE_VERSION_ID, RISINGWAVE_ICEBERG_ROW_ID, ROWID_PREFIX,
+    CdcTableDesc, ColumnCatalog, ColumnDesc, ConflictBehavior, Engine, FieldLike, TableId,
+    TableVersionId, DEFAULT_SCHEMA_NAME, INITIAL_TABLE_VERSION_ID, RISINGWAVE_ICEBERG_ROW_ID,
+    ROWID_PREFIX,
 };
 use risingwave_common::config::MetaBackend;
 use risingwave_common::license::Feature;
@@ -43,9 +44,7 @@ use risingwave_connector::source::cdc::external::{
 };
 use risingwave_connector::{source, WithOptionsSecResolved};
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
-use risingwave_pb::catalog::{
-    PbHandleConflictBehavior, PbSource, PbTable, PbWebhookSourceInfo, Table, WatermarkDesc,
-};
+use risingwave_pb::catalog::{PbSource, PbTable, PbWebhookSourceInfo, Table, WatermarkDesc};
 use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::{
@@ -673,18 +672,18 @@ fn gen_table_plan_with_source(
 #[derive(Clone, Copy)]
 pub enum EitherOnConflict {
     Ast(Option<OnConflict>),
-    Pb(PbHandleConflictBehavior),
-}
-
-impl From<PbHandleConflictBehavior> for EitherOnConflict {
-    fn from(v: PbHandleConflictBehavior) -> Self {
-        Self::Pb(v)
-    }
+    Resolved(ConflictBehavior),
 }
 
 impl From<Option<OnConflict>> for EitherOnConflict {
     fn from(v: Option<OnConflict>) -> Self {
         Self::Ast(v)
+    }
+}
+
+impl From<ConflictBehavior> for EitherOnConflict {
+    fn from(v: ConflictBehavior) -> Self {
+        Self::Resolved(v)
     }
 }
 

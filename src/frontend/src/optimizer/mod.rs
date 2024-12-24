@@ -877,7 +877,7 @@ impl PlanRoot {
                     }
                 }
             }
-            EitherOnConflict::Pb(b) => ConflictBehavior::from_protobuf(&b),
+            EitherOnConflict::Resolved(b) => b,
         };
 
         if let ConflictBehavior::IgnoreConflict = conflict_behavior
