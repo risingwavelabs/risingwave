@@ -257,6 +257,21 @@ impl HummockVersion {
                 .values()
                 .map(|table_watermark| table_watermark.estimated_encode_len())
                 .sum::<usize>()
+            + self
+                .table_change_log
+                .values()
+                .map(|c| {
+                    c.0.iter()
+                        .map(|l| {
+                            l.old_value
+                                .iter()
+                                .chain(l.new_value.iter())
+                                .map(|s| s.estimated_encode_len())
+                                .sum::<usize>()
+                        })
+                        .sum::<usize>()
+                })
+                .sum::<usize>()
     }
 }
 
