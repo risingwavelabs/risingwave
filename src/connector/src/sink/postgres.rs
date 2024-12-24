@@ -252,8 +252,9 @@ impl<'a> ParameterBuffer<'a> {
     /// and <https://github.com/sfackler/rust-postgres/issues/356>
     const MAX_PARAMETERS: usize = 32768;
 
-    fn new(schema_types: &'a [PgType], chunk_size: usize) -> Self {
-        let estimated_parameter_size = usize::min(Self::MAX_PARAMETERS, chunk_size);
+    /// `flattened_chunk_size` is the number of datums in a single chunk.
+    fn new(schema_types: &'a [PgType], flattened_chunk_size: usize) -> Self {
+        let estimated_parameter_size = usize::min(Self::MAX_PARAMETERS, flattened_chunk_size);
         Self {
             parameters: vec![],
             column_length: schema_types.len(),
@@ -379,7 +380,10 @@ impl PostgresSinkWriter {
     async fn write_batch_append_only(&mut self, chunk: StreamChunk) -> Result<()> {
         let mut transaction = self.client.transaction().await?;
         // 1d flattened array of parameters to be inserted.
-        let mut parameter_buffer = ParameterBuffer::new(&self.schema_types, chunk.cardinality());
+        let mut parameter_buffer = ParameterBuffer::new(
+            &self.schema_types,
+            chunk.cardinality() * chunk.data_types().len(),
+        );
         for (op, row) in chunk.rows() {
             match op {
                 Op::Insert => {
@@ -409,10 +413,14 @@ impl PostgresSinkWriter {
     async fn write_batch_non_append_only(&mut self, chunk: StreamChunk) -> Result<()> {
         let mut transaction = self.client.transaction().await?;
         // 1d flattened array of parameters to be inserted.
-        let mut insert_parameter_buffer =
-            ParameterBuffer::new(&self.schema_types, chunk.cardinality());
-        let mut delete_parameter_buffer =
-            ParameterBuffer::new(&self.schema_types, chunk.cardinality());
+        let mut insert_parameter_buffer = ParameterBuffer::new(
+            &self.schema_types,
+            chunk.cardinality() * chunk.data_types().len(),
+        );
+        let mut delete_parameter_buffer = ParameterBuffer::new(
+            &self.schema_types,
+            chunk.cardinality() * self.pk_indices.len(),
+        );
         // 1d flattened array of parameters to be deleted.
         for (op, row) in chunk.rows() {
             match op {
