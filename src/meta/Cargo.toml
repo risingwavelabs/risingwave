@@ -7,21 +7,12 @@ keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
 
-[package.metadata.cargo-machete]
-ignored = ["workspace-hack"]
-
-[package.metadata.cargo-udeps.ignore]
-normal = ["workspace-hack"]
-
 [dependencies]
 anyhow = "1"
 arc-swap = "1"
 assert_matches = "1"
 async-trait = "0.1"
-aws-config = { workspace = true }
-aws-sdk-ec2 = { workspace = true }
 base64-url = { version = "3.0.0" }
-bincode = "1.3"
 bytes = { version = "1", features = ["serde"] }
 chrono = "0.4"
 clap = { workspace = true }
@@ -32,17 +23,12 @@ educe = "0.6"
 either = "1"
 enum-as-inner = "0.6"
 fail = "0.5"
-flate2 = "1"
-function_name = "0.3.0"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hex = "0.4"
 http = "1"
 itertools = { workspace = true }
 jsonbb = { workspace = true }
 maplit = "1.0.2"
-memcomparable = { version = "0.2" }
-mime_guess = "2"
-moka = { version = "0.12.3", features = ["future"] }
 notify = { version = "7", default-features = false, features = [
     "macos_fsevent",
 ] }
@@ -89,7 +75,6 @@ tokio-stream = { workspace = true }
 tonic = { workspace = true }
 tower = { version = "0.5", features = ["util", "load-shed"] }
 tracing = "0.1"
-url = "2"
 uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(not(madsim))'.dependencies]

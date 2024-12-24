@@ -156,9 +156,7 @@ export async function fetchEmbeddedBackPressure() {
   const response: GetBackPressureResponse = await api.get(
     "/metrics/fragment/embedded_back_pressures"
   )
-  let backPressureInfos: BackPressureInfo[] =
-    response.backPressureInfos?.map(BackPressureInfo.fromJSON) ?? []
-  return backPressureInfos
+  return response
 }
 
 function calculatePercentile(samples: MetricsSample[], percentile: number) {

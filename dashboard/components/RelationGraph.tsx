@@ -33,8 +33,14 @@ import {
   flipLayoutRelation,
   generateRelationEdges,
 } from "../lib/layout"
+import { RelationStats } from "../proto/gen/monitor_service"
 import { CatalogModal, useCatalogModal } from "./CatalogModal"
-import { backPressureColor, backPressureWidth } from "./utils/backPressure"
+import {
+  backPressureColor,
+  backPressureWidth,
+  epochToUnixMillis,
+  latencyToColor,
+} from "./utils/backPressure"
 
 function boundBox(
   relationPosition: RelationPointPosition[],
@@ -62,11 +68,13 @@ export default function RelationGraph({
   selectedId,
   setSelectedId,
   backPressures,
+  relationStats,
 }: {
   nodes: RelationPoint[]
   selectedId: string | undefined
   setSelectedId: (id: string) => void
   backPressures?: Map<string, number> // relationId-relationId->back_pressure_rate})
+  relationStats: { [relationId: number]: RelationStats } | undefined
 }) {
   const [modalData, setModalId] = useCatalogModal(nodes.map((n) => n.relation))
 
@@ -99,6 +107,7 @@ export default function RelationGraph({
   const { layoutMap, width, height, links } = layoutMapCallback()
 
   useEffect(() => {
+    const now_ms = Date.now()
     const svgNode = svgRef.current
     const svgSelection = d3.select(svgNode)
 
@@ -150,24 +159,39 @@ export default function RelationGraph({
           isSelected(d.source) || isSelected(d.target) ? 1 : 0.5
         )
 
-      // Tooltip for back pressure rate
-      let title = sel.select<SVGTitleElement>("title")
-      if (title.empty()) {
-        title = sel.append<SVGTitleElement>("title")
-      }
+      sel
+        .on("mouseover", (event, d) => {
+          // Remove existing tooltip if any
+          d3.selectAll(".tooltip").remove()
 
-      const text = (d: Edge) => {
-        if (backPressures) {
-          let value = backPressures.get(`${d.target}_${d.source}`)
-          if (value) {
-            return `${value.toFixed(2)}%`
+          if (backPressures) {
+            const value = backPressures.get(`${d.target}_${d.source}`)
+            if (value) {
+              // Create new tooltip
+              d3.select("body")
+                .append("div")
+                .attr("class", "tooltip")
+                .style("position", "absolute")
+                .style("background", "white")
+                .style("padding", "10px")
+                .style("border", "1px solid #ddd")
+                .style("border-radius", "4px")
+                .style("pointer-events", "none")
+                .style("left", event.pageX + 10 + "px")
+                .style("top", event.pageY + 10 + "px")
+                .style("font-size", "12px")
+                .html(`BP: ${value.toFixed(2)}%`)
+            }
           }
-        }
-
-        return ""
-      }
-
-      title.text(text)
+        })
+        .on("mousemove", (event) => {
+          d3.select(".tooltip")
+            .style("left", event.pageX + 10 + "px")
+            .style("top", event.pageY + 10 + "px")
+        })
+        .on("mouseout", () => {
+          d3.selectAll(".tooltip").remove()
+        })
 
       return sel
     }
@@ -189,9 +213,19 @@ export default function RelationGraph({
 
       circle.attr("r", nodeRadius).attr("fill", ({ id, relation }) => {
         const weight = relationIsStreamingJob(relation) ? "500" : "400"
-        return isSelected(id)
+        const baseColor = isSelected(id)
           ? theme.colors.blue[weight]
           : theme.colors.gray[weight]
+        if (relationStats) {
+          const relationId = parseInt(id)
+          if (!isNaN(relationId) && relationStats[relationId]) {
+            const currentMs = epochToUnixMillis(
+              relationStats[relationId].currentEpoch
+            )
+            return latencyToColor(now_ms - currentMs, baseColor)
+          }
+        }
+        return baseColor
       })
 
       // Relation name
@@ -233,16 +267,50 @@ export default function RelationGraph({
         .attr("font-size", 16)
         .attr("font-weight", "bold")
 
-      // Relation type tooltip
-      let typeTooltip = g.select<SVGTitleElement>("title")
-      if (typeTooltip.empty()) {
-        typeTooltip = g.append<SVGTitleElement>("title")
+      // Tooltip
+      const getTooltipContent = (relation: Relation, id: string) => {
+        const relationId = parseInt(id)
+        const stats = relationStats?.[relationId]
+        const latencySeconds = stats
+          ? (
+              (Date.now() - epochToUnixMillis(stats.currentEpoch)) /
+              1000
+            ).toFixed(2)
+          : "N/A"
+        const epoch = stats?.currentEpoch ?? "N/A"
+
+        return `<b>${relation.name} (${relationTypeTitleCase(
+          relation
+        )})</b><br>Epoch: ${epoch}<br>Latency: ${latencySeconds} seconds`
       }
 
-      typeTooltip.text(
-        ({ relation }) =>
-          `${relation.name} (${relationTypeTitleCase(relation)})`
-      )
+      g.on("mouseover", (event, { relation, id }) => {
+        // Remove existing tooltip if any
+        d3.selectAll(".tooltip").remove()
+
+        // Create new tooltip
+        d3.select("body")
+          .append("div")
+          .attr("class", "tooltip")
+          .style("position", "absolute")
+          .style("background", "white")
+          .style("padding", "10px")
+          .style("border", "1px solid #ddd")
+          .style("border-radius", "4px")
+          .style("pointer-events", "none")
+          .style("left", event.pageX + 10 + "px")
+          .style("top", event.pageY + 10 + "px")
+          .style("font-size", "12px")
+          .html(getTooltipContent(relation, id))
+      })
+        .on("mousemove", (event) => {
+          d3.select(".tooltip")
+            .style("left", event.pageX + 10 + "px")
+            .style("top", event.pageY + 10 + "px")
+        })
+        .on("mouseout", () => {
+          d3.selectAll(".tooltip").remove()
+        })
 
       // Relation modal
       g.style("cursor", "pointer").on("click", (_, { relation, id }) => {
@@ -265,7 +333,15 @@ export default function RelationGraph({
     nodeSelection.enter().call(createNode)
     nodeSelection.call(applyNode)
     nodeSelection.exit().remove()
-  }, [layoutMap, links, selectedId, setModalId, setSelectedId, backPressures])
+  }, [
+    layoutMap,
+    links,
+    selectedId,
+    setModalId,
+    setSelectedId,
+    backPressures,
+    relationStats,
+  ])
 
   return (
     <>
