@@ -261,50 +261,13 @@ pub fn bind_sql_columns(column_defs: &[ColumnDef]) -> Result<Vec<ColumnCatalog>>
     Ok(columns)
 }
 
-fn check_generated_column_constraints(
-    column_name: &String,
-    column_id: ColumnId,
-    expr: &ExprImpl,
-    column_catalogs: &[ColumnCatalog],
-    generated_column_names: &[String],
-    pk_column_ids: &[ColumnId],
-) -> Result<()> {
-    let input_refs = expr.collect_input_refs(column_catalogs.len());
-    for idx in input_refs.ones() {
-        let referred_generated_column = &column_catalogs[idx].column_desc.name;
-        if generated_column_names
-            .iter()
-            .any(|c| c == referred_generated_column)
-        {
-            return Err(ErrorCode::BindError(format!(
-                "Generated can not reference another generated column. \
-                But here generated column \"{}\" referenced another generated column \"{}\"",
-                column_name, referred_generated_column
-            ))
-            .into());
-        }
-    }
-
-    if pk_column_ids.contains(&column_id) && expr.is_impure() {
-        return Err(ErrorCode::BindError(format!(
-            "Generated columns with impure expressions should not be part of the primary key. \
-            Here column \"{}\" is defined as part of the primary key.",
-            column_name
-        ))
-        .into());
-    }
-
-    Ok(())
-}
-
 /// Binds constraints that can be only specified in column definitions,
 /// currently generated columns and default columns.
-pub fn bind_sql_column_constraints(
+pub fn bind_sql_columns_generated_and_default(
     session: &SessionImpl,
     table_name: String,
     column_catalogs: &mut [ColumnCatalog],
     columns: Vec<ColumnDef>,
-    pk_column_ids: &[ColumnId],
 ) -> Result<()> {
     let generated_column_names = {
         let mut names = vec![];
@@ -336,14 +299,19 @@ pub fn bind_sql_column_constraints(
                         )
                     })?;
 
-                    check_generated_column_constraints(
-                        &column.name.real_value(),
-                        column_catalogs[idx].column_id(),
-                        &expr_impl,
-                        column_catalogs,
-                        &generated_column_names,
-                        pk_column_ids,
-                    )?;
+                    // Check if generated column references another generated column.
+                    let input_refs = expr_impl.collect_input_refs(column_catalogs.len());
+                    for idx in input_refs.ones() {
+                        let referred_generated_column = &column_catalogs[idx].column_desc.name;
+                        if generated_column_names.contains(referred_generated_column) {
+                            return Err(ErrorCode::BindError(format!(
+                                "Generated can not reference another generated column. \
+                                 But here generated column \"{}\" referenced another generated column \"{}\"",
+                                column.name.real_value(), referred_generated_column
+                            ))
+                            .into());
+                        }
+                    }
 
                     column_catalogs[idx].column_desc.generated_or_default_column = Some(
                         GeneratedOrDefaultColumn::GeneratedColumn(GeneratedColumnDesc {
@@ -487,6 +455,23 @@ pub fn bind_pk_and_row_id_on_relation(
         )))?;
     }
 
+    // Check if impure generated columns are part of the primary key.
+    for column in &columns {
+        let Some(expr) = column.generated_expr() else {
+            continue;
+        };
+        let expr = ExprImpl::from_expr_proto(&expr)?;
+
+        if pk_column_ids.contains(&column.column_id()) && expr.is_impure() {
+            return Err(ErrorCode::BindError(format!(
+                "Generated columns with impure expressions should not be part of the primary key. \
+                Here column \"{}\" is defined as part of the primary key.",
+                column.name()
+            ))
+            .into());
+        }
+    }
+
     Ok((columns, pk_column_ids, row_id_index))
 }
 
@@ -568,7 +553,6 @@ pub(crate) async fn gen_create_table_plan_with_source(
 
 /// `gen_create_table_plan` generates the plan for creating a table without an external stream
 /// source.
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn gen_create_table_plan(
     context: OptimizerContext,
     table_name: ObjectName,
@@ -583,37 +567,41 @@ pub(crate) fn gen_create_table_plan(
         c.column_desc.column_id = col_id_gen.generate(&*c)?;
     }
 
+    bind_sql_columns_generated_and_default(
+        context.session_ctx(),
+        table_name.real_value(),
+        &mut columns,
+        column_defs.clone(),
+    )?;
+
     let (_, secret_refs, connection_refs) = context.with_options().clone().into_parts();
     if !secret_refs.is_empty() || !connection_refs.is_empty() {
         return Err(crate::error::ErrorCode::InvalidParameterValue("Secret reference and Connection reference are not allowed in options when creating table without external source".to_owned()).into());
     }
 
+    let pk_names = bind_sql_pk_names(&column_defs, bind_table_constraints(&constraints)?)?;
+
     gen_create_table_plan_without_source(
         context,
         table_name,
         columns,
-        column_defs,
-        constraints,
+        pk_names,
         source_watermarks,
         col_id_gen.into_version(),
         props,
     )
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn gen_create_table_plan_without_source(
     context: OptimizerContext,
     table_name: ObjectName,
     columns: Vec<ColumnCatalog>,
-    column_defs: Vec<ColumnDef>,
-    constraints: Vec<TableConstraint>,
+    pk_names: Vec<String>,
     source_watermarks: Vec<SourceWatermark>,
     version: TableVersion,
     props: CreateTableProps,
 ) -> Result<(PlanRef, PbTable)> {
-    // XXX: Why not bind outside?
-    let pk_names = bind_sql_pk_names(&column_defs, bind_table_constraints(&constraints)?)?;
-    let (mut columns, pk_column_ids, row_id_index) =
+    let (columns, pk_column_ids, row_id_index) =
         bind_pk_and_row_id_on_relation(columns, pk_names, true)?;
 
     let watermark_descs: Vec<WatermarkDesc> = bind_source_watermark(
@@ -623,13 +611,6 @@ pub(crate) fn gen_create_table_plan_without_source(
         &columns,
     )?;
 
-    bind_sql_column_constraints(
-        context.session_ctx(),
-        table_name.real_value(),
-        &mut columns,
-        column_defs,
-        &pk_column_ids,
-    )?;
     let session = context.session_ctx().clone();
 
     let db_name = session.database();
@@ -857,17 +838,16 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
         c.column_desc.column_id = col_id_gen.generate(&*c)?;
     }
 
-    let (mut columns, pk_column_ids, _row_id_index) =
-        bind_pk_and_row_id_on_relation(columns, pk_names, true)?;
-
     // NOTES: In auto schema change, default value is not provided in column definition.
-    bind_sql_column_constraints(
+    bind_sql_columns_generated_and_default(
         context.session_ctx(),
         table_name.real_value(),
         &mut columns,
         column_defs,
-        &pk_column_ids,
     )?;
+
+    let (columns, pk_column_ids, _row_id_index) =
+        bind_pk_and_row_id_on_relation(columns, pk_names, true)?;
 
     let definition = context.normalized_sql().to_owned();
 

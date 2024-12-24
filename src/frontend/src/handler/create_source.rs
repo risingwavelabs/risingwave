@@ -86,7 +86,7 @@ use crate::error::ErrorCode::{self, Deprecated, InvalidInputSyntax, NotSupported
 use crate::error::{Result, RwError};
 use crate::expr::Expr;
 use crate::handler::create_table::{
-    bind_pk_and_row_id_on_relation, bind_sql_column_constraints, bind_sql_columns,
+    bind_pk_and_row_id_on_relation, bind_sql_columns, bind_sql_columns_generated_and_default,
     bind_sql_pk_names, bind_table_constraints, ColumnIdGenerator,
 };
 use crate::handler::util::{
@@ -746,6 +746,14 @@ pub async fn bind_create_source_or_table_with_connector(
     }
     debug_assert_column_ids_distinct(&columns);
 
+    bind_sql_columns_generated_and_default(
+        session,
+        source_name.clone(),
+        &mut columns,
+        // TODO(st1page): pass the ref
+        sql_columns_defs.to_vec(),
+    )?;
+
     let must_need_pk = if is_create_source {
         with_properties.connector_need_pk()
     } else {
@@ -756,7 +764,7 @@ pub async fn bind_create_source_or_table_with_connector(
         true
     };
 
-    let (mut columns, pk_col_ids, row_id_index) =
+    let (columns, pk_col_ids, row_id_index) =
         bind_pk_and_row_id_on_relation(columns, pk_names, must_need_pk)?;
 
     let watermark_descs =
@@ -764,14 +772,6 @@ pub async fn bind_create_source_or_table_with_connector(
     // TODO(yuhao): allow multiple watermark on source.
     assert!(watermark_descs.len() <= 1);
 
-    bind_sql_column_constraints(
-        session,
-        source_name.clone(),
-        &mut columns,
-        // TODO(st1page): pass the ref
-        sql_columns_defs.to_vec(),
-        &pk_col_ids,
-    )?;
     check_format_encode(&with_properties, row_id_index, &columns).await?;
 
     let definition = handler_args.normalized_sql.clone();

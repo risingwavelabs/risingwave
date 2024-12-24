@@ -107,8 +107,7 @@ pub async fn handle_create_as(
             context,
             table_name.clone(),
             columns,
-            vec![],
-            vec![],
+            vec![], // No primary key, will generate a hidden `row_id` column.
             vec![], // No watermark should be defined in for `CREATE TABLE AS`
             col_id_gen.into_version(),
             CreateTableProps {
