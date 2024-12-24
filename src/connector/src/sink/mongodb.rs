@@ -728,6 +728,12 @@ impl MongodbPayloadWriter {
             )))
         })?;
 
+        if let Ok(ok) = result.get_i32("ok")
+            && ok != 1
+        {
+            return Err(SinkError::Mongodb(anyhow!("bulk write write errors")));
+        }
+
         if let Ok(write_errors) = result.get_array("writeErrors") {
             return Err(SinkError::Mongodb(anyhow!(
                 "bulk write respond with write errors: {:?}",
@@ -735,15 +741,10 @@ impl MongodbPayloadWriter {
             )));
         }
 
-        let n = result.get_i32("n").map_err(|err| {
-            SinkError::Mongodb(
-                anyhow!(err).context("can't extract field n from bulk write response"),
-            )
-        })?;
-        if n < 1 {
+        if let Ok(write_concern_error) = result.get_array("writeConcernError") {
             return Err(SinkError::Mongodb(anyhow!(
-                "bulk write respond with an abnormal state, n = {}",
-                n
+                "bulk write respond with write errors: {:?}",
+                write_concern_error,
             )));
         }
 
