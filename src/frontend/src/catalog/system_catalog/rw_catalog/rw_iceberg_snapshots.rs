@@ -78,7 +78,7 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwIcebergSnapshots>> 
                         summary: Value::object(
                             snapshot
                                 .summary()
-                                .other
+                                .additional_properties
                                 .iter()
                                 .map(|(k, v)| (k.as_str(), ValueRef::String(v))),
                         )

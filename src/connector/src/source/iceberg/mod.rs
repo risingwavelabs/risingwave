@@ -70,7 +70,7 @@ impl IcebergProperties {
             java_catalog_props.insert("jdbc.password".to_owned(), jdbc_password);
         }
         // TODO: support path_style_access and java_catalog_props for iceberg source
-        self.common.create_catalog_v2(&java_catalog_props).await
+        self.common.create_catalog(&java_catalog_props).await
     }
 
     pub async fn load_table_v2(&self) -> ConnectorResult<TableV2> {
@@ -82,7 +82,7 @@ impl IcebergProperties {
             java_catalog_props.insert("jdbc.password".to_owned(), jdbc_password);
         }
         // TODO: support java_catalog_props for iceberg source
-        self.common.load_table_v2(&java_catalog_props).await
+        self.common.load_table(&java_catalog_props).await
     }
 
     pub async fn load_table_v2_with_metadata(
@@ -98,7 +98,7 @@ impl IcebergProperties {
         }
         // TODO: support path_style_access and java_catalog_props for iceberg source
         self.common
-            .load_table_v2_with_metadata(table_meta, &java_catalog_props)
+            .load_table_with_metadata(table_meta, &java_catalog_props)
             .await
     }
 }

@@ -298,202 +298,18 @@ impl IcebergCommon {
     }
 }
 
-/// icelake
-mod v1 {
-    use anyhow::anyhow;
-    use icelake::catalog::{load_catalog, CatalogRef};
-    use icelake::{Table, TableIdentifier};
-
-    use super::*;
-
-    impl IcebergCommon {
-        pub fn full_table_name(&self) -> ConnectorResult<TableIdentifier> {
-            let ret = if let Some(database_name) = &self.database_name {
-                TableIdentifier::new(vec![database_name, &self.table_name])
-            } else {
-                TableIdentifier::new(vec![&self.table_name])
-            };
-
-            Ok(ret.context("Failed to create table identifier")?)
-        }
-
-        fn build_iceberg_configs(&self) -> ConnectorResult<HashMap<String, String>> {
-            let mut iceberg_configs = HashMap::new();
-
-            let catalog_type = self.catalog_type().to_owned();
-
-            iceberg_configs.insert(CATALOG_NAME.to_owned(), self.catalog_name());
-
-            match catalog_type.as_str() {
-                "storage" => {
-                    iceberg_configs.insert(
-                        format!("iceberg.catalog.{}.warehouse", self.catalog_name()),
-                        self.warehouse_path.clone().ok_or_else(|| {
-                            anyhow!("`warehouse.path` must be set in storage catalog")
-                        })?,
-                    );
-                    iceberg_configs.insert(CATALOG_TYPE.to_owned(), "storage".into());
-                }
-                "rest_rust" => {
-                    let uri = self
-                        .catalog_uri
-                        .clone()
-                        .with_context(|| "`catalog.uri` must be set in rest catalog".to_owned())?;
-                    iceberg_configs
-                        .insert(format!("iceberg.catalog.{}.uri", self.catalog_name()), uri);
-                    iceberg_configs.insert(CATALOG_TYPE.to_owned(), "rest".into());
-                }
-                _ => {
-                    bail!(
-                        "Unsupported catalog type: {}, only support `storage` and `rest`",
-                        catalog_type
-                    );
-                }
-            }
-
-            if let Some(region) = &self.region {
-                iceberg_configs.insert("iceberg.table.io.region".to_owned(), region.clone());
-            }
-
-            if let Some(endpoint) = &self.endpoint {
-                iceberg_configs.insert("iceberg.table.io.endpoint".to_owned(), endpoint.clone());
-            }
-
-            if let Some(access_key) = &self.access_key {
-                iceberg_configs.insert(
-                    "iceberg.table.io.access_key_id".to_owned(),
-                    access_key.clone(),
-                );
-            }
-            if let Some(secret_key) = &self.secret_key {
-                iceberg_configs.insert(
-                    "iceberg.table.io.secret_access_key".to_owned(),
-                    secret_key.clone(),
-                );
-            }
-
-            if let Some(path_style_access) = self.path_style_access {
-                iceberg_configs.insert(
-                    "iceberg.table.io.enable_virtual_host_style".to_owned(),
-                    (!path_style_access).to_string(),
-                );
-            }
-
-            match &self.warehouse_path {
-                Some(warehouse_path) => {
-                    let (bucket, root) = {
-                        let url = Url::parse(warehouse_path).with_context(|| {
-                            format!("Invalid warehouse path: {}", warehouse_path)
-                        })?;
-                        let bucket = url
-                            .host_str()
-                            .with_context(|| {
-                                format!("Invalid s3 path: {}, bucket is missing", warehouse_path)
-                            })?
-                            .to_owned();
-                        let root = url.path().trim_start_matches('/').to_owned();
-                        (bucket, root)
-                    };
-
-                    iceberg_configs.insert("iceberg.table.io.bucket".to_owned(), bucket);
-
-                    // Only storage catalog should set this.
-                    if catalog_type == "storage" {
-                        iceberg_configs.insert("iceberg.table.io.root".to_owned(), root);
-                    }
-                }
-                None => {
-                    if catalog_type == "storage" {
-                        bail!("`warehouse.path` must be set in storage catalog");
-                    }
-                }
-            }
-
-            let enable_config_load = self.enable_config_load.unwrap_or(false);
-            iceberg_configs.insert(
-                "iceberg.table.io.disable_config_load".to_owned(),
-                (!enable_config_load).to_string(),
-            );
-
-            Ok(iceberg_configs)
-        }
-
-        /// TODO: remove the arguments and put them into `IcebergCommon`. Currently the handling in source and sink are different, so pass them separately to be safer.
-        pub async fn create_catalog(
-            &self,
-            java_catalog_props: &HashMap<String, String>,
-        ) -> ConnectorResult<CatalogRef> {
-            match self.catalog_type() {
-                "storage" | "rest_rust" => {
-                    let iceberg_configs = self.build_iceberg_configs()?;
-                    let catalog = load_catalog(&iceberg_configs).await?;
-                    Ok(catalog)
-                }
-                catalog_type
-                    if catalog_type == "hive"
-                        || catalog_type == "jdbc"
-                        || catalog_type == "glue"
-                        || catalog_type == "rest" =>
-                {
-                    // Create java catalog
-                    let (base_catalog_config, java_catalog_props) =
-                        self.build_jni_catalog_configs(java_catalog_props)?;
-                    let catalog_impl = match catalog_type {
-                        "hive" => "org.apache.iceberg.hive.HiveCatalog",
-                        "jdbc" => "org.apache.iceberg.jdbc.JdbcCatalog",
-                        "glue" => "org.apache.iceberg.aws.glue.GlueCatalog",
-                        "rest" => "org.apache.iceberg.rest.RESTCatalog",
-                        _ => unreachable!(),
-                    };
-
-                    jni_catalog::JniCatalog::build_catalog(
-                        base_catalog_config,
-                        self.catalog_name(),
-                        catalog_impl,
-                        java_catalog_props,
-                    )
-                }
-                "mock" => Ok(Arc::new(mock_catalog::MockCatalog {})),
-                _ => {
-                    bail!(
-                    "Unsupported catalog type: {}, only support `storage`, `rest`, `hive`, `jdbc`, `glue`",
-                    self.catalog_type()
-                )
-                }
-            }
-        }
-
-        /// TODO: remove the arguments and put them into `IcebergCommon`. Currently the handling in source and sink are different, so pass them separately to be safer.
-        pub async fn load_table(
-            &self,
-            java_catalog_props: &HashMap<String, String>,
-        ) -> ConnectorResult<Table> {
-            let catalog = self
-                .create_catalog(java_catalog_props)
-                .await
-                .context("Unable to load iceberg catalog")?;
-
-            let table_id = self
-                .full_table_name()
-                .context("Unable to parse table name")?;
-
-            catalog.load_table(&table_id).await.map_err(Into::into)
-        }
-    }
-}
-
 /// iceberg-rust
 mod v2 {
     use anyhow::anyhow;
     use iceberg::spec::TableMetadata;
     use iceberg::table::Table as TableV2;
-    use iceberg::{Catalog as CatalogV2, TableIdent};
+    use iceberg::{Catalog, TableIdent};
     use iceberg_catalog_glue::{AWS_ACCESS_KEY_ID, AWS_REGION_NAME, AWS_SECRET_ACCESS_KEY};
 
     use super::*;
 
     impl IcebergCommon {
-        pub fn full_table_name_v2(&self) -> ConnectorResult<TableIdent> {
+        pub fn full_table_name(&self) -> ConnectorResult<TableIdent> {
             let ret = if let Some(database_name) = &self.database_name {
                 TableIdent::from_strs(vec![database_name, &self.table_name])
             } else {
@@ -504,10 +320,10 @@ mod v2 {
         }
 
         /// TODO: remove the arguments and put them into `IcebergCommon`. Currently the handling in source and sink are different, so pass them separately to be safer.
-        pub async fn create_catalog_v2(
+        pub async fn create_catalog(
             &self,
             java_catalog_props: &HashMap<String, String>,
-        ) -> ConnectorResult<Arc<dyn CatalogV2>> {
+        ) -> ConnectorResult<Arc<dyn Catalog>> {
             match self.catalog_type() {
                 "storage" => {
                     let config = storage_catalog::StorageCatalogConfig::builder()
@@ -623,7 +439,7 @@ mod v2 {
                         _ => unreachable!(),
                     };
 
-                    jni_catalog::JniCatalog::build_catalog_v2(
+                    jni_catalog::JniCatalog::build_catalog(
                         base_catalog_config,
                         self.catalog_name(),
                         catalog_impl,
@@ -641,23 +457,23 @@ mod v2 {
         }
 
         /// TODO: remove the arguments and put them into `IcebergCommon`. Currently the handling in source and sink are different, so pass them separately to be safer.
-        pub async fn load_table_v2(
+        pub async fn load_table(
             &self,
             java_catalog_props: &HashMap<String, String>,
         ) -> ConnectorResult<TableV2> {
             let catalog = self
-                .create_catalog_v2(java_catalog_props)
+                .create_catalog(java_catalog_props)
                 .await
                 .context("Unable to load iceberg catalog")?;
 
             let table_id = self
-                .full_table_name_v2()
+                .full_table_name()
                 .context("Unable to parse table name")?;
 
             catalog.load_table(&table_id).await.map_err(Into::into)
         }
 
-        pub async fn load_table_v2_with_metadata(
+        pub async fn load_table_with_metadata(
             &self,
             metadata: TableMetadata,
             java_catalog_props: &HashMap<String, String>,
@@ -680,7 +496,7 @@ mod v2 {
                     let storage_catalog = storage_catalog::StorageCatalog::new(config)?;
 
                     let table_id = self
-                        .full_table_name_v2()
+                        .full_table_name()
                         .context("Unable to parse table name")?;
 
                     Ok(iceberg::table::Table::builder()
@@ -691,7 +507,7 @@ mod v2 {
                         .readonly(true)
                         .build()?)
                 }
-                _ => self.load_table_v2(java_catalog_props).await,
+                _ => self.load_table(java_catalog_props).await,
             }
         }
     }

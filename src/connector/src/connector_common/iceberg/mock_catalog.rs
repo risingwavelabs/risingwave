@@ -276,7 +276,8 @@ mod v2 {
                     TableMetadataBuilder::from_table_creation(table_creation)
                         .unwrap()
                         .build()
-                        .unwrap(),
+                        .unwrap()
+                        .metadata,
                 )
                 .build()
                 .unwrap()

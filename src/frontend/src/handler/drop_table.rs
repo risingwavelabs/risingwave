@@ -131,14 +131,14 @@ pub async fn handle_drop_table(
                         let catalog = iceberg_properties.create_catalog_v2().await?;
                         let table_id = iceberg_properties
                             .common
-                            .full_table_name_v2()
+                            .full_table_name()
                             .context("Unable to parse table name")?;
                         (catalog, table_id)
                     }
                     Either::Right(iceberg_config) => {
-                        let catalog = iceberg_config.create_catalog_v2().await?;
+                        let catalog = iceberg_config.create_catalog().await?;
                         let table_id = iceberg_config
-                            .full_table_name_v2()
+                            .full_table_name()
                             .context("Unable to parse table name")?;
                         (catalog, table_id)
                     }
