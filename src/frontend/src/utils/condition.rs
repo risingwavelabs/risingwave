@@ -366,7 +366,18 @@ impl Condition {
                 scan_ranges.extend(scan_ranges_chunk);
             }
 
-            let order_types = table_desc.pk.iter().map(|x| x.order_type).collect_vec();
+            let order_types = table_desc
+                .pk
+                .iter()
+                .cloned()
+                .map(|x| {
+                    if x.order_type.is_descending() {
+                        x.order_type.reverse()
+                    } else {
+                        x.order_type
+                    }
+                })
+                .collect_vec();
             scan_ranges.sort_by(|left, right| {
                 let (left_start, _left_end) = &left.convert_to_range();
                 let (right_start, _right_end) = &right.convert_to_range();

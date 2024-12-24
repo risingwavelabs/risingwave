@@ -15,6 +15,7 @@
 use std::cmp::Ordering;
 use std::ops::{Bound, RangeBounds};
 
+use itertools::Itertools;
 use paste::paste;
 use risingwave_pb::batch_plan::scan_range::Bound as PbBound;
 use risingwave_pb::batch_plan::ScanRange as PbScanRange;
@@ -156,6 +157,17 @@ impl ScanRange {
             return true;
         }
 
+        let order_types = if order_types.iter().all(|o| o.is_ascending()) {
+            order_types
+        } else {
+            // reverse order types to ascending
+            &order_types
+                .iter()
+                .cloned()
+                .map(|o| o.reverse())
+                .collect_vec()
+        };
+
         // Unbounded is always less than any other bound
         if left_start_vec.is_empty() {
             // pass
@@ -165,7 +177,6 @@ impl ScanRange {
             assert!(!left_start_vec.is_empty());
             assert!(!right_start_vec.is_empty());
             let cmp_column_len = left_start_vec.len().min(right_start_vec.len());
-
             let cmp_start = cmp_rows(
                 &left_start_vec[0..cmp_column_len],
                 &right_start_vec[0..cmp_column_len],
@@ -206,7 +217,6 @@ impl ScanRange {
             assert!(!right_start_vec.is_empty());
 
             let cmp_column_len = left_end_vec.len().min(right_start_vec.len());
-
             let cmp_end = cmp_rows(
                 &left_end_vec[0..cmp_column_len],
                 &right_start_vec[0..cmp_column_len],
