@@ -263,7 +263,9 @@ pub fn bind_sql_columns(column_defs: &[ColumnDef]) -> Result<Vec<ColumnCatalog>>
 
 /// Binds constraints that can be only specified in column definitions,
 /// currently generated columns and default columns.
-pub fn bind_sql_columns_generated_and_default(
+///
+/// `generated_or_default_column` field in [`ColumnDesc`] will be set.
+pub fn bind_sql_columns_generated_and_default_constraints(
     session: &SessionImpl,
     table_name: String,
     column_catalogs: &mut [ColumnCatalog],
@@ -412,8 +414,14 @@ fn multiple_pk_definition_err() -> RwError {
 
 /// Binds primary keys defined in SQL.
 ///
-/// It returns the columns together with `pk_column_ids`, and an optional row id column index if
-/// added.
+/// If `must_need_pk` is true and no primary key is specified, a `_row_id` column is added to the
+/// given `columns` vec as the primary key.
+///
+/// Returns the (maybe) updated columns together with `pk_column_ids`, and an optional `_row_id`
+/// column index if added.
+///
+/// Should be called after calling [`bind_sql_columns_generated_and_default_constraints`] so that
+/// it can check whether a generated column is valid for being part of the primary key, if any.
 pub fn bind_pk_and_row_id_on_relation(
     mut columns: Vec<ColumnCatalog>,
     pk_names: Vec<String>,
@@ -567,7 +575,7 @@ pub(crate) fn gen_create_table_plan(
         c.column_desc.column_id = col_id_gen.generate(&*c)?;
     }
 
-    bind_sql_columns_generated_and_default(
+    bind_sql_columns_generated_and_default_constraints(
         context.session_ctx(),
         table_name.real_value(),
         &mut columns,
@@ -839,7 +847,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     }
 
     // NOTES: In auto schema change, default value is not provided in column definition.
-    bind_sql_columns_generated_and_default(
+    bind_sql_columns_generated_and_default_constraints(
         context.session_ctx(),
         table_name.real_value(),
         &mut columns,

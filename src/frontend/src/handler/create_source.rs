@@ -86,8 +86,9 @@ use crate::error::ErrorCode::{self, Deprecated, InvalidInputSyntax, NotSupported
 use crate::error::{Result, RwError};
 use crate::expr::Expr;
 use crate::handler::create_table::{
-    bind_pk_and_row_id_on_relation, bind_sql_columns, bind_sql_columns_generated_and_default,
-    bind_sql_pk_names, bind_table_constraints, ColumnIdGenerator,
+    bind_pk_and_row_id_on_relation, bind_sql_columns,
+    bind_sql_columns_generated_and_default_constraints, bind_sql_pk_names, bind_table_constraints,
+    ColumnIdGenerator,
 };
 use crate::handler::util::{
     check_connector_match_connection_type, ensure_connection_type_allowed, SourceSchemaCompatExt,
@@ -746,7 +747,7 @@ pub async fn bind_create_source_or_table_with_connector(
     }
     debug_assert_column_ids_distinct(&columns);
 
-    bind_sql_columns_generated_and_default(
+    bind_sql_columns_generated_and_default_constraints(
         session,
         source_name.clone(),
         &mut columns,
