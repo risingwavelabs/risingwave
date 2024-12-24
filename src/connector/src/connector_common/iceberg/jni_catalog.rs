@@ -22,7 +22,7 @@ use anyhow::Context;
 use async_trait::async_trait;
 use iceberg::io::FileIO;
 use iceberg::spec::{Schema, SortOrder, TableMetadata, UnboundPartitionSpec};
-use iceberg::table::Table as TableV2;
+use iceberg::table::Table;
 use iceberg::{
     Catalog, Namespace, NamespaceIdent, TableCommit, TableCreation, TableIdent, TableRequirement,
     TableUpdate,
@@ -149,7 +149,7 @@ impl Catalog for JniCatalog {
         &self,
         namespace: &NamespaceIdent,
         creation: TableCreation,
-    ) -> iceberg::Result<TableV2> {
+    ) -> iceberg::Result<Table> {
         execute_with_jni_env(self.jvm, |env| {
             let namespace_jstr = if namespace.is_empty() {
                 env.new_string("").unwrap()
@@ -186,7 +186,7 @@ impl Catalog for JniCatalog {
                 .with_props(self.config.table_io_configs.iter())
                 .build()?;
 
-            Ok(TableV2::builder()
+            Ok(Table::builder()
                 .file_io(file_io)
                 .identifier(TableIdent::new(namespace.clone(), creation.name))
                 .metadata(table_metadata)
@@ -202,7 +202,7 @@ impl Catalog for JniCatalog {
     }
 
     /// Load table from the catalog.
-    async fn load_table(&self, table: &TableIdent) -> iceberg::Result<TableV2> {
+    async fn load_table(&self, table: &TableIdent) -> iceberg::Result<Table> {
         execute_with_jni_env(self.jvm, |env| {
             let table_name_str = format!(
                 "{}.{}",
@@ -236,7 +236,7 @@ impl Catalog for JniCatalog {
                 .with_props(self.config.table_io_configs.iter())
                 .build()?;
 
-            Ok(TableV2::builder()
+            Ok(Table::builder()
                 .file_io(file_io)
                 .identifier(table.clone())
                 .metadata(table_metadata)
@@ -312,7 +312,7 @@ impl Catalog for JniCatalog {
     }
 
     /// Update a table to the catalog.
-    async fn update_table(&self, mut commit: TableCommit) -> iceberg::Result<TableV2> {
+    async fn update_table(&self, mut commit: TableCommit) -> iceberg::Result<Table> {
         execute_with_jni_env(self.jvm, |env| {
             let requirements = commit.take_requirements();
             let updates = commit.take_updates();
@@ -350,7 +350,7 @@ impl Catalog for JniCatalog {
                 .with_props(self.config.table_io_configs.iter())
                 .build()?;
 
-            Ok(TableV2::builder()
+            Ok(Table::builder()
                 .file_io(file_io)
                 .identifier(commit.identifier().clone())
                 .metadata(table_metadata)
