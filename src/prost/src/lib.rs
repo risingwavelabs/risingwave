@@ -525,7 +525,7 @@ mod tests {
 
     #[test]
     fn test_getter() {
-        let mut data_type: DataType = DataType {
+        let data_type: DataType = DataType {
             is_nullable: true,
             ..Default::default()
         };
