@@ -20,7 +20,7 @@ use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::catalog::Schema;
-use risingwave_common::row::Row;
+use risingwave_common::row::{Row, RowExt};
 use serde_derive::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 use simd_json::prelude::ArrayTrait;
@@ -423,7 +423,7 @@ impl PostgresSinkWriter {
                     insert_parameter_buffer.add_row(row);
                 }
                 Op::Delete => {
-                    delete_parameter_buffer.add_row(row);
+                    delete_parameter_buffer.add_row(row.project(&self.pk_indices));
                 }
             }
         }
@@ -553,12 +553,11 @@ fn create_delete_sql(
     let number_of_pk = pk_indices.len();
     let parameters: String = (0..number_of_rows)
         .map(|i| {
-            let row_parameters: String = pk_indices
-                .iter()
-                .map(|j| {
+            let row_parameters: String = pk_indices.iter().enumerate()
+                .map(|(j, pk_index)| {
                     format!(
                         "{} = ${}",
-                        schema.fields()[*j].name,
+                        schema.fields()[*pk_index].name,
                         i * number_of_pk + j + 1
                     )
                 })
@@ -630,7 +629,7 @@ mod tests {
         let sql = create_delete_sql(&schema, table_name, &[1], 3);
         check(
             sql,
-            expect!["DELETE FROM test_table WHERE (b = $2)OR(b = $3)OR(b = $4)"],
+            expect!["DELETE FROM test_table WHERE (b = $1)OR(b = $2)OR(b = $3)"],
         );
     }
 }
