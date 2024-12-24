@@ -34,9 +34,6 @@ cargo sort --check --workspace --grouped
 echo "--- Rust format check"
 cargo fmt --all -- --check
 
-echo "--- Check unused dependencies"
-cargo machete
-
 echo "--- Run clippy check (dev, all features)"
 cargo clippy --all-targets --all-features --locked -- -D warnings
 
@@ -68,3 +65,6 @@ RUSTDOCFLAGS="-Clink-arg=-fuse-ld=lld" cargo test --doc
 echo "--- Show sccache stats"
 sccache --show-stats
 sccache --zero-stats
+
+echo "--- Check unused dependencies"
+cargo machete
