@@ -49,7 +49,7 @@ impl AccessBuilder for AvroAccessBuilder {
         self.value = self.parse_avro_value(&payload).await?;
         Ok(AccessImpl::Avro(AvroAccess::new(
             self.value.as_ref().unwrap(),
-            AvroParseOptions::create(&self.schema.resolved_schema),
+            AvroParseOptions::create(&self.schema.original_schema),
         )))
     }
 }

@@ -19,18 +19,17 @@ js-udf = ["risingwave_expr_impl/js-udf"]
 python-udf = ["risingwave_expr_impl/python-udf"]
 
 [package.metadata.cargo-machete]
-ignored = ["workspace-hack", "workspace-config", "task_stats_alloc"]
+ignored = ["workspace-hack", "workspace-config", "task_stats_alloc", "tikv-jemallocator"]
 
 [package.metadata.cargo-udeps.ignore]
-ignored = ["workspace-hack", "workspace-config", "task_stats_alloc"]
+ignored = ["workspace-hack", "workspace-config", "task_stats_alloc", "tikv-jemallocator"]
 
 [dependencies]
-anyhow = "1"
 clap = { workspace = true }
 console = "0.15"
 const-str = "0.5"
 home = "0.5"
-prometheus = { version = "0.13" }
+risingwave_batch_executors = { workspace = true }
 risingwave_cmd = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_compactor = { workspace = true }

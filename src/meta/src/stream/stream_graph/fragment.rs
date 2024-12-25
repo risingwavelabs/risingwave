@@ -626,7 +626,7 @@ impl StreamFragmentGraph {
                                 } else {
                                     None
                                 },
-                                stream_scan.clone(),
+                                *stream_scan.clone(),
                             ));
                             true
                         }

@@ -279,6 +279,7 @@ message SinkNode {
   // A sink with a kv log store should have a table.
   catalog.Table table = 2;
   SinkLogStoreType log_store_type = 3;
+  optional uint32 rate_limit = 4;
 }
 
 message ProjectNode {

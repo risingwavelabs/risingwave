@@ -25,7 +25,7 @@ use crate::parser::ParserConfig;
 use crate::source::common::into_chunk_stream;
 use crate::source::nats::NatsProperties;
 use crate::source::{
-    BoxChunkSourceStream, Column, SourceContextRef, SourceMessage, SplitId, SplitReader,
+    BoxSourceChunkStream, Column, SourceContextRef, SourceMessage, SplitId, SplitReader,
 };
 
 pub struct NatsSplitReader {
@@ -105,7 +105,7 @@ impl SplitReader for NatsSplitReader {
         })
     }
 
-    fn into_stream(self) -> BoxChunkSourceStream {
+    fn into_stream(self) -> BoxSourceChunkStream {
         let parser_config = self.parser_config.clone();
         let source_context = self.source_ctx.clone();
         into_chunk_stream(self.into_data_stream(), parser_config, source_context)

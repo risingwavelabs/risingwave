@@ -41,6 +41,7 @@ use super::google_pubsub::GooglePubsubMeta;
 use super::kafka::KafkaMeta;
 use super::kinesis::KinesisMeta;
 use super::monitor::SourceMetrics;
+use super::nats::source::NatsMeta;
 use super::nexmark::source::message::NexmarkMeta;
 use super::{AZBLOB_CONNECTOR, GCS_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR};
 use crate::error::ConnectorResult as Result;
@@ -141,17 +142,27 @@ pub type SourceEnumeratorContextRef = Arc<SourceEnumeratorContext>;
 /// The max size of a chunk yielded by source stream.
 pub const MAX_CHUNK_SIZE: usize = 1024;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct SourceCtrlOpts {
     /// The max size of a chunk yielded by source stream.
     pub chunk_size: usize,
-    /// Rate limit of source
-    pub rate_limit: Option<u32>,
+    /// Whether to allow splitting a transaction into multiple chunks to meet the `max_chunk_size`.
+    pub split_txn: bool,
 }
 
 // The options in `SourceCtrlOpts` are so important that we don't want to impl `Default` for it,
 // so that we can prevent any unintentional use of the default value.
 impl !Default for SourceCtrlOpts {}
+
+impl SourceCtrlOpts {
+    #[cfg(test)]
+    pub fn for_test() -> Self {
+        SourceCtrlOpts {
+            chunk_size: 256,
+            split_txn: false,
+        }
+    }
+}
 
 #[derive(Debug)]
 pub struct SourceEnumeratorContext {
@@ -225,7 +236,7 @@ impl SourceContext {
             Arc::new(SourceMetrics::default()),
             SourceCtrlOpts {
                 chunk_size: MAX_CHUNK_SIZE,
-                rate_limit: None,
+                split_txn: false,
             },
             ConnectorProperties::default(),
             None,
@@ -342,20 +353,22 @@ pub fn extract_source_struct(info: &PbStreamSourceInfo) -> Result<SourceStruct> 
     Ok(SourceStruct::new(format, encode))
 }
 
-/// Stream of [`SourceMessage`].
-pub type BoxSourceStream = BoxStream<'static, crate::error::ConnectorResult<Vec<SourceMessage>>>;
+/// Stream of [`SourceMessage`]. Messages flow through the stream in the unit of a batch.
+pub type BoxSourceMessageStream =
+    BoxStream<'static, crate::error::ConnectorResult<Vec<SourceMessage>>>;
+/// Stream of [`StreamChunk`]s parsed from the messages from the external source.
+pub type BoxSourceChunkStream = BoxStream<'static, crate::error::ConnectorResult<StreamChunk>>;
 
 // Manually expand the trait alias to improve IDE experience.
-pub trait ChunkSourceStream:
+pub trait SourceChunkStream:
     Stream<Item = crate::error::ConnectorResult<StreamChunk>> + Send + 'static
 {
 }
-impl<T> ChunkSourceStream for T where
+impl<T> SourceChunkStream for T where
     T: Stream<Item = crate::error::ConnectorResult<StreamChunk>> + Send + 'static
 {
 }
 
-pub type BoxChunkSourceStream = BoxStream<'static, crate::error::ConnectorResult<StreamChunk>>;
 pub type BoxTryStream<M> = BoxStream<'static, crate::error::ConnectorResult<M>>;
 
 /// [`SplitReader`] is a new abstraction of the external connector read interface which is
@@ -374,7 +387,7 @@ pub trait SplitReader: Sized + Send {
         columns: Option<Vec<Column>>,
     ) -> crate::error::ConnectorResult<Self>;
 
-    fn into_stream(self) -> BoxChunkSourceStream;
+    fn into_stream(self) -> BoxSourceChunkStream;
 
     fn backfill_info(&self) -> HashMap<SplitId, BackfillInfo> {
         HashMap::new()
@@ -652,6 +665,7 @@ pub enum SourceMeta {
     GooglePubsub(GooglePubsubMeta),
     Datagen(DatagenMeta),
     DebeziumCdc(DebeziumCdcMeta),
+    Nats(NatsMeta),
     // For the source that doesn't have meta data.
     Empty,
 }

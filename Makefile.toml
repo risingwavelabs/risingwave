@@ -196,6 +196,19 @@ script = '''
 watch -n 1 "${TMUX} list-windows -t risedev | grep -v active | cut -d'(' -f1"
 '''
 
+[tasks.diagnose]
+category = "Misc"
+description = "Dump diagnose info"
+dependencies = ["check-and-load-risedev-env-file"]
+script = '''
+#!/usr/bin/env bash
+set -e
+file_name=${PREFIX_LOG}/diagnose-$(date -u +%Y-%m-%dT%H:%M:%SZ).txt
+curl -s ${RISEDEV_RW_META_DASHBOARD_ADDR}/api/monitor/diagnose/ > ${file_name}
+echo "Diagnose info has been dumped to ${file_name}"
+'''
+
+
 [tasks.del]
 alias = "delete"
 
@@ -369,11 +382,7 @@ ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "$
 [tasks.post-build-risingwave]
 category = "RiseDev - Build"
 description = "Copy RisingWave binaries to bin"
-condition = { env_set = [
-    "ENABLE_BUILD_RUST",
-], env_not_set = [
-    "USE_SYSTEM_RISINGWAVE",
-] }
+condition = { env_set = ["ENABLE_BUILD_RUST"], env_not_set = ["USE_SYSTEM_RISINGWAVE"] }
 dependencies = [
     "link-all-in-one-binaries",
     "link-user-bin",
@@ -636,11 +645,21 @@ echo "   $(tput setaf 4)source ${PREFIX_CONFIG}/psql-env$(tput sgr0)"
 
 [tasks.psql]
 category = "RiseDev - Start/Stop"
-description = "Run local psql client with default connection parameters. You can pass extra arguments to psql."
+description = "Run local psql client for RisingWave with default connection parameters. You can pass extra arguments to psql."
 dependencies = ["check-and-load-risedev-env-file"]
 script = '''
 #!/usr/bin/env bash
 psql -h $RISEDEV_RW_FRONTEND_LISTEN_ADDRESS -p $RISEDEV_RW_FRONTEND_PORT -U root -d dev "$@"
+'''
+
+[tasks.pgpsql]
+category = "RiseDev - Start/Stop"
+description = "Run local psql client for postgres with default connection parameters. You can pass extra arguments to psql."
+dependencies = ["check-and-load-risedev-env-file"]
+script = '''
+#!/usr/bin/env bash
+source "${PREFIX_CONFIG}/risedev-env"
+PGHOST=$PGHOST PGPORT=$PGPORT PGUSER=$PGUSER PGDATABASE=$PGDATABASE psql "$@"
 '''
 
 [tasks.ctl]
@@ -849,11 +868,6 @@ dependencies = ["install-nextest"]
 script = """
 #!/usr/bin/env bash
 set -e
-
-echo "Running Planner Test requires larger stack size, setting RUST_MIN_STACK to 8388608 (8MB) as default."
-if [[ -z "${RUST_MIN_STACK}" ]]; then
-  export RUST_MIN_STACK=8388608
-fi
 
 cargo nextest run --workspace --exclude risingwave_simulation "$@"
 """
@@ -1195,7 +1209,7 @@ script = """
 
 echo "Running $(tput setaf 4)cargo udeps$(tput sgr0) checks"
 
-cargo udeps --workspace --all-targets ${RISINGWAVE_FEATURE_FLAGS} --exclude workspace-hack --exclude risingwave_bench --exclude risingwave_udf --exclude risingwave_simulation
+cargo udeps --workspace --all-targets ${RISINGWAVE_FEATURE_FLAGS} --exclude workspace-hack --exclude risingwave_bench --exclude risingwave_simulation
 """
 
 [tasks.check-trailing-spaces]
@@ -1290,7 +1304,7 @@ echo If you still feel this is not enough, you may copy $(tput setaf 4)risedev$(
 [tasks.ci-start]
 category = "RiseDev - CI"
 dependencies = ["clean-data", "pre-start-dev"]
-command = "target/debug/risedev-dev"                                                 # `risedev-dev` is always built in dev profile
+command = "target/debug/risedev-dev" # `risedev-dev` is always built in dev profile
 env = { RISEDEV_CLEAN_START = true }
 args = ["${@}"]
 description = "Clean data and start a full RisingWave dev cluster using risedev-dev"
@@ -1327,7 +1341,7 @@ echo "All processes has exited."
 
 [tasks.slt]
 category = "RiseDev - Test - SQLLogicTest"
-install_crate = { min_version = "0.21.0", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
+install_crate = { min_version = "0.24.0", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
     "--help",
 ], install_command = "binstall" }
 dependencies = ["check-and-load-risedev-env-file"]

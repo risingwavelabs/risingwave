@@ -27,6 +27,17 @@ pub enum RecordType {
     Update,
 }
 
+impl RecordType {
+    /// Get the corresponding `Op`s for this record type.
+    pub fn ops(self) -> &'static [Op] {
+        match self {
+            RecordType::Insert => &[Op::Insert],
+            RecordType::Delete => &[Op::Delete],
+            RecordType::Update => &[Op::UpdateDelete, Op::UpdateInsert],
+        }
+    }
+}
+
 /// Generic type to represent a row change.
 #[derive(Debug, Clone, Copy)]
 pub enum Record<R: Row> {

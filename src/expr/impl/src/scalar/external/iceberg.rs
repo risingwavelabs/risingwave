@@ -19,9 +19,8 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use icelake::types::{
-    create_transform_function, Any as IcelakeDataType, BoxedTransformFunction, Transform,
-};
+use iceberg::spec::{PrimitiveType, Transform, Type as IcebergType};
+use iceberg::transform::{create_transform_function, BoxedTransformFunction};
 use risingwave_common::array::arrow::{arrow_schema_iceberg, IcebergArrowConvert};
 use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::ensure;
@@ -81,7 +80,7 @@ fn build(return_type: DataType, mut children: Vec<BoxedExpression>) -> Result<Bo
         let datum = children[0].eval_const()?.unwrap();
         let str = datum.as_utf8();
         Transform::from_str(str).map_err(|_| ExprError::InvalidParam {
-            name: "transform type in icberg_transform",
+            name: "transform type in iceberg_transform",
             reason: format!("Fail to parse {str} as iceberg transform type").into(),
         })?
     };
@@ -101,7 +100,7 @@ fn build(return_type: DataType, mut children: Vec<BoxedExpression>) -> Result<Bo
         .data_type()
         .clone();
     let output_arrow_field = IcebergArrowConvert.to_arrow_field("", &return_type)?;
-    let input_type = IcelakeDataType::try_from(input_arrow_type.clone()).map_err(|err| {
+    let input_type = iceberg::arrow::arrow_type_to_type(&input_arrow_type).map_err(|err| {
         ExprError::InvalidParam {
             name: "input type in iceberg_transform",
             reason: format!(
@@ -120,8 +119,8 @@ fn build(return_type: DataType, mut children: Vec<BoxedExpression>) -> Result<Bo
             )
             .into()
         })?;
-    let actual_res_type = IcelakeDataType::try_from(
-        IcebergArrowConvert
+    let actual_res_type = iceberg::arrow::arrow_type_to_type(
+        &IcebergArrowConvert
             .to_arrow_field("", &return_type)?
             .data_type()
             .clone(),
@@ -134,13 +133,21 @@ fn build(return_type: DataType, mut children: Vec<BoxedExpression>) -> Result<Bo
         )
         .into(),
     })?;
+
     ensure!(
-        expect_res_type == actual_res_type,
+        (expect_res_type == actual_res_type)
+            ||
+            // This is a confusing stuff.<https://github.com/apache/iceberg/pull/11749>
+            (matches!(transform_type, Transform::Day) && matches!(actual_res_type, IcebergType::Primitive(PrimitiveType::Int))),
         ExprError::InvalidParam {
             name: "return type in iceberg_transform",
             reason: format!(
-                "Expect return type {:?} but got {:?}",
-                expect_res_type, actual_res_type
+                "Expect return type {:?} but got {:?}, RisingWave return type is {:?}, input type is {:?}, transform type is {:?}",
+                expect_res_type,
+                actual_res_type,
+                return_type,
+                (input_type, input_arrow_type),
+                transform_type
             )
             .into()
         }

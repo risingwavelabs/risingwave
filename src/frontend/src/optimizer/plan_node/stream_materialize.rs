@@ -97,6 +97,7 @@ impl StreamMaterialize {
         } else {
             CreateType::Foreground
         };
+
         let table = Self::derive_table_catalog(
             input.clone(),
             name,
@@ -136,15 +137,14 @@ impl StreamMaterialize {
         version_column_index: Option<usize>,
         pk_column_indices: Vec<usize>,
         row_id_index: Option<usize>,
-        version: Option<TableVersion>,
+        version: TableVersion,
         retention_seconds: Option<NonZeroU32>,
-        cdc_table_id: Option<String>,
         webhook_info: Option<PbWebhookSourceInfo>,
         engine: Engine,
     ) -> Result<Self> {
         let input = Self::rewrite_input(input, user_distributed_by, TableType::Table)?;
 
-        let mut table = Self::derive_table_catalog(
+        let table = Self::derive_table_catalog(
             input.clone(),
             name,
             user_order_by,
@@ -155,15 +155,13 @@ impl StreamMaterialize {
             Some(pk_column_indices),
             row_id_index,
             TableType::Table,
-            version,
+            Some(version),
             Cardinality::unknown(), // unknown cardinality for tables
             retention_seconds,
             CreateType::Foreground,
             webhook_info,
             engine,
         )?;
-
-        table.cdc_table_id = cdc_table_id;
 
         Ok(Self::new(input, table))
     }
@@ -385,7 +383,7 @@ impl StreamNode for StreamMaterialize {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
         use risingwave_pb::stream_plan::*;
 
-        PbNodeBody::Materialize(MaterializeNode {
+        PbNodeBody::Materialize(Box::new(MaterializeNode {
             // We don't need table id for materialize node in frontend. The id will be generated on
             // meta catalog service.
             table_id: 0,
@@ -396,7 +394,7 @@ impl StreamNode for StreamMaterialize {
                 .map(ColumnOrder::to_protobuf)
                 .collect(),
             table: Some(self.table().to_internal_table_prost()),
-        })
+        }))
     }
 }
 

@@ -336,7 +336,10 @@ impl WorkerNodeSelector {
         } else {
             self.apply_worker_node_mask(self.manager.list_serving_worker_nodes())
         };
-        worker_nodes.iter().map(|node| node.parallelism()).sum()
+        worker_nodes
+            .iter()
+            .map(|node| node.compute_node_parallelism())
+            .sum()
     }
 
     pub fn fragment_mapping(&self, fragment_id: FragmentId) -> Result<WorkerSlotMapping> {
