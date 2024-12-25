@@ -48,7 +48,7 @@ message ScanRange {
 
   // `None` represent unbounded.
   message Bound {
-    bytes value = 1;
+    repeated bytes value = 1;
     bool inclusive = 2;
   }
   //  The lower bound of the next PK column subsequent to those in `eq_conds`.

@@ -608,7 +608,6 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
     ) -> StorageResult<impl Stream<Item = StorageResult<KeyedRow<Bytes>>> + Send> {
         let start_key = self.serialize_pk_bound(&pk_prefix, range_bounds.start_bound(), true);
         let end_key = self.serialize_pk_bound(&pk_prefix, range_bounds.end_bound(), false);
-
         assert!(pk_prefix.len() <= self.pk_indices.len());
         let pk_prefix_indices = (0..pk_prefix.len())
             .map(|index| self.pk_indices[index])
