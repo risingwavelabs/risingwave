@@ -10,6 +10,40 @@
 # ```
 
 profile:
+  kkk:
+    config-path: src/config/example.toml
+    steps:
+      - use: minio
+      - use: postgres
+        port: 8432
+        user: postgres
+        database: metadata
+      - use: meta-node
+        port: 5690
+        dashboard-port: 5691
+        exporter-port: 1250
+        meta-backend: postgres
+      - use: compactor
+      - use: compute-node
+        port: 5686
+        exporter-port: 1221
+        parallelism: 64
+      - use: compute-node
+        port: 5687
+        exporter-port: 1222
+        parallelism: 64
+      - use: compute-node
+        port: 5688
+        exporter-port: 1223
+        parallelism: 64
+      - use: compute-node
+        port: 5689
+        exporter-port: 1224
+        parallelism: 64
+      - use: frontend
+      - use: prometheus
+      - use: grafana
+
   #################################################
   ### Configuration profiles used by developers ###
   #################################################
