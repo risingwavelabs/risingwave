@@ -18,6 +18,7 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::util::epoch::EpochPair;
+use risingwave_hummock_sdk::table_watermark::WatermarkSerdeType;
 use risingwave_hummock_sdk::{HummockReadEpoch, HummockVersionId};
 use risingwave_pb::common::PbBuffer;
 
@@ -263,7 +264,7 @@ pub struct TracedInitOptions {
 #[derive(Debug, Clone, PartialEq, Eq, Decode, Encode)]
 pub struct TracedSealCurrentEpochOptions {
     // The watermark is serialized into protobuf
-    pub table_watermarks: Option<(bool, Vec<Vec<u8>>)>,
+    pub table_watermarks: Option<(bool, Vec<Vec<u8>>, WatermarkSerdeType)>,
     pub switch_op_consistency_level: Option<bool>,
 }
 

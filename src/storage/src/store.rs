@@ -30,7 +30,9 @@ use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::{Epoch, EpochPair};
 use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange};
-use risingwave_hummock_sdk::table_watermark::{VnodeWatermark, WatermarkDirection};
+use risingwave_hummock_sdk::table_watermark::{
+    VnodeWatermark, WatermarkDirection, WatermarkSerdeType,
+};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_hummock_trace::{
     TracedInitOptions, TracedNewLocalOptions, TracedOpConsistencyLevel, TracedPrefetchOptions,
@@ -797,25 +799,28 @@ impl From<TracedInitOptions> for InitOptions {
 
 #[derive(Clone, Debug)]
 pub struct SealCurrentEpochOptions {
-    pub table_watermarks: Option<(WatermarkDirection, Vec<VnodeWatermark>)>,
+    pub table_watermarks: Option<(WatermarkDirection, Vec<VnodeWatermark>, WatermarkSerdeType)>,
     pub switch_op_consistency_level: Option<OpConsistencyLevel>,
 }
 
 impl From<SealCurrentEpochOptions> for TracedSealCurrentEpochOptions {
     fn from(value: SealCurrentEpochOptions) -> Self {
         TracedSealCurrentEpochOptions {
-            table_watermarks: value.table_watermarks.map(|(direction, watermarks)| {
-                (
-                    direction == WatermarkDirection::Ascending,
-                    watermarks
-                        .into_iter()
-                        .map(|watermark| {
-                            let pb_watermark = PbVnodeWatermark::from(watermark);
-                            Message::encode_to_vec(&pb_watermark)
-                        })
-                        .collect(),
-                )
-            }),
+            table_watermarks: value.table_watermarks.map(
+                |(direction, watermarks, watermark_type)| {
+                    (
+                        direction == WatermarkDirection::Ascending,
+                        watermarks
+                            .into_iter()
+                            .map(|watermark| {
+                                let pb_watermark = PbVnodeWatermark::from(watermark);
+                                Message::encode_to_vec(&pb_watermark)
+                            })
+                            .collect(),
+                        watermark_type,
+                    )
+                },
+            ),
             switch_op_consistency_level: value
                 .switch_op_consistency_level
                 .map(|level| matches!(level, OpConsistencyLevel::ConsistentOldValue { .. })),
@@ -826,23 +831,26 @@ impl From<SealCurrentEpochOptions> for TracedSealCurrentEpochOptions {
 impl From<TracedSealCurrentEpochOptions> for SealCurrentEpochOptions {
     fn from(value: TracedSealCurrentEpochOptions) -> SealCurrentEpochOptions {
         SealCurrentEpochOptions {
-            table_watermarks: value.table_watermarks.map(|(is_ascending, watermarks)| {
-                (
-                    if is_ascending {
-                        WatermarkDirection::Ascending
-                    } else {
-                        WatermarkDirection::Descending
-                    },
-                    watermarks
-                        .into_iter()
-                        .map(|serialized_watermark| {
-                            Message::decode(serialized_watermark.as_slice())
-                                .map(|pb: PbVnodeWatermark| VnodeWatermark::from(pb))
-                                .expect("should not failed")
-                        })
-                        .collect(),
-                )
-            }),
+            table_watermarks: value.table_watermarks.map(
+                |(is_ascending, watermarks, is_non_pk_prefix)| {
+                    (
+                        if is_ascending {
+                            WatermarkDirection::Ascending
+                        } else {
+                            WatermarkDirection::Descending
+                        },
+                        watermarks
+                            .into_iter()
+                            .map(|serialized_watermark| {
+                                Message::decode(serialized_watermark.as_slice())
+                                    .map(|pb: PbVnodeWatermark| VnodeWatermark::from(pb))
+                                    .expect("should not failed")
+                            })
+                            .collect(),
+                        is_non_pk_prefix,
+                    )
+                },
+            ),
             switch_op_consistency_level: value.switch_op_consistency_level.map(|enable| {
                 if enable {
                     OpConsistencyLevel::ConsistentOldValue {

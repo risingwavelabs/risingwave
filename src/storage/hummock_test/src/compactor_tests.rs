@@ -39,7 +39,7 @@ pub(crate) mod tests {
     use risingwave_hummock_sdk::sstable_info::SstableInfo;
     use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
     use risingwave_hummock_sdk::table_watermark::{
-        ReadTableWatermark, TableWatermarks, VnodeWatermark, WatermarkDirection,
+        ReadTableWatermark, TableWatermarks, VnodeWatermark, WatermarkDirection, WatermarkSerdeType,
     };
     use risingwave_hummock_sdk::version::HummockVersion;
     use risingwave_hummock_sdk::{can_concat, CompactionGroupId};
@@ -1773,6 +1773,7 @@ pub(crate) mod tests {
                     vec![VnodeWatermark::new(bitmap.clone(), watermark_key.clone())].into(),
                 )],
                 direction: WatermarkDirection::Ascending,
+                watermark_type: WatermarkSerdeType::PkPrefix,
             },
         );
 

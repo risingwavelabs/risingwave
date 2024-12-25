@@ -29,7 +29,7 @@ use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common_estimate_size::{EstimateSize, KvSize};
 use risingwave_hummock_sdk::key::{prefixed_range_with_vnode, FullKey, TableKey, TableKeyRange};
-use risingwave_hummock_sdk::table_watermark::WatermarkDirection;
+use risingwave_hummock_sdk::table_watermark::{WatermarkDirection, WatermarkSerdeType};
 use thiserror::Error;
 use thiserror_ext::AsReport;
 use tracing::error;
@@ -719,7 +719,7 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
             next_epoch,
             prev_epoch
         );
-        if let Some((direction, watermarks)) = opts.table_watermarks {
+        if let Some((direction, watermarks, WatermarkSerdeType::PkPrefix)) = opts.table_watermarks {
             let delete_ranges = watermarks
                 .iter()
                 .flat_map(|vnode_watermark| {

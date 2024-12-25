@@ -135,6 +135,7 @@ pub fn safe_epoch_table_watermarks_impl(
             Some(TableWatermarks {
                 watermarks: vec![(*first_epoch, first_epoch_watermark.clone())],
                 direction: table_watermarks.direction,
+                watermark_type: table_watermarks.watermark_type,
             })
         } else {
             None

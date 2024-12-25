@@ -12,19 +12,33 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::Bound::{self, *};
+use std::sync::Arc;
 
+use bytes::BytesMut;
 use futures::{pin_mut, StreamExt};
+use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
+use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{self, OwnedRow};
-use risingwave_common::types::{DataType, Scalar, Timestamptz};
+use risingwave_common::types::{DataType, Scalar, ScalarImpl, Timestamptz};
 use risingwave_common::util::epoch::{test_epoch, EpochPair};
+use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::BasicSerde;
+use risingwave_hummock_sdk::table_watermark::{ReadTableWatermark, WatermarkDirection};
 use risingwave_hummock_test::test_utils::prepare_hummock_test_env;
+use risingwave_pb::catalog::PbTable;
+use risingwave_pb::common::PbColumnOrder;
+use risingwave_pb::plan_common::ColumnCatalog;
+use risingwave_storage::compaction_catalog_manager::{
+    CompactionCatalogAgent, FilterKeyExtractorImpl, FullKeyFilterKeyExtractor,
+};
+use risingwave_storage::hummock::iterator::SkipWatermarkIterator;
 use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::SINGLETON_VNODE;
@@ -2095,5 +2109,134 @@ async fn test_replicated_state_table_replication() {
             &OwnedRow::new(vec![Some(222_i32.into()), Some(2_i32.into()),]),
             res.as_ref()
         );
+    }
+}
+
+#[tokio::test]
+async fn test_non_pk_prefix_watermark_read() {
+    // Define the base table to replicate
+    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    let order_types = vec![OrderType::ascending(), OrderType::ascending()];
+    let column_ids = [ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
+    let column_descs = vec![
+        ColumnDesc::unnamed(column_ids[0], DataType::Int32),
+        ColumnDesc::unnamed(column_ids[1], DataType::Int32),
+        ColumnDesc::unnamed(column_ids[2], DataType::Int32),
+    ];
+    let pk_indices = vec![0_usize, 1_usize];
+    let read_prefix_len_hint = 1;
+    let mut table = gen_pbtable(
+        TEST_TABLE_ID,
+        column_descs,
+        order_types,
+        pk_indices,
+        read_prefix_len_hint,
+    );
+
+    // non-pk-prefix watermark
+    let watermark_col_idx = 1;
+    table.watermark_indices = vec![watermark_col_idx];
+    let test_env = prepare_hummock_test_env().await;
+    test_env.register_table(table.clone()).await;
+
+    // Create the base state table
+    let mut state_table: crate::common::table::state_table::StateTableInner<HummockStorage> =
+        StateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None)
+            .await;
+
+    let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
+    test_env
+        .storage
+        .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
+    state_table.init_epoch(epoch).await.unwrap();
+
+    // Insert first record into base state table
+    let r1 = OwnedRow::new(vec![
+        Some(0_i32.into()),
+        Some(1_i32.into()),
+        Some(1_i32.into()),
+    ]);
+    state_table.insert(r1.clone());
+
+    let r2 = OwnedRow::new(vec![
+        Some(0_i32.into()),
+        Some(2_i32.into()),
+        Some(2_i32.into()),
+    ]);
+    state_table.insert(r2.clone());
+
+    let r3 = OwnedRow::new(vec![
+        Some(0_i32.into()),
+        Some(3_i32.into()),
+        Some(3_i32.into()),
+    ]);
+    state_table.insert(r3.clone());
+
+    epoch.inc_for_test();
+    test_env
+        .storage
+        .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
+    state_table.commit(epoch).await.unwrap();
+    test_env.commit_epoch(epoch.prev).await;
+
+    {
+        // test read
+        let item_1 = state_table
+            .get_row(OwnedRow::new(vec![Some(0_i32.into()), Some(1_i32.into())]))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(r1, item_1);
+
+        let item_2 = state_table
+            .get_row(OwnedRow::new(vec![Some(0_i32.into()), Some(2_i32.into())]))
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(r2, item_2);
+
+        let item_3 = state_table
+            .get_row(OwnedRow::new(vec![Some(0_i32.into()), Some(3_i32.into())]))
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(r3, item_3);
+    }
+
+    {
+        // update watermark
+        let watermark = ScalarImpl::Int32(1);
+        state_table.update_watermark(watermark);
+
+        epoch.inc_for_test();
+        test_env
+            .storage
+            .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
+        state_table.commit(epoch).await.unwrap();
+        test_env.commit_epoch(epoch.prev).await;
+
+        // do not rewrite key-range or filter data for non-pk-prefix watermark
+        let item_1 = state_table
+            .get_row(OwnedRow::new(vec![Some(0_i32.into()), Some(1_i32.into())]))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(r1, item_1);
+
+        let item_2 = state_table
+            .get_row(OwnedRow::new(vec![Some(0_i32.into()), Some(2_i32.into())]))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(r2, item_2);
+
+        let item_3 = state_table
+            .get_row(OwnedRow::new(vec![Some(0_i32.into()), Some(3_i32.into())]))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(r3, item_3);
     }
 }
