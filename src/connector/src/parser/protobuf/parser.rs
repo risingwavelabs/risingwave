@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
+
 use anyhow::Context;
 use prost_reflect::{DescriptorPool, DynamicMessage, FileDescriptor, MessageDescriptor};
 use risingwave_common::{bail, try_match_expand};
@@ -30,6 +32,7 @@ use crate::schema::SchemaLoader;
 pub struct ProtobufAccessBuilder {
     confluent_wire_type: bool,
     message_descriptor: MessageDescriptor,
+    struct_as_jsonb: HashSet<String>,
 }
 
 impl AccessBuilder for ProtobufAccessBuilder {
@@ -44,7 +47,10 @@ impl AccessBuilder for ProtobufAccessBuilder {
         let message = DynamicMessage::decode(self.message_descriptor.clone(), payload)
             .context("failed to parse message")?;
 
-        Ok(AccessImpl::Protobuf(ProtobufAccess::new(message)))
+        Ok(AccessImpl::Protobuf(ProtobufAccess::new(
+            message,
+            &self.struct_as_jsonb,
+        )))
     }
 }
 
@@ -53,11 +59,19 @@ impl ProtobufAccessBuilder {
         let ProtobufParserConfig {
             confluent_wire_type,
             message_descriptor,
+            struct_as_jsonb_str,
         } = config;
+
+        let mut struct_as_jsonb: HashSet<String> = struct_as_jsonb_str
+            .split(',')
+            .map(|s| s.to_owned())
+            .collect();
+        struct_as_jsonb.insert("google.protobuf.Any".to_owned());
 
         Ok(Self {
             confluent_wire_type,
             message_descriptor,
+            struct_as_jsonb,
         })
     }
 }
@@ -66,6 +80,7 @@ impl ProtobufAccessBuilder {
 pub struct ProtobufParserConfig {
     confluent_wire_type: bool,
     pub(crate) message_descriptor: MessageDescriptor,
+    struct_as_jsonb_str: String,
 }
 
 impl ProtobufParserConfig {
@@ -110,6 +125,7 @@ impl ProtobufParserConfig {
         Ok(Self {
             message_descriptor,
             confluent_wire_type: protobuf_config.use_schema_registry,
+            struct_as_jsonb_str: protobuf_config.message_as_jsonb.unwrap_or_default(),
         })
     }
 

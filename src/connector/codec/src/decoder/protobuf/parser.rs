@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
+
 use anyhow::Context;
 use itertools::Itertools;
 use prost_reflect::{Cardinality, FieldDescriptor, Kind, MessageDescriptor, ReflectMessage, Value};
@@ -106,6 +108,7 @@ pub fn from_protobuf_value<'a>(
     field_desc: &FieldDescriptor,
     value: &'a Value,
     type_expected: &DataType,
+    struct_as_jsonb: &'a HashSet<String>,
 ) -> AccessResult<DatumCow<'a>> {
     let kind = field_desc.kind();
 
@@ -136,7 +139,8 @@ pub fn from_protobuf_value<'a>(
             ScalarImpl::Utf8(enum_symbol.name().into())
         }
         Value::Message(dyn_msg) => {
-            if dyn_msg.descriptor().full_name() == "google.protobuf.Any" {
+            let msg_full_name = dyn_msg.descriptor().full_name().to_owned();
+            if struct_as_jsonb.contains(&msg_full_name) {
                 ScalarImpl::Jsonb(JsonbVal::from(
                     serde_json::to_value(dyn_msg).map_err(AccessError::ProtobufAnyToJson)?,
                 ))
@@ -159,8 +163,13 @@ pub fn from_protobuf_value<'a>(
                     };
                     let value = dyn_msg.get_field(&field_desc);
                     rw_values.push(
-                        from_protobuf_value(&field_desc, &value, expected_field_type)?
-                            .to_owned_datum(),
+                        from_protobuf_value(
+                            &field_desc,
+                            &value,
+                            expected_field_type,
+                            struct_as_jsonb,
+                        )?
+                        .to_owned_datum(),
                     );
                 }
                 ScalarImpl::Struct(StructValue::new(rw_values))
@@ -176,7 +185,12 @@ pub fn from_protobuf_value<'a>(
             };
             let mut builder = element_type.create_array_builder(values.len());
             for value in values {
-                builder.append(from_protobuf_value(field_desc, value, element_type)?);
+                builder.append(from_protobuf_value(
+                    field_desc,
+                    value,
+                    element_type,
+                    struct_as_jsonb,
+                )?);
             }
             ScalarImpl::List(ListValue::new(builder.finish()))
         }
@@ -209,11 +223,13 @@ pub fn from_protobuf_value<'a>(
                     &map_desc.map_entry_key_field(),
                     &key.clone().into(),
                     map_type.key(),
+                    struct_as_jsonb,
                 )?);
                 value_builder.append(from_protobuf_value(
                     &map_desc.map_entry_value_field(),
                     value,
                     map_type.value(),
+                    struct_as_jsonb,
                 )?);
             }
             let keys = key_builder.finish();

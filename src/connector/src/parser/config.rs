@@ -322,6 +322,7 @@ pub struct ProtobufProperties {
     pub topic: String,
     pub key_message_name: Option<String>,
     pub name_strategy: PbSchemaRegistryNameStrategy,
+    pub message_as_jsonb: Option<String>,
 }
 
 #[derive(Debug, Default, Clone, Copy)]

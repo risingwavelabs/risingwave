@@ -35,7 +35,7 @@ pub mod util;
 pub enum AccessImpl<'a> {
     Avro(AvroAccess<'a>),
     Bytes(BytesAccess<'a>),
-    Protobuf(ProtobufAccess),
+    Protobuf(ProtobufAccess<'a>),
     Json(JsonAccess<'a>),
     MongoJson(MongoJsonAccess<JsonAccess<'a>>),
 }
