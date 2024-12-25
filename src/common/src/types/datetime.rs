@@ -481,8 +481,11 @@ impl Time {
     }
 }
 
-/// document about old and new format, including the meaning of highest 2 bits, and the corresponding accepted ranges.
-/// The enumeration holds the correct value, which will be added(removed) to highest 2 bits when calling `to_protobuf` and `from_protobuf` methods
+// The first 64 bits of protobuf encoding for `Timestamp` type has 2 possible meanings.
+// * When the highest 2 bits are `11` or `00` (i.e. values ranging from `0b1100...00` to `0b0011..11`),
+//   it is *microseconds* since 1970-01-01 midnight. 2^62 microseconds covers 146235 years.
+// * When the highest 2 bits are `10` or `01`, we flip the second bit to get values from `0b1100...00` to `0b0011..11` again.
+//   It is *seconds* since 1970-01-01 midnight. It is then followed by another 32 bits as nanoseconds within a second.
 enum FirstI64 {
     V0 { usecs: i64 },
     V1 { secs: i64 },
