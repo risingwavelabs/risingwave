@@ -466,6 +466,7 @@ struct LocalInstanceUnsyncData {
     sealed_data: VecDeque<LocalInstanceEpochData>,
     // newer data comes first
     flushing_imms: VecDeque<SharedBufferBatchId>,
+    is_destroyed: bool,
 }
 
 impl LocalInstanceUnsyncData {
@@ -476,6 +477,7 @@ impl LocalInstanceUnsyncData {
             current_epoch_data: Some(LocalInstanceEpochData::new(init_epoch)),
             sealed_data: VecDeque::new(),
             flushing_imms: Default::default(),
+            is_destroyed: false,
         }
     }
 
@@ -610,6 +612,10 @@ impl LocalInstanceUnsyncData {
                 assert!(current_data.imms.is_empty() && !current_data.has_spilled);
             }
         }
+    }
+
+    fn is_finished(&self) -> bool {
+        self.is_destroyed && self.sealed_data.is_empty()
     }
 }
 
@@ -889,18 +895,19 @@ impl UnsyncData {
         }
     }
 
-    fn may_destroy_instance(&mut self, instance_id: LocalInstanceId) -> Option<TableUnsyncData> {
-        if let Some(table_id) = self.instance_table_id.remove(&instance_id) {
+    fn may_destroy_instance(&mut self, instance_id: LocalInstanceId) {
+        if let Some(table_id) = self.instance_table_id.get(&instance_id) {
             debug!(instance_id, "destroy instance");
-            let table_data = self.table_data.get_mut(&table_id).expect("should exist");
-            assert!(table_data.instance_data.remove(&instance_id).is_some());
-            if table_data.is_empty() {
-                Some(self.table_data.remove(&table_id).expect("should exist"))
-            } else {
-                None
-            }
-        } else {
-            None
+            let table_data = self.table_data.get_mut(table_id).expect("should exist");
+            let instance_data = table_data
+                .instance_data
+                .get_mut(&instance_id)
+                .expect("should exist");
+            assert!(
+                !instance_data.is_destroyed,
+                "cannot destroy an instance for twice"
+            );
+            instance_data.is_destroyed = true;
         }
     }
 
@@ -997,6 +1004,18 @@ impl UploaderData {
                             flush_payload.insert(instance_id, payload);
                         }
                     }
+                    table_data.instance_data.retain(|instance_id, data| {
+                        // remove the finished instances
+                        if data.is_finished() {
+                            assert_eq!(
+                                self.unsync_data.instance_table_id.remove(instance_id),
+                                Some(*table_id)
+                            );
+                            false
+                        } else {
+                            true
+                        }
+                    });
                     if let Some((direction, watermarks)) = table_watermarks {
                         Self::add_table_watermarks(
                             &mut all_table_watermarks,
@@ -1414,28 +1433,7 @@ impl HummockUploader {
         let UploaderState::Working(data) = &mut self.state else {
             return;
         };
-        if let Some(removed_table_data) = data.unsync_data.may_destroy_instance(instance_id) {
-            data.task_manager.remove_table_spill_tasks(
-                removed_table_data.table_id,
-                removed_table_data
-                    .spill_tasks
-                    .into_values()
-                    .flat_map(|task_ids| task_ids.into_iter())
-                    .filter(|task_id| {
-                        if let Some((_, table_ids)) = data.unsync_data.spilled_data.get_mut(task_id)
-                        {
-                            assert!(table_ids.remove(&removed_table_data.table_id));
-                            if table_ids.is_empty() {
-                                data.unsync_data.spilled_data.remove(task_id);
-                            }
-                            false
-                        } else {
-                            true
-                        }
-                    }),
-            )
-        }
-        data.check_upload_task_consistency();
+        data.unsync_data.may_destroy_instance(instance_id);
     }
 
     pub(crate) fn min_uncommitted_sst_id(&self) -> Option<HummockSstableObjectId> {
