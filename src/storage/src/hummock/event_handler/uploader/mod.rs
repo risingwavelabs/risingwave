@@ -933,6 +933,14 @@ impl UnsyncData {
                         .all(|instance| instance.is_destroyed),
                     "should be clear when dropping the read version instance"
                 );
+                for instance_id in table_unsync_data.instance_data.keys() {
+                    assert_eq!(
+                        *table_id,
+                        self.instance_table_id
+                            .remove(instance_id)
+                            .expect("should exist")
+                    );
+                }
             }
         }
         debug_assert!(self
