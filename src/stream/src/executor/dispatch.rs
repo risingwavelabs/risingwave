@@ -398,10 +398,10 @@ impl StreamConsumer for DispatchExecutor {
     type BarrierStream = impl Stream<Item = StreamResult<Barrier>> + Send;
 
     fn execute(mut self: Box<Self>) -> Self::BarrierStream {
-        // TODO: use config
-        let barrier_batch_size = std::env::var("RW_ENABLE_BATCH_BARRIER_SIZE")
-            .map(|s| s.parse::<u32>().unwrap())
-            .unwrap_or(1);
+        let barrier_batch_size = std::cmp::max(
+            1,
+            self.inner.context.config.developer.max_barrier_batch_size,
+        );
         #[try_stream]
         async move {
             let mut input = self.input.execute().peekable();
@@ -413,35 +413,35 @@ impl StreamConsumer for DispatchExecutor {
                 };
                 let mut barrier_batch = vec![];
                 let msg: Message = msg?;
-                let end_batch;
-                if let Message::Barrier(ref barrier) = msg {
-                    end_batch = barrier.mutation.is_some();
-                    barrier_batch.push(barrier.clone());
-                } else {
-                    let (msg, span, tracing_span) = match msg {
-                        Message::Chunk(c) => (
-                            MessageBatch::Chunk(c),
-                            "dispatch_chunk",
-                            tracing::info_span!("dispatch_chunk"),
-                        ),
-                        Message::Watermark(w) => (
-                            MessageBatch::Watermark(w),
-                            "dispatch_watermark",
-                            tracing::info_span!("dispatch_watermark"),
-                        ),
-                        Message::Barrier(_) => unreachable!(""),
-                    };
-                    self.inner
-                        .dispatch(msg)
-                        .instrument(tracing_span)
-                        .instrument_await(span)
-                        .await?;
-                    continue;
-                }
-
+                let max_peek_attempts = match msg {
+                    Message::Chunk(c) => {
+                        self.inner
+                            .dispatch(MessageBatch::Chunk(c))
+                            .instrument(tracing::info_span!("dispatch_chunk"))
+                            .instrument_await("dispatch_chunk")
+                            .await?;
+                        continue;
+                    }
+                    Message::Watermark(w) => {
+                        self.inner
+                            .dispatch(MessageBatch::Watermark(w))
+                            .instrument(tracing::info_span!("dispatch_watermark"))
+                            .instrument_await("dispatch_watermark")
+                            .await?;
+                        continue;
+                    }
+                    Message::Barrier(b) => {
+                        let peek_more_barrier = b.mutation.is_none();
+                        barrier_batch.push(b);
+                        if peek_more_barrier {
+                            barrier_batch_size
+                        } else {
+                            0
+                        }
+                    }
+                };
                 // Try to peek more consecutive non-mutation barriers.
-                let b = if end_batch { 0 } else { barrier_batch_size };
-                for _ in 0..b {
+                for _ in 0..max_peek_attempts {
                     let peek = input.peek().now_or_never();
                     let Some(peek) = peek else {
                         break;
