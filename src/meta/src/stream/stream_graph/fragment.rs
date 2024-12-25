@@ -604,7 +604,7 @@ impl StreamFragmentGraph {
                             match (prev_snapshot_backfill_info, is_snapshot_backfill) {
                                 (Some(prev_snapshot_backfill_info), true) => {
                                     prev_snapshot_backfill_info
-                                        .upstream_mv_table_ids
+                                        .upstream_mv_table_id_to_backfill_epoch
                                         .insert(TableId::new(stream_scan.table_id), None);
                                     true
                                 }
@@ -619,10 +619,9 @@ impl StreamFragmentGraph {
                             prev_stream_scan = Some((
                                 if is_snapshot_backfill {
                                     Some(SnapshotBackfillInfo {
-                                        upstream_mv_table_ids: HashMap::from_iter([(
-                                            TableId::new(stream_scan.table_id),
-                                            None,
-                                        )]),
+                                        upstream_mv_table_id_to_backfill_epoch: HashMap::from_iter(
+                                            [(TableId::new(stream_scan.table_id), None)],
+                                        ),
                                     })
                                 } else {
                                     None

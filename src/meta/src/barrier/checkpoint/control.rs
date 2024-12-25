@@ -696,7 +696,7 @@ impl DatabaseCheckpointControl {
                                 progress_epoch,
                                 creating_job
                                     .snapshot_backfill_info
-                                    .upstream_mv_table_ids
+                                    .upstream_mv_table_id_to_backfill_epoch
                                     .keys()
                                     .cloned()
                                     .collect(),
@@ -993,7 +993,9 @@ impl DatabaseCheckpointControl {
                 return Ok(());
             }
             // set snapshot epoch of upstream table for snapshot backfill
-            for snapshot_backfill_epoch in snapshot_backfill_info.upstream_mv_table_ids.values_mut()
+            for snapshot_backfill_epoch in snapshot_backfill_info
+                .upstream_mv_table_id_to_backfill_epoch
+                .values_mut()
             {
                 assert!(
                     snapshot_backfill_epoch
@@ -1010,7 +1012,7 @@ impl DatabaseCheckpointControl {
             {
                 fill_snapshot_backfill_epoch(
                     stream_actor.nodes.as_mut().expect("should exist"),
-                    &snapshot_backfill_info.upstream_mv_table_ids,
+                    &snapshot_backfill_info.upstream_mv_table_id_to_backfill_epoch,
                 )?;
             }
             let info = info.clone();

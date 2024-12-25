@@ -222,7 +222,7 @@ impl CommandContext {
                                         }
                                     },
                                 ),
-                                &snapshot_backfill_info.upstream_mv_table_ids,
+                                &snapshot_backfill_info.upstream_mv_table_id_to_backfill_epoch,
                             )
                             .await?
                     }
