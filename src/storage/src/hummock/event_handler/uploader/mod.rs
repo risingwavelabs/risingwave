@@ -482,6 +482,7 @@ impl LocalInstanceUnsyncData {
     }
 
     fn add_imm(&mut self, imm: UploaderImm) {
+        assert!(!self.is_destroyed);
         assert_eq!(self.table_id, imm.table_id);
         self.current_epoch_data
             .as_mut()
@@ -490,6 +491,7 @@ impl LocalInstanceUnsyncData {
     }
 
     fn local_seal_epoch(&mut self, next_epoch: HummockEpoch) -> HummockEpoch {
+        assert!(!self.is_destroyed);
         let data = self
             .current_epoch_data
             .as_mut()
@@ -1781,6 +1783,65 @@ pub(crate) mod tests {
                 .table_committed_epoch(TEST_TABLE_ID)
                 .unwrap()
         );
+    }
+
+    #[tokio::test]
+    async fn test_uploader_destroy_instance_before_sync() {
+        let mut uploader = test_uploader(dummy_success_upload_future);
+        let epoch1 = INITIAL_EPOCH.next_epoch();
+        uploader.start_epochs_for_test([epoch1]);
+        let imm = gen_imm(epoch1).await;
+        uploader.init_instance(TEST_LOCAL_INSTANCE_ID, TEST_TABLE_ID, epoch1);
+        uploader.add_imm(TEST_LOCAL_INSTANCE_ID, imm.clone());
+        uploader.local_seal_epoch_for_test(TEST_LOCAL_INSTANCE_ID, epoch1);
+        uploader.may_destroy_instance(TEST_LOCAL_INSTANCE_ID);
+
+        let (sync_tx, sync_rx) = oneshot::channel();
+        uploader.start_single_epoch_sync(epoch1, sync_tx, HashSet::from_iter([TEST_TABLE_ID]));
+        assert_eq!(epoch1 as HummockEpoch, uploader.test_max_syncing_epoch());
+        assert_eq!(1, uploader.data().syncing_data.len());
+        let (_, syncing_data) = uploader.data().syncing_data.first_key_value().unwrap();
+        assert_eq!(epoch1 as HummockEpoch, syncing_data.sync_table_epochs[0].0);
+        assert!(syncing_data.uploaded.is_empty());
+        assert!(!syncing_data.remaining_uploading_tasks.is_empty());
+
+        let staging_sst = uploader.next_uploaded_sst().await;
+        assert_eq!(&vec![epoch1], staging_sst.epochs());
+        assert_eq!(
+            &HashMap::from_iter([(TEST_LOCAL_INSTANCE_ID, vec![imm.batch_id()])]),
+            staging_sst.imm_ids()
+        );
+        assert_eq!(
+            &dummy_success_upload_output().new_value_ssts,
+            staging_sst.sstable_infos()
+        );
+
+        match sync_rx.await {
+            Ok(Ok(data)) => {
+                let SyncedData {
+                    uploaded_ssts,
+                    table_watermarks,
+                } = data;
+                assert_eq!(1, uploaded_ssts.len());
+                let staging_sst = &uploaded_ssts[0];
+                assert_eq!(&vec![epoch1], staging_sst.epochs());
+                assert_eq!(
+                    &HashMap::from_iter([(TEST_LOCAL_INSTANCE_ID, vec![imm.batch_id()])]),
+                    staging_sst.imm_ids()
+                );
+                assert_eq!(
+                    &dummy_success_upload_output().new_value_ssts,
+                    staging_sst.sstable_infos()
+                );
+                assert!(table_watermarks.is_empty());
+            }
+            _ => unreachable!(),
+        };
+        assert!(!uploader
+            .data()
+            .unsync_data
+            .table_data
+            .contains_key(&TEST_TABLE_ID));
     }
 
     #[tokio::test]
