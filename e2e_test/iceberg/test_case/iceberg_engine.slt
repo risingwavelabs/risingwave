@@ -89,3 +89,26 @@ with (
 
 statement ok
 DROP TABLE nexmark_t
+
+# test hidden _row_id column for iceberg engine table
+statement ok
+create table t_without_pk(name varchar) with(commit_checkpoint_interval = 1) engine = iceberg;
+
+statement ok
+insert into t_without_pk values('xxx');
+
+statement ok
+FLUSH;
+
+query ?
+select * from t_without_pk;
+----
+xxx
+
+query ?
+select count(_row_id) from t_without_pk;
+----
+1
+
+statement ok
+DROP TABLE t_without_pk
