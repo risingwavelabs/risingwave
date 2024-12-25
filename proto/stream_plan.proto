@@ -186,7 +186,6 @@ message StreamMessageBatch {
   }
 }
 
-
 // Hash mapping for compute node. Stores mapping from virtual node to actor id.
 message ActorMapping {
   repeated uint32 original_indices = 1;
