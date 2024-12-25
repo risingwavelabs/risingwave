@@ -364,14 +364,16 @@ pub(crate) fn new_input(
 }
 
 impl DispatcherMessageBatch {
-    fn into_messages(self) -> Vec<DispatcherMessage> {
+    fn into_messages(self) -> impl Iterator<Item = DispatcherMessage> {
+        #[auto_enums::auto_enum(Iterator)]
         match self {
-            DispatcherMessageBatch::BarrierBatch(barriers) => barriers
-                .into_iter()
-                .map(DispatcherMessage::Barrier)
-                .collect(),
-            DispatcherMessageBatch::Chunk(c) => vec![DispatcherMessage::Chunk(c)],
-            DispatcherMessageBatch::Watermark(w) => vec![DispatcherMessage::Watermark(w)],
+            DispatcherMessageBatch::BarrierBatch(barriers) => {
+                barriers.into_iter().map(DispatcherMessage::Barrier)
+            }
+            DispatcherMessageBatch::Chunk(c) => std::iter::once(DispatcherMessage::Chunk(c)),
+            DispatcherMessageBatch::Watermark(w) => {
+                std::iter::once(DispatcherMessage::Watermark(w))
+            }
         }
     }
 }
