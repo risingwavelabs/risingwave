@@ -171,13 +171,13 @@ impl StreamNode for StreamDynamicFilter {
         let right_table = infer_right_internal_table_catalog(right.plan_base())
             .with_id(state.gen_table_id_wrapped());
         #[allow(deprecated)]
-        NodeBody::DynamicFilter(DynamicFilterNode {
+        NodeBody::DynamicFilter(Box::new(DynamicFilterNode {
             left_key: left_index as u32,
             condition,
             left_table: Some(left_table.to_internal_table_prost()),
             right_table: Some(right_table.to_internal_table_prost()),
             condition_always_relax: false, // deprecated
-        })
+        }))
     }
 }
 

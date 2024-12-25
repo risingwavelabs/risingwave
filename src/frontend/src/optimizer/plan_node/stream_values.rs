@@ -72,7 +72,7 @@ impl Distill for StreamValues {
 
 impl StreamNode for StreamValues {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode {
-        ProstStreamNode::Values(ValuesNode {
+        ProstStreamNode::Values(Box::new(ValuesNode {
             tuples: self
                 .logical
                 .rows()
@@ -86,7 +86,7 @@ impl StreamNode for StreamValues {
                 .iter()
                 .map(|f| f.to_prost())
                 .collect(),
-        })
+        }))
     }
 }
 
