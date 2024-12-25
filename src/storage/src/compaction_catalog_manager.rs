@@ -411,8 +411,9 @@ impl CompactionCatalogManager {
 pub struct CompactionCatalogAgent {
     filter_key_extractor_manager: FilterKeyExtractorImpl,
     table_id_to_vnode: HashMap<StateTableId, usize>,
-    // table_id ->(prefix_watermark_serde, watermark_col_serde)
-    table_id_to_watermark_serde: HashMap<StateTableId, Option<(OrderedRowSerde, OrderedRowSerde)>>,
+    // table_id ->(prefix_watermark_serde, watermark_col_serde, watermark_col_idx)
+    table_id_to_watermark_serde:
+        HashMap<StateTableId, Option<(OrderedRowSerde, OrderedRowSerde, usize)>>,
 }
 
 impl CompactionCatalogAgent {
@@ -421,7 +422,7 @@ impl CompactionCatalogAgent {
         table_id_to_vnode: HashMap<StateTableId, usize>,
         table_id_to_watermark_serde: HashMap<
             StateTableId,
-            Option<(OrderedRowSerde, OrderedRowSerde)>,
+            Option<(OrderedRowSerde, OrderedRowSerde, usize)>,
         >,
     ) -> Self {
         Self {
@@ -479,7 +480,7 @@ impl CompactionCatalogAgent {
     pub fn watermark_serde(
         &self,
         table_id: StateTableId,
-    ) -> Option<(OrderedRowSerde, OrderedRowSerde)> {
+    ) -> Option<(OrderedRowSerde, OrderedRowSerde, usize)> {
         self.table_id_to_watermark_serde
             .get(&table_id)
             .unwrap_or_else(|| {
@@ -504,7 +505,9 @@ impl CompactionCatalogAgent {
 pub type CompactionCatalogManagerRef = Arc<CompactionCatalogManager>;
 pub type CompactionCatalogAgentRef = Arc<CompactionCatalogAgent>;
 
-fn build_watermark_col_serde(table_catalog: &Table) -> Option<(OrderedRowSerde, OrderedRowSerde)> {
+fn build_watermark_col_serde(
+    table_catalog: &Table,
+) -> Option<(OrderedRowSerde, OrderedRowSerde, usize)> {
     let watermark_indices = table_catalog.get_watermark_indices();
     if watermark_indices.is_empty() || watermark_indices[0] == 0 {
         // non watermark table or watermark column is the first column (pk_prefix_watermark)
@@ -513,37 +516,53 @@ fn build_watermark_col_serde(table_catalog: &Table) -> Option<(OrderedRowSerde, 
         use risingwave_common::types::DataType;
         let watermark_col_idx = watermark_indices[0] as usize;
 
-        let data_types: Vec<DataType> = table_catalog
-            .get_columns()
-            .iter()
-            .take(watermark_col_idx + 1)
-            .map(|col| {
-                col.get_column_desc()
-                    .unwrap()
-                    .get_column_type()
-                    .unwrap()
-                    .into()
-            })
-            .collect_vec();
-
-        let order_types = table_catalog
+        let pk_indices = table_catalog
             .pk
             .iter()
-            .take(watermark_col_idx + 1)
+            .map(|col_order| col_order.column_index as usize)
+            .collect_vec();
+
+        let watermark_col_idx_in_pk = pk_indices
+            .iter()
+            .position(|&idx| idx == watermark_col_idx)
+            .unwrap_or_else(|| {
+                panic!(
+                    "watermark column not found in pk_indices {:?} watermark_col_idx {}",
+                    pk_indices, watermark_col_idx
+                )
+            });
+
+        let table_columns: Vec<ColumnDesc> = table_catalog
+            .columns
+            .iter()
+            .map(|col| col.column_desc.as_ref().unwrap().into())
+            .collect();
+
+        let pk_data_types: Vec<DataType> = table_catalog
+            .pk
+            .iter()
+            .map(|col_order| {
+                table_columns[col_order.column_index as usize]
+                    .data_type
+                    .clone()
+            })
+            .collect();
+
+        let pk_order_types = table_catalog
+            .pk
+            .iter()
             .map(|col_order| OrderType::from_protobuf(col_order.get_order_type().unwrap()))
             .collect_vec();
 
-        assert_eq!(data_types.len(), order_types.len());
-        assert_eq!(watermark_col_idx + 1, data_types.len());
+        assert_eq!(pk_data_types.len(), pk_order_types.len());
 
         let watermark_col_serde = OrderedRowSerde::new(
-            vec![data_types[watermark_col_idx].clone()],
-            vec![order_types[watermark_col_idx]],
+            vec![pk_data_types[watermark_col_idx_in_pk].clone()],
+            vec![pk_order_types[watermark_col_idx_in_pk]],
         );
 
-        let pk_serde = OrderedRowSerde::new(data_types, order_types);
-
-        Some((pk_serde, watermark_col_serde))
+        let pk_serde = OrderedRowSerde::new(pk_data_types, pk_order_types);
+        Some((pk_serde, watermark_col_serde, watermark_col_idx_in_pk))
     }
 }
 

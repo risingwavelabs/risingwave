@@ -241,7 +241,7 @@ pub async fn gen_test_sstable_impl<B: AsRef<[u8]> + Clone + Default + Eq, F: Fil
     sstable_store: SstableStoreRef,
     policy: CachePolicy,
     table_id_to_vnode: HashMap<u32, usize>,
-    table_id_to_watermark_serde: HashMap<u32, Option<(OrderedRowSerde, OrderedRowSerde)>>,
+    table_id_to_watermark_serde: HashMap<u32, Option<(OrderedRowSerde, OrderedRowSerde, usize)>>,
 ) -> SstableInfo {
     let writer_opts = SstableWriterOptions {
         capacity_hint: None,

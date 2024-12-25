@@ -137,7 +137,10 @@ impl<W: SstableWriter> SstableBuilder<W, Xor16FilterBuilder> {
         writer: W,
         options: SstableBuilderOptions,
         table_id_to_vnode: HashMap<StateTableId, usize>,
-        table_id_to_watermark_serde: HashMap<u32, Option<(OrderedRowSerde, OrderedRowSerde)>>,
+        table_id_to_watermark_serde: HashMap<
+            u32,
+            Option<(OrderedRowSerde, OrderedRowSerde, usize)>,
+        >,
     ) -> Self {
         let compaction_catalog_agent_ref = Arc::new(CompactionCatalogAgent::new(
             FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor),

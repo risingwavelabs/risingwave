@@ -159,7 +159,7 @@ pub struct StateTableInner<
 
     op_consistency_level: StateTableOpConsistencyLevel,
 
-    watermark_col_idx: usize,
+    watermark_col_idx_in_pk: usize,
 }
 
 /// `StateTable` will use `BasicSerde` as default
@@ -431,18 +431,29 @@ where
             row_serde.kind().is_column_aware()
         );
 
-        let watermark_col_idx = if table_catalog.watermark_indices.is_empty() {
+        let watermark_col_idx_in_pk = if table_catalog.watermark_indices.is_empty() {
             0
         } else {
-            table_catalog.watermark_indices[0] as usize
+            pk_indices
+                .iter()
+                .position(|&idx| idx == table_catalog.watermark_indices[0] as usize)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "watermark column not found in pk_indices {:?} watermark_col_idx {}",
+                        pk_indices, table_catalog.watermark_indices[0]
+                    )
+                })
         };
 
         // Restore persisted table watermark.
         let prefix_watermark_deser = if pk_indices.is_empty() {
             None
         } else {
-            assert!(watermark_col_idx == 0 || pk_indices.contains(&watermark_col_idx));
-            Some(pk_serde.index(watermark_col_idx))
+            assert!(
+                watermark_col_idx_in_pk == 0
+                    || pk_indices.contains(&(table_catalog.watermark_indices[0] as usize)),
+            );
+            Some(pk_serde.index(watermark_col_idx_in_pk))
         };
         let max_watermark_of_vnodes = distribution
             .vnodes()
@@ -521,7 +532,7 @@ where
             output_indices,
             i2o_mapping,
             op_consistency_level: state_table_op_consistency_level,
-            watermark_col_idx,
+            watermark_col_idx_in_pk,
         }
     }
 
@@ -1054,7 +1065,7 @@ where
                         let keyed_row = entry?;
                         let pk = self.pk_serde.deserialize(keyed_row.key())?;
                         // watermark column should be part of the pk
-                        if !pk.is_null_at(self.watermark_col_idx) {
+                        if !pk.is_null_at(self.watermark_col_idx_in_pk) {
                             pks.push(pk);
                         }
                     }
@@ -1088,10 +1099,10 @@ where
         let prefix_serializer = if self.pk_indices().is_empty() {
             None
         } else {
-            Some(self.pk_serde.index(self.watermark_col_idx))
+            Some(self.pk_serde.index(self.watermark_col_idx_in_pk))
         };
 
-        let watermark_type = match self.watermark_col_idx {
+        let watermark_type = match self.watermark_col_idx_in_pk {
             0 => WatermarkSerdeType::PkPrefix,
             _ => WatermarkSerdeType::NonPkPrefix,
         };
