@@ -927,7 +927,10 @@ impl UnsyncData {
                     }
                 }
                 assert!(
-                    table_unsync_data.instance_data.is_empty(),
+                    table_unsync_data
+                        .instance_data
+                        .values()
+                        .all(|instance| instance.is_destroyed),
                     "should be clear when dropping the read version instance"
                 );
             }
