@@ -50,6 +50,7 @@ use crate::barrier::{
 };
 use crate::manager::ActiveStreamingWorkerNodes;
 use crate::rpc::metrics::GLOBAL_META_METRICS;
+use crate::stream::fill_snapshot_backfill_epoch;
 use crate::{MetaError, MetaResult};
 
 #[derive(Default)]
@@ -695,8 +696,10 @@ impl DatabaseCheckpointControl {
                                 progress_epoch,
                                 creating_job
                                     .snapshot_backfill_info
-                                    .upstream_mv_table_ids
-                                    .clone(),
+                                    .upstream_mv_table_id_to_backfill_epoch
+                                    .keys()
+                                    .cloned()
+                                    .collect(),
                             ),
                         )
                     })
@@ -977,7 +980,7 @@ impl DatabaseCheckpointControl {
         if let Some(Command::CreateStreamingJob {
             job_type: CreateStreamingJobType::SnapshotBackfill(snapshot_backfill_info),
             info,
-        }) = &command
+        }) = &mut command
         {
             if self.state.paused_reason().is_some() {
                 warn!("cannot create streaming job with snapshot backfill when paused");
@@ -989,18 +992,44 @@ impl DatabaseCheckpointControl {
                 }
                 return Ok(());
             }
+            // set snapshot epoch of upstream table for snapshot backfill
+            for snapshot_backfill_epoch in snapshot_backfill_info
+                .upstream_mv_table_id_to_backfill_epoch
+                .values_mut()
+            {
+                assert!(
+                    snapshot_backfill_epoch
+                        .replace(barrier_info.prev_epoch())
+                        .is_none(),
+                    "must not set previously"
+                );
+            }
+            for stream_actor in info
+                .stream_job_fragments
+                .fragments
+                .values_mut()
+                .flat_map(|fragment| fragment.actors.iter_mut())
+            {
+                fill_snapshot_backfill_epoch(
+                    stream_actor.nodes.as_mut().expect("should exist"),
+                    &snapshot_backfill_info.upstream_mv_table_id_to_backfill_epoch,
+                )?;
+            }
+            let info = info.clone();
+            let job_id = info.stream_job_fragments.stream_job_id();
+            let snapshot_backfill_info = snapshot_backfill_info.clone();
             let mutation = command
                 .as_ref()
                 .expect("checked Some")
                 .to_mutation(None)
                 .expect("should have some mutation in `CreateStreamingJob` command");
-            let job_id = info.stream_job_fragments.stream_job_id();
+
             control_stream_manager.add_partial_graph(self.database_id, Some(job_id))?;
             self.creating_streaming_job_controls.insert(
                 job_id,
                 CreatingStreamingJobControl::new(
-                    info.clone(),
-                    snapshot_backfill_info.clone(),
+                    info,
+                    snapshot_backfill_info,
                     barrier_info.prev_epoch(),
                     hummock_version_stats,
                     mutation,
