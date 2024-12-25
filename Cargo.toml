@@ -151,9 +151,9 @@ icelake = { git = "https://github.com/risingwavelabs/icelake.git", rev = "0ec44f
     "prometheus",
 ] }
 # branch dev-rebase-main-20241030
-iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "bd06df2fc75bde7f37d9642409a9028d4e90472b" }
-iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "bd06df2fc75bde7f37d9642409a9028d4e90472b" }
-iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "bd06df2fc75bde7f37d9642409a9028d4e90472b" }
+iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "2a97e6fe6eb9e29ebd801d011f2a5b23aa7e1d21" }
+iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "2a97e6fe6eb9e29ebd801d011f2a5b23aa7e1d21" }
+iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "2a97e6fe6eb9e29ebd801d011f2a5b23aa7e1d21" }
 opendal = "0.49"
 # used only by arrow-udf-flight
 arrow-flight = "53"
