@@ -46,6 +46,7 @@ mod pg_settings;
 mod pg_shadow;
 mod pg_shdescription;
 mod pg_stat_activity;
+mod pg_stat_user_tables;
 mod pg_tables;
 mod pg_tablespace;
 mod pg_trigger;
