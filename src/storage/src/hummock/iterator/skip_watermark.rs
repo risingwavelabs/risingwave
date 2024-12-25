@@ -444,7 +444,7 @@ mod tests {
     use itertools::Itertools;
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
-    use risingwave_common::row::{OwnedRow, Row, RowExt};
+    use risingwave_common::row::{OwnedRow, RowExt};
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_common::util::row_serde::OrderedRowSerde;
@@ -662,15 +662,15 @@ mod tests {
             pk_indices: &[usize],
         ) -> (TableKey<Bytes>, SharedBufferValue<Bytes>) {
             let r = OwnedRow::new(vec![
-                Some(ScalarImpl::Int32(0 as i32)),
-                Some(ScalarImpl::Int32(0 as i32)),
+                Some(ScalarImpl::Int32(0_i32)),
+                Some(ScalarImpl::Int32(0_i32)),
                 Some(ScalarImpl::Int32(index as i32)), // watermark column
-                Some(ScalarImpl::Int32(0 as i32)),
+                Some(ScalarImpl::Int32(0_i32)),
             ]);
 
             let pk = r.project(pk_indices);
 
-            let k1 = serialize_pk_with_vnode(pk, &pk_serde, VirtualNode::from_index(vnode));
+            let k1 = serialize_pk_with_vnode(pk, pk_serde, VirtualNode::from_index(vnode));
             let v1 = SharedBufferValue::Insert(Bytes::copy_from_slice(
                 format!("{}-value-{}", vnode, index).as_bytes(),
             ));
@@ -700,20 +700,20 @@ mod tests {
             );
 
             iter.rewind().await.unwrap();
-            assert_eq!(iter.is_valid(), true);
+            assert!(iter.is_valid());
             for i in 0..10 {
                 let (k, _v) = gen_key_value(0, i, &pk_serde, &pk_indices);
                 assert_eq!(iter.key().user_key.table_key.as_ref(), k.as_ref());
                 iter.next().await.unwrap();
             }
+            assert!(!iter.is_valid());
         }
 
         {
             // test watermark
             let watermark = {
                 let r1 = OwnedRow::new(vec![Some(ScalarImpl::Int32(5))]);
-                let watermark = serialize_pk(r1, &watermark_col_serde);
-                watermark
+                serialize_pk(r1, &watermark_col_serde)
             };
 
             let read_watermark = ReadTableWatermark {
@@ -752,13 +752,13 @@ mod tests {
             );
 
             iter.rewind().await.unwrap();
-            assert_eq!(iter.is_valid(), true);
+            assert!(iter.is_valid());
             for i in 5..10 {
                 let (k, _v) = gen_key_value(0, i, &pk_serde, &pk_indices);
                 assert_eq!(iter.key().user_key.table_key.as_ref(), k.as_ref());
                 iter.next().await.unwrap();
             }
-            assert_eq!(iter.is_valid(), false);
+            assert!(!iter.is_valid());
         }
     }
 }

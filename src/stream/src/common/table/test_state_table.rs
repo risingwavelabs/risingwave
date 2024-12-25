@@ -12,33 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::HashSet;
 use std::ops::Bound::{self, *};
-use std::sync::Arc;
 
-use bytes::BytesMut;
 use futures::{pin_mut, StreamExt};
-use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
-use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{self, OwnedRow};
 use risingwave_common::types::{DataType, Scalar, ScalarImpl, Timestamptz};
 use risingwave_common::util::epoch::{test_epoch, EpochPair};
-use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::BasicSerde;
-use risingwave_hummock_sdk::table_watermark::{ReadTableWatermark, WatermarkDirection};
 use risingwave_hummock_test::test_utils::prepare_hummock_test_env;
-use risingwave_pb::catalog::PbTable;
-use risingwave_pb::common::PbColumnOrder;
-use risingwave_pb::plan_common::ColumnCatalog;
-use risingwave_storage::compaction_catalog_manager::{
-    CompactionCatalogAgent, FilterKeyExtractorImpl, FullKeyFilterKeyExtractor,
-};
-use risingwave_storage::hummock::iterator::SkipWatermarkIterator;
 use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::SINGLETON_VNODE;
