@@ -132,7 +132,7 @@ impl StreamNode for StreamGlobalApproxPercentile {
                     .to_internal_table_prost(),
             ),
         };
-        PbNodeBody::GlobalApproxPercentile(body)
+        PbNodeBody::GlobalApproxPercentile(Box::new(body))
     }
 }
 

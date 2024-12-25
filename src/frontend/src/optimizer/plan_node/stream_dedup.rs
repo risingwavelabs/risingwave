@@ -92,7 +92,7 @@ impl StreamNode for StreamDedup {
         let table_catalog = self
             .infer_internal_table_catalog()
             .with_id(state.gen_table_id_wrapped());
-        PbNodeBody::AppendOnlyDedup(DedupNode {
+        PbNodeBody::AppendOnlyDedup(Box::new(DedupNode {
             state_table: Some(table_catalog.to_internal_table_prost()),
             dedup_column_indices: self
                 .core
@@ -100,7 +100,7 @@ impl StreamNode for StreamDedup {
                 .iter()
                 .map(|idx| *idx as _)
                 .collect_vec(),
-        })
+        }))
     }
 }
 

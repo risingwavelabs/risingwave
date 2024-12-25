@@ -21,12 +21,11 @@ use anyhow::Context;
 use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use prometheus::core::{AtomicI64, GenericGauge};
 use rdkafka::config::RDKafkaLogLevel;
 use rdkafka::consumer::{Consumer, StreamConsumer};
 use rdkafka::error::KafkaError;
 use rdkafka::{ClientConfig, Message, Offset, TopicPartitionList};
-use risingwave_common::metrics::LabelGuardedMetric;
+use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
 
 use crate::error::ConnectorResult as Result;
@@ -247,10 +246,8 @@ impl KafkaSplitReader {
             )
         });
 
-        let mut latest_message_id_metrics: HashMap<
-            String,
-            LabelGuardedMetric<GenericGauge<AtomicI64>, 3>,
-        > = HashMap::new();
+        let mut latest_message_id_metrics: HashMap<String, LabelGuardedIntGauge<3>> =
+            HashMap::new();
 
         #[for_await]
         'for_outer_loop: for msgs in self.consumer.stream().ready_chunks(max_chunk_size) {

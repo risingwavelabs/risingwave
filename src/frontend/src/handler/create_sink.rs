@@ -649,9 +649,9 @@ pub(crate) fn insert_merger_to_union_with_project(
         // TODO: MergeNode is used as a placeholder, see issue #17658
         node.input.push(StreamNode {
             input: vec![StreamNode {
-                node_body: Some(NodeBody::Merge(MergeNode {
+                node_body: Some(NodeBody::Merge(Box::new(MergeNode {
                     ..Default::default()
-                })),
+                }))),
                 ..Default::default()
             }],
             identity: uniq_identity

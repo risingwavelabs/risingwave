@@ -123,8 +123,8 @@ impl StreamNode for StreamFsFetch {
                 secret_refs,
             }
         });
-        NodeBody::StreamFsFetch(StreamFsFetchNode {
+        NodeBody::StreamFsFetch(Box::new(StreamFsFetchNode {
             node_inner: source_inner,
-        })
+        }))
     }
 }
