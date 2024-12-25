@@ -372,7 +372,6 @@ pub async fn handle(
                 .await;
             }
             let format_encode = format_encode.map(|s| s.into_v2_with_warning());
-            println!("WATERMARK source_watermarks: {:?}", source_watermarks);
             create_table::handle_create_table(
                 handler_args,
                 name,
