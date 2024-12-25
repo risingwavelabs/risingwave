@@ -398,10 +398,13 @@ impl StreamConsumer for DispatchExecutor {
     type BarrierStream = impl Stream<Item = StreamResult<Barrier>> + Send;
 
     fn execute(mut self: Box<Self>) -> Self::BarrierStream {
-        let barrier_batch_size = std::cmp::max(
-            1,
-            self.inner.context.config.developer.max_barrier_batch_size,
-        );
+        let barrier_batch_size = self
+            .inner
+            .context
+            .config
+            .developer
+            .max_barrier_batch_size
+            .saturating_sub(1);
         #[try_stream]
         async move {
             let mut input = self.input.execute().peekable();
