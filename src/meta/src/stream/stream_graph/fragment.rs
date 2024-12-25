@@ -27,7 +27,9 @@ use risingwave_common::catalog::{
 use risingwave_common::hash::VnodeCount;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::stream_graph_visitor;
-use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
+use risingwave_common::util::stream_graph_visitor::{
+    visit_stream_node_cont, visit_stream_node_cont_mut,
+};
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::ddl_service::TableJobType;
@@ -38,7 +40,7 @@ use risingwave_pb::stream_plan::stream_fragment_graph::{
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     DispatchStrategy, DispatcherType, FragmentTypeFlag, StreamActor,
-    StreamFragmentGraph as StreamFragmentGraphProto, StreamScanNode, StreamScanType,
+    StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamScanNode, StreamScanType,
 };
 
 use crate::barrier::SnapshotBackfillInfo;
@@ -602,8 +604,8 @@ impl StreamFragmentGraph {
                             match (prev_snapshot_backfill_info, is_snapshot_backfill) {
                                 (Some(prev_snapshot_backfill_info), true) => {
                                     prev_snapshot_backfill_info
-                                        .upstream_mv_table_ids
-                                        .insert(TableId::new(stream_scan.table_id));
+                                        .upstream_mv_table_id_to_backfill_epoch
+                                        .insert(TableId::new(stream_scan.table_id), None);
                                     true
                                 }
                                 (None, false) => true,
@@ -617,9 +619,9 @@ impl StreamFragmentGraph {
                             prev_stream_scan = Some((
                                 if is_snapshot_backfill {
                                     Some(SnapshotBackfillInfo {
-                                        upstream_mv_table_ids: HashSet::from_iter([TableId::new(
-                                            stream_scan.table_id,
-                                        )]),
+                                        upstream_mv_table_id_to_backfill_epoch: HashMap::from_iter(
+                                            [(TableId::new(stream_scan.table_id), None)],
+                                        ),
                                     })
                                 } else {
                                     None
@@ -640,6 +642,44 @@ impl StreamFragmentGraph {
                 .unwrap_or(None)
         })
     }
+}
+
+/// Fill snapshot epoch for `StreamScanNode` of `SnapshotBackfill`.
+/// Return `true` when has change applied.
+pub fn fill_snapshot_backfill_epoch(
+    node: &mut StreamNode,
+    upstream_mv_table_snapshot_epoch: &HashMap<TableId, Option<u64>>,
+) -> MetaResult<bool> {
+    let mut result = Ok(());
+    let mut applied = false;
+    visit_stream_node_cont_mut(node, |node| {
+        if let Some(NodeBody::StreamScan(stream_scan)) = node.node_body.as_mut()
+            && stream_scan.stream_scan_type == StreamScanType::SnapshotBackfill as i32
+        {
+            result = try {
+                let table_id = TableId::new(stream_scan.table_id);
+                let snapshot_epoch = upstream_mv_table_snapshot_epoch
+                    .get(&table_id)
+                    .ok_or_else(|| anyhow!("upstream table id not covered: {}", table_id))?
+                    .ok_or_else(|| anyhow!("upstream table id not set: {}", table_id))?;
+                if let Some(prev_snapshot_epoch) =
+                    stream_scan.snapshot_backfill_epoch.replace(snapshot_epoch)
+                {
+                    Err(anyhow!(
+                        "snapshot backfill epoch set again: {} {} {}",
+                        table_id,
+                        prev_snapshot_epoch,
+                        snapshot_epoch
+                    ))?;
+                }
+                applied = true;
+            };
+            result.is_ok()
+        } else {
+            true
+        }
+    });
+    result.map(|_| applied)
 }
 
 static EMPTY_HASHMAP: LazyLock<HashMap<GlobalFragmentId, StreamFragmentEdge>> =
