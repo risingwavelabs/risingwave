@@ -1979,26 +1979,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8c3c1a368f70d6cf7302d78f8f7093da241fb8e8807c05cc9e51a125895a6d5b"
 
 [[package]]
-name = "bcc"
-version = "0.0.33"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce860f38082f1544a557dfa447838143e1b0bfa061c0369e407ebadf640001d1"
-dependencies = [
- "bcc-sys",
- "bitflags 1.3.2",
- "byteorder",
- "libc",
- "socket2 0.4.9",
- "thiserror 1.0.63",
-]
-
-[[package]]
-name = "bcc-sys"
-version = "0.23.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5f40afb3abbf90895dda3ddbc6d8734d24215130a22d646067690f5e318f81bc"
-
-[[package]]
 name = "beef"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2348,15 +2328,6 @@ checksum = "e47d3a8076e283f3acd27400535992edb3ba4b5bb72f8891ad8fbe7932a7d4b9"
 dependencies = [
  "bytes",
  "either",
-]
-
-[[package]]
-name = "bytesize"
-version = "1.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a3e368af43e418a04d52505cf3dbc23dda4e3407ae2fa99fd0e4f308ce546acc"
-dependencies = [
- "serde",
 ]
 
 [[package]]
@@ -5905,7 +5876,6 @@ checksum = "7f19b9f54f7c7f55e31401bb647626ce0cf0f67b0004982ce815b3ee72a02aa8"
 dependencies = [
  "base64 0.13.1",
  "byteorder",
- "crossbeam-channel",
  "flate2",
  "nom",
  "num-traits",
@@ -10588,40 +10558,19 @@ name = "risingwave_bench"
 version = "2.3.0-alpha"
 dependencies = [
  "anyhow",
- "async-trait",
- "aws-config",
- "aws-sdk-s3",
- "aws-smithy-http",
- "aws-smithy-types",
- "bcc",
- "bytes",
- "bytesize",
  "clap",
  "futures",
  "futures-async-stream",
- "hdrhistogram",
  "itertools 0.13.0",
- "libc",
  "madsim-tokio",
  "nix 0.29.0",
- "opentelemetry",
- "parking_lot 0.12.1",
  "plotters",
- "prometheus",
- "rand",
  "risingwave_common",
  "risingwave_connector",
- "risingwave_pb",
- "risingwave_rt",
- "risingwave_storage",
  "risingwave_stream",
  "serde",
  "serde_yaml",
  "thiserror-ext",
- "tokio-stream 0.1.15",
- "toml 0.8.12",
- "tracing",
- "tracing-subscriber",
  "workspace-hack",
 ]
 
