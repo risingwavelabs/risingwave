@@ -29,7 +29,7 @@ import _, { reverse, sortBy } from "lodash"
 import Head from "next/head"
 import { parseAsInteger, useQueryState } from "nuqs"
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react"
-import RelationGraph, { nodeRadius } from "../components/RelationGraph"
+import RelationGraph, { boxHeight, boxWidth } from "../components/RelationGraph"
 import Title from "../components/Title"
 import useErrorToast from "../hook/useErrorToast"
 import useFetch from "../lib/api/fetch"
@@ -82,8 +82,8 @@ function buildDependencyAsEdges(
           : []
         : [],
       order: r.id,
-      width: nodeRadius * 2,
-      height: nodeRadius * 2,
+      width: boxWidth,
+      height: boxHeight,
       relation: r,
     })
   }
