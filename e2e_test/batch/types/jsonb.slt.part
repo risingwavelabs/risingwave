@@ -302,13 +302,3 @@ query T
 select JSONB_POPULATE_RECORD(NULL::struct<id DOUBLE>, '{"id": "1e10"}'::jsonb) AS v;
 ----
  (10000000000)
-
-statement error
-select JSONB_POPULATE_RECORD(NULL::struct<id DECIMAL>, '{"id": "1"}'::jsonb) AS v;
-----
-db error: ERROR: Failed to run the query
-
-Caused by these errors (recent errors listed first):
-  1: Expr error
-  2: error while evaluating expression `jsonb_populate_record(NULL, '{"id": "1"}')`
-  3: Parse error: cannot cast jsonb to numeric

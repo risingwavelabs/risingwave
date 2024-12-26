@@ -150,19 +150,13 @@ select jsonb_populate_map(
 {a:a,b:3,c:4}
 
 
-query error
+query ?
 select jsonb_populate_map(
-    MAP {'a': 1, 'b': 2},
-    '{"b": "3", "c": 4}'::jsonb
+    MAP {'a': '1', 'b': '2'},
+    '{"b": "3", "c": "4"}'::jsonb
 );
 ----
-db error: ERROR: Failed to run the query
-
-Caused by these errors (recent errors listed first):
-  1: Expr error
-  2: error while evaluating expression `jsonb_populate_map('{a:1,b:2}', '{"b": "3", "c": 4}')`
-  3: Parse error: cannot cast jsonb string to type number
-
+{a:1,b:3,c:4}
 
 query error
 select jsonb_populate_map(

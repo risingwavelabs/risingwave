@@ -14,7 +14,6 @@
 
 use std::fmt::{self, Write};
 use std::hash::Hash;
-use std::str::FromStr;
 
 use bytes::{Buf, BufMut, BytesMut};
 use jsonbb::{Value, ValueRef};
@@ -325,16 +324,12 @@ impl<'a> JsonbRef<'a> {
     /// According to RFC 8259, only number within IEEE 754 binary64 (double precision) has good
     /// interoperability. We do not support arbitrary precision like PostgreSQL `numeric` right now.
     pub fn as_number(&self) -> Result<F64, String> {
-        if let Some(s) = self.0.as_str() {
-            F64::from_str(s).map_err(|e| format!("{}", e.as_report()))
-        } else {
-            self.0
-                .as_number()
-                .ok_or_else(|| format!("cannot cast jsonb {} to type number", self.type_name()))?
-                .as_f64()
-                .map(|f| f.into_ordered())
-                .ok_or_else(|| "jsonb number out of range".into())
-        }
+        self.0
+            .as_number()
+            .ok_or_else(|| format!("cannot cast jsonb {} to type number", self.type_name()))?
+            .as_f64()
+            .map(|f| f.into_ordered())
+            .ok_or_else(|| "jsonb number out of range".into())
     }
 
     /// This is part of the `->>` or `#>>` syntax to access a child as string.
@@ -414,37 +409,13 @@ impl<'a> JsonbRef<'a> {
 
     /// Convert the jsonb value to a datum.
     pub fn to_datum(self, ty: &DataType) -> Result<Datum, String> {
-        if !matches!(
-            ty,
-            DataType::Jsonb
-                | DataType::Boolean
-                | DataType::Int16
-                | DataType::Int32
-                | DataType::Int64
-                | DataType::Float32
-                | DataType::Float64
-                | DataType::Varchar
-                | DataType::List(_)
-                | DataType::Struct(_)
-        ) {
-            return Err(format!("cannot cast jsonb to {ty}"));
-        }
         if self.0.as_null().is_some() {
             return Ok(None);
         }
-        Ok(Some(match ty {
-            DataType::Jsonb => ScalarImpl::Jsonb(self.into()),
-            DataType::Boolean => ScalarImpl::Bool(self.as_bool()?),
-            DataType::Int16 => ScalarImpl::Int16(self.as_number()?.try_into()?),
-            DataType::Int32 => ScalarImpl::Int32(self.as_number()?.try_into()?),
-            DataType::Int64 => ScalarImpl::Int64(self.as_number()?.try_into()?),
-            DataType::Float32 => ScalarImpl::Float32(self.as_number()?.try_into()?),
-            DataType::Float64 => ScalarImpl::Float64(self.as_number()?),
-            DataType::Varchar => ScalarImpl::Utf8(self.force_string().into()),
-            DataType::List(t) => ScalarImpl::List(self.to_list(t)?),
-            DataType::Struct(s) => ScalarImpl::Struct(self.to_struct(s)?),
-            _ => unreachable!(),
-        }))
+        let s = self.force_string();
+        Ok(Some(
+            ScalarImpl::from_text(&s, ty).map_err(|e| format!("{}", e.as_report()))?,
+        ))
     }
 
     /// Convert the jsonb value to a list value.
