@@ -24,6 +24,7 @@ use iceberg::expr::Predicate as IcebergPredicate;
 use iceberg::scan::FileScanTask;
 use iceberg::spec::TableMetadata;
 use iceberg::table::Table;
+use iceberg::Catalog;
 use itertools::Itertools;
 pub use parquet_file_handler::*;
 use risingwave_common::bail;
@@ -57,11 +58,8 @@ pub struct IcebergProperties {
     pub unknown_fields: HashMap<String, String>,
 }
 
-use iceberg::table::Table as TableV2;
-use iceberg::Catalog as CatalogV2;
-
 impl IcebergProperties {
-    pub async fn create_catalog_v2(&self) -> ConnectorResult<Arc<dyn CatalogV2>> {
+    pub async fn create_catalog(&self) -> ConnectorResult<Arc<dyn Catalog>> {
         let mut java_catalog_props = HashMap::new();
         if let Some(jdbc_user) = self.jdbc_user.clone() {
             java_catalog_props.insert("jdbc.user".to_owned(), jdbc_user);
@@ -70,10 +68,10 @@ impl IcebergProperties {
             java_catalog_props.insert("jdbc.password".to_owned(), jdbc_password);
         }
         // TODO: support path_style_access and java_catalog_props for iceberg source
-        self.common.create_catalog_v2(&java_catalog_props).await
+        self.common.create_catalog(&java_catalog_props).await
     }
 
-    pub async fn load_table_v2(&self) -> ConnectorResult<TableV2> {
+    pub async fn load_table(&self) -> ConnectorResult<Table> {
         let mut java_catalog_props = HashMap::new();
         if let Some(jdbc_user) = self.jdbc_user.clone() {
             java_catalog_props.insert("jdbc.user".to_owned(), jdbc_user);
@@ -82,13 +80,13 @@ impl IcebergProperties {
             java_catalog_props.insert("jdbc.password".to_owned(), jdbc_password);
         }
         // TODO: support java_catalog_props for iceberg source
-        self.common.load_table_v2(&java_catalog_props).await
+        self.common.load_table(&java_catalog_props).await
     }
 
-    pub async fn load_table_v2_with_metadata(
+    pub async fn load_table_with_metadata(
         &self,
         table_meta: TableMetadata,
-    ) -> ConnectorResult<TableV2> {
+    ) -> ConnectorResult<Table> {
         let mut java_catalog_props = HashMap::new();
         if let Some(jdbc_user) = self.jdbc_user.clone() {
             java_catalog_props.insert("jdbc.user".to_owned(), jdbc_user);
@@ -98,7 +96,7 @@ impl IcebergProperties {
         }
         // TODO: support path_style_access and java_catalog_props for iceberg source
         self.common
-            .load_table_v2_with_metadata(table_meta, &java_catalog_props)
+            .load_table_with_metadata(table_meta, &java_catalog_props)
             .await
     }
 }
@@ -327,7 +325,7 @@ impl IcebergSplitEnumerator {
         if batch_parallelism == 0 {
             bail!("Batch parallelism is 0. Cannot split the iceberg files.");
         }
-        let table = self.config.load_table_v2().await?;
+        let table = self.config.load_table().await?;
         let snapshot_id = Self::get_snapshot_id(&table, time_traval_info)?;
         let table_meta = TableMetadataJsonStr::serialize(table.metadata());
         if snapshot_id.is_none() {
@@ -443,7 +441,7 @@ impl IcebergSplitEnumerator {
     }
 
     pub async fn get_all_delete_column_names(&self) -> ConnectorResult<Vec<String>> {
-        let table = self.config.load_table_v2().await?;
+        let table = self.config.load_table().await?;
         let snapshot_id = Self::get_snapshot_id(&table, None)?;
         if snapshot_id.is_none() {
             return Ok(vec![]);
