@@ -132,7 +132,7 @@ impl Cursor {
 
     pub fn get_fields(&mut self) -> Vec<Field> {
         match self {
-            Cursor::Subscription(cursor) => cursor.fields.clone(),
+            Cursor::Subscription(cursor) => cursor.fields_manager.get_output_fields().clone(),
             Cursor::Query(cursor) => cursor.fields.clone(),
         }
     }
@@ -256,6 +256,106 @@ impl Display for State {
     }
 }
 
+struct FieldsManager {
+    all_fields: Vec<Field>,
+    output_fields: Vec<Field>,
+    pk_columns_flags: Vec<bool>,
+    hidden_columns_flags: Vec<bool>,
+    pk_column_names: HashMap<String, bool>,
+}
+impl FieldsManager {
+    pub fn new(all_fields: Vec<Field>, pk_column_names: HashMap<String, bool>) -> Self {
+        let mut pk_columns_flags = Vec::new();
+        let mut hidden_columns_flags = Vec::new();
+        for field in &all_fields {
+            if let Some(is_hidden) = pk_column_names.get(&field.name) {
+                pk_columns_flags.push(true);
+                if *is_hidden {
+                    hidden_columns_flags.push(false);
+                } else {
+                    hidden_columns_flags.push(true);
+                }
+            } else {
+                hidden_columns_flags.push(true);
+                pk_columns_flags.push(false);
+            }
+        }
+        let mut output_fields = all_fields.clone();
+        let mut hidden_columns_flags_iter = hidden_columns_flags.iter();
+        output_fields.retain(|_| *hidden_columns_flags_iter.next().unwrap());
+        Self {
+            all_fields,
+            output_fields,
+            pk_columns_flags,
+            hidden_columns_flags,
+            pk_column_names,
+        }
+    }
+
+    pub fn try_refill_fields(
+        &mut self,
+        all_fields: Vec<Field>,
+        pk_column_names: HashMap<String, bool>,
+    ) -> bool {
+        if self.all_fields.ne(&all_fields) || self.pk_column_names.ne(&pk_column_names) {
+            *self = Self::new(all_fields, pk_column_names);
+            true
+        } else {
+            false
+        }
+    }
+
+    // In the beginning (declare cur), we will give it an empty formats,
+    // this formats is not a real, when we fetch, We fill it with the formats returned from the pg client.
+    pub fn get_row_stream_fields_and_formats(
+        &self,
+        formats: &Vec<Format>,
+        from_snapshot: bool,
+    ) -> (Vec<Field>, Vec<Format>) {
+        let mut fields = self.all_fields.clone();
+        fields.pop();
+        if from_snapshot {
+            fields.pop();
+        }
+        if formats.is_empty() || formats.len() == 1 {
+            (fields, formats.clone())
+        } else {
+            let mut formats = formats.clone();
+            for (index, value) in self.hidden_columns_flags.iter().enumerate() {
+                if *value {
+                    formats.insert(index, Format::Text);
+                }
+            }
+            formats.pop();
+            if from_snapshot {
+                formats.pop();
+            }
+            (fields, formats)
+        }
+    }
+
+    pub fn process_output_desc_row(
+        &self,
+        mut rows: Vec<Row>,
+    ) -> (Vec<Row>, Option<Vec<Option<Bytes>>>) {
+        let last_row = rows.last_mut().map(|row| {
+            let mut row = row.0.clone();
+            let mut pk_columns_flags_iter = self.pk_columns_flags.iter();
+            row.retain(|_| *pk_columns_flags_iter.next().unwrap());
+            row
+        });
+        rows.iter_mut().for_each(|row| {
+            let mut hidden_columns_flags_iter = self.hidden_columns_flags.iter();
+            row.0.retain(|_| *hidden_columns_flags_iter.next().unwrap());
+        });
+        (rows, last_row)
+    }
+
+    pub fn get_output_fields(&self) -> &Vec<Field> {
+        &self.output_fields
+    }
+}
+
 pub struct SubscriptionCursor {
     cursor_name: String,
     subscription: Arc<SubscriptionCatalog>,
@@ -264,10 +364,9 @@ pub struct SubscriptionCursor {
     state: State,
     // fields will be set in the table's catalog when the cursor is created,
     // and will be reset each time it is created chunk_stream, this is to avoid changes in the catalog due to alter.
-    fields: Vec<Field>,
+    fields_manager: FieldsManager,
     cursor_metrics: Arc<CursorMetrics>,
     last_fetch: Instant,
-    pk_column_names: HashMap<String, bool>,
     seek_pk_row: Option<Vec<Option<Bytes>>>,
 }
 
@@ -340,10 +439,9 @@ impl SubscriptionCursor {
             dependent_table_id,
             cursor_need_drop_time,
             state,
-            fields,
+            fields_manager: FieldsManager::new(fields, pk_column_names),
             cursor_metrics,
             last_fetch: Instant::now(),
-            pk_column_names,
             seek_pk_row: None,
         })
     }
@@ -378,11 +476,15 @@ impl SubscriptionCursor {
                                     None,
                                 )
                                 .await?;
-                            Self::init_row_stream(
-                                &mut chunk_stream,
-                                formats,
-                                &from_snapshot,
+                            let table_schema_changed = self
+                                .fields_manager
+                                .try_refill_fields(fields, pk_column_names);
+                            let (fields, formats) = self
+                                .fields_manager
+                                .get_row_stream_fields_and_formats(formats, from_snapshot);
+                            chunk_stream.init_row_stream(
                                 &fields,
+                                &formats,
                                 handler_args.session.clone(),
                             );
 
@@ -400,10 +502,7 @@ impl SubscriptionCursor {
                                 expected_timestamp,
                                 init_query_timer,
                             };
-                            if self.fields.ne(&fields) || self.pk_column_names.ne(&pk_column_names)
-                            {
-                                self.fields = fields;
-                                self.pk_column_names = pk_column_names;
+                            if table_schema_changed {
                                 return Ok(None);
                             }
                         }
@@ -504,13 +603,10 @@ impl SubscriptionCursor {
             ..
         } = &mut self.state
         {
-            Self::init_row_stream(
-                chunk_stream,
-                formats,
-                from_snapshot,
-                &self.fields,
-                session.clone(),
-            );
+            let (fields, fotmats) = self
+                .fields_manager
+                .get_row_stream_fields_and_formats(formats, *from_snapshot);
+            chunk_stream.init_row_stream(&fields, &fotmats, session.clone());
         }
         while cur < count {
             let fetch_cursor_timer = Instant::now();
@@ -556,12 +652,16 @@ impl SubscriptionCursor {
             }
         }
         self.last_fetch = Instant::now();
-        let (fields, rows, seek_pk_row) =
-            Self::process_output_desc_row(&self.fields, ans, &self.pk_column_names);
+        let (rows, seek_pk_row) = self.fields_manager.process_output_desc_row(ans);
         if let Some(seek_pk_row) = seek_pk_row {
             self.seek_pk_row = Some(seek_pk_row);
         }
-        let desc = fields.iter().map(to_pg_field).collect();
+        let desc = self
+            .fields_manager
+            .get_output_fields()
+            .iter()
+            .map(to_pg_field)
+            .collect();
 
         Ok((rows, desc))
     }
@@ -742,52 +842,6 @@ impl SubscriptionCursor {
         Ok(row)
     }
 
-    pub fn process_output_desc_row(
-        descs: &Vec<Field>,
-        mut rows: Vec<Row>,
-        pk_column_names: &HashMap<String, bool>,
-    ) -> (Vec<Field>, Vec<Row>, Option<Vec<Option<Bytes>>>) {
-        let last_row = rows.last_mut().map(|row| {
-            row.0
-                .iter()
-                .zip_eq_fast(descs.iter())
-                .filter_map(|(data, field)| {
-                    if pk_column_names.contains_key(&field.name) {
-                        Some(data.clone())
-                    } else {
-                        None
-                    }
-                })
-                .collect_vec()
-        });
-        let iter = descs
-            .iter()
-            .map(|field| {
-                if let Some(is_hidden) = pk_column_names.get(&field.name)
-                    && *is_hidden
-                {
-                    (false, field)
-                } else {
-                    (true, field)
-                }
-            })
-            .collect_vec();
-        let pk_fields = iter
-            .iter()
-            .filter(|(is_hidden, _)| *is_hidden)
-            .map(|(_, field)| (*field).clone())
-            .collect();
-        let pk_keep = iter
-            .iter()
-            .map(|(is_hidden, _)| *is_hidden)
-            .collect::<Vec<_>>();
-        rows.iter_mut().for_each(|row| {
-            let mut pk_keep_iter = pk_keep.iter();
-            row.0.retain(|_| *pk_keep_iter.next().unwrap())
-        });
-        (pk_fields, rows, last_row)
-    }
-
     pub fn build_desc(mut descs: Vec<Field>, from_snapshot: bool) -> Vec<Field> {
         if from_snapshot {
             descs.push(Field::with_name(DataType::Varchar, "op"));
@@ -950,26 +1004,6 @@ impl SubscriptionCursor {
             dependent_relations: table_catalog.dependent_relations.clone(),
             read_storage_tables: HashSet::from_iter([table_catalog.id]),
         })
-    }
-
-    // In the beginning (declare cur), we will give it an empty formats,
-    // this formats is not a real, when we fetch, We fill it with the formats returned from the pg client.
-    pub fn init_row_stream(
-        chunk_stream: &mut CursorDataChunkStream,
-        formats: &Vec<Format>,
-        from_snapshot: &bool,
-        fields: &Vec<Field>,
-        session: Arc<SessionImpl>,
-    ) {
-        let mut formats = formats.clone();
-        let mut fields = fields.clone();
-        formats.pop();
-        fields.pop();
-        if *from_snapshot {
-            formats.pop();
-            fields.pop();
-        }
-        chunk_stream.init_row_stream(&fields, &formats, session);
     }
 
     pub fn idle_duration(&self) -> Duration {

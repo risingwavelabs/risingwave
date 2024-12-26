@@ -551,7 +551,7 @@ def test_order_multi_pk():
     drop_table_subscription()
 
 def test_explain_cursor():
-    print(f"test_order_mutil_pk")
+    print(f"test_explain_cursor")
     create_table_subscription()
     conn = psycopg2.connect(
         host="localhost",
