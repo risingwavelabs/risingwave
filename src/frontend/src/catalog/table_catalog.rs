@@ -18,6 +18,7 @@ use std::collections::{HashMap, HashSet};
 use anyhow::Context as _;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
+use risingwave_common::bail;
 use risingwave_common::catalog::{
     ColumnCatalog, ConflictBehavior, CreateType, Engine, Field, Schema, StreamJobStatus, TableDesc,
     TableId, TableVersionId,
@@ -33,12 +34,15 @@ use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::DefaultColumnDesc;
 use risingwave_sqlparser::ast;
 use risingwave_sqlparser::parser::Parser;
+use thiserror_ext::AsReport as _;
 
 use super::{ColumnId, DatabaseId, FragmentId, OwnedByUserCatalog, SchemaId, SinkId};
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::ExprImpl;
 use crate::optimizer::property::Cardinality;
+use crate::session::current::notice_to_user;
 use crate::user::UserId;
+use crate::utils::data_type::to_ast_data_type;
 
 /// `TableCatalog` Includes full information about a table.
 ///
@@ -270,6 +274,123 @@ impl TableVersion {
             version: self.version_id,
             next_column_id: self.next_column_id.into(),
         }
+    }
+}
+
+impl TableCatalog {
+    pub fn better_create_stmt(&self) -> Result<ast::Statement> {
+        self.table_purified_create_stmt().or_else(|e| {
+            notice_to_user(format!(
+                "failed to purify table definition: {}",
+                e.as_report()
+            ));
+            self.single_stmt()
+        })
+    }
+
+    fn single_stmt(&self) -> Result<ast::Statement> {
+        Ok(Parser::parse_sql(&self.definition)
+            .context("unable to parse original table definition")?
+            .into_iter()
+            .exactly_one()
+            .context("expect exactly one statement")?)
+    }
+
+    pub fn table_purified_create_stmt(&self) -> Result<ast::Statement> {
+        use ast::*;
+
+        if self.table_type != TableType::Table {
+            bail!("not applicable for {:?}", self.table_type);
+        }
+
+        let mut base = if self.definition.is_empty() {
+            // CREATE TABLE AS
+            let name = ObjectName(vec![self.name.as_str().into()]);
+
+            Statement::CreateTable {
+                name,
+                or_replace: false,
+                temporary: false,
+                if_not_exists: false,
+                columns: Vec::new(),
+                wildcard_idx: None,
+                constraints: Vec::new(),
+                with_options: Vec::new(),
+                format_encode: None,
+                source_watermarks: Vec::new(),
+                append_only: false,
+                on_conflict: None,
+                with_version_column: None,
+                query: None,
+                cdc_table_info: None,
+                include_column_options: Vec::new(),
+                webhook_info: None,
+                engine: Engine::Hummock,
+            }
+        } else {
+            self.single_stmt()?
+        };
+
+        let Statement::CreateTable {
+            columns: column_defs,
+            constraints,
+            ..
+        } = &mut base
+        else {
+            bail!("expect `CREATE TABLE` statement, found: `{:?}`", base);
+        };
+
+        let defined_columns = self.columns.iter().filter(|c| {
+            !c.is_hidden() && !c.is_connector_additional_column() && !c.is_rw_sys_column()
+        });
+
+        if !column_defs.is_empty() {
+            let defined_columns_len = defined_columns.count();
+            if column_defs.len() != defined_columns_len {
+                bail!(
+                    "column count mismatch: defined {} columns, but {} columns in the definition",
+                    defined_columns_len,
+                    column_defs.len()
+                );
+            }
+
+            return Ok(base);
+        }
+
+        // Schema inferred. Derive `ColumnDef` from `ColumnCatalog`.
+
+        for column in defined_columns {
+            if column.column_desc.generated_or_default_column.is_some() {
+                bail!("generated column / default value not supported yet");
+            }
+
+            let column_def = ColumnDef {
+                name: column.name().into(),
+                data_type: Some(to_ast_data_type(column.data_type())?),
+                collation: None,
+                options: Vec::new(),
+            };
+            column_defs.push(column_def);
+        }
+
+        if self.row_id_index.is_none() {
+            // User-defined primary key.
+            let mut pk_columns = Vec::new();
+
+            for id in self.pk_column_ids() {
+                let column = self.columns.iter().find(|c| c.column_id() == id).unwrap();
+                pk_columns.push(column.name().into());
+            }
+
+            let pk_constraint = TableConstraint::Unique {
+                name: None,
+                columns: pk_columns,
+                is_primary: true,
+            };
+            *constraints = vec![pk_constraint];
+        }
+
+        Ok(base)
     }
 }
 
