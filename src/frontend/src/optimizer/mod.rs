@@ -33,7 +33,6 @@ pub use plan_visitor::{
     ExecutionModeDecider, PlanVisitor, ReadStorageTableVisitor, RelationCollectorVisitor,
     SysTableVisitor,
 };
-use risingwave_sqlparser::ast::OnConflict;
 
 mod logical_optimization;
 mod optimizer_context;
@@ -73,7 +72,7 @@ use self::rule::*;
 use crate::catalog::table_catalog::TableType;
 use crate::error::{ErrorCode, Result};
 use crate::expr::TimestamptzExprFinder;
-use crate::handler::create_table::{CreateTableInfo, CreateTableProps, EitherOnConflict};
+use crate::handler::create_table::{CreateTableInfo, CreateTableProps};
 use crate::optimizer::plan_node::generic::{SourceNodeKind, Union};
 use crate::optimizer::plan_node::{
     BatchExchange, PlanNodeType, PlanTreeNode, RewriteExprsRecursive, StreamExchange, StreamUnion,
@@ -848,37 +847,7 @@ impl PlanRoot {
             }
         }
 
-        let conflict_behavior = match on_conflict {
-            EitherOnConflict::Ast(on_conflict) => {
-                if append_only {
-                    if row_id_index.is_some() {
-                        // Primary key will be generated, no conflict check needed.
-                        ConflictBehavior::NoCheck
-                    } else {
-                        // User defined PK on append-only table, enforce `DO NOTHING`.
-                        if let Some(on_conflict) = on_conflict
-                            && on_conflict != OnConflict::Nothing
-                        {
-                            return Err(ErrorCode::InvalidInputSyntax(
-                                "When PRIMARY KEY constraint applied to an APPEND ONLY table, \
-                                 the ON CONFLICT behavior must be DO NOTHING."
-                                    .to_owned(),
-                            )
-                            .into());
-                        }
-                        ConflictBehavior::IgnoreConflict
-                    }
-                } else {
-                    // Default to `UPDATE FULL` for non-append-only tables.
-                    match on_conflict.unwrap_or(OnConflict::UpdateFull) {
-                        OnConflict::UpdateFull => ConflictBehavior::Overwrite,
-                        OnConflict::Nothing => ConflictBehavior::IgnoreConflict,
-                        OnConflict::UpdateIfNotNull => ConflictBehavior::DoUpdateIfNotNull,
-                    }
-                }
-            }
-            EitherOnConflict::Resolved(b) => b,
-        };
+        let conflict_behavior = on_conflict.to_behavior(append_only, row_id_index.is_some())?;
 
         if let ConflictBehavior::IgnoreConflict = conflict_behavior
             && version_column_index.is_some()

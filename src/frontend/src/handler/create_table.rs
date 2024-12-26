@@ -687,6 +687,45 @@ impl From<ConflictBehavior> for EitherOnConflict {
     }
 }
 
+impl EitherOnConflict {
+    /// Resolves the conflict behavior based on the given information.
+    pub fn to_behavior(self, append_only: bool, row_id_as_pk: bool) -> Result<ConflictBehavior> {
+        let conflict_behavior = match self {
+            EitherOnConflict::Ast(on_conflict) => {
+                if append_only {
+                    if row_id_as_pk {
+                        // Primary key will be generated, no conflict check needed.
+                        ConflictBehavior::NoCheck
+                    } else {
+                        // User defined PK on append-only table, enforce `DO NOTHING`.
+                        if let Some(on_conflict) = on_conflict
+                            && on_conflict != OnConflict::Nothing
+                        {
+                            return Err(ErrorCode::InvalidInputSyntax(
+                                "When PRIMARY KEY constraint applied to an APPEND ONLY table, \
+                                     the ON CONFLICT behavior must be DO NOTHING."
+                                    .to_owned(),
+                            )
+                            .into());
+                        }
+                        ConflictBehavior::IgnoreConflict
+                    }
+                } else {
+                    // Default to `UPDATE FULL` for non-append-only tables.
+                    match on_conflict.unwrap_or(OnConflict::UpdateFull) {
+                        OnConflict::UpdateFull => ConflictBehavior::Overwrite,
+                        OnConflict::Nothing => ConflictBehavior::IgnoreConflict,
+                        OnConflict::UpdateIfNotNull => ConflictBehavior::DoUpdateIfNotNull,
+                    }
+                }
+            }
+            EitherOnConflict::Resolved(b) => b,
+        };
+
+        Ok(conflict_behavior)
+    }
+}
+
 /// Arguments of the functions that generate a table plan, part 1.
 ///
 /// Compared to [`CreateTableProps`], this struct contains fields that need some work of binding
