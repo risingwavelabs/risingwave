@@ -343,7 +343,7 @@ impl ControlStreamManager {
             added_actors: Default::default(),
             actor_splits: build_actor_connector_splits(&source_split_assignments),
             pause: paused_reason.is_some(),
-            subscriptions_to_add: (&subscription_info).into_iter().collect(),
+            subscriptions_to_add: Default::default(),
         });
 
         let mut epochs = info.existing_table_ids().map(|table_id| {
@@ -393,7 +393,7 @@ impl ControlStreamManager {
             info.fragment_infos(),
             info.fragment_infos(),
             Some(node_actors),
-            vec![],
+            (&subscription_info).into_iter().collect(),
             vec![],
         )?;
         debug!(
