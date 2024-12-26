@@ -19,7 +19,7 @@ pub async fn extract_iceberg_columns(
 ) -> anyhow::Result<Vec<ColumnCatalog>> {
     let props = ConnectorProperties::extract(with_properties.clone(), true)?;
     if let ConnectorProperties::Iceberg(properties) = props {
-        let table = properties.load_table_v2().await?;
+        let table = properties.load_table().await?;
         let iceberg_schema: arrow_schema_iceberg::Schema =
             ::iceberg::arrow::schema_to_arrow_schema(table.metadata().current_schema())?;
 
@@ -73,7 +73,7 @@ pub async fn check_iceberg_source(
             .collect(),
     };
 
-    let table = properties.load_table_v2().await?;
+    let table = properties.load_table().await?;
 
     let iceberg_schema =
         ::iceberg::arrow::schema_to_arrow_schema(table.metadata().current_schema())?;

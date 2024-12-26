@@ -192,10 +192,6 @@ function buildFragmentDependencyAsEdges(
 const SIDEBAR_WIDTH = 225
 
 type BackPressureDataSource = "Embedded" | "Prometheus"
-const backPressureDataSources: BackPressureDataSource[] = [
-  "Embedded",
-  "Prometheus",
-]
 
 // The state of the embedded back pressure metrics.
 // The metrics from previous fetch are stored here to calculate the rate.
@@ -338,7 +334,6 @@ export default function Streaming() {
       function refresh() {
         fetchEmbeddedBackPressure().then(
           (response) => {
-            console.log(response)
             let newBP =
               response.backPressureInfos?.map(BackPressureInfo.fromJSON) ?? []
             setEmbeddedBackPressureInfo((prev) =>
