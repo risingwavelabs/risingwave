@@ -703,7 +703,7 @@ impl From<PbTable> for TableCatalog {
             webhook_info: tb.webhook_info,
             job_id: tb.job_id.map(TableId::from),
             engine,
-            clean_watermark_index_in_pk: None, // TODO: fill this field
+            clean_watermark_index_in_pk: tb.clean_watermark_index_in_pk.map(|x| x as usize),
         }
     }
 }
