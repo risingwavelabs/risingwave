@@ -546,15 +546,22 @@ pub(crate) async fn gen_create_table_plan_with_source(
 
     let pb_source = source_catalog.to_prost(schema_id, database_id);
 
-    let context = OptimizerContext::new(handler_args, explain_options);
+    let (plan, table) = {
+        let context = OptimizerContext::new(handler_args, explain_options).into();
+        let version = col_id_gen.into_version();
+        let table_name = source_catalog.name.clone();
 
-    let (plan, table) = gen_table_plan_with_source(
-        context.into(),
-        schema_name,
-        source_catalog,
-        col_id_gen.into_version(),
-        props,
-    )?;
+        let info = CreateTableInfo {
+            columns: source_catalog.columns.clone(),
+            pk_column_ids: source_catalog.pk_col_ids.clone(),
+            row_id_index: source_catalog.row_id_index,
+            watermark_descs: source_catalog.watermark_descs.clone(),
+            source_catalog: Some(source_catalog),
+            version,
+        };
+
+        gen_table_plan_inner(context, schema_name, table_name, info, props)
+    }?;
 
     Ok((plan, Some(pb_source), table))
 }
@@ -634,27 +641,6 @@ pub(crate) fn gen_create_table_plan_without_source(
     };
 
     gen_table_plan_inner(context.into(), schema_name, table_name, info, props)
-}
-
-fn gen_table_plan_with_source(
-    context: OptimizerContextRef,
-    schema_name: Option<String>,
-    source_catalog: SourceCatalog,
-    version: TableVersion,
-    props: CreateTableProps,
-) -> Result<(PlanRef, PbTable)> {
-    let table_name = source_catalog.name.clone();
-
-    let info = CreateTableInfo {
-        columns: source_catalog.columns.clone(),
-        pk_column_ids: source_catalog.pk_col_ids.clone(),
-        row_id_index: source_catalog.row_id_index,
-        watermark_descs: source_catalog.watermark_descs.clone(),
-        source_catalog: Some(source_catalog),
-        version,
-    };
-
-    gen_table_plan_inner(context, schema_name, table_name, info, props)
 }
 
 /// On-conflict behavior either from user input or existing table catalog.
