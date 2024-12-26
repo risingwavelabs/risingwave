@@ -20,6 +20,7 @@ use bytes::{Buf, BufMut, BytesMut};
 use jsonbb::{Value, ValueRef};
 use postgres_types::{accepts, to_sql_checked, FromSql, IsNull, ToSql, Type};
 use risingwave_common_estimate_size::EstimateSize;
+use thiserror_ext::AsReport;
 
 use super::{
     Datum, IntoOrdered, ListValue, MapType, MapValue, ScalarImpl, StructRef, ToOwnedDatum, F64,
@@ -325,7 +326,7 @@ impl<'a> JsonbRef<'a> {
     /// interoperability. We do not support arbitrary precision like PostgreSQL `numeric` right now.
     pub fn as_number(&self) -> Result<F64, String> {
         if let Some(s) = self.0.as_str() {
-            F64::from_str(s).map_err(|e| format!("{e}"))
+            F64::from_str(s).map_err(|e| format!("{}", e.as_report()))
         } else {
             self.0
                 .as_number()
