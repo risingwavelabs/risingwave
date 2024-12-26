@@ -101,7 +101,9 @@ impl ControlStreamManager {
     pub(super) async fn add_worker(
         &mut self,
         node: WorkerNode,
-        initial_subscriptions: impl Iterator<Item = (DatabaseId, &InflightSubscriptionInfo)>,
+        inflight_infos: impl Iterator<
+            Item = (DatabaseId, &InflightSubscriptionInfo, &InflightDatabaseInfo),
+        >,
         context: &impl GlobalBarrierWorkerContext,
     ) {
         let node_id = node.id as WorkerId;
@@ -113,7 +115,7 @@ impl ControlStreamManager {
         let mut backoff = ExponentialBackoff::from_millis(100)
             .max_delay(Duration::from_secs(3))
             .factor(5);
-        let init_request = Self::collect_init_request(initial_subscriptions);
+        let init_request = self.collect_init_request(inflight_infos);
         const MAX_RETRY: usize = 5;
         for i in 1..=MAX_RETRY {
             match context.new_control_stream(&node, &init_request).await {
@@ -145,11 +147,10 @@ impl ControlStreamManager {
 
     pub(super) async fn reset(
         &mut self,
-        initial_subscriptions: impl Iterator<Item = (DatabaseId, &InflightSubscriptionInfo)>,
         nodes: &HashMap<WorkerId, WorkerNode>,
         context: &impl GlobalBarrierWorkerContext,
     ) -> MetaResult<()> {
-        let init_request = Self::collect_init_request(initial_subscriptions);
+        let init_request = PbInitRequest { databases: vec![] };
         let init_request = &init_request;
         let nodes = try_join_all(nodes.iter().map(|(worker_id, node)| async move {
             let handle = context.new_control_stream(node, init_request).await?;
@@ -267,17 +268,41 @@ impl ControlStreamManager {
     }
 
     fn collect_init_request(
-        initial_subscriptions: impl Iterator<Item = (DatabaseId, &InflightSubscriptionInfo)>,
+        &self,
+        initial_inflight_infos: impl Iterator<
+            Item = (DatabaseId, &InflightSubscriptionInfo, &InflightDatabaseInfo),
+        >,
     ) -> PbInitRequest {
         PbInitRequest {
-            databases: initial_subscriptions
-                .map(|(database_id, info)| PbDatabaseInitialPartialGraph {
-                    database_id: database_id.database_id,
-                    graphs: vec![PbInitialPartialGraph {
-                        partial_graph_id: to_partial_graph_id(None),
-                        subscriptions: info.into_iter().collect_vec(),
-                    }],
-                })
+            databases: initial_inflight_infos
+                .map(
+                    |(database_id, subscriptions, inflight_info)| PbDatabaseInitialPartialGraph {
+                        database_id: database_id.database_id,
+                        graphs: vec![PbInitialPartialGraph {
+                            partial_graph_id: to_partial_graph_id(None),
+                            subscriptions: subscriptions.into_iter().collect_vec(),
+                            actor_infos: inflight_info
+                                .fragment_infos()
+                                .flat_map(|fragment| {
+                                    fragment.actors.iter().map(|(actor_id, worker_id)| {
+                                        let host_addr = self
+                                            .nodes
+                                            .get(worker_id)
+                                            .expect("worker should exist for inflight actor")
+                                            .worker
+                                            .host
+                                            .clone()
+                                            .expect("should exist");
+                                        ActorInfo {
+                                            actor_id: *actor_id,
+                                            host: Some(host_addr),
+                                        }
+                                    })
+                                })
+                                .collect(),
+                        }],
+                    },
+                )
                 .collect(),
         }
     }
@@ -318,7 +343,7 @@ impl ControlStreamManager {
             added_actors: Default::default(),
             actor_splits: build_actor_connector_splits(&source_split_assignments),
             pause: paused_reason.is_some(),
-            subscriptions_to_add: Default::default(),
+            subscriptions_to_add: (&subscription_info).into_iter().collect(),
         });
 
         let mut epochs = info.existing_table_ids().map(|table_id| {
