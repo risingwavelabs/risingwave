@@ -385,7 +385,7 @@ impl StreamNode for StreamMaterialize {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
         use risingwave_pb::stream_plan::*;
 
-        PbNodeBody::Materialize(MaterializeNode {
+        PbNodeBody::Materialize(Box::new(MaterializeNode {
             // We don't need table id for materialize node in frontend. The id will be generated on
             // meta catalog service.
             table_id: 0,
@@ -396,7 +396,7 @@ impl StreamNode for StreamMaterialize {
                 .map(ColumnOrder::to_protobuf)
                 .collect(),
             table: Some(self.table().to_internal_table_prost()),
-        })
+        }))
     }
 }
 
