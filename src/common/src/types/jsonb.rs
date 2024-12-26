@@ -412,10 +412,16 @@ impl<'a> JsonbRef<'a> {
         if self.0.as_null().is_some() {
             return Ok(None);
         }
-        let s = self.force_string();
-        Ok(Some(
-            ScalarImpl::from_text(&s, ty).map_err(|e| format!("{}", e.as_report()))?,
-        ))
+        let datum = match ty {
+            DataType::Jsonb => ScalarImpl::Jsonb(self.into()),
+            DataType::List(t) => ScalarImpl::List(self.to_list(t)?),
+            DataType::Struct(s) => ScalarImpl::Struct(self.to_struct(s)?),
+            _ => {
+                let s = self.force_string();
+                ScalarImpl::from_text(&s, ty).map_err(|e| format!("{}", e.as_report()))?
+            }
+        };
+        Ok(Some(datum))
     }
 
     /// Convert the jsonb value to a list value.
