@@ -1,7 +1,5 @@
 use sea_orm_migration::prelude::{Table as MigrationTable, *};
 
-use crate::utils::ColumnDefExt;
-
 #[derive(DeriveMigrationName)]
 pub struct Migration;
 
@@ -13,7 +11,7 @@ impl MigrationTrait for Migration {
             .alter_table(
                 MigrationTable::alter()
                     .table(Table::Table)
-                    .add_column(ColumnDef::new(Table::CleanWatermarkIndexInPk).rw_binary(manager))
+                    .add_column(ColumnDef::new(Table::CleanWatermarkIndexInPk).integer())
                     .to_owned(),
             )
             .await
