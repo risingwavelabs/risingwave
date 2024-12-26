@@ -244,6 +244,8 @@ pub async fn read_parquet_file(
 ) -> ConnectorResult<
     Pin<Box<dyn Stream<Item = Result<StreamChunk, crate::error::ConnectorError>> + Send>>,
 > {
+
+    tracing::info!("read object {:?}", file_name);
     let mut reader: tokio_util::compat::Compat<opendal::FuturesAsyncReader> = op
         .reader_with(&file_name)
         .into_future() // Unlike `rustc`, `try_stream` seems require manual `into_future`.
