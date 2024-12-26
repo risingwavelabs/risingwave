@@ -29,7 +29,7 @@ struct RwWorkerNode {
     port: Option<String>,
     r#type: String,
     state: String,
-    parallelism: i32,
+    parallelism: Option<i32>,
     is_streaming: Option<bool>,
     is_serving: Option<bool>,
     is_unschedulable: Option<bool>,
@@ -59,11 +59,7 @@ async fn read_rw_worker_nodes_info(reader: &SysCatalogReaderImpl) -> Result<Vec<
                 port: host.map(|h| h.port.to_string()),
                 r#type: worker.get_type().unwrap().as_str_name().into(),
                 state: worker.get_state().unwrap().as_str_name().into(),
-                parallelism: if is_compute {
-                    worker.parallelism() as i32
-                } else {
-                    0
-                },
+                parallelism: worker.parallelism().map(|parallelism| parallelism as _),
                 is_streaming: if is_compute {
                     property.map(|p| p.is_streaming)
                 } else {

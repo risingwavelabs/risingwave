@@ -24,7 +24,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
 use risingwave_common::row::Row;
 use risingwave_connector::error::ConnectorError;
-use risingwave_connector::source::{BoxChunkSourceStream, SourceColumnDesc, SplitId};
+use risingwave_connector::source::{BoxSourceChunkStream, SourceColumnDesc, SplitId};
 use risingwave_pb::plan_common::additional_column::ColumnType;
 use risingwave_pb::plan_common::AdditionalColumn;
 pub use state_table_handler::*;
@@ -53,7 +53,6 @@ use tokio::sync::mpsc::UnboundedReceiver;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 
 use crate::executor::error::StreamExecutorError;
-use crate::executor::utils::compute_rate_limit_chunk_permits;
 use crate::executor::{Barrier, Message};
 
 /// Receive barriers from barrier manager with the channel, error on channel close.
@@ -120,7 +119,7 @@ pub fn prune_additional_cols(
 }
 
 #[try_stream(ok = StreamChunk, error = ConnectorError)]
-pub async fn apply_rate_limit(stream: BoxChunkSourceStream, rate_limit_rps: Option<u32>) {
+pub async fn apply_rate_limit(stream: BoxSourceChunkStream, rate_limit_rps: Option<u32>) {
     if rate_limit_rps == Some(0) {
         // block the stream until the rate limit is reset
         let future = futures::future::pending::<()>();
@@ -150,7 +149,7 @@ pub async fn apply_rate_limit(stream: BoxChunkSourceStream, rate_limit_rps: Opti
         let limiter = limiter.as_ref().unwrap();
         let limit = rate_limit_rps.unwrap() as usize;
 
-        let required_permits = compute_rate_limit_chunk_permits(&chunk, limit);
+        let required_permits: usize = chunk.compute_rate_limit_chunk_permits(limit);
         if required_permits <= limit {
             let n = NonZeroU32::new(required_permits as u32).unwrap();
             // `InsufficientCapacity` should never happen because we have check the cardinality
@@ -159,8 +158,8 @@ pub async fn apply_rate_limit(stream: BoxChunkSourceStream, rate_limit_rps: Opti
         } else {
             // Cut the chunk into smaller chunks
             for chunk in chunk.split(limit) {
-                let n = NonZeroU32::new(compute_rate_limit_chunk_permits(&chunk, limit) as u32)
-                    .unwrap();
+                let n =
+                    NonZeroU32::new(chunk.compute_rate_limit_chunk_permits(limit) as u32).unwrap();
                 // chunks split should have effective chunk size <= limit
                 limiter.until_n_ready(n).await.unwrap();
                 yield chunk;

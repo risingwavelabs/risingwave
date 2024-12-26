@@ -28,7 +28,8 @@ use risingwave_meta_model::prelude::{Actor, Fragment, Sink, StreamingJob};
 use risingwave_meta_model::{
     actor, actor_dispatcher, fragment, object, sink, source, streaming_job, table, ActorId,
     ActorUpstreamActors, ConnectorSplits, DatabaseId, ExprContext, FragmentId, I32Array, JobStatus,
-    ObjectId, SinkId, SourceId, StreamNode, StreamingParallelism, TableId, VnodeBitmap, WorkerId,
+    ObjectId, SchemaId, SinkId, SourceId, StreamNode, StreamingParallelism, TableId, VnodeBitmap,
+    WorkerId,
 };
 use risingwave_meta_model_migration::{Alias, SelectStatement};
 use risingwave_pb::common::PbActorLocation;
@@ -882,6 +883,25 @@ impl CatalogController {
         Ok(actor_locations)
     }
 
+    pub async fn list_actor_info(
+        &self,
+    ) -> MetaResult<Vec<(ActorId, FragmentId, ObjectId, SchemaId, ObjectType)>> {
+        let inner = self.inner.read().await;
+        let actor_locations: Vec<(ActorId, FragmentId, ObjectId, SchemaId, ObjectType)> =
+            Actor::find()
+                .join(JoinType::LeftJoin, actor::Relation::Fragment.def())
+                .join(JoinType::LeftJoin, fragment::Relation::Object.def())
+                .select_only()
+                .columns([actor::Column::ActorId, actor::Column::FragmentId])
+                .column_as(object::Column::Oid, "job_id")
+                .column_as(object::Column::SchemaId, "schema_id")
+                .column_as(object::Column::ObjType, "type")
+                .into_tuple()
+                .all(&inner.db)
+                .await?;
+        Ok(actor_locations)
+    }
+
     pub async fn list_source_actors(&self) -> MetaResult<Vec<(ActorId, FragmentId)>> {
         let inner = self.inner.read().await;
 
@@ -1273,6 +1293,34 @@ impl CatalogController {
         Ok(())
     }
 
+    pub async fn fill_snapshot_backfill_epoch(
+        &self,
+        fragment_ids: impl Iterator<Item = FragmentId>,
+        upstream_mv_snapshot_epoch: &HashMap<risingwave_common::catalog::TableId, Option<u64>>,
+    ) -> MetaResult<()> {
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
+        for fragment_id in fragment_ids {
+            let fragment = Fragment::find_by_id(fragment_id)
+                .one(&txn)
+                .await?
+                .context(format!("fragment {} not found", fragment_id))?;
+            let mut node = fragment.stream_node.to_protobuf();
+            if crate::stream::fill_snapshot_backfill_epoch(&mut node, upstream_mv_snapshot_epoch)? {
+                let node = StreamNode::from(&node);
+                Fragment::update(fragment::ActiveModel {
+                    fragment_id: Set(fragment_id),
+                    stream_node: Set(node),
+                    ..Default::default()
+                })
+                .exec(&txn)
+                .await?;
+            }
+        }
+        txn.commit().await?;
+        Ok(())
+    }
+
     /// Get the actor ids of the fragment with `fragment_id` with `Running` status.
     pub async fn get_running_actors_of_fragment(
         &self,
@@ -1619,11 +1667,11 @@ mod tests {
         let mut input = vec![];
         for (upstream_fragment_id, upstream_actor_ids) in actor_upstream_actor_ids {
             input.push(PbStreamNode {
-                node_body: Some(PbNodeBody::Merge(MergeNode {
+                node_body: Some(PbNodeBody::Merge(Box::new(MergeNode {
                     upstream_actor_id: upstream_actor_ids.iter().map(|id| *id as _).collect(),
                     upstream_fragment_id: *upstream_fragment_id as _,
                     ..Default::default()
-                })),
+                }))),
                 ..Default::default()
             });
         }

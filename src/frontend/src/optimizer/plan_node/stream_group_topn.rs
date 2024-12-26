@@ -129,9 +129,9 @@ impl StreamNode for StreamGroupTopN {
             order_by: self.topn_order().to_protobuf(),
         };
         if self.input().append_only() {
-            PbNodeBody::AppendOnlyGroupTopN(group_topn_node)
+            PbNodeBody::AppendOnlyGroupTopN(Box::new(group_topn_node))
         } else {
-            PbNodeBody::GroupTopN(group_topn_node)
+            PbNodeBody::GroupTopN(Box::new(group_topn_node))
         }
     }
 }

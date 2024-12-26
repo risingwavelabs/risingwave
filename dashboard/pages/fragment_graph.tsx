@@ -56,7 +56,7 @@ import {
 } from "../lib/api/streaming"
 import { FragmentBox } from "../lib/layout"
 import { TableFragments, TableFragments_Fragment } from "../proto/gen/meta"
-import { BackPressureInfo } from "../proto/gen/monitor_service"
+import { BackPressureInfo, FragmentStats } from "../proto/gen/monitor_service"
 import { Dispatcher, MergeNode, StreamNode } from "../proto/gen/stream_plan"
 
 interface DispatcherNode {
@@ -329,12 +329,18 @@ export default function Streaming() {
   // Didn't call `useFetch()` because the `setState` way is special.
   const [embeddedBackPressureInfo, setEmbeddedBackPressureInfo] =
     useState<EmbeddedBackPressureInfo>()
+  const [fragmentStats, setFragmentStats] = useState<{
+    [key: number]: FragmentStats
+  }>()
+
   useEffect(() => {
     if (backPressureDataSource === "Embedded") {
-      const interval = setInterval(() => {
+      function refresh() {
         fetchEmbeddedBackPressure().then(
-          (newBP) => {
-            console.log(newBP)
+          (response) => {
+            console.log(response)
+            let newBP =
+              response.backPressureInfos?.map(BackPressureInfo.fromJSON) ?? []
             setEmbeddedBackPressureInfo((prev) =>
               prev
                 ? {
@@ -355,13 +361,16 @@ export default function Streaming() {
                     totalDurationNs: 0,
                   }
             )
+            setFragmentStats(response.fragmentStats)
           },
           (e) => {
             console.error(e)
             toast(e, "error")
           }
         )
-      }, INTERVAL_MS)
+      }
+      refresh()
+      const interval = setInterval(refresh, INTERVAL_MS)
       return () => {
         clearInterval(interval)
       }
@@ -550,6 +559,7 @@ export default function Streaming() {
               fragmentDependency={fragmentDependency}
               planNodeDependencies={planNodeDependencies}
               backPressures={backPressures}
+              fragmentStats={fragmentStats}
             />
           )}
         </Box>

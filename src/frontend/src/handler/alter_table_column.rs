@@ -29,12 +29,12 @@ use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{ProjectNode, StreamFragmentGraph};
 use risingwave_sqlparser::ast::{
-    AlterTableOperation, ColumnDef, ColumnOption, DataType as AstDataType, Encode,
-    FormatEncodeOptions, Ident, ObjectName, Statement, StructField, TableConstraint,
+    AlterTableOperation, ColumnDef, ColumnOption, DataType as AstDataType, Ident, ObjectName,
+    Statement, StructField, TableConstraint,
 };
 use risingwave_sqlparser::parser::Parser;
 
-use super::create_source::get_json_schema_location;
+use super::create_source::schema_has_schema_registry;
 use super::create_table::{generate_stream_graph_for_replace_table, ColumnIdGenerator};
 use super::util::SourceSchemaCompatExt;
 use super::{HandlerArgs, RwPgResponse};
@@ -45,7 +45,7 @@ use crate::expr::{Expr, ExprImpl, InputRef, Literal};
 use crate::handler::create_sink::{fetch_incoming_sinks, insert_merger_to_union_with_project};
 use crate::handler::create_table::bind_table_constraints;
 use crate::session::SessionImpl;
-use crate::{Binder, TableCatalog, WithOptions};
+use crate::{Binder, TableCatalog};
 
 /// Used in auto schema change process
 pub async fn get_new_table_definition_for_cdc_table(
@@ -296,10 +296,10 @@ pub(crate) fn hijack_merger_for_target_table(
         }
     }
 
-    let pb_project = PbNodeBody::Project(ProjectNode {
+    let pb_project = PbNodeBody::Project(Box::new(ProjectNode {
         select_list: exprs.iter().map(|expr| expr.to_expr_proto()).collect(),
         ..Default::default()
-    });
+    }));
 
     for fragment in graph.fragments.values_mut() {
         if let Some(node) = &mut fragment.node {
@@ -473,17 +473,6 @@ pub async fn handle_alter_table_column(
         .replace_table(source, table, graph, col_index_mapping, job_type)
         .await?;
     Ok(PgResponse::empty_result(StatementType::ALTER_TABLE))
-}
-
-pub fn schema_has_schema_registry(schema: &FormatEncodeOptions) -> bool {
-    match schema.row_encode {
-        Encode::Avro | Encode::Protobuf => true,
-        Encode::Json => {
-            let mut options = WithOptions::try_from(schema.row_options()).unwrap();
-            matches!(get_json_schema_location(options.inner_mut()), Ok(Some(_)))
-        }
-        _ => false,
-    }
 }
 
 pub fn fetch_table_catalog_for_alter(

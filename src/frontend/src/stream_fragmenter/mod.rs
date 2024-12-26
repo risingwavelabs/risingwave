@@ -439,9 +439,9 @@ fn build_fragment(
                                 let node = state.gen_no_op_stream_node(StreamNode {
                                     operator_id: no_shuffle_exchange_operator_id,
                                     identity: "StreamNoShuffleExchange".into(),
-                                    node_body: Some(NodeBody::Exchange(ExchangeNode {
+                                    node_body: Some(NodeBody::Exchange(Box::new(ExchangeNode {
                                         strategy: Some(no_shuffle_strategy.clone()),
-                                    })),
+                                    }))),
                                     input: vec![],
 
                                     // Take reference's properties.

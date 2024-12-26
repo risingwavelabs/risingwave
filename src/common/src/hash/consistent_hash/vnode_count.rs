@@ -24,14 +24,13 @@ pub enum VnodeCount {
     /// The field is a placeholder and has to be filled first before using it.
     #[default]
     Placeholder,
+    /// The table/fragment is a singleton, thus the value should always be interpreted as `1`.
+    Singleton,
     /// The field is set to a specific value.
     Set(NonZeroUsize),
     /// The field is unset because the table/fragment is persisted as hash-distributed
     /// in an older version.
     CompatHash,
-    /// The field is unset because the table/fragment is persisted as singleton
-    /// in an older version.
-    CompatSingleton,
 }
 
 impl VnodeCount {
@@ -51,18 +50,26 @@ impl VnodeCount {
         Self::set(VirtualNode::COUNT_FOR_TEST)
     }
 
-    /// Converts from protobuf representation of `maybe_vnode_count`. If the value is not set,
-    /// call `compat_is_singleton` to determine whether it should be treated as a singleton
-    /// when it comes to backward compatibility.
-    fn from_protobuf(v: Option<u32>, compat_is_singleton: impl FnOnce() -> bool) -> Self {
+    /// Converts from protobuf representation of `maybe_vnode_count`.
+    ///
+    /// The value will be ignored if `is_singleton` returns `true`.
+    fn from_protobuf(v: Option<u32>, is_singleton: impl FnOnce() -> bool) -> Self {
         match v {
             Some(0) => VnodeCount::Placeholder,
-            Some(v) => VnodeCount::set(v as usize),
-            None => {
-                if compat_is_singleton() {
-                    VnodeCount::CompatSingleton
+            _ => {
+                if is_singleton() {
+                    if let Some(v) = v
+                        && v != 1
+                    {
+                        tracing::debug!(
+                            vnode_count = v,
+                            "singleton has vnode count set to non-1, \
+                            ignoring as it could be due to backward compatibility"
+                        );
+                    }
+                    VnodeCount::Singleton
                 } else {
-                    VnodeCount::CompatHash
+                    v.map_or(VnodeCount::CompatHash, VnodeCount::set)
                 }
             }
         }
@@ -79,9 +86,9 @@ impl VnodeCount {
     pub fn value_opt(self) -> Option<usize> {
         match self {
             VnodeCount::Placeholder => None,
+            VnodeCount::Singleton => Some(1),
             VnodeCount::Set(v) => Some(v.get()),
             VnodeCount::CompatHash => Some(VirtualNode::COUNT_FOR_COMPAT),
-            VnodeCount::CompatSingleton => Some(1),
         }
     }
 

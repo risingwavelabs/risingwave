@@ -31,6 +31,27 @@ services:
       timeout: 5s
       retries: 5
 
+  # TODO: reuse the same mysql instance for connector test and meta store
+  #       after https://github.com/risingwavelabs/risingwave/issues/19783 addressed
+  mysql-meta:
+    image: mysql:8.0
+    command: --character-set-server=utf8 --collation-server=utf8_general_ci
+    ports:
+      - 3306
+    environment:
+      - MYSQL_ROOT_PASSWORD=123456
+      - MYSQL_USER=mysqluser
+      - MYSQL_PASSWORD=mysqlpw
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "mysqladmin ping -h 127.0.0.1 -u root -p123456"
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   message_queue:
     image: "redpandadata/redpanda:latest"
     command:
@@ -69,9 +90,10 @@ services:
       retries: 5
 
   source-test-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20241030
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20241224
     depends_on:
       - mysql
+      - mysql-meta
       - sqlserver-server
       - db
       - message_queue
@@ -84,9 +106,10 @@ services:
       - ..:/risingwave
 
   sink-test-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20241030
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20241224
     depends_on:
       - mysql
+      - mysql-meta
       - db
       - message_queue
       - schemaregistry
@@ -106,27 +129,28 @@ services:
       - ..:/risingwave
 
   rw-build-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20241030
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20241224
     volumes:
       - ..:/risingwave
 
-  pg-mysql-backend-test-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20240911
+  # Standard environment for CI, including MySQL and Postgres for metadata.
+  ci-standard-env:
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20241224
     depends_on:
-      - mysql
+      - mysql-meta
       - db
     volumes:
       - ..:/risingwave
 
   iceberg-engine-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20241030
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20241224
     depends_on:
       - db
     volumes:
       - ..:/risingwave
 
   ci-flamegraph-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20241030
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20241224
     # NOTE(kwannoel): This is used in order to permit
     # syscalls for `nperf` (perf_event_open),
     # so it can do CPU profiling.
@@ -137,7 +161,7 @@ services:
       - ..:/risingwave
 
   regress-test-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20241030
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20241224
     depends_on:
       db:
         condition: service_healthy

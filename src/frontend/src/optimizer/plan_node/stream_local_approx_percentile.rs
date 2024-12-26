@@ -120,7 +120,7 @@ impl StreamNode for StreamLocalApproxPercentile {
             base,
             percentile_index,
         };
-        PbNodeBody::LocalApproxPercentile(body)
+        PbNodeBody::LocalApproxPercentile(Box::new(body))
     }
 }
 
