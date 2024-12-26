@@ -14,6 +14,7 @@
 
 use std::fmt::{self, Write};
 use std::hash::Hash;
+use std::str::FromStr;
 
 use bytes::{Buf, BufMut, BytesMut};
 use jsonbb::{Value, ValueRef};
@@ -323,12 +324,16 @@ impl<'a> JsonbRef<'a> {
     /// According to RFC 8259, only number within IEEE 754 binary64 (double precision) has good
     /// interoperability. We do not support arbitrary precision like PostgreSQL `numeric` right now.
     pub fn as_number(&self) -> Result<F64, String> {
-        self.0
-            .as_number()
-            .ok_or_else(|| format!("cannot cast jsonb {} to type number", self.type_name()))?
-            .as_f64()
-            .map(|f| f.into_ordered())
-            .ok_or_else(|| "jsonb number out of range".into())
+        if let Some(s) = self.0.as_str() {
+            F64::from_str(s).map_err(|e| format!("{e}"))
+        } else {
+            self.0
+                .as_number()
+                .ok_or_else(|| format!("cannot cast jsonb {} to type number", self.type_name()))?
+                .as_f64()
+                .map(|f| f.into_ordered())
+                .ok_or_else(|| "jsonb number out of range".into())
+        }
     }
 
     /// This is part of the `->>` or `#>>` syntax to access a child as string.
