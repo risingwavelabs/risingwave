@@ -34,16 +34,15 @@ use risingwave_sqlparser::ast::{
 };
 use risingwave_sqlparser::parser::Parser;
 
-use super::create_source::schema_has_schema_registry;
 use super::create_table::{
-    bind_pk_and_row_id_on_relation, bind_sql_columns,
-    bind_sql_columns_generated_and_default_constraints, gen_create_table_plan,
-    gen_create_table_plan_without_source, gen_table_plan_inner,
-    generate_stream_graph_for_replace_table, ColumnIdGenerator, CreateTableInfo, CreateTableProps,
+    bind_sql_columns, bind_sql_columns_generated_and_default_constraints, bind_sql_pk_names,
+    gen_table_plan_inner, generate_stream_graph_for_replace_table, ColumnIdGenerator,
+    CreateTableInfo, CreateTableProps,
 };
 use super::util::SourceSchemaCompatExt;
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::root_catalog::SchemaPath;
+use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::table_catalog::TableType;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{Expr, ExprImpl, InputRef, Literal};
@@ -323,55 +322,17 @@ pub async fn handle_alter_table_column(
     operation: AlterTableOperation,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
-    let original_catalog = fetch_table_catalog_for_alter(session.as_ref(), &table_name)?;
+    let (original_table, _associated_source) =
+        fetch_table_source_for_alter(session.as_ref(), &table_name)?;
 
-    if !original_catalog.incoming_sinks.is_empty() && original_catalog.has_generated_column() {
+    if !original_table.incoming_sinks.is_empty() && original_table.has_generated_column() {
         return Err(RwError::from(ErrorCode::BindError(
             "Alter a table with incoming sink and generated column has not been implemented."
                 .to_owned(),
         )));
     }
 
-    // Retrieve the original table definition and parse it to AST.
-    // let [mut definition]: [_; 1] = Parser::parse_sql(&original_catalog.definition)
-    //     .context("unable to parse original table definition")?
-    //     .try_into()
-    //     .unwrap();
-
-    // let Statement::CreateTable {
-    //     columns: _,
-    //     format_encode,
-    //     ..
-    // } = &mut definition
-    // else {
-    //     panic!("unexpected statement: {:?}", definition);
-    // };
-
-    // let format_encode = format_encode
-    //     .clone()
-    //     .map(|format_encode| format_encode.into_v2_with_warning());
-
-    // let fail_if_has_schema_registry = || {
-    //     if let Some(format_encode) = &format_encode
-    //         && schema_has_schema_registry(format_encode)
-    //     {
-    //         Err(ErrorCode::NotSupported(
-    //             "alter table with schema registry".to_owned(),
-    //             "try `ALTER TABLE .. FORMAT .. ENCODE .. (...)` instead".to_owned(),
-    //         ))
-    //     } else {
-    //         Ok(())
-    //     }
-    // };
-
-    // if columns.is_empty() {
-    //     Err(ErrorCode::NotSupported(
-    //         "alter a table with empty column definitions".to_owned(),
-    //         "Please recreate the table with column definitions.".to_owned(),
-    //     ))?
-    // }
-
-    if !original_catalog.incoming_sinks.is_empty()
+    if !original_table.incoming_sinks.is_empty()
         && matches!(operation, AlterTableOperation::DropColumn { .. })
     {
         return Err(ErrorCode::InvalidInputSyntax(
@@ -379,27 +340,34 @@ pub async fn handle_alter_table_column(
         ))?;
     }
 
-    let mut column_catalogs = original_catalog.columns().to_vec();
-    let pk_column_ids = original_catalog.pk_column_ids();
+    let fail_if_schema_is_inferred = || {
+        // TODO: check if the schema is inferred from `associated_source`.
+        Result::Ok(())
+    };
+
+    let mut column_catalogs = original_table.columns().to_vec();
+    let pk_column_ids = original_table.pk_column_ids();
 
     match operation {
         AlterTableOperation::AddColumn {
-            column_def: new_column,
+            column_def: added_column,
         } => {
-            // fail_if_has_schema_registry()?;
+            // If the schema is inferred, do not allow adding columns.
+            fail_if_schema_is_inferred()?;
 
             // Duplicated names can actually be checked by `StreamMaterialize`. We do here for
             // better error reporting.
-            let new_column_name = new_column.name.real_value();
-            if column_catalogs.iter().any(|c| c.name() == new_column_name) {
+            let added_column_name = added_column.name.real_value();
+            if column_catalogs
+                .iter()
+                .any(|c| c.name() == added_column_name)
+            {
                 Err(ErrorCode::InvalidInputSyntax(format!(
-                    "column \"{new_column_name}\" of table \"{table_name}\" already exists"
+                    "column \"{added_column_name}\" of table \"{table_name}\" already exists"
                 )))?
             }
 
-            if new_column
-                .options
-                .iter()
+            if (added_column.options.iter())
                 .any(|x| matches!(x.option, ColumnOption::GeneratedColumns(_)))
             {
                 Err(ErrorCode::InvalidInputSyntax(
@@ -407,18 +375,25 @@ pub async fn handle_alter_table_column(
                 ))?
             }
 
-            let new_column = vec![new_column];
+            let added_column = vec![added_column];
 
-            let mut new_column_catalog = bind_sql_columns(&new_column)?;
+            let added_pk = !bind_sql_pk_names(&added_column, Vec::new())?.is_empty();
+            if added_pk {
+                Err(ErrorCode::InvalidInputSyntax(
+                    "cannot add a primary key column".to_owned(),
+                ))?
+            }
+
+            let mut added_column_catalog = bind_sql_columns(&added_column)?;
 
             bind_sql_columns_generated_and_default_constraints(
                 &session,
                 table_name.real_value(),
-                &mut new_column_catalog, // no ref to existing columns
-                new_column,
+                &mut added_column_catalog,
+                added_column,
             )?;
 
-            column_catalogs.extend(new_column_catalog);
+            column_catalogs.extend(added_column_catalog);
         }
 
         AlterTableOperation::DropColumn {
@@ -431,16 +406,12 @@ pub async fn handle_alter_table_column(
             }
 
             // Check if the column to drop is referenced by any generated columns.
-            for column in original_catalog.columns() {
-                if column_name.real_value() == column.name() && !column.is_generated() {
-                    // fail_if_has_schema_registry()?;
-                }
-
+            for column in original_table.columns() {
                 if let Some(expr) = column.generated_expr() {
                     let expr = ExprImpl::from_expr_proto(expr)?;
-                    let refs = expr.collect_input_refs(original_catalog.columns().len());
+                    let refs = expr.collect_input_refs(original_table.columns().len());
                     for idx in refs.ones() {
-                        let refed_column = &original_catalog.columns()[idx];
+                        let refed_column = &original_table.columns()[idx];
                         if refed_column.name() == column_name.real_value() {
                             bail!(format!(
                                 "failed to drop column \"{}\" because it's referenced by a generated column \"{}\"",
@@ -458,25 +429,37 @@ pub async fn handle_alter_table_column(
                 .extract_if(|c| c.name() == column_name)
                 .at_most_one()
                 .ok()
-                .unwrap();
+                .expect("should not be multiple columns with the same name");
 
-            if let Some(removed_column) = removed_column {
-                if !removed_column.can_drop() {
-                    bail!("cannot drop");
+            let Some(removed_column) = removed_column else {
+                if if_exists {
+                    return Ok(PgResponse::builder(StatementType::ALTER_TABLE)
+                        .notice(format!(
+                            "column \"{}\" does not exist, skipping",
+                            column_name
+                        ))
+                        .into());
+                } else {
+                    Err(ErrorCode::InvalidInputSyntax(format!(
+                        "column \"{}\" of table \"{}\" does not exist",
+                        column_name, table_name
+                    )))?
                 }
-                // PASS
-            } else if if_exists {
-                return Ok(PgResponse::builder(StatementType::ALTER_TABLE)
-                    .notice(format!(
-                        "column \"{}\" does not exist, skipping",
-                        column_name
-                    ))
-                    .into());
-            } else {
-                Err(ErrorCode::InvalidInputSyntax(format!(
-                    "column \"{}\" of table \"{}\" does not exist",
-                    column_name, table_name
-                )))?
+            };
+
+            if !removed_column.can_drop() {
+                bail!("cannot drop a hidden or system column");
+            }
+
+            // If the schema is inferred, only allow dropping generated columns.
+            if !removed_column.is_generated() {
+                fail_if_schema_is_inferred()?;
+            }
+
+            if pk_column_ids.contains(&removed_column.column_id()) {
+                Err(ErrorCode::InvalidInputSyntax(
+                    "cannot drop a primary key column".to_owned(),
+                ))?
             }
         }
 
@@ -485,16 +468,8 @@ pub async fn handle_alter_table_column(
 
     column_catalogs.retain(|c| !c.is_rw_timestamp_column());
 
-    // TODO: Check pk not changed.
-
-    let (source, table, graph, col_index_mapping, job_type) = get_replace_table_plan_2(
-        &session,
-        table_name,
-        column_catalogs,
-        &original_catalog,
-        None,
-    )
-    .await?;
+    let (source, table, graph, col_index_mapping, job_type) =
+        get_replace_table_plan_2(&session, table_name, column_catalogs, &original_table).await?;
 
     let catalog_writer = session.catalog_writer()?;
 
@@ -509,7 +484,6 @@ pub async fn get_replace_table_plan_2(
     table_name: ObjectName,
     mut new_columns: Vec<ColumnCatalog>,
     old_catalog: &Arc<TableCatalog>,
-    new_version_columns: Option<Vec<ColumnCatalog>>, // only provided in auto schema change
 ) -> Result<(
     Option<Source>,
     Table,
@@ -529,8 +503,6 @@ pub async fn get_replace_table_plan_2(
 
     let db_name = session.database();
     let (schema_name, name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
-    let (database_id, schema_id) =
-        session.get_database_and_schema_id_for_create(schema_name.clone())?;
 
     let row_id_index = new_columns
         .iter()
@@ -614,6 +586,14 @@ pub fn fetch_table_catalog_for_alter(
     session: &SessionImpl,
     table_name: &ObjectName,
 ) -> Result<Arc<TableCatalog>> {
+    let (table, _source) = fetch_table_source_for_alter(session, table_name)?;
+    Ok(table)
+}
+
+pub fn fetch_table_source_for_alter(
+    session: &SessionImpl,
+    table_name: &ObjectName,
+) -> Result<(Arc<TableCatalog>, Option<Arc<SourceCatalog>>)> {
     let db_name = session.database();
     let (schema_name, real_table_name) =
         Binder::resolve_schema_qualified_name(db_name, table_name.clone())?;
@@ -622,8 +602,9 @@ pub fn fetch_table_catalog_for_alter(
 
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
-    let original_catalog = {
-        let reader = session.env().catalog_reader().read_guard();
+    let reader = session.env().catalog_reader().read_guard();
+
+    let table = {
         let (table, schema_name) =
             reader.get_created_table_by_name(db_name, schema_path, &real_table_name)?;
 
@@ -640,7 +621,24 @@ pub fn fetch_table_catalog_for_alter(
         table.clone()
     };
 
-    Ok(original_catalog)
+    let source = if let Some(associated_source_id) = table.associated_source_id() {
+        let (source, schema_name) =
+            reader.get_source_by_name(db_name, schema_path, &real_table_name)?;
+
+        assert_eq!(
+            source.id,
+            associated_source_id.table_id(),
+            "associated source id mismatches"
+        );
+
+        session.check_privilege_for_drop_alter(schema_name, &**source)?;
+
+        Some(source.clone())
+    } else {
+        None
+    };
+
+    Ok((table, source))
 }
 
 #[cfg(test)]
