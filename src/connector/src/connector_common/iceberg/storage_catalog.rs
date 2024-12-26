@@ -17,20 +17,26 @@
 use std::collections::HashMap;
 
 use async_trait::async_trait;
-use iceberg::io::{FileIO, S3_ACCESS_KEY_ID, S3_ENDPOINT, S3_REGION, S3_SECRET_ACCESS_KEY};
+use iceberg::io::{
+    FileIO, GCS_CREDENTIALS_JSON, S3_ACCESS_KEY_ID, S3_ENDPOINT, S3_REGION, S3_SECRET_ACCESS_KEY,
+};
 use iceberg::spec::{TableMetadata, TableMetadataBuilder};
 use iceberg::table::Table;
 use iceberg::{
     Catalog, Error, ErrorKind, Namespace, NamespaceIdent, Result, TableCommit, TableCreation,
     TableIdent,
 };
-use opendal::Operator;
 use thiserror_ext::AsReport;
-use tokio_stream::StreamExt;
 use typed_builder::TypedBuilder;
 
+#[derive(Debug)]
+pub enum StorageCatalogConfig {
+    S3(StorageCatalogS3Config),
+    GCS(StorageCatalogGCSConfig),
+}
+
 #[derive(Clone, Debug, TypedBuilder)]
-pub struct StorageCatalogConfig {
+pub struct StorageCatalogS3Config {
     warehouse: String,
     access_key: String,
     secret_key: String,
@@ -38,35 +44,46 @@ pub struct StorageCatalogConfig {
     region: Option<String>,
 }
 
+#[derive(Clone, Debug, TypedBuilder)]
+pub struct StorageCatalogGCSConfig {
+    warehouse: String,
+    credential: String,
+}
+
 /// File system catalog.
 #[derive(Debug)]
 pub struct StorageCatalog {
     warehouse: String,
-    config: StorageCatalogConfig,
     file_io: FileIO,
 }
 
 impl StorageCatalog {
     pub fn new(config: StorageCatalogConfig) -> Result<Self> {
-        let mut file_io_builder = FileIO::from_path(&config.warehouse)?
-            .with_prop(S3_ACCESS_KEY_ID, &config.access_key)
-            .with_prop(S3_SECRET_ACCESS_KEY, &config.secret_key);
-        file_io_builder = if let Some(endpoint) = &config.endpoint {
-            file_io_builder.with_prop(S3_ENDPOINT, endpoint)
-        } else {
-            file_io_builder
-        };
-        file_io_builder = if let Some(region) = &config.region {
-            file_io_builder.with_prop(S3_REGION, region)
-        } else {
-            file_io_builder
+        let (warehouse, file_io) = match config {
+            StorageCatalogConfig::S3(config) => {
+                let mut file_io_builder = FileIO::from_path(&config.warehouse)?
+                    .with_prop(S3_ACCESS_KEY_ID, &config.access_key)
+                    .with_prop(S3_SECRET_ACCESS_KEY, &config.secret_key);
+                file_io_builder = if let Some(endpoint) = &config.endpoint {
+                    file_io_builder.with_prop(S3_ENDPOINT, endpoint)
+                } else {
+                    file_io_builder
+                };
+                file_io_builder = if let Some(region) = &config.region {
+                    file_io_builder.with_prop(S3_REGION, region)
+                } else {
+                    file_io_builder
+                };
+                (config.warehouse.clone(), file_io_builder.build()?)
+            }
+            StorageCatalogConfig::GCS(config) => {
+                let file_io_builder = FileIO::from_path(&config.warehouse)?
+                    .with_prop(GCS_CREDENTIALS_JSON, &config.credential);
+                (config.warehouse.clone(), file_io_builder.build()?)
+            }
         };
 
-        Ok(StorageCatalog {
-            warehouse: config.warehouse.clone(),
-            config,
-            file_io: file_io_builder.build()?,
-        })
+        Ok(StorageCatalog { warehouse, file_io })
     }
 
     /// Check if version hint file exist.
@@ -106,60 +123,6 @@ impl StorageCatalog {
         version_hint
             .parse()
             .map_err(|_| Error::new(ErrorKind::DataInvalid, "parse version hint failed"))
-    }
-
-    /// List all paths of table metadata files.
-    ///
-    /// The returned paths are sorted by name.
-    ///
-    /// TODO: we can improve this by only fetch the latest metadata.
-    ///
-    /// `table_path`: relative path of table dir under warehouse root.
-    async fn list_table_metadata_paths(&self, table_path: &str) -> Result<Vec<String>> {
-        // create s3 operator
-        let mut builder = opendal::services::S3::default()
-            .root(&self.warehouse)
-            .access_key_id(&self.config.access_key)
-            .secret_access_key(&self.config.secret_key);
-        if let Some(endpoint) = &self.config.endpoint {
-            builder = builder.endpoint(endpoint);
-        }
-        if let Some(region) = &self.config.region {
-            builder = builder.region(region);
-        }
-        let op: Operator = Operator::new(builder)
-            .map_err(|err| Error::new(ErrorKind::Unexpected, err.to_report_string()))?
-            .finish();
-
-        // list metadata files
-        let mut lister = op
-            .lister(format!("{table_path}/metadata/").as_str())
-            .await
-            .map_err(|err| {
-                Error::new(
-                    ErrorKind::Unexpected,
-                    format!("list metadata failed: {}", err.as_report()),
-                )
-            })?;
-        let mut paths = vec![];
-        while let Some(entry) = lister.next().await {
-            let entry = entry.map_err(|err| {
-                Error::new(
-                    ErrorKind::Unexpected,
-                    format!("list metadata entry failed: {}", err.as_report()),
-                )
-            })?;
-
-            // Only push into paths if the entry is a metadata file.
-            if entry.path().ends_with(".metadata.json") {
-                paths.push(entry.path().to_owned());
-            }
-        }
-
-        // Make the returned paths sorted by name.
-        paths.sort();
-
-        Ok(paths)
     }
 
     pub fn file_io(&self) -> &FileIO {
@@ -303,12 +266,10 @@ impl Catalog for StorageCatalog {
             let version_hint = self.read_version_hint(&table_path).await?;
             format!("{table_path}/metadata/v{}.metadata.json", version_hint)
         } else {
-            let files = self.list_table_metadata_paths(&table_path).await?;
-
-            files.into_iter().last().ok_or(Error::new(
+            return Err(Error::new(
                 ErrorKind::DataInvalid,
-                "no table metadata found",
-            ))?
+                "no version hint found for table",
+            ));
         };
 
         let metadata_file = self.file_io.new_input(path)?;
