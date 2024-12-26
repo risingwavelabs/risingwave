@@ -88,6 +88,8 @@ ignored = [
     "pretty_assertions",
     "serde",
     "serde_json",
+    "linkme",
+    "tempfile",
 ]
 [workspace.metadata.cargo-udeps.ignore]
 normal = ["workspace-hack"]
