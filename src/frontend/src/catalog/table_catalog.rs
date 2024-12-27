@@ -278,33 +278,43 @@ impl TableVersion {
 }
 
 impl TableCatalog {
-    pub fn better_create_stmt(&self) -> Result<ast::Statement> {
-        self.table_purified_create_stmt().or_else(|e| {
-            notice_to_user(format!(
-                "failed to purify table definition: {}",
-                e.as_report()
-            ));
-            self.single_stmt()
-        })
+    /// Returns the SQL definition when the table was created, purified with best effort
+    /// if it's a table.
+    pub fn create_sql_purified(&self) -> String {
+        self.create_stmt_purified()
+            .map(|stmt| stmt.to_string())
+            .unwrap_or_else(|_| self.create_sql())
     }
 
-    fn single_stmt(&self) -> Result<ast::Statement> {
-        Ok(Parser::parse_sql(&self.definition)
-            .context("unable to parse original table definition")?
-            .into_iter()
-            .exactly_one()
-            .context("expect exactly one statement")?)
+    /// Returns the parsed SQL definition when the table was created, purified with best effort
+    /// if it's a table.
+    ///
+    /// Returns error if it's invalid.
+    pub fn create_stmt_purified(&self) -> Result<ast::Statement> {
+        if let TableType::Table = self.table_type() {
+            match self.try_table_create_stmt_purified() {
+                Ok(stmt) => return Ok(stmt),
+                Err(e) => notice_to_user(format!(
+                    "error occurred while purifying definition for table \"{}\": {}",
+                    self.name,
+                    e.as_report()
+                )),
+            }
+        }
+        self.create_stmt()
     }
 
-    pub fn table_purified_create_stmt(&self) -> Result<ast::Statement> {
+    /// Try to restore missing column definitions and constraints in the persisted table definition,
+    /// if the schema of the table is derived from external systems (like schema registry) or it's
+    /// created by `CREATE TABLE AS`.
+    ///
+    /// Returns error if restoring failed, or called on non-`TableType::Table`, or the persisted
+    /// definition is invalid.
+    fn try_table_create_stmt_purified(&self) -> Result<ast::Statement> {
         use ast::*;
 
-        if self.table_type != TableType::Table {
-            bail!("not applicable for {:?}", self.table_type);
-        }
-
         let mut base = if self.definition.is_empty() {
-            // CREATE TABLE AS
+            // Created by `CREATE TABLE AS`.
             let name = ObjectName(vec![self.name.as_str().into()]);
 
             Statement::CreateTable {
@@ -328,7 +338,7 @@ impl TableCatalog {
                 engine: Engine::Hummock,
             }
         } else {
-            self.single_stmt()?
+            self.create_stmt()?
         };
 
         let Statement::CreateTable {
@@ -358,7 +368,6 @@ impl TableCatalog {
         }
 
         // Schema inferred. Derive `ColumnDef` from `ColumnCatalog`.
-
         for column in defined_columns {
             if column.column_desc.generated_or_default_column.is_some() {
                 bail!("generated column / default value not supported yet");

@@ -649,7 +649,7 @@ pub fn handle_show_create_object(
                 .get_created_table_by_name(&object_name)
                 .filter(|t| t.is_user_table())
                 .ok_or_else(|| CatalogError::NotFound("table", name.to_string()))?;
-            table.table_purified_create_stmt()?.to_string()
+            table.create_sql_purified()
         }
         ShowCreateType::Sink => {
             let sink = schema
