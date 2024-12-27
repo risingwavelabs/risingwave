@@ -865,7 +865,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 CacheResult::Miss => (false, None),
             };
 
-            macro_rules! dispatch_match_rows {
+            macro_rules! match_rows {
                 ($op:ident, $from_cache:literal) => {
                     Self::handle_fetch_matched_rows::<SIDE, { JoinOp::$op }, $from_cache>(
                         rows,
@@ -881,45 +881,18 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 };
             }
 
-            match cache_hit {
-                true => match op {
-                    Op::Insert | Op::UpdateInsert => {
-                        #[for_await]
-                        for chunk in dispatch_match_rows!(Insert, true) {
-                            let chunk = chunk?;
-                            total_matches += chunk.cardinality();
-                            yield chunk;
-                        }
-                    }
-                    Op::Delete | Op::UpdateDelete => {
-                        #[for_await]
-                        for chunk in dispatch_match_rows!(Delete, true) {
-                            let chunk = chunk?;
-                            total_matches += chunk.cardinality();
-                            yield chunk;
-                        }
-                    }
-                },
-                false => {
-                    match op {
-                        Op::Insert | Op::UpdateInsert => {
-                            #[for_await]
-                            for chunk in dispatch_match_rows!(Insert, false) {
-                                let chunk = chunk?;
-                                total_matches += chunk.cardinality();
-                                yield chunk;
-                            }
-                        }
-                        Op::Delete | Op::UpdateDelete => {
-                            #[for_await]
-                            for chunk in dispatch_match_rows!(Delete, false) {
-                                let chunk = chunk?;
-                                total_matches += chunk.cardinality();
-                                yield chunk;
-                            }
-                        }
-                    };
-                }
+            let stream = match (cache_hit, op) {
+                (true, Op::Insert | Op::UpdateInsert) => match_rows!(Insert, true).boxed(),
+                (true, Op::Delete | Op::UpdateDelete) => match_rows!(Delete, true).boxed(),
+                (false, Op::Insert | Op::UpdateInsert) => match_rows!(Insert, false).boxed(),
+                (false, Op::Delete | Op::UpdateDelete) => match_rows!(Delete, false).boxed(),
+            };
+
+            #[for_await]
+            for chunk in stream {
+                let chunk = chunk?;
+                total_matches += chunk.cardinality();
+                yield chunk;
             }
 
             join_matched_join_keys.observe(total_matches as _);
