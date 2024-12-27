@@ -27,6 +27,7 @@ pub enum FileFormat {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum StorageType {
     S3,
+    Minio,
 }
 
 #[derive(Debug, Clone, Educe)]

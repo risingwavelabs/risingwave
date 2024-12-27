@@ -58,7 +58,10 @@ impl Rule for TableFunctionToFileScanRule {
                 }
             }
             assert!("parquet".eq_ignore_ascii_case(&eval_args[0]));
-            assert!("s3".eq_ignore_ascii_case(&eval_args[1]));
+            assert!(
+                ("s3".eq_ignore_ascii_case(&eval_args[1])
+                    || "minio".eq_ignore_ascii_case(&eval_args[1]))
+            );
             let s3_region = eval_args[2].clone();
             let s3_access_key = eval_args[3].clone();
             let s3_secret_key = eval_args[4].clone();
@@ -69,7 +72,7 @@ impl Rule for TableFunctionToFileScanRule {
                     logical_table_function.ctx(),
                     schema,
                     "parquet".to_owned(),
-                    "s3".to_owned(),
+                    eval_args[1].to_owned(),
                     s3_region,
                     s3_access_key,
                     s3_secret_key,
