@@ -42,7 +42,7 @@ import { BackPressureInfo, RelationStats } from "../proto/gen/monitor_service"
 const SIDEBAR_WIDTH = "200px"
 const INTERVAL_MS = 5000
 
-// The state of the embedded back pressure metrics.
+// The state of the back pressure metrics.
 // The metrics from previous fetch are stored here to calculate the rate.
 interface EmbeddedBackPressureInfo {
   previous: BackPressureInfo[]
@@ -107,7 +107,7 @@ export default function StreamingGraph() {
 
   const relationDependency = relationDependencyCallback()
 
-  // Periodically fetch embedded back-pressure from Meta node
+  // Periodically fetch back-pressure from Meta node
   // Didn't call `useFetch()` because the `setState` way is special.
   const [embeddedBackPressureInfo, setEmbeddedBackPressureInfo] =
     useState<EmbeddedBackPressureInfo>()
