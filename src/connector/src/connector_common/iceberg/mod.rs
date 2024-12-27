@@ -302,7 +302,16 @@ impl IcebergCommon {
         match self.catalog_type() {
             "storage" => {
                 // check gcs credential or s3 access key and secret key
-                let config = if self.gcs_credential.is_none() {
+                let config = if let Some(gcs_credential) = &self.gcs_credential {
+                    StorageCatalogConfig::GCS(
+                        storage_catalog::StorageCatalogGCSConfig::builder()
+                            .warehouse(self.warehouse_path.clone().ok_or_else(|| {
+                                anyhow!("`warehouse.path` must be set in storage catalog")
+                            })?)
+                            .credential(gcs_credential.clone())
+                            .build(),
+                    )
+                } else {
                     StorageCatalogConfig::S3(
                         storage_catalog::StorageCatalogS3Config::builder()
                             .warehouse(self.warehouse_path.clone().ok_or_else(|| {
@@ -318,17 +327,6 @@ impl IcebergCommon {
                             .endpoint(self.endpoint.clone())
                             .build(),
                     )
-                } else {
-                    StorageCatalogConfig::GCS(
-                        storage_catalog::StorageCatalogGCSConfig::builder()
-                            .warehouse(self.warehouse_path.clone().ok_or_else(|| {
-                                anyhow!("`warehouse.path` must be set in storage catalog")
-                            })?)
-                            .credential(self.gcs_credential.clone().ok_or_else(|| {
-                                anyhow!("`gcs.gcs_credential` must be set in storage catalog")
-                            })?)
-                            .build(),
-                    )
                 };
 
                 let catalog = storage_catalog::StorageCatalog::new(config)?;
@@ -336,18 +334,25 @@ impl IcebergCommon {
             }
             "rest_rust" => {
                 let mut iceberg_configs = HashMap::new();
-                if let Some(region) = &self.region {
-                    iceberg_configs.insert(S3_REGION.to_owned(), region.clone());
-                }
-                if let Some(endpoint) = &self.endpoint {
-                    iceberg_configs.insert(S3_ENDPOINT.to_owned(), endpoint.clone());
-                }
-                if let Some(access_key) = &self.access_key {
-                    iceberg_configs.insert(S3_ACCESS_KEY_ID.to_owned(), access_key.clone());
-                }
-                if let Some(secret_key) = &self.secret_key {
-                    iceberg_configs.insert(S3_SECRET_ACCESS_KEY.to_owned(), secret_key.clone());
-                }
+
+                // check gcs credential or s3 access key and secret key
+                if let Some(gcs_credential) = &self.gcs_credential {
+                    iceberg_configs.insert(GCS_CREDENTIALS_JSON.to_owned(), gcs_credential.clone());
+                } else {
+                    if let Some(region) = &self.region {
+                        iceberg_configs.insert(S3_REGION.to_owned(), region.clone());
+                    }
+                    if let Some(endpoint) = &self.endpoint {
+                        iceberg_configs.insert(S3_ENDPOINT.to_owned(), endpoint.clone());
+                    }
+                    if let Some(access_key) = &self.access_key {
+                        iceberg_configs.insert(S3_ACCESS_KEY_ID.to_owned(), access_key.clone());
+                    }
+                    if let Some(secret_key) = &self.secret_key {
+                        iceberg_configs.insert(S3_SECRET_ACCESS_KEY.to_owned(), secret_key.clone());
+                    }
+                };
+
                 if let Some(credential) = &self.credential {
                     iceberg_configs.insert("credential".to_owned(), credential.clone());
                 }
