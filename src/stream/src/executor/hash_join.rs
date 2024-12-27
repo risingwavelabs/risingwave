@@ -161,7 +161,11 @@ pub struct HashJoinExecutor<K: HashKey, S: StateStore, const T: JoinTypePrimitiv
     /// watermark column index -> `BufferedWatermarks`
     watermark_buffers: BTreeMap<usize, BufferedWatermarks<SideTypePrimitive>>,
 
+    /// When to alert high join amplification
     high_join_amplification_threshold: usize,
+
+    /// Max number of rows that will be cached in the entry state.
+    entry_state_max_rows: usize,
 }
 
 impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> std::fmt::Debug
@@ -199,6 +203,7 @@ struct EqJoinArgs<'a, K: HashKey, S: StateStore> {
     chunk_size: usize,
     cnt_rows_received: &'a mut u32,
     high_join_amplification_threshold: usize,
+    entry_state_max_rows: usize,
 }
 
 enum CacheResult {
@@ -229,6 +234,10 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         chunk_size: usize,
         high_join_amplification_threshold: usize,
     ) -> Self {
+        let entry_state_max_rows = ctx
+            .streaming_config
+            .developer
+            .hash_join_entry_state_max_rows;
         let side_l_column_n = input_l.schema().len();
 
         let schema_fields = match T {
@@ -456,6 +465,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             cnt_rows_received: 0,
             watermark_buffers,
             high_join_amplification_threshold,
+            entry_state_max_rows,
         }
     }
 
@@ -551,6 +561,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         chunk_size: self.chunk_size,
                         cnt_rows_received: &mut self.cnt_rows_received,
                         high_join_amplification_threshold: self.high_join_amplification_threshold,
+                        entry_state_max_rows: self.entry_state_max_rows,
                     }) {
                         left_time += left_start_time.elapsed();
                         yield Message::Chunk(chunk?);
@@ -576,6 +587,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         chunk_size: self.chunk_size,
                         cnt_rows_received: &mut self.cnt_rows_received,
                         high_join_amplification_threshold: self.high_join_amplification_threshold,
+                        entry_state_max_rows: self.entry_state_max_rows,
                     }) {
                         right_time += right_start_time.elapsed();
                         yield Message::Chunk(chunk?);
@@ -799,6 +811,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             chunk_size,
             cnt_rows_received,
             high_join_amplification_threshold,
+            entry_state_max_rows,
             ..
         } = args;
 
@@ -877,6 +890,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         &useful_state_clean_columns,
                         cond,
                         append_only_optimize,
+                        entry_state_max_rows,
                     )
                 };
             }
@@ -943,10 +957,10 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         useful_state_clean_columns: &'a [(usize, &'a Watermark)],
         cond: &'a mut Option<NonStrictExpression>,
         append_only_optimize: bool,
+        entry_state_max_rows: usize,
     ) {
         let mut entry_state = JoinEntryState::default();
         let mut entry_state_count = 0;
-        let entry_state_max_rows = 30000; // TODO: Make this configurable.
 
         let mut degree = 0;
         let mut append_only_matched_row: Option<JoinRow<OwnedRow>> = None;
