@@ -522,6 +522,7 @@ impl LocalStateStore for LocalHummockStorage {
             prev_epoch
         );
 
+        // only update the PkPrefix watermark for read
         if let Some((direction, watermarks, WatermarkSerdeType::PkPrefix)) =
             &mut opts.table_watermarks
         {
