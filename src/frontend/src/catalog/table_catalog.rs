@@ -295,7 +295,8 @@ impl TableCatalog {
             match self.try_table_create_stmt_purified() {
                 Ok(stmt) => return Ok(stmt),
                 Err(e) => notice_to_user(format!(
-                    "error occurred while purifying definition for table \"{}\": {}",
+                    "error occurred while purifying definition for table \"{}\", \
+                     results may be inaccurate: {}",
                     self.name,
                     e.as_report()
                 )),
@@ -314,7 +315,7 @@ impl TableCatalog {
         use ast::*;
 
         let mut base = if self.definition.is_empty() {
-            // Created by `CREATE TABLE AS`.
+            // Created by `CREATE TABLE AS`, create a skeleton `CREATE TABLE` statement.
             let name = ObjectName(vec![self.name.as_str().into()]);
 
             Statement::CreateTable {
@@ -350,14 +351,17 @@ impl TableCatalog {
             bail!("expect `CREATE TABLE` statement, found: `{:?}`", base);
         };
 
-        let defined_columns = self.columns.iter().filter(|c| {
-            !c.is_hidden() && !c.is_connector_additional_column() && !c.is_rw_sys_column()
-        });
+        // Filter out columns that are not defined by users in SQL.
+        let defined_columns = self.columns.iter().filter(|c| c.is_user_defined());
 
+        // If there are defined columns...
+        // - either the schema is fully specified by the user,
+        // - the persisted definition is already purified.
+        // No need to proceed.
         if !column_defs.is_empty() {
             let defined_columns_len = defined_columns.count();
-            if column_defs.len() != defined_columns_len {
-                bail!(
+            if column_defs.len()!= defined_columns_len {
+                bail /* unlikely */ !(
                     "column count mismatch: defined {} columns, but {} columns in the definition",
                     defined_columns_len,
                     column_defs.len()
@@ -369,15 +373,25 @@ impl TableCatalog {
 
         // Schema inferred. Derive `ColumnDef` from `ColumnCatalog`.
         for column in defined_columns {
-            if column.column_desc.generated_or_default_column.is_some() {
-                bail!("generated column / default value not supported yet");
+            if let Some(c) = &column.column_desc.generated_or_default_column {
+                match c {
+                    GeneratedOrDefaultColumn::GeneratedColumn(_) => {
+                        unreachable!("generated column must not be inferred");
+                    }
+                    GeneratedOrDefaultColumn::DefaultColumn(_) => {
+                        // TODO: convert `ExprNode` back to ast can be a bit tricky.
+                        // Fortunately, this case is rare as inferring default values is not
+                        // widely supported.
+                        bail!("purifying default value is not supported yet");
+                    }
+                }
             }
 
             let column_def = ColumnDef {
                 name: column.name().into(),
                 data_type: Some(to_ast_data_type(column.data_type())?),
                 collation: None,
-                options: Vec::new(),
+                options: Vec::new(), // pk will be specified with table constraints
             };
             column_defs.push(column_def);
         }
@@ -388,6 +402,12 @@ impl TableCatalog {
 
             for id in self.pk_column_ids() {
                 let column = self.columns.iter().find(|c| c.column_id() == id).unwrap();
+                if !column.is_user_defined() {
+                    bail /* unlikely */ !(
+                        "primary key column \"{}\" is not user-defined",
+                        column.name()
+                    );
+                }
                 pk_columns.push(column.name().into());
             }
 
@@ -396,6 +416,7 @@ impl TableCatalog {
                 columns: pk_columns,
                 is_primary: true,
             };
+            // We don't support table constraints other than `PRIMARY KEY`, thus simply overwrite.
             *constraints = vec![pk_constraint];
         }
 

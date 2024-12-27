@@ -413,6 +413,12 @@ impl ColumnCatalog {
         !self.is_generated() && !self.is_rw_timestamp_column()
     }
 
+    /// Returns whether the column is defined by user within the column definition clause
+    /// in the `CREATE TABLE` statement.
+    pub fn is_user_defined(&self) -> bool {
+        !self.is_hidden() && !self.is_rw_sys_column() && !self.is_connector_additional_column()
+    }
+
     /// If the column is a generated column
     pub fn generated_expr(&self) -> Option<&ExprNode> {
         if let Some(GeneratedOrDefaultColumn::GeneratedColumn(desc)) =
