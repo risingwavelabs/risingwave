@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use std::assert_matches::assert_matches;
-use std::collections::{BTreeMap, Bound, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use std::time::Duration;
 
 use anyhow::Context;
@@ -24,16 +24,14 @@ use risingwave_common::row::RowExt;
 use risingwave_common::types::{DefaultOrd, ToOwnedDatum};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqDebug;
-use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_expr::expr::NonStrictExpression;
 use risingwave_expr::ExprError;
-use risingwave_storage::store::PrefetchOptions;
 use tokio::time::Instant;
 
 use self::builder::JoinChunkBuilder;
 use super::barrier_align::*;
 use super::join::hash_join::*;
-use super::join::row::{DegreeType, JoinRow};
+use super::join::row::JoinRow;
 use super::join::*;
 use super::watermark::*;
 use crate::consistency::enable_strict_consistency;
@@ -123,19 +121,6 @@ impl<K: HashKey, S: StateStore> JoinSide<K, S> {
 
     pub async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         self.ht.init(epoch).await
-    }
-
-    fn get_table_mut_refs(
-        &mut self,
-    ) -> (
-        &[usize],
-        &[DataType],
-        &[usize],
-        &OrderedRowSerde,
-        &mut StateTable<S>,
-        Option<&mut StateTable<S>>,
-    ) {
-        self.ht.get_table_mut_refs()
     }
 }
 
@@ -315,7 +300,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             TableInner::new(
                 degree_pk_indices_l,
                 degree_join_key_indices_l,
-                join_key_data_types_l.clone(),
                 degree_state_table_l,
             )
         });
@@ -323,7 +307,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             TableInner::new(
                 degree_pk_indices_r,
                 degree_join_key_indices_r,
-                join_key_data_types_r.clone(),
                 degree_state_table_r,
             )
         });
@@ -881,19 +864,17 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 CacheResult::Hit(rows) => match op {
                     Op::Insert | Op::UpdateInsert => {
                         #[for_await]
-                        for chunk in
-                            Self::handle_fetch_matched_rows::<SIDE, { JoinOp::Insert }, { true }>(
-                                rows,
-                                row,
-                                key,
-                                &mut hashjoin_chunk_builder,
-                                side_match,
-                                side_update,
-                                &useful_state_clean_columns,
-                                cond,
-                                append_only_optimize,
-                            )
-                        {
+                        for chunk in Self::handle_fetch_matched_rows::<SIDE, { JoinOp::Insert }, true>(
+                            rows,
+                            row,
+                            key,
+                            &mut hashjoin_chunk_builder,
+                            side_match,
+                            side_update,
+                            &useful_state_clean_columns,
+                            cond,
+                            append_only_optimize,
+                        ) {
                             let chunk = chunk?;
                             total_matches += chunk.cardinality();
                             yield chunk;
@@ -901,19 +882,17 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     }
                     Op::Delete | Op::UpdateDelete => {
                         #[for_await]
-                        for chunk in
-                            Self::handle_fetch_matched_rows::<SIDE, { JoinOp::Delete }, { true }>(
-                                rows,
-                                row,
-                                key,
-                                &mut hashjoin_chunk_builder,
-                                side_match,
-                                side_update,
-                                &useful_state_clean_columns,
-                                cond,
-                                append_only_optimize,
-                            )
-                        {
+                        for chunk in Self::handle_fetch_matched_rows::<SIDE, { JoinOp::Delete }, true>(
+                            rows,
+                            row,
+                            key,
+                            &mut hashjoin_chunk_builder,
+                            side_match,
+                            side_update,
+                            &useful_state_clean_columns,
+                            cond,
+                            append_only_optimize,
+                        ) {
                             let chunk = chunk?;
                             total_matches += chunk.cardinality();
                             yield chunk;
@@ -924,21 +903,19 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     match op {
                         Op::Insert | Op::UpdateInsert => {
                             #[for_await]
-                            for chunk in Self::handle_fetch_matched_rows::<
-                                SIDE,
-                                { JoinOp::Insert },
-                                { false },
-                            >(
-                                None,
-                                row,
-                                key,
-                                &mut hashjoin_chunk_builder,
-                                side_match,
-                                side_update,
-                                &useful_state_clean_columns,
-                                cond,
-                                append_only_optimize,
-                            ) {
+                            for chunk in
+                                Self::handle_fetch_matched_rows::<SIDE, { JoinOp::Insert }, false>(
+                                    None,
+                                    row,
+                                    key,
+                                    &mut hashjoin_chunk_builder,
+                                    side_match,
+                                    side_update,
+                                    &useful_state_clean_columns,
+                                    cond,
+                                    append_only_optimize,
+                                )
+                            {
                                 let chunk = chunk?;
                                 total_matches += chunk.cardinality();
                                 yield chunk;
@@ -946,21 +923,19 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         }
                         Op::Delete | Op::UpdateDelete => {
                             #[for_await]
-                            for chunk in Self::handle_fetch_matched_rows::<
-                                SIDE,
-                                { JoinOp::Delete },
-                                { false },
-                            >(
-                                None,
-                                row,
-                                key,
-                                &mut hashjoin_chunk_builder,
-                                side_match,
-                                side_update,
-                                &useful_state_clean_columns,
-                                cond,
-                                append_only_optimize,
-                            ) {
+                            for chunk in
+                                Self::handle_fetch_matched_rows::<SIDE, { JoinOp::Delete }, false>(
+                                    None,
+                                    row,
+                                    key,
+                                    &mut hashjoin_chunk_builder,
+                                    side_match,
+                                    side_update,
+                                    &useful_state_clean_columns,
+                                    cond,
+                                    append_only_optimize,
+                                )
+                            {
                                 let chunk = chunk?;
                                 total_matches += chunk.cardinality();
                                 yield chunk;
@@ -999,6 +974,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
     /// 2. Always do cache refill, if the state count is good.
     /// 3. Handle state cleaning.
     /// 4. Handle degree table update.
+    #[allow(clippy::too_many_arguments)]
     #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
     async fn handle_fetch_matched_rows<
         'a,
@@ -1018,9 +994,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
     ) {
         let mut entry_state = JoinEntryState::default();
         let mut entry_state_count = 0;
-        let entry_state_max_rows = 30000;
-
-        let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Bound::Unbounded, Bound::Unbounded);
+        let entry_state_max_rows = 30000; // TODO: Make this configurable.
 
         let mut degree = 0;
         let mut append_only_matched_row: Option<JoinRow<OwnedRow>> = None;
@@ -1061,7 +1035,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
 
             #[for_await]
             for matched_row in matched_rows {
-                let (encoded_pk, mut matched_row) = matched_row?;
+                let (encoded_pk, matched_row) = matched_row?;
 
                 // cache refill
                 if entry_state_count <= entry_state_max_rows {
@@ -1140,6 +1114,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn handle_matched_row<
         'a,
         const SIDE: SideTypePrimitive,
@@ -1229,53 +1204,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             matched_rows_to_clean.push(matched_row);
         }
 
-        return chunk_opt;
-    }
-
-    /// We use this to fetch ALL degrees into memory.
-    /// We use this instead of a streaming interface.
-    /// It is necessary because we must update the degree_state_table concurrently.
-    /// If we obtain the degrees in a stream,
-    /// we will need to hold an immutable reference to the state table for the entire lifetime,
-    /// preventing us from concurrently updating the state table.
-    ///
-    /// The cost of fetching all degrees upfront is acceptable. We currently already do so
-    /// in `fetch_cached_state`.
-    /// The memory use should be limited since we only store a u64.
-    ///
-    /// Let's say we have amplification of 1B, we will have 1B * 8 bytes ~= 8GB
-    ///
-    /// We can also have further optimization, to permit breaking the streaming update,
-    /// to flush the in-memory degrees, if this is proven to have high memory consumption.
-    ///
-    /// TODO(kwannoel): Perhaps we can cache these separately from matched rows too.
-    /// Because matched rows may occupy a larger capacity.
-    ///
-    /// Argument for this:
-    /// We only hit this when cache miss. When cache miss, we will have this as one off cost.
-    /// Keeping this cached separately from matched rows is beneficial.
-    /// Then we can evict matched rows, without touching the degrees.
-    async fn handle_fetch_degrees(
-        key: &K,
-        join_key_data_types: &[DataType],
-        degree_state_table: &StateTable<S>,
-    ) -> StreamExecutorResult<Vec<DegreeType>> {
-        let key = key.deserialize(join_key_data_types)?;
-        let mut degrees = vec![];
-        let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Bound::Unbounded, Bound::Unbounded);
-        let table_iter = degree_state_table
-            .iter_with_prefix(key, sub_range, PrefetchOptions::default())
-            .await
-            .unwrap();
-        #[for_await]
-        for entry in table_iter {
-            let degree_row = entry?;
-            let degree_i64 = degree_row
-                .datum_at(degree_row.len() - 1)
-                .expect("degree should not be NULL");
-            degrees.push(degree_i64.into_int64() as u64);
-        }
-        Ok(degrees)
+        chunk_opt
     }
 
     // TODO(yuhao-su): We should find a better way to eval the expression
