@@ -20,8 +20,8 @@
 //! ```
 
 use std::env;
-use risingwave_pb::plan_common::JoinType;
 
+use risingwave_pb::plan_common::JoinType;
 use risingwave_stream::executor::test_utils::hash_join_executor::*;
 
 risingwave_expr_impl::enable!();
@@ -33,10 +33,11 @@ static ALLOC: dhat::Alloc = dhat::Alloc;
 #[tokio::main]
 async fn main() {
     let arg = env::var("ARGS");
-    let (amp, workload, join_type) = if let Ok(raw_arg) = arg
-    {
+    let (amp, workload, join_type) = if let Ok(raw_arg) = arg {
         let parts = raw_arg.split(',').collect::<Vec<_>>();
-        let amp = parts[0].parse::<usize>().expect(format!("invalid amplification_size: {}", parts[0]).as_str());
+        let amp = parts[0]
+            .parse::<usize>()
+            .expect(format!("invalid amplification_size: {}", parts[0]).as_str());
         let workload = match parts[1] {
             "NotInCache" => HashJoinWorkload::NotInCache,
             "InCache" => HashJoinWorkload::InCache,
@@ -59,7 +60,7 @@ async fn main() {
         let _profiler = dhat::Profiler::new_heap();
 
         handle_streams(workload, join_type, amp, tx_l, tx_r, out).await;
-        let stats= dhat::HeapStats::get();
+        let stats = dhat::HeapStats::get();
         println!("max_blocks: {}", stats.max_blocks);
         println!("max_bytes: {}", stats.max_bytes);
     }

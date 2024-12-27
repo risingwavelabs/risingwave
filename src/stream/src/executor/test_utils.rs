@@ -630,13 +630,13 @@ pub mod hash_join_executor {
     use std::sync::Arc;
 
     use itertools::Itertools;
-    use strum_macros::Display;
     use risingwave_common::array::{I64Array, Op};
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, TableId};
     use risingwave_common::hash::Key128;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_pb::plan_common::JoinType;
     use risingwave_storage::memory::MemoryStateStore;
+    use strum_macros::Display;
 
     use super::*;
     use crate::common::table::test_utils::gen_pbtable;
@@ -758,31 +758,36 @@ pub mod hash_join_executor {
 
         match join_type {
             JoinType::Inner => {
-                let executor = HashJoinExecutor::<Key128, MemoryStateStore, { ConstJoinType::Inner }>::new(
-                    ActorContext::for_test(123),
-                    info,
-                    source_l,
-                    source_r,
-                    params_l,
-                    params_r,
-                    vec![false], // null-safe
-                    (0..schema_len).collect_vec(),
-                    None,   // condition, it is an eq join, we have no condition
-                    vec![], // ineq pairs
-                    lhs_state_table,
-                    lhs_degree_state_table,
-                    rhs_state_table,
-                    rhs_degree_state_table,
-                    Arc::new(AtomicU64::new(0)), // watermark epoch
-                    false,                       // is_append_only
-                    Arc::new(StreamingMetrics::unused()),
-                    1024, // chunk_size
-                    2048, // high_join_amplification_threshold
-                );
+                let executor =
+                    HashJoinExecutor::<Key128, MemoryStateStore, { ConstJoinType::Inner }>::new(
+                        ActorContext::for_test(123),
+                        info,
+                        source_l,
+                        source_r,
+                        params_l,
+                        params_r,
+                        vec![false], // null-safe
+                        (0..schema_len).collect_vec(),
+                        None,   // condition, it is an eq join, we have no condition
+                        vec![], // ineq pairs
+                        lhs_state_table,
+                        lhs_degree_state_table,
+                        rhs_state_table,
+                        rhs_degree_state_table,
+                        Arc::new(AtomicU64::new(0)), // watermark epoch
+                        false,                       // is_append_only
+                        Arc::new(StreamingMetrics::unused()),
+                        1024, // chunk_size
+                        2048, // high_join_amplification_threshold
+                    );
                 (tx_l, tx_r, executor.boxed().execute())
             }
             JoinType::LeftOuter => {
-                let executor = HashJoinExecutor::<Key128, MemoryStateStore, { ConstJoinType::LeftOuter }>::new(
+                let executor = HashJoinExecutor::<
+                    Key128,
+                    MemoryStateStore,
+                    { ConstJoinType::LeftOuter },
+                >::new(
                     ActorContext::for_test(123),
                     info,
                     source_l,
@@ -807,14 +812,13 @@ pub mod hash_join_executor {
             }
             _ => panic!("Unsupported join type"),
         }
-
     }
 
     fn build_chunk(size: usize, join_key_value: i64) -> StreamChunk {
         // Create column [0]: join key. Each record has the same value, to trigger join amplification.
         let mut int64_jk_builder = DataType::Int64.create_array_builder(size);
         int64_jk_builder
-            .append_array(&I64Array::from_iter(vec![Some(join_key_value); size].into_iter()).into());
+            .append_array(&I64Array::from_iter(vec![Some(join_key_value); size]).into());
         let jk = int64_jk_builder.finish();
 
         // Create column [1]: pk. The original pk will be here, it will be unique.
