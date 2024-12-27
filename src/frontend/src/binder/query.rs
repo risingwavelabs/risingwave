@@ -213,7 +213,7 @@ impl Binder {
                 // eval error
                 Some(Err(e)) => {
                     return Err(ErrorCode::ExprError(
-                        format!("expects an integer or expression that can be evaluated to an integer after LIMIT,\nbut the evaluation of the expression returns error:{}", e
+                        format!("expects an integer or expression that can be evaluated to an integer after LIMIT,\nbut the evaluation of the expression returns error:{}", e.as_report()
                         ).into(),
                     ).into())
                 }
