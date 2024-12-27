@@ -23,7 +23,7 @@ use ::iceberg::spec::TableMetadata;
 use ::iceberg::table::Table;
 use ::iceberg::{Catalog, TableIdent};
 use anyhow::{anyhow, Context};
-use iceberg::io::GCS_CREDENTIALS_JSON;
+use iceberg::io::{GCS_CREDENTIALS_JSON, GCS_DISABLE_CONFIG_LOAD, S3_DISABLE_CONFIG_LOAD};
 use iceberg_catalog_glue::{AWS_ACCESS_KEY_ID, AWS_REGION_NAME, AWS_SECRET_ACCESS_KEY};
 use risingwave_common::bail;
 use serde_derive::Deserialize;
@@ -137,10 +137,7 @@ impl IcebergCommon {
                 iceberg_configs.insert(S3_SECRET_ACCESS_KEY.to_owned(), secret_key.clone());
             }
             if let Some(gcs_credential) = &self.gcs_credential {
-                iceberg_configs.insert(
-                    format!("iceberg.table.io.{}", GCS_CREDENTIALS_JSON),
-                    gcs_credential.clone(),
-                );
+                iceberg_configs.insert(GCS_CREDENTIALS_JSON.to_owned(), gcs_credential.clone());
             }
 
             match &self.warehouse_path {
@@ -181,8 +178,12 @@ impl IcebergCommon {
             }
             let enable_config_load = self.enable_config_load.unwrap_or(false);
             iceberg_configs.insert(
-                // TODO: `disable_config_load` is outdated.
-                "disable_config_load".to_owned(),
+                S3_DISABLE_CONFIG_LOAD.to_owned(),
+                (!enable_config_load).to_string(),
+            );
+
+            iceberg_configs.insert(
+                GCS_DISABLE_CONFIG_LOAD.to_owned(),
                 (!enable_config_load).to_string(),
             );
 
