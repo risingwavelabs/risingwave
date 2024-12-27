@@ -151,29 +151,28 @@ impl TableFunction {
 
             #[cfg(not(madsim))]
             {
+                let (bucket, _) = extract_bucket_and_file_name(&eval_args[5].clone())?;
+                let op = if "s3".eq_ignore_ascii_case(&eval_args[1]) {
+                    new_s3_operator(
+                        eval_args[2].clone(),
+                        eval_args[3].clone(),
+                        eval_args[4].clone(),
+                        bucket.clone(),
+                    )?
+                } else if "minio".eq_ignore_ascii_case(&eval_args[1]) {
+                    new_minio_operator(
+                        eval_args[2].clone(),
+                        eval_args[3].clone(),
+                        eval_args[4].clone(),
+                        bucket.clone(),
+                    )?
+                } else {
+                    unreachable!()
+                };
                 let files = if eval_args[5].ends_with('/') {
                     let files = tokio::task::block_in_place(|| {
                         FRONTEND_RUNTIME.block_on(async {
-                            let (bucket, _file_name) =
-                                extract_bucket_and_file_name(&eval_args[5].clone())?;
-                            let op = if "s3".eq_ignore_ascii_case(&eval_args[1]) {
-                                new_s3_operator(
-                                    eval_args[2].clone(),
-                                    eval_args[3].clone(),
-                                    eval_args[4].clone(),
-                                    bucket.clone(),
-                                )?
-                            } else if "minio".eq_ignore_ascii_case(&eval_args[1]) {
-                                new_minio_operator(
-                                    eval_args[2].clone(),
-                                    eval_args[3].clone(),
-                                    eval_args[4].clone(),
-                                    bucket.clone(),
-                                )?
-                            } else {
-                                unreachable!()
-                            };
-                            let files = list_s3_directory(op, eval_args[5].clone()).await?;
+                            let files = list_s3_directory(op.clone(), eval_args[5].clone()).await?;
 
                             Ok::<Vec<String>, anyhow::Error>(files)
                         })
@@ -196,24 +195,7 @@ impl TableFunction {
                             Some(files) => files[0].clone(),
                             None => eval_args[5].clone(),
                         };
-                        let (bucket, file_name) = extract_bucket_and_file_name(&location)?;
-                        let op = if "s3".eq_ignore_ascii_case(&eval_args[1]) {
-                            new_s3_operator(
-                                eval_args[2].clone(),
-                                eval_args[3].clone(),
-                                eval_args[4].clone(),
-                                bucket.clone(),
-                            )?
-                        } else if "minio".eq_ignore_ascii_case(&eval_args[1]) {
-                            new_minio_operator(
-                                eval_args[2].clone(),
-                                eval_args[3].clone(),
-                                eval_args[4].clone(),
-                                bucket.clone(),
-                            )?
-                        } else {
-                            unreachable!()
-                        };
+                        let (_, file_name) = extract_bucket_and_file_name(&location)?;
 
                         let fields = get_parquet_fields(op, file_name).await?;
 

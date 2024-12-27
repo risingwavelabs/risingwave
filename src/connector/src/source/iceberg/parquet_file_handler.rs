@@ -133,7 +133,7 @@ pub fn new_minio_operator(
     minio_secret_key: String,
     bucket: String,
 ) -> ConnectorResult<Operator> {
-    // Create s3 builder.
+    // Create minio builder.
     let mut builder = S3::default();
     builder = builder
         .region(&minio_region)
@@ -144,7 +144,7 @@ pub fn new_minio_operator(
     builder = builder.disable_config_load();
 
     let op: Operator = Operator::new(builder)?
-        // .layer(LoggingLayer::default())
+        .layer(LoggingLayer::default())
         .layer(RetryLayer::default())
         .finish();
     Ok(op)
@@ -167,7 +167,6 @@ pub fn extract_bucket_and_file_name(location: &str) -> ConnectorResult<(String, 
 }
 
 pub async fn list_s3_directory(op: Operator, dir: String) -> Result<Vec<String>, anyhow::Error> {
-    println!("list");
     let (bucket, file_name) = extract_bucket_and_file_name(&dir)?;
     let prefix = format!("s3://{}/", bucket);
     if dir.starts_with(&prefix) {
