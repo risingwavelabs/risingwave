@@ -76,8 +76,8 @@ use crate::model::{StreamContext, StreamJobFragments, TableParallelism};
 use crate::stream::{
     create_source_worker_handle, validate_sink, ActorGraphBuildResult, ActorGraphBuilder,
     CompleteStreamFragmentGraph, CreateStreamingJobContext, CreateStreamingJobOption,
-    GlobalStreamManagerRef, JobRescheduleTarget, ReplaceStreamJobContext,
-    SourceManagerRef, StreamFragmentGraph,
+    GlobalStreamManagerRef, JobRescheduleTarget, ReplaceStreamJobContext, SourceManagerRef,
+    StreamFragmentGraph,
 };
 use crate::{MetaError, MetaResult};
 
@@ -874,7 +874,7 @@ impl DdlController {
                                             format!("ProjectExecutor(from sink {})", sink_id);
                                     }
 
-                                    *merge_node = MergeNode {
+                                    **merge_node = MergeNode {
                                         upstream_actor_id: sink_actor_ids.clone(),
                                         upstream_fragment_id,
                                         upstream_dispatcher_type: DispatcherType::Hash as _,

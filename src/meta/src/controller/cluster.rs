@@ -408,7 +408,7 @@ impl StreamingClusterInfo {
         self.worker_nodes
             .values()
             .filter(|worker| available_worker_ids.contains(&(worker.id as WorkerId)))
-            .map(|worker| worker.parallelism())
+            .map(|worker| worker.compute_node_parallelism())
             .sum()
     }
 

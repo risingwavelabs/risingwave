@@ -7,12 +7,6 @@ keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
 
-[package.metadata.cargo-machete]
-ignored = ["workspace-hack"]
-
-[package.metadata.cargo-udeps.ignore]
-normal = ["workspace-hack"]
-
 [dependencies]
 ahash = "0.8"
 anyhow = "1"
@@ -48,12 +42,11 @@ ethnum = { version = "1", features = ["serde"] }
 fixedbitset = "0.5"
 foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-governor = { version = "0.6", default-features = false, features = ["std"] }
+governor = { workspace = true }
 hashbrown = "0.14"
 hex = "0.4.3"
 http = "1"
 humantime = "2.1"
-hytra = { workspace = true }
 itertools = { workspace = true }
 itoa = "1.0"
 jsonbb = { workspace = true }
@@ -121,7 +114,7 @@ tracing = "0.1"
 tracing-futures = { version = "0.2", features = ["futures-03"] }
 tracing-opentelemetry = { workspace = true }
 tracing-subscriber = "0.3.17"
-twox-hash = "1"
+twox-hash = "2"
 url = "2"
 uuid = { version = "1", features = ["v4"] }
 

@@ -77,7 +77,10 @@ async fn test_resource_group() -> Result<()> {
         .await?;
 
     let mat_fragment = cluster
-        .locate_one_fragment([identity_contains("materialize"), no_identity_contains("union")])
+        .locate_one_fragment([
+            identity_contains("materialize"),
+            no_identity_contains("union"),
+        ])
         .await?;
 
     assert_eq!(union_fragment.inner.actors.len(), 2);
@@ -85,12 +88,19 @@ async fn test_resource_group() -> Result<()> {
 
     println!("222222");
 
-    println!("res {}", session
-        .run("alter materialized view m set resource_group to 'test'")
-        .await.unwrap());
+    println!(
+        "res {}",
+        session
+            .run("alter materialized view m set resource_group to 'test'")
+            .await
+            .unwrap()
+    );
 
     let mat_fragment = cluster
-        .locate_one_fragment([identity_contains("materialize"), no_identity_contains("union")])
+        .locate_one_fragment([
+            identity_contains("materialize"),
+            no_identity_contains("union"),
+        ])
         .await?;
 
     assert_eq!(mat_fragment.inner.actors.len(), 2);
@@ -106,14 +116,16 @@ async fn test_resource_group() -> Result<()> {
         .await?;
 
     let mat_fragment = cluster
-        .locate_one_fragment([identity_contains("materialize"), no_identity_contains("union")])
+        .locate_one_fragment([
+            identity_contains("materialize"),
+            no_identity_contains("union"),
+        ])
         .await?;
 
     println!("444");
 
     assert_eq!(union_fragment.inner.actors.len(), 2);
     assert_eq!(mat_fragment.inner.actors.len(), 4);
-
 
     // let cordoned_worker = workers.pop().unwrap();
     // let rest_worker_slots: HashSet<_> = workers

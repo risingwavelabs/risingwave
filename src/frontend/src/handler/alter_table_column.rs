@@ -296,10 +296,10 @@ pub(crate) fn hijack_merger_for_target_table(
         }
     }
 
-    let pb_project = PbNodeBody::Project(ProjectNode {
+    let pb_project = PbNodeBody::Project(Box::new(ProjectNode {
         select_list: exprs.iter().map(|expr| expr.to_expr_proto()).collect(),
         ..Default::default()
-    });
+    }));
 
     for fragment in graph.fragments.values_mut() {
         if let Some(node) = &mut fragment.node {

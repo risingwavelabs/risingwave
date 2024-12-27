@@ -148,12 +148,12 @@ impl StreamNode for StreamWatermarkFilter {
 
         let table = infer_internal_table_catalog(watermark_type);
 
-        PbNodeBody::WatermarkFilter(WatermarkFilterNode {
+        PbNodeBody::WatermarkFilter(Box::new(WatermarkFilterNode {
             watermark_descs: self.watermark_descs.clone(),
             tables: vec![table
                 .with_id(state.gen_table_id_wrapped())
                 .to_internal_table_prost()],
-        })
+        }))
     }
 }
 

@@ -592,6 +592,9 @@ impl ScaleController {
                     vnode_bitmap,
                 } = actors.first().unwrap().clone();
 
+                let (related_job, job_definition) =
+                    related_jobs.get(&job_id).expect("job not found");
+
                 let fragment = CustomFragmentInfo {
                     fragment_id: fragment_id as _,
                     fragment_type_mask: fragment_type_mask as _,
@@ -605,8 +608,7 @@ impl ScaleController {
                         dispatcher,
                         upstream_actor_id,
                         vnode_bitmap: vnode_bitmap.map(|b| b.to_protobuf()),
-                        // todo, we need to fill this part
-                        mview_definition: "".to_owned(),
+                        mview_definition: job_definition.to_owned(),
                         expr_context: expr_contexts
                             .get(&actor_id)
                             .cloned()
@@ -618,8 +620,6 @@ impl ScaleController {
                 fragment_map.insert(fragment_id as _, fragment);
 
                 fragment_to_table.insert(fragment_id as _, TableId::from(job_id as u32));
-
-                let related_job = related_jobs.get(&job_id).expect("job not found");
 
                 fragment_state.insert(
                     fragment_id,
@@ -2003,7 +2003,7 @@ impl ScaleController {
             let available_worker_slots = workers
                 .iter()
                 .filter(|(id, _)| filtered_worker_ids.contains(&(**id as WorkerId)))
-                .map(|(_, worker)| (worker.id as WorkerId, worker.parallelism()))
+                .map(|(_, worker)| (worker.id as WorkerId, worker.compute_node_parallelism()))
                 .collect::<BTreeMap<_, _>>();
 
             for fragment_id in fragment_map {
@@ -2681,7 +2681,7 @@ impl GlobalStreamManager {
                             let prev_worker = worker_cache.insert(worker.id, worker.clone());
 
                             match prev_worker {
-                                Some(prev_worker) if prev_worker.parallelism() != worker.parallelism()   => {
+                                Some(prev_worker) if prev_worker.compute_node_parallelism() != worker.compute_node_parallelism()  => {
                                     tracing::info!(worker = worker.id, "worker parallelism changed");
                                     should_trigger = true;
                                 }

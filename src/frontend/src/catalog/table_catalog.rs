@@ -188,6 +188,8 @@ pub struct TableCatalog {
     pub job_id: Option<TableId>,
 
     pub engine: Engine,
+
+    pub clean_watermark_index_in_pk: Option<usize>,
 }
 
 pub const ICEBERG_SOURCE_PREFIX: &str = "__iceberg_source_";
@@ -496,6 +498,7 @@ impl TableCatalog {
             webhook_info: self.webhook_info.clone(),
             job_id: self.job_id.map(|id| id.table_id),
             engine: Some(self.engine.to_protobuf().into()),
+            clean_watermark_index_in_pk: self.clean_watermark_index_in_pk.map(|x| x as i32),
         }
     }
 
@@ -700,6 +703,7 @@ impl From<PbTable> for TableCatalog {
             webhook_info: tb.webhook_info,
             job_id: tb.job_id.map(TableId::from),
             engine,
+            clean_watermark_index_in_pk: tb.clean_watermark_index_in_pk.map(|x| x as usize),
         }
     }
 }
@@ -795,6 +799,7 @@ mod tests {
             webhook_info: None,
             job_id: None,
             engine: Some(PbEngine::Hummock as i32),
+            clean_watermark_index_in_pk: None,
         }
         .into();
 
@@ -865,6 +870,7 @@ mod tests {
                 webhook_info: None,
                 job_id: None,
                 engine: Engine::Hummock,
+                clean_watermark_index_in_pk: None,
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));

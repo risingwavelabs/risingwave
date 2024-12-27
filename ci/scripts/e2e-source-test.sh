@@ -32,7 +32,7 @@ mkdir ./connector-node
 tar xf ./risingwave-connector.tar.gz -C ./connector-node
 
 echo "--- Install dependencies"
-python3 -m pip install --break-system-packages requests protobuf fastavro confluent_kafka jsonschema nats-py requests psycopg2-binary
+python3 -m pip install --break-system-packages -r ./e2e_test/requirements.txt
 apt-get -y install jq
 
 echo "--- e2e, inline test"
@@ -144,7 +144,6 @@ risedev ci-kill
 export RISINGWAVE_CI=true
 
 echo "--- e2e, ci-kafka-plus-pubsub, legacy kafka tests"
-export RUST_MIN_STACK=4194304
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 risedev ci-start ci-kafka
 ./e2e_test/source_legacy/basic/scripts/prepare_ci_kafka.sh

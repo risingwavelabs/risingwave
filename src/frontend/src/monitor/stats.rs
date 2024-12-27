@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
-use prometheus::core::{AtomicI64, AtomicU64, GenericCounter, GenericGauge};
+use prometheus::core::{AtomicU64, GenericCounter};
 use prometheus::{
     exponential_buckets, histogram_opts, register_histogram_vec_with_registry,
     register_histogram_with_registry, register_int_counter_with_registry,
@@ -96,8 +96,8 @@ pub struct CursorMetrics {
     pub subscription_cursor_query_duration: HistogramVec,
     pub subscription_cursor_declare_duration: HistogramVec,
     pub subscription_cursor_fetch_duration: HistogramVec,
-    subsription_cursor_nums: GenericGauge<AtomicI64>,
-    invalid_subsription_cursor_nums: GenericGauge<AtomicI64>,
+    subsription_cursor_nums: IntGauge,
+    invalid_subsription_cursor_nums: IntGauge,
     subscription_cursor_last_fetch_duration: HistogramVec,
     _cursor_metrics_collector: Option<Arc<CursorMetricsCollector>>,
 }
@@ -199,8 +199,8 @@ struct CursorMetricsCollector {
 impl CursorMetricsCollector {
     fn new(
         session_map: SessionMapRef,
-        subsription_cursor_nums: GenericGauge<AtomicI64>,
-        invalid_subsription_cursor_nums: GenericGauge<AtomicI64>,
+        subsription_cursor_nums: IntGauge,
+        invalid_subsription_cursor_nums: IntGauge,
         subscription_cursor_last_fetch_duration: HistogramVec,
     ) -> Self {
         const COLLECT_INTERVAL_SECONDS: u64 = 60;

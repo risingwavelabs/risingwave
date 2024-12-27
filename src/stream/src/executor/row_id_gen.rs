@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::{Array, ArrayBuilder, ArrayRef, Op, SerialArrayBuilder};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash::VnodeBitmapExt;
@@ -57,7 +56,7 @@ impl RowIdGenExecutor {
     fn gen_row_id_column_by_op(
         &mut self,
         column: &ArrayRef,
-        ops: Ops<'_>,
+        ops: &'_ [Op],
         vis: &Bitmap,
     ) -> ArrayRef {
         let len = column.len();

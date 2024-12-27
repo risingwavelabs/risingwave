@@ -22,6 +22,8 @@ while getopts 'p:m:' opt; do
 done
 shift $((OPTIND -1))
 
+source ci/scripts/common.sh
+
 if [[ $mode == "standalone" ]]; then
   source ci/scripts/standalone-utils.sh
 fi
@@ -46,7 +48,7 @@ cluster_start() {
     risedev pre-start-dev
     start_single_node "$PREFIX_LOG"/single-node.log &
     # Give it a while to make sure the single-node is ready.
-    sleep 10
+    sleep 15
   else
     risedev ci-start "$mode"
   fi

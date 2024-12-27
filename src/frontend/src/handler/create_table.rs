@@ -23,18 +23,21 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{
-    CdcTableDesc, ColumnCatalog, ColumnDesc, Engine, TableId, TableVersionId, DEFAULT_SCHEMA_NAME,
-    INITIAL_TABLE_VERSION_ID, RISINGWAVE_ICEBERG_ROW_ID, ROWID_PREFIX,
+    CdcTableDesc, ColumnCatalog, ColumnDesc, ConflictBehavior, Engine, FieldLike, TableId,
+    TableVersionId, DEFAULT_SCHEMA_NAME, INITIAL_TABLE_VERSION_ID, RISINGWAVE_ICEBERG_ROW_ID,
+    ROWID_PREFIX,
 };
 use risingwave_common::config::MetaBackend;
 use risingwave_common::license::Feature;
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_common::system_param::reader::SystemParamsRead;
+use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_common::{bail, bail_not_implemented};
 use risingwave_connector::jvm_runtime::JVM;
+use risingwave_connector::sink::decouple_checkpoint_log_sink::COMMIT_CHECKPOINT_INTERVAL;
 use risingwave_connector::source::cdc::build_cdc_table_id;
 use risingwave_connector::source::cdc::external::{
     ExternalTableConfig, ExternalTableImpl, DATABASE_NAME_KEY, SCHEMA_NAME_KEY, TABLE_NAME_KEY,
@@ -52,9 +55,9 @@ use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_sqlparser::ast::{
     CdcTableInfo, ColumnDef, ColumnOption, CompatibleFormatEncode, CreateSink, CreateSinkStatement,
-    CreateSourceStatement, DataType, DataType as AstDataType, ExplainOptions, Format,
-    FormatEncodeOptions, Ident, ObjectName, OnConflict, SecretRefAsType, SourceWatermark,
-    Statement, TableConstraint, WebhookSourceInfo, WithProperties,
+    CreateSourceStatement, DataType as AstDataType, ExplainOptions, Format, FormatEncodeOptions,
+    Ident, ObjectName, OnConflict, SecretRefAsType, SourceWatermark, Statement, TableConstraint,
+    WebhookSourceInfo, WithProperties,
 };
 use risingwave_sqlparser::parser::{IncludeOption, Parser};
 use thiserror_ext::AsReport;
@@ -85,13 +88,13 @@ use crate::{Binder, TableCatalog, WithOptions};
 /// Column ID generator for a new table or a new version of an existing table to alter.
 #[derive(Debug)]
 pub struct ColumnIdGenerator {
-    /// Existing column names and their IDs.
+    /// Existing column names and their IDs and data types.
     ///
     /// This is used for aligning column IDs between versions (`ALTER`s). If a column already
-    /// exists, its ID is reused. Otherwise, a new ID is generated.
+    /// exists and the data type matches, its ID is reused. Otherwise, a new ID is generated.
     ///
     /// For a new table, this is empty.
-    pub existing: HashMap<String, ColumnId>,
+    pub existing: HashMap<String, (ColumnId, DataType)>,
 
     /// The next column ID to generate, used for new columns that do not exist in `existing`.
     pub next_column_id: ColumnId,
@@ -109,7 +112,12 @@ impl ColumnIdGenerator {
         let existing = original
             .columns()
             .iter()
-            .map(|col| (col.name().to_owned(), col.column_id()))
+            .map(|col| {
+                (
+                    col.name().to_owned(),
+                    (col.column_id(), col.data_type().clone()),
+                )
+            })
             .collect();
 
         let version = original.version().expect("version field not set");
@@ -130,14 +138,31 @@ impl ColumnIdGenerator {
         }
     }
 
-    /// Generates a new [`ColumnId`] for a column with the given name.
-    pub fn generate(&mut self, name: &str) -> ColumnId {
-        if let Some(id) = self.existing.get(name) {
-            *id
+    /// Generates a new [`ColumnId`] for a column with the given field.
+    ///
+    /// Returns an error if the data type of the column has been changed.
+    pub fn generate(&mut self, field: impl FieldLike) -> Result<ColumnId> {
+        if let Some((id, original_type)) = self.existing.get(field.name()) {
+            // Intentionally not using `datatype_equals` here because we want nested types to be
+            // exactly the same, **NOT** ignoring field names as they may be referenced in expressions
+            // of generated columns or downstream jobs.
+            // TODO: support compatible changes on types, typically for `STRUCT` types.
+            //       https://github.com/risingwavelabs/risingwave/issues/19755
+            if original_type == field.data_type() {
+                Ok(*id)
+            } else {
+                bail_not_implemented!(
+                    "The data type of column \"{}\" has been changed from \"{}\" to \"{}\". \
+                     This is currently not supported, even if it could be a compatible change in external systems.",
+                    field.name(),
+                    original_type,
+                    field.data_type()
+                );
+            }
         } else {
             let id = self.next_column_id;
             self.next_column_id = self.next_column_id.next();
-            id
+            Ok(id)
         }
     }
 
@@ -478,13 +503,10 @@ pub(crate) async fn gen_create_table_plan_with_source(
     format_encode: FormatEncodeOptions,
     source_watermarks: Vec<SourceWatermark>,
     mut col_id_gen: ColumnIdGenerator,
-    append_only: bool,
-    on_conflict: Option<OnConflict>,
-    with_version_column: Option<String>,
     include_column_options: IncludeOption,
-    engine: Engine,
+    props: CreateTableProps,
 ) -> Result<(PlanRef, Option<PbSource>, PbTable)> {
-    if append_only
+    if props.append_only
         && format_encode.format != Format::Plain
         && format_encode.format != Format::Native
     {
@@ -497,6 +519,9 @@ pub(crate) async fn gen_create_table_plan_with_source(
 
     let session = &handler_args.session;
     let with_properties = bind_connector_props(&handler_args, &format_encode, false)?;
+
+    let db_name: &str = session.database();
+    let (schema_name, _) = Binder::resolve_schema_qualified_name(db_name, table_name.clone())?;
 
     let (columns_from_resolve_source, source_info) = bind_columns_from_source(
         session,
@@ -532,14 +557,10 @@ pub(crate) async fn gen_create_table_plan_with_source(
 
     let (plan, table) = gen_table_plan_with_source(
         context.into(),
+        schema_name,
         source_catalog,
-        append_only,
-        on_conflict,
-        with_version_column,
-        Some(col_id_gen.into_version()),
-        database_id,
-        schema_id,
-        engine,
+        col_id_gen.into_version(),
+        props,
     )?;
 
     Ok((plan, Some(pb_source), table))
@@ -555,16 +576,11 @@ pub(crate) fn gen_create_table_plan(
     constraints: Vec<TableConstraint>,
     mut col_id_gen: ColumnIdGenerator,
     source_watermarks: Vec<SourceWatermark>,
-    append_only: bool,
-    on_conflict: Option<OnConflict>,
-    with_version_column: Option<String>,
-    webhook_info: Option<PbWebhookSourceInfo>,
-    engine: Engine,
+    props: CreateTableProps,
 ) -> Result<(PlanRef, PbTable)> {
-    let definition = context.normalized_sql().to_owned();
     let mut columns = bind_sql_columns(&column_defs)?;
     for c in &mut columns {
-        c.column_desc.column_id = col_id_gen.generate(c.name())
+        c.column_desc.column_id = col_id_gen.generate(&*c)?;
     }
 
     let (_, secret_refs, connection_refs) = context.with_options().clone().into_parts();
@@ -578,14 +594,9 @@ pub(crate) fn gen_create_table_plan(
         columns,
         column_defs,
         constraints,
-        definition,
         source_watermarks,
-        append_only,
-        on_conflict,
-        with_version_column,
-        Some(col_id_gen.into_version()),
-        webhook_info,
-        engine,
+        col_id_gen.into_version(),
+        props,
     )
 }
 
@@ -596,15 +607,11 @@ pub(crate) fn gen_create_table_plan_without_source(
     columns: Vec<ColumnCatalog>,
     column_defs: Vec<ColumnDef>,
     constraints: Vec<TableConstraint>,
-    definition: String,
     source_watermarks: Vec<SourceWatermark>,
-    append_only: bool,
-    on_conflict: Option<OnConflict>,
-    with_version_column: Option<String>,
-    version: Option<TableVersion>,
-    webhook_info: Option<PbWebhookSourceInfo>,
-    engine: Engine,
+    version: TableVersion,
+    props: CreateTableProps,
 ) -> Result<(PlanRef, PbTable)> {
+    // XXX: Why not bind outside?
     let pk_names = bind_sql_pk_names(&column_defs, bind_table_constraints(&constraints)?)?;
     let (mut columns, pk_column_ids, row_id_index) =
         bind_pk_and_row_id_on_relation(columns, pk_names, true)?;
@@ -626,89 +633,151 @@ pub(crate) fn gen_create_table_plan_without_source(
     let session = context.session_ctx().clone();
 
     let db_name = session.database();
-    let (schema_name, name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
-    let (database_id, schema_id) =
-        session.get_database_and_schema_id_for_create(schema_name.clone())?;
+    let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
 
-    gen_table_plan_inner(
-        context.into(),
-        name,
+    let info = CreateTableInfo {
         columns,
         pk_column_ids,
         row_id_index,
-        definition,
         watermark_descs,
-        append_only,
-        on_conflict,
-        with_version_column,
+        source_catalog: None,
         version,
-        None,
-        database_id,
-        schema_id,
-        webhook_info,
-        engine,
-    )
+    };
+
+    gen_table_plan_inner(context.into(), schema_name, table_name, info, props)
 }
 
 fn gen_table_plan_with_source(
     context: OptimizerContextRef,
+    schema_name: Option<String>,
     source_catalog: SourceCatalog,
-    append_only: bool,
-    on_conflict: Option<OnConflict>,
-    with_version_column: Option<String>,
-    version: Option<TableVersion>, /* TODO: this should always be `Some` if we support `ALTER
-                                    * TABLE` for `CREATE TABLE AS`. */
-    database_id: DatabaseId,
-    schema_id: SchemaId,
-    engine: Engine,
+    version: TableVersion,
+    props: CreateTableProps,
 ) -> Result<(PlanRef, PbTable)> {
-    let cloned_source_catalog = source_catalog.clone();
-    gen_table_plan_inner(
-        context,
-        source_catalog.name,
-        source_catalog.columns,
-        source_catalog.pk_col_ids,
-        source_catalog.row_id_index,
-        source_catalog.definition,
-        source_catalog.watermark_descs,
-        append_only,
-        on_conflict,
-        with_version_column,
+    let table_name = source_catalog.name.clone();
+
+    let info = CreateTableInfo {
+        columns: source_catalog.columns.clone(),
+        pk_column_ids: source_catalog.pk_col_ids.clone(),
+        row_id_index: source_catalog.row_id_index,
+        watermark_descs: source_catalog.watermark_descs.clone(),
+        source_catalog: Some(source_catalog),
         version,
-        Some(cloned_source_catalog),
-        database_id,
-        schema_id,
-        None,
-        engine,
-    )
+    };
+
+    gen_table_plan_inner(context, schema_name, table_name, info, props)
+}
+
+/// On-conflict behavior either from user input or existing table catalog.
+#[derive(Clone, Copy)]
+pub enum EitherOnConflict {
+    Ast(Option<OnConflict>),
+    Resolved(ConflictBehavior),
+}
+
+impl From<Option<OnConflict>> for EitherOnConflict {
+    fn from(v: Option<OnConflict>) -> Self {
+        Self::Ast(v)
+    }
+}
+
+impl From<ConflictBehavior> for EitherOnConflict {
+    fn from(v: ConflictBehavior) -> Self {
+        Self::Resolved(v)
+    }
+}
+
+impl EitherOnConflict {
+    /// Resolves the conflict behavior based on the given information.
+    pub fn to_behavior(self, append_only: bool, row_id_as_pk: bool) -> Result<ConflictBehavior> {
+        let conflict_behavior = match self {
+            EitherOnConflict::Ast(on_conflict) => {
+                if append_only {
+                    if row_id_as_pk {
+                        // Primary key will be generated, no conflict check needed.
+                        ConflictBehavior::NoCheck
+                    } else {
+                        // User defined PK on append-only table, enforce `DO NOTHING`.
+                        if let Some(on_conflict) = on_conflict
+                            && on_conflict != OnConflict::Nothing
+                        {
+                            return Err(ErrorCode::InvalidInputSyntax(
+                                "When PRIMARY KEY constraint applied to an APPEND ONLY table, \
+                                     the ON CONFLICT behavior must be DO NOTHING."
+                                    .to_owned(),
+                            )
+                            .into());
+                        }
+                        ConflictBehavior::IgnoreConflict
+                    }
+                } else {
+                    // Default to `UPDATE FULL` for non-append-only tables.
+                    match on_conflict.unwrap_or(OnConflict::UpdateFull) {
+                        OnConflict::UpdateFull => ConflictBehavior::Overwrite,
+                        OnConflict::Nothing => ConflictBehavior::IgnoreConflict,
+                        OnConflict::UpdateIfNotNull => ConflictBehavior::DoUpdateIfNotNull,
+                    }
+                }
+            }
+            EitherOnConflict::Resolved(b) => b,
+        };
+
+        Ok(conflict_behavior)
+    }
+}
+
+/// Arguments of the functions that generate a table plan, part 1.
+///
+/// Compared to [`CreateTableProps`], this struct contains fields that need some work of binding
+/// or resolving based on the user input.
+pub struct CreateTableInfo {
+    pub columns: Vec<ColumnCatalog>,
+    pub pk_column_ids: Vec<ColumnId>,
+    pub row_id_index: Option<usize>,
+    pub watermark_descs: Vec<WatermarkDesc>,
+    pub source_catalog: Option<SourceCatalog>,
+    pub version: TableVersion,
+}
+
+/// Arguments of the functions that generate a table plan, part 2.
+///
+/// Compared to [`CreateTableInfo`], this struct contains fields that can be (relatively) simply
+/// obtained from the input or the context.
+pub struct CreateTableProps {
+    pub definition: String,
+    pub append_only: bool,
+    pub on_conflict: EitherOnConflict,
+    pub with_version_column: Option<String>,
+    pub webhook_info: Option<PbWebhookSourceInfo>,
+    pub engine: Engine,
 }
 
 #[allow(clippy::too_many_arguments)]
 fn gen_table_plan_inner(
     context: OptimizerContextRef,
+    schema_name: Option<String>,
     table_name: String,
-    columns: Vec<ColumnCatalog>,
-    pk_column_ids: Vec<ColumnId>,
-    row_id_index: Option<usize>,
-    definition: String,
-    watermark_descs: Vec<WatermarkDesc>,
-    append_only: bool,
-    on_conflict: Option<OnConflict>,
-    with_version_column: Option<String>,
-    version: Option<TableVersion>, /* TODO: this should always be `Some` if we support `ALTER
-                                    * TABLE` for `CREATE TABLE AS`. */
-    source_catalog: Option<SourceCatalog>,
-    database_id: DatabaseId,
-    schema_id: SchemaId,
-    webhook_info: Option<PbWebhookSourceInfo>,
-    engine: Engine,
+    info: CreateTableInfo,
+    props: CreateTableProps,
 ) -> Result<(PlanRef, PbTable)> {
+    let CreateTableInfo {
+        ref columns,
+        row_id_index,
+        ref watermark_descs,
+        ref source_catalog,
+        ..
+    } = info;
+    let CreateTableProps { append_only, .. } = props;
+
+    let (database_id, schema_id) = context
+        .session_ctx()
+        .get_database_and_schema_id_for_create(schema_name)?;
+
     let session = context.session_ctx().clone();
     let retention_seconds = context.with_options().retention_seconds();
-    let is_external_source = source_catalog.is_some();
 
     let source_node: PlanRef = LogicalSource::new(
-        source_catalog.map(|source| Rc::new(source.clone())),
+        source_catalog.clone().map(Rc::new),
         columns.clone(),
         row_id_index,
         SourceNodeKind::CreateTable,
@@ -726,21 +795,6 @@ fn gen_table_plan_inner(
         vec![],
     );
 
-    let pk_on_append_only = append_only && row_id_index.is_none();
-
-    let on_conflict = if pk_on_append_only {
-        let on_conflict = on_conflict.unwrap_or(OnConflict::Nothing);
-        if on_conflict != OnConflict::Nothing {
-            return Err(ErrorCode::InvalidInputSyntax(
-                "When PRIMARY KEY constraint applied to an APPEND ONLY table, the ON CONFLICT behavior must be DO NOTHING.".to_owned(),
-            )
-                .into());
-        }
-        Some(on_conflict)
-    } else {
-        on_conflict
-    };
-
     if !append_only && !watermark_descs.is_empty() {
         return Err(ErrorCode::NotSupported(
             "Defining watermarks on table requires the table to be append only.".to_owned(),
@@ -757,24 +811,7 @@ fn gen_table_plan_inner(
         .into());
     }
 
-    let materialize = plan_root.gen_table_plan(
-        context,
-        table_name,
-        columns,
-        definition,
-        pk_column_ids,
-        row_id_index,
-        append_only,
-        on_conflict,
-        with_version_column,
-        watermark_descs,
-        version,
-        is_external_source,
-        retention_seconds,
-        None,
-        webhook_info,
-        engine,
-    )?;
+    let materialize = plan_root.gen_table_plan(context, table_name, info, props)?;
 
     let mut table = materialize.table().to_prost(schema_id, database_id);
 
@@ -817,7 +854,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     )?;
 
     for c in &mut columns {
-        c.column_desc.column_id = col_id_gen.generate(c.name())
+        c.column_desc.column_id = col_id_gen.generate(&*c)?;
     }
 
     let (mut columns, pk_column_ids, _row_id_index) =
@@ -895,24 +932,27 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     let materialize = plan_root.gen_table_plan(
         context,
         resolved_table_name,
-        columns,
-        definition,
-        pk_column_ids,
-        None,
-        false,
-        on_conflict,
-        with_version_column,
-        vec![],
-        Some(col_id_gen.into_version()),
-        true,
-        None,
-        Some(cdc_table_id),
-        None,
-        engine,
+        CreateTableInfo {
+            columns,
+            pk_column_ids,
+            row_id_index: None,
+            watermark_descs: vec![],
+            source_catalog: Some((*source).clone()),
+            version: col_id_gen.into_version(),
+        },
+        CreateTableProps {
+            definition,
+            append_only: false,
+            on_conflict: on_conflict.into(),
+            with_version_column,
+            webhook_info: None,
+            engine,
+        },
     )?;
 
     let mut table = materialize.table().to_prost(schema_id, database_id);
     table.owner = session.user_id();
+    table.cdc_table_id = Some(cdc_table_id);
     table.dependent_relations = vec![source.id];
 
     Ok((materialize.into(), table))
@@ -1000,6 +1040,18 @@ pub(super) async fn handle_create_table_plan(
         &include_column_options,
         &cdc_table_info,
     )?;
+    let webhook_info = webhook_info
+        .map(|info| bind_webhook_info(&handler_args.session, &column_defs, info))
+        .transpose()?;
+
+    let props = CreateTableProps {
+        definition: handler_args.normalized_sql.clone(),
+        append_only,
+        on_conflict: on_conflict.into(),
+        with_version_column: with_version_column.clone(),
+        webhook_info,
+        engine,
+    };
 
     let ((plan, source, table), job_type) = match (format_encode, cdc_table_info.as_ref()) {
         (Some(format_encode), None) => (
@@ -1013,20 +1065,13 @@ pub(super) async fn handle_create_table_plan(
                 format_encode,
                 source_watermarks,
                 col_id_gen,
-                append_only,
-                on_conflict,
-                with_version_column,
                 include_column_options,
-                engine,
+                props,
             )
             .await?,
             TableJobType::General,
         ),
         (None, None) => {
-            let webhook_info = webhook_info
-                .map(|info| bind_webhook_info(&handler_args.session, &column_defs, info))
-                .transpose()?;
-
             let context = OptimizerContext::new(handler_args, explain_options);
             let (plan, table) = gen_create_table_plan(
                 context,
@@ -1035,11 +1080,7 @@ pub(super) async fn handle_create_table_plan(
                 constraints,
                 col_id_gen,
                 source_watermarks,
-                append_only,
-                on_conflict,
-                with_version_column,
-                webhook_info,
-                engine,
+                props,
             )?;
 
             ((plan, None, table), TableJobType::General)
@@ -1381,7 +1422,7 @@ pub async fn handle_create_table(
 pub async fn create_iceberg_engine_table(
     session: Arc<SessionImpl>,
     handler_args: HandlerArgs,
-    source: Option<PbSource>,
+    mut source: Option<PbSource>,
     table: PbTable,
     graph: StreamFragmentGraph,
     job_type: TableJobType,
@@ -1621,7 +1662,7 @@ pub async fn create_iceberg_engine_table(
     with.insert("table.name".to_owned(), iceberg_table_name.clone());
     let commit_checkpoint_interval = handler_args
         .with_options
-        .get("commit_checkpoint_interval")
+        .get(COMMIT_CHECKPOINT_INTERVAL)
         .map(|v| v.to_owned())
         .unwrap_or_else(|| "60".to_owned());
     let commit_checkpoint_interval = commit_checkpoint_interval.parse::<u32>().map_err(|_| {
@@ -1635,13 +1676,18 @@ pub async fn create_iceberg_engine_table(
         bail!("commit_checkpoint_interval must be a positive integer: 0");
     }
 
+    // remove commit_checkpoint_interval from source options, otherwise it will be considered as an unknown field.
+    source
+        .as_mut()
+        .map(|x| x.with_properties.remove(COMMIT_CHECKPOINT_INTERVAL));
+
     let sink_decouple = session.config().sink_decouple();
     if matches!(sink_decouple, SinkDecouple::Disable) && commit_checkpoint_interval > 1 {
         bail!("config conflict: `commit_checkpoint_interval` larger than 1 means that sink decouple must be enabled, but session config sink_decouple is disabled")
     }
 
     with.insert(
-        "commit_checkpoint_interval".to_owned(),
+        COMMIT_CHECKPOINT_INTERVAL.to_owned(),
         commit_checkpoint_interval.to_string(),
     );
     with.insert("create_table_if_not_exists".to_owned(), "true".to_owned());
@@ -1755,6 +1801,15 @@ pub async fn generate_stream_graph_for_replace_table(
 ) -> Result<(StreamFragmentGraph, Table, Option<PbSource>, TableJobType)> {
     use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 
+    let props = CreateTableProps {
+        definition: handler_args.normalized_sql.clone(),
+        append_only,
+        on_conflict: on_conflict.into(),
+        with_version_column: with_version_column.clone(),
+        webhook_info: original_catalog.webhook_info.clone(),
+        engine,
+    };
+
     let ((plan, mut source, table), job_type) = match (format_encode, cdc_table_info.as_ref()) {
         (Some(format_encode), None) => (
             gen_create_table_plan_with_source(
@@ -1767,11 +1822,8 @@ pub async fn generate_stream_graph_for_replace_table(
                 format_encode,
                 source_watermarks,
                 col_id_gen,
-                append_only,
-                on_conflict,
-                with_version_column,
                 include_column_options,
-                engine,
+                props,
             )
             .await?,
             TableJobType::General,
@@ -1785,11 +1837,7 @@ pub async fn generate_stream_graph_for_replace_table(
                 constraints,
                 col_id_gen,
                 source_watermarks,
-                append_only,
-                on_conflict,
-                with_version_column,
-                original_catalog.webhook_info.clone(),
-                engine,
+                props,
             )?;
             ((plan, None, table), TableJobType::General)
         }
@@ -1901,7 +1949,8 @@ fn bind_webhook_info(
     webhook_info: WebhookSourceInfo,
 ) -> Result<PbWebhookSourceInfo> {
     // validate columns
-    if columns_defs.len() != 1 || columns_defs[0].data_type.as_ref().unwrap() != &DataType::Jsonb {
+    if columns_defs.len() != 1 || columns_defs[0].data_type.as_ref().unwrap() != &AstDataType::Jsonb
+    {
         return Err(ErrorCode::InvalidInputSyntax(
             "Table with webhook source should have exactly one JSONB column".to_owned(),
         )
@@ -1963,12 +2012,28 @@ mod tests {
     use super::*;
     use crate::test_utils::{create_proto_file, LocalFrontend, PROTO_FILE_DATA};
 
-    #[test]
-    fn test_col_id_gen() {
-        let mut gen = ColumnIdGenerator::new_initial();
-        assert_eq!(gen.generate("v1"), ColumnId::new(1));
-        assert_eq!(gen.generate("v2"), ColumnId::new(2));
+    struct BrandNewColumn(&'static str);
+    use BrandNewColumn as B;
 
+    impl FieldLike for BrandNewColumn {
+        fn name(&self) -> &str {
+            self.0
+        }
+
+        fn data_type(&self) -> &DataType {
+            unreachable!("for brand new columns, data type will not be accessed")
+        }
+    }
+
+    #[test]
+    fn test_col_id_gen_initial() {
+        let mut gen = ColumnIdGenerator::new_initial();
+        assert_eq!(gen.generate(B("v1")).unwrap(), ColumnId::new(1));
+        assert_eq!(gen.generate(B("v2")).unwrap(), ColumnId::new(2));
+    }
+
+    #[test]
+    fn test_col_id_gen_alter() {
         let mut gen = ColumnIdGenerator::new_alter(&TableCatalog {
             columns: vec![
                 ColumnCatalog {
@@ -1985,16 +2050,41 @@ mod tests {
                     ),
                     is_hidden: false,
                 },
+                ColumnCatalog {
+                    column_desc: ColumnDesc::from_field_with_column_id(
+                        &Field::with_name(
+                            StructType::new([("f1", DataType::Int32)]).into(),
+                            "nested",
+                        ),
+                        3,
+                    ),
+                    is_hidden: false,
+                },
             ],
-            version: Some(TableVersion::new_initial_for_test(ColumnId::new(2))),
+            version: Some(TableVersion::new_initial_for_test(ColumnId::new(3))),
             ..Default::default()
         });
 
-        assert_eq!(gen.generate("v1"), ColumnId::new(3));
-        assert_eq!(gen.generate("v2"), ColumnId::new(4));
-        assert_eq!(gen.generate("f32"), ColumnId::new(1));
-        assert_eq!(gen.generate("f64"), ColumnId::new(2));
-        assert_eq!(gen.generate("v3"), ColumnId::new(5));
+        assert_eq!(gen.generate(B("v1")).unwrap(), ColumnId::new(4));
+        assert_eq!(gen.generate(B("v2")).unwrap(), ColumnId::new(5));
+        assert_eq!(
+            gen.generate(Field::new("f32", DataType::Float32)).unwrap(),
+            ColumnId::new(1)
+        );
+
+        // mismatched data type
+        gen.generate(Field::new("f64", DataType::Float32))
+            .unwrap_err();
+
+        // mismatched data type
+        // we require the nested data type to be exactly the same
+        gen.generate(Field::new(
+            "nested",
+            StructType::new([("f1", DataType::Int32), ("f2", DataType::Int64)]).into(),
+        ))
+        .unwrap_err();
+
+        assert_eq!(gen.generate(B("v3")).unwrap(), ColumnId::new(6));
     }
 
     #[tokio::test]
@@ -2086,7 +2176,7 @@ mod tests {
                 let mut columns = bind_sql_columns(&column_defs)?;
                 let mut col_id_gen = ColumnIdGenerator::new_initial();
                 for c in &mut columns {
-                    c.column_desc.column_id = col_id_gen.generate(c.name())
+                    c.column_desc.column_id = col_id_gen.generate(&*c).unwrap();
                 }
 
                 let pk_names =

@@ -112,9 +112,9 @@ impl StreamNode for StreamTopN {
             order_by: self.topn_order().to_protobuf(),
         };
         if self.input().append_only() {
-            PbNodeBody::AppendOnlyTopN(topn_node)
+            PbNodeBody::AppendOnlyTopN(Box::new(topn_node))
         } else {
-            PbNodeBody::TopN(topn_node)
+            PbNodeBody::TopN(Box::new(topn_node))
         }
     }
 }
