@@ -17,7 +17,7 @@ use futures_util::stream::StreamExt;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_connector::source::iceberg::{
-    extract_bucket_and_file_name, new_minio_operator, new_s3_operator, read_parquet_file,
+    extract_bucket_and_file_name, new_s3_operator, read_parquet_file,
 };
 use risingwave_pb::batch_plan::file_scan_node;
 use risingwave_pb::batch_plan::file_scan_node::StorageType;
@@ -88,20 +88,13 @@ impl S3FileScanExecutor {
         assert_eq!(self.file_format, FileFormat::Parquet);
         for file in self.file_location {
             let (bucket, file_name) = extract_bucket_and_file_name(&file)?;
-            let op = match self.is_minio {
-                true => new_minio_operator(
-                    self.s3_region.clone(),
-                    self.s3_access_key.clone(),
-                    self.s3_secret_key.clone(),
-                    bucket.clone(),
-                )?,
-                false => new_s3_operator(
-                    self.s3_region.clone(),
-                    self.s3_access_key.clone(),
-                    self.s3_secret_key.clone(),
-                    bucket.clone(),
-                )?,
-            };
+            let op = new_s3_operator(
+                self.s3_region.clone(),
+                self.s3_access_key.clone(),
+                self.s3_secret_key.clone(),
+                bucket.clone(),
+                self.is_minio,
+            )?;
             let chunk_stream =
                 read_parquet_file(op, file_name, None, None, self.batch_size, 0).await?;
             #[for_await]

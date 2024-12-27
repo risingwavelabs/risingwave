@@ -21,8 +21,7 @@ use mysql_async::prelude::*;
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::types::{DataType, ScalarImpl, StructType};
 use risingwave_connector::source::iceberg::{
-    extract_bucket_and_file_name, get_parquet_fields, list_s3_directory, new_minio_operator,
-    new_s3_operator,
+    extract_bucket_and_file_name, get_parquet_fields, list_s3_directory, new_s3_operator,
 };
 pub use risingwave_pb::expr::table_function::PbType as TableFunctionType;
 use risingwave_pb::expr::PbTableFunction;
@@ -152,23 +151,14 @@ impl TableFunction {
             #[cfg(not(madsim))]
             {
                 let (bucket, _) = extract_bucket_and_file_name(&eval_args[5].clone())?;
-                let op = if "s3".eq_ignore_ascii_case(&eval_args[1]) {
-                    new_s3_operator(
-                        eval_args[2].clone(),
-                        eval_args[3].clone(),
-                        eval_args[4].clone(),
-                        bucket.clone(),
-                    )?
-                } else if "minio".eq_ignore_ascii_case(&eval_args[1]) {
-                    new_minio_operator(
-                        eval_args[2].clone(),
-                        eval_args[3].clone(),
-                        eval_args[4].clone(),
-                        bucket.clone(),
-                    )?
-                } else {
-                    unreachable!()
-                };
+
+                let op = new_s3_operator(
+                    eval_args[2].clone(),
+                    eval_args[3].clone(),
+                    eval_args[4].clone(),
+                    bucket.clone(),
+                    "minio".eq_ignore_ascii_case(&eval_args[1]),
+                )?;
                 let files = if eval_args[5].ends_with('/') {
                     let files = tokio::task::block_in_place(|| {
                         FRONTEND_RUNTIME.block_on(async {

@@ -109,44 +109,28 @@ pub fn new_s3_operator(
     s3_access_key: String,
     s3_secret_key: String,
     bucket: String,
+    is_minio: bool,
 ) -> ConnectorResult<Operator> {
     // Create s3 builder.
-    let mut builder = S3::default().bucket(&bucket).region(&s3_region);
-    builder = builder.secret_access_key(&s3_access_key);
-    builder = builder.secret_access_key(&s3_secret_key);
-    builder = builder.endpoint(&format!(
-        "https://{}.s3.{}.amazonaws.com",
-        bucket, s3_region
-    ));
-
-    let op: Operator = Operator::new(builder)?
-        .layer(LoggingLayer::default())
-        .layer(RetryLayer::default())
-        .finish();
-
-    Ok(op)
-}
-
-pub fn new_minio_operator(
-    minio_region: String,
-    minio_access_key: String,
-    minio_secret_key: String,
-    bucket: String,
-) -> ConnectorResult<Operator> {
-    // Create minio builder.
     let mut builder = S3::default();
     builder = builder
-        .region(&minio_region)
-        .access_key_id(&minio_access_key)
-        .secret_access_key(&minio_secret_key)
+        .region(&s3_region)
+        .access_key_id(&s3_access_key)
+        .secret_access_key(&s3_secret_key)
         .bucket(&bucket);
-    builder = builder.endpoint(&format!("http://{}.127.0.0.1:9301", bucket));
+    builder = match is_minio {
+        true => builder.endpoint(&format!("http://{}.127.0.0.1:9301", bucket)),
+        false => builder.endpoint(&format!(
+            "https://{}.s3.{}.amazonaws.com",
+            bucket, s3_region
+        )),
+    };
     builder = builder.disable_config_load();
-
     let op: Operator = Operator::new(builder)?
         .layer(LoggingLayer::default())
         .layer(RetryLayer::default())
         .finish();
+
     Ok(op)
 }
 
