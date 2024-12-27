@@ -56,6 +56,7 @@ message GetBackPressureRequest {}
 
 message BackPressureInfo {
   uint32 actor_count = 3;
+  // Sum of output blocking duration of all actors
   double value = 4;
 }
 
