@@ -571,6 +571,7 @@ mod tests {
             webhook_info: None,
             job_id: None,
             engine: Some(PbEngine::Hummock as i32),
+            clean_watermark_index_in_pk: None,
         }
     }
 

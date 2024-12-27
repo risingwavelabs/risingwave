@@ -33,7 +33,6 @@ pub use plan_visitor::{
     ExecutionModeDecider, PlanVisitor, ReadStorageTableVisitor, RelationCollectorVisitor,
     SysTableVisitor,
 };
-use risingwave_sqlparser::ast::OnConflict;
 
 mod logical_optimization;
 mod optimizer_context;
@@ -848,17 +847,7 @@ impl PlanRoot {
             }
         }
 
-        let conflict_behavior = match on_conflict {
-            Some(on_conflict) => match on_conflict {
-                OnConflict::UpdateFull => ConflictBehavior::Overwrite,
-                OnConflict::Nothing => ConflictBehavior::IgnoreConflict,
-                OnConflict::UpdateIfNotNull => ConflictBehavior::DoUpdateIfNotNull,
-            },
-            None => match append_only {
-                true => ConflictBehavior::NoCheck,
-                false => ConflictBehavior::Overwrite,
-            },
-        };
+        let conflict_behavior = on_conflict.to_behavior(append_only, row_id_index.is_some())?;
 
         if let ConflictBehavior::IgnoreConflict = conflict_behavior
             && version_column_index.is_some()

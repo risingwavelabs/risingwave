@@ -42,7 +42,6 @@ risingwave_rt = { workspace = true }
 shell-words = "1.1.0"
 strum = "0.26"
 strum_macros = "0.26"
-tempfile = "3"
 tikv-jemallocator = { workspace = true, features = [
     "unprefixed_malloc_on_supported_platforms",
 ] }
