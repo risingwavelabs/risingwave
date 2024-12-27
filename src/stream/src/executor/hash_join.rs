@@ -952,28 +952,37 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         let mut append_only_matched_row: Option<JoinRow<OwnedRow>> = None;
         let mut matched_rows_to_clean = vec![];
 
+        macro_rules! match_row {
+            ($degree_table:expr, $matched_row:expr, $matched_row_ref:expr) => {
+                Self::handle_match_row::<SIDE, { JOIN_OP }, { MATCHED_ROWS_FROM_CACHE }>(
+                    row,
+                    $matched_row,
+                    $matched_row_ref,
+                    hashjoin_chunk_builder,
+                    $degree_table,
+                    side_update.start_pos,
+                    side_match.start_pos,
+                    cond,
+                    &mut degree,
+                    useful_state_clean_columns,
+                    append_only_optimize,
+                    &mut append_only_matched_row,
+                    &mut matched_rows_to_clean,
+                )
+            };
+        }
+
         let entry_state = if MATCHED_ROWS_FROM_CACHE {
             let mut cached_rows = cached_rows.unwrap();
             for (matched_row_ref, matched_row) in cached_rows.values_mut(&side_match.all_data_types)
             {
                 let matched_row = matched_row?;
-                if let Some(chunk) =
-                    Self::handle_matched_row::<SIDE, { JOIN_OP }, { MATCHED_ROWS_FROM_CACHE }>(
-                        row,
-                        matched_row,
-                        Some(matched_row_ref),
-                        hashjoin_chunk_builder,
-                        side_match.ht.get_degree_state_mut_ref(),
-                        side_update.start_pos,
-                        side_match.start_pos,
-                        cond,
-                        &mut degree,
-                        useful_state_clean_columns,
-                        append_only_optimize,
-                        &mut append_only_matched_row,
-                        &mut matched_rows_to_clean,
-                    )
-                    .await
+                if let Some(chunk) = match_row!(
+                    side_match.ht.get_degree_state_mut_ref(),
+                    matched_row,
+                    Some(matched_row_ref)
+                )
+                .await
                 {
                     yield chunk;
                 }
@@ -996,24 +1005,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         .with_context(|| format!("row: {}", row.display(),))?;
                     entry_state_count += 1;
                 }
-                if let Some(chunk) =
-                    Self::handle_matched_row::<SIDE, { JOIN_OP }, { MATCHED_ROWS_FROM_CACHE }>(
-                        row,
-                        matched_row,
-                        None,
-                        hashjoin_chunk_builder,
-                        degree_table,
-                        side_update.start_pos,
-                        side_match.start_pos,
-                        cond,
-                        &mut degree,
-                        useful_state_clean_columns,
-                        append_only_optimize,
-                        &mut append_only_matched_row,
-                        &mut matched_rows_to_clean,
-                    )
-                    .await
-                {
+                if let Some(chunk) = match_row!(degree_table, matched_row, None).await {
                     yield chunk;
                 }
             }
@@ -1067,7 +1059,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn handle_matched_row<
+    async fn handle_match_row<
         'a,
         const SIDE: SideTypePrimitive,
         const JOIN_OP: JoinOpPrimitive,
