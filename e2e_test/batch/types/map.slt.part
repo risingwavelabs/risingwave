@@ -152,7 +152,7 @@ select jsonb_populate_map(
 
 query ?
 select jsonb_populate_map(
-    MAP {'a': '1', 'b': '2'},
+    MAP {'a': 1, 'b': 2},
     '{"b": "3", "c": "4"}'::jsonb
 );
 ----
