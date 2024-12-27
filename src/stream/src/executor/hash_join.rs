@@ -747,6 +747,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         key: &K,
         ht: &mut JoinHashMap<K, S>,
     ) -> StreamExecutorResult<Option<HashValueType>> {
+        // If the key contains null values, but these are not null-safe on the match side predicate,
+        // we will never match. So just return `None` to indicate this.
         if !key.null_bitmap().is_subset(ht.null_matched()) {
             Ok(None)
         } else {
@@ -987,7 +989,17 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         }
 
         let entry_state = if MATCHED_ROWS_FROM_CACHE {
-            let mut cached_rows = cached_rows.unwrap();
+            let Some(mut cached_rows) = cached_rows else {
+                // Handle rows with null-datums, these rows will never match.
+                let op = match JOIN_OP {
+                    JoinOp::Insert => Op::Insert,
+                    JoinOp::Delete => Op::Delete,
+                };
+                if let Some(chunk) = hashjoin_chunk_builder.forward_if_not_matched(op, row) {
+                    yield chunk;
+                }
+                return Ok(());
+            };
             for (matched_row_ref, matched_row) in cached_rows.values_mut(&side_match.all_data_types)
             {
                 let matched_row = matched_row?;
@@ -1001,6 +1013,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     yield chunk;
                 }
             }
+
             cached_rows
         } else {
             let (matched_rows, degree_table) = side_match
