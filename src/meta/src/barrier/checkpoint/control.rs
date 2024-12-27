@@ -38,7 +38,7 @@ use crate::barrier::checkpoint::recovery::{
 use crate::barrier::checkpoint::state::BarrierWorkerState;
 use crate::barrier::command::CommandContext;
 use crate::barrier::complete_task::{BarrierCompleteOutput, CompleteBarrierTask};
-use crate::barrier::info::{BarrierInfo, InflightStreamingJobInfo};
+use crate::barrier::info::{BarrierInfo, InflightDatabaseInfo, InflightStreamingJobInfo};
 use crate::barrier::notifier::Notifier;
 use crate::barrier::progress::{CreateMviewProgressTracker, TrackingCommand, TrackingJob};
 use crate::barrier::rpc::{from_partial_graph_id, ControlStreamManager};
@@ -341,13 +341,18 @@ impl CheckpointControl {
         });
     }
 
-    pub(crate) fn subscriptions(
+    pub(crate) fn inflight_infos(
         &self,
-    ) -> impl Iterator<Item = (DatabaseId, &InflightSubscriptionInfo)> + '_ {
+    ) -> impl Iterator<Item = (DatabaseId, &InflightSubscriptionInfo, &InflightDatabaseInfo)> + '_
+    {
         self.databases.iter().flat_map(|(database_id, database)| {
-            database
-                .checkpoint_control()
-                .map(|database| (*database_id, &database.state.inflight_subscription_info))
+            database.checkpoint_control().map(|database| {
+                (
+                    *database_id,
+                    &database.state.inflight_subscription_info,
+                    &database.state.inflight_graph_info,
+                )
+            })
         })
     }
 }
