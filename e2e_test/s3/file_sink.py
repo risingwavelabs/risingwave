@@ -532,12 +532,12 @@ if __name__ == "__main__":
             _local(idx)
         )
     # put parquet file to test table function file scan
-    if data:  
+    if data:
         first_file_data = data[0]
         first_table = pa.Table.from_pandas(pd.DataFrame(first_file_data))
-        
-        first_file_name = f"test_file_scan.parquet"  
-        first_file_path = f"test_file_scan/{first_file_name}" 
+
+        first_file_name = f"test_file_scan.parquet"
+        first_file_path = f"test_file_scan/{first_file_name}"
 
         pq.write_table(first_table, "data_0.parquet")
 
@@ -546,7 +546,7 @@ if __name__ == "__main__":
             first_file_path,
             "data_0.parquet"
         )
-    
+
     # do test
     do_test(config, FILE_NUM, ITEM_NUM_PER_FILE, run_id)
 
