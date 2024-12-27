@@ -44,19 +44,15 @@ import Title from "../components/Title"
 import useErrorToast from "../hook/useErrorToast"
 import useFetch from "../lib/api/fetch"
 import {
-  calculateBPRate,
-  calculateCumulativeBp,
-  fetchEmbeddedBackPressure,
-} from "../lib/api/metric"
-import {
   getFragmentsByJobId,
   getRelationIdInfos,
   getStreamingJobs,
 } from "../lib/api/streaming"
 import { FragmentBox } from "../lib/layout"
 import { TableFragments, TableFragments_Fragment } from "../proto/gen/meta"
-import { BackPressureInfo, FragmentStats } from "../proto/gen/monitor_service"
+import { BackPressureInfo, FragmentStats, GetBackPressureResponse } from "../proto/gen/monitor_service"
 import { Dispatcher, MergeNode, StreamNode } from "../proto/gen/stream_plan"
+import api from "../lib/api/api"
 
 interface DispatcherNode {
   [actorId: number]: Dispatcher[]
@@ -190,13 +186,35 @@ function buildFragmentDependencyAsEdges(
 
 const SIDEBAR_WIDTH = 225
 
-// The state of the embedded back pressure metrics.
-// The metrics from previous fetch are stored here to calculate the rate.
-interface EmbeddedBackPressureInfo {
-  previous: BackPressureInfo[]
-  current: BackPressureInfo[]
-  totalBackpressureNs: BackPressureInfo[]
-  totalDurationNs: number
+class BackPressureSnapshot {
+  // The first fetch result. Key is `<fragmentId>-<downstreamFragmentId>`, value is the blocked duration in ns.
+  result: Map<string, number>
+  // The time of the current fetch in milliseconds. (`Date.now()`)
+  time: number
+
+  constructor(result: Map<string, number>, time: number) {
+    this.result = result
+    this.time = time
+  }
+
+  static fromResponse(channelStats: { [key: string]: BackPressureInfo }): BackPressureSnapshot {
+    const result = new Map<string, number>()
+    for (const [key, info] of Object.entries(channelStats)) {
+      result.set(key, info.value)
+    }
+    return new BackPressureSnapshot(result, Date.now())
+  }
+
+  getRate(initial: BackPressureSnapshot): Map<string, number> {
+    const result = new Map<string, number>()
+    for (const [key, value] of this.result) {
+      const initialValue = initial.result.get(key)
+      if (initialValue) {
+        result.set(key, (value - initialValue) / (this.time - initial.time))
+      }
+    }
+    return result
+  }
 }
 
 export default function Streaming() {
@@ -308,40 +326,26 @@ export default function Streaming() {
     toast(new Error(`Actor ${searchActorIdInt} not found`))
   }
 
-  // Periodically fetch embedded back-pressure from Meta node
-  // Didn't call `useFetch()` because the `setState` way is special.
-  const [embeddedBackPressureInfo, setEmbeddedBackPressureInfo] =
-    useState<EmbeddedBackPressureInfo>()
+  // Keep the initial snapshot to calculate the rate of back pressure
+  const [backPressureSnapshot, setBackPressureSnapshot] = useState<BackPressureSnapshot>()
+  const [backPressureRate, setBackPressureRate] = useState<Map<string, number>>()
+  
   const [fragmentStats, setFragmentStats] = useState<{
     [key: number]: FragmentStats
   }>()
 
   useEffect(() => {
     function refresh() {
-      fetchEmbeddedBackPressure().then(
+      api.get(
+        "/metrics/fragment/embedded_back_pressures"
+      ).then(
         (response) => {
-          let newBP =
-            response.backPressureInfos?.map(BackPressureInfo.fromJSON) ?? []
-          setEmbeddedBackPressureInfo((prev) =>
-            prev
-              ? {
-                  previous: prev.current,
-                  current: newBP,
-                  totalBackpressureNs: calculateCumulativeBp(
-                    prev.totalBackpressureNs,
-                    prev.current,
-                    newBP
-                  ),
-                  totalDurationNs:
-                    prev.totalDurationNs + INTERVAL_MS * 1000 * 1000,
-                }
-              : {
-                  previous: newBP, // Use current value to show zero rate, but it's fine
-                  current: newBP,
-                  totalBackpressureNs: [],
-                  totalDurationNs: 0,
-                }
-          )
+          let snapshot = BackPressureSnapshot.fromResponse(response.channelStats);
+          if (!backPressureSnapshot) {
+            setBackPressureSnapshot(snapshot)
+          } else {
+            setBackPressureRate(snapshot.getRate(backPressureSnapshot))
+          }
           setFragmentStats(response.fragmentStats)
         },
         (e) => {
@@ -356,26 +360,6 @@ export default function Streaming() {
       clearInterval(interval)
     }
   }, [toast])
-
-  const backPressures = useMemo(() => {
-    if (embeddedBackPressureInfo) {
-      let map = new Map()
-
-      if (embeddedBackPressureInfo) {
-        const metrics = calculateBPRate(
-          embeddedBackPressureInfo.totalBackpressureNs,
-          embeddedBackPressureInfo.totalDurationNs
-        )
-        for (const m of metrics.outputBufferBlockingDuration) {
-          map.set(
-            `${m.metric.fragmentId}_${m.metric.downstreamFragmentId}`,
-            m.sample[0].value
-          )
-        }
-      }
-      return map
-    }
-  }, [embeddedBackPressureInfo])
 
   const retVal = (
     <Flex p={3} height="calc(100vh - 20px)" flexDirection="column">
@@ -503,7 +487,7 @@ export default function Streaming() {
               selectedFragmentId={selectedFragmentId?.toString()}
               fragmentDependency={fragmentDependency}
               planNodeDependencies={planNodeDependencies}
-              backPressures={backPressures}
+              backPressures={backPressureRate}
               fragmentStats={fragmentStats}
             />
           )}
