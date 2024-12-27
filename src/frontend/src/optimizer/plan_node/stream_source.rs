@@ -96,7 +96,7 @@ impl StreamNode for StreamSource {
                 secret_refs,
             }
         });
-        PbNodeBody::Source(SourceNode { source_inner })
+        PbNodeBody::Source(Box::new(SourceNode { source_inner }))
     }
 }
 

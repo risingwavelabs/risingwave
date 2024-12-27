@@ -29,7 +29,7 @@ import _, { reverse, sortBy } from "lodash"
 import Head from "next/head"
 import { parseAsInteger, useQueryState } from "nuqs"
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react"
-import RelationGraph, { nodeRadius } from "../components/RelationGraph"
+import RelationGraph, { boxHeight, boxWidth } from "../components/RelationGraph"
 import Title from "../components/Title"
 import useErrorToast from "../hook/useErrorToast"
 import useFetch from "../lib/api/fetch"
@@ -47,7 +47,7 @@ import {
   relationIsStreamingJob,
 } from "../lib/api/streaming"
 import { RelationPoint } from "../lib/layout"
-import { BackPressureInfo } from "../proto/gen/monitor_service"
+import { BackPressureInfo, RelationStats } from "../proto/gen/monitor_service"
 
 const SIDEBAR_WIDTH = "200px"
 const INTERVAL_MS = 5000
@@ -82,8 +82,8 @@ function buildDependencyAsEdges(
           : []
         : [],
       order: r.id,
-      width: nodeRadius * 2,
-      height: nodeRadius * 2,
+      width: boxWidth,
+      height: boxHeight,
       relation: r,
     })
   }
@@ -133,15 +133,20 @@ export default function StreamingGraph() {
   // Didn't call `useFetch()` because the `setState` way is special.
   const [embeddedBackPressureInfo, setEmbeddedBackPressureInfo] =
     useState<EmbeddedBackPressureInfo>()
+  const [relationStats, setRelationStats] = useState<{
+    [key: number]: RelationStats
+  }>()
+
   useEffect(() => {
     if (resetEmbeddedBackPressures) {
       setEmbeddedBackPressureInfo(undefined)
       toggleResetEmbeddedBackPressures()
     }
     if (backPressureDataSource === "Embedded") {
-      const interval = setInterval(() => {
+      function refresh() {
         fetchEmbeddedBackPressure().then(
-          (newBP) => {
+          (response) => {
+            let newBP = response.backPressureInfos
             setEmbeddedBackPressureInfo((prev) =>
               prev
                 ? {
@@ -162,13 +167,16 @@ export default function StreamingGraph() {
                     totalDurationNs: 0,
                   }
             )
+            setRelationStats(response.relationStats)
           },
           (e) => {
             console.error(e)
             toast(e, "error")
           }
         )
-      }, INTERVAL_MS)
+      }
+      refresh()
+      const interval = setInterval(refresh, INTERVAL_MS)
       return () => {
         clearInterval(interval)
       }
@@ -308,6 +316,7 @@ export default function StreamingGraph() {
               selectedId={selectedId?.toString()}
               setSelectedId={(id) => setSelectedId(parseInt(id))}
               backPressures={backPressures}
+              relationStats={relationStats}
             />
           )}
         </Box>

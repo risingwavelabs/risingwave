@@ -22,15 +22,11 @@ use anyhow::Context;
 use async_trait::async_trait;
 use iceberg::io::FileIO;
 use iceberg::spec::{Schema, SortOrder, TableMetadata, UnboundPartitionSpec};
-use iceberg::table::Table as TableV2;
+use iceberg::table::Table;
 use iceberg::{
-    Catalog as CatalogV2, Namespace, NamespaceIdent, TableCommit, TableCreation, TableIdent,
+    Catalog, Namespace, NamespaceIdent, TableCommit, TableCreation, TableIdent, TableRequirement,
+    TableUpdate,
 };
-use icelake::catalog::models::{CommitTableRequest, CommitTableResponse, LoadTableResult};
-use icelake::catalog::{
-    BaseCatalogConfig, Catalog, IcebergTableIoArgs, OperatorCreator, UpdateTable,
-};
-use icelake::{ErrorKind, Table, TableIdentifier};
 use itertools::Itertools;
 use jni::objects::{GlobalRef, JObject};
 use jni::JavaVM;
@@ -66,6 +62,20 @@ struct CreateTableRequest {
     pub properties: HashMap<String, String>,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+struct CommitTableRequest {
+    identifier: TableIdent,
+    requirements: Vec<TableRequirement>,
+    updates: Vec<TableUpdate>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+struct CommitTableResponse {
+    metadata_location: String,
+    metadata: TableMetadata,
+}
+
 impl From<&TableCreation> for CreateTableRequest {
     fn from(value: &TableCreation) -> Self {
         Self {
@@ -83,112 +93,11 @@ impl From<&TableCreation> for CreateTableRequest {
 pub struct JniCatalog {
     java_catalog: GlobalRef,
     jvm: &'static JavaVM,
-    config: BaseCatalogConfig,
+    file_io_props: HashMap<String, String>,
 }
 
 #[async_trait]
 impl Catalog for JniCatalog {
-    fn name(&self) -> &str {
-        &self.config.name
-    }
-
-    async fn load_table(self: Arc<Self>, table_name: &TableIdentifier) -> icelake::Result<Table> {
-        execute_with_jni_env(self.jvm, |env| {
-            let table_name_str = table_name.to_string();
-
-            let table_name_jstr = env.new_string(&table_name_str).unwrap();
-
-            let result_json =
-                call_method!(env, self.java_catalog.as_obj(), {String loadTable(String)},
-                &table_name_jstr)
-                .with_context(|| format!("Failed to load iceberg table: {table_name_str}"))?;
-
-            let rust_json_str = jobj_to_str(env, result_json)?;
-
-            let resp: LoadTableResult = serde_json::from_str(&rust_json_str)?;
-
-            let metadata_location = resp.metadata_location.clone().ok_or_else(|| {
-                icelake::Error::new(
-                    ErrorKind::IcebergFeatureUnsupported,
-                    "Loading uncommitted table is not supported!",
-                )
-            })?;
-
-            tracing::info!("Table metadata location of {table_name} is {metadata_location}");
-
-            let table_metadata = resp.table_metadata()?;
-
-            let iceberg_io_args = IcebergTableIoArgs::builder_from_path(&table_metadata.location)?
-                .with_args(self.config.table_io_configs.iter())
-                .build()?;
-            let table_op = iceberg_io_args.create()?;
-
-            Ok(Table::builder_from_catalog(
-                table_op,
-                self.clone(),
-                table_metadata,
-                table_name.clone(),
-            )
-            .build()?)
-        })
-        .map_err(|e| {
-            icelake::Error::new(ErrorKind::Unexpected, "Failed to load iceberg table.")
-                .set_source(e)
-        })
-    }
-
-    async fn update_table(self: Arc<Self>, update_table: &UpdateTable) -> icelake::Result<Table> {
-        execute_with_jni_env(self.jvm, |env| {
-            let request_str = serde_json::to_string(&CommitTableRequest::try_from(update_table)?)?;
-
-            let request_jni_str = env.new_string(&request_str).with_context(|| {
-                format!("Failed to create jni string from request json: {request_str}.")
-            })?;
-
-            let result_json =
-                call_method!(env, self.java_catalog.as_obj(), {String updateTable(String)},
-                &request_jni_str)
-                .with_context(|| {
-                    format!(
-                        "Failed to update iceberg table: {}",
-                        update_table.table_name()
-                    )
-                })?;
-
-            let rust_json_str = jobj_to_str(env, result_json)?;
-
-            let response: CommitTableResponse = serde_json::from_str(&rust_json_str)?;
-
-            tracing::info!(
-                "Table metadata location of {} is {}",
-                update_table.table_name(),
-                response.metadata_location
-            );
-
-            let table_metadata = response.metadata()?;
-
-            let args = IcebergTableIoArgs::builder_from_path(&table_metadata.location)?
-                .with_args(self.config.table_io_configs.iter())
-                .build()?;
-            let table_op = args.create()?;
-
-            Ok(Table::builder_from_catalog(
-                table_op,
-                self.clone(),
-                table_metadata,
-                update_table.table_name().clone(),
-            )
-            .build()?)
-        })
-        .map_err(|e| {
-            icelake::Error::new(ErrorKind::Unexpected, "Failed to update iceberg table.")
-                .set_source(e)
-        })
-    }
-}
-
-#[async_trait]
-impl CatalogV2 for JniCatalog {
     /// List namespaces from table.
     async fn list_namespaces(
         &self,
@@ -239,7 +148,7 @@ impl CatalogV2 for JniCatalog {
         &self,
         namespace: &NamespaceIdent,
         creation: TableCreation,
-    ) -> iceberg::Result<TableV2> {
+    ) -> iceberg::Result<Table> {
         execute_with_jni_env(self.jvm, |env| {
             let namespace_jstr = if namespace.is_empty() {
                 env.new_string("").unwrap()
@@ -273,10 +182,10 @@ impl CatalogV2 for JniCatalog {
             let table_metadata = resp.metadata;
 
             let file_io = FileIO::from_path(&metadata_location)?
-                .with_props(self.config.table_io_configs.iter())
+                .with_props(self.file_io_props.iter())
                 .build()?;
 
-            Ok(TableV2::builder()
+            Ok(Table::builder()
                 .file_io(file_io)
                 .identifier(TableIdent::new(namespace.clone(), creation.name))
                 .metadata(table_metadata)
@@ -292,7 +201,7 @@ impl CatalogV2 for JniCatalog {
     }
 
     /// Load table from the catalog.
-    async fn load_table(&self, table: &TableIdent) -> iceberg::Result<TableV2> {
+    async fn load_table(&self, table: &TableIdent) -> iceberg::Result<Table> {
         execute_with_jni_env(self.jvm, |env| {
             let table_name_str = format!(
                 "{}.{}",
@@ -323,10 +232,10 @@ impl CatalogV2 for JniCatalog {
             let table_metadata = resp.metadata;
 
             let file_io = FileIO::from_path(&metadata_location)?
-                .with_props(self.config.table_io_configs.iter())
+                .with_props(self.file_io_props.iter())
                 .build()?;
 
-            Ok(TableV2::builder()
+            Ok(Table::builder()
                 .file_io(file_io)
                 .identifier(table.clone())
                 .metadata(table_metadata)
@@ -402,14 +311,63 @@ impl CatalogV2 for JniCatalog {
     }
 
     /// Update a table to the catalog.
-    async fn update_table(&self, _commit: TableCommit) -> iceberg::Result<TableV2> {
-        todo!()
+    async fn update_table(&self, mut commit: TableCommit) -> iceberg::Result<Table> {
+        execute_with_jni_env(self.jvm, |env| {
+            let requirements = commit.take_requirements();
+            let updates = commit.take_updates();
+            let request = CommitTableRequest {
+                identifier: commit.identifier().clone(),
+                requirements,
+                updates,
+            };
+            let request_str = serde_json::to_string(&request)?;
+
+            let request_jni_str = env.new_string(&request_str).with_context(|| {
+                format!("Failed to create jni string from request json: {request_str}.")
+            })?;
+
+            let result_json =
+                call_method!(env, self.java_catalog.as_obj(), {String updateTable(String)},
+                &request_jni_str)
+                .with_context(|| {
+                    format!("Failed to update iceberg table: {}", commit.identifier())
+                })?;
+
+            let rust_json_str = jobj_to_str(env, result_json)?;
+
+            let response: CommitTableResponse = serde_json::from_str(&rust_json_str)?;
+
+            tracing::info!(
+                "Table metadata location of {} is {}",
+                commit.identifier(),
+                response.metadata_location
+            );
+
+            let table_metadata = response.metadata;
+
+            let file_io = FileIO::from_path(&response.metadata_location)?
+                .with_props(self.file_io_props.iter())
+                .build()?;
+
+            Ok(Table::builder()
+                .file_io(file_io)
+                .identifier(commit.identifier().clone())
+                .metadata(table_metadata)
+                .build()?)
+        })
+        .map_err(|e| {
+            iceberg::Error::new(
+                iceberg::ErrorKind::Unexpected,
+                "Failed to update iceberg table.",
+            )
+            .with_source(e)
+        })
     }
 }
 
 impl JniCatalog {
     fn build(
-        base_config: BaseCatalogConfig,
+        file_io_props: HashMap<String, String>,
         name: impl ToString,
         catalog_impl: impl ToString,
         java_catalog_props: HashMap<String, String>,
@@ -447,29 +405,19 @@ impl JniCatalog {
             Ok(Self {
                 java_catalog: jni_catalog,
                 jvm,
-                config: base_config,
+                file_io_props,
             })
         })
             .map_err(Into::into)
     }
 
     pub fn build_catalog(
-        base_config: BaseCatalogConfig,
+        file_io_props: HashMap<String, String>,
         name: impl ToString,
         catalog_impl: impl ToString,
         java_catalog_props: HashMap<String, String>,
     ) -> ConnectorResult<Arc<dyn Catalog>> {
-        let catalog = Self::build(base_config, name, catalog_impl, java_catalog_props)?;
+        let catalog = Self::build(file_io_props, name, catalog_impl, java_catalog_props)?;
         Ok(Arc::new(catalog) as Arc<dyn Catalog>)
-    }
-
-    pub fn build_catalog_v2(
-        base_config: BaseCatalogConfig,
-        name: impl ToString,
-        catalog_impl: impl ToString,
-        java_catalog_props: HashMap<String, String>,
-    ) -> ConnectorResult<Arc<dyn CatalogV2>> {
-        let catalog = Self::build(base_config, name, catalog_impl, java_catalog_props)?;
-        Ok(Arc::new(catalog) as Arc<dyn CatalogV2>)
     }
 }

@@ -310,7 +310,7 @@ impl StreamNode for StreamAsOfJoin {
             _ => unreachable!(),
         };
 
-        NodeBody::AsOfJoin(AsOfJoinNode {
+        NodeBody::AsOfJoin(Box::new(AsOfJoinNode {
             join_type: asof_join_type.into(),
             left_key: left_jk_indices_prost,
             right_key: right_jk_indices_prost,
@@ -321,7 +321,7 @@ impl StreamNode for StreamAsOfJoin {
             right_deduped_input_pk_indices,
             output_indices: self.core.output_indices.iter().map(|&x| x as u32).collect(),
             asof_desc: Some(self.inequality_desc),
-        })
+        }))
     }
 }
 

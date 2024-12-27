@@ -8,12 +8,6 @@ license = { workspace = true }
 repository = { workspace = true }
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-[package.metadata.cargo-machete]
-ignored = ["workspace-hack"]
-
-[package.metadata.cargo-udeps.ignore]
-normal = ["workspace-hack"]
-
 [dependencies]
 async-trait = "0.1"
 bytes = { version = "1" }
@@ -34,7 +28,7 @@ risingwave_object_store = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
 risingwave_storage = { workspace = true, features = ["test"] }
-serde = { version = "1", features = ["derive"] }
+serial_test = { version = "3.2", optional = true }
 tokio = { version = "0.2", package = "madsim-tokio" }
 
 [target.'cfg(not(madsim))'.dependencies]
@@ -51,12 +45,11 @@ futures = { version = "0.3", default-features = false, features = [
 futures-async-stream = "0.2.9"
 risingwave_hummock_sdk = { workspace = true }
 risingwave_test_runner = { workspace = true }
-serial_test = "3.2"
 sync-point = { path = "../../utils/sync-point" }
 
 [features]
 failpoints = ["risingwave_storage/failpoints"]
-sync_point = ["sync-point/sync_point"]
+sync_point = ["sync-point/sync_point", "serial_test"]
 test = []
 
 [[bench]]

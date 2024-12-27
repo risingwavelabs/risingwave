@@ -310,7 +310,7 @@ impl StreamTableScan {
             None
         };
 
-        let node_body = PbNodeBody::StreamScan(StreamScanNode {
+        let node_body = PbNodeBody::StreamScan(Box::new(StreamScanNode {
             table_id: self.core.table_desc.table_id.table_id,
             stream_scan_type: self.stream_scan_type as i32,
             // The column indices need to be forwarded to the downstream
@@ -322,7 +322,7 @@ impl StreamTableScan {
             arrangement_table,
             rate_limit: self.base.ctx().overwrite_options().backfill_rate_limit,
             ..Default::default()
-        });
+        }));
 
         Ok(PbStreamNode {
             fields: self.schema().to_prost(),
@@ -338,7 +338,7 @@ impl StreamTableScan {
                 },
                 // Snapshot read
                 PbStreamNode {
-                    node_body: Some(PbNodeBody::BatchPlan(batch_plan_node)),
+                    node_body: Some(PbNodeBody::BatchPlan(Box::new(batch_plan_node))),
                     operator_id: self.batch_plan_id.0 as u64,
                     identity: "BatchPlanNode".into(),
                     fields: snapshot_schema,

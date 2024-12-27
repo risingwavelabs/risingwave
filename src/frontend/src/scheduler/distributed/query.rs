@@ -593,6 +593,7 @@ pub(crate) mod tests {
             webhook_info: None,
             job_id: None,
             engine: Engine::Hummock,
+            clean_watermark_index_in_pk: None,
         };
         let batch_plan_node: PlanRef = LogicalScan::create(
             "".to_owned(),
