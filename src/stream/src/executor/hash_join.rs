@@ -1109,7 +1109,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         }
 
         // cache refill
-        if entry_state_count <= entry_state_max_rows {
+        if MATCHED_ROWS_FROM_CACHE || entry_state_count <= entry_state_max_rows {
             side_match.ht.update_state(key, entry_state);
         }
 
