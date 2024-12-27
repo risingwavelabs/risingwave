@@ -490,6 +490,7 @@ async fn make_log_stream(
 ) -> StreamExecutorResult<VnodeStream<impl super::vnode_stream::BackfillRowStream>> {
     let data_types = upstream_table.schema().data_types();
     let start_pk = start_pk.as_ref();
+    // TODO: may avoid polling all vnodes concurrently at the same time but instead with a limit on concurrency.
     let vnode_streams = try_join_all(upstream_table.vnodes().iter_vnodes().map(move |vnode| {
         upstream_table
             .batch_iter_vnode_log(

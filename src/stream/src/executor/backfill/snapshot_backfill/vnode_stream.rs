@@ -26,6 +26,8 @@ use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 
 use crate::executor::StreamExecutorResult;
 
+/// Can be either one row or two rows. When having two rows, the two rows should be included in the same stream chunk.
+/// The case of two rows is for combining the `UpdateDelete` and `UpdateInsert` of `ChangeLogValue::Update`
 pub(super) type BackfillRowItem = ((Op, OwnedRow), Option<(Op, OwnedRow)>);
 pub(super) trait BackfillRowStream =
     Stream<Item = StreamExecutorResult<BackfillRowItem>> + Sized + 'static;
@@ -122,12 +124,12 @@ impl<St: BackfillRowStream> VnodeStream<St> {
         for vnode_stream in &mut self.streams {
             let vnode_stream = vnode_stream.get_mut().expect("should exist");
             match vnode_stream.stream.as_mut().peek().await {
-                Some(Ok(((_, row), extra))) => {
+                Some(Ok(((_, row), second))) => {
                     let pk = row.project(pk_indices).to_owned_row();
                     if cfg!(debug_assertions)
-                        && let Some((_, extra_row)) = extra
+                        && let Some((_, second_row)) = second
                     {
-                        assert_eq!(pk, extra_row.project(pk_indices).to_owned_row());
+                        assert_eq!(pk, second_row.project(pk_indices).to_owned_row());
                     }
                     on_vnode_progress(vnode_stream.vnode, Some(pk));
                 }
@@ -155,21 +157,21 @@ impl<St: BackfillRowStream> Stream for VnodeStream<St> {
         let capacity = this.data_chunk_builder.batch_size();
         loop {
             match ready!(this.poll_next_row(cx)) {
-                Ok(Some(((op, row), extra))) => {
-                    let may_chunk = if let Some((extra_op, extra_row)) = extra {
+                Ok(Some(((op, row), second))) => {
+                    let may_chunk = if let Some((second_op, second_row)) = second {
                         if this.data_chunk_builder.can_append(2) {
-                            this.ops.extend([op, extra_op]);
+                            this.ops.extend([op, second_op]);
                             assert!(this.data_chunk_builder.append_one_row(row).is_none());
-                            this.data_chunk_builder.append_one_row(extra_row)
+                            this.data_chunk_builder.append_one_row(second_row)
                         } else {
                             let chunk = this
                                 .data_chunk_builder
                                 .consume_all()
                                 .expect("should be Some when not can_append");
                             let ops = replace(&mut this.ops, Vec::with_capacity(capacity));
-                            this.ops.extend([op, extra_op]);
+                            this.ops.extend([op, second_op]);
                             assert!(this.data_chunk_builder.append_one_row(row).is_none());
-                            assert!(this.data_chunk_builder.append_one_row(extra_row).is_none());
+                            assert!(this.data_chunk_builder.append_one_row(second_row).is_none());
                             break Poll::Ready(Some(Ok(StreamChunk::from_parts(ops, chunk))));
                         }
                     } else {
