@@ -867,7 +867,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
 
             macro_rules! match_rows {
                 ($op:ident, $from_cache:literal) => {
-                    Self::handle_fetch_matched_rows::<SIDE, { JoinOp::$op }, $from_cache>(
+                    Self::handle_match_rows::<SIDE, { JoinOp::$op }, $from_cache>(
                         rows,
                         row,
                         key,
@@ -881,6 +881,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 };
             }
 
+            // NOTE(kwannoel): The performance might be slightly worse because of the `box`.
+            // But the code readability is better.
             let stream = match (cache_hit, op) {
                 (true, Op::Insert | Op::UpdateInsert) => match_rows!(Insert, true).boxed(),
                 (true, Op::Delete | Op::UpdateDelete) => match_rows!(Delete, true).boxed(),
@@ -926,7 +928,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
     /// 4. Handle degree table update.
     #[allow(clippy::too_many_arguments)]
     #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
-    async fn handle_fetch_matched_rows<
+    async fn handle_match_rows<
         'a,
         const SIDE: SideTypePrimitive,
         const JOIN_OP: JoinOpPrimitive,
