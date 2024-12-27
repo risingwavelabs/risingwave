@@ -59,7 +59,7 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwIcebergSnapshots>> 
     for (schema_name, source) in iceberg_sources {
         let config = ConnectorProperties::extract(source.with_properties.clone(), false)?;
         if let ConnectorProperties::Iceberg(iceberg_properties) = config {
-            let table: Table = iceberg_properties.load_table_v2().await?;
+            let table: Table = iceberg_properties.load_table().await?;
 
             let snapshots: ConnectorResult<Vec<RwIcebergSnapshots>> = table
                 .metadata()
@@ -78,7 +78,7 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwIcebergSnapshots>> 
                         summary: Value::object(
                             snapshot
                                 .summary()
-                                .other
+                                .additional_properties
                                 .iter()
                                 .map(|(k, v)| (k.as_str(), ValueRef::String(v))),
                         )

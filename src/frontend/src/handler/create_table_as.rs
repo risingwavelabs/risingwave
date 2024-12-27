@@ -114,7 +114,7 @@ pub async fn handle_create_as(
             CreateTableProps {
                 definition: "".to_owned(), // TODO: empty definition means no schema change support
                 append_only,
-                on_conflict,
+                on_conflict: on_conflict.into(),
                 with_version_column,
                 webhook_info: None,
                 engine,

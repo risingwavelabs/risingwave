@@ -98,7 +98,6 @@ fiemap = "0.1.1"
 # tikv = ["tikv-client"]
 test = ["risingwave_hummock_sdk/test"]
 failpoints = ["fail/failpoints"]
-bpf = []
 hm-trace = []
 
 [[bench]]
