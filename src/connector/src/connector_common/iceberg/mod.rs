@@ -24,9 +24,6 @@ use ::iceberg::table::Table;
 use ::iceberg::{Catalog, TableIdent};
 use anyhow::{anyhow, Context};
 use iceberg_catalog_glue::{AWS_ACCESS_KEY_ID, AWS_REGION_NAME, AWS_SECRET_ACCESS_KEY};
-use icelake::catalog::{
-    load_iceberg_base_catalog_config, BaseCatalogConfig, CATALOG_NAME, CATALOG_TYPE,
-};
 use risingwave_common::bail;
 use serde_derive::Deserialize;
 use serde_with::serde_as;
@@ -110,58 +107,28 @@ impl IcebergCommon {
     fn build_jni_catalog_configs(
         &self,
         java_catalog_props: &HashMap<String, String>,
-    ) -> ConnectorResult<(BaseCatalogConfig, HashMap<String, String>)> {
+    ) -> ConnectorResult<(HashMap<String, String>, HashMap<String, String>)> {
         let mut iceberg_configs = HashMap::new();
 
-        let base_catalog_config = {
+        let file_io_props = {
             let catalog_type = self.catalog_type().to_owned();
 
-            iceberg_configs.insert(CATALOG_TYPE.to_owned(), catalog_type.clone());
-            iceberg_configs.insert(CATALOG_NAME.to_owned(), self.catalog_name());
-
             if let Some(region) = &self.region {
-                // icelake
-                iceberg_configs.insert("iceberg.table.io.region".to_owned(), region.clone());
                 // iceberg-rust
-                iceberg_configs.insert(format!("iceberg.table.io.{}", S3_REGION), region.clone());
+                iceberg_configs.insert(S3_REGION.to_owned(), region.clone());
             }
 
             if let Some(endpoint) = &self.endpoint {
-                iceberg_configs.insert("iceberg.table.io.endpoint".to_owned(), endpoint.clone());
-
                 // iceberg-rust
-                iceberg_configs.insert(
-                    format!("iceberg.table.io.{}", S3_ENDPOINT),
-                    endpoint.clone(),
-                );
-            }
-
-            // icelake
-            if let Some(access_key) = &self.access_key {
-                iceberg_configs.insert(
-                    "iceberg.table.io.access_key_id".to_owned(),
-                    access_key.clone(),
-                );
-            }
-            if let Some(secret_key) = &self.secret_key {
-                iceberg_configs.insert(
-                    "iceberg.table.io.secret_access_key".to_owned(),
-                    secret_key.clone(),
-                );
+                iceberg_configs.insert(S3_ENDPOINT.to_owned(), endpoint.clone());
             }
 
             // iceberg-rust
             if let Some(access_key) = &self.access_key {
-                iceberg_configs.insert(
-                    format!("iceberg.table.io.{}", S3_ACCESS_KEY_ID),
-                    access_key.clone(),
-                );
+                iceberg_configs.insert(S3_ACCESS_KEY_ID.to_owned(), access_key.clone());
             }
             if let Some(secret_key) = &self.secret_key {
-                iceberg_configs.insert(
-                    format!("iceberg.table.io.{}", S3_SECRET_ACCESS_KEY),
-                    secret_key.clone(),
-                );
+                iceberg_configs.insert(S3_SECRET_ACCESS_KEY.to_owned(), secret_key.clone());
             }
 
             match &self.warehouse_path {
@@ -202,11 +169,12 @@ impl IcebergCommon {
             }
             let enable_config_load = self.enable_config_load.unwrap_or(false);
             iceberg_configs.insert(
-                "iceberg.table.io.disable_config_load".to_owned(),
+                // TODO: `disable_config_load` is outdated.
+                "disable_config_load".to_owned(),
                 (!enable_config_load).to_string(),
             );
 
-            load_iceberg_base_catalog_config(&iceberg_configs)?
+            iceberg_configs
         };
 
         // Prepare jni configs, for details please see https://iceberg.apache.org/docs/latest/aws/
@@ -298,7 +266,7 @@ impl IcebergCommon {
             }
         }
 
-        Ok((base_catalog_config, java_catalog_configs))
+        Ok((file_io_props, java_catalog_configs))
     }
 }
 
@@ -424,7 +392,7 @@ impl IcebergCommon {
                 if catalog_type == "hive" || catalog_type == "jdbc" || catalog_type == "rest" =>
             {
                 // Create java catalog
-                let (base_catalog_config, java_catalog_props) =
+                let (file_io_props, java_catalog_props) =
                     self.build_jni_catalog_configs(java_catalog_props)?;
                 let catalog_impl = match catalog_type {
                     "hive" => "org.apache.iceberg.hive.HiveCatalog",
@@ -434,7 +402,7 @@ impl IcebergCommon {
                 };
 
                 jni_catalog::JniCatalog::build_catalog(
-                    base_catalog_config,
+                    file_io_props,
                     self.catalog_name(),
                     catalog_impl,
                     java_catalog_props,
