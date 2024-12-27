@@ -225,55 +225,25 @@ pub struct JoinHashMap<K: HashKey, S: StateStore> {
 }
 
 impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
-    pub(crate) fn get_table_mut_refs(
-        &mut self,
-    ) -> (
-        &[usize],
-        &[DataType],
-        &[usize],
-        &OrderedRowSerde,
-        &mut StateTable<S>,
-        Option<&mut StateTable<S>>,
-    ) {
-        let degree_state = self.degree_state.as_mut();
-        let (order_key_indices, pk_indices, state_table) = (
-            &self.state.order_key_indices,
-            &self.state.pk_indices,
-            &mut self.state.table,
-        );
-        (
-            order_key_indices,                  // degree table update
-            &self.join_key_data_types,          // decode key from state_table
-            pk_indices,                         // decode pk from state_table
-            &self.pk_serializer,                // serialize pk for entry_state (state table)
-            state_table,                        // state table
-            degree_state.map(|d| &mut d.table), // for degree table
-        )
-    }
-
     pub(crate) fn get_degree_state_mut_ref(&mut self) -> &mut Option<TableInner<S>> {
         &mut self.degree_state
     }
 
-    /// NOTE(kwannoel): This allows us to concurrently stream records from the state_table,
+    /// NOTE(kwannoel): This allows us to concurrently stream records from the `state_table`,
     /// and update the degree table, without using `unsafe` code.
     ///
     /// This is because we obtain separate references to separate parts of the `JoinHashMap`,
-    /// instead of reusing the same reference to `JoinHashMap` for concurrent read access to state_table,
+    /// instead of reusing the same reference to `JoinHashMap` for concurrent read access to `state_table`,
     /// and write access to the degree table.
     pub(crate) async fn fetch_matched_rows_and_get_degree_table_ref<'a>(
         &'a mut self,
         key: &'a K,
     ) -> StreamExecutorResult<(
         impl Stream<Item = StreamExecutorResult<(PkType, JoinRow<OwnedRow>)>> + 'a,
-        &mut Option<TableInner<S>>,
+        &'a mut Option<TableInner<S>>,
     )> {
         let degree_state = &mut self.degree_state;
-        let (order_key_indices, pk_indices, state_table) = (
-            &self.state.order_key_indices,
-            &self.state.pk_indices,
-            &mut self.state.table,
-        );
+        let (pk_indices, state_table) = (&self.state.pk_indices, &mut self.state.table);
         let degrees = if let Some(ref degree_state) = degree_state {
             Some(fetch_degrees(key, &self.join_key_data_types, &degree_state.table).await?)
         } else {
@@ -321,6 +291,29 @@ pub(crate) async fn into_stream<'a, K: HashKey, S: StateStore>(
     }
 }
 
+/// We use this to fetch ALL degrees into memory.
+/// We use this instead of a streaming interface.
+/// It is necessary because we must update the `degree_state_table` concurrently.
+/// If we obtain the degrees in a stream,
+/// we will need to hold an immutable reference to the state table for the entire lifetime,
+/// preventing us from concurrently updating the state table.
+///
+/// The cost of fetching all degrees upfront is acceptable. We currently already do so
+/// in `fetch_cached_state`.
+/// The memory use should be limited since we only store a u64.
+///
+/// Let's say we have amplification of 1B, we will have 1B * 8 bytes ~= 8GB
+///
+/// We can also have further optimization, to permit breaking the streaming update,
+/// to flush the in-memory degrees, if this is proven to have high memory consumption.
+///
+/// TODO(kwannoel): Perhaps we can cache these separately from matched rows too.
+/// Because matched rows may occupy a larger capacity.
+///
+/// Argument for this:
+/// We only hit this when cache miss. When cache miss, we will have this as one off cost.
+/// Keeping this cached separately from matched rows is beneficial.
+/// Then we can evict matched rows, without touching the degrees.
 async fn fetch_degrees<K: HashKey, S: StateStore>(
     key: &K,
     join_key_data_types: &[DataType],
@@ -375,25 +368,17 @@ pub struct TableInner<S: StateStore> {
     pk_indices: Vec<usize>,
     /// Indices of the join key in a state row
     join_key_indices: Vec<usize>,
-    /// Join key datatypes
-    join_key_data_types: Vec<DataType>,
     /// This should be identical to the pk in state table.
     order_key_indices: Vec<usize>,
     pub(crate) table: StateTable<S>,
 }
 
 impl<S: StateStore> TableInner<S> {
-    pub fn new(
-        pk_indices: Vec<usize>,
-        join_key_indices: Vec<usize>,
-        join_key_data_types: Vec<DataType>,
-        table: StateTable<S>,
-    ) -> Self {
+    pub fn new(pk_indices: Vec<usize>, join_key_indices: Vec<usize>, table: StateTable<S>) -> Self {
         let order_key_indices = table.pk_indices().to_vec();
         Self {
             pk_indices,
             join_key_indices,
-            join_key_data_types,
             order_key_indices,
             table,
         }
@@ -454,7 +439,6 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         let state = TableInner {
             pk_indices: state_pk_indices,
             join_key_indices: state_join_key_indices,
-            join_key_data_types: join_key_data_types.clone(),
             order_key_indices: state_table.pk_indices().to_vec(),
             table: state_table,
         };
@@ -740,10 +724,6 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         Ok(entry_state)
     }
 
-    pub fn error_context(&self, row: &impl Row) -> String {
-        self.state.error_context(row)
-    }
-
     pub async fn flush(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         self.metrics.flush();
         self.state.table.commit(epoch).await?;
@@ -881,43 +861,6 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         self.inner.put(key.clone(), HashValueWrapper(Some(state)));
     }
 
-    /// Manipulate the degree of the given [`JoinRow`] and [`EncodedJoinRow`] with `action`, both in
-    /// memory and in the degree table.
-    fn manipulate_degree(
-        &mut self,
-        join_row: &mut JoinRow<OwnedRow>,
-        action: impl Fn(&mut DegreeType),
-    ) {
-        // TODO: no need to `into_owned_row` here due to partial borrow.
-        let old_degree = join_row
-            .to_table_rows(&self.state.order_key_indices)
-            .1
-            .into_owned_row();
-
-        action(&mut join_row.degree);
-
-        let new_degree = join_row.to_table_rows(&self.state.order_key_indices).1;
-        let degree_state = self.degree_state.as_mut().unwrap();
-        degree_state.table.update(old_degree, new_degree);
-    }
-
-    /// Increment the degree of the given [`JoinRow`] and [`EncodedJoinRow`] with `action`, both in
-    /// memory and in the degree table.
-    pub fn inc_degree(&mut self, join_row: &mut JoinRow<OwnedRow>) {
-        self.manipulate_degree(join_row, |d| *d += 1)
-    }
-
-    /// Decrement the degree of the given [`JoinRow`] and [`EncodedJoinRow`] with `action`, both in
-    /// memory and in the degree table.
-    pub fn dec_degree(&mut self, join_row: &mut JoinRow<OwnedRow>) {
-        self.manipulate_degree(join_row, |d| {
-            *d = d.checked_sub(1).unwrap_or_else(|| {
-                consistency_panic!("Tried to decrement zero join row degree");
-                0
-            });
-        })
-    }
-
     /// Evict the cache.
     pub fn evict(&mut self) {
         self.inner.evict();
@@ -964,15 +907,11 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     }
 }
 
-use risingwave_common::array::{Op, RowRef};
 use risingwave_common_estimate_size::KvSize;
-use risingwave_expr::expr::NonStrictExpression;
 use thiserror::Error;
 
 use super::*;
-use crate::executor::join::builder::JoinChunkBuilder;
 use crate::executor::prelude::{try_stream, Stream};
-use crate::executor::Watermark;
 
 /// We manages a `HashMap` in memory for all entries belonging to a join key.
 /// When evicted, `cached` does not hold any entries.
