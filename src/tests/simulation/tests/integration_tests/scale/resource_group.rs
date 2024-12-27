@@ -29,9 +29,9 @@ async fn test_resource_group() -> Result<()> {
     config.compute_nodes = 3;
     config.compute_node_cores = 2;
     config.compute_resource_groups = HashMap::from([
-        (1, DEFAULT_RESOURCE_GROUP.to_string()),
-        (2, "test".to_string().clone()),
-        (3, "test".to_string()),
+        (1, DEFAULT_RESOURCE_GROUP.to_owned()),
+        (2, "test".to_owned()),
+        (3, "test".to_owned()),
     ]);
 
     let mut cluster = Cluster::start(config).await?;

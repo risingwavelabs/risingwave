@@ -435,7 +435,15 @@ impl CatalogController {
             })
             .collect();
 
-        Ok(RescheduleWorkingSet { fragments, actors, actor_dispatchers, fragment_downstreams, fragment_upstreams, job_resource_groups, related_jobs })
+        Ok(RescheduleWorkingSet {
+            fragments,
+            actors,
+            actor_dispatchers,
+            fragment_downstreams,
+            fragment_upstreams,
+            job_resource_groups,
+            related_jobs,
+        })
     }
 }
 
