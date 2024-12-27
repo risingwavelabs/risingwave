@@ -187,8 +187,11 @@ function buildFragmentDependencyAsEdges(
 const SIDEBAR_WIDTH = 225
 
 export class BackPressureSnapshot {
-  // The first fetch result. Key is `<fragmentId>-<downstreamFragmentId>`, value is the blocked duration in ns.
+  // The first fetch result.
+  // key: `<fragmentId>_<downstreamFragmentId>`
+  // value: output blocking duration in nanoseconds.
   result: Map<string, number>
+
   // The time of the current fetch in milliseconds. (`Date.now()`)
   time: number
 
@@ -202,7 +205,7 @@ export class BackPressureSnapshot {
   }): BackPressureSnapshot {
     const result = new Map<string, number>()
     for (const [key, info] of Object.entries(channelStats)) {
-      result.set(key, info.value)
+      result.set(key, info.value / info.actorCount)
     }
     return new BackPressureSnapshot(result, Date.now())
   }
@@ -212,7 +215,10 @@ export class BackPressureSnapshot {
     for (const [key, value] of this.result) {
       const initialValue = initial.result.get(key)
       if (initialValue) {
-        result.set(key, (value - initialValue) / (this.time - initial.time))
+        result.set(
+          key,
+          (value - initialValue) / (this.time - initial.time) / 1000000
+        )
       }
     }
     return result
@@ -329,8 +335,6 @@ export default function Streaming() {
   }
 
   // Keep the initial snapshot to calculate the rate of back pressure
-  const [backPressureSnapshot, setBackPressureSnapshot] =
-    useState<BackPressureSnapshot>()
   const [backPressureRate, setBackPressureRate] =
     useState<Map<string, number>>()
 
@@ -339,16 +343,20 @@ export default function Streaming() {
   }>()
 
   useEffect(() => {
+    // The initial snapshot is used to calculate the rate of back pressure
+    // It's not used to render the page directly, so we don't need to set it in the state
+    let initialSnapshot: BackPressureSnapshot | undefined
+
     function refresh() {
       api.get("/metrics/fragment/embedded_back_pressures").then(
         (response) => {
           let snapshot = BackPressureSnapshot.fromResponse(
             response.channelStats
           )
-          if (!backPressureSnapshot) {
-            setBackPressureSnapshot(snapshot)
+          if (!initialSnapshot) {
+            initialSnapshot = snapshot
           } else {
-            setBackPressureRate(snapshot.getRate(backPressureSnapshot))
+            setBackPressureRate(snapshot.getRate(initialSnapshot!))
           }
           setFragmentStats(response.fragmentStats)
         },
@@ -358,8 +366,8 @@ export default function Streaming() {
         }
       )
     }
-    refresh()
-    const interval = setInterval(refresh, INTERVAL_MS)
+    refresh() // run once immediately
+    const interval = setInterval(refresh, INTERVAL_MS) // and then run every interval
     return () => {
       clearInterval(interval)
     }

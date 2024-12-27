@@ -96,8 +96,6 @@ export default function StreamingGraph() {
   const relationDependency = relationDependencyCallback()
 
   // Periodically fetch fragment-level back-pressure from Meta node
-  const [backPressureSnapshot, setBackPressureSnapshot] =
-    useState<BackPressureSnapshot>()
   const [backPressureRate, setBackPressureRate] =
     useState<Map<string, number>>()
   const [relationStats, setRelationStats] = useState<{
@@ -105,21 +103,25 @@ export default function StreamingGraph() {
   }>()
 
   useEffect(() => {
+    // The initial snapshot is used to calculate the rate of back pressure
+    // It's not used to render the page directly, so we don't need to set it in the state
+    let initialSnapshot: BackPressureSnapshot | undefined
+
     if (resetEmbeddedBackPressures) {
-      setBackPressureSnapshot(undefined)
       setBackPressureRate(undefined)
       toggleResetEmbeddedBackPressures()
     }
+
     function refresh() {
       api.get("/metrics/fragment/embedded_back_pressures").then(
         (response) => {
           let snapshot = BackPressureSnapshot.fromResponse(
             response.channelStats
           )
-          if (!backPressureSnapshot) {
-            setBackPressureSnapshot(snapshot)
+          if (!initialSnapshot) {
+            initialSnapshot = snapshot
           } else {
-            setBackPressureRate(snapshot.getRate(backPressureSnapshot))
+            setBackPressureRate(snapshot.getRate(initialSnapshot!))
           }
           setRelationStats(response.relationStats)
         },
@@ -129,8 +131,8 @@ export default function StreamingGraph() {
         }
       )
     }
-    refresh()
-    const interval = setInterval(refresh, INTERVAL_MS)
+    refresh() // run once immediately
+    const interval = setInterval(refresh, INTERVAL_MS) // and then run every interval
     return () => {
       clearInterval(interval)
     }
