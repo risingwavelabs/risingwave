@@ -291,7 +291,7 @@ db error: ERROR: Failed to run the query
 Caused by these errors (recent errors listed first):
   1: Expr error
   2: expects an integer or expression that can be evaluated to an integer after LIMIT,
-but the evaluation of the expression returns error:Expr error: error while evaluating expression `str_parse('2.2')`
+but the evaluation of the expression returns error:Expr error: error while evaluating expression `str_parse('2.2')`: Parse error: bigint invalid digit found in string
 
 
 statement error
