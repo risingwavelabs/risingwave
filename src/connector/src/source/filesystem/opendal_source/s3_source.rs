@@ -37,12 +37,10 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
             .region(&s3_properties.region_name);
 
         if let Some(endpoint_url) = s3_properties.endpoint_url {
-            println!("这里 endpoint_url = {:?}", endpoint_url);
             builder = builder.endpoint(&endpoint_url);
         }
 
         if let Some(access) = s3_properties.access {
-            println!("这里 access = {:?}", access);
             builder = builder.access_key_id(&access);
         } else {
             tracing::error!(
@@ -52,7 +50,6 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
         }
 
         if let Some(secret) = s3_properties.secret {
-            println!("这里 secret = {:?}", secret);
             builder = builder.secret_access_key(&secret);
         } else {
             tracing::error!(
@@ -62,7 +59,6 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
         }
 
         if let Some(assume_role) = assume_role {
-            println!("多了一个assume_role = {:?}", assume_role);
             builder = builder.role_arn(&assume_role);
         }
 
