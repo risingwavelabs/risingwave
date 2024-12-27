@@ -23,12 +23,8 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from "react"
 import RelationGraph, { boxHeight, boxWidth } from "../components/RelationGraph"
 import Title from "../components/Title"
 import useErrorToast from "../hook/useErrorToast"
+import api from "../lib/api/api"
 import useFetch from "../lib/api/fetch"
-import {
-  calculateBPRate,
-  calculateCumulativeBp,
-  fetchEmbeddedBackPressure,
-} from "../lib/api/metric"
 import {
   Relation,
   getFragmentVertexToRelationMap,
@@ -37,19 +33,11 @@ import {
   relationIsStreamingJob,
 } from "../lib/api/streaming"
 import { RelationPoint } from "../lib/layout"
-import { BackPressureInfo, RelationStats } from "../proto/gen/monitor_service"
+import { RelationStats } from "../proto/gen/monitor_service"
+import { BackPressureSnapshot } from "./fragment_graph"
 
 const SIDEBAR_WIDTH = "200px"
 const INTERVAL_MS = 5000
-
-// The state of the back pressure metrics.
-// The metrics from previous fetch are stored here to calculate the rate.
-interface EmbeddedBackPressureInfo {
-  previous: BackPressureInfo[]
-  current: BackPressureInfo[]
-  totalBackpressureNs: BackPressureInfo[]
-  totalDurationNs: number
-}
 
 function buildDependencyAsEdges(
   list: Relation[],
@@ -107,43 +95,32 @@ export default function StreamingGraph() {
 
   const relationDependency = relationDependencyCallback()
 
-  // Periodically fetch back-pressure from Meta node
-  // Didn't call `useFetch()` because the `setState` way is special.
-  const [embeddedBackPressureInfo, setEmbeddedBackPressureInfo] =
-    useState<EmbeddedBackPressureInfo>()
+  // Periodically fetch fragment-level back-pressure from Meta node
+  const [backPressureSnapshot, setBackPressureSnapshot] =
+    useState<BackPressureSnapshot>()
+  const [backPressureRate, setBackPressureRate] =
+    useState<Map<string, number>>()
   const [relationStats, setRelationStats] = useState<{
     [key: number]: RelationStats
   }>()
 
   useEffect(() => {
     if (resetEmbeddedBackPressures) {
-      setEmbeddedBackPressureInfo(undefined)
+      setBackPressureSnapshot(undefined)
+      setBackPressureRate(undefined)
       toggleResetEmbeddedBackPressures()
     }
     function refresh() {
-      fetchEmbeddedBackPressure().then(
+      api.get("/metrics/fragment/embedded_back_pressures").then(
         (response) => {
-          let newBP = response.backPressureInfos
-          setEmbeddedBackPressureInfo((prev) =>
-            prev
-              ? {
-                  previous: prev.current,
-                  current: newBP,
-                  totalBackpressureNs: calculateCumulativeBp(
-                    prev.totalBackpressureNs,
-                    prev.current,
-                    newBP
-                  ),
-                  totalDurationNs:
-                    prev.totalDurationNs + INTERVAL_MS * 1000 * 1000,
-                }
-              : {
-                  previous: newBP, // Use current value to show zero rate, but it's fine
-                  current: newBP,
-                  totalBackpressureNs: [],
-                  totalDurationNs: 0,
-                }
+          let snapshot = BackPressureSnapshot.fromResponse(
+            response.channelStats
           )
+          if (!backPressureSnapshot) {
+            setBackPressureSnapshot(snapshot)
+          } else {
+            setBackPressureRate(snapshot.getRate(backPressureSnapshot))
+          }
           setRelationStats(response.relationStats)
         },
         (e) => {
@@ -159,33 +136,27 @@ export default function StreamingGraph() {
     }
   }, [toast, resetEmbeddedBackPressures])
 
-  // Get relationId-relationId -> backpressure rate map
+  // Convert fragment-level backpressure rate map to relation-level backpressure rate
   const backPressures: Map<string, number> | undefined = useMemo(() => {
     if (!fragmentVertexToRelationMap) {
       return new Map<string, number>()
     }
     let inMap = fragmentVertexToRelationMap.inMap
     let outMap = fragmentVertexToRelationMap.outMap
-    if (embeddedBackPressureInfo) {
+    if (backPressureRate) {
       let map = new Map<string, number>()
-
-      const metrics = calculateBPRate(
-        embeddedBackPressureInfo.totalBackpressureNs,
-        embeddedBackPressureInfo.totalDurationNs
-      )
-      for (const m of metrics.outputBufferBlockingDuration) {
-        let output = Number(m.metric.fragmentId)
-        let input = Number(m.metric.downstreamFragmentId)
-        if (outMap[output] && inMap[input]) {
-          output = outMap[output]
-          input = inMap[input]
-          let key = `${output}_${input}`
-          map.set(key, m.sample[0].value)
+      for (const [key, value] of backPressureRate) {
+        const [outputFragment, inputFragment] = key.split("_").map(Number)
+        if (outMap[outputFragment] && inMap[inputFragment]) {
+          const outputRelation = outMap[outputFragment]
+          const inputRelation = inMap[inputFragment]
+          let key = `${outputRelation}_${inputRelation}`
+          map.set(key, value)
         }
       }
       return map
     }
-  }, [embeddedBackPressureInfo, fragmentVertexToRelationMap])
+  }, [backPressureRate, fragmentVertexToRelationMap])
 
   const retVal = (
     <Flex p={3} height="calc(100vh - 20px)" flexDirection="column">

@@ -42,6 +42,7 @@ import FragmentDependencyGraph from "../components/FragmentDependencyGraph"
 import FragmentGraph from "../components/FragmentGraph"
 import Title from "../components/Title"
 import useErrorToast from "../hook/useErrorToast"
+import api from "../lib/api/api"
 import useFetch from "../lib/api/fetch"
 import {
   getFragmentsByJobId,
@@ -50,9 +51,8 @@ import {
 } from "../lib/api/streaming"
 import { FragmentBox } from "../lib/layout"
 import { TableFragments, TableFragments_Fragment } from "../proto/gen/meta"
-import { BackPressureInfo, FragmentStats, GetBackPressureResponse } from "../proto/gen/monitor_service"
+import { BackPressureInfo, FragmentStats } from "../proto/gen/monitor_service"
 import { Dispatcher, MergeNode, StreamNode } from "../proto/gen/stream_plan"
-import api from "../lib/api/api"
 
 interface DispatcherNode {
   [actorId: number]: Dispatcher[]
@@ -186,7 +186,7 @@ function buildFragmentDependencyAsEdges(
 
 const SIDEBAR_WIDTH = 225
 
-class BackPressureSnapshot {
+export class BackPressureSnapshot {
   // The first fetch result. Key is `<fragmentId>-<downstreamFragmentId>`, value is the blocked duration in ns.
   result: Map<string, number>
   // The time of the current fetch in milliseconds. (`Date.now()`)
@@ -197,7 +197,9 @@ class BackPressureSnapshot {
     this.time = time
   }
 
-  static fromResponse(channelStats: { [key: string]: BackPressureInfo }): BackPressureSnapshot {
+  static fromResponse(channelStats: {
+    [key: string]: BackPressureInfo
+  }): BackPressureSnapshot {
     const result = new Map<string, number>()
     for (const [key, info] of Object.entries(channelStats)) {
       result.set(key, info.value)
@@ -327,20 +329,22 @@ export default function Streaming() {
   }
 
   // Keep the initial snapshot to calculate the rate of back pressure
-  const [backPressureSnapshot, setBackPressureSnapshot] = useState<BackPressureSnapshot>()
-  const [backPressureRate, setBackPressureRate] = useState<Map<string, number>>()
-  
+  const [backPressureSnapshot, setBackPressureSnapshot] =
+    useState<BackPressureSnapshot>()
+  const [backPressureRate, setBackPressureRate] =
+    useState<Map<string, number>>()
+
   const [fragmentStats, setFragmentStats] = useState<{
     [key: number]: FragmentStats
   }>()
 
   useEffect(() => {
     function refresh() {
-      api.get(
-        "/metrics/fragment/embedded_back_pressures"
-      ).then(
+      api.get("/metrics/fragment/embedded_back_pressures").then(
         (response) => {
-          let snapshot = BackPressureSnapshot.fromResponse(response.channelStats);
+          let snapshot = BackPressureSnapshot.fromResponse(
+            response.channelStats
+          )
           if (!backPressureSnapshot) {
             setBackPressureSnapshot(snapshot)
           } else {
