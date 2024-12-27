@@ -15,7 +15,6 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::{Arc, LazyLock};
 
-use anyhow::Context;
 use either::Either;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap, hashset};
@@ -43,7 +42,6 @@ use risingwave_sqlparser::ast::{
     CreateSink, CreateSinkStatement, EmitMode, Encode, ExplainOptions, Format, FormatEncodeOptions,
     Query, Statement,
 };
-use risingwave_sqlparser::parser::Parser;
 
 use super::create_mv::get_column_names;
 use super::create_source::UPSTREAM_SOURCE_KEY;
@@ -504,10 +502,7 @@ pub(crate) async fn reparse_table_for_sink(
     table_catalog: &Arc<TableCatalog>,
 ) -> Result<(StreamFragmentGraph, Table, Option<PbSource>)> {
     // Retrieve the original table definition and parse it to AST.
-    let [definition]: [_; 1] = Parser::parse_sql(&table_catalog.definition)
-        .context("unable to parse original table definition")?
-        .try_into()
-        .unwrap();
+    let definition = table_catalog.create_stmt()?;
     let Statement::CreateTable {
         name,
         format_encode,
