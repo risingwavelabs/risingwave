@@ -183,6 +183,7 @@ impl Binder {
         };
         let limit_expr = limit.map(|expr| self.bind_expr(expr)).transpose()?;
         let limit = if let Some(limit_expr) = limit_expr {
+            // wrong type error is handled here
             let limit_cast_to_bigint = limit_expr.cast_assign(DataType::Int64).map_err(|_| {
                 RwError::from(ErrorCode::ExprError(
                     "expects an integer or expression that can be evaluated to an integer after LIMIT"
@@ -191,24 +192,31 @@ impl Binder {
             })?;
             let limit = match limit_cast_to_bigint.try_fold_const() {
                 Some(Ok(Some(datum))) => {
-                    let value = datum.as_integral();
-                    if value < 0 {
+                    let value = datum.as_int64();
+                    if *value < 0 {
                         return Err(ErrorCode::ExprError(
-                            format!("LIMIT must not be negative, but found: {}", value).into(),
+                            format!("LIMIT must not be negative, but found: {}", *value).into(),
                         )
                             .into());
                     }
-                    value as u64
+                    *value as u64
                 }
                 // If evaluated to NULL, we follow PG to treat NULL as no limit
                 Some(Ok(None)) => {
                     u64::MAX
                 }
-                // wrong type, not const, eval error all belongs to this branch
-                _ => return Err(ErrorCode::ExprError(
-                    "expects an integer or expression that can be evaluated to an integer after LIMIT"
+                // not const error
+                None => return Err(ErrorCode::ExprError(
+                    "expects an integer or expression that can be evaluated to an integer after LIMIT, but found non-const expression"
                         .into(),
                 ).into()),
+                // eval error
+                Some(Err(e)) => {
+                    return Err(ErrorCode::ExprError(
+                        format!("expects an integer or expression that can be evaluated to an integer after LIMIT,\nbut the evaluation of the expression returns error:{}", e
+                        ).into(),
+                    ).into())
+                }
             };
             Some(limit)
         } else {
