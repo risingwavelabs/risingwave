@@ -847,7 +847,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 .iter()
                 .all(|column_idx| unsafe { row.datum_at_unchecked(*column_idx).is_some() });
 
-            let matched_rows = if key_satisfies_non_null_requirement {
+            let cache_lookup_result = if key_satisfies_non_null_requirement {
                 if enable_strict_consistency() {
                     Self::hash_eq_match_opt(key, &mut side_match.ht)
                 } else {
@@ -860,21 +860,32 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
 
             let mut total_matches = 0;
 
-            match matched_rows {
-                CacheResult::Hit(rows) => match op {
+            let (cache_hit, rows) = match cache_lookup_result {
+                CacheResult::Hit(rows) => (true, rows),
+                CacheResult::Miss => (false, None),
+            };
+
+            macro_rules! dispatch_match_rows {
+                ($op:ident, $from_cache:literal) => {
+                    Self::handle_fetch_matched_rows::<SIDE, { JoinOp::$op }, $from_cache>(
+                        rows,
+                        row,
+                        key,
+                        &mut hashjoin_chunk_builder,
+                        side_match,
+                        side_update,
+                        &useful_state_clean_columns,
+                        cond,
+                        append_only_optimize,
+                    )
+                };
+            }
+
+            match cache_hit {
+                true => match op {
                     Op::Insert | Op::UpdateInsert => {
                         #[for_await]
-                        for chunk in Self::handle_fetch_matched_rows::<SIDE, { JoinOp::Insert }, true>(
-                            rows,
-                            row,
-                            key,
-                            &mut hashjoin_chunk_builder,
-                            side_match,
-                            side_update,
-                            &useful_state_clean_columns,
-                            cond,
-                            append_only_optimize,
-                        ) {
+                        for chunk in dispatch_match_rows!(Insert, true) {
                             let chunk = chunk?;
                             total_matches += chunk.cardinality();
                             yield chunk;
@@ -882,40 +893,18 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     }
                     Op::Delete | Op::UpdateDelete => {
                         #[for_await]
-                        for chunk in Self::handle_fetch_matched_rows::<SIDE, { JoinOp::Delete }, true>(
-                            rows,
-                            row,
-                            key,
-                            &mut hashjoin_chunk_builder,
-                            side_match,
-                            side_update,
-                            &useful_state_clean_columns,
-                            cond,
-                            append_only_optimize,
-                        ) {
+                        for chunk in dispatch_match_rows!(Delete, true) {
                             let chunk = chunk?;
                             total_matches += chunk.cardinality();
                             yield chunk;
                         }
                     }
                 },
-                CacheResult::Miss => {
+                false => {
                     match op {
                         Op::Insert | Op::UpdateInsert => {
                             #[for_await]
-                            for chunk in
-                                Self::handle_fetch_matched_rows::<SIDE, { JoinOp::Insert }, false>(
-                                    None,
-                                    row,
-                                    key,
-                                    &mut hashjoin_chunk_builder,
-                                    side_match,
-                                    side_update,
-                                    &useful_state_clean_columns,
-                                    cond,
-                                    append_only_optimize,
-                                )
-                            {
+                            for chunk in dispatch_match_rows!(Insert, false) {
                                 let chunk = chunk?;
                                 total_matches += chunk.cardinality();
                                 yield chunk;
@@ -923,19 +912,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         }
                         Op::Delete | Op::UpdateDelete => {
                             #[for_await]
-                            for chunk in
-                                Self::handle_fetch_matched_rows::<SIDE, { JoinOp::Delete }, false>(
-                                    None,
-                                    row,
-                                    key,
-                                    &mut hashjoin_chunk_builder,
-                                    side_match,
-                                    side_update,
-                                    &useful_state_clean_columns,
-                                    cond,
-                                    append_only_optimize,
-                                )
-                            {
+                            for chunk in dispatch_match_rows!(Delete, false) {
                                 let chunk = chunk?;
                                 total_matches += chunk.cardinality();
                                 yield chunk;
