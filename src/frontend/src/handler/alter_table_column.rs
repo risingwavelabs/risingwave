@@ -41,7 +41,7 @@ use crate::expr::{Expr, ExprImpl, InputRef, Literal};
 use crate::handler::create_sink::{fetch_incoming_sinks, insert_merger_to_union_with_project};
 use crate::handler::create_table::bind_table_constraints;
 use crate::session::SessionImpl;
-use crate::utils::data_type::to_ast_data_type;
+use crate::utils::data_type::DataTypeToAst;
 use crate::{Binder, TableCatalog};
 
 /// Used in auto schema change process
@@ -99,10 +99,10 @@ pub async fn get_new_table_definition_for_cdc_table(
         // if the column exists in the original catalog, use it to construct the column definition.
         // since we don't support altering the column type right now
         if let Some(original_col) = orig_column_catalog.get(new_col.name()) {
-            let ty = to_ast_data_type(original_col.data_type())?;
+            let ty = original_col.data_type().to_ast()?;
             new_column_defs.push(ColumnDef::new(original_col.name().into(), ty, None, vec![]));
         } else {
-            let ty = to_ast_data_type(new_col.data_type())?;
+            let ty = new_col.data_type().to_ast()?;
             new_column_defs.push(ColumnDef::new(new_col.name().into(), ty, None, vec![]));
         }
     }

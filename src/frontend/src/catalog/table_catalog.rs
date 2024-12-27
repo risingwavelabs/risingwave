@@ -42,7 +42,7 @@ use crate::expr::ExprImpl;
 use crate::optimizer::property::Cardinality;
 use crate::session::current::notice_to_user;
 use crate::user::UserId;
-use crate::utils::data_type::to_ast_data_type;
+use crate::utils::data_type::DataTypeToAst;
 
 /// `TableCatalog` Includes full information about a table.
 ///
@@ -389,7 +389,7 @@ impl TableCatalog {
 
             let column_def = ColumnDef {
                 name: column.name().into(),
-                data_type: Some(to_ast_data_type(column.data_type())?),
+                data_type: Some(column.data_type().to_ast()?),
                 collation: None,
                 options: Vec::new(), // pk will be specified with table constraints
             };
