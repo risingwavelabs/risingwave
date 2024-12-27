@@ -273,7 +273,7 @@ SELECT * FROM generate_series(0,3,1) as t(v) order by v limit '2';
 1
 
 
-statement error 
+statement error
 SELECT * FROM generate_series(0,3,1) as t(v) order by v limit '-2';
 ----
 db error: ERROR: Failed to run the query
@@ -294,7 +294,7 @@ Caused by these errors (recent errors listed first):
 but the evaluation of the expression returns error:Expr error: error while evaluating expression `str_parse('2.2')`
 
 
-statement error 
+statement error
 select 1 limit generate_series(1, 2);
 ----
 db error: ERROR: Failed to run the query
