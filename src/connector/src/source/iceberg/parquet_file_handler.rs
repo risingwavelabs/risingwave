@@ -142,9 +142,9 @@ pub fn new_minio_operator(
     builder = builder.endpoint("http://127.0.0.1:9301");
 
 
-    builder = builder.disable_ec2_metadata();
+    // builder = builder.disable_ec2_metadata();
     builder = builder.disable_config_load();
-    builder = builder.allow_anonymous();
+    // builder = builder.allow_anonymous();
     // builder = builder.enable_virtual_host_style();
 
      let op: Operator = Operator::new(builder)?
