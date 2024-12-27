@@ -280,9 +280,7 @@ impl SkipWatermarkState {
             .watermarks
             .iter()
             .flat_map(|(table_id, read_watermarks)| {
-                let serde = self
-                        .compaction_catalog_agent_ref
-                        .watermark_serde(table_id.table_id());
+                let watermark_serde = self.compaction_catalog_agent_ref.watermark_serde(table_id.table_id()).map(|(_pk_serde, watermark_serde, _watermark_col_idx_in_pk)| watermark_serde);
 
                 read_watermarks
                     .vnode_watermarks
@@ -292,18 +290,15 @@ impl SkipWatermarkState {
                             *table_id,
                             *vnode,
                             read_watermarks.direction,
-                            if serde.is_none() {
-                                WatermarkSerdeType::Bytes(watermarks.clone())
-                            } else {
-                                let row = serde
-                                    .as_ref()
-                                    .unwrap()
-                                    .1
-                                    .clone()
-                                    .deserialize(watermarks).unwrap_or_else(|_| {
-                                        panic!("Failed to deserialize watermark {:?} serde data_types {:?} order_types {:?}", watermarks, serde.as_ref().unwrap().1.get_data_types(), serde.as_ref().unwrap().1.get_order_types());
-                                    });
-                                WatermarkSerdeType::Serde(row[0].clone())
+                            match watermark_serde.as_ref() {
+                                Some(watermark_serde) => {
+                                    let row = watermark_serde
+                                        .deserialize(watermarks).unwrap_or_else(|_| {
+                                            panic!("Failed to deserialize watermark {:?} serde data_types {:?} order_types {:?}", watermarks, watermark_serde.get_data_types(), watermark_serde.get_order_types());
+                                        });
+                                    WatermarkSerdeType::Serde(row[0].clone())
+                                }
+                                None => WatermarkSerdeType::Bytes(watermarks.clone()),
                             },
                         )
                     })

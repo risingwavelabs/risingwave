@@ -159,7 +159,7 @@ pub struct StateTableInner<
 
     op_consistency_level: StateTableOpConsistencyLevel,
 
-    watermark_col_idx_in_pk: usize,
+    clean_watermark_index_in_pk: Option<i32>,
 }
 
 /// `StateTable` will use `BasicSerde` as default
@@ -431,36 +431,23 @@ where
             row_serde.kind().is_column_aware()
         );
 
-        let watermark_col_idx_in_pk = if table_catalog.watermark_indices.is_empty() {
-            0
-        } else {
-            pk_indices
-                .iter()
-                .position(|&idx| idx == table_catalog.watermark_indices[0] as usize)
-                .unwrap_or_else(|| {
-                    panic!(
-                        "watermark column not found in pk_indices {:?} watermark_col_idx {}",
-                        pk_indices, table_catalog.watermark_indices[0]
-                    )
-                })
-        };
-
         // Restore persisted table watermark.
-        let prefix_watermark_deser = if pk_indices.is_empty() {
+        let watermark_serde = if pk_indices.is_empty() {
             None
         } else {
-            assert!(
-                watermark_col_idx_in_pk == 0
-                    || pk_indices.contains(&(table_catalog.watermark_indices[0] as usize)),
-            );
-            Some(pk_serde.index(watermark_col_idx_in_pk))
+            match table_catalog.clean_watermark_index_in_pk {
+                None => Some(pk_serde.index(0)),
+                Some(clean_watermark_index_in_pk) => {
+                    Some(pk_serde.index(clean_watermark_index_in_pk as usize))
+                }
+            }
         };
         let max_watermark_of_vnodes = distribution
             .vnodes()
             .iter_vnodes()
             .filter_map(|vnode| local_state_store.get_table_watermark(vnode))
             .max();
-        let committed_watermark = if let Some(deser) = prefix_watermark_deser
+        let committed_watermark = if let Some(deser) = watermark_serde
             && let Some(max_watermark) = max_watermark_of_vnodes
         {
             let deserialized = deser.deserialize(&max_watermark).ok().and_then(|row| {
@@ -532,7 +519,7 @@ where
             output_indices,
             i2o_mapping,
             op_consistency_level: state_table_op_consistency_level,
-            watermark_col_idx_in_pk,
+            clean_watermark_index_in_pk: table_catalog.clean_watermark_index_in_pk,
         }
     }
 
@@ -1065,7 +1052,7 @@ where
                         let keyed_row = entry?;
                         let pk = self.pk_serde.deserialize(keyed_row.key())?;
                         // watermark column should be part of the pk
-                        if !pk.is_null_at(self.watermark_col_idx_in_pk) {
+                        if !pk.is_null_at(self.clean_watermark_index_in_pk.unwrap() as _) {
                             pks.push(pk);
                         }
                     }
@@ -1096,15 +1083,23 @@ where
             trace!(table_id = %self.table_id, watermark = ?watermark, "state cleaning");
         });
 
-        let prefix_serializer = if self.pk_indices().is_empty() {
+        let watermark_serializer = if self.pk_indices().is_empty() {
             None
         } else {
-            Some(self.pk_serde.index(self.watermark_col_idx_in_pk))
+            match self.clean_watermark_index_in_pk {
+                None => Some(self.pk_serde.index(0)),
+                Some(clean_watermark_index_in_pk) => {
+                    Some(self.pk_serde.index(clean_watermark_index_in_pk as usize))
+                }
+            }
         };
 
-        let watermark_type = match self.watermark_col_idx_in_pk {
-            0 => WatermarkSerdeType::PkPrefix,
-            _ => WatermarkSerdeType::NonPkPrefix,
+        let watermark_type = match self.clean_watermark_index_in_pk {
+            None => WatermarkSerdeType::PkPrefix,
+            Some(clean_watermark_index_in_pk) => match clean_watermark_index_in_pk {
+                0 => WatermarkSerdeType::PkPrefix,
+                _ => WatermarkSerdeType::NonPkPrefix,
+            },
         };
 
         let should_clean_watermark = match watermark {
@@ -1132,7 +1127,7 @@ where
         let watermark_suffix = watermark.as_ref().map(|watermark| {
             serialize_pk(
                 row::once(Some(watermark.clone())),
-                prefix_serializer.as_ref().unwrap(),
+                watermark_serializer.as_ref().unwrap(),
             )
         });
 
@@ -1145,7 +1140,7 @@ where
                 self.vnodes().iter_vnodes().collect_vec()
             }, "delete range");
 
-            let order_type = prefix_serializer
+            let order_type = watermark_serializer
                 .as_ref()
                 .unwrap()
                 .get_order_types()
