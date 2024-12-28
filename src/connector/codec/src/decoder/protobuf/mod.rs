@@ -27,14 +27,14 @@ use super::{uncategorized, Access, AccessResult};
 
 pub struct ProtobufAccess<'a> {
     message: DynamicMessage,
-    struct_as_jsonb: &'a HashSet<String>,
+    messages_as_jsonb: &'a HashSet<String>,
 }
 
 impl<'a> ProtobufAccess<'a> {
-    pub fn new(message: DynamicMessage, struct_as_jsonb: &'a HashSet<String>) -> Self {
+    pub fn new(message: DynamicMessage, messages_as_jsonb: &'a HashSet<String>) -> Self {
         Self {
             message,
-            struct_as_jsonb,
+            messages_as_jsonb,
         }
     }
 
@@ -62,12 +62,12 @@ impl Access for ProtobufAccess<'_> {
 
         match self.message.get_field(&field_desc) {
             Cow::Borrowed(value) => {
-                from_protobuf_value(&field_desc, value, type_expected, self.struct_as_jsonb)
+                from_protobuf_value(&field_desc, value, type_expected, self.messages_as_jsonb)
             }
 
             // `Owned` variant occurs only if there's no such field and the default value is returned.
             Cow::Owned(value) => {
-                from_protobuf_value(&field_desc, &value, type_expected, self.struct_as_jsonb)
+                from_protobuf_value(&field_desc, &value, type_expected, self.messages_as_jsonb)
                     .map(|d| d.to_owned_datum().into())
             }
         }

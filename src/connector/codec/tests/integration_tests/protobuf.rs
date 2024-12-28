@@ -19,7 +19,7 @@ mod recursive;
 #[allow(clippy::all)]
 mod all_types;
 use std::collections::HashMap;
-
+use std::collections::HashSet;
 use anyhow::Context;
 use prost::Message;
 use prost_reflect::{DescriptorPool, DynamicMessage, MessageDescriptor};
@@ -58,8 +58,9 @@ fn check(
     ));
 
     let mut data_str = vec![];
+    let messages_as_jsonb = HashSet::from(["google.protobuf.Any".to_owned()]);
     for data in pb_data {
-        let access = ProtobufAccess::new(DynamicMessage::decode(pb_schema.clone(), *data).unwrap());
+        let access = ProtobufAccess::new(DynamicMessage::decode(pb_schema.clone(), *data).unwrap(), &messages_as_jsonb);
         let mut row = vec![];
         for col in &rw_schema {
             let rw_data = access.access(&[&col.name], &col.data_type);

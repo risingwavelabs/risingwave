@@ -32,7 +32,10 @@ use crate::schema::SchemaLoader;
 pub struct ProtobufAccessBuilder {
     confluent_wire_type: bool,
     message_descriptor: MessageDescriptor,
-    struct_as_jsonb: HashSet<String>,
+
+    // A HashSet containing protobuf message type full names (e.g. "google.protobuf.Any")
+    // that should be mapped to JSONB type when storing in RisingWave
+    messages_as_jsonb: HashSet<String>,
 }
 
 impl AccessBuilder for ProtobufAccessBuilder {
@@ -49,7 +52,7 @@ impl AccessBuilder for ProtobufAccessBuilder {
 
         Ok(AccessImpl::Protobuf(ProtobufAccess::new(
             message,
-            &self.struct_as_jsonb,
+            &self.messages_as_jsonb,
         )))
     }
 }
@@ -62,16 +65,16 @@ impl ProtobufAccessBuilder {
             struct_as_jsonb_str,
         } = config;
 
-        let mut struct_as_jsonb: HashSet<String> = struct_as_jsonb_str
+        let mut messages_as_jsonb: HashSet<String> = struct_as_jsonb_str
             .split(',')
             .map(|s| s.to_owned())
             .collect();
-        struct_as_jsonb.insert("google.protobuf.Any".to_owned());
+        messages_as_jsonb.insert("google.protobuf.Any".to_owned());
 
         Ok(Self {
             confluent_wire_type,
             message_descriptor,
-            struct_as_jsonb,
+            messages_as_jsonb,
         })
     }
 }
