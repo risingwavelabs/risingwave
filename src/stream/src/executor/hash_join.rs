@@ -36,6 +36,7 @@ use super::join::*;
 use super::watermark::*;
 use crate::consistency::enable_strict_consistency;
 use crate::executor::join::builder::JoinStreamChunkBuilder;
+use crate::executor::join::hash_join::CacheResult;
 use crate::executor::prelude::*;
 
 /// Evict the cache every n rows.
@@ -204,11 +205,6 @@ struct EqJoinArgs<'a, K: HashKey, S: StateStore> {
     cnt_rows_received: &'a mut u32,
     high_join_amplification_threshold: usize,
     entry_state_max_rows: usize,
-}
-
-enum CacheResult {
-    Miss,                       // Cache-miss
-    Hit(Option<HashValueType>), // Cache-hit, no match or match.
 }
 
 impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, S, T> {
@@ -746,25 +742,11 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
     async fn hash_eq_match(
         key: &K,
         ht: &mut JoinHashMap<K, S>,
-    ) -> StreamExecutorResult<Option<HashValueType>> {
-        // If the key contains null values, but these are not null-safe on the match side predicate,
-        // we will never match. So just return `None` to indicate this.
-        if !key.null_bitmap().is_subset(ht.null_matched()) {
-            Ok(None)
+    ) -> StreamExecutorResult<CacheResult> {
+        if enable_strict_consistency() {
+            Ok(ht.take_state_opt(key))
         } else {
-            ht.take_state(key).await.map(Some)
-        }
-    }
-
-    /// the data the hash table and match the coming
-    /// data chunk with the executor state
-    fn hash_eq_match_opt(key: &K, ht: &mut JoinHashMap<K, S>) -> CacheResult {
-        if !key.null_bitmap().is_subset(ht.null_matched()) {
-            CacheResult::Hit(None)
-        } else if let Some(state) = ht.take_state_opt(key) {
-            CacheResult::Hit(Some(state))
-        } else {
-            CacheResult::Miss
+            ht.take_state(key).await.map(CacheResult::Hit)
         }
     }
 
@@ -857,33 +839,25 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             };
             Self::evict_cache(side_update, side_match, cnt_rows_received);
 
-            let key_satisfies_non_null_requirement = side_update
-                .non_null_fields
-                .iter()
-                .all(|column_idx| unsafe { row.datum_at_unchecked(*column_idx).is_some() });
-
-            let cache_lookup_result = if key_satisfies_non_null_requirement {
-                if enable_strict_consistency() {
-                    Self::hash_eq_match_opt(key, &mut side_match.ht)
+            let cache_lookup_result = {
+                let probe_non_null_requirement_satisfied = side_update
+                    .non_null_fields
+                    .iter()
+                    .all(|column_idx| unsafe { row.datum_at_unchecked(*column_idx).is_some() });
+                let build_non_null_requirement_satisfied =
+                    key.null_bitmap().is_subset(side_match.ht.null_matched());
+                if probe_non_null_requirement_satisfied && build_non_null_requirement_satisfied {
+                    Self::hash_eq_match(key, &mut side_match.ht).await?
                 } else {
-                    let result = Self::hash_eq_match(key, &mut side_match.ht).await?;
-                    CacheResult::Hit(result)
+                    CacheResult::NeverMatch
                 }
-            } else {
-                CacheResult::Hit(None)
             };
-
             let mut total_matches = 0;
 
-            let (cache_hit, rows) = match cache_lookup_result {
-                CacheResult::Hit(rows) => (true, rows),
-                CacheResult::Miss => (false, None),
-            };
-
             macro_rules! match_rows {
-                ($op:ident, $from_cache:literal) => {
-                    Self::handle_match_rows::<SIDE, { JoinOp::$op }, $from_cache>(
-                        rows,
+                ($op:ident) => {
+                    Self::handle_match_rows::<SIDE, { JoinOp::$op }>(
+                        cache_lookup_result,
                         row,
                         key,
                         &mut hashjoin_chunk_builder,
@@ -899,11 +873,9 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
 
             // NOTE(kwannoel): The performance might be slightly worse because of the `box`.
             // But the code readability is better.
-            let stream = match (cache_hit, op) {
-                (true, Op::Insert | Op::UpdateInsert) => match_rows!(Insert, true).boxed(),
-                (true, Op::Delete | Op::UpdateDelete) => match_rows!(Delete, true).boxed(),
-                (false, Op::Insert | Op::UpdateInsert) => match_rows!(Insert, false).boxed(),
-                (false, Op::Delete | Op::UpdateDelete) => match_rows!(Delete, false).boxed(),
+            let stream = match op {
+                Op::Insert | Op::UpdateInsert => match_rows!(Insert).boxed(),
+                Op::Delete | Op::UpdateDelete => match_rows!(Delete).boxed(),
             };
 
             #[for_await]
@@ -948,9 +920,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         'a,
         const SIDE: SideTypePrimitive,
         const JOIN_OP: JoinOpPrimitive,
-        const MATCHED_ROWS_FROM_CACHE: bool,
     >(
-        cached_rows: Option<HashValueType>,
+        cached_lookup_result: CacheResult,
         row: RowRef<'a>,
         key: &'a K,
         hashjoin_chunk_builder: &'a mut JoinChunkBuilder<T, SIDE>,
@@ -961,6 +932,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         append_only_optimize: bool,
         entry_state_max_rows: usize,
     ) {
+        let cache_hit = matches!(cached_lookup_result, CacheResult::Hit(_));
         let mut entry_state = JoinEntryState::default();
         let mut entry_state_count = 0;
 
@@ -969,8 +941,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         let mut matched_rows_to_clean = vec![];
 
         macro_rules! match_row {
-            ($degree_table:expr, $matched_row:expr, $matched_row_ref:expr) => {
-                Self::handle_match_row::<SIDE, { JOIN_OP }, { MATCHED_ROWS_FROM_CACHE }>(
+            ($degree_table:expr, $matched_row:expr, $matched_row_ref:expr, $from_cache:literal) => {
+                Self::handle_match_row::<SIDE, { JOIN_OP }, { $from_cache }>(
                     row,
                     $matched_row,
                     $matched_row_ref,
@@ -988,9 +960,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             };
         }
 
-        let entry_state = if MATCHED_ROWS_FROM_CACHE {
-            let Some(mut cached_rows) = cached_rows else {
-                // Handle rows with null-datums, these rows will never match.
+        let entry_state = match cached_lookup_result {
+            CacheResult::NeverMatch => {
                 let op = match JOIN_OP {
                     JoinOp::Insert => Op::Insert,
                     JoinOp::Delete => Op::Delete,
@@ -999,44 +970,51 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     yield chunk;
                 }
                 return Ok(());
-            };
-            for (matched_row_ref, matched_row) in cached_rows.values_mut(&side_match.all_data_types)
-            {
-                let matched_row = matched_row?;
-                if let Some(chunk) = match_row!(
-                    side_match.ht.get_degree_state_mut_ref(),
-                    matched_row,
-                    Some(matched_row_ref)
-                )
-                .await
+            }
+            CacheResult::Hit(mut cached_rows) => {
+                // Handle cached rows which match the probe-side row.
+                for (matched_row_ref, matched_row) in
+                    cached_rows.values_mut(&side_match.all_data_types)
                 {
-                    yield chunk;
+                    let matched_row = matched_row?;
+                    if let Some(chunk) = match_row!(
+                        side_match.ht.get_degree_state_mut_ref(),
+                        matched_row,
+                        Some(matched_row_ref),
+                        true
+                    )
+                    .await
+                    {
+                        yield chunk;
+                    }
                 }
+
+                cached_rows
             }
+            CacheResult::Miss => {
+                // Handle rows which are not in cache.
+                let (matched_rows, degree_table) = side_match
+                    .ht
+                    .fetch_matched_rows_and_get_degree_table_ref(key)
+                    .await?;
 
-            cached_rows
-        } else {
-            let (matched_rows, degree_table) = side_match
-                .ht
-                .fetch_matched_rows_and_get_degree_table_ref(key)
-                .await?;
+                #[for_await]
+                for matched_row in matched_rows {
+                    let (encoded_pk, matched_row) = matched_row?;
 
-            #[for_await]
-            for matched_row in matched_rows {
-                let (encoded_pk, matched_row) = matched_row?;
-
-                // cache refill
-                if entry_state_count <= entry_state_max_rows {
-                    entry_state
-                        .insert(encoded_pk, matched_row.encode(), None) // TODO(kwannoel): handle ineq key for asof join.
-                        .with_context(|| format!("row: {}", row.display(),))?;
-                    entry_state_count += 1;
+                    // cache refill
+                    if entry_state_count <= entry_state_max_rows {
+                        entry_state
+                            .insert(encoded_pk, matched_row.encode(), None) // TODO(kwannoel): handle ineq key for asof join.
+                            .with_context(|| format!("row: {}", row.display(),))?;
+                        entry_state_count += 1;
+                    }
+                    if let Some(chunk) = match_row!(degree_table, matched_row, None, false).await {
+                        yield chunk;
+                    }
                 }
-                if let Some(chunk) = match_row!(degree_table, matched_row, None).await {
-                    yield chunk;
-                }
+                Box::new(entry_state)
             }
-            Box::new(entry_state)
         };
 
         // forward rows depending on join types
@@ -1054,7 +1032,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         }
 
         // cache refill
-        if MATCHED_ROWS_FROM_CACHE || entry_state_count <= entry_state_max_rows {
+        if cache_hit || entry_state_count <= entry_state_max_rows {
             side_match.ht.update_state(key, entry_state);
         }
 

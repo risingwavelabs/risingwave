@@ -67,6 +67,12 @@ impl EstimateSize for HashValueType {
 /// map, which can make the compiler happy.
 struct HashValueWrapper(Option<HashValueType>);
 
+pub(crate) enum CacheResult {
+    NeverMatch,         // Will never match, will not be in cache at all.
+    Miss,               // Cache-miss
+    Hit(HashValueType), // Cache-hit
+}
+
 impl EstimateSize for HashValueWrapper {
     fn estimated_heap_size(&self) -> usize {
         self.0.estimated_heap_size()
@@ -513,17 +519,17 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     /// returned.
     ///
     /// Note: This will NOT remove anything from remote storage.
-    pub fn take_state_opt(&mut self, key: &K) -> Option<HashValueType> {
+    pub fn take_state_opt(&mut self, key: &K) -> CacheResult {
         self.metrics.total_lookup_count += 1;
         if self.inner.contains(key) {
             tracing::trace!("hit cache for join key: {:?}", key);
             // Do not update the LRU statistics here with `peek_mut` since we will put the state
             // back.
             let mut state = self.inner.peek_mut(key).unwrap();
-            Some(state.take())
+            CacheResult::Hit(state.take())
         } else {
             tracing::trace!("miss cache for join key: {:?}", key);
-            None
+            CacheResult::Miss
         }
     }
 
