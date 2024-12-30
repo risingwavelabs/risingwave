@@ -20,26 +20,34 @@ use risingwave_sqlparser::ast::*;
 use crate::error::Result;
 use crate::utils::data_type::DataTypeToAst as _;
 
-/// Try to restore missing column definitions and constraints in the persisted table definition,
-/// if the schema of the table is derived from external systems (like schema registry) or it's
+/// Try to restore missing column definitions and constraints in the persisted table (or source)
+/// definition, if the schemais derived from external systems (like schema registry) or it's
 /// created by `CREATE TABLE AS`.
 ///
-/// Returns error if restoring failed, or called on non-`TableType::Table`, or the persisted
-/// definition is invalid.
-pub fn try_purify_table_create_sql_ast(
+/// Returns error if restoring failed, or the persisted definition is invalid.
+pub fn try_purify_table_source_create_sql_ast(
     mut base: Statement,
     columns: &[ColumnCatalog],
     row_id_index: Option<usize>,
     pk_column_ids: &[ColumnId],
 ) -> Result<Statement> {
-    let Statement::CreateTable {
+    let (Statement::CreateTable {
         columns: column_defs,
         constraints,
         wildcard_idx,
         ..
-    } = &mut base
+    }
+    | Statement::CreateSource {
+        stmt:
+            CreateSourceStatement {
+                columns: column_defs,
+                constraints,
+                wildcard_idx,
+                ..
+            },
+    }) = &mut base
     else {
-        bail!("expect `CREATE TABLE` statement, found: `{:?}`", base);
+        bail!("expect `CREATE TABLE` or `CREATE SOURCE` statement, found: `{base:?}`");
     };
 
     // Filter out columns that are not defined by users in SQL.
