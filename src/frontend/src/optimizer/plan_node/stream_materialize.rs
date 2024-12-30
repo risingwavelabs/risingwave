@@ -302,6 +302,7 @@ impl StreamMaterialize {
                     engine
                 }
             },
+            clean_watermark_index_in_pk: None, // TODO: fill this field
         })
     }
 

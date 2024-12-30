@@ -29,10 +29,7 @@ use crate::error::{ErrorCode, Result};
 use crate::TableCatalog;
 
 fn get_format_encode_from_table(table: &TableCatalog) -> Result<Option<FormatEncodeOptions>> {
-    let [stmt]: [_; 1] = Parser::parse_sql(&table.definition)
-        .context("unable to parse original table definition")?
-        .try_into()
-        .unwrap();
+    let stmt = table.create_sql_ast()?;
     let Statement::CreateTable { format_encode, .. } = stmt else {
         unreachable!()
     };

@@ -30,7 +30,7 @@ pub struct Query {
     /// ORDER BY
     pub order_by: Vec<OrderByExpr>,
     /// `LIMIT { <N> | ALL }`
-    pub limit: Option<String>,
+    pub limit: Option<Expr>,
     /// `OFFSET <N> [ { ROW | ROWS } ]`
     ///
     /// `ROW` and `ROWS` are noise words that don't influence the effect of the clause.
