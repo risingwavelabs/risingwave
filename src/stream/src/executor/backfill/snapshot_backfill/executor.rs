@@ -21,7 +21,7 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use futures::future::{try_join_all, Either};
 use futures::{pin_mut, Stream, TryFutureExt, TryStreamExt};
-use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::array::StreamChunk;
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::metrics::LabelGuardedIntCounter;
 use risingwave_common::row::OwnedRow;
@@ -487,7 +487,7 @@ async fn make_log_stream(
     prev_epoch: u64,
     start_pk: Option<OwnedRow>,
     chunk_size: usize,
-) -> StreamExecutorResult<VnodeStream<impl super::vnode_stream::BackfillRowStream>> {
+) -> StreamExecutorResult<VnodeStream<impl super::vnode_stream::ChangeLogRowStream>> {
     let data_types = upstream_table.schema().data_types();
     let start_pk = start_pk.as_ref();
     // TODO: may avoid polling all vnodes concurrently at the same time but instead with a limit on concurrency.
@@ -500,19 +500,7 @@ async fn make_log_stream(
                 vnode,
             )
             .map_ok(move |stream| {
-                let stream = stream.map(|result| {
-                    Ok(match result? {
-                        ChangeLogRow::Insert(row) => ((Op::Insert, row), None),
-                        ChangeLogRow::Update {
-                            new_value,
-                            old_value,
-                        } => (
-                            (Op::UpdateDelete, old_value),
-                            Some((Op::UpdateInsert, new_value)),
-                        ),
-                        ChangeLogRow::Delete(row) => ((Op::Delete, row), None),
-                    })
-                });
+                let stream = stream.map_err(Into::into);
                 (vnode, stream)
             })
     }))
@@ -527,7 +515,7 @@ async fn make_snapshot_stream(
     start_pk: Option<OwnedRow>,
     rate_limit: Option<usize>,
     chunk_size: usize,
-) -> StreamExecutorResult<VnodeStream<impl super::vnode_stream::BackfillRowStream>> {
+) -> StreamExecutorResult<VnodeStream<impl super::vnode_stream::ChangeLogRowStream>> {
     let data_types = upstream_table.schema().data_types();
     let start_pk = start_pk.as_ref();
     let vnode_streams = try_join_all(upstream_table.vnodes().iter_vnodes().map(move |vnode| {
@@ -539,7 +527,7 @@ async fn make_snapshot_stream(
                 PrefetchOptions::prefetch_for_large_range_scan(),
             )
             .map_ok(move |stream| {
-                let stream = stream.map(|result| Ok(((Op::Insert, result?), None)));
+                let stream = stream.map_ok(ChangeLogRow::Insert).map_err(Into::into);
                 (vnode, stream)
             })
     }))

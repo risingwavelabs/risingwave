@@ -23,14 +23,12 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+use risingwave_storage::table::ChangeLogRow;
 
 use crate::executor::StreamExecutorResult;
 
-/// Can be either one row or two rows. When having two rows, the two rows should be included in the same stream chunk.
-/// The case of two rows is for combining the `UpdateDelete` and `UpdateInsert` of `ChangeLogValue::Update`
-pub(super) type BackfillRowItem = ((Op, OwnedRow), Option<(Op, OwnedRow)>);
-pub(super) trait BackfillRowStream =
-    Stream<Item = StreamExecutorResult<BackfillRowItem>> + Sized + 'static;
+pub(super) trait ChangeLogRowStream =
+    Stream<Item = StreamExecutorResult<ChangeLogRow>> + Sized + 'static;
 
 struct StreamWithVnode<St> {
     stream: St,
@@ -45,15 +43,16 @@ impl<St: Stream + Unpin> Stream for StreamWithVnode<St> {
     }
 }
 
-pub(super) struct VnodeStream<St: BackfillRowStream> {
-    #[expect(clippy::type_complexity)]
-    streams: FuturesUnordered<StreamFuture<StreamWithVnode<Pin<Box<Peekable<St>>>>>>,
+type ChangeLogRowVnodeStream<St> = StreamWithVnode<Pin<Box<Peekable<St>>>>;
+
+pub(super) struct VnodeStream<St: ChangeLogRowStream> {
+    streams: FuturesUnordered<StreamFuture<ChangeLogRowVnodeStream<St>>>,
     finished_vnode: HashSet<VirtualNode>,
     data_chunk_builder: DataChunkBuilder,
     ops: Vec<Op>,
 }
 
-impl<St: BackfillRowStream> VnodeStream<St> {
+impl<St: ChangeLogRowStream> VnodeStream<St> {
     pub(super) fn new(
         vnode_streams: impl IntoIterator<Item = (VirtualNode, St)>,
         data_chunk_builder: DataChunkBuilder,
@@ -78,11 +77,11 @@ impl<St: BackfillRowStream> VnodeStream<St> {
     }
 }
 
-impl<St: BackfillRowStream> VnodeStream<St> {
+impl<St: ChangeLogRowStream> VnodeStream<St> {
     fn poll_next_row(
         &mut self,
         cx: &mut Context<'_>,
-    ) -> Poll<StreamExecutorResult<Option<BackfillRowItem>>> {
+    ) -> Poll<StreamExecutorResult<Option<ChangeLogRow>>> {
         loop {
             let ready_item = match ready!(self.streams.poll_next_unpin(cx)) {
                 None => Ok(None),
@@ -124,13 +123,23 @@ impl<St: BackfillRowStream> VnodeStream<St> {
         for vnode_stream in &mut self.streams {
             let vnode_stream = vnode_stream.get_mut().expect("should exist");
             match vnode_stream.stream.as_mut().peek().await {
-                Some(Ok(((_, row), second))) => {
+                Some(Ok(change_log_row)) => {
+                    let row = match change_log_row {
+                        ChangeLogRow::Insert(row) | ChangeLogRow::Delete(row) => row,
+                        ChangeLogRow::Update {
+                            new_value,
+                            old_value,
+                        } => {
+                            if cfg!(debug_assertions) {
+                                assert_eq!(
+                                    old_value.project(pk_indices),
+                                    new_value.project(pk_indices)
+                                );
+                            }
+                            new_value
+                        }
+                    };
                     let pk = row.project(pk_indices).to_owned_row();
-                    if cfg!(debug_assertions)
-                        && let Some((_, second_row)) = second
-                    {
-                        assert_eq!(pk, second_row.project(pk_indices).to_owned_row());
-                    }
                     on_vnode_progress(vnode_stream.vnode, Some(pk));
                 }
                 Some(Err(_)) => {
@@ -149,34 +158,55 @@ impl<St: BackfillRowStream> VnodeStream<St> {
     }
 }
 
-impl<St: BackfillRowStream> Stream for VnodeStream<St> {
+impl<St: ChangeLogRowStream> Stream for VnodeStream<St> {
     type Item = StreamExecutorResult<StreamChunk>;
 
+    // Here we implement the stream on our own instead of generating the stream with
+    // `try_stream` macro, because we want to access the state of the streams on the flight.
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
         let capacity = this.data_chunk_builder.batch_size();
         loop {
             match ready!(this.poll_next_row(cx)) {
-                Ok(Some(((op, row), second))) => {
-                    let may_chunk = if let Some((second_op, second_row)) = second {
-                        if this.data_chunk_builder.can_append(2) {
-                            this.ops.extend([op, second_op]);
-                            assert!(this.data_chunk_builder.append_one_row(row).is_none());
-                            this.data_chunk_builder.append_one_row(second_row)
-                        } else {
-                            let chunk = this
-                                .data_chunk_builder
-                                .consume_all()
-                                .expect("should be Some when not can_append");
-                            let ops = replace(&mut this.ops, Vec::with_capacity(capacity));
-                            this.ops.extend([op, second_op]);
-                            assert!(this.data_chunk_builder.append_one_row(row).is_none());
-                            assert!(this.data_chunk_builder.append_one_row(second_row).is_none());
-                            break Poll::Ready(Some(Ok(StreamChunk::from_parts(ops, chunk))));
+                Ok(Some(change_log_row)) => {
+                    let may_chunk = match change_log_row {
+                        ChangeLogRow::Insert(row) => {
+                            this.ops.push(Op::Insert);
+                            this.data_chunk_builder.append_one_row(row)
                         }
-                    } else {
-                        this.ops.push(op);
-                        this.data_chunk_builder.append_one_row(row)
+                        ChangeLogRow::Delete(row) => {
+                            this.ops.push(Op::Delete);
+                            this.data_chunk_builder.append_one_row(row)
+                        }
+                        ChangeLogRow::Update {
+                            new_value,
+                            old_value,
+                        } => {
+                            if this.data_chunk_builder.can_append_update() {
+                                this.ops.extend([Op::UpdateDelete, Op::UpdateInsert]);
+                                assert!(this
+                                    .data_chunk_builder
+                                    .append_one_row(old_value)
+                                    .is_none());
+                                this.data_chunk_builder.append_one_row(new_value)
+                            } else {
+                                let chunk = this
+                                    .data_chunk_builder
+                                    .consume_all()
+                                    .expect("should be Some when not can_append");
+                                let ops = replace(&mut this.ops, Vec::with_capacity(capacity));
+                                this.ops.extend([Op::UpdateDelete, Op::UpdateInsert]);
+                                assert!(this
+                                    .data_chunk_builder
+                                    .append_one_row(old_value)
+                                    .is_none());
+                                assert!(this
+                                    .data_chunk_builder
+                                    .append_one_row(new_value)
+                                    .is_none());
+                                break Poll::Ready(Some(Ok(StreamChunk::from_parts(ops, chunk))));
+                            }
+                        }
                     };
                     if let Some(chunk) = may_chunk {
                         let ops = replace(&mut this.ops, Vec::with_capacity(capacity));
