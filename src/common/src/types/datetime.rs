@@ -256,7 +256,7 @@ enum ErrorKind {
     ParseDate,
     #[error("Can't cast string to time (expected format is HH:MM:SS[.D+{{up to 6 digits}}][Z] or HH:MM)")]
     ParseTime,
-    #[error("Can't cast string to timestamp (expected format is YYYY-MM-DD HH:MM:SS[.D+{{up to 6 digits}}] or YYYY-MM-DD HH:MM or YYYY-MM-DD or ISO 8601 format)")]
+    #[error("Can't cast string to timestamp (expected format is YYYY-MM-DD HH:MM:SS[.D+{{up to 9 digits}}] or YYYY-MM-DD HH:MM or YYYY-MM-DD or ISO 8601 format)")]
     ParseTimestamp,
 }
 
@@ -486,6 +486,7 @@ impl Time {
 //   it is *microseconds* since 1970-01-01 midnight. 2^62 microseconds covers 146235 years.
 // * When the highest 2 bits are `10` or `01`, we flip the second bit to get values from `0b1100...00` to `0b0011..11` again.
 //   It is *seconds* since 1970-01-01 midnight. It is then followed by another 32 bits as nanoseconds within a second.
+// Since timestamp is negative when it is less than 1970-1-1, you need to take both cases into account(`11+00`` or `01+10``).
 enum FirstI64 {
     V0 { usecs: i64 },
     V1 { secs: i64 },
