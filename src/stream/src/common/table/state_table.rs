@@ -1052,7 +1052,7 @@ where
                         let keyed_row = entry?;
                         let pk = self.pk_serde.deserialize(keyed_row.key())?;
                         // watermark column should be part of the pk
-                        if !pk.is_null_at(self.clean_watermark_index_in_pk.unwrap() as _) {
+                        if !pk.is_null_at(self.clean_watermark_index_in_pk.unwrap_or(0) as usize) {
                             pks.push(pk);
                         }
                     }
