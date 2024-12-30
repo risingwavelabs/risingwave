@@ -22,10 +22,7 @@ use crate::handler::privilege::ObjectCheckItem;
 use crate::handler::{HandlerArgs, RwPgResponse};
 use crate::Binder;
 
-pub async fn handle_use_db(
-    handler_args: HandlerArgs,
-    database_name: ObjectName,
-) -> Result<RwPgResponse> {
+pub fn handle_use_db(handler_args: HandlerArgs, database_name: ObjectName) -> Result<RwPgResponse> {
     let session = handler_args.session;
     let database_name = Binder::resolve_database_name(database_name)?;
 

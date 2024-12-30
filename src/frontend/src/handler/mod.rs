@@ -594,10 +594,9 @@ pub async fn handle(
                 let res = use_db::handle_use_db(
                     handler_args,
                     ObjectName::from(vec![Ident::new_unchecked(
-                        x.unwrap_or("default".to_string()),
+                        x.unwrap_or("default".to_owned()),
                     )]),
-                )
-                .await?;
+                )?;
                 let mut builder = RwPgResponse::builder(StatementType::SET_VARIABLE);
                 for notice in res.notices() {
                     builder = builder.notice(notice);
@@ -1156,7 +1155,7 @@ pub async fn handle(
             object_name,
             comment,
         } => comment::handle_comment(handler_args, object_type, object_name, comment).await,
-        Statement::Use { db_name } => use_db::handle_use_db(handler_args, db_name).await,
+        Statement::Use { db_name } => use_db::handle_use_db(handler_args, db_name),
         _ => bail_not_implemented!("Unhandled statement: {}", stmt),
     }
 }
