@@ -91,6 +91,9 @@ impl<St: ChangeLogRowStream> VnodeStream<St> {
                     continue;
                 }
                 Some((Some(Ok(item)), stream)) => {
+                    // TODO: may avoid generating a `StreamFuture` for each row, because
+                    // `FuturesUnordered::push` involve memory allocation of `Arc`, and may
+                    // incur some unnecessary costs.
                     self.streams.push(stream.into_future());
                     Ok(Some(item))
                 }
