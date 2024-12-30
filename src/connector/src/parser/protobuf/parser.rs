@@ -62,10 +62,8 @@ impl ProtobufAccessBuilder {
         let ProtobufParserConfig {
             confluent_wire_type,
             message_descriptor,
-            mut messages_as_jsonb,
+            messages_as_jsonb,
         } = config;
-
-        messages_as_jsonb.insert("google.protobuf.Any".to_owned());
 
         Ok(Self {
             confluent_wire_type,
@@ -130,7 +128,8 @@ impl ProtobufParserConfig {
 
     /// Maps the protobuf schema to relational schema.
     pub fn map_to_columns(&self) -> ConnectorResult<Vec<ColumnDesc>> {
-        pb_schema_to_column_descs(&self.message_descriptor).map_err(|e| e.into())
+        pb_schema_to_column_descs(&self.message_descriptor, &self.messages_as_jsonb)
+            .map_err(|e| e.into())
     }
 }
 

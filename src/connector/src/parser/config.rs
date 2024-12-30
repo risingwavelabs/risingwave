@@ -189,13 +189,14 @@ impl SpecificParserConfig {
                 if info.row_schema_location.is_empty() {
                     bail!("protobuf file location not provided");
                 }
-                let messages_as_jsonb = if let Some(messages_as_jsonb) =
+                let mut messages_as_jsonb = if let Some(messages_as_jsonb) =
                     format_encode_options_with_secret.get(PROTOBUF_MESSAGES_AS_JSONB)
                 {
                     messages_as_jsonb.split(',').map(|s| s.to_owned()).collect()
                 } else {
                     HashSet::new()
                 };
+                messages_as_jsonb.insert("google.protobuf.Any".to_owned());
 
                 let mut config = ProtobufProperties {
                     message_name: info.proto_message_name.clone(),

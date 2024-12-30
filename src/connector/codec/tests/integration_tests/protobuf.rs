@@ -39,7 +39,7 @@ fn check(
     expected_risingwave_schema: expect_test::Expect,
     expected_risingwave_data: expect_test::Expect,
 ) {
-    let rw_schema = pb_schema_to_column_descs(&pb_schema);
+    let rw_schema = pb_schema_to_column_descs(&pb_schema, &HashSet::new());
 
     if let Err(e) = rw_schema {
         expected_risingwave_schema.assert_eq(&e.to_report_string_pretty());
@@ -714,7 +714,7 @@ fn test_recursive() -> anyhow::Result<()> {
             failed to map protobuf type
 
             Caused by:
-              circular reference detected: parent(recursive.ComplexRecursiveMessage.parent)->siblings(recursive.ComplexRecursiveMessage.Parent.siblings), conflict with parent(recursive.ComplexRecursiveMessage.parent), kind recursive.ComplexRecursiveMessage.Parent. Adding "recursive.ComplexRecursiveMessage.parent" to "messages_as_jsonb" may help.
+              circular reference detected: parent(recursive.ComplexRecursiveMessage.parent)->siblings(recursive.ComplexRecursiveMessage.Parent.siblings), conflict with parent(recursive.ComplexRecursiveMessage.parent), kind recursive.ComplexRecursiveMessage.Parent. Adding "recursive.ComplexRecursiveMessage" to "messages_as_jsonb" may help.
         "#]],
         expect![""],
     );

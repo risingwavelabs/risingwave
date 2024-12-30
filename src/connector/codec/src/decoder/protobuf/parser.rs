@@ -32,12 +32,18 @@ pub const PROTOBUF_MESSAGES_AS_JSONB: &str = "messages_as_jsonb";
 
 pub fn pb_schema_to_column_descs(
     message_descriptor: &MessageDescriptor,
+    messages_as_jsonb: &HashSet<String>,
 ) -> anyhow::Result<Vec<ColumnDesc>> {
     let mut columns = Vec::with_capacity(message_descriptor.fields().len());
     let mut index = 0;
     let mut parse_trace: Vec<String> = vec![];
     for field in message_descriptor.fields() {
-        columns.push(pb_field_to_col_desc(&field, &mut index, &mut parse_trace)?);
+        columns.push(pb_field_to_col_desc(
+            &field,
+            &mut index,
+            &mut parse_trace,
+            messages_as_jsonb,
+        )?);
     }
 
     Ok(columns)
@@ -48,15 +54,16 @@ fn pb_field_to_col_desc(
     field_descriptor: &FieldDescriptor,
     index: &mut i32,
     parse_trace: &mut Vec<String>,
+    messages_as_jsonb: &HashSet<String>,
 ) -> anyhow::Result<ColumnDesc> {
-    let field_type = protobuf_type_mapping(field_descriptor, parse_trace)
+    let field_type = protobuf_type_mapping(field_descriptor, parse_trace, messages_as_jsonb)
         .context("failed to map protobuf type")?;
     if let Kind::Message(m) = field_descriptor.kind() {
         let field_descs = if let DataType::List { .. } = field_type {
             vec![]
         } else {
             m.fields()
-                .map(|f| pb_field_to_col_desc(&f, index, parse_trace))
+                .map(|f| pb_field_to_col_desc(&f, index, parse_trace, messages_as_jsonb))
                 .try_collect()?
         };
         *index += 1;
@@ -100,7 +107,7 @@ fn detect_loop_and_push(
             trace.iter().format("->"),
             identifier,
             fd.kind(),
-            fd.full_name(),
+            fd.kind(),
             PROTOBUF_MESSAGES_AS_JSONB,
         );
     }
@@ -250,6 +257,7 @@ pub fn from_protobuf_value<'a>(
 fn protobuf_type_mapping(
     field_descriptor: &FieldDescriptor,
     parse_trace: &mut Vec<String>,
+    messages_as_jsonb: &HashSet<String>,
 ) -> std::result::Result<DataType, ProtobufTypeError> {
     detect_loop_and_push(parse_trace, field_descriptor)?;
     let mut t = match field_descriptor.kind() {
@@ -264,20 +272,33 @@ fn protobuf_type_mapping(
         Kind::Uint64 | Kind::Fixed64 => DataType::Decimal,
         Kind::String => DataType::Varchar,
         Kind::Message(m) => {
-            if m.full_name() == "google.protobuf.Any" {
+            if messages_as_jsonb.contains(m.full_name()) {
                 // Well-Known Types are identified by their full name
                 DataType::Jsonb
             } else if m.is_map_entry() {
                 // Map is equivalent to `repeated MapFieldEntry map_field = N;`
                 debug_assert!(field_descriptor.is_map());
-                let key = protobuf_type_mapping(&m.map_entry_key_field(), parse_trace)?;
-                let value = protobuf_type_mapping(&m.map_entry_value_field(), parse_trace)?;
+                let key = protobuf_type_mapping(
+                    &m.map_entry_key_field(),
+                    parse_trace,
+                    messages_as_jsonb,
+                )?;
+                let value = protobuf_type_mapping(
+                    &m.map_entry_value_field(),
+                    parse_trace,
+                    messages_as_jsonb,
+                )?;
                 _ = parse_trace.pop();
                 return Ok(DataType::Map(MapType::from_kv(key, value)));
             } else {
                 let fields = m
                     .fields()
-                    .map(|f| Ok((f.name().to_owned(), protobuf_type_mapping(&f, parse_trace)?)))
+                    .map(|f| {
+                        Ok((
+                            f.name().to_owned(),
+                            protobuf_type_mapping(&f, parse_trace, messages_as_jsonb)?,
+                        ))
+                    })
                     .try_collect::<_, Vec<_>, _>()?;
                 StructType::new(fields).into()
             }
