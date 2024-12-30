@@ -281,7 +281,7 @@ impl TableCatalog {
     /// Returns the SQL definition when the table was created, purified with best effort
     /// if it's a table.
     pub fn create_sql_purified(&self) -> String {
-        self.create_stmt_purified()
+        self.create_sql_ast_purified()
             .map(|stmt| stmt.to_string())
             .unwrap_or_else(|_| self.create_sql())
     }
@@ -290,9 +290,9 @@ impl TableCatalog {
     /// if it's a table.
     ///
     /// Returns error if it's invalid.
-    pub fn create_stmt_purified(&self) -> Result<ast::Statement> {
+    pub fn create_sql_ast_purified(&self) -> Result<ast::Statement> {
         if let TableType::Table = self.table_type() {
-            match self.try_table_create_stmt_purified() {
+            match self.try_purify_table_create_sql_ast() {
                 Ok(stmt) => return Ok(stmt),
                 Err(e) => notice_to_user(format!(
                     "error occurred while purifying definition for table \"{}\", \
@@ -302,7 +302,7 @@ impl TableCatalog {
                 )),
             }
         }
-        self.create_stmt()
+        self.create_sql_ast()
     }
 
     /// Try to restore missing column definitions and constraints in the persisted table definition,
@@ -311,7 +311,7 @@ impl TableCatalog {
     ///
     /// Returns error if restoring failed, or called on non-`TableType::Table`, or the persisted
     /// definition is invalid.
-    fn try_table_create_stmt_purified(&self) -> Result<ast::Statement> {
+    fn try_purify_table_create_sql_ast(&self) -> Result<ast::Statement> {
         use ast::*;
 
         let mut base = if self.definition.is_empty() {
@@ -339,7 +339,7 @@ impl TableCatalog {
                 engine: Engine::Hummock,
             }
         } else {
-            self.create_stmt()?
+            self.create_sql_ast()?
         };
 
         let Statement::CreateTable {
