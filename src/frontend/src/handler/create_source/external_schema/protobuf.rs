@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::*;
-
 use risingwave_connector::parser::PROTOBUF_MESSAGES_AS_JSONB;
+
+use super::*;
 
 /// Map a protobuf schema to a relational schema.
 pub async fn extract_protobuf_table_schema(

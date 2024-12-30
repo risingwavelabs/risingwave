@@ -39,7 +39,7 @@ fn check(
     expected_risingwave_schema: expect_test::Expect,
     expected_risingwave_data: expect_test::Expect,
 ) {
-    let rw_schema = pb_schema_to_column_descs(&pb_schema, &HashSet::new());
+    let rw_schema = pb_schema_to_column_descs(&pb_schema, &HashSet::from(["google.protobuf.Any".to_owned()]));
 
     if let Err(e) = rw_schema {
         expected_risingwave_schema.assert_eq(&e.to_report_string_pretty());
@@ -239,11 +239,11 @@ fn test_any_schema() -> anyhow::Result<()> {
     // }
     static ANY_DATA_3: &[u8] = b"\x08\xb9\x60\x12\x32\x0a\x24\x74\x79\x70\x65\x2e\x67\x6f\x6f\x67\x6c\x65\x61\x70\x69\x73\x2e\x63\x6f\x6d\x2f\x74\x65\x73\x74\x2e\x53\x74\x72\x69\x6e\x67\x56\x61\x6c\x75\x65\x12\x0a\x0a\x08\x4a\x6f\x68\x6e\x20\x44\x6f\x65";
 
-    // // id: 12345
-    // // any_value: {
-    // //    type_url: "type.googleapis.com/test.StringXalue"
-    // //    value: "\n\010John Doe"
-    // // }
+    // id: 12345
+    // any_value: {
+    //    type_url: "type.googleapis.com/test.StringXalue"
+    //    value: "\n\010John Doe"
+    // }
     static ANY_DATA_INVALID: &[u8] = b"\x08\xb9\x60\x12\x32\x0a\x24\x74\x79\x70\x65\x2e\x67\x6f\x6f\x67\x6c\x65\x61\x70\x69\x73\x2e\x63\x6f\x6d\x2f\x74\x65\x73\x74\x2e\x53\x74\x72\x69\x6e\x67\x58\x61\x6c\x75\x65\x12\x0a\x0a\x08\x4a\x6f\x68\x6e\x20\x44\x6f\x65";
 
     // validate the binary data is correct
@@ -714,7 +714,7 @@ fn test_recursive() -> anyhow::Result<()> {
             failed to map protobuf type
 
             Caused by:
-              circular reference detected: parent(recursive.ComplexRecursiveMessage.parent)->siblings(recursive.ComplexRecursiveMessage.Parent.siblings), conflict with parent(recursive.ComplexRecursiveMessage.parent), kind recursive.ComplexRecursiveMessage.Parent. Adding "recursive.ComplexRecursiveMessage" to "messages_as_jsonb" may help.
+              circular reference detected: parent(recursive.ComplexRecursiveMessage.parent)->siblings(recursive.ComplexRecursiveMessage.Parent.siblings), conflict with parent(recursive.ComplexRecursiveMessage.parent), kind recursive.ComplexRecursiveMessage.Parent. Adding recursive.ComplexRecursiveMessage.Parent to "messages_as_jsonb" may help.
         "#]],
         expect![""],
     );
