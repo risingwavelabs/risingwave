@@ -82,13 +82,13 @@ pub use {
 pub mod lru;
 pub mod opts;
 pub mod range;
+pub mod rate_limit;
 pub mod row;
 pub mod sequence;
 pub mod session_config;
 pub mod system_param;
 pub mod telemetry;
 pub mod test_utils;
-pub mod throttle;
 pub mod transaction;
 pub mod types;
 pub mod vnode_mapping;

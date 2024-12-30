@@ -73,7 +73,7 @@ impl Default for LogSuppresser {
 #[cfg(test)]
 mod tests {
     use std::sync::LazyLock;
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     use tracing_subscriber::util::SubscriberInitExt;
 
@@ -85,8 +85,14 @@ mod tests {
             .with_max_level(tracing::Level::ERROR)
             .set_default();
 
-        let mut interval = tokio::time::interval(Duration::from_millis(100));
-        for _ in 0..100 {
+        let mut interval = tokio::time::interval(Duration::from_millis(10));
+
+        let mut allowed = 0;
+        let mut suppressed = 0;
+
+        let start = Instant::now();
+
+        for _ in 0..1000 {
             interval.tick().await;
             static RATE_LIMITER: LazyLock<LogSuppresser> = LazyLock::new(|| {
                 LogSuppresser::new(RateLimiter::direct(Quota::per_second(
@@ -95,8 +101,18 @@ mod tests {
             });
 
             if let Ok(suppressed_count) = RATE_LIMITER.check() {
+                suppressed += suppressed_count.map(|v| v.get()).unwrap_or_default();
+                allowed += 1;
                 tracing::error!(suppressed_count, "failed to foo bar");
             }
         }
+        let duration = Instant::now().duration_since(start);
+
+        tracing::error!(
+            allowed,
+            suppressed,
+            ?duration,
+            rate = allowed as f64 / duration.as_secs_f64()
+        );
     }
 }
