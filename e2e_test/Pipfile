@@ -1,0 +1,24 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+nats-py = "==2.9.0"
+psycopg2-binary = "==2.9.10"
+requests = "*"
+confluent-kafka = "==2.6.2"
+protobuf = "==5.28.0"
+fastavro = "==1.9.4"
+httpx = "==0.27.2"
+attrs = "*"
+cachetools = "*"
+jsonschema = "*"
+google-auth = "*"
+google-api-core = "*"
+google-cloud-kms = "*"
+
+[dev-packages]
+
+[requires]
+python_version = "3.12"

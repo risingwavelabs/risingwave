@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+
+set -e
+
+# A wrapper around `python` to run the script in the provisioned environment.
+
+# Bail out if pipenv not installed.
+if ! command -v pipenv &>/dev/null; then
+    echo "pipenv could not be found, please install it via 'pip install pipenv' or 'brew install pipenv' first."
+    exit 1
+fi
+
+export PIPENV_PIPFILE=e2e_test/Pipfile
+
+# Update dependencies and lock file, if needed.
+pipenv install >/dev/null
+
+pipenv run python "$@"
