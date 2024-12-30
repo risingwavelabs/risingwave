@@ -525,6 +525,13 @@ impl ManagedBarrierState {
             let database_id = DatabaseId::new(database.database_id);
             assert!(!databases.contains_key(&database_id));
             let shared_context = Arc::new(SharedContext::new(database_id, &actor_manager.env));
+            shared_context.add_actors(
+                database
+                    .graphs
+                    .iter()
+                    .flat_map(|graph| graph.actor_infos.iter())
+                    .cloned(),
+            );
             let state = DatabaseManagedBarrierState::new(
                 database_id,
                 actor_manager.clone(),
