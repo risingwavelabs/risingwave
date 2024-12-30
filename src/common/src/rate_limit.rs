@@ -22,6 +22,7 @@ use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
 use arc_swap::ArcSwap;
+use parking_lot::Mutex;
 use pin_project_lite::pin_project;
 use risingwave_common::catalog::TableId;
 use risingwave_common::metrics::LabelGuardedUintGaugeVec;
@@ -29,6 +30,7 @@ use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common_metrics::{
     register_guarded_uint_gauge_vec_with_registry, LabelGuardedUintGauge,
 };
+use tokio::sync::oneshot;
 use tokio::time::Sleep;
 
 static METRICS: LazyLock<LabelGuardedUintGaugeVec<1>> = LazyLock::new(|| {
@@ -47,6 +49,7 @@ pin_project! {
     pub enum Delay {
         Noop,
         Sleep{#[pin] sleep: Sleep},
+        Wait{#[pin] rx: oneshot::Receiver<()> },
         Infinite,
     }
 }
@@ -60,10 +63,6 @@ impl Delay {
                 sleep: tokio::time::sleep(dur),
             },
         }
-    }
-
-    pub fn infinite() -> Self {
-        Self::Infinite
     }
 }
 
@@ -80,6 +79,7 @@ impl Future for Delay {
         match self.project() {
             DelayProj::Noop => Poll::Ready(()),
             DelayProj::Sleep { sleep } => sleep.poll(cx),
+            DelayProj::Wait { rx } => rx.poll(cx).map(|_| ()),
             DelayProj::Infinite => Poll::Pending,
         }
     }
@@ -147,9 +147,7 @@ pub trait RateLimiterTrait: Send + Sync + 'static {
 
     /// Book a request with given quota and suspend task until there is enough quota and consume.
     #[must_use]
-    fn wait(&self, quota: u64) -> Delay {
-        self.book(quota).into()
-    }
+    fn wait(&self, quota: u64) -> Delay;
 }
 
 /// A rate limiter that supports multiple rate limit policy and online policy switch.
@@ -162,7 +160,7 @@ impl RateLimiter {
         match rate_limit {
             RateLimit::Disabled => Box::new(InfiniteRatelimiter),
             RateLimit::Fixed(rate) => Box::new(FixedRateLimiter::new(rate)),
-            RateLimit::Pause => Box::new(PausedRateLimiter),
+            RateLimit::Pause => Box::new(PausedRateLimiter::default()),
         }
     }
 
@@ -210,6 +208,10 @@ impl RateLimiterTrait for RateLimiter {
     fn book(&self, quota: u64) -> Duration {
         self.inner.load().book(quota)
     }
+
+    fn wait(&self, quota: u64) -> Delay {
+        self.inner.load().wait(quota)
+    }
 }
 
 /// A rate limiter that supports multiple rate limit policy, online policy switch and metrics support.
@@ -243,6 +245,12 @@ impl RateLimiterTrait for MonitoredRateLimiter {
         self.report();
         res
     }
+
+    fn wait(&self, quota: u64) -> Delay {
+        let res = self.inner.wait(quota);
+        self.report();
+        res
+    }
 }
 
 impl MonitoredRateLimiter {
@@ -273,10 +281,32 @@ impl RateLimiterTrait for InfiniteRatelimiter {
     fn book(&self, _: u64) -> Duration {
         Duration::ZERO
     }
+
+    fn wait(&self, quota: u64) -> Delay {
+        self.book(quota).into()
+    }
 }
 
 #[derive(Debug)]
-pub struct PausedRateLimiter;
+pub struct PausedRateLimiter {
+    waiters: Mutex<Vec<oneshot::Sender<()>>>,
+}
+
+impl Default for PausedRateLimiter {
+    fn default() -> Self {
+        Self {
+            waiters: Mutex::new(vec![]),
+        }
+    }
+}
+
+impl Drop for PausedRateLimiter {
+    fn drop(&mut self) {
+        for tx in self.waiters.lock().drain(..) {
+            let _ = tx.send(());
+        }
+    }
+}
 
 impl RateLimiterTrait for PausedRateLimiter {
     fn rate_limit(&self) -> RateLimit {
@@ -292,7 +322,9 @@ impl RateLimiterTrait for PausedRateLimiter {
     }
 
     fn wait(&self, _: u64) -> Delay {
-        Delay::infinite()
+        let (tx, rx) = oneshot::channel();
+        self.waiters.lock().push(tx);
+        Delay::Wait { rx }
     }
 }
 
@@ -320,6 +352,10 @@ impl RateLimiterTrait for FixedRateLimiter {
 
     fn book(&self, quota: u64) -> Duration {
         self.inner.book(quota)
+    }
+
+    fn wait(&self, quota: u64) -> Delay {
+        self.book(quota).into()
     }
 }
 
@@ -526,5 +562,21 @@ mod tests {
         let eratio = error as f64 / (RATE as f64 * DURATION.as_secs_f64());
         assert!(eratio < ERATIO, "eratio: {}, target: {}", eratio, ERATIO);
         println!("eratio {eratio} < ERATIO {ERATIO}");
+    }
+
+    #[tokio::test]
+    async fn test_pause_and_resume() {
+        let l = Arc::new(RateLimiter::new(RateLimit::Pause));
+
+        let delay = l.wait(1);
+
+        let ll = l.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            ll.update(RateLimit::Disabled);
+        });
+
+        tokio::time::sleep(Duration::from_millis(1000)).await;
+        delay.await;
     }
 }

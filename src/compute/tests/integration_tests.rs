@@ -32,6 +32,7 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{
     ColumnDesc, ColumnId, ConflictBehavior, Field, Schema, TableId, INITIAL_TABLE_VERSION_ID,
 };
+use risingwave_common::rate_limit::RateLimit;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::test_prelude::DataChunkTestExt;
@@ -194,7 +195,7 @@ async fn test_table_materialize() -> StreamResult<()> {
             INITIAL_TABLE_VERSION_ID,
             column_descs.clone(),
             1024,
-            None,
+            RateLimit::Disabled,
         )
         .boxed(),
     );
