@@ -35,11 +35,11 @@ fn build_no_shuffle_exchange_for_delta_join(
         identity: "NO SHUFFLE Exchange (Lookup and Merge)".into(),
         fields: upstream.fields.clone(),
         stream_key: upstream.stream_key.clone(),
-        node_body: Some(NodeBody::Exchange(ExchangeNode {
+        node_body: Some(NodeBody::Exchange(Box::new(ExchangeNode {
             strategy: Some(dispatch_no_shuffle(
                 (0..(upstream.fields.len() as u32)).collect(),
             )),
-        })),
+        }))),
         input: vec![],
         append_only: upstream.append_only,
     }
@@ -55,12 +55,12 @@ fn build_consistent_hash_shuffle_exchange_for_delta_join(
         identity: "HASH Exchange (Lookup and Merge)".into(),
         fields: upstream.fields.clone(),
         stream_key: upstream.stream_key.clone(),
-        node_body: Some(NodeBody::Exchange(ExchangeNode {
+        node_body: Some(NodeBody::Exchange(Box::new(ExchangeNode {
             strategy: Some(dispatch_consistent_hash_shuffle(
                 dist_key_indices,
                 (0..(upstream.fields.len() as u32)).collect(),
             )),
-        })),
+        }))),
         input: vec![],
         append_only: upstream.append_only,
     }
@@ -97,7 +97,7 @@ fn build_lookup_for_delta_join(
         identity: "Lookup".into(),
         fields: output_fields,
         stream_key: output_stream_key,
-        node_body: Some(NodeBody::Lookup(lookup_node)),
+        node_body: Some(NodeBody::Lookup(Box::new(lookup_node))),
         input: vec![
             exchange_node_arrangement.clone(),
             exchange_node_stream.clone(),
@@ -281,7 +281,9 @@ fn build_delta_join_inner(
         identity: "Union".into(),
         fields: node.fields.clone(),
         stream_key: node.stream_key.clone(),
-        node_body: Some(NodeBody::LookupUnion(LookupUnionNode { order: vec![1, 0] })),
+        node_body: Some(NodeBody::LookupUnion(Box::new(LookupUnionNode {
+            order: vec![1, 0],
+        }))),
         input: vec![exchange_l0m.clone(), exchange_l1m.clone()],
         append_only: node.append_only,
     };

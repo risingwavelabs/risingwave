@@ -130,13 +130,13 @@ impl StreamNode for StreamOverWindow {
             .config()
             .streaming_over_window_cache_policy();
 
-        PbNodeBody::OverWindow(OverWindowNode {
+        PbNodeBody::OverWindow(Box::new(OverWindowNode {
             calls,
             partition_by,
             order_by,
             state_table: Some(state_table),
             cache_policy: cache_policy.to_protobuf() as _,
-        })
+        }))
     }
 }
 

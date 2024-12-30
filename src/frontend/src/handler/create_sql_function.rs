@@ -213,7 +213,7 @@ pub async fn handle_create_sql_function(
 
     // resolve database and schema id
     let session = &handler_args.session;
-    let db_name = session.database();
+    let db_name = &session.database();
     let (schema_name, function_name) = Binder::resolve_schema_qualified_name(db_name, name)?;
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
 

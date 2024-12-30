@@ -232,8 +232,8 @@ impl DataChunkBuilder {
         self.buffered_count
     }
 
-    pub fn can_append(&self, count: usize) -> bool {
-        self.buffered_count + count <= self.batch_size
+    pub fn can_append_update(&self) -> bool {
+        self.buffered_count + 2 <= self.batch_size
     }
 
     pub fn num_columns(&self) -> usize {

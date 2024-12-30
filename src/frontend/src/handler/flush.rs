@@ -30,7 +30,7 @@ pub(crate) async fn do_flush(session: &SessionImpl) -> Result<()> {
         .env()
         .catalog_reader()
         .read_guard()
-        .get_database_by_name(session.database())?
+        .get_database_by_name(&session.database())?
         .id();
     let version_id = client.flush(database_id).await?;
 

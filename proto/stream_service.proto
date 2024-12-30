@@ -68,6 +68,7 @@ message StreamingControlStreamRequest {
   message InitialPartialGraph {
     uint32 partial_graph_id = 1;
     repeated stream_plan.SubscriptionUpstreamInfo subscriptions = 2;
+    repeated common.ActorInfo actor_infos = 3;
   }
 
   message DatabaseInitialPartialGraph {
