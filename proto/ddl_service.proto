@@ -469,6 +469,13 @@ message AutoSchemaChangeRequest {
 
 message AutoSchemaChangeResponse {}
 
+message AlterTableTtlRequest {
+  uint32 table_id = 1;
+  optional uint32 retention_seconds = 2;
+}
+
+message AlterTableTtlResponse {}
+
 service DdlService {
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse);
   rpc DropDatabase(DropDatabaseRequest) returns (DropDatabaseResponse);
@@ -508,4 +515,5 @@ service DdlService {
   rpc Wait(WaitRequest) returns (WaitResponse);
   rpc CommentOn(CommentOnRequest) returns (CommentOnResponse);
   rpc AutoSchemaChange(AutoSchemaChangeRequest) returns (AutoSchemaChangeResponse);
+  rpc AlterTableTtl(AlterTableTtlRequest) returns (AlterTableTtlResponse);
 }

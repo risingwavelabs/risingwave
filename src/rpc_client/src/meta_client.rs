@@ -568,6 +568,19 @@ impl MetaClient {
         Ok(())
     }
 
+    pub async fn alter_table_ttl(
+        &self,
+        table_id: u32,
+        retention_seconds: Option<u32>,
+    ) -> Result<()> {
+        let request = AlterTableTtlRequest {
+            table_id,
+            retention_seconds,
+        };
+        let _ = self.inner.alter_table_ttl(request).await?;
+        Ok(())
+    }
+
     pub async fn create_view(&self, view: PbView) -> Result<CatalogVersion> {
         let request = CreateViewRequest { view: Some(view) };
         let resp = self.inner.create_view(request).await?;
@@ -2051,6 +2064,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, get_tables, GetTablesRequest, GetTablesResponse }
             ,{ ddl_client, wait, WaitRequest, WaitResponse }
             ,{ ddl_client, auto_schema_change, AutoSchemaChangeRequest, AutoSchemaChangeResponse }
+            ,{ ddl_client, alter_table_ttl, AlterTableTtlRequest, AlterTableTtlResponse }
             ,{ hummock_client, unpin_version_before, UnpinVersionBeforeRequest, UnpinVersionBeforeResponse }
             ,{ hummock_client, get_current_version, GetCurrentVersionRequest, GetCurrentVersionResponse }
             ,{ hummock_client, replay_version_delta, ReplayVersionDeltaRequest, ReplayVersionDeltaResponse }

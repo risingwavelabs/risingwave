@@ -538,6 +538,13 @@ enum MetaCommands {
         #[clap(long, required = true)]
         endpoint: String,
     },
+
+    UpdateTableTTL {
+        #[clap(long)]
+        table_id: u32,
+        #[clap(long)]
+        retention_seconds: Option<u32>,
+    },
 }
 
 #[derive(Subcommand, Clone, Debug)]
@@ -908,6 +915,12 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                 credentials,
             };
             cmd_impl::meta::migrate(etcd_backend, sql_endpoint, force_clean).await?
+        }
+        Commands::Meta(MetaCommands::UpdateTableTTL {
+            table_id,
+            retention_seconds,
+        }) => {
+            cmd_impl::meta::update_table_ttl(context, table_id, retention_seconds).await?;
         }
         Commands::AwaitTree => cmd_impl::await_tree::dump(context).await?,
         Commands::Profile(ProfileCommands::Cpu { sleep }) => {
