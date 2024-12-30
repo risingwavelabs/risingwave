@@ -405,7 +405,7 @@ impl StreamActorManager {
             actor_context.clone(),
             progress,
             chunk_size,
-            node.rate_limit.map(|x| x as _),
+            node.rate_limit.into(),
             barrier_rx,
             self.streaming_metrics.clone(),
         )

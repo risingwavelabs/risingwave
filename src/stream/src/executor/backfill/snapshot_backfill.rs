@@ -23,6 +23,7 @@ use futures::future::Either;
 use futures::{pin_mut, Stream, TryStreamExt};
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::metrics::LabelGuardedIntCounter;
+use risingwave_common::rate_limit::RateLimit;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_hummock_sdk::HummockReadEpoch;
@@ -56,7 +57,7 @@ pub struct SnapshotBackfillExecutor<S: StateStore> {
     progress: CreateMviewProgressReporter,
 
     chunk_size: usize,
-    rate_limit: Option<usize>,
+    rate_limit: RateLimit,
 
     barrier_rx: UnboundedReceiver<Barrier>,
 
@@ -73,14 +74,14 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
         actor_ctx: ActorContextRef,
         progress: CreateMviewProgressReporter,
         chunk_size: usize,
-        rate_limit: Option<usize>,
+        rate_limit: RateLimit,
         barrier_rx: UnboundedReceiver<Barrier>,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
         assert_eq!(&upstream.info.schema, upstream_table.schema());
-        if let Some(rate_limit) = rate_limit {
+        if !matches!(rate_limit, RateLimit::Disabled) {
             debug!(
-                rate_limit,
+                ?rate_limit,
                 "create snapshot backfill executor with rate limit"
             );
         }
@@ -202,7 +203,8 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                             ))
                             .await?;
                         let data_types = self.upstream_table.schema().data_types();
-                        let builder = create_builder(None, self.chunk_size, data_types);
+                        let builder =
+                            create_builder(RateLimit::Disabled, self.chunk_size, data_types);
                         let stream = read_change_log(stream, builder);
                         pin_mut!(stream);
                         while let Some(chunk) =
@@ -515,7 +517,7 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
     upstream_table: &'a StorageTable<S>,
     snapshot_epoch: u64,
     chunk_size: usize,
-    rate_limit: Option<usize>,
+    rate_limit: RateLimit,
     barrier_rx: &'a mut UnboundedReceiver<Barrier>,
     progress: &'a mut CreateMviewProgressReporter,
     first_recv_barrier: Barrier,
@@ -558,11 +560,7 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
     let mut count = 0;
     let mut epoch_row_count = 0;
     loop {
-        let throttle_snapshot_stream = if let Some(rate_limit) = rate_limit {
-            epoch_row_count > rate_limit
-        } else {
-            false
-        };
+        let throttle_snapshot_stream = epoch_row_count as u64 > rate_limit.to_u64();
         match select_barrier_and_snapshot_stream(
             barrier_rx,
             &mut snapshot_stream,

@@ -187,8 +187,8 @@ impl RateLimiter {
     }
 
     /// Monitor the rate limiter with related table id.
-    pub fn monitored(self, table_id: TableId) -> MonitoredRateLimiter {
-        let metric = METRICS.with_guarded_label_values(&[&table_id.to_string()]);
+    pub fn monitored(self, table_id: impl Into<TableId>) -> MonitoredRateLimiter {
+        let metric = METRICS.with_guarded_label_values(&[&table_id.into().to_string()]);
         let rate_limit = AtomicU64::new(self.rate_limit().to_u64());
         MonitoredRateLimiter {
             inner: self,
