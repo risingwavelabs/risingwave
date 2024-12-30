@@ -5,10 +5,17 @@ system ok
 rpk registry schema create "opentelemetry_test-value" --schema "/risingwave/src/connector/codec/tests/test_data/opentelemetry_test.proto" --references opentelemetry_common.proto:opentelemetry_common.proto:1
 
 system ok
-echo '{"any_value":{"string_value":"example"},"key_value_list":{"values":[{"key":"key1","value":{"string_value":"value1"}},{"key":"key2","value":{"int_value":42}}]},"instrumentation_scope":{"name":"test-scope","version":"1.0"}}' | rpk topic produce "opentelemetry_test" --schema-id=topic --schema-type="opentelemetry_test.OTLPTestMessage"
+echo '{"any_value":{"string_value":"example"},"key_value_list":{"values":[{"key":"key1","value":{"string_value":"value1"}},{"key":"key2","value":{"int_value":42}}]},"instrumentation_scope":{"name":"test-scope","version":"1.0"}}' | rpk topic produce "opentelemetry_test" --schema-id=topic --schema-type="opentelemetry_test.OTLPTestMessage" --allow-auto-topic-creation
 
 statement ok
-create table opentelemetry_test with ( ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON}, topic = 'opentelemetry_test') format plain encode protobuf (schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}, message = 'opentelemetry_test.OTLPTestMessage')) ;
+create table opentelemetry_test with (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'opentelemetry_test')
+format plain encode protobuf (
+  schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL},
+  message = 'opentelemetry_test.OTLPTestMessage',
+  messages_as_jsonb = 'opentelemetry.proto.common.v1.ArrayValue,opentelemetry.proto.common.v1.KeyValueList'
+) ;
 
 statement ok
 flush;
@@ -19,6 +26,21 @@ query T
 select count(*) from opentelemetry_test;
 ----
 1
+
+query TTIITTT
+select (any_value).string_value, (any_value).bool_value, (any_value).int_value, (any_value).double_value, (any_value).array_value, (any_value).kvlist_value, (any_value).bytes_value from opentelemetry_test ;
+----
+example f 0 0 {} {} \x
+
+query T
+select key_value_list from opentelemetry_test;
+----
+{"values": [{"key": "key1", "value": {"stringValue": "value1"}}, {"key": "key2", "value": {"intValue": "42"}}]}
+
+query TTTI
+select (instrumentation_scope).name, (instrumentation_scope).version, (instrumentation_scope).attributes, (instrumentation_scope).dropped_attributes_count from opentelemetry_test;
+----
+test-scope 1.0 {} 0
 
 # ==== clean up ====
 
