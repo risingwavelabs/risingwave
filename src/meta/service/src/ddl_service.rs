@@ -882,6 +882,7 @@ impl DdlService for DdlServiceImpl {
                     .into_iter()
                     .map(|id| id as _)
                     .collect(),
+                true,
             )
             .await?;
 
