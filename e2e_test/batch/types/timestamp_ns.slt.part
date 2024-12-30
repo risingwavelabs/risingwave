@@ -51,7 +51,7 @@ select v1, v2, coalesce(v2, '1900-01-01 00:00:00') as coalesce_v2 from t1;
 query T
 select count(v2) as total_rows from t1;
 ----
-4
+5
 
 query T rowsort
 select * from t1 order by v2;

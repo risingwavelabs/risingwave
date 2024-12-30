@@ -42,18 +42,18 @@ fn extract_from_datelike(date: impl Datelike, unit: Unit) -> Decimal {
 
 /// Extract field from `Timelike`.
 fn extract_from_timelike(time: impl Timelike, unit: Unit) -> Decimal {
-    let usecs = || time.second() as u64 * 1_000_000_000 + time.nanosecond() as u64;
+    let nanos = || time.second() as u64 * 1_000_000_000 + time.nanosecond() as u64;
     match unit {
         Hour => time.hour().into(),
         Minute => time.minute().into(),
-        Second => Decimal::from_i128_with_scale(usecs() as i128, 9),
-        Millisecond => Decimal::from_i128_with_scale(usecs() as i128, 6),
-        Microsecond => Decimal::from_i128_with_scale(usecs() as i128, 3),
-        Nanosecond => usecs().into(),
+        Second => Decimal::from_i128_with_scale(nanos() as i128, 9),
+        Millisecond => Decimal::from_i128_with_scale(nanos() as i128, 6),
+        Microsecond => Decimal::from_i128_with_scale(nanos() as i128, 3),
+        Nanosecond => nanos().into(),
         Epoch => {
-            let usecs =
+            let nanos =
                 time.num_seconds_from_midnight() as u64 * 1_000_000_000 + time.nanosecond() as u64;
-            Decimal::from_i128_with_scale(usecs as i128, 9)
+            Decimal::from_i128_with_scale(nanos as i128, 9)
         }
         u => unreachable!("invalid unit {:?} for time", u),
     }
