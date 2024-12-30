@@ -60,6 +60,7 @@ DROP TABLE TIME_TBL;
 
 --
 -- test EXTRACT
+-- Since postgresql does not support nanosecond time, it is not tested here. We did a similar test in e2e_test/batch/types/timestamp_ns.slt
 --
 SELECT EXTRACT(MINUTE      FROM TIME '13:30:25.575401');
 SELECT EXTRACT(HOUR        FROM TIME '13:30:25.575401');
