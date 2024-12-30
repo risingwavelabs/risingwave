@@ -11026,7 +11026,6 @@ dependencies = [
  "google-cloud-gax",
  "google-cloud-googleapis",
  "google-cloud-pubsub",
- "governor",
  "iceberg",
  "iceberg-catalog-glue",
  "iceberg-catalog-rest",
@@ -12094,7 +12093,6 @@ name = "risingwave_stream"
 version = "2.3.0-alpha"
 dependencies = [
  "anyhow",
- "arc-swap",
  "assert_matches",
  "async-recursion",
  "async-stream",
@@ -12114,7 +12112,6 @@ dependencies = [
  "foyer",
  "futures",
  "futures-async-stream",
- "governor",
  "hytra",
  "itertools 0.13.0",
  "jsonbb",
