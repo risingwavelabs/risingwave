@@ -98,17 +98,17 @@ pg_catalog
 public
 rw_catalog
 
-query T
+query T rowsort
 show tables;
 ----
-t3as
 t3
+t3as
 
-query T
+query T rowsort
 show tables from public;
 ----
-t3as
 t3
+t3as
 
 query T
 show tables from public like 't_';
