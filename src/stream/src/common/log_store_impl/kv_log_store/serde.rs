@@ -598,7 +598,7 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
                     old_value,
                 } => {
                     read_info.read_update(row_read_size);
-                    if !data_chunk_builder.can_append(2) {
+                    if !data_chunk_builder.can_append_update() {
                         let ops = replace(&mut ops, Vec::with_capacity(chunk_size));
                         let chunk = data_chunk_builder.consume_all().expect("must not be empty");
                         yield (
