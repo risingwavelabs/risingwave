@@ -345,6 +345,7 @@ impl TableCatalog {
         let Statement::CreateTable {
             columns: column_defs,
             constraints,
+            wildcard_idx,
             ..
         } = &mut base
         else {
@@ -354,13 +355,13 @@ impl TableCatalog {
         // Filter out columns that are not defined by users in SQL.
         let defined_columns = self.columns.iter().filter(|c| c.is_user_defined());
 
-        // If there are defined columns...
+        // If all columns are defined...
         // - either the schema is fully specified by the user,
         // - the persisted definition is already purified.
         // No need to proceed.
-        if !column_defs.is_empty() {
+        if !column_defs.is_empty() && wildcard_idx.is_none() {
             let defined_columns_len = defined_columns.count();
-            if column_defs.len()!= defined_columns_len {
+            if column_defs.len() != defined_columns_len {
                 bail /* unlikely */ !(
                     "column count mismatch: defined {} columns, but {} columns in the definition",
                     defined_columns_len,
@@ -371,8 +372,22 @@ impl TableCatalog {
             return Ok(base);
         }
 
-        // Schema inferred. Derive `ColumnDef` from `ColumnCatalog`.
+        // Schema inferred. Now derive the missing columns and constraints.
+        // First, remove the wildcard from the definition.
+        *wildcard_idx = None;
+
+        // Derive `ColumnDef` from `ColumnCatalog`.
+        let mut purified_column_defs = Vec::new();
         for column in defined_columns {
+            // If the column is already defined in the persisted definition, keep it.
+            if let Some(existing) = column_defs
+                .iter()
+                .find(|c| c.name.real_value() == column.name())
+            {
+                purified_column_defs.push(existing.clone());
+                continue;
+            }
+
             if let Some(c) = &column.column_desc.generated_or_default_column {
                 match c {
                     GeneratedOrDefaultColumn::GeneratedColumn(_) => {
@@ -382,7 +397,7 @@ impl TableCatalog {
                         // TODO: convert `ExprNode` back to ast can be a bit tricky.
                         // Fortunately, this case is rare as inferring default values is not
                         // widely supported.
-                        bail!("purifying default value is not supported yet");
+                        bail /* unlikely */ !("purifying default value is not supported yet");
                     }
                 }
             }
@@ -393,8 +408,9 @@ impl TableCatalog {
                 collation: None,
                 options: Vec::new(), // pk will be specified with table constraints
             };
-            column_defs.push(column_def);
+            purified_column_defs.push(column_def);
         }
+        *column_defs = purified_column_defs;
 
         if self.row_id_index.is_none() {
             // User-defined primary key.
