@@ -35,8 +35,8 @@ sleep 10s
 statement ok
 INSERT INTO t6 VALUES (1, 1, 50, '1-50', '2022-03-11');
 
-
-sleep 10s
+statement ok
+flush;
 
 query I
 select count(*) from t6;

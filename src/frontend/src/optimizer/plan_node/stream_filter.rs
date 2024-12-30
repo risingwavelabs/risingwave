@@ -69,9 +69,9 @@ impl_distill_by_unit!(StreamFilter, core, "StreamFilter");
 
 impl StreamNode for StreamFilter {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
-        PbNodeBody::Filter(FilterNode {
+        PbNodeBody::Filter(Box::new(FilterNode {
             search_condition: Some(ExprImpl::from(self.predicate().clone()).to_expr_proto()),
-        })
+        }))
     }
 }
 

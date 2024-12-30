@@ -158,7 +158,7 @@ impl StreamSourceScan {
                     ..Default::default()
                 },
             ],
-            node_body: Some(PbNodeBody::SourceBackfill(backfill)),
+            node_body: Some(PbNodeBody::SourceBackfill(Box::new(backfill))),
             stream_key,
             operator_id: self.base.id().0 as u64,
             identity: self.distill_to_string(),

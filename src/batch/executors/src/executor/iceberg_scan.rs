@@ -137,7 +137,7 @@ impl IcebergScanExecutor {
     async fn do_execute(mut self: Box<Self>) {
         let table = self
             .iceberg_config
-            .load_table_v2_with_metadata(self.table_meta)
+            .load_table_with_metadata(self.table_meta)
             .await?;
         let data_types = self.schema.data_types();
         let table_name = table.identifier().name().to_owned();

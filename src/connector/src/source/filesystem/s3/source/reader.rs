@@ -40,7 +40,7 @@ use crate::source::filesystem::file_common::FsSplit;
 use crate::source::filesystem::nd_streaming::need_nd_streaming;
 use crate::source::filesystem::s3::S3Properties;
 use crate::source::{
-    into_chunk_stream, BoxChunkSourceStream, Column, SourceContextRef, SourceMessage, SourceMeta,
+    into_chunk_stream, BoxSourceChunkStream, Column, SourceContextRef, SourceMessage, SourceMeta,
 };
 
 const STREAM_READER_CAPACITY: usize = 4096;
@@ -201,7 +201,7 @@ impl SplitReader for S3FileReader {
         Ok(s3_file_reader)
     }
 
-    fn into_stream(self) -> BoxChunkSourceStream {
+    fn into_stream(self) -> BoxSourceChunkStream {
         self.into_stream_inner()
     }
 }
