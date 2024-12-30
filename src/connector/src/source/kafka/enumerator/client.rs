@@ -20,12 +20,11 @@ use anyhow::{anyhow, Context};
 use async_trait::async_trait;
 use moka::future::Cache as MokaCache;
 use moka::ops::compute::Op;
-use prometheus::core::{AtomicI64, GenericGauge};
 use rdkafka::consumer::{BaseConsumer, Consumer};
 use rdkafka::error::KafkaResult;
 use rdkafka::{ClientConfig, Offset, TopicPartitionList};
 use risingwave_common::bail;
-use risingwave_common::metrics::LabelGuardedMetric;
+use risingwave_common::metrics::LabelGuardedIntGauge;
 
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::source::base::SplitEnumerator;
@@ -60,7 +59,7 @@ pub struct KafkaSplitEnumerator {
     stop_offset: KafkaEnumeratorOffset,
 
     sync_call_timeout: Duration,
-    high_watermark_metrics: HashMap<i32, LabelGuardedMetric<GenericGauge<AtomicI64>, 2>>,
+    high_watermark_metrics: HashMap<i32, LabelGuardedIntGauge<2>>,
 }
 
 impl KafkaSplitEnumerator {}

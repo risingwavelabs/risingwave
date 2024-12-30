@@ -493,7 +493,7 @@ mod tests {
             id: 0,
             schema_id: 0,
             database_id: 0,
-            name: "test".to_string(),
+            name: "test".to_owned(),
             table_type: TableType::Table as i32,
             columns: vec![
                 PbColumnCatalog {
@@ -571,6 +571,7 @@ mod tests {
             webhook_info: None,
             job_id: None,
             engine: Some(PbEngine::Hummock as i32),
+            clean_watermark_index_in_pk: None,
         }
     }
 

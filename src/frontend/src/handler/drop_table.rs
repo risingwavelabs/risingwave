@@ -75,7 +75,7 @@ pub async fn handle_drop_table(
                 .get_source_by_name(
                     db_name,
                     schema_path,
-                    &(ICEBERG_SOURCE_PREFIX.to_string() + &table_name),
+                    &(ICEBERG_SOURCE_PREFIX.to_owned() + &table_name),
                 )
                 .map(|(source, _)| source.clone())
             {
@@ -92,7 +92,7 @@ pub async fn handle_drop_table(
                 .get_sink_by_name(
                     db_name,
                     schema_path,
-                    &(ICEBERG_SINK_PREFIX.to_string() + &table_name),
+                    &(ICEBERG_SINK_PREFIX.to_owned() + &table_name),
                 )
                 .map(|(sink, _)| sink.clone())
             {
@@ -114,10 +114,10 @@ pub async fn handle_drop_table(
                 ObjectName::from(match schema_name {
                     Some(ref schema) => vec![
                         Ident::from(schema.as_str()),
-                        Ident::from((ICEBERG_SINK_PREFIX.to_string() + &table_name).as_str()),
+                        Ident::from((ICEBERG_SINK_PREFIX.to_owned() + &table_name).as_str()),
                     ],
                     None => vec![Ident::from(
-                        (ICEBERG_SINK_PREFIX.to_string() + &table_name).as_str(),
+                        (ICEBERG_SINK_PREFIX.to_owned() + &table_name).as_str(),
                     )],
                 }),
                 true,
@@ -128,17 +128,17 @@ pub async fn handle_drop_table(
             if let Some(either) = either {
                 let (iceberg_catalog, table_id) = match either {
                     Either::Left(iceberg_properties) => {
-                        let catalog = iceberg_properties.create_catalog_v2().await?;
+                        let catalog = iceberg_properties.create_catalog().await?;
                         let table_id = iceberg_properties
                             .common
-                            .full_table_name_v2()
+                            .full_table_name()
                             .context("Unable to parse table name")?;
                         (catalog, table_id)
                     }
                     Either::Right(iceberg_config) => {
-                        let catalog = iceberg_config.create_catalog_v2().await?;
+                        let catalog = iceberg_config.create_catalog().await?;
                         let table_id = iceberg_config
-                            .full_table_name_v2()
+                            .full_table_name()
                             .context("Unable to parse table name")?;
                         (catalog, table_id)
                     }
@@ -167,10 +167,10 @@ pub async fn handle_drop_table(
                     ObjectName::from(match schema_name {
                         Some(ref schema) => vec![
                             Ident::from(schema.as_str()),
-                            Ident::from((ICEBERG_SOURCE_PREFIX.to_string() + &table_name).as_str()),
+                            Ident::from((ICEBERG_SOURCE_PREFIX.to_owned() + &table_name).as_str()),
                         ],
                         None => vec![Ident::from(
-                            (ICEBERG_SOURCE_PREFIX.to_string() + &table_name).as_str(),
+                            (ICEBERG_SOURCE_PREFIX.to_owned() + &table_name).as_str(),
                         )],
                     }),
                     true,

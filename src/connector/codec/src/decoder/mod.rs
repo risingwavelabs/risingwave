@@ -73,7 +73,7 @@ pub trait Access {
     /// TODO: the meaning of `path` is a little confusing and maybe over-abstracted.
     /// `access` does not need to serve arbitrarily deep `path` access, but just "top-level" access.
     /// The API creates an illusion that arbitrary access is supported, but it's not.
-    /// Perhapts we should separate out another trait like `ToDatum`,
+    /// Perhaps we should separate out another trait like `ToDatum`,
     /// which only does type mapping, without caring about the path. And `path` itself is only an `enum` instead of `&[&str]`.
     ///
     /// What `path` to access is decided by the CDC layer, i.e., the `FORMAT ...` part (`ChangeEvent`).

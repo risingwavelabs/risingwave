@@ -8,12 +8,6 @@ license = { workspace = true }
 repository = { workspace = true }
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-[package.metadata.cargo-machete]
-ignored = ["workspace-hack"]
-
-[package.metadata.cargo-udeps.ignore]
-normal = ["workspace-hack"]
-
 [dependencies]
 anyhow = "1"
 arc-swap = "1"
@@ -25,6 +19,7 @@ await-tree = { workspace = true }
 bytes = "1"
 cfg-if = "1"
 delta_btree_map = { path = "../utils/delta_btree_map" }
+dhat = { version = "0.3", optional = true }
 educe = "0.6"
 either = "1"
 enum-as-inner = "0.6"
@@ -32,11 +27,7 @@ fail = "0.5"
 foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
-governor = { version = "0.6", default-features = false, features = [
-  "std",
-  "dashmap",
-  "jitter",
-] }
+governor = { workspace = true }
 hytra = "0.1.2"
 itertools = { workspace = true }
 jsonbb = { workspace = true }
@@ -65,7 +56,6 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1"
 smallvec = "1"
 static_assertions = "1"
-strum = "0.26"
 strum_macros = "0.26"
 thiserror = "1"
 thiserror-ext = { workspace = true }
@@ -83,6 +73,7 @@ tokio-retry = "0.3"
 tokio-stream = { workspace = true }
 tonic = { workspace = true }
 tracing = "0.1"
+url = "2"
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
@@ -99,12 +90,23 @@ risingwave_hummock_test = { path = "../storage/hummock_test", features = [
 serde_yaml = "0.9"
 tracing-test = "0.2"
 
+[features]
+dhat-heap = ["dhat"]
+
 [[bench]]
 name = "stream_hash_agg"
 harness = false
 
 [[bench]]
 name = "bench_state_table"
+harness = false
+
+[[bench]]
+name = "stream_hash_join_rt"
+harness = false
+
+[[bench]]
+name = "stream_hash_join_mem"
 harness = false
 
 [lints]

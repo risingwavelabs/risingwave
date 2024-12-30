@@ -62,6 +62,8 @@ pub struct SnapshotBackfillExecutor<S: StateStore> {
 
     actor_ctx: ActorContextRef,
     metrics: Arc<StreamingMetrics>,
+
+    snapshot_epoch: Option<u64>,
 }
 
 impl<S: StateStore> SnapshotBackfillExecutor<S> {
@@ -76,6 +78,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
         rate_limit: Option<usize>,
         barrier_rx: UnboundedReceiver<Barrier>,
         metrics: Arc<StreamingMetrics>,
+        snapshot_epoch: Option<u64>,
     ) -> Self {
         assert_eq!(&upstream.info.schema, upstream_table.schema());
         if let Some(rate_limit) = rate_limit {
@@ -94,17 +97,37 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
             barrier_rx,
             actor_ctx,
             metrics,
+            snapshot_epoch,
         }
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
         debug!("snapshot backfill executor start");
-        let first_barrier = expect_first_barrier(&mut self.upstream).await?;
-        debug!(epoch = ?first_barrier.epoch, "get first upstream barrier");
+        let first_upstream_barrier = expect_first_barrier(&mut self.upstream).await?;
+        debug!(epoch = ?first_upstream_barrier.epoch, "get first upstream barrier");
         let first_recv_barrier = receive_next_barrier(&mut self.barrier_rx).await?;
         debug!(epoch = ?first_recv_barrier.epoch, "get first inject barrier");
-        let should_backfill = first_barrier.epoch != first_recv_barrier.epoch;
+        let should_backfill = if let Some(snapshot_epoch) = self.snapshot_epoch {
+            if first_upstream_barrier.epoch != first_recv_barrier.epoch {
+                assert_eq!(snapshot_epoch, first_upstream_barrier.epoch.prev);
+                true
+            } else {
+                false
+            }
+        } else {
+            // when snapshot epoch is not set, the StreamNode must be created previously and has finished the backfill
+            if cfg!(debug_assertions) {
+                panic!(
+                    "snapshot epoch not set. first_upstream_epoch: {:?}, first_recv_epoch: {:?}",
+                    first_upstream_barrier.epoch, first_recv_barrier.epoch
+                );
+            } else {
+                warn!(first_upstream_epoch = ?first_upstream_barrier.epoch, first_recv_epoch=?first_recv_barrier.epoch, "snapshot epoch not set");
+                assert_eq!(first_upstream_barrier.epoch, first_recv_barrier.epoch);
+                false
+            }
+        };
 
         let (mut barrier_epoch, mut need_report_finish) = {
             if should_backfill {
@@ -119,7 +142,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                 let mut upstream_buffer =
                     UpstreamBuffer::new(&mut self.upstream, consume_upstream_row_count);
 
-                let first_barrier_epoch = first_barrier.epoch;
+                let first_barrier_epoch = first_upstream_barrier.epoch;
 
                 // Phase 1: consume upstream snapshot
                 {
@@ -156,7 +179,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                     }
 
                     let recv_barrier = self.barrier_rx.recv().await.expect("should exist");
-                    assert_eq!(first_barrier.epoch, recv_barrier.epoch);
+                    assert_eq!(first_upstream_barrier.epoch, recv_barrier.epoch);
                     yield Message::Barrier(recv_barrier);
                 }
 
@@ -239,10 +262,9 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                     table_id = self.upstream_table.table_id().table_id,
                     "skip backfill"
                 );
-                let first_recv_barrier = receive_next_barrier(&mut self.barrier_rx).await?;
-                assert_eq!(first_barrier.epoch, first_recv_barrier.epoch);
+                assert_eq!(first_upstream_barrier.epoch, first_recv_barrier.epoch);
                 yield Message::Barrier(first_recv_barrier);
-                (first_barrier.epoch, false)
+                (first_upstream_barrier.epoch, false)
             }
         };
         let mut upstream = self.upstream.into_executor(self.barrier_rx).execute();

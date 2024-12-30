@@ -73,10 +73,12 @@ message DropSourceResponse {
   WaitVersion version = 2;
 }
 
+// Only for non-shared source
 message AlterSourceRequest {
   catalog.Source source = 1;
 }
 
+// Only for non-shared source
 message AlterSourceResponse {
   common.Status status = 1;
   WaitVersion version = 2;
@@ -86,7 +88,7 @@ message CreateSinkRequest {
   catalog.Sink sink = 1;
   stream_plan.StreamFragmentGraph fragment_graph = 2;
   // It is used to provide a replace plan for the downstream table in `create sink into table` requests.
-  optional ReplaceTablePlan affected_table_change = 3;
+  optional ReplaceJobPlan affected_table_change = 3;
   // The list of object IDs that this sink depends on.
   repeated uint32 dependencies = 4;
 }
@@ -99,7 +101,7 @@ message CreateSinkResponse {
 message DropSinkRequest {
   uint32 sink_id = 1;
   bool cascade = 2;
-  optional ReplaceTablePlan affected_table_change = 3;
+  optional ReplaceJobPlan affected_table_change = 3;
 }
 
 message DropSinkResponse {
@@ -354,26 +356,38 @@ message DropIndexResponse {
   WaitVersion version = 2;
 }
 
-message ReplaceTablePlan {
-  // The new table catalog, with the correct (old) table ID and a new version.
-  // If the new version does not match the subsequent version in the meta service's
-  // catalog, this request will be rejected.
-  catalog.Table table = 1;
+message ReplaceJobPlan {
   // The new materialization plan, where all schema are updated.
-  stream_plan.StreamFragmentGraph fragment_graph = 2;
+  stream_plan.StreamFragmentGraph fragment_graph = 1;
   // The mapping from the old columns to the new columns of the table.
   // If no column modifications occur (such as for sinking into table), this will be None.
-  catalog.ColIndexMapping table_col_index_mapping = 3;
-  // Source catalog of table's associated source
-  catalog.Source source = 4;
-  TableJobType job_type = 5;
+  catalog.ColIndexMapping table_col_index_mapping = 2;
+
+  message ReplaceTable {
+    // The new table catalog, with the correct (old) table ID and a new version.
+    // If the new version does not match the subsequent version in the meta service's
+    // catalog, this request will be rejected.
+    catalog.Table table = 1;
+    // Source catalog of table's associated source
+    catalog.Source source = 2;
+    TableJobType job_type = 3;
+  }
+
+  message ReplaceSource {
+    catalog.Source source = 1;
+  }
+
+  oneof replace_job {
+    ReplaceTable replace_table = 3;
+    ReplaceSource replace_source = 4;
+  }
 }
 
-message ReplaceTablePlanRequest {
-  ReplaceTablePlan plan = 1;
+message ReplaceJobPlanRequest {
+  ReplaceJobPlan plan = 1;
 }
 
-message ReplaceTablePlanResponse {
+message ReplaceJobPlanResponse {
   common.Status status = 1;
   // The new global catalog version.
   WaitVersion version = 2;
@@ -544,7 +558,7 @@ service DdlService {
   rpc DropIndex(DropIndexRequest) returns (DropIndexResponse);
   rpc CreateFunction(CreateFunctionRequest) returns (CreateFunctionResponse);
   rpc DropFunction(DropFunctionRequest) returns (DropFunctionResponse);
-  rpc ReplaceTablePlan(ReplaceTablePlanRequest) returns (ReplaceTablePlanResponse);
+  rpc ReplaceJobPlan(ReplaceJobPlanRequest) returns (ReplaceJobPlanResponse);
   rpc GetTable(GetTableRequest) returns (GetTableResponse);
   rpc GetDdlProgress(GetDdlProgressRequest) returns (GetDdlProgressResponse);
   rpc CreateConnection(CreateConnectionRequest) returns (CreateConnectionResponse);

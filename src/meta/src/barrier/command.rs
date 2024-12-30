@@ -145,6 +145,31 @@ impl ReplaceStreamJobPlan {
         }
         fragment_changes
     }
+
+    /// `old_fragment_id` -> `new_fragment_id`
+    pub fn fragment_replacements(&self) -> HashMap<FragmentId, FragmentId> {
+        let mut fragment_replacements = HashMap::new();
+        for merge_update in &self.merge_updates {
+            if let Some(new_upstream_fragment_id) = merge_update.new_upstream_fragment_id {
+                let r = fragment_replacements
+                    .insert(merge_update.upstream_fragment_id, new_upstream_fragment_id);
+                if let Some(r) = r {
+                    assert_eq!(
+                        new_upstream_fragment_id, r,
+                        "one fragment is replaced by multiple fragments"
+                    );
+                }
+            }
+        }
+        fragment_replacements
+    }
+
+    pub fn dropped_actors(&self) -> HashSet<ActorId> {
+        self.merge_updates
+            .iter()
+            .flat_map(|merge_update| merge_update.removed_upstream_actor_id.clone())
+            .collect()
+    }
 }
 
 #[derive(educe::Educe, Clone)]
@@ -202,7 +227,10 @@ impl CreateStreamingJobCommandInfo {
 
 #[derive(Debug, Clone)]
 pub struct SnapshotBackfillInfo {
-    pub upstream_mv_table_ids: HashSet<TableId>,
+    /// `table_id` -> `Some(snapshot_backfill_epoch)`
+    /// The `snapshot_backfill_epoch` should be None at the beginning, and be filled
+    /// by global barrier worker when handling the command.
+    pub upstream_mv_table_id_to_backfill_epoch: HashMap<TableId, Option<u64>>,
 }
 
 #[derive(Debug, Clone)]
@@ -672,8 +700,8 @@ impl Command {
                             job_type
                         {
                             snapshot_backfill_info
-                                .upstream_mv_table_ids
-                                .iter()
+                                .upstream_mv_table_id_to_backfill_epoch
+                                .keys()
                                 .map(|table_id| SubscriptionUpstreamInfo {
                                     subscriber_id: table_fragments.stream_job_id().table_id,
                                     upstream_mv_table_id: table_id.table_id,
@@ -722,12 +750,13 @@ impl Command {
                         info: jobs_to_merge
                             .iter()
                             .flat_map(|(table_id, (backfill_info, _))| {
-                                backfill_info.upstream_mv_table_ids.iter().map(
-                                    move |upstream_table_id| SubscriptionUpstreamInfo {
+                                backfill_info
+                                    .upstream_mv_table_id_to_backfill_epoch
+                                    .keys()
+                                    .map(move |upstream_table_id| SubscriptionUpstreamInfo {
                                         subscriber_id: table_id.table_id,
                                         upstream_mv_table_id: upstream_table_id.table_id,
-                                    },
-                                )
+                                    })
                             })
                             .collect(),
                     }))

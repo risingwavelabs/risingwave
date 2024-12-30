@@ -159,13 +159,13 @@ impl StreamNode for StreamProject {
             .iter()
             .map(|(i, o)| (*i as u32, *o as u32))
             .unzip();
-        PbNodeBody::Project(ProjectNode {
+        PbNodeBody::Project(Box::new(ProjectNode {
             select_list: self.core.exprs.iter().map(|x| x.to_expr_proto()).collect(),
             watermark_input_cols,
             watermark_output_cols,
             nondecreasing_exprs: self.nondecreasing_exprs.iter().map(|i| *i as _).collect(),
             noop_update_hint: self.noop_update_hint,
-        })
+        }))
     }
 }
 

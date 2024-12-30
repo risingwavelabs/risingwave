@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod monitored_base_file_writer;
+pub mod monitored_general_writer;
 pub mod monitored_partition_writer;
 pub mod monitored_position_delete_writer;
-pub mod monitored_write_writer;

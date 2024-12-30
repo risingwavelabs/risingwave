@@ -15,7 +15,6 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::Display;
 use std::future::{pending, poll_fn};
-use std::iter::once;
 use std::sync::Arc;
 use std::task::Poll;
 use std::time::Duration;
@@ -26,7 +25,7 @@ use futures::future::BoxFuture;
 use futures::stream::{BoxStream, FuturesOrdered};
 use futures::{FutureExt, StreamExt, TryFutureExt};
 use itertools::Itertools;
-use risingwave_common::error::tonic::extra::Score;
+use risingwave_common::error::tonic::extra::{Score, ScoredError};
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_service::barrier_complete_response::{
     PbCreateMviewProgress, PbLocalSstableInfo,
@@ -38,6 +37,7 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tonic::{Code, Status};
+use tracing::warn;
 
 use self::managed_state::ManagedBarrierState;
 use crate::error::{IntoUnexpectedExit, StreamError, StreamResult};
@@ -56,22 +56,22 @@ use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
 use risingwave_hummock_sdk::{LocalSstableInfo, SyncResult};
 use risingwave_pb::stream_service::streaming_control_stream_request::{
-    DatabaseInitialPartialGraph, InitRequest, Request,
+    DatabaseInitialPartialGraph, InitRequest, Request, ResetDatabaseRequest,
 };
 use risingwave_pb::stream_service::streaming_control_stream_response::{
-    InitResponse, ShutdownResponse,
+    InitResponse, ReportDatabaseFailureResponse, ResetDatabaseResponse, Response, ShutdownResponse,
 };
 use risingwave_pb::stream_service::{
     streaming_control_stream_response, BarrierCompleteResponse, InjectBarrierRequest,
-    StreamingControlStreamRequest, StreamingControlStreamResponse,
+    PbScoredError, StreamingControlStreamRequest, StreamingControlStreamResponse,
 };
 
 use crate::executor::exchange::permit::Receiver;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{Barrier, BarrierInner, StreamExecutorError};
 use crate::task::barrier_manager::managed_state::{
-    DatabaseManagedBarrierState, ManagedBarrierStateDebugInfo, ManagedBarrierStateEvent,
-    PartialGraphManagedBarrierState,
+    DatabaseManagedBarrierState, DatabaseStatus, ManagedBarrierStateDebugInfo,
+    ManagedBarrierStateEvent, PartialGraphManagedBarrierState, ResetDatabaseOutput,
 };
 use crate::task::barrier_manager::progress::BackfillState;
 
@@ -155,6 +155,22 @@ impl ControlStreamHandle {
         } else {
             debug!("control stream has been reset, ignore shutdown");
         }
+    }
+
+    pub(super) fn ack_reset_database(
+        &mut self,
+        database_id: DatabaseId,
+        root_err: Option<ScoredStreamError>,
+        reset_request_id: u32,
+    ) {
+        self.send_response(Response::ResetDatabase(ResetDatabaseResponse {
+            database_id: database_id.database_id,
+            root_err: root_err.map(|err| PbScoredError {
+                err_msg: err.error.to_report_string(),
+                score: err.score.0,
+            }),
+            reset_request_id,
+        }));
     }
 
     fn send_response(&mut self, response: streaming_control_stream_response::Response) {
@@ -245,7 +261,7 @@ pub(crate) struct StreamActorManager {
 }
 
 pub(super) struct LocalBarrierWorkerDebugInfo<'a> {
-    managed_barrier_state: HashMap<DatabaseId, ManagedBarrierStateDebugInfo<'a>>,
+    managed_barrier_state: HashMap<DatabaseId, (String, Option<ManagedBarrierStateDebugInfo<'a>>)>,
     has_control_stream_connected: bool,
 }
 
@@ -257,11 +273,16 @@ impl Display for LocalBarrierWorkerDebugInfo<'_> {
             self.has_control_stream_connected
         )?;
 
-        for (database_id, managed_barrier_state) in &self.managed_barrier_state {
+        for (database_id, (status, managed_barrier_state)) in &self.managed_barrier_state {
             writeln!(
                 f,
-                "database {} managed_barrier_state:\n{}",
-                database_id.database_id, managed_barrier_state
+                "database {} status: {} managed_barrier_state:\n{}",
+                database_id.database_id,
+                status,
+                managed_barrier_state
+                    .as_ref()
+                    .map(ToString::to_string)
+                    .unwrap_or_default()
             )?;
         }
         Ok(())
@@ -303,7 +324,22 @@ impl LocalBarrierWorker {
                 .state
                 .databases
                 .iter()
-                .map(|(database_id, state)| (*database_id, state.to_debug_info()))
+                .map(|(database_id, status)| {
+                    (*database_id, {
+                        match status {
+                            DatabaseStatus::Running(state) => {
+                                ("running".to_owned(), Some(state.to_debug_info()))
+                            }
+                            DatabaseStatus::Suspended(state) => {
+                                (format!("suspended: {:?}", state.suspend_time), None)
+                            }
+                            DatabaseStatus::Resetting(_) => ("resetting".to_owned(), None),
+                            DatabaseStatus::Unspecified => {
+                                unreachable!()
+                            }
+                        }
+                    })
+                })
                 .collect(),
             has_control_stream_connected: self.control_stream_handle.connected(),
         }
@@ -356,7 +392,10 @@ impl LocalBarrierWorker {
                             actor_id,
                             err,
                         } => {
-                            self.notify_actor_failure(database_id, actor_id, err, "recv actor failure").await;
+                            self.on_database_failure(database_id, Some(actor_id), err, "recv actor failure");
+                        }
+                        ManagedBarrierStateEvent::DatabaseReset(output, reset_request_id) => {
+                            self.ack_database_reset(database_id, Some(output), reset_request_id);
                         }
                     }
                 }
@@ -366,7 +405,10 @@ impl LocalBarrierWorker {
                             self.on_epoch_completed(database_id, partial_graph_id, barrier.epoch.prev, result);
                         }
                         Err(err) => {
-                            self.notify_other_failure(err, "failed to complete epoch").await;
+                            // TODO: may only report as database failure instead of reset the stream
+                            // when the HummockUploader support partial recovery. Currently the HummockUploader
+                            // enter `Err` state and stop working until a global recovery to clear the uploader.
+                            self.control_stream_handle.reset_stream_with_err(Status::internal(format!("failed to complete epoch: {} {} {:?} {:?}", database_id, partial_graph_id.0, barrier.epoch, err.as_report())));
                         }
                     }
                 },
@@ -375,12 +417,24 @@ impl LocalBarrierWorker {
                         match actor_op {
                             LocalActorOperation::NewControlStream { handle, init_request  } => {
                                 self.control_stream_handle.reset_stream_with_err(Status::internal("control stream has been reset to a new one"));
-                                self.reset(init_request.databases).await;
+                                self.reset(init_request).await;
                                 self.control_stream_handle = handle;
                                 self.control_stream_handle.send_response(streaming_control_stream_response::Response::Init(InitResponse {}));
                             }
                             LocalActorOperation::Shutdown { result_sender } => {
-                                if self.state.databases.values().any(|database| !database.actor_states.is_empty()) {
+                                if self.state.databases.values().any(|database| {
+                                    match database {
+                                        DatabaseStatus::Running(database) => {
+                                            !database.actor_states.is_empty()
+                                        }
+                                        DatabaseStatus::Suspended(_) | DatabaseStatus::Resetting(_) => {
+                                            false
+                                        }
+                                        DatabaseStatus::Unspecified => {
+                                            unreachable!()
+                                        }
+                                    }
+                                }) {
                                     tracing::warn!(
                                         "shutdown with running actors, scaling or migration will be triggered"
                                     );
@@ -399,23 +453,27 @@ impl LocalBarrierWorker {
                 },
                 request = self.control_stream_handle.next_request() => {
                     let result = self.handle_streaming_control_request(request.request.expect("non empty"));
-                    if let Err(err) = result {
-                        self.notify_other_failure(err, "failed to inject barrier").await;
+                    if let Err((database_id, err)) = result {
+                        self.on_database_failure(database_id, None, err, "failed to inject barrier");
                     }
                 },
             }
         }
     }
 
-    fn handle_streaming_control_request(&mut self, request: Request) -> StreamResult<()> {
+    fn handle_streaming_control_request(
+        &mut self,
+        request: Request,
+    ) -> Result<(), (DatabaseId, StreamError)> {
         match request {
             Request::InjectBarrier(req) => {
-                let barrier = Barrier::from_protobuf(req.get_barrier().unwrap())?;
-                self.update_actor_info(
-                    DatabaseId::new(req.database_id),
-                    req.broadcast_info.iter().cloned(),
-                )?;
-                self.send_barrier(&barrier, req)?;
+                let database_id = DatabaseId::new(req.database_id);
+                let result: StreamResult<()> = try {
+                    let barrier = Barrier::from_protobuf(req.get_barrier().unwrap())?;
+                    self.update_actor_info(database_id, req.broadcast_info.iter().cloned());
+                    self.send_barrier(&barrier, req)?;
+                };
+                result.map_err(|e| (database_id, e))?;
                 Ok(())
             }
             Request::RemovePartialGraph(req) => {
@@ -430,6 +488,10 @@ impl LocalBarrierWorker {
                     DatabaseId::new(req.database_id),
                     PartialGraphId::new(req.partial_graph_id),
                 );
+                Ok(())
+            }
+            Request::ResetDatabase(req) => {
+                self.reset_database(req);
                 Ok(())
             }
             Request::Init(_) => {
@@ -459,11 +521,12 @@ impl LocalBarrierWorker {
             }
             #[cfg(test)]
             LocalActorOperation::GetCurrentSharedContext(sender) => {
-                let database_state = self
+                let database_status = self
                     .state
                     .databases
                     .get(&crate::task::TEST_DATABASE_ID)
                     .unwrap();
+                let database_state = risingwave_common::must_match!(database_status, DatabaseStatus::Running(database_state) => database_state);
                 let _ = sender.send((
                     database_state.current_shared_context.clone(),
                     database_state.local_barrier_manager.clone(),
@@ -490,7 +553,8 @@ impl LocalBarrierWorker {
                                 barrier.epoch.prev,
                             );
                         }
-                        ManagedBarrierStateEvent::ActorError { .. } => {
+                        ManagedBarrierStateEvent::ActorError { .. }
+                        | ManagedBarrierStateEvent::DatabaseReset(..) => {
                             unreachable!()
                         }
                     }
@@ -602,12 +666,17 @@ impl LocalBarrierWorker {
         prev_epoch: u64,
     ) {
         {
-            let (barrier, table_ids, create_mview_progress) = self
+            let Some(database_state) = self
                 .state
                 .databases
                 .get_mut(&database_id)
                 .expect("should exist")
-                .pop_barrier_to_complete(partial_graph_id, prev_epoch);
+                .state_for_request()
+            else {
+                return;
+            };
+            let (barrier, table_ids, create_mview_progress) =
+                database_state.pop_barrier_to_complete(partial_graph_id, prev_epoch);
 
             let complete_barrier_future = match &barrier.kind {
                 BarrierKind::Unspecified => unreachable!(),
@@ -669,7 +738,7 @@ impl LocalBarrierWorker {
             {
                 streaming_control_stream_response::Response::CompleteBarrier(
                     BarrierCompleteResponse {
-                        request_id: "todo".to_string(),
+                        request_id: "todo".to_owned(),
                         partial_graph_id: partial_graph_id.into(),
                         epoch,
                         status: None,
@@ -710,7 +779,7 @@ impl LocalBarrierWorker {
     /// barrier is finished, in managed mode.
     ///
     /// Note that the error returned here is typically a [`StreamError::barrier_send`], which is not
-    /// the root cause of the failure. The caller should then call [`Self::try_find_root_failure`]
+    /// the root cause of the failure. The caller should then call `try_find_root_failure`
     /// to find the root cause.
     fn send_barrier(
         &mut self,
@@ -724,11 +793,14 @@ impl LocalBarrierWorker {
             request.actor_ids_to_collect
         );
 
-        self.state
+        let database_status = self
+            .state
             .databases
             .get_mut(&DatabaseId::new(request.database_id))
-            .expect("should exist")
-            .transform_to_issued(barrier, request)?;
+            .expect("should exist");
+        if let Some(state) = database_status.state_for_request() {
+            state.transform_to_issued(barrier, request)?;
+        }
         Ok(())
     }
 
@@ -737,10 +809,17 @@ impl LocalBarrierWorker {
         database_id: DatabaseId,
         partial_graph_ids: impl Iterator<Item = PartialGraphId>,
     ) {
-        let Some(database_state) = self.state.databases.get_mut(&database_id) else {
+        let Some(database_status) = self.state.databases.get_mut(&database_id) else {
             warn!(
                 database_id = database_id.database_id,
                 "database to remove partial graph not exist"
+            );
+            return;
+        };
+        let Some(database_state) = database_status.state_for_request() else {
+            warn!(
+                database_id = database_id.database_id,
+                "ignore remove partial graph request on err database",
             );
             return;
         };
@@ -760,107 +839,128 @@ impl LocalBarrierWorker {
         }
     }
 
-    pub(super) fn add_partial_graph(
-        &mut self,
-        database_id: DatabaseId,
-        partial_graph_id: PartialGraphId,
-    ) {
-        assert!(self
-            .state
-            .databases
-            .entry(database_id)
-            .or_insert_with(|| {
-                DatabaseManagedBarrierState::new(
-                    self.actor_manager.clone(),
-                    LocalBarrierWorker::get_or_insert_database_shared_context(
-                        &mut self.state.current_shared_context,
-                        database_id,
-                        &self.actor_manager,
-                    )
-                    .clone(),
-                    vec![],
+    fn add_partial_graph(&mut self, database_id: DatabaseId, partial_graph_id: PartialGraphId) {
+        let status = self.state.databases.entry(database_id).or_insert_with(|| {
+            DatabaseStatus::Running(DatabaseManagedBarrierState::new(
+                database_id,
+                self.actor_manager.clone(),
+                LocalBarrierWorker::get_or_insert_database_shared_context(
+                    &mut self.state.current_shared_context,
+                    database_id,
+                    &self.actor_manager,
                 )
-            })
-            .graph_states
-            .insert(
-                partial_graph_id,
-                PartialGraphManagedBarrierState::new(&self.actor_manager)
-            )
-            .is_none());
-    }
-
-    /// Reset all internal states.
-    pub(super) fn reset_state(&mut self, initial_partial_graphs: Vec<DatabaseInitialPartialGraph>) {
-        *self = Self::new(self.actor_manager.clone(), initial_partial_graphs);
-    }
-
-    /// When a actor exit unexpectedly, the error is reported using this function. The control stream
-    /// will be reset and the meta service will then trigger recovery.
-    async fn notify_actor_failure(
-        &mut self,
-        database_id: DatabaseId,
-        actor_id: ActorId,
-        err: StreamError,
-        err_context: &'static str,
-    ) {
-        let root_err = self.try_find_root_failure(err).await;
-
-        if let Some(database_state) = self.state.databases.get(&database_id)
-            && let Some(actor_state) = database_state.actor_states.get(&actor_id)
-            && (!actor_state.inflight_barriers.is_empty() || actor_state.is_running())
-        {
-            self.control_stream_handle.reset_stream_with_err(
-                anyhow!(root_err)
-                    .context(err_context)
-                    .to_status_unnamed(Code::Internal),
-            );
+                .clone(),
+                vec![],
+            ))
+        });
+        if let Some(state) = status.state_for_request() {
+            assert!(state
+                .graph_states
+                .insert(
+                    partial_graph_id,
+                    PartialGraphManagedBarrierState::new(&self.actor_manager)
+                )
+                .is_none());
         }
     }
 
-    /// When some other failure happens (like failed to send barrier), the error is reported using
-    /// this function. The control stream will be reset and the meta service will then trigger recovery.
-    ///
-    /// This is similar to [`Self::notify_actor_failure`], but since there's not always an actor failure,
-    /// the given `err` will be used if there's no root failure found.
-    async fn notify_other_failure(&mut self, err: StreamError, message: impl Into<String>) {
-        let root_err = self.try_find_root_failure(err).await;
+    fn reset_database(&mut self, req: ResetDatabaseRequest) {
+        let database_id = DatabaseId::new(req.database_id);
+        if let Some(database_status) = self.state.databases.get_mut(&database_id) {
+            database_status.start_reset(
+                database_id,
+                self.await_epoch_completed_futures.remove(&database_id),
+                req.reset_request_id,
+            );
+        } else {
+            self.ack_database_reset(database_id, None, req.reset_request_id);
+        }
+    }
 
-        self.control_stream_handle.reset_stream_with_err(
-            anyhow!(root_err)
-                .context(message.into())
-                .to_status_unnamed(Code::Internal),
+    fn ack_database_reset(
+        &mut self,
+        database_id: DatabaseId,
+        reset_output: Option<ResetDatabaseOutput>,
+        reset_request_id: u32,
+    ) {
+        info!(
+            database_id = database_id.database_id,
+            "database reset successfully"
+        );
+        if let Some(reset_database) = self.state.databases.remove(&database_id) {
+            match reset_database {
+                DatabaseStatus::Resetting(_) => {}
+                _ => {
+                    unreachable!("must be resetting previously")
+                }
+            }
+        }
+        self.state.current_shared_context.remove(&database_id);
+        self.await_epoch_completed_futures.remove(&database_id);
+        self.control_stream_handle.ack_reset_database(
+            database_id,
+            reset_output.and_then(|output| output.root_err),
+            reset_request_id,
         );
     }
 
+    /// When some other failure happens (like failed to send barrier), the error is reported using
+    /// this function. The control stream will be responded with a message to notify about the error,
+    /// and the global barrier worker will later reset and rerun the database.
+    fn on_database_failure(
+        &mut self,
+        database_id: DatabaseId,
+        failed_actor: Option<ActorId>,
+        err: StreamError,
+        message: impl Into<String>,
+    ) {
+        let message = message.into();
+        error!(database_id = database_id.database_id, ?failed_actor, message, err = ?err.as_report(), "suspend database on error");
+        let completing_futures = self.await_epoch_completed_futures.remove(&database_id);
+        self.state
+            .databases
+            .get_mut(&database_id)
+            .expect("should exist")
+            .suspend(failed_actor, err, completing_futures);
+        self.control_stream_handle
+            .send_response(Response::ReportDatabaseFailure(
+                ReportDatabaseFailureResponse {
+                    database_id: database_id.database_id,
+                },
+            ));
+    }
+}
+
+impl DatabaseManagedBarrierState {
     /// Collect actor errors for a while and find the one that might be the root cause.
     ///
     /// Returns `None` if there's no actor error received.
-    async fn try_find_root_failure(&mut self, first_err: StreamError) -> ScoredStreamError {
+    async fn try_find_root_actor_failure(
+        &mut self,
+        first_failure: Option<(Option<ActorId>, StreamError)>,
+    ) -> Option<ScoredStreamError> {
         let mut later_errs = vec![];
         // fetch more actor errors within a timeout
         let _ = tokio::time::timeout(Duration::from_secs(3), async {
-            loop {
-                let error = poll_fn(|cx| {
-                    for database in self.state.databases.values_mut() {
-                        if let Poll::Ready(option) = database.actor_failure_rx.poll_recv(cx) {
-                            let (_, err) = option
-                                .expect("should not be none when tx in local_barrier_manager");
-                            return Poll::Ready(err);
-                        }
-                    }
-                    Poll::Pending
-                })
-                .await;
+            let mut uncollected_actors: HashSet<_> = self.actor_states.keys().cloned().collect();
+            if let Some((Some(failed_actor), _)) = &first_failure {
+                uncollected_actors.remove(failed_actor);
+            }
+            while !uncollected_actors.is_empty()
+                && let Some((actor_id, error)) = self.actor_failure_rx.recv().await
+            {
+                uncollected_actors.remove(&actor_id);
                 later_errs.push(error);
             }
         })
         .await;
 
-        once(first_err)
+        first_failure
+            .into_iter()
+            .map(|(_, err)| err)
             .chain(later_errs.into_iter())
-            .map(|e| ScoredStreamError::new(e.clone()))
+            .map(|e| e.with_score())
             .max_by_key(|e| e.score)
-            .expect("non-empty")
     }
 }
 
@@ -979,33 +1079,11 @@ impl LocalBarrierManager {
 }
 
 /// A [`StreamError`] with a score, used to find the root cause of actor failures.
-#[derive(Debug, Clone)]
-struct ScoredStreamError {
-    error: StreamError,
-    score: Score,
-}
+type ScoredStreamError = ScoredError<StreamError>;
 
-impl std::fmt::Display for ScoredStreamError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.error.fmt(f)
-    }
-}
-
-impl std::error::Error for ScoredStreamError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        self.error.source()
-    }
-
-    fn provide<'a>(&'a self, request: &mut std::error::Request<'a>) {
-        self.error.provide(request);
-        // HIGHLIGHT: Provide the score to make it retrievable from meta service.
-        request.provide_value(self.score);
-    }
-}
-
-impl ScoredStreamError {
+impl StreamError {
     /// Score the given error based on hard-coded rules.
-    fn new(error: StreamError) -> Self {
+    fn with_score(self) -> ScoredStreamError {
         // Explicitly list all error kinds here to notice developers to update this function when
         // there are changes in error kinds.
 
@@ -1052,8 +1130,8 @@ impl ScoredStreamError {
             }
         }
 
-        let score = Score(stream_error_score(&error));
-        Self { error, score }
+        let score = Score(stream_error_score(&self));
+        ScoredStreamError { error: self, score }
     }
 }
 
@@ -1136,6 +1214,7 @@ pub(crate) mod barrier_test_utils {
                         graphs: vec![PbInitialPartialGraph {
                             partial_graph_id: TEST_PARTIAL_GRAPH_ID.into(),
                             subscriptions: vec![],
+                            actor_infos: vec![],
                         }],
                     }],
                 },
@@ -1169,7 +1248,7 @@ pub(crate) mod barrier_test_utils {
                 .send(Ok(StreamingControlStreamRequest {
                     request: Some(streaming_control_stream_request::Request::InjectBarrier(
                         InjectBarrierRequest {
-                            request_id: "".to_string(),
+                            request_id: "".to_owned(),
                             barrier: Some(barrier.to_protobuf()),
                             database_id: TEST_DATABASE_ID.database_id,
                             actor_ids_to_collect: actor_to_collect.into_iter().collect(),

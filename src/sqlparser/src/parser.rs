@@ -3430,6 +3430,28 @@ impl Parser<'_> {
         })
     }
 
+    /// SINK_RATE_LIMIT = default | NUMBER
+    /// SINK_RATE_LIMIT TO default | NUMBER
+    pub fn parse_alter_sink_rate_limit(&mut self) -> PResult<Option<i32>> {
+        if !self.parse_word("SINK_RATE_LIMIT") {
+            return Ok(None);
+        }
+        if self.expect_keyword(Keyword::TO).is_err() && self.expect_token(&Token::Eq).is_err() {
+            return self.expected("TO or = after ALTER SINK SET SINK_RATE_LIMIT");
+        }
+        let rate_limit = if self.parse_keyword(Keyword::DEFAULT) {
+            -1
+        } else {
+            let s = self.parse_number_value()?;
+            if let Ok(n) = s.parse::<i32>() {
+                n
+            } else {
+                return self.expected("number or DEFAULT");
+            }
+        };
+        Ok(Some(rate_limit))
+    }
+
     pub fn parse_alter_sink(&mut self) -> PResult<Statement> {
         let sink_name = self.parse_object_name()?;
         let operation = if self.parse_keyword(Keyword::RENAME) {
@@ -3464,6 +3486,8 @@ impl Parser<'_> {
                     parallelism: value,
                     deferred,
                 }
+            } else if let Some(rate_limit) = self.parse_alter_sink_rate_limit()? {
+                AlterSinkOperation::SetSinkRateLimit { rate_limit }
             } else {
                 return self.expected("SCHEMA/PARALLELISM after SET");
             }
@@ -3672,11 +3696,11 @@ impl Parser<'_> {
         while let Some(t) = self.next_token_no_skip() {
             match t.token {
                 Token::Whitespace(Whitespace::Tab) => {
-                    values.push(Some(content.to_string()));
+                    values.push(Some(content.clone()));
                     content.clear();
                 }
                 Token::Whitespace(Whitespace::Newline) => {
-                    values.push(Some(content.to_string()));
+                    values.push(Some(content.clone()));
                     content.clear();
                 }
                 Token::Backslash => {
@@ -4466,7 +4490,7 @@ impl Parser<'_> {
                                 }
                                 Ok(SetTimeZoneValue::Ident(Ident::with_quote_unchecked(
                                     '\'',
-                                    "UTC".to_string(),
+                                    "UTC".to_owned(),
                                 )))
                             }
                             _ => Err(StrError("expect Value::Interval".into())),
@@ -5333,16 +5357,12 @@ impl Parser<'_> {
     }
 
     /// Parse a LIMIT clause
-    pub fn parse_limit(&mut self) -> PResult<Option<String>> {
+    pub fn parse_limit(&mut self) -> PResult<Option<Expr>> {
         if self.parse_keyword(Keyword::ALL) {
             Ok(None)
         } else {
-            let number = self.parse_number_value()?;
-            // TODO(Kexiang): support LIMIT expr
-            if self.consume_token(&Token::DoubleColon) {
-                self.expect_keyword(Keyword::BIGINT)?
-            }
-            Ok(Some(number))
+            let expr = self.parse_expr()?;
+            Ok(Some(expr))
         }
     }
 
@@ -5558,7 +5578,7 @@ mod tests {
         run_parser_method(min_bigint, |parser| {
             assert_eq!(
                 parser.parse_expr().unwrap(),
-                Expr::Value(Value::Number("-9223372036854775808".to_string()))
+                Expr::Value(Value::Number("-9223372036854775808".to_owned()))
             )
         });
     }

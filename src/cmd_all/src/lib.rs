@@ -22,4 +22,5 @@ pub mod single_node;
 pub use single_node::*;
 pub use standalone::*;
 
+risingwave_batch_executors::enable!();
 risingwave_expr_impl::enable!();

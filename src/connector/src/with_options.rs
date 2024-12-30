@@ -230,3 +230,9 @@ impl TryFrom<&WithOptionsSecResolved> for Option<SinkFormatDesc> {
         }
     }
 }
+
+impl Get for WithOptionsSecResolved {
+    fn get(&self, key: &str) -> Option<&String> {
+        self.inner.get(key)
+    }
+}

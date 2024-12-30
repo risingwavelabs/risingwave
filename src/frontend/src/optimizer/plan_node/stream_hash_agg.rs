@@ -126,9 +126,9 @@ impl StreamHashAgg {
 
         if wtmk_group_key.is_empty() || wtmk_group_key.len() > 1 {
             return Err(ErrorCode::NotSupported(
-                "The query cannot be executed in Emit-On-Window-Close mode.".to_string(),
+                "The query cannot be executed in Emit-On-Window-Close mode.".to_owned(),
                 "Please make sure there is one and only one watermark column in GROUP BY"
-                    .to_string(),
+                    .to_owned(),
             )
             .into());
         }
@@ -187,7 +187,7 @@ impl StreamNode for StreamHashAgg {
             self.core
                 .infer_tables(&self.base, self.vnode_col_idx, self.window_col_idx);
 
-        PbNodeBody::HashAgg(HashAggNode {
+        PbNodeBody::HashAgg(Box::new(HashAggNode {
             group_key: self.group_key().to_vec_as_u32(),
             agg_calls: self
                 .agg_calls()
@@ -220,7 +220,7 @@ impl StreamNode for StreamHashAgg {
             row_count_index: self.row_count_idx as u32,
             emit_on_window_close: self.base.emit_on_window_close(),
             version: PbAggNodeVersion::Issue13465 as _,
-        })
+        }))
     }
 }
 

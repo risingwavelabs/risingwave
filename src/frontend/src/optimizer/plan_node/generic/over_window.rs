@@ -35,6 +35,7 @@ pub struct PlanWindowFunction {
     pub kind: WindowFuncKind,
     pub return_type: DataType,
     pub args: Vec<InputRef>,
+    pub ignore_nulls: bool,
     pub partition_by: Vec<InputRef>,
     pub order_by: Vec<ColumnOrder>,
     pub frame: Frame,
@@ -53,6 +54,7 @@ impl std::fmt::Debug for PlanWindowFunctionDisplay<'_> {
                 .field("kind", &window_function.kind)
                 .field("return_type", &window_function.return_type)
                 .field("args", &window_function.args)
+                .field("ignore_nulls", &window_function.ignore_nulls)
                 .field("partition_by", &window_function.partition_by)
                 .field("order_by", &window_function.order_by)
                 .field("frame", &window_function.frame)
@@ -71,6 +73,9 @@ impl std::fmt::Debug for PlanWindowFunctionDisplay<'_> {
                         input_schema: self.input_schema
                     }
                 )?;
+            }
+            if window_function.ignore_nulls {
+                write!(f, " IGNORE NULLS")?;
             }
             write!(f, ") OVER(")?;
             let mut delim = "";
@@ -129,6 +134,7 @@ impl PlanWindowFunction {
             args: self.args.iter().map(InputRef::to_proto).collect(),
             return_type: Some(self.return_type.to_protobuf()),
             frame: Some(self.frame.to_protobuf()),
+            ignore_nulls: self.ignore_nulls,
         }
     }
 }

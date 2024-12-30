@@ -611,10 +611,6 @@ impl SstableStore {
         );
     }
 
-    pub fn get_meta_memory_usage(&self) -> u64 {
-        self.meta_cache.memory().usage() as _
-    }
-
     pub fn get_prefetch_memory_usage(&self) -> usize {
         self.prefetch_buffer_usage.load(Ordering::Acquire)
     }

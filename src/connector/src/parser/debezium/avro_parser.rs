@@ -15,12 +15,13 @@
 use std::fmt::Debug;
 use std::sync::Arc;
 
+use anyhow::Context;
 use apache_avro::types::Value;
 use apache_avro::{from_avro_datum, Schema};
 use risingwave_common::try_match_expand;
 use risingwave_connector_codec::decoder::avro::{
-    avro_extract_field_schema, avro_schema_skip_nullable_union, avro_schema_to_column_descs,
-    AvroAccess, AvroParseOptions, ResolvedAvroSchema,
+    avro_schema_to_column_descs, get_nullable_union_inner, AvroAccess, AvroParseOptions,
+    ResolvedAvroSchema,
 };
 use risingwave_pb::plan_common::ColumnDesc;
 
@@ -56,7 +57,7 @@ impl AccessBuilder for DebeziumAvroAccessBuilder {
             // Assumption: Key will not contain reference, so unresolved schema can work here.
             AvroParseOptions::create(match self.encoding_type {
                 EncodingType::Key => self.key_schema.as_mut().unwrap(),
-                EncodingType::Value => &self.schema.resolved_schema,
+                EncodingType::Value => &self.schema.original_schema,
             }),
         )))
     }
@@ -162,18 +163,31 @@ impl DebeziumAvroParserConfig {
         // See <https://debezium.io/documentation/reference/stable/connectors/mysql.html#mysql-events>
 
         avro_schema_to_column_descs(
-            avro_schema_skip_nullable_union(avro_extract_field_schema(
-                // FIXME: use resolved schema here.
-                // Currently it works because "after" refers to a subtree in "before",
-                // but in theory, inside "before" there could also be a reference.
-                &self.outer_schema,
-                Some("before"),
-            )?)?,
+            // This assumes no external `Ref`s (e.g. "before" referring to "after" or "source").
+            // Internal `Ref`s inside the "before" tree are allowed.
+            extract_debezium_table_schema(&self.outer_schema)?,
             // TODO: do we need to support map type here?
             None,
         )
         .map_err(Into::into)
     }
+}
+
+fn extract_debezium_table_schema(root: &Schema) -> anyhow::Result<&Schema> {
+    let Schema::Record(root_record) = root else {
+        anyhow::bail!("Root schema of debezium shall be a record but got: {root:?}");
+    };
+    let idx = (root_record.lookup.get("before"))
+        .context("Root schema of debezium shall contain \"before\" field.")?;
+    let schema = &root_record.fields[*idx].schema;
+    // It is wrapped inside a union to allow null, so we look inside.
+    let Schema::Union(union_schema) = schema else {
+        return Ok(schema);
+    };
+    get_nullable_union_inner(union_schema).context(format!(
+        "illegal avro union schema, expected [null, T], got {:?}",
+        union_schema
+    ))
 }
 
 #[cfg(test)]
@@ -193,7 +207,7 @@ mod tests {
 
     use super::*;
     use crate::parser::{DebeziumParser, SourceStreamChunkBuilder, SpecificParserConfig};
-    use crate::source::{SourceColumnDesc, SourceContext};
+    use crate::source::{SourceColumnDesc, SourceContext, SourceCtrlOpts};
     use crate::WithOptionsSecResolved;
 
     const DEBEZIUM_AVRO_DATA: &[u8] = b"\x00\x00\x00\x00\x06\x00\x02\xd2\x0f\x0a\x53\x61\x6c\x6c\x79\x0c\x54\x68\x6f\x6d\x61\x73\x2a\x73\x61\x6c\x6c\x79\x2e\x74\x68\x6f\x6d\x61\x73\x40\x61\x63\x6d\x65\x2e\x63\x6f\x6d\x16\x32\x2e\x31\x2e\x32\x2e\x46\x69\x6e\x61\x6c\x0a\x6d\x79\x73\x71\x6c\x12\x64\x62\x73\x65\x72\x76\x65\x72\x31\xc0\xb4\xe8\xb7\xc9\x61\x00\x30\x66\x69\x72\x73\x74\x5f\x69\x6e\x5f\x64\x61\x74\x61\x5f\x63\x6f\x6c\x6c\x65\x63\x74\x69\x6f\x6e\x12\x69\x6e\x76\x65\x6e\x74\x6f\x72\x79\x00\x02\x12\x63\x75\x73\x74\x6f\x6d\x65\x72\x73\x00\x00\x20\x6d\x79\x73\x71\x6c\x2d\x62\x69\x6e\x2e\x30\x30\x30\x30\x30\x33\x8c\x06\x00\x00\x00\x02\x72\x02\x92\xc3\xe8\xb7\xc9\x61\x00";
@@ -211,15 +225,13 @@ mod tests {
         columns: Vec<SourceColumnDesc>,
         payload: Vec<u8>,
     ) -> Vec<(Op, OwnedRow)> {
-        let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 2);
-        {
-            let writer = builder.row_writer();
-            parser
-                .parse_inner(None, Some(payload), writer)
-                .await
-                .unwrap();
-        }
-        let chunk = builder.finish();
+        let mut builder = SourceStreamChunkBuilder::new(columns, SourceCtrlOpts::for_test());
+        parser
+            .parse_inner(None, Some(payload), builder.row_writer())
+            .await
+            .unwrap();
+        builder.finish_current_chunk();
+        let chunk = builder.consume_ready_chunks().next().unwrap();
         chunk
             .rows()
             .map(|(op, row_ref)| (op, row_ref.into_owned_row()))
@@ -264,10 +276,7 @@ mod tests {
 
         let outer_schema = get_outer_schema();
         let expected_inner_schema = Schema::parse_str(inner_shema_str).unwrap();
-        let extracted_inner_schema = avro_schema_skip_nullable_union(
-            avro_extract_field_schema(&outer_schema, Some("before")).unwrap(),
-        )
-        .unwrap();
+        let extracted_inner_schema = extract_debezium_table_schema(&outer_schema).unwrap();
         assert_eq!(&expected_inner_schema, extracted_inner_schema);
     }
 
@@ -355,10 +364,7 @@ mod tests {
     fn test_map_to_columns() {
         let outer_schema = get_outer_schema();
         let columns = avro_schema_to_column_descs(
-            avro_schema_skip_nullable_union(
-                avro_extract_field_schema(&outer_schema, Some("before")).unwrap(),
-            )
-            .unwrap(),
+            extract_debezium_table_schema(&outer_schema).unwrap(),
             None,
         )
         .unwrap()

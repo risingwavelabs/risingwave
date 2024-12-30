@@ -40,7 +40,7 @@ pub(crate) fn report_event(
         connector_name,
         object,
         attributes,
-        TELEMETRY_COMPACTOR_REPORT_TYPE.to_string(),
+        TELEMETRY_COMPACTOR_REPORT_TYPE.to_owned(),
     );
 }
 
@@ -117,8 +117,8 @@ mod test {
     #[tokio::test]
     async fn test_compactor_telemetry_report() {
         let mut report = CompactorTelemetryReport::new(
-            "7d45669c-08c7-4571-ae3d-d3a3e70a2f7e".to_string(),
-            "7d45669c-08c7-4571-ae3d-d3a3e70a2f7e".to_string(),
+            "7d45669c-08c7-4571-ae3d-d3a3e70a2f7e".to_owned(),
+            "7d45669c-08c7-4571-ae3d-d3a3e70a2f7e".to_owned(),
             100,
         );
         report.base.is_test = true;

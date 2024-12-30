@@ -33,7 +33,7 @@ use crate::source::filesystem::nd_streaming::need_nd_streaming;
 use crate::source::filesystem::OpendalFsSplit;
 use crate::source::iceberg::read_parquet_file;
 use crate::source::{
-    BoxChunkSourceStream, Column, SourceContextRef, SourceMessage, SourceMeta, SplitMetaData,
+    BoxSourceChunkStream, Column, SourceContextRef, SourceMessage, SourceMeta, SplitMetaData,
     SplitReader,
 };
 
@@ -69,7 +69,7 @@ impl<Src: OpendalSource> SplitReader for OpendalReader<Src> {
         Ok(opendal_reader)
     }
 
-    fn into_stream(self) -> BoxChunkSourceStream {
+    fn into_stream(self) -> BoxSourceChunkStream {
         self.into_stream_inner()
     }
 }
@@ -109,7 +109,7 @@ impl<Src: OpendalSource> OpendalReader<Src> {
                 let parser =
                     ByteStreamSourceParserImpl::create(self.parser_config.clone(), source_ctx)
                         .await?;
-                chunk_stream = Box::pin(parser.into_stream(line_stream));
+                chunk_stream = Box::pin(parser.parse_stream(line_stream));
             }
 
             #[for_await]
@@ -129,7 +129,7 @@ impl<Src: OpendalSource> OpendalReader<Src> {
         let actor_id = source_ctx.actor_id.to_string();
         let fragment_id = source_ctx.fragment_id.to_string();
         let source_id = source_ctx.source_id.to_string();
-        let source_name = source_ctx.source_name.to_string();
+        let source_name = source_ctx.source_name.clone();
         let object_name = split.name.clone();
         let start_offset = split.offset;
         let reader = op
@@ -182,10 +182,16 @@ impl<Src: OpendalSource> OpendalReader<Src> {
             // note that the buffer contains the newline character
             debug_assert_eq!(n_read, line_buf.len());
 
+            // FIXME(rc): Here we have to use `offset + n_read`, i.e. the offset of the next line,
+            // as the *message offset*, because we check whether a file is finished by comparing the
+            // message offset with the file size in `FsFetchExecutor::into_stream`. However, we must
+            // understand that this message offset is not semantically consistent with the offset of
+            // other source connectors.
+            let msg_offset = (offset + n_read).to_string();
             batch.push(SourceMessage {
                 key: None,
                 payload: Some(std::mem::take(&mut line_buf).into_bytes()),
-                offset: offset.to_string(),
+                offset: msg_offset,
                 split_id: split.id(),
                 meta: SourceMeta::Empty,
             });

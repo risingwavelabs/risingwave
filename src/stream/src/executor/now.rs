@@ -526,7 +526,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_now_generate_series() -> StreamExecutorResult<()> {
-        TIME_ZONE::scope("UTC".to_string(), test_now_generate_series_inner()).await
+        TIME_ZONE::scope("UTC".to_owned(), test_now_generate_series_inner()).await
     }
 
     async fn test_now_generate_series_inner() -> StreamExecutorResult<()> {

@@ -600,7 +600,7 @@ mod tests {
     impl Transactional<Transaction> for TestTransactional {
         async fn upsert_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
             trx.put(
-                TEST_CF.to_string(),
+                TEST_CF.to_owned(),
                 self.key.as_bytes().into(),
                 self.value.as_bytes().into(),
             );
@@ -608,7 +608,7 @@ mod tests {
         }
 
         async fn delete_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
-            trx.delete(TEST_CF.to_string(), self.key.as_bytes().into());
+            trx.delete(TEST_CF.to_owned(), self.key.as_bytes().into());
             Ok(())
         }
     }
@@ -656,21 +656,21 @@ mod tests {
     async fn test_tree_map_transaction_commit() {
         let mut map: BTreeMap<String, TestTransactional> = BTreeMap::new();
         map.insert(
-            "to-remove".to_string(),
+            "to-remove".to_owned(),
             TestTransactional {
                 key: "to-remove",
                 value: "to-remove-value",
             },
         );
         map.insert(
-            "to-remove-after-modify".to_string(),
+            "to-remove-after-modify".to_owned(),
             TestTransactional {
                 key: "to-remove-after-modify",
                 value: "to-remove-after-modify-value",
             },
         );
         map.insert(
-            "first".to_string(),
+            "first".to_owned(),
             TestTransactional {
                 key: "first",
                 value: "first-orig-value",
@@ -679,24 +679,24 @@ mod tests {
 
         let mut map_copy = map.clone();
         let mut map_txn = BTreeMapTransaction::new(&mut map);
-        map_txn.remove("to-remove".to_string());
+        map_txn.remove("to-remove".to_owned());
         map_txn.insert(
-            "to-remove-after-modify".to_string(),
+            "to-remove-after-modify".to_owned(),
             TestTransactional {
                 key: "to-remove-after-modify",
                 value: "to-remove-after-modify-value-modifying",
             },
         );
-        map_txn.remove("to-remove-after-modify".to_string());
+        map_txn.remove("to-remove-after-modify".to_owned());
         map_txn.insert(
-            "first".to_string(),
+            "first".to_owned(),
             TestTransactional {
                 key: "first",
                 value: "first-value",
             },
         );
         map_txn.insert(
-            "second".to_string(),
+            "second".to_owned(),
             TestTransactional {
                 key: "second",
                 value: "second-value",
@@ -707,10 +707,10 @@ mod tests {
                 key: "second",
                 value: "second-value",
             },
-            map_txn.get(&"second".to_string()).unwrap()
+            map_txn.get(&"second".to_owned()).unwrap()
         );
         map_txn.insert(
-            "third".to_string(),
+            "third".to_owned(),
             TestTransactional {
                 key: "third",
                 value: "third-value",
@@ -721,17 +721,17 @@ mod tests {
                 key: "third",
                 value: "third-value",
             },
-            map_txn.get(&"third".to_string()).unwrap()
+            map_txn.get(&"third".to_owned()).unwrap()
         );
 
-        let mut third_entry = map_txn.get_mut("third".to_string()).unwrap();
+        let mut third_entry = map_txn.get_mut("third".to_owned()).unwrap();
         third_entry.value = "third-value-updated";
         assert_eq!(
             &TestTransactional {
                 key: "third",
                 value: "third-value-updated",
             },
-            map_txn.get(&"third".to_string()).unwrap()
+            map_txn.get(&"third".to_owned()).unwrap()
         );
 
         let mut txn = Transaction::default();
@@ -764,7 +764,7 @@ mod tests {
         // replay the change to local copy and compare
         map_copy.remove("to-remove").unwrap();
         map_copy.insert(
-            "to-remove-after-modify".to_string(),
+            "to-remove-after-modify".to_owned(),
             TestTransactional {
                 key: "to-remove-after-modify",
                 value: "to-remove-after-modify-value-modifying",
@@ -772,21 +772,21 @@ mod tests {
         );
         map_copy.remove("to-remove-after-modify").unwrap();
         map_copy.insert(
-            "first".to_string(),
+            "first".to_owned(),
             TestTransactional {
                 key: "first",
                 value: "first-value",
             },
         );
         map_copy.insert(
-            "second".to_string(),
+            "second".to_owned(),
             TestTransactional {
                 key: "second",
                 value: "second-value",
             },
         );
         map_copy.insert(
-            "third".to_string(),
+            "third".to_owned(),
             TestTransactional {
                 key: "third",
                 value: "third-value-updated",
@@ -799,7 +799,7 @@ mod tests {
     async fn test_tree_map_entry_update_transaction_commit() {
         let mut map: BTreeMap<String, TestTransactional> = BTreeMap::new();
         map.insert(
-            "first".to_string(),
+            "first".to_owned(),
             TestTransactional {
                 key: "first",
                 value: "first-orig-value",
@@ -807,7 +807,7 @@ mod tests {
         );
 
         let mut map_txn = BTreeMapTransaction::new(&mut map);
-        let mut first_entry_txn = map_txn.new_entry_txn("first".to_string()).unwrap();
+        let mut first_entry_txn = map_txn.new_entry_txn("first".to_owned()).unwrap();
         first_entry_txn.value = "first-value";
         let mut txn = Transaction::default();
         first_entry_txn.apply_to_txn(&mut txn).await.unwrap();
@@ -826,7 +826,7 @@ mod tests {
 
         let mut map_txn = BTreeMapTransaction::new(&mut map);
         let first_entry_txn = map_txn.new_entry_insert_txn(
-            "first".to_string(),
+            "first".to_owned(),
             TestTransactional {
                 key: "first",
                 value: "first-value",

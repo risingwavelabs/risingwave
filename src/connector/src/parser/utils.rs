@@ -116,7 +116,7 @@ pub(super) async fn bytes_from_url(
     }
 }
 
-pub fn extreact_timestamp_from_meta(meta: &SourceMeta) -> DatumRef<'_> {
+pub fn extract_timestamp_from_meta(meta: &SourceMeta) -> DatumRef<'_> {
     match meta {
         SourceMeta::Kafka(kafka_meta) => kafka_meta.extract_timestamp(),
         SourceMeta::DebeziumCdc(cdc_meta) => cdc_meta.extract_timestamp(),
@@ -135,7 +135,7 @@ pub fn extract_cdc_meta_column<'a>(
         ColumnType::DatabaseName(_) => Ok(cdc_meta.extract_database_name()),
         ColumnType::TableName(_) => Ok(cdc_meta.extract_table_name()),
         _ => Err(AccessError::UnsupportedAdditionalColumn {
-            name: column_name.to_string(),
+            name: column_name.to_owned(),
         }),
     }
 }
@@ -154,6 +154,13 @@ pub fn extract_header_inner_from_meta<'a>(
 ) -> Option<DatumCow<'a>> {
     match meta {
         SourceMeta::Kafka(kafka_meta) => kafka_meta.extract_header_inner(inner_field, data_type), /* expect output of type `bytea` or `varchar` */
+        _ => None,
+    }
+}
+
+pub fn extract_subject_from_meta(meta: &SourceMeta) -> Option<DatumRef<'_>> {
+    match meta {
+        SourceMeta::Nats(nats_meta) => Some(nats_meta.extract_subject()),
         _ => None,
     }
 }

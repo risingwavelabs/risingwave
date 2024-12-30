@@ -21,17 +21,15 @@ use risingwave_sqlparser::parser::Parser;
 use thiserror_ext::AsReport;
 
 use super::alter_source_with_sr::alter_definition_format_encode;
-use super::alter_table_column::{fetch_table_catalog_for_alter, schema_has_schema_registry};
+use super::alter_table_column::fetch_table_catalog_for_alter;
+use super::create_source::schema_has_schema_registry;
 use super::util::SourceSchemaCompatExt;
 use super::{get_replace_table_plan, HandlerArgs, RwPgResponse};
 use crate::error::{ErrorCode, Result};
 use crate::TableCatalog;
 
 fn get_format_encode_from_table(table: &TableCatalog) -> Result<Option<FormatEncodeOptions>> {
-    let [stmt]: [_; 1] = Parser::parse_sql(&table.definition)
-        .context("unable to parse original table definition")?
-        .try_into()
-        .unwrap();
+    let stmt = table.create_sql_ast()?;
     let Statement::CreateTable { format_encode, .. } = stmt else {
         unreachable!()
     };
@@ -56,8 +54,8 @@ pub async fn handle_refresh_schema(
             .is_some_and(schema_has_schema_registry)
         {
             return Err(ErrorCode::NotSupported(
-                "tables without schema registry cannot refreshed".to_string(),
-                "try `ALTER TABLE .. ADD/DROP COLUMN ...` instead".to_string(),
+                "tables without schema registry cannot refreshed".to_owned(),
+                "try `ALTER TABLE .. ADD/DROP COLUMN ...` instead".to_owned(),
             )
             .into());
         }

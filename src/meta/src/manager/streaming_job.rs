@@ -24,7 +24,7 @@ use risingwave_pb::catalog::{CreateType, Index, PbSource, Sink, Table};
 use risingwave_pb::ddl_service::TableJobType;
 use sea_orm::entity::prelude::*;
 use sea_orm::{DatabaseTransaction, QuerySelect};
-use strum::EnumIs;
+use strum::{EnumIs, EnumTryAs};
 
 use super::{
     get_referred_connection_ids_from_sink, get_referred_connection_ids_from_source,
@@ -35,7 +35,7 @@ use crate::{MetaError, MetaResult};
 
 // This enum is used in order to re-use code in `DdlServiceImpl` for creating MaterializedView and
 // Sink.
-#[derive(Debug, Clone, EnumIs)]
+#[derive(Debug, Clone, EnumIs, EnumTryAs)]
 pub enum StreamingJob {
     MaterializedView(Table),
     Sink(Sink, Option<(Table, Option<PbSource>)>),

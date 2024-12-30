@@ -28,15 +28,13 @@ use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnId, DatabaseId, Field, Schema, TableId};
 use risingwave_common::config::MetricLevel;
-use risingwave_common::{bail, must_match};
+use risingwave_common::must_match;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{StreamActor, StreamNode, StreamScanNode, StreamScanType};
-use risingwave_pb::stream_service::streaming_control_stream_request::{
-    DatabaseInitialPartialGraph, InitRequest,
-};
+use risingwave_pb::stream_service::streaming_control_stream_request::InitRequest;
 use risingwave_pb::stream_service::{
     StreamingControlStreamRequest, StreamingControlStreamResponse,
 };
@@ -256,12 +254,12 @@ impl LocalStreamManager {
 
 impl LocalBarrierWorker {
     /// Force stop all actors on this worker, and then drop their resources.
-    pub(super) async fn reset(&mut self, initial_partial_graphs: Vec<DatabaseInitialPartialGraph>) {
+    pub(super) async fn reset(&mut self, init_request: InitRequest) {
         join_all(
             self.state
                 .databases
                 .values_mut()
-                .map(|database| database.abort_actors()),
+                .map(|database| database.abort()),
         )
         .await;
         if let Some(m) = self.actor_manager.await_tree_reg.as_ref() {
@@ -275,7 +273,7 @@ impl LocalBarrierWorker {
                 .await
         }
         self.actor_manager.env.dml_manager_ref().clear();
-        self.reset_state(initial_partial_graphs);
+        *self = Self::new(self.actor_manager.clone(), init_request.databases);
     }
 }
 
@@ -408,6 +406,7 @@ impl StreamActorManager {
             node.rate_limit.map(|x| x as _),
             barrier_rx,
             self.streaming_metrics.clone(),
+            node.snapshot_backfill_epoch,
         )
         .boxed();
 
@@ -748,26 +747,13 @@ impl LocalBarrierWorker {
         &mut self,
         database_id: DatabaseId,
         new_actor_infos: impl Iterator<Item = ActorInfo>,
-    ) -> StreamResult<()> {
-        let mut actor_infos = Self::get_or_insert_database_shared_context(
+    ) {
+        Self::get_or_insert_database_shared_context(
             &mut self.state.current_shared_context,
             database_id,
             &self.actor_manager,
         )
-        .actor_infos
-        .write();
-        for actor in new_actor_infos {
-            if let Some(prev_actor) = actor_infos.get(&actor.get_actor_id())
-                && &actor != prev_actor
-            {
-                bail!(
-                    "actor info mismatch when broadcasting {}",
-                    actor.get_actor_id()
-                );
-            }
-            actor_infos.insert(actor.get_actor_id(), actor);
-        }
-        Ok(())
+        .add_actors(new_actor_infos);
     }
 }
 
