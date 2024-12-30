@@ -35,7 +35,9 @@ echo "--- Install dependencies"
 apt-get -y install jq
 
 echo "--- Prepare python environment"
-PIPENV_PIPFILE=./e2e_test/Pipfile pipenv install --deploy
+export PIPENV_PIPFILE=./e2e_test/Pipfile
+pipenv install --deploy
+. "$(pipenv --venv)/bin/activate"
 
 echo "--- e2e, inline test"
 RUST_LOG="debug,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info,risingwave_meta=info" \
