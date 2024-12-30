@@ -448,9 +448,9 @@ mod tests {
         assert_eq!(extract(Hour), "23");
         assert_eq!(extract(Minute), "22");
         assert_eq!(extract(Second), "57.123450");
-        assert_eq!(extract(Millisecond), "57123.450");
-        assert_eq!(extract(Microsecond), "57123450");
-        assert_eq!(extract(Epoch), "84177.123450");
+        assert_eq!(extract(Millisecond), "57123.450000");
+        assert_eq!(extract(Microsecond), "57123450.000");
+        assert_eq!(extract(Epoch), "84177.12345000");
     }
 
     #[test]

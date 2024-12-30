@@ -138,7 +138,7 @@ select v2, count(*) from t1 group by v2;
 2213-01-01 01:01:01.123456789 1
 NULL 1
 
-query T rowsort
+query T
 select * from t1 order by v2 desc;
 ----
 5  NULL
