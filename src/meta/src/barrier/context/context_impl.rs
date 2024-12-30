@@ -159,7 +159,7 @@ impl CommandContext {
 
             Command::Resume(_) => {}
 
-            Command::SourceSplitAssignment(split_assignment) => {
+            Command::SourceChangeSplit(split_assignment) => {
                 barrier_manager_context
                     .metadata_manager
                     .update_actor_splits_by_split_assignment(split_assignment)

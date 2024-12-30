@@ -78,15 +78,7 @@ use super::utils::{
     rename_relation, rename_relation_refer,
 };
 use crate::controller::catalog::util::update_internal_tables;
-use crate::controller::utils::{
-    build_relation_group_for_delete, check_connection_name_duplicate,
-    check_database_name_duplicate, check_function_signature_duplicate,
-    check_relation_name_duplicate, check_schema_name_duplicate, check_secret_name_duplicate,
-    ensure_object_id, ensure_object_not_refer, ensure_schema_empty, ensure_user_id,
-    extract_external_table_name_from_definition, get_referring_objects,
-    get_referring_objects_cascade, get_user_privilege, list_user_info_by_ids,
-    resolve_source_register_info_for_jobs, PartialObject,
-};
+use crate::controller::utils::*;
 use crate::controller::ObjectModel;
 use crate::manager::{
     get_referred_connection_ids_from_source, get_referred_secret_ids_from_source, MetaSrvEnv,
@@ -121,20 +113,17 @@ pub struct CatalogController {
 #[derive(Clone, Default)]
 pub struct ReleaseContext {
     pub(crate) database_id: DatabaseId,
-    pub(crate) streaming_job_ids: Vec<ObjectId>,
+    pub(crate) removed_streaming_job_ids: Vec<ObjectId>,
     /// Dropped state table list, need to unregister from hummock.
-    pub(crate) state_table_ids: Vec<TableId>,
-    /// Dropped source list, need to unregister from source manager.
-    pub(crate) source_ids: Vec<SourceId>,
-    /// Dropped connection list, need to delete from vpc endpoints.
-    #[allow(dead_code)]
-    pub(crate) connections: Vec<ConnectionId>,
+    pub(crate) removed_state_table_ids: Vec<TableId>,
 
-    /// Dropped fragments that are fetching data from the target source.
-    pub(crate) source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
-    /// Dropped actors.
+    /// Dropped sources (when `DROP SOURCE`), need to unregister from source manager.
+    pub(crate) removed_source_ids: Vec<SourceId>,
+    /// Dropped Source fragments (when `DROP MATERIALIZED VIEW` referencing sources),
+    /// need to unregister from source manager.
+    pub(crate) removed_source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
+
     pub(crate) removed_actors: HashSet<ActorId>,
-
     pub(crate) removed_fragments: HashSet<FragmentId>,
 }
 
