@@ -24,8 +24,8 @@ use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use super::*;
 use crate::common::table::state_table::{ReplicatedStateTable, StateTable};
 use crate::executor::{
-    ArrangementBackfillExecutor, BackfillExecutor, ChainExecutor, RearrangedChainExecutor,
-    TroublemakerExecutor,
+    AdaptiveRateLimiterConfig, ArrangementBackfillExecutor, BackfillExecutor, ChainExecutor,
+    RearrangedChainExecutor, TroublemakerExecutor,
 };
 
 pub struct StreamScanExecutorBuilder;
@@ -114,6 +114,49 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                 let upstream_table = node.get_arrangement_table().unwrap();
                 let versioned = upstream_table.get_version().is_ok();
 
+                let adaptive_rate_limit_config = AdaptiveRateLimiterConfig {
+                    min_rate_limit: params
+                        .actor_context
+                        .streaming_config
+                        .developer
+                        .backfill_adaptive_rate_limit_min,
+                    max_rate_limit: params
+                        .actor_context
+                        .streaming_config
+                        .developer
+                        .backfill_adaptive_rate_limit_max,
+                    init_rate_limit: params
+                        .actor_context
+                        .streaming_config
+                        .developer
+                        .backfill_adaptive_rate_limit_init,
+                    step_min: params
+                        .actor_context
+                        .streaming_config
+                        .developer
+                        .backfill_adaptive_rate_limit_step_min,
+                    step_max: params
+                        .actor_context
+                        .streaming_config
+                        .developer
+                        .backfill_adaptive_rate_limit_step_max,
+                    step_ratio: params
+                        .actor_context
+                        .streaming_config
+                        .developer
+                        .backfill_adaptive_rate_limit_step_ratio,
+                    step_up_threshold: params
+                        .actor_context
+                        .streaming_config
+                        .developer
+                        .backfill_adaptive_rate_limit_step_up_threshold,
+                    step_down_threshold: params
+                        .actor_context
+                        .streaming_config
+                        .developer
+                        .backfill_adaptive_rate_limit_step_down_threshold,
+                };
+
                 macro_rules! new_executor {
                     ($SD:ident) => {{
                         let upstream_table =
@@ -133,6 +176,7 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                             params.executor_stats.clone(),
                             params.env.config().developer.chunk_size,
                             node.rate_limit.map(|x| x as _),
+                            adaptive_rate_limit_config,
                         )
                         .boxed()
                     }};
