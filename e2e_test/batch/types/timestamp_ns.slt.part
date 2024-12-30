@@ -54,16 +54,6 @@ select count(v2) as total_rows from t1;
 5
 
 query T rowsort
-select * from t1 order by v2;
-----
-1  2013-01-01 01:01:01.123456789
-2  2012-01-01 01:01:01.123456
-3  0001-01-01 01:01:01.123456789 BC
-4  2213-01-01 01:01:01.123456789
-5  NULL
-6  2013-01-01 01:01:01.123456789
-
-query T rowsort
 select * from t1 where v2 >= '2012-01-01 01:01:01.123456';
 ----
 1  2013-01-01 01:01:01.123456789
@@ -139,7 +129,7 @@ select v2, count(*) from t1 group by v2;
 NULL 1
 
 query T
-select * from t1 order by v2 desc;
+select * from t1 order by v2 desc , v1 desc;
 ----
 5  NULL
 4  2213-01-01 01:01:01.123456789
