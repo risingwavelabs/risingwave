@@ -14,8 +14,7 @@ create table opentelemetry_test with (
 format plain encode protobuf (
   schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL},
   message = 'opentelemetry_test.OTLPTestMessage',
-  messages_as_jsonb = 'opentelemetry.proto.common.v1.ArrayValue,opentelemetry.proto.common.v1.KeyValueList'
-) ;
+  messages_as_jsonb = 'opentelemetry.proto.common.v1.ArrayValue,opentelemetry.proto.common.v1.KeyValueList,opentelemetry.proto.common.v1.AnyValue')
 
 statement ok
 flush;
