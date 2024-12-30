@@ -1,3 +1,5 @@
+use crate::common::CtlContext;
+
 // Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -11,21 +13,14 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
-mod backup_meta;
-mod cluster_info;
-mod connection;
-mod migration;
-mod pause_resume;
-mod reschedule;
-mod serving;
-mod ttl;
-
-pub use backup_meta::*;
-pub use cluster_info::*;
-pub use connection::*;
-pub use migration::*;
-pub use pause_resume::*;
-pub use reschedule::*;
-pub use serving::*;
-pub use ttl::update_table_ttl;
+pub async fn update_table_ttl(
+    context: &CtlContext,
+    table_id: u32,
+    retention_seconds: Option<u32>,
+) -> anyhow::Result<()> {
+    let meta_client = context.meta_client().await?;
+    meta_client
+        .alter_table_ttl(table_id, retention_seconds)
+        .await?;
+    Ok(())
+}

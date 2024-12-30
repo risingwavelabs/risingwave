@@ -2364,6 +2364,24 @@ impl DdlController {
             MetadataManager::V2(mgr) => mgr.catalog_controller.comment_on(comment).await,
         }
     }
+
+    pub async fn alter_table_ttl(
+        &self,
+        table_id: u32,
+        retention_seconds: Option<u32>,
+    ) -> MetaResult<()> {
+        match &self.metadata_manager {
+            MetadataManager::V1(mgr) => {
+                mgr.catalog_manager
+                    .alter_table_ttl(table_id.into(), retention_seconds)
+                    .await?;
+                Ok(())
+            }
+            MetadataManager::V2(_) => {
+                Err(anyhow!("ALTER TABLE TTL is not supported yet in V2").into())
+            }
+        }
+    }
 }
 
 /// Fill in necessary information for `Table` stream graph.

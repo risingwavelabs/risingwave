@@ -1106,6 +1106,20 @@ impl DdlService for DdlServiceImpl {
 
         Ok(Response::new(AutoSchemaChangeResponse {}))
     }
+
+    async fn alter_table_ttl(
+        &self,
+        request: Request<AlterTableTtlRequest>,
+    ) -> Result<Response<AlterTableTtlResponse>, Status> {
+        let AlterTableTtlRequest {
+            table_id,
+            retention_seconds,
+        } = request.into_inner();
+        self.ddl_controller
+            .alter_table_ttl(table_id, retention_seconds)
+            .await?;
+        Ok(Response::new(AlterTableTtlResponse {}))
+    }
 }
 
 impl DdlServiceImpl {

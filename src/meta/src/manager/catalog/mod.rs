@@ -131,6 +131,8 @@ use risingwave_pb::meta::cancel_creating_jobs_request::CreatingJobInfo;
 use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
 use risingwave_pb::meta::relation::RelationInfo;
 use risingwave_pb::meta::{Relation, RelationGroup};
+use risingwave_sqlparser::ast::{SqlOption, Statement, Value};
+use risingwave_sqlparser::parser::Parser;
 pub(crate) use {commit_meta, commit_meta_with_trx};
 
 use self::utils::{
@@ -2310,6 +2312,57 @@ impl CatalogManager {
             source,
         )
         .await
+    }
+
+    pub async fn alter_table_ttl(
+        &self,
+        table_id: TableId,
+        retention_seconds: Option<u32>,
+    ) -> MetaResult<()> {
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        database_core.ensure_table_id(table_id)?;
+        let mut table = database_core.tables.get(&table_id).unwrap().clone();
+        table.retention_seconds = retention_seconds;
+        let ast = Parser::parse_sql(&table.definition).map_err(|e| anyhow!(e))?;
+        let mut stmt = ast
+            .into_iter()
+            .exactly_one()
+            .expect("should contains only one statement");
+        // Ideally we should use struct WithOptions' methods, however it's only available risingwave_frontend crate.
+        // For simplicity, we use string literal here instead.
+        let Statement::CreateTable { with_options, .. } = &mut stmt else {
+            panic!("expect CreateTable, got {}", stmt);
+        };
+        const RETENTION_SECONDS: &str = "retention_seconds";
+        let update_option = match with_options
+            .iter_mut()
+            .find(|o| o.name.real_value() == RETENTION_SECONDS)
+        {
+            None => {
+                let insert_option = SqlOption {
+                    name: vec![RETENTION_SECONDS.into()].into(),
+                    value: Value::Null,
+                };
+                with_options.push(insert_option);
+                &mut with_options.last_mut().unwrap()
+            }
+            Some(option) => option,
+        };
+        match retention_seconds {
+            None => {
+                update_option.value = Value::Number(u32::MAX.to_string());
+            }
+            Some(v) => {
+                update_option.value = Value::Number(v.to_string());
+            }
+        }
+        table.definition = stmt.to_string();
+
+        let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
+        tables.insert(table.id, table);
+        commit_meta!(self, tables)?;
+        Ok(())
     }
 
     // TODO: refactor dependency cache in catalog manager for better performance.
