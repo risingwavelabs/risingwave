@@ -731,6 +731,7 @@ impl DataChunkTestExt for DataChunk {
                 "TZ" => DataType::Timestamptz,
                 "T" => DataType::Varchar,
                 "SRL" => DataType::Serial,
+                "D" => DataType::Date,
                 array if array.starts_with('<') && array.ends_with('>') => {
                     DataType::Struct(StructType::unnamed(
                         array[1..array.len() - 1]

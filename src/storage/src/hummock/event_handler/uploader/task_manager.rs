@@ -136,24 +136,6 @@ impl TaskManager {
         )
     }
 
-    pub(super) fn remove_table_spill_tasks(
-        &mut self,
-        table_id: TableId,
-        task_ids: impl Iterator<Item = UploadingTaskId>,
-    ) {
-        for task_id in task_ids {
-            let entry = self.tasks.get_mut(&task_id).expect("should exist");
-            let empty = must_match!(&mut entry.status, UploadingTaskStatus::Spilling(table_ids) => {
-                assert!(table_ids.remove(&table_id));
-                table_ids.is_empty()
-            });
-            if empty {
-                let task = self.tasks.remove(&task_id).expect("should exist").task;
-                task.join_handle.abort();
-            }
-        }
-    }
-
     pub(super) fn sync(
         &mut self,
         context: &UploaderContext,
