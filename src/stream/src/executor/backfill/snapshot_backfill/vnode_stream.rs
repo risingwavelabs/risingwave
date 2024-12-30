@@ -19,6 +19,7 @@ use std::task::{ready, Context, Poll};
 
 use futures::stream::{FuturesUnordered, Peekable, StreamFuture};
 use futures::{Stream, StreamExt, TryStreamExt};
+use pin_project::pin_project;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
@@ -30,20 +31,23 @@ use crate::executor::StreamExecutorResult;
 pub(super) trait ChangeLogRowStream =
     Stream<Item = StreamExecutorResult<ChangeLogRow>> + Sized + 'static;
 
+#[pin_project]
 struct StreamWithVnode<St> {
+    #[pin]
     stream: St,
     vnode: VirtualNode,
 }
 
-impl<St: Stream + Unpin> Stream for StreamWithVnode<St> {
+impl<St: ChangeLogRowStream> Stream for StreamWithVnode<St> {
     type Item = St::Item;
 
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.stream.poll_next_unpin(cx)
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.project();
+        this.stream.poll_next(cx)
     }
 }
 
-type ChangeLogRowVnodeStream<St> = StreamWithVnode<Pin<Box<Peekable<St>>>>;
+type ChangeLogRowVnodeStream<St> = Pin<Box<Peekable<StreamWithVnode<St>>>>;
 
 pub(super) struct VnodeStream<St: ChangeLogRowStream> {
     streams: FuturesUnordered<StreamFuture<ChangeLogRowVnodeStream<St>>>,
@@ -61,11 +65,7 @@ impl<St: ChangeLogRowStream> VnodeStream<St> {
         assert!(data_chunk_builder.batch_size() >= 2);
         let streams =
             FuturesUnordered::from_iter(vnode_streams.into_iter().map(|(vnode, stream)| {
-                StreamWithVnode {
-                    stream: Box::pin(stream.peekable()),
-                    vnode,
-                }
-                .into_future()
+                Box::pin(StreamWithVnode { stream, vnode }.peekable()).into_future()
             }));
         let ops = Vec::with_capacity(data_chunk_builder.batch_size());
         Self {
@@ -86,6 +86,7 @@ impl<St: ChangeLogRowStream> VnodeStream<St> {
             let ready_item = match ready!(self.streams.poll_next_unpin(cx)) {
                 None => Ok(None),
                 Some((None, stream)) => {
+                    let stream = stream.get_ref();
                     assert!(self.finished_vnode.insert(stream.vnode));
                     continue;
                 }
@@ -122,7 +123,7 @@ impl<St: ChangeLogRowStream> VnodeStream<St> {
         }
         for vnode_stream in &mut self.streams {
             let vnode_stream = vnode_stream.get_mut().expect("should exist");
-            match vnode_stream.stream.as_mut().peek().await {
+            match vnode_stream.as_mut().peek().await {
                 Some(Ok(change_log_row)) => {
                     let row = match change_log_row {
                         ChangeLogRow::Insert(row) | ChangeLogRow::Delete(row) => row,
@@ -140,16 +141,14 @@ impl<St: ChangeLogRowStream> VnodeStream<St> {
                         }
                     };
                     let pk = row.project(pk_indices).to_owned_row();
+                    let vnode_stream = vnode_stream.get_ref();
                     on_vnode_progress(vnode_stream.vnode, Some(pk));
                 }
                 Some(Err(_)) => {
-                    return Err(vnode_stream
-                        .stream
-                        .try_next()
-                        .await
-                        .expect_err("checked Err"));
+                    return Err(vnode_stream.try_next().await.expect_err("checked Err"));
                 }
                 None => {
+                    let vnode_stream = vnode_stream.get_ref();
                     on_vnode_progress(vnode_stream.vnode, None);
                 }
             }
