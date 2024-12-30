@@ -59,9 +59,9 @@ message ChannelStats {
   // Sum of output blocking duration of all actors in nanoseconds
   double blocking_duration = 2 [json_name = "b"];
   // Sum of input row count of all actors
-  double in_row_count = 3 [json_name = "i"];
+  uint64 input_row_count = 3 [json_name = "i"];
   // Sum of output row count of all actors
-  double out_row_count = 4 [json_name = "o"];
+  uint64 output_row_count = 4 [json_name = "o"];
 }
 
 message FragmentStats {
