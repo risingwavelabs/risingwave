@@ -51,7 +51,7 @@ import {
 } from "../lib/api/streaming"
 import { FragmentBox } from "../lib/layout"
 import { TableFragments, TableFragments_Fragment } from "../proto/gen/meta"
-import { BackPressureInfo, FragmentStats } from "../proto/gen/monitor_service"
+import { ChannelStats, FragmentStats } from "../proto/gen/monitor_service"
 import { Dispatcher, MergeNode, StreamNode } from "../proto/gen/stream_plan"
 
 interface DispatcherNode {
@@ -201,11 +201,11 @@ export class BackPressureSnapshot {
   }
 
   static fromResponse(channelStats: {
-    [key: string]: BackPressureInfo
+    [key: string]: ChannelStats
   }): BackPressureSnapshot {
     const result = new Map<string, number>()
     for (const [key, info] of Object.entries(channelStats)) {
-      result.set(key, info.value / info.actorCount)
+      result.set(key, info.blockingDuration / info.actorCount)
     }
     return new BackPressureSnapshot(result, Date.now())
   }

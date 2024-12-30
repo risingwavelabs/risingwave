@@ -54,25 +54,29 @@ message AnalyzeHeapResponse {
 // Back pressure
 message GetBackPressureRequest {}
 
-message BackPressureInfo {
-  uint32 actor_count = 3;
-  // Sum of output blocking duration of all actors
-  double value = 4;
+message ChannelStats {
+  uint32 actor_count = 1 [json_name = "n"];
+  // Sum of output blocking duration of all actors in nanoseconds
+  double blocking_duration = 2 [json_name = "b"];
+  // Sum of input row count of all actors
+  double in_row_count = 3 [json_name = "i"];
+  // Sum of output row count of all actors
+  double out_row_count = 4 [json_name = "o"];
 }
 
 message FragmentStats {
-  uint32 actor_count = 2;
-  uint64 current_epoch = 3;
+  uint32 actor_count = 2 [json_name = "n"];
+  uint64 current_epoch = 3 [json_name = "e"];
 }
 
 message RelationStats {
-  uint32 actor_count = 2;
-  uint64 current_epoch = 3;
+  uint32 actor_count = 2 [json_name = "n"];
+  uint64 current_epoch = 3 [json_name = "e"];
 }
 
 message GetBackPressureResponse {
   // Key: "<upstream_fragment_id>_<downstream_fragment_id>"
-  map<string, BackPressureInfo> channel_stats = 1;
+  map<string, ChannelStats> channel_stats = 1;
   map<uint32, FragmentStats> fragment_stats = 2;
   map<uint32, RelationStats> relation_stats = 3;
 }

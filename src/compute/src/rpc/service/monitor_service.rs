@@ -28,11 +28,10 @@ use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_jni_core::jvm_runtime::dump_jvm_stack_traces;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorService;
 use risingwave_pb::monitor_service::{
-    AnalyzeHeapRequest, AnalyzeHeapResponse, BackPressureInfo, FragmentStats,
-    GetBackPressureRequest, GetBackPressureResponse, HeapProfilingRequest, HeapProfilingResponse,
-    ListHeapProfilingRequest, ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse,
-    RelationStats, StackTraceRequest, StackTraceResponse, TieredCacheTracingRequest,
-    TieredCacheTracingResponse,
+    AnalyzeHeapRequest, AnalyzeHeapResponse, ChannelStats, FragmentStats, GetBackPressureRequest,
+    GetBackPressureResponse, HeapProfilingRequest, HeapProfilingResponse, ListHeapProfilingRequest,
+    ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse, RelationStats,
+    StackTraceRequest, StackTraceResponse, TieredCacheTracingRequest, TieredCacheTracingResponse,
 };
 use risingwave_rpc_client::error::ToTonicStatus;
 use risingwave_storage::hummock::compactor::await_tree_key::Compaction;
@@ -382,19 +381,19 @@ impl MonitorService for MonitorServiceImpl {
             }
         }
 
-        let mut channel_stats: HashMap<_, BackPressureInfo> = HashMap::new();
+        let mut channel_stats: HashMap<_, ChannelStats> = HashMap::new();
 
         for metric in actor_output_buffer_blocking_duration_ns {
             let fragment_id: u32 = get_label(&metric, "fragment_id").unwrap();
             let downstream_fragment_id: u32 = get_label(&metric, "downstream_fragment_id").unwrap();
 
             let key = format!("{}_{}", fragment_id, downstream_fragment_id);
-            let channel_stat = channel_stats
-                .entry(key)
-                .or_insert_with(|| BackPressureInfo {
-                    actor_count: 0,
-                    value: 0.,
-                });
+            let channel_stat = channel_stats.entry(key).or_insert_with(|| ChannelStats {
+                actor_count: 0,
+                blocking_duration: 0.,
+                in_row_count: 0.,  // TODO
+                out_row_count: 0., // TODO
+            });
 
             // When metrics level is Debug, `actor_id` will be removed to reduce metrics.
             // See `src/common/metrics/src/relabeled_metric.rs`
@@ -404,7 +403,7 @@ impl MonitorService for MonitorServiceImpl {
                 } else {
                     1
                 };
-            channel_stat.value += metric.get_counter().get_value();
+            channel_stat.blocking_duration += metric.get_counter().get_value();
         }
 
         Ok(Response::new(GetBackPressureResponse {

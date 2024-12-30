@@ -514,7 +514,7 @@ pub(super) mod handlers {
             for (key, channel_stats) in result.channel_stats {
                 if let Some(s) = all.channel_stats.get_mut(&key) {
                     s.actor_count += channel_stats.actor_count;
-                    s.value += channel_stats.value;
+                    s.blocking_duration += channel_stats.blocking_duration;
                 } else {
                     all.channel_stats.insert(key, channel_stats);
                 }
