@@ -402,11 +402,6 @@ impl<R: LogReader> RateLimitedLogReader<R> {
 }
 
 impl<R: LogReader> RateLimitedLogReader<R> {
-    // Returns old limit
-    fn update_rate_limit(&mut self, rate_limit: RateLimit) -> RateLimit {
-        self.rate_limiter.update(rate_limit)
-    }
-
     async fn apply_rate_limit(
         &mut self,
         split_chunk: SplitChunk,
@@ -494,7 +489,7 @@ impl<R: LogReader> LogReader for RateLimitedLogReader<R> {
                         Some(limit) => limit,
                         None => bail!("rate limit control channel closed"),
                     };
-                    let old_rate_limit = self.update_rate_limit(new_rate_limit);
+                    let old_rate_limit = self.rate_limiter.update(new_rate_limit);
                     paused = matches!(new_rate_limit, RateLimit::Pause);
                     tracing::info!("rate limit changed from {:?} to {:?}, paused = {paused}", old_rate_limit, new_rate_limit);
                 },
