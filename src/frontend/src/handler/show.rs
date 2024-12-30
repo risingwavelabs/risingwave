@@ -662,7 +662,7 @@ pub fn handle_show_create_object(
                 .get_source_by_name(&object_name)
                 .filter(|s| s.associated_table_id.is_none())
                 .ok_or_else(|| CatalogError::NotFound("source", name.to_string()))?;
-            source.create_sql()
+            source.create_sql_purified()
         }
         ShowCreateType::Index => {
             let index = schema
