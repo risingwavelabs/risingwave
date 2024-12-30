@@ -28,6 +28,8 @@ use crate::parser::{AccessBuilder, EncodingProperties};
 use crate::schema::schema_registry::{extract_schema_id, handle_sr_list, Client, WireFormatError};
 use crate::schema::SchemaLoader;
 
+pub const PROTOBUF_MESSAGES_AS_JSONB: &str = "messages_as_jsonb";
+
 #[derive(Debug)]
 pub struct ProtobufAccessBuilder {
     confluent_wire_type: bool,
@@ -62,13 +64,9 @@ impl ProtobufAccessBuilder {
         let ProtobufParserConfig {
             confluent_wire_type,
             message_descriptor,
-            struct_as_jsonb_str,
+            mut messages_as_jsonb,
         } = config;
 
-        let mut messages_as_jsonb: HashSet<String> = struct_as_jsonb_str
-            .split(',')
-            .map(|s| s.to_owned())
-            .collect();
         messages_as_jsonb.insert("google.protobuf.Any".to_owned());
 
         Ok(Self {
@@ -83,7 +81,7 @@ impl ProtobufAccessBuilder {
 pub struct ProtobufParserConfig {
     confluent_wire_type: bool,
     pub(crate) message_descriptor: MessageDescriptor,
-    struct_as_jsonb_str: String,
+    messages_as_jsonb: HashSet<String>,
 }
 
 impl ProtobufParserConfig {
@@ -128,7 +126,7 @@ impl ProtobufParserConfig {
         Ok(Self {
             message_descriptor,
             confluent_wire_type: protobuf_config.use_schema_registry,
-            struct_as_jsonb_str: protobuf_config.message_as_jsonb.unwrap_or_default(),
+            messages_as_jsonb: protobuf_config.messages_as_jsonb,
         })
     }
 
