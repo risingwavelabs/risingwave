@@ -55,7 +55,7 @@ pub async fn get_new_table_definition_for_cdc_table(
     let original_catalog = fetch_table_catalog_for_alter(session.as_ref(), &table_name)?;
 
     // Retrieve the original table definition and parse it to AST.
-    let mut definition = original_catalog.create_stmt()?;
+    let mut definition = original_catalog.create_sql_ast()?;
 
     let Statement::CreateTable {
         columns: original_columns,
@@ -324,7 +324,7 @@ pub async fn handle_alter_table_column(
     }
 
     // Retrieve the original table definition and parse it to AST.
-    let mut definition = original_catalog.create_stmt()?;
+    let mut definition = original_catalog.create_sql_ast()?;
     let Statement::CreateTable {
         columns,
         format_encode,

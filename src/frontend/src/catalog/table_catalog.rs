@@ -431,7 +431,7 @@ impl TableCatalog {
     /// Returns the parsed SQL definition when the table was created.
     ///
     /// Returns error if it's invalid.
-    pub fn create_stmt(&self) -> Result<ast::Statement> {
+    pub fn create_sql_ast(&self) -> Result<ast::Statement> {
         Ok(Parser::parse_sql(&self.definition)
             .context("unable to parse definition sql")?
             .into_iter()

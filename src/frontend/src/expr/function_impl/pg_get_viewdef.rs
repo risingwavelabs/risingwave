@@ -44,7 +44,7 @@ fn pg_get_viewdef_impl(
         write!(writer, "{}", view.sql).unwrap();
         Ok(())
     } else if let Ok(mv) = catalog_reader.get_created_table_by_id_with_db(db_name, oid as u32) {
-        let stmt = mv.create_stmt().map_err(|e| anyhow!(e))?;
+        let stmt = mv.create_sql_ast().map_err(|e| anyhow!(e))?;
         if let Statement::CreateView {
             query,
             materialized,
