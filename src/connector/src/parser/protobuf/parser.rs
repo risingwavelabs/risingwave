@@ -17,7 +17,7 @@ use std::collections::HashSet;
 use anyhow::Context;
 use prost_reflect::{DescriptorPool, DynamicMessage, FileDescriptor, MessageDescriptor};
 use risingwave_common::{bail, try_match_expand};
-pub use risingwave_connector_codec::decoder::protobuf::parser::*;
+pub use risingwave_connector_codec::decoder::protobuf::parser::{PROTOBUF_MESSAGES_AS_JSONB, *};
 use risingwave_connector_codec::decoder::protobuf::ProtobufAccess;
 use risingwave_pb::plan_common::ColumnDesc;
 
@@ -27,8 +27,6 @@ use crate::parser::utils::bytes_from_url;
 use crate::parser::{AccessBuilder, EncodingProperties};
 use crate::schema::schema_registry::{extract_schema_id, handle_sr_list, Client, WireFormatError};
 use crate::schema::SchemaLoader;
-
-pub const PROTOBUF_MESSAGES_AS_JSONB: &str = "messages_as_jsonb";
 
 #[derive(Debug)]
 pub struct ProtobufAccessBuilder {

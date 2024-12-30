@@ -28,6 +28,8 @@ use thiserror_ext::Macro;
 
 use crate::decoder::{uncategorized, AccessError, AccessResult};
 
+pub const PROTOBUF_MESSAGES_AS_JSONB: &str = "messages_as_jsonb";
+
 pub fn pb_schema_to_column_descs(
     message_descriptor: &MessageDescriptor,
 ) -> anyhow::Result<Vec<ColumnDesc>> {
@@ -94,10 +96,12 @@ fn detect_loop_and_push(
     let identifier = format!("{}({})", fd.name(), fd.full_name());
     if trace.iter().any(|s| s == identifier.as_str()) {
         bail_protobuf_type_error!(
-            "circular reference detected: {}, conflict with {}, kind {:?}",
+            "circular reference detected: {}, conflict with {}, kind {:?}. Adding {:?} to {:?} may help.",
             trace.iter().format("->"),
             identifier,
             fd.kind(),
+            fd.full_name(),
+            PROTOBUF_MESSAGES_AS_JSONB,
         );
     }
     trace.push(identifier);

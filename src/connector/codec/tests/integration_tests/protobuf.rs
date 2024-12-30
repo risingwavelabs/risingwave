@@ -714,7 +714,7 @@ fn test_recursive() -> anyhow::Result<()> {
             failed to map protobuf type
 
             Caused by:
-              circular reference detected: parent(recursive.ComplexRecursiveMessage.parent)->siblings(recursive.ComplexRecursiveMessage.Parent.siblings), conflict with parent(recursive.ComplexRecursiveMessage.parent), kind recursive.ComplexRecursiveMessage.Parent
+              circular reference detected: parent(recursive.ComplexRecursiveMessage.parent)->siblings(recursive.ComplexRecursiveMessage.Parent.siblings), conflict with parent(recursive.ComplexRecursiveMessage.parent), kind recursive.ComplexRecursiveMessage.Parent. Adding "recursive.ComplexRecursiveMessage.parent" to "messages_as_jsonb" may help.
         "#]],
         expect![""],
     );
