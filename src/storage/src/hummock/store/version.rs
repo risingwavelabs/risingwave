@@ -413,7 +413,6 @@ impl HummockReadVersion {
                 epoch,
                 vnode_watermarks,
             } => {
-                println!("NewTableWatermark {:?} epoch {:?}", vnode_watermarks, epoch);
                 if let Some(watermark_index) = &mut self.table_watermarks {
                     watermark_index.add_epoch_watermark(
                         epoch,
