@@ -220,7 +220,6 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> JoinChunkBuilder
     ) -> Option<StreamChunk> {
         // Left/Right Anti sides
         if is_anti(T) {
-            tracing::info!("building delete update_row: {:?}", row);
             if matched_row.is_zero_degree() && only_forward_matched_side(T, SIDE) {
                 self.stream_chunk_builder
                     .append_row_matched(Op::Delete, &matched_row.row)
