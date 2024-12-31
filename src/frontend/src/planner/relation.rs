@@ -135,7 +135,7 @@ impl Planner {
                 }
                 let opt_ctx = self.ctx();
                 let session = opt_ctx.session_ctx();
-                let db_name = session.database();
+                let db_name = &session.database();
                 let catalog_reader = session.env().catalog_reader().read_guard();
                 let mut source_catalog = None;
                 for schema in catalog_reader.iter_schemas(db_name).unwrap() {

@@ -36,7 +36,7 @@ pub async fn handle_create_secret(
         .map_err(|e| anyhow::anyhow!(e))?;
 
     let session = handler_args.session.clone();
-    let db_name = session.database();
+    let db_name = &session.database();
     let (schema_name, secret_name) =
         Binder::resolve_schema_qualified_name(db_name, stmt.secret_name.clone())?;
 
