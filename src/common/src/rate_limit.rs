@@ -178,7 +178,7 @@ pub trait RateLimiterTrait: Send + Sync + 'static {
     /// The caller is supposed to proceed the request with the given quota.
     ///
     /// On failure, [`Check::Retry`] or [`Check::RetryAfter`] is returned.
-    /// The caller is supposed to retry the check after the given duration or retry after receiving the singal.
+    /// The caller is supposed to retry the check after the given duration or retry after receiving the signal.
     fn check(&self, quota: u64) -> Check;
 }
 
