@@ -40,6 +40,7 @@ import {
   epochToUnixMillis,
   latencyToColor,
 } from "./utils/backPressure"
+import { ChannelStatsDerived } from "../pages/fragment_graph"
 
 // Size of each relation box in pixels
 export const boxWidth = 150
@@ -74,13 +75,13 @@ export default function RelationGraph({
   nodes,
   selectedId,
   setSelectedId,
-  backPressures,
+  channelStats,
   relationStats,
 }: {
   nodes: RelationPoint[] // rename to RelationNode
   selectedId: string | undefined
   setSelectedId: (id: string) => void
-  backPressures?: Map<string, number> // relationId-relationId->back_pressure_rate})
+  channelStats?: Map<string, ChannelStatsDerived>
   relationStats: { [relationId: number]: RelationStats } | undefined
 }) {
   const [modalData, setModalId] = useCatalogModal(nodes.map((n) => n.relation))
@@ -173,10 +174,10 @@ export default function RelationGraph({
 
     const applyEdge = (sel: EdgeSelection) => {
       const color = (d: Edge) => {
-        if (backPressures) {
-          let value = backPressures.get(`${d.source}_${d.target}`)
+        if (channelStats) {
+          let value = channelStats.get(`${d.source}_${d.target}`)
           if (value) {
-            return backPressureColor(value)
+            return backPressureColor(value.backPressure)
           }
         }
 
@@ -184,10 +185,10 @@ export default function RelationGraph({
       }
 
       const width = (d: Edge) => {
-        if (backPressures) {
-          let value = backPressures.get(`${d.source}_${d.target}`)
+        if (channelStats) {
+          let value = channelStats.get(`${d.source}_${d.target}`)
           if (value) {
-            return backPressureWidth(value, 15)
+            return backPressureWidth(value.backPressure, 15)
           }
         }
         return 2
@@ -208,11 +209,15 @@ export default function RelationGraph({
           d3.selectAll(".tooltip").remove()
 
           // Create new tooltip
-          const bpValue = backPressures?.get(`${d.source}_${d.target}`)
+          const stats = channelStats?.get(`${d.source}_${d.target}`)
           const tooltipText = `<b>Relation ${d.source} → ${
             d.target
           }</b><br>Backpressure: ${
-            bpValue != null ? `${(bpValue * 100).toFixed(2)}%` : "N/A"
+            stats != null ? `${(stats.backPressure * 100).toFixed(2)}%` : "N/A"
+          }<br>Input Throughput: ${
+            stats != null ? `${stats.inputThroughput.toFixed(2)} rows/s` : "N/A"
+          }<br>Output Throughput: ${
+            stats != null ? `${stats.outputThroughput.toFixed(2)} rows/s` : "N/A"
           }`
           d3.select("body")
             .append("div")
@@ -421,7 +426,7 @@ export default function RelationGraph({
     selectedId,
     setModalId,
     setSelectedId,
-    backPressures,
+    channelStats,
     relationStats,
   ])
 
