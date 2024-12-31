@@ -381,7 +381,7 @@ impl MonitorService for MonitorServiceImpl {
             }
         }
 
-        let mut channel_stats: HashMap<String, ChannelStats> = HashMap::new();
+        let mut channel_stats: BTreeMap<String, ChannelStats> = BTreeMap::new();
 
         for metric in actor_output_buffer_blocking_duration_ns {
             let fragment_id: u32 = get_label(&metric, "fragment_id");
@@ -408,25 +408,27 @@ impl MonitorService for MonitorServiceImpl {
         let actor_output_row_count = collect(&metrics.actor_out_record_cnt);
         for metric in actor_output_row_count {
             let fragment_id: u32 = get_label(&metric, "fragment_id");
-            let downstream_fragment_id: u32 = get_label(&metric, "downstream_fragment_id");
 
-            let key = format!("{}_{}", fragment_id, downstream_fragment_id);
-            if let Some(s) = channel_stats.get_mut(&key) {
+            // Find out and write to all downstream channels
+            let key_prefix = format!("{}_", fragment_id);
+            let key_range_end = format!("{}`", fragment_id); // '`' is next to `_`
+            for (_, s) in channel_stats.range_mut(key_prefix..key_range_end) {
                 s.output_row_count += metric.get_counter().get_value() as u64;
             }
         }
 
         let actor_input_row_count = collect(&metrics.actor_in_record_cnt);
         for metric in actor_input_row_count {
+            let upstream_fragment_id: u32 = get_label(&metric, "upstream_fragment_id");
             let fragment_id: u32 = get_label(&metric, "fragment_id");
-            let downstream_fragment_id: u32 = get_label(&metric, "downstream_fragment_id");
 
-            let key = format!("{}_{}", fragment_id, downstream_fragment_id);
+            let key = format!("{}_{}", upstream_fragment_id, fragment_id);
             if let Some(s) = channel_stats.get_mut(&key) {
                 s.input_row_count += metric.get_counter().get_value() as u64;
             }
         }
 
+        let channel_stats = channel_stats.into_iter().collect();
         Ok(Response::new(GetBackPressureResponse {
             channel_stats,
             fragment_stats,

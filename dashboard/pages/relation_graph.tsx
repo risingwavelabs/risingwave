@@ -34,7 +34,7 @@ import {
 } from "../lib/api/streaming"
 import { RelationPoint } from "../lib/layout"
 import { RelationStats } from "../proto/gen/monitor_service"
-import { BackPressureSnapshot } from "./fragment_graph"
+import { ChannelStatsSnapshot } from "./fragment_graph"
 
 const SIDEBAR_WIDTH = "200px"
 const INTERVAL_MS = 5000
@@ -105,7 +105,7 @@ export default function StreamingGraph() {
   useEffect(() => {
     // The initial snapshot is used to calculate the rate of back pressure
     // It's not used to render the page directly, so we don't need to set it in the state
-    let initialSnapshot: BackPressureSnapshot | undefined
+    let initialSnapshot: ChannelStatsSnapshot | undefined
 
     if (resetEmbeddedBackPressures) {
       setBackPressureRate(undefined)
@@ -115,7 +115,7 @@ export default function StreamingGraph() {
     function refresh() {
       api.get("/metrics/fragment/embedded_back_pressures").then(
         (response) => {
-          let snapshot = BackPressureSnapshot.fromResponse(
+          let snapshot = ChannelStatsSnapshot.fromResponse(
             response.channelStats
           )
           if (!initialSnapshot) {

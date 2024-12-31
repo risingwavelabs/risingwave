@@ -16,7 +16,7 @@ import * as dagre from "dagre"
 import { cloneDeep } from "lodash"
 import { Fragment, useCallback, useEffect, useRef, useState } from "react"
 import { Edge, Enter, FragmentBox, Position } from "../lib/layout"
-import { PlanNodeDatum } from "../pages/fragment_graph"
+import { ChannelStatsDerived, PlanNodeDatum } from "../pages/fragment_graph"
 import { FragmentStats } from "../proto/gen/monitor_service"
 import { StreamNode } from "../proto/gen/stream_plan"
 import {
@@ -93,13 +93,13 @@ export default function FragmentGraph({
   planNodeDependencies,
   fragmentDependency,
   selectedFragmentId,
-  backPressures,
+  channelStats,
   fragmentStats,
 }: {
   planNodeDependencies: Map<string, d3.HierarchyNode<PlanNodeDatum>>
   fragmentDependency: FragmentBox[]
   selectedFragmentId?: string
-  backPressures?: Map<string, number>
+  channelStats?: Map<string, ChannelStatsDerived>
   fragmentStats?: { [fragmentId: number]: FragmentStats }
 }) {
   const svgRef = useRef<SVGSVGElement>(null)
@@ -475,8 +475,8 @@ export default function FragmentGraph({
           isSelected(d.source) || isSelected(d.target)
 
         const color = (d: Edge) => {
-          if (backPressures) {
-            let value = backPressures.get(`${d.source}_${d.target}`)
+          if (channelStats) {
+            let value = channelStats.get(`${d.source}_${d.target}`)?.backPressure
             if (value) {
               return backPressureColor(value)
             }
@@ -488,8 +488,8 @@ export default function FragmentGraph({
         }
 
         const width = (d: Edge) => {
-          if (backPressures) {
-            let value = backPressures.get(`${d.source}_${d.target}`)
+          if (channelStats) {
+            let value = channelStats.get(`${d.source}_${d.target}`)?.backPressure
             if (value) {
               return backPressureWidth(value, 30)
             }
@@ -510,11 +510,15 @@ export default function FragmentGraph({
             d3.selectAll(".tooltip").remove()
 
             // Create new tooltip
-            const bpValue = backPressures?.get(`${d.source}_${d.target}`)
+            const stats = channelStats?.get(`${d.source}_${d.target}`)
             const tooltipText = `<b>Fragment ${d.source} → ${
               d.target
             }</b><br>Backpressure: ${
-              bpValue != null ? `${(bpValue * 100).toFixed(2)}%` : "N/A"
+              stats?.backPressure != null ? `${(stats.backPressure * 100).toFixed(2)}%` : "N/A"
+            }<br>Recv Throughput: ${
+              stats?.inputThroughput != null ? `${stats.inputThroughput.toFixed(2)} rows/s` : "N/A"
+            }<br>Send Throughput: ${
+              stats?.outputThroughput != null ? `${stats.outputThroughput.toFixed(2)} rows/s` : "N/A"
             }`
             d3.select("body")
               .append("div")
@@ -551,7 +555,7 @@ export default function FragmentGraph({
   }, [
     fragmentLayout,
     fragmentEdgeLayout,
-    backPressures,
+    channelStats,
     selectedFragmentId,
     openPlanNodeDetail,
   ])

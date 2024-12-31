@@ -51,7 +51,7 @@ import {
 } from "../lib/api/streaming"
 import { FragmentBox } from "../lib/layout"
 import { TableFragments, TableFragments_Fragment } from "../proto/gen/meta"
-import { ChannelStats, FragmentStats } from "../proto/gen/monitor_service"
+import { ChannelStats, FragmentStats, GetBackPressureResponse } from "../proto/gen/monitor_service"
 import { Dispatcher, MergeNode, StreamNode } from "../proto/gen/stream_plan"
 
 interface DispatcherNode {
@@ -69,6 +69,17 @@ export interface PlanNodeDatum {
   operatorId: string | number
   node: StreamNode | DispatcherNode
   actorIds?: string[]
+}
+
+// Derived stats from ChannelStats, majorly by dividing the stats by duration.
+export interface ChannelStatsDerived {
+  actorCount: number;
+  /** Rate of blocking duration of all actors */
+  backPressure: number;
+  /** Rate of input row count of all actors */
+  inputThroughput: number;
+  /** Rate of output row count of all actors */
+  outputThroughput: number;
 }
 
 function buildPlanNodeDependency(
@@ -186,38 +197,33 @@ function buildFragmentDependencyAsEdges(
 
 const SIDEBAR_WIDTH = 225
 
-export class BackPressureSnapshot {
+export class ChannelStatsSnapshot {
   // The first fetch result.
   // key: `<fragmentId>_<downstreamFragmentId>`
-  // value: output blocking duration in nanoseconds.
-  result: Map<string, number>
+  result: Map<string, ChannelStats>
 
   // The time of the current fetch in milliseconds. (`Date.now()`)
   time: number
 
-  constructor(result: Map<string, number>, time: number) {
+  constructor(result: Map<string, ChannelStats>, time: number) {
     this.result = result
     this.time = time
   }
 
-  static fromResponse(channelStats: {
-    [key: string]: ChannelStats
-  }): BackPressureSnapshot {
-    const result = new Map<string, number>()
-    for (const [key, info] of Object.entries(channelStats)) {
-      result.set(key, info.blockingDuration / info.actorCount)
-    }
-    return new BackPressureSnapshot(result, Date.now())
-  }
-
-  getRate(initial: BackPressureSnapshot): Map<string, number> {
-    const result = new Map<string, number>()
-    for (const [key, value] of this.result) {
-      const initialValue = initial.result.get(key)
-      if (initialValue) {
+  getRate(initial: ChannelStatsSnapshot): Map<string, ChannelStatsDerived> {
+    const result = new Map<string, ChannelStatsDerived>()
+    for (const [key, s] of this.result) {
+      const init = initial.result.get(key)
+      if (init) {
+        const delta = this.time - initial.time; // in microseconds
         result.set(
           key,
-          (value - initialValue) / (this.time - initial.time) / 1000000
+          {
+            actorCount: s.actorCount,
+            backPressure: (s.blockingDuration - init.blockingDuration) / init.actorCount / delta / 1000000,
+            inputThroughput: (s.inputRowCount - init.inputRowCount) / delta * 1000,
+            outputThroughput: (s.outputRowCount - init.outputRowCount) / delta * 1000,
+          }
         )
       }
     }
@@ -335,8 +341,8 @@ export default function Streaming() {
   }
 
   // Keep the initial snapshot to calculate the rate of back pressure
-  const [backPressureRate, setBackPressureRate] =
-    useState<Map<string, number>>()
+  const [channelStats, setChannelStats] =
+    useState<Map<string, ChannelStatsDerived>>()
 
   const [fragmentStats, setFragmentStats] = useState<{
     [key: number]: FragmentStats
@@ -345,18 +351,20 @@ export default function Streaming() {
   useEffect(() => {
     // The initial snapshot is used to calculate the rate of back pressure
     // It's not used to render the page directly, so we don't need to set it in the state
-    let initialSnapshot: BackPressureSnapshot | undefined
+    let initialSnapshot: ChannelStatsSnapshot | undefined
 
     function refresh() {
       api.get("/metrics/fragment/embedded_back_pressures").then(
-        (response) => {
-          let snapshot = BackPressureSnapshot.fromResponse(
-            response.channelStats
+        (res) => {
+          let response = GetBackPressureResponse.fromJSON(res)
+          let snapshot = new ChannelStatsSnapshot(
+            new Map(Object.entries(response.channelStats)),
+            Date.now()
           )
           if (!initialSnapshot) {
             initialSnapshot = snapshot
           } else {
-            setBackPressureRate(snapshot.getRate(initialSnapshot!))
+            setChannelStats(snapshot.getRate(initialSnapshot))
           }
           setFragmentStats(response.fragmentStats)
         },
@@ -499,7 +507,7 @@ export default function Streaming() {
               selectedFragmentId={selectedFragmentId?.toString()}
               fragmentDependency={fragmentDependency}
               planNodeDependencies={planNodeDependencies}
-              backPressures={backPressureRate}
+              channelStats={channelStats}
               fragmentStats={fragmentStats}
             />
           )}
