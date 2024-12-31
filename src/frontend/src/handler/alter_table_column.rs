@@ -99,10 +99,10 @@ pub async fn get_new_table_definition_for_cdc_table(
         // if the column exists in the original catalog, use it to construct the column definition.
         // since we don't support altering the column type right now
         if let Some(original_col) = orig_column_catalog.get(new_col.name()) {
-            let ty = original_col.data_type().to_ast()?;
+            let ty = original_col.data_type().to_ast();
             new_column_defs.push(ColumnDef::new(original_col.name().into(), ty, None, vec![]));
         } else {
-            let ty = new_col.data_type().to_ast()?;
+            let ty = new_col.data_type().to_ast();
             new_column_defs.push(ColumnDef::new(new_col.name().into(), ty, None, vec![]));
         }
     }

@@ -94,7 +94,7 @@ pub fn try_purify_table_create_sql_ast(
 
         let column_def = ColumnDef {
             name: column.name().into(),
-            data_type: Some(column.data_type().to_ast()?),
+            data_type: Some(column.data_type().to_ast()),
             collation: None,
             options: Vec::new(), // pk will be specified with table constraints
         };

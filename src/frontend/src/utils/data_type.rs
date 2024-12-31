@@ -12,49 +12,48 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::bail_not_implemented;
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{DataType as AstDataType, StructField};
 
-use crate::error::Result;
-
 #[easy_ext::ext(DataTypeToAst)]
 impl DataType {
-    pub fn to_ast(&self) -> Result<AstDataType> {
+    /// Convert the data type to its AST representation.
+    pub fn to_ast(&self) -> AstDataType {
         match self {
-            DataType::Boolean => Ok(AstDataType::Boolean),
-            DataType::Int16 => Ok(AstDataType::SmallInt),
-            DataType::Int32 => Ok(AstDataType::Int),
-            DataType::Int64 => Ok(AstDataType::BigInt),
-            DataType::Float32 => Ok(AstDataType::Real),
-            DataType::Float64 => Ok(AstDataType::Double),
-            // TODO: handle precision and scale for decimal
-            DataType::Decimal => Ok(AstDataType::Decimal(None, None)),
-            DataType::Date => Ok(AstDataType::Date),
-            DataType::Varchar => Ok(AstDataType::Varchar),
-            DataType::Time => Ok(AstDataType::Time(false)),
-            DataType::Timestamp => Ok(AstDataType::Timestamp(false)),
-            DataType::Timestamptz => Ok(AstDataType::Timestamp(true)),
-            DataType::Interval => Ok(AstDataType::Interval),
-            DataType::Jsonb => Ok(AstDataType::Jsonb),
-            DataType::Bytea => Ok(AstDataType::Bytea),
-            DataType::List(item_ty) => Ok(AstDataType::Array(Box::new(item_ty.to_ast()?))),
+            DataType::Boolean => AstDataType::Boolean,
+            DataType::Int16 => AstDataType::SmallInt,
+            DataType::Int32 => AstDataType::Int,
+            DataType::Int64 => AstDataType::BigInt,
+            DataType::Float32 => AstDataType::Real,
+            DataType::Float64 => AstDataType::Double,
+            // Note: we don't currently support precision and scale for decimal
+            DataType::Decimal => AstDataType::Decimal(None, None),
+            DataType::Date => AstDataType::Date,
+            DataType::Varchar => AstDataType::Varchar,
+            DataType::Time => AstDataType::Time(false),
+            DataType::Timestamp => AstDataType::Timestamp(false),
+            DataType::Timestamptz => AstDataType::Timestamp(true),
+            DataType::Interval => AstDataType::Interval,
+            DataType::Jsonb => AstDataType::Jsonb,
+            DataType::Bytea => AstDataType::Bytea,
+            DataType::List(item_ty) => AstDataType::Array(Box::new(item_ty.to_ast())),
             DataType::Struct(fields) => {
                 let fields = fields
                     .iter()
-                    .map(|(name, ty)| {
-                        ty.to_ast().map(|ty| StructField {
-                            name: name.into(),
-                            data_type: ty,
-                        })
+                    .map(|(name, ty)| StructField {
+                        // FIXME: If the name is empty, this will give unparsable results.
+                        //        We should probably follow Postgres and generate field names.
+                        name: name.into(),
+                        data_type: ty.to_ast(),
                     })
-                    .try_collect()?;
-                Ok(AstDataType::Struct(fields))
+                    .collect();
+                AstDataType::Struct(fields)
             }
-            DataType::Serial | DataType::Int256 | DataType::Map(_) => {
-                // TODO: support them
-                bail_not_implemented!("convert data type {:?} back to AST", self);
+            DataType::Int256 => AstDataType::Custom(vec!["rw_int256".into()].into()),
+            DataType::Map(map) => {
+                AstDataType::Map(Box::new((map.key().to_ast(), map.value().to_ast())))
             }
+            DataType::Serial => unreachable!("serial type should not be user-defined"),
         }
     }
 }
