@@ -232,8 +232,8 @@ pub struct JoinHashMap<K: HashKey, S: StateStore> {
 }
 
 impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
-    pub(crate) fn get_degree_state_mut_ref(&mut self) -> &mut Option<TableInner<S>> {
-        &mut self.degree_state
+    pub(crate) fn get_degree_state_mut_ref(&mut self) -> (&[usize], &mut Option<TableInner<S>>) {
+        (&self.state.order_key_indices, &mut self.degree_state)
     }
 
     /// NOTE(kwannoel): This allows us to concurrently stream records from the `state_table`,
@@ -247,10 +247,15 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         key: &'a K,
     ) -> StreamExecutorResult<(
         impl Stream<Item = StreamExecutorResult<(PkType, JoinRow<OwnedRow>)>> + 'a,
+        &'a [usize],
         &'a mut Option<TableInner<S>>,
     )> {
         let degree_state = &mut self.degree_state;
-        let (pk_indices, state_table) = (&self.state.pk_indices, &mut self.state.table);
+        let (order_key_indices, pk_indices, state_table) = (
+            &self.state.order_key_indices,
+            &self.state.pk_indices,
+            &mut self.state.table,
+        );
         let degrees = if let Some(ref degree_state) = degree_state {
             Some(fetch_degrees(key, &self.join_key_data_types, &degree_state.table).await?)
         } else {
@@ -264,7 +269,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             key,
             degrees,
         );
-        Ok((stream, &mut self.degree_state))
+        Ok((stream, order_key_indices, &mut self.degree_state))
     }
 }
 
@@ -348,13 +353,14 @@ async fn fetch_degrees<K: HashKey, S: StateStore>(
 // A degree table is `TableInner`, a `TableInner` might not be a degree table.
 // Hence we don't specify it in its impl block.
 pub(crate) fn update_degree<S: StateStore, const INCREMENT: bool>(
+    order_key_indices: &[usize],
     degree_state: &mut TableInner<S>,
     matched_row: &mut JoinRow<OwnedRow>,
 ) {
     let old_degree_row = matched_row
         .row
         .as_ref()
-        .project(&degree_state.order_key_indices)
+        .project(order_key_indices)
         .chain(once(Some(ScalarImpl::Int64(matched_row.degree as i64))));
     if INCREMENT {
         matched_row.degree += 1;
@@ -365,7 +371,7 @@ pub(crate) fn update_degree<S: StateStore, const INCREMENT: bool>(
     let new_degree_row = matched_row
         .row
         .as_ref()
-        .project(&degree_state.order_key_indices)
+        .project(order_key_indices)
         .chain(once(Some(ScalarImpl::Int64(matched_row.degree as i64))));
     degree_state.table.update(old_degree_row, new_degree_row);
 }
@@ -375,7 +381,10 @@ pub struct TableInner<S: StateStore> {
     pk_indices: Vec<usize>,
     /// Indices of the join key in a state row
     join_key_indices: Vec<usize>,
-    /// This should be identical to the pk in state table.
+    /// The order key of the join side has the following format:
+    /// | `join_key` ... | pk ... |
+    /// Where `join_key` contains all the columns not in the pk.
+    /// It should be a superset of the pk.
     order_key_indices: Vec<usize>,
     pub(crate) table: StateTable<S>,
 }

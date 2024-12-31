@@ -941,12 +941,19 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         let mut matched_rows_to_clean = vec![];
 
         macro_rules! match_row {
-            ($degree_table:expr, $matched_row:expr, $matched_row_ref:expr, $from_cache:literal) => {
+            (
+                $match_order_key_indices:expr,
+                $degree_table:expr,
+                $matched_row:expr,
+                $matched_row_ref:expr,
+                $from_cache:literal
+            ) => {
                 Self::handle_match_row::<SIDE, { JOIN_OP }, { $from_cache }>(
                     row,
                     $matched_row,
                     $matched_row_ref,
                     hashjoin_chunk_builder,
+                    $match_order_key_indices,
                     $degree_table,
                     side_update.start_pos,
                     side_match.start_pos,
@@ -972,13 +979,16 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 return Ok(());
             }
             CacheResult::Hit(mut cached_rows) => {
+                let (match_order_key_indices, match_degree_state) =
+                    side_match.ht.get_degree_state_mut_ref();
                 // Handle cached rows which match the probe-side row.
                 for (matched_row_ref, matched_row) in
                     cached_rows.values_mut(&side_match.all_data_types)
                 {
                     let matched_row = matched_row?;
                     if let Some(chunk) = match_row!(
-                        side_match.ht.get_degree_state_mut_ref(),
+                        match_order_key_indices,
+                        match_degree_state,
                         matched_row,
                         Some(matched_row_ref),
                         true
@@ -993,7 +1003,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             }
             CacheResult::Miss => {
                 // Handle rows which are not in cache.
-                let (matched_rows, degree_table) = side_match
+                let (matched_rows, match_order_key_indices, degree_table) = side_match
                     .ht
                     .fetch_matched_rows_and_get_degree_table_ref(key)
                     .await?;
@@ -1012,8 +1022,14 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         matched_row_ref = Some(row_ref);
                         entry_state_count += 1;
                     }
-                    if let Some(chunk) =
-                        match_row!(degree_table, matched_row, matched_row_ref, false).await
+                    if let Some(chunk) = match_row!(
+                        match_order_key_indices,
+                        degree_table,
+                        matched_row,
+                        matched_row_ref,
+                        false
+                    )
+                    .await
                     {
                         yield chunk;
                     }
@@ -1079,7 +1095,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         mut matched_row: JoinRow<OwnedRow>,
         mut matched_row_cache_ref: Option<&mut StateValueType>,
         hashjoin_chunk_builder: &'a mut JoinChunkBuilder<T, SIDE>,
-        degree_table: &mut Option<TableInner<S>>,
+        match_order_key_indices: &[usize],
+        match_degree_table: &mut Option<TableInner<S>>,
         side_update_start_pos: usize,
         side_match_start_pos: usize,
         cond: &Option<NonStrictExpression>,
@@ -1116,8 +1133,12 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     chunk_opt = Some(chunk);
                 }
             }
-            if let Some(degree_table) = degree_table {
-                update_degree::<S, { JOIN_OP }>(degree_table, &mut matched_row);
+            if let Some(degree_table) = match_degree_table {
+                update_degree::<S, { JOIN_OP }>(
+                    match_order_key_indices,
+                    degree_table,
+                    &mut matched_row,
+                );
                 if MATCHED_ROWS_FROM_CACHE || matched_row_cache_ref.is_some() {
                     // update matched row in cache
                     match JOIN_OP {
