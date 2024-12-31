@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
 use itertools::Itertools;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
@@ -21,40 +21,49 @@ use crate::utils::IndexSet;
 
 pub type WatermarkGroupId = u32;
 
+/// Represents the output watermark columns of a plan node.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub struct WatermarkColumns {
     col_idx_to_wtmk_group_id: BTreeMap<usize, WatermarkGroupId>,
 }
 
 impl WatermarkColumns {
+    /// Create an empty `WatermarkColumns`.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Check if the `WatermarkColumns` is empty.
     pub fn is_empty(&self) -> bool {
         self.col_idx_to_wtmk_group_id.is_empty()
     }
 
+    /// Get the number of watermark columns.
     pub fn n_indices(&self) -> usize {
         self.col_idx_to_wtmk_group_id.len()
     }
 
+    /// Insert a column index with a watermark group ID.
     pub fn insert(&mut self, col_idx: usize, group: WatermarkGroupId) {
         self.col_idx_to_wtmk_group_id.insert(col_idx, group);
     }
 
+    /// Check if the `WatermarkColumns` contains a column index.
     pub fn contains(&self, col_idx: usize) -> bool {
         self.col_idx_to_wtmk_group_id.contains_key(&col_idx)
     }
 
+    /// Get the watermark group ID of a column index.
     pub fn get_group(&self, col_idx: usize) -> Option<WatermarkGroupId> {
         self.col_idx_to_wtmk_group_id.get(&col_idx).copied()
     }
 
+    /// Get all watermark columns as a `IndexSet`.
     pub fn index_set(&self) -> IndexSet {
         self.col_idx_to_wtmk_group_id.keys().copied().collect()
     }
 
+    /// Iterate over all column indices, in ascending order.
     pub fn indices(&self) -> impl Iterator<Item = usize> + '_ {
         self.col_idx_to_wtmk_group_id.keys().copied()
     }
@@ -70,6 +79,8 @@ impl WatermarkColumns {
         }
         groups
     }
+
+    /// Iterate over all column indices and their corresponding watermark group IDs, in ascending order.
     pub fn iter(&self) -> impl Iterator<Item = (usize, WatermarkGroupId)> + '_ {
         self.col_idx_to_wtmk_group_id
             .iter()
