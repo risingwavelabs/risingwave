@@ -87,7 +87,7 @@ impl StreamHashAgg {
         } else {
             for idx in core.group_key.indices() {
                 if let Some(wtmk_group) = input.watermark_columns().get_group(idx) {
-                    /// Non-EOWC `StreamHashAgg` simply forwards the watermark messages from the input.
+                    // Non-EOWC `StreamHashAgg` simply forwards the watermark messages from the input.
                     watermark_columns.insert(mapping.map(idx), wtmk_group);
                 }
             }

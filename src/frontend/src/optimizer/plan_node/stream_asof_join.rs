@@ -21,7 +21,6 @@ use risingwave_pb::plan_common::{AsOfJoinDesc, AsOfJoinType, JoinType, PbAsOfJoi
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::AsOfJoinNode;
 
-use super::generic::GenericPlanNode;
 use super::stream::prelude::*;
 use super::utils::{
     childless_record, plan_node_name, watermark_pretty, Distill, TableCatalogBuilder,

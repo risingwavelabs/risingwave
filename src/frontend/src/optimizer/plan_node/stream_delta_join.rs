@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::BitAnd;
-
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::util::functional::SameOrElseExt;
@@ -32,7 +30,6 @@ use crate::optimizer::plan_node::{EqJoinPredicate, EqJoinPredicateDisplay, TryTo
 use crate::optimizer::property::{Distribution, MonotonicityMap, WatermarkColumns};
 use crate::scheduler::SchedulerResult;
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::utils::ColIndexMappingRewriteExt;
 
 /// [`StreamDeltaJoin`] implements [`super::LogicalJoin`] with delta join. It requires its two
 /// inputs to be indexes.

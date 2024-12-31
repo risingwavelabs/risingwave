@@ -74,7 +74,7 @@ pub fn stream_enforce_eowc_requirement(
             )
             .into())
         } else {
-            let first_watermark_group = watermark_groups.iter().next().unwrap().1;
+            let first_watermark_group = watermark_groups.values().next().unwrap();
             let watermark_col_idx = first_watermark_group.indices().next().unwrap();
             if n_watermark_groups > 1 {
                 ctx.warn_to_user(format!(

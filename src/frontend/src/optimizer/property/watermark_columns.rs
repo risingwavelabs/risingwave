@@ -14,7 +14,6 @@
 
 use std::collections::BTreeMap;
 
-use itertools::Itertools;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 
 use crate::utils::IndexSet;
@@ -118,7 +117,7 @@ impl WatermarkColumns {
             .filter_map(|(&col_idx, &group_id)| {
                 col_mapping
                     .try_map(col_idx)
-                    .and_then(|new_col_idx| Some((new_col_idx, group_id)))
+                    .map(|new_col_idx| (new_col_idx, group_id))
             })
             .collect();
         Self {

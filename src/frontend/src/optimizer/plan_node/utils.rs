@@ -261,8 +261,8 @@ pub(crate) fn watermark_pretty<'a>(
     } else {
         let groups = watermark_columns.grouped();
         let pretty_groups = groups
-            .iter()
-            .map(|(_, cols)| {
+            .values()
+            .map(|cols| {
                 Pretty::Array(
                     cols.indices()
                         .map(|idx| FieldDisplay(schema.fields.get(idx).unwrap()))

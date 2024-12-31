@@ -34,7 +34,6 @@ impl StreamChangeLog {
     pub fn new(core: generic::ChangeLog<PlanRef>) -> Self {
         let input = core.input.clone();
         let dist = input.distribution().clone();
-        let input_len = input.schema().len();
         // Filter executor won't change the append-only behavior of the stream.
         let base = PlanBase::new_stream_with_core(
             &core,
