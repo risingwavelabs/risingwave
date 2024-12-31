@@ -58,7 +58,9 @@ fn pb_field_to_col_desc(
 ) -> anyhow::Result<ColumnDesc> {
     let field_type = protobuf_type_mapping(field_descriptor, parse_trace, messages_as_jsonb)
         .context("failed to map protobuf type")?;
-    if let Kind::Message(m) = field_descriptor.kind() && !messages_as_jsonb.contains(m.full_name()) {
+    if let Kind::Message(m) = field_descriptor.kind()
+        && !messages_as_jsonb.contains(m.full_name())
+    {
         let field_descs = if let DataType::List { .. } = field_type {
             vec![]
         } else {
