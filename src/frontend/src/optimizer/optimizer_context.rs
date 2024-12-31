@@ -155,7 +155,7 @@ impl OptimizerContext {
     }
 
     pub fn next_watermark_group_id(&self) -> WatermarkGroupId {
-        WatermarkGroupId(self.last_watermark_group_id.update(|id| id + 1))
+        self.last_watermark_group_id.update(|id| id + 1)
     }
 
     pub(in crate::optimizer) fn backup_elem_ids(&self) -> LastAssignedIds {
