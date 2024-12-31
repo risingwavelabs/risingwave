@@ -14,7 +14,7 @@
 
 #![feature(let_chains)]
 
-//! Specify the amplification_size,workload,join_type e.g. 40000
+//! Specify the `amplification_size,workload,join_type`
 //! ```sh
 //! ARGS=40000,NotInCache,Inner cargo bench --features dhat-heap --bench stream_hash_join_mem
 //! ```
@@ -37,7 +37,7 @@ async fn main() {
         let parts = raw_arg.split(',').collect::<Vec<_>>();
         let amp = parts[0]
             .parse::<usize>()
-            .expect(format!("invalid amplification_size: {}", parts[0]).as_str());
+            .unwrap_or_else(|_| panic!("invalid amplification_size: {}", parts[0]));
         let workload = match parts[1] {
             "NotInCache" => HashJoinWorkload::NotInCache,
             "InCache" => HashJoinWorkload::InCache,
