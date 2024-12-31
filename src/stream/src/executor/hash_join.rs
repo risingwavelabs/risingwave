@@ -1002,14 +1002,17 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 for matched_row in matched_rows {
                     let (encoded_pk, matched_row) = matched_row?;
 
+                    let mut matched_row_ref = None;
+
                     // cache refill
                     if entry_state_count <= entry_state_max_rows {
-                        entry_state
+                        let row_ref = entry_state
                             .insert(encoded_pk, matched_row.encode(), None) // TODO(kwannoel): handle ineq key for asof join.
                             .with_context(|| format!("row: {}", row.display(),))?;
+                        matched_row_ref = Some(row_ref);
                         entry_state_count += 1;
                     }
-                    if let Some(chunk) = match_row!(degree_table, matched_row, None, false).await {
+                    if let Some(chunk) = match_row!(degree_table, matched_row, matched_row_ref, false).await {
                         yield chunk;
                     }
                 }
@@ -1113,7 +1116,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             }
             if let Some(degree_table) = degree_table {
                 update_degree::<S, { JOIN_OP }>(degree_table, &mut matched_row);
-                if MATCHED_ROWS_FROM_CACHE {
+                if MATCHED_ROWS_FROM_CACHE || matched_row_cache_ref.is_some() {
                     // update matched row in cache
                     match JOIN_OP {
                         JoinOp::Insert => {
