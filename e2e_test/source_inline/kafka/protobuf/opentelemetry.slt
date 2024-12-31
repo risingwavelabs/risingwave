@@ -6,17 +6,15 @@ rpk registry schema create "opentelemetry_common.proto" --schema "/risingwave/sr
 system ok
 rpk registry schema create "opentelemetry_test-value" --schema "/dev/stdin" --references opentelemetry_common.proto:opentelemetry_common.proto:1 --type protobuf << EOF
 syntax = "proto3";
-
 package opentelemetry_test;
-
 import "opentelemetry_common.proto";
-
 message OTLPTestMessage {
   opentelemetry.proto.common.v1.AnyValue any_value = 1;
   opentelemetry.proto.common.v1.KeyValueList key_value_list = 2;
   opentelemetry.proto.common.v1.InstrumentationScope instrumentation_scope = 3;
 }
 EOF
+
 
 system ok
 echo '{"any_value":{"string_value":"example"},"key_value_list":{"values":[{"key":"key1","value":{"string_value":"value1"}},{"key":"key2","value":{"int_value":42}}]},"instrumentation_scope":{"name":"test-scope","version":"1.0"}}' | rpk topic produce "opentelemetry_test" --schema-id=topic --schema-type="opentelemetry_test.OTLPTestMessage" --allow-auto-topic-creation
