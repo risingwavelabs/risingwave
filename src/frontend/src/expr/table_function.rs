@@ -159,31 +159,27 @@ impl TableFunction {
                     } else {
                         unreachable!();
                     };
-                let (op, file_name) = match file_scan_backend {
+                let op = match file_scan_backend {
                     FileScanBackend::S3 => {
-                        let (bucket, file_name) =
+                        let (bucket, _) =
                             extract_bucket_and_file_name(&input_file_location, &file_scan_backend)?;
-                        (
-                            new_s3_operator(
-                                eval_args[2].clone(),
-                                eval_args[3].clone(),
-                                eval_args[4].clone(),
-                                bucket.clone(),
-                            )?,
-                            file_name,
-                        )
+
+                        new_s3_operator(
+                            eval_args[2].clone(),
+                            eval_args[3].clone(),
+                            eval_args[4].clone(),
+                            bucket.clone(),
+                        )?
                     }
                     FileScanBackend::Gcs => {
-                        let (bucket, file_name) =
+                        let (bucket, _) =
                             extract_bucket_and_file_name(&input_file_location, &file_scan_backend)?;
-                        (
-                            new_gcs_operator(
-                                eval_args[2].clone(),
-                                eval_args[3].clone(),
-                                bucket.clone(),
-                            )?,
-                            file_name,
-                        )
+
+                        new_gcs_operator(
+                            eval_args[2].clone(),
+                            eval_args[3].clone(),
+                            bucket.clone(),
+                        )?
                     }
                 };
                 let files = if input_file_location.ends_with('/') {
@@ -213,6 +209,13 @@ impl TableFunction {
                 };
                 let schema = tokio::task::block_in_place(|| {
                     FRONTEND_RUNTIME.block_on(async {
+                        let location = match files.as_ref() {
+                            Some(files) => files[0].clone(),
+                            None => input_file_location.clone(),
+                        };
+                        let (_, file_name) =
+                            extract_bucket_and_file_name(&location, &file_scan_backend)?;
+
                         let fields = get_parquet_fields(op, file_name).await?;
 
                         let mut rw_types = vec![];
@@ -231,7 +234,10 @@ impl TableFunction {
 
                 if let Some(files) = files {
                     // if the file location is a directory, we need to remove the last argument and add all files in the directory as arguments
-                    args.remove(5);
+                    match file_scan_backend {
+                        FileScanBackend::S3 => args.remove(5),
+                        FileScanBackend::Gcs => args.remove(4),
+                    };
                     for file in files {
                         args.push(ExprImpl::Literal(Box::new(Literal::new(
                             Some(ScalarImpl::Utf8(file.into())),
