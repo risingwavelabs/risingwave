@@ -239,8 +239,6 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> JoinChunkBuilder
             }
         // Outer sides
         } else if matched_row.is_zero_degree() && outer_side_null(T, SIDE) {
-            tracing::info!("building update update_row: {:?}", row);
-            tracing::info!("building update matched_row: {:?}", matched_row);
             // if the matched_row does not have any current matches
             // `StreamChunkBuilder` guarantees that `UpdateDelete` will never
             // issue an output chunk.
