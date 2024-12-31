@@ -1084,6 +1084,9 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         append_only_matched_row: &mut Option<JoinRow<OwnedRow>>,
         matched_rows_to_clean: &mut Vec<JoinRow<OwnedRow>>,
     ) -> Option<StreamChunk> {
+        let mut need_state_clean = false;
+        let mut chunk_opt = None;
+
         // check join cond
         let join_condition_satisfied = Self::check_join_condition(
             update_row,
@@ -1093,8 +1096,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             cond,
         )
         .await;
-        let mut need_state_clean = false;
-        let mut chunk_opt = None;
+
         if join_condition_satisfied {
             // update degree
             *update_row_degree += 1;
@@ -1187,6 +1189,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
 
 #[cfg(test)]
 mod tests {
+    use pretty_assertions::assert_eq;
     use std::sync::atomic::AtomicU64;
 
     use risingwave_common::array::*;

@@ -220,6 +220,7 @@ pub struct JoinHashMap<K: HashKey, S: StateStore> {
     /// since we only stored a boolean value rather than the count.
     /// Hence we need to store the count of matched records.
     degree_state: Option<TableInner<S>>,
+    // TODO(kwannoel): Make this `const` instead.
     /// If degree table is need
     need_degree_table: bool,
     /// Pk is part of the join key.
@@ -779,11 +780,11 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         } else if self.pk_contained_in_jk {
             // Refill cache when the join key exist in neither cache or storage.
             self.metrics.insert_cache_miss_count += 1;
-            let mut state = JoinEntryState::default();
-            state
+            let mut entry = JoinEntryState::default();
+            entry
                 .insert(pk, value.encode(), inequality_key)
                 .with_context(|| self.state.error_context(&value.row))?;
-            self.update_state(key, state.into());
+            self.update_state(key, entry.into());
         }
 
         // Update the flush buffer.
