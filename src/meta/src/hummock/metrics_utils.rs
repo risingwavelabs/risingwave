@@ -311,6 +311,27 @@ pub fn trigger_sst_stat(
     }
 }
 
+pub fn trigger_epoch_stat(metrics: &MetaMetrics, version: &HummockVersion) {
+    metrics.max_committed_epoch.set(
+        version
+            .state_table_info
+            .info()
+            .values()
+            .map(|i| i.committed_epoch)
+            .max()
+            .unwrap_or(0) as _,
+    );
+    metrics.min_committed_epoch.set(
+        version
+            .state_table_info
+            .info()
+            .values()
+            .map(|i| i.committed_epoch)
+            .min()
+            .unwrap_or(0) as _,
+    );
+}
+
 pub fn remove_compaction_group_in_sst_stat(
     metrics: &MetaMetrics,
     compaction_group_id: CompactionGroupId,
