@@ -66,4 +66,49 @@ statement ok
 DROP TABLE full_type_t;
 
 
+# test connector with commit_checkpoint_interval
+statement ok
+create table nexmark_t (
+  id BIGINT,
+  item_name VARCHAR,
+  description VARCHAR,
+  initial_bid BIGINT,
+  reserve BIGINT,
+  date_time TIMESTAMP,
+  expires TIMESTAMP,
+  seller BIGINT,
+  category BIGINT,
+  extra VARCHAR)
+with (
+  connector = 'nexmark',
+  nexmark.table.type = 'Auction',
+  nexmark.split.num = '2',
+  nexmark.min.event.gap.in.ns = '500000',
+  commit_checkpoint_interval = 1
+) engine = iceberg;
 
+statement ok
+DROP TABLE nexmark_t
+
+# test hidden _row_id column for iceberg engine table
+statement ok
+create table t_without_pk(name varchar) with(commit_checkpoint_interval = 1) engine = iceberg;
+
+statement ok
+insert into t_without_pk values('xxx');
+
+statement ok
+FLUSH;
+
+query ?
+select * from t_without_pk;
+----
+xxx
+
+query ?
+select count(_row_id) from t_without_pk;
+----
+1
+
+statement ok
+DROP TABLE t_without_pk

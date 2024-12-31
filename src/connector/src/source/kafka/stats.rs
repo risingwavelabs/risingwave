@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use prometheus::core::AtomicU64;
 use prometheus::Registry;
 use rdkafka::statistics::{Broker, ConsumerGroup, Partition, Topic, Window};
 use rdkafka::Statistics;

@@ -8,12 +8,6 @@ license = { workspace = true }
 repository = { workspace = true }
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-[package.metadata.cargo-machete]
-ignored = ["workspace-hack"]
-
-[package.metadata.cargo-udeps.ignore]
-normal = ["workspace-hack"]
-
 [dependencies]
 anyhow = "1"
 arc-swap = "1"
@@ -39,7 +33,6 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 iana-time-zone = "0.1"
 iceberg = { workspace = true }
-icelake = { workspace = true }
 itertools = { workspace = true }
 jsonbb = { workspace = true }
 linkme = { workspace = true }
@@ -61,7 +54,7 @@ pretty-xmlish = "0.1.13"
 pretty_assertions = "1"
 prometheus = { version = "0.13", features = ["process"] }
 prost = { workspace = true }
-quick-xml = { version = "0.36", features = ["serialize"] }
+quick-xml = { version = "0.37", features = ["serialize"] }
 rand = { version = "0.8", features = ["small_rng"] }
 risingwave_batch = { workspace = true }
 risingwave_common = { workspace = true }
@@ -72,7 +65,6 @@ risingwave_dml = { workspace = true }
 risingwave_expr = { workspace = true }
 risingwave_frontend_macro = { path = "macro" }
 risingwave_hummock_sdk = { workspace = true }
-risingwave_object_store = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
 risingwave_sqlparser = { workspace = true }
@@ -109,7 +101,6 @@ tower-http = { version = "0.6", features = [
 tracing = "0.1"
 url = "2.5.0"
 uuid = "1"
-zstd = { version = "0.13", default-features = false }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }

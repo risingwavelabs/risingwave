@@ -42,8 +42,8 @@ pub struct StorageCatalogConfig {
 #[derive(Debug)]
 pub struct StorageCatalog {
     warehouse: String,
-    file_io: FileIO,
     config: StorageCatalogConfig,
+    file_io: FileIO,
 }
 
 impl StorageCatalog {
@@ -64,8 +64,8 @@ impl StorageCatalog {
 
         Ok(StorageCatalog {
             warehouse: config.warehouse.clone(),
-            file_io: file_io_builder.build()?,
             config,
+            file_io: file_io_builder.build()?,
         })
     }
 
@@ -97,7 +97,7 @@ impl StorageCatalog {
             Error::new(
                 ErrorKind::DataInvalid,
                 format!(
-                    "Fail to covert version_hint from utf8 to string: {}",
+                    "Fail to convert version_hint from utf8 to string: {}",
                     err.as_report()
                 ),
             )
@@ -165,6 +165,55 @@ impl StorageCatalog {
     pub fn file_io(&self) -> &FileIO {
         &self.file_io
     }
+
+    fn table_path(&self, table: &TableIdent) -> String {
+        let mut names = table.namespace.clone().inner();
+        names.push(table.name.clone());
+        if self.warehouse.ends_with('/') {
+            format!("{}{}", self.warehouse, names.join("/"))
+        } else {
+            format!("{}/{}", self.warehouse, names.join("/"))
+        }
+    }
+
+    async fn commit_table(&self, table_path: &str, next_metadata: TableMetadata) -> Result<()> {
+        let current_version = if self.is_version_hint_exist(table_path).await? {
+            self.read_version_hint(table_path).await?
+        } else {
+            return Err(Error::new(
+                ErrorKind::DataInvalid,
+                "no version hint found for table",
+            ));
+        };
+
+        // # NOTE
+        // Iceberg rust didn't support rename operation now, so this commit operation is not atomic.
+        let final_metadata_file_path = format!(
+            "{table_path}/metadata/v{}.metadata.json",
+            current_version + 1
+        );
+        self.file_io()
+            .new_output(final_metadata_file_path)?
+            .write(serde_json::to_string(&next_metadata)?.into())
+            .await?;
+
+        // write version hint
+        let final_file_path = format!("{table_path}/metadata/version-hint.text");
+        if self
+            .file_io()
+            .exists(final_file_path.as_str())
+            .await
+            .map_err(|_| Error::new(ErrorKind::Unexpected, "Fail to check exist"))?
+        {
+            self.file_io().delete(final_file_path.as_str()).await?;
+        }
+        self.file_io()
+            .new_output(final_file_path)?
+            .write(format!("{}", current_version + 1).into())
+            .await?;
+
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -221,15 +270,7 @@ impl Catalog for StorageCatalog {
         creation: TableCreation,
     ) -> iceberg::Result<Table> {
         let table_ident = TableIdent::new(namespace.clone(), creation.name.clone());
-        let table_path = {
-            let mut names = table_ident.namespace.clone().inner();
-            names.push(table_ident.name.clone());
-            if self.warehouse.ends_with('/') {
-                format!("{}{}", self.warehouse, names.join("/"))
-            } else {
-                format!("{}/{}", self.warehouse, names.join("/"))
-            }
-        };
+        let table_path = self.table_path(&table_ident);
 
         // Create the metadata directory
         let metadata_path = format!("{table_path}/metadata");
@@ -239,7 +280,7 @@ impl Catalog for StorageCatalog {
 
         // Write the initial metadata file
         let metadata_file_path = format!("{metadata_path}/v1.metadata.json");
-        let metadata_json = serde_json::to_string(&table_metadata)?;
+        let metadata_json = serde_json::to_string(&table_metadata.metadata)?;
         let output = self.file_io.new_output(&metadata_file_path)?;
         output.write(metadata_json.into()).await?;
 
@@ -249,7 +290,7 @@ impl Catalog for StorageCatalog {
         version_hint_output.write("1".into()).await?;
 
         Table::builder()
-            .metadata(table_metadata)
+            .metadata(table_metadata.metadata)
             .identifier(table_ident)
             .file_io(self.file_io.clone())
             .build()
@@ -257,15 +298,7 @@ impl Catalog for StorageCatalog {
 
     /// Load table from the catalog.
     async fn load_table(&self, table: &TableIdent) -> iceberg::Result<Table> {
-        let table_path = {
-            let mut names = table.namespace.clone().inner();
-            names.push(table.name.clone());
-            if self.warehouse.ends_with('/') {
-                format!("{}{}", self.warehouse, names.join("/"))
-            } else {
-                format!("{}/{}", self.warehouse, names.join("/"))
-            }
-        };
+        let table_path = self.table_path(table);
         let path = if self.is_version_hint_exist(&table_path).await? {
             let version_hint = self.read_version_hint(&table_path).await?;
             format!("{table_path}/metadata/v{}.metadata.json", version_hint)
@@ -302,15 +335,7 @@ impl Catalog for StorageCatalog {
 
     /// Check if a table exists in the catalog.
     async fn table_exists(&self, table: &TableIdent) -> iceberg::Result<bool> {
-        let table_path = {
-            let mut names = table.namespace.clone().inner();
-            names.push(table.name.clone());
-            if self.warehouse.ends_with('/') {
-                format!("{}{}", self.warehouse, names.join("/"))
-            } else {
-                format!("{}/{}", self.warehouse, names.join("/"))
-            }
-        };
+        let table_path = self.table_path(table);
         let metadata_path = format!("{table_path}/metadata/version-hint.text");
         self.file_io.exists(&metadata_path).await.map_err(|err| {
             Error::new(
@@ -326,7 +351,27 @@ impl Catalog for StorageCatalog {
     }
 
     /// Update a table to the catalog.
-    async fn update_table(&self, _commit: TableCommit) -> iceberg::Result<Table> {
-        todo!()
+    async fn update_table(&self, mut commit: TableCommit) -> iceberg::Result<Table> {
+        let table = self.load_table(commit.identifier()).await?;
+        let requirements = commit.take_requirements();
+        let updates = commit.take_updates();
+
+        let metadata = table.metadata().clone();
+        for requirement in requirements {
+            requirement.check(Some(&metadata))?;
+        }
+
+        let mut metadata_builder = metadata.into_builder(None);
+        for update in updates {
+            metadata_builder = update.apply(metadata_builder)?;
+        }
+
+        self.commit_table(
+            &self.table_path(table.identifier()),
+            metadata_builder.build()?.metadata,
+        )
+        .await?;
+
+        self.load_table(commit.identifier()).await
     }
 }

@@ -124,7 +124,7 @@ format upsert encode protobuf (
 db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
-  1: gRPC request to meta service failed: Internal error
+  1: gRPC request to meta service (call `/ddl_service.DdlService/CreateSink`) failed: Internal error
   2: failed to validate sink
   3: config error
   4: sink format/encode/key_encode unsupported: Upsert Protobuf None

@@ -141,10 +141,10 @@ impl_plan_tree_node_for_binary! { StreamRowMerge }
 
 impl StreamNode for StreamRowMerge {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
-        PbNodeBody::RowMerge(risingwave_pb::stream_plan::RowMergeNode {
+        PbNodeBody::RowMerge(Box::new(risingwave_pb::stream_plan::RowMergeNode {
             lhs_mapping: Some(self.lhs_mapping.to_protobuf()),
             rhs_mapping: Some(self.rhs_mapping.to_protobuf()),
-        })
+        }))
     }
 }
 

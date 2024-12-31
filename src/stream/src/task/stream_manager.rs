@@ -261,7 +261,7 @@ impl LocalBarrierWorker {
             self.state
                 .databases
                 .values_mut()
-                .map(|database| database.abort_actors()),
+                .map(|database| database.abort()),
         )
         .await;
         if let Some(m) = self.actor_manager.await_tree_reg.as_ref() {
@@ -408,6 +408,7 @@ impl StreamActorManager {
             node.rate_limit.map(|x| x as _),
             barrier_rx,
             self.streaming_metrics.clone(),
+            node.snapshot_backfill_epoch,
         )
         .boxed();
 

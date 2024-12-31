@@ -20,8 +20,6 @@ use either::Either;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap, hashset};
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::array::arrow::arrow_schema_iceberg::DataType as ArrowDataType;
-use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::bail;
 use risingwave_common::catalog::{
     ColumnCatalog, ConnectionId, DatabaseId, ObjectId, Schema, SchemaId, UserId,
@@ -63,9 +61,7 @@ use crate::handler::util::{
     check_connector_match_connection_type, ensure_connection_type_allowed, SourceSchemaCompatExt,
 };
 use crate::handler::HandlerArgs;
-use crate::optimizer::plan_node::{
-    generic, IcebergPartitionInfo, LogicalSource, PartitionComputeInfo, StreamProject,
-};
+use crate::optimizer::plan_node::{generic, LogicalSource, PartitionComputeInfo, StreamProject};
 use crate::optimizer::{OptimizerContext, PlanRef, RelationCollectorVisitor};
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
@@ -367,86 +363,14 @@ pub async fn get_partition_compute_info(
     }
 }
 
+#[allow(clippy::unused_async)]
 async fn get_partition_compute_info_for_iceberg(
     _iceberg_config: &IcebergConfig,
 ) -> Result<Option<PartitionComputeInfo>> {
     // TODO: enable partition compute for iceberg after fixing the issue of sink decoupling.
-    return Ok(None);
+    Ok(None)
 
-    #[allow(unreachable_code)]
-    {
-        // TODO: check table if exists
-        if _iceberg_config.create_table_if_not_exists {
-            return Ok(None);
-        }
-        let table = _iceberg_config.load_table().await?;
-        let Some(partition_spec) = table.current_table_metadata().current_partition_spec().ok()
-        else {
-            return Ok(None);
-        };
-
-        if partition_spec.is_unpartitioned() {
-            return Ok(None);
-        }
-
-        // Separate the partition spec into two parts: sparse partition and range partition.
-        // Sparse partition means that the data distribution is more sparse at a given time.
-        // Range partition means that the data distribution is likely same at a given time.
-        // Only compute the partition and shuffle by them for the sparse partition.
-        let has_sparse_partition = partition_spec.fields.iter().any(|f| match f.transform {
-            // Sparse partition
-            icelake::types::Transform::Identity
-            | icelake::types::Transform::Truncate(_)
-            | icelake::types::Transform::Bucket(_) => true,
-            // Range partition
-            icelake::types::Transform::Year
-            | icelake::types::Transform::Month
-            | icelake::types::Transform::Day
-            | icelake::types::Transform::Hour
-            | icelake::types::Transform::Void => false,
-        });
-
-        if !has_sparse_partition {
-            return Ok(None);
-        }
-
-        let arrow_type: ArrowDataType = table
-            .current_partition_type()
-            .map_err(|err| RwError::from(ErrorCode::SinkError(err.into())))?
-            .try_into()
-            .map_err(|_| {
-                RwError::from(ErrorCode::SinkError(
-                    "Fail to convert iceberg partition type to arrow type".into(),
-                ))
-            })?;
-        let Some(schema) = table.current_table_metadata().current_schema().ok() else {
-            return Ok(None);
-        };
-        let partition_fields = partition_spec
-            .fields
-            .iter()
-            .map(|f| {
-                let source_f =
-                    schema
-                        .look_up_field_by_id(f.source_column_id)
-                        .ok_or(RwError::from(ErrorCode::SinkError(
-                            "Fail to look up iceberg partition field".into(),
-                        )))?;
-                Ok((source_f.name.clone(), f.transform))
-            })
-            .collect::<Result<Vec<_>>>()?;
-
-        let ArrowDataType::Struct(partition_type) = arrow_type else {
-            return Err(RwError::from(ErrorCode::SinkError(
-                "Partition type of iceberg should be a struct type".into(),
-            )));
-        };
-
-        Ok(Some(PartitionComputeInfo::Iceberg(IcebergPartitionInfo {
-            partition_type: IcebergArrowConvert.struct_from_fields(&partition_type)?,
-            partition_fields,
-        })))
-    }
+    // TODO: migrate to iceberg-rust later
 }
 
 pub async fn handle_create_sink(
@@ -655,9 +579,9 @@ pub(crate) fn insert_merger_to_union_with_project(
         // TODO: MergeNode is used as a placeholder, see issue #17658
         node.input.push(StreamNode {
             input: vec![StreamNode {
-                node_body: Some(NodeBody::Merge(MergeNode {
+                node_body: Some(NodeBody::Merge(Box::new(MergeNode {
                     ..Default::default()
-                })),
+                }))),
                 ..Default::default()
             }],
             identity: uniq_identity

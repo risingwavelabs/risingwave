@@ -216,6 +216,7 @@ impl ScanRange {
             next_col_bounds,
         } = self;
 
+        // The len of a valid pk_prefix should be less than or equal pk's num.
         let order_type = table.pk_serializer().get_order_types()[pk_prefix.len()];
         let (start_bound, end_bound) = if order_type.is_ascending() {
             (next_col_bounds.0, next_col_bounds.1)
