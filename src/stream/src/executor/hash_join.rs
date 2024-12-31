@@ -1100,6 +1100,16 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         if join_condition_satisfied {
             // update degree
             *update_row_degree += 1;
+            // send matched row downstream
+            if !forward_exactly_once(T, SIDE) {
+                if let Some(chunk) =
+                    hashjoin_chunk_builder.with_match::<JOIN_OP>(&update_row, &matched_row)
+                {
+                    chunk_opt = Some(chunk);
+                }
+            }
+
+            //
             if let Some(degree_table) = degree_table {
                 update_degree::<S, { JOIN_OP }>(degree_table, &mut matched_row);
                 if MATCHED_ROWS_FROM_CACHE {
@@ -1112,14 +1122,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                             matched_row_cache_ref.as_mut().unwrap().degree -= 1;
                         }
                     }
-                }
-            }
-            // send matched row downstream
-            if !forward_exactly_once(T, SIDE) {
-                if let Some(chunk) =
-                    hashjoin_chunk_builder.with_match::<JOIN_OP>(&update_row, &matched_row)
-                {
-                    chunk_opt = Some(chunk);
                 }
             }
         } else {
