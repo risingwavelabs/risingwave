@@ -19,7 +19,7 @@ use either::Either;
 use futures::TryStreamExt;
 use risingwave_common::catalog::{ColumnDesc, TableId, TableVersionId};
 use risingwave_common::rate_limit::{
-    MonitoredRateLimiter, RateLimit, RateLimiter, RateLimiterTrait,
+    MonitoredRateLimiter, RateLimit, RateLimiter, RateLimiterTrait, RateLimiterTraitExt,
 };
 use risingwave_common::transaction::transaction_id::TxnId;
 use risingwave_common::transaction::transaction_message::TxnMsg;

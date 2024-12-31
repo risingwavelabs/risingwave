@@ -19,7 +19,7 @@ use await_tree::InstrumentAwait;
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
-use risingwave_common::rate_limit::{RateLimiter, RateLimiterTrait};
+use risingwave_common::rate_limit::{RateLimiter, RateLimiterTraitExt};
 use risingwave_common::row::Row;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::source::{BoxSourceChunkStream, SourceColumnDesc, SplitId};

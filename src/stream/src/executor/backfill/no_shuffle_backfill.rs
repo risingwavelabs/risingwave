@@ -18,7 +18,7 @@ use futures::stream::select_with_strategy;
 use risingwave_common::array::{DataChunk, Op};
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::rate_limit::{
-    MonitoredRateLimiter, RateLimit, RateLimiter, RateLimiterTrait,
+    MonitoredRateLimiter, RateLimit, RateLimiter, RateLimiterTrait, RateLimiterTraitExt,
 };
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::{bail, row};

@@ -22,7 +22,7 @@ use risingwave_common::array::{DataChunk, Op};
 use risingwave_common::bail;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::rate_limit::{
-    MonitoredRateLimiter, RateLimit, RateLimiter, RateLimiterTrait,
+    MonitoredRateLimiter, RateLimit, RateLimiter, RateLimiterTrait, RateLimiterTraitExt,
 };
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
@@ -344,7 +344,7 @@ where
                     //
                     // If rate limit is set, respect the rate limit, check if we can read,
                     // If we can't, skip it. If no rate limit set, we can read.
-                    let rate_limit_ready = self.rate_limiter.try_book(1).is_ok();
+                    let rate_limit_ready = self.rate_limiter.check(1).is_ok();
                     if !has_snapshot_read && !paused && rate_limit_ready {
                         debug_assert!(builders.values().all(|b| b.is_empty()));
                         let (_, snapshot) = backfill_stream.into_inner();

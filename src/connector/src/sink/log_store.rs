@@ -28,7 +28,9 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::metrics::{LabelGuardedIntCounter, LabelGuardedIntGauge};
-use risingwave_common::rate_limit::{RateLimit, RateLimiter, RateLimiterTrait};
+use risingwave_common::rate_limit::{
+    RateLimit, RateLimiter, RateLimiterTrait, RateLimiterTraitExt,
+};
 use risingwave_common::util::epoch::{EpochPair, INVALID_EPOCH};
 use risingwave_common_estimate_size::EstimateSize;
 use tokio::select;

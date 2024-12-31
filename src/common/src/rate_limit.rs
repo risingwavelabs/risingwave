@@ -16,7 +16,7 @@ use std::future::Future;
 use std::num::NonZeroU64;
 use std::ops::Deref;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock};
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
@@ -128,26 +128,58 @@ impl From<Option<u32>> for RateLimit {
     }
 }
 
+#[derive(Debug)]
+pub enum Check {
+    Ok,
+    Retry(Duration),
+    RetryAfter(oneshot::Receiver<()>),
+}
+
+impl Check {
+    pub fn is_ok(&self) -> bool {
+        matches!(self, Self::Ok)
+    }
+}
+
+pub trait RateLimiterTraitExt: RateLimiterTrait + Sized {
+    // fn wait(&self, quota: u64) -> DelayV2<'_, Self>;
+    fn wait(&self, quota: u64) -> impl Future<Output = ()> + Send;
+}
+
+impl<T> RateLimiterTraitExt for T
+where
+    T: RateLimiterTrait + Sized,
+{
+    fn wait(&self, quota: u64) -> impl Future<Output = ()> + Send {
+        async move {
+            loop {
+                match self.check(quota) {
+                    Check::Ok => return,
+                    Check::Retry(duration) => {
+                        tokio::time::sleep(duration).await;
+                    }
+                    Check::RetryAfter(rx) => {
+                        let _ = rx.await;
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Shared behavior for rate limiters.
 pub trait RateLimiterTrait: Send + Sync + 'static {
     /// Return current throttle policy.
     fn rate_limit(&self) -> RateLimit;
 
-    /// Try to book a request with given quota at the moment.
+    /// Check if the request with the given quota is supposed to be allowed at the moment.
     ///
-    /// On success, the request can be served immdeiately without needs of other operations.
+    /// On success, the quota will be consumed. [`Check::Ok`] is returned.
+    /// The caller is supposed to proceed the request with the given quota.
     ///
-    /// On failure, the minimal interval for retries is returned.
-    fn try_book(&self, quota: u64) -> Result<(), Duration>;
-
-    /// Book a request with given quota.
-    ///
-    /// Return the duration to serve the request since now.
-    fn book(&self, quota: u64) -> Duration;
-
-    /// Book a request with given quota and suspend task until there is enough quota and consume.
-    #[must_use]
-    fn wait(&self, quota: u64) -> Delay;
+    /// On failure, [`Check::Retry`] or [`Check::RetryAfter`] is returned.
+    /// The caller is supposed to retry the check after the given duration or retry after receiving the singal.
+    fn check(&self, quota: u64) -> Check;
 }
 
 /// A rate limiter that supports multiple rate limit policy and online policy switch.
@@ -201,16 +233,8 @@ impl RateLimiterTrait for RateLimiter {
         self.inner.load().rate_limit()
     }
 
-    fn try_book(&self, quota: u64) -> Result<(), Duration> {
-        self.inner.load().try_book(quota)
-    }
-
-    fn book(&self, quota: u64) -> Duration {
-        self.inner.load().book(quota)
-    }
-
-    fn wait(&self, quota: u64) -> Delay {
-        self.inner.load().wait(quota)
+    fn check(&self, quota: u64) -> Check {
+        self.inner.load().check(quota)
     }
 }
 
@@ -234,22 +258,12 @@ impl RateLimiterTrait for MonitoredRateLimiter {
         self.inner.rate_limit()
     }
 
-    fn try_book(&self, quota: u64) -> Result<(), Duration> {
-        let res = self.inner.try_book(quota);
-        self.report();
-        res
-    }
-
-    fn book(&self, quota: u64) -> Duration {
-        let res = self.inner.book(quota);
-        self.report();
-        res
-    }
-
-    fn wait(&self, quota: u64) -> Delay {
-        let res = self.inner.wait(quota);
-        self.report();
-        res
+    fn check(&self, quota: u64) -> Check {
+        let check = self.inner.check(quota);
+        if matches! { check, Check::Ok} {
+            self.report();
+        }
+        check
     }
 }
 
@@ -274,16 +288,8 @@ impl RateLimiterTrait for InfiniteRatelimiter {
         RateLimit::Disabled
     }
 
-    fn try_book(&self, _: u64) -> Result<(), Duration> {
-        Ok(())
-    }
-
-    fn book(&self, _: u64) -> Duration {
-        Duration::ZERO
-    }
-
-    fn wait(&self, quota: u64) -> Delay {
-        self.book(quota).into()
+    fn check(&self, _: u64) -> Check {
+        Check::Ok
     }
 }
 
@@ -313,18 +319,10 @@ impl RateLimiterTrait for PausedRateLimiter {
         RateLimit::Pause
     }
 
-    fn try_book(&self, _: u64) -> Result<(), Duration> {
-        Err(Duration::MAX)
-    }
-
-    fn book(&self, _: u64) -> Duration {
-        Duration::MAX
-    }
-
-    fn wait(&self, _: u64) -> Delay {
+    fn check(&self, _: u64) -> Check {
         let (tx, rx) = oneshot::channel();
         self.waiters.lock().push(tx);
-        Delay::Wait { rx }
+        Check::RetryAfter(rx)
     }
 }
 
@@ -346,16 +344,11 @@ impl RateLimiterTrait for FixedRateLimiter {
         RateLimit::Fixed(self.rate)
     }
 
-    fn try_book(&self, quota: u64) -> Result<(), Duration> {
-        self.inner.try_book(quota)
-    }
-
-    fn book(&self, quota: u64) -> Duration {
-        self.inner.book(quota)
-    }
-
-    fn wait(&self, quota: u64) -> Delay {
-        self.book(quota).into()
+    fn check(&self, quota: u64) -> Check {
+        match self.inner.check(quota) {
+            Ok(()) => Check::Ok,
+            Err(duration) => Check::Retry(duration),
+        }
     }
 }
 
@@ -375,10 +368,10 @@ pub struct LeakBucket {
     /// Zero time instant.
     origin: Instant,
 
-    /// Request count of the last window.
-    window_requests: AtomicU64,
-    /// Total waited request duration (nanos) of the last window.
-    window_wait_nanos: AtomicU64,
+    /// Total allowed quotas.
+    total_allowed_quotas: AtomicU64,
+    /// Total waited nanos.
+    total_waited_nanos: AtomicI64,
 }
 
 impl LeakBucket {
@@ -400,52 +393,17 @@ impl LeakBucket {
             scale,
             ltat: AtomicU64::new(0),
             origin,
-            window_requests: AtomicU64::new(0),
-            window_wait_nanos: AtomicU64::new(0),
+            total_allowed_quotas: AtomicU64::new(0),
+            total_waited_nanos: AtomicI64::new(0),
         }
     }
 
-    /// Try to book a request with given quota at the moment.
+    /// Check if the request with the given quota is supposed to be allowed at the moment.
     ///
-    /// On success, the request can be served immdeiately without needs of other operations.
+    /// On success, the quota will be consumed. The caller is supposed to proceed the quota.
     ///
-    /// On failure, the minimal interval for retries is returned.
-    ///
-    /// Note: `try_book` only update `awt` (Average Wait Time) on success.
-    fn try_book(&self, quota: u64) -> Result<(), Duration> {
-        let now = Instant::now();
-        let tnow = now.duration_since(self.origin).as_nanos() as u64;
-
-        let weight = quota * self.scale.load(Ordering::Relaxed);
-
-        let mut ltat = self.ltat.load(Ordering::Acquire);
-        loop {
-            let tat = ltat + weight;
-
-            if tat > tnow {
-                return Err(Duration::from_nanos(tat - tnow));
-            }
-
-            let ltat_new = std::cmp::max(tat, tnow);
-
-            match self
-                .ltat
-                .compare_exchange(ltat, ltat_new, Ordering::Release, Ordering::Acquire)
-            {
-                Ok(_) => break,
-                Err(cur) => ltat = cur,
-            }
-        }
-
-        self.window_requests.fetch_add(1, Ordering::Relaxed);
-
-        Ok(())
-    }
-
-    /// Book a request with given quota.
-    ///
-    /// Return the duration to serve the request since now.
-    fn book(&self, quota: u64) -> Duration {
+    /// On failure, the minimal duration to retry `check()` is returned.
+    fn check(&self, quota: u64) -> Result<(), Duration> {
         let now = Instant::now();
         let tnow = now.duration_since(self.origin).as_nanos() as u64;
 
@@ -454,6 +412,12 @@ impl LeakBucket {
         let mut ltat = self.ltat.load(Ordering::Acquire);
         let tat = loop {
             let tat = ltat + weight;
+
+            if tat > tnow {
+                self.total_waited_nanos
+                    .fetch_add((tat - tnow) as i64, Ordering::Relaxed);
+                return Err(Duration::from_nanos(tat - tnow));
+            }
 
             let ltat_new = std::cmp::max(tat, tnow);
 
@@ -466,34 +430,33 @@ impl LeakBucket {
             }
         };
 
-        self.window_requests.fetch_add(1, Ordering::Relaxed);
+        self.total_allowed_quotas
+            .fetch_add(quota, Ordering::Relaxed);
+        self.total_waited_nanos
+            .fetch_sub((tnow - tat) as i64, Ordering::Relaxed);
 
-        if tat <= tnow {
-            Duration::ZERO
+        Ok(())
+    }
+
+    // // TODO(MrCroxx): Reserved for adaptive rate limiter.
+    /// Average wait time per quota.
+    ///
+    /// Positive value indicates waits, negative value indicates there is spare rate limit.
+    fn _avg_wait_nanos_per_quota(&self) -> i64 {
+        let quotas = self.total_allowed_quotas.load(Ordering::Relaxed);
+        if quotas == 0 {
+            0
         } else {
-            let nanos = tat - tnow;
-            self.window_wait_nanos.fetch_add(nanos, Ordering::Relaxed);
-            Duration::from_nanos(nanos)
+            let nanos = self.total_waited_nanos.load(Ordering::Relaxed);
+            nanos / quotas as i64
         }
     }
 
-    // TODO(MrCroxx): Reserved for adaptive rate limiter.
-    /// Average wait time per request of the last window.
-    fn _awt(&self) -> Duration {
-        let requests = self.window_requests.load(Ordering::Relaxed);
-        if requests == 0 {
-            Duration::ZERO
-        } else {
-            let nanos = self.window_wait_nanos.load(Ordering::Relaxed);
-            Duration::from_nanos(nanos / requests)
-        }
-    }
-
-    // TODO(MrCroxx): Reserved for adaptive rate limiter.
-    /// Clear the aws calculation window.
-    fn _reset_awt(&self) {
-        self.window_requests.store(0, Ordering::Relaxed);
-        self.window_wait_nanos.store(0, Ordering::Relaxed);
+    // // TODO(MrCroxx): Reserved for adaptive rate limiter.
+    /// Reset statistics.
+    fn _reset_stats(&self) {
+        self.total_allowed_quotas.store(0, Ordering::Relaxed);
+        self.total_waited_nanos.store(0, Ordering::Relaxed);
     }
 
     // TODO(MrCroxx): Reserved for adaptive rate limiter.
@@ -518,12 +481,6 @@ mod tests {
     const RATE: u64 = 1000;
     const DURATION: Duration = Duration::from_secs(10);
 
-    /// Run with:
-    ///
-    /// ```bash
-    /// RUST_BACKTRACE=1 cargo test --package risingwave_common --lib -- rate_limit::tests::test_leak_bucket --exact --show-output --ignored
-    /// ```
-    #[ignore]
     #[test]
     fn test_leak_bucket() {
         let v = Arc::new(AtomicU64::new(0));
@@ -534,8 +491,9 @@ mod tests {
                 if start.elapsed() >= DURATION {
                     break;
                 }
-                let dur = vs.book(quota);
-                std::thread::sleep(dur);
+                while let Err(dur) = vs.check(quota) {
+                    std::thread::sleep(dur);
+                }
 
                 v.fetch_add(quota, Ordering::Relaxed);
             }
