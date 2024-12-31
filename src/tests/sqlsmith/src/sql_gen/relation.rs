@@ -14,7 +14,7 @@
 
 use rand::prelude::SliceRandom;
 use rand::Rng;
-use risingwave_common::types::DataType::Boolean;
+use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{
     Ident, ObjectName, TableAlias, TableFactor, TableWithJoins, Value,
 };
@@ -117,7 +117,10 @@ impl<R: Rng> SqlGenerator<'_, R> {
     fn gen_bool_with_tables(&mut self, tables: Vec<Table>) -> Expr {
         let old_context = self.new_local_context();
         self.add_relations_to_context(tables);
-        let expr = self.gen_expr(&Boolean, SqlGeneratorContext::new_with_can_agg(false));
+        let expr = self.gen_expr(
+            &DataType::Boolean,
+            SqlGeneratorContext::new_with_can_agg(false),
+        );
         self.restore_context(old_context);
         expr
     }

@@ -318,7 +318,7 @@ fn bench_expr(c: &mut Criterion) {
 
         let mut children = vec![];
         for (i, t) in sig.inputs_type.iter().enumerate() {
-            use DataType::*;
+            use DataType as T;
             let idx = match (sig.name.as_scalar(), i) {
                 (PbType::CharToTimestamptz, 0) => TIMESTAMP_FORMATTED_STRING,
                 (PbType::ToChar | PbType::CharToTimestamptz, 1) => {
@@ -333,15 +333,17 @@ fn bench_expr(c: &mut Criterion) {
                     children.push(string_literal("VALUE"));
                     continue;
                 }
-                (PbType::Cast, 0) if t.as_exact() == &Varchar => match sig.ret_type.as_exact() {
-                    Boolean => BOOL_STRING,
-                    Int16 | Int32 | Int64 | Float32 | Float64 | Decimal => NUMBER_STRING,
-                    Date => DATE_STRING,
-                    Time => TIME_STRING,
-                    Timestamp => TIMESTAMP_STRING,
-                    Timestamptz => TIMESTAMPTZ_STRING,
-                    Interval => INTERVAL_STRING,
-                    Bytea => NUMBER_STRING, // any
+                (PbType::Cast, 0) if t.as_exact() == &T::Varchar => match sig.ret_type.as_exact() {
+                    T::Boolean => BOOL_STRING,
+                    T::Int16 | T::Int32 | T::Int64 | T::Float32 | T::Float64 | T::Decimal => {
+                        NUMBER_STRING
+                    }
+                    T::Date => DATE_STRING,
+                    T::Time => TIME_STRING,
+                    T::Timestamp => TIMESTAMP_STRING,
+                    T::Timestamptz => TIMESTAMPTZ_STRING,
+                    T::Interval => INTERVAL_STRING,
+                    T::Bytea => NUMBER_STRING, // any
                     _ => {
                         println!("todo: {sig:?}");
                         continue 'sig;
@@ -351,11 +353,11 @@ fn bench_expr(c: &mut Criterion) {
                 (PbType::DateTrunc, 0) => TIME_FIELD,
                 (PbType::DateTrunc, 2) => TIMEZONE,
                 (PbType::Extract, 0) => match sig.inputs_type[1].as_exact() {
-                    Date => EXTRACT_FIELD_DATE,
-                    Time => EXTRACT_FIELD_TIME,
-                    Timestamp => EXTRACT_FIELD_TIMESTAMP,
-                    Timestamptz => EXTRACT_FIELD_TIMESTAMPTZ,
-                    Interval => EXTRACT_FIELD_INTERVAL,
+                    T::Date => EXTRACT_FIELD_DATE,
+                    T::Time => EXTRACT_FIELD_TIME,
+                    T::Timestamp => EXTRACT_FIELD_TIMESTAMP,
+                    T::Timestamptz => EXTRACT_FIELD_TIMESTAMPTZ,
+                    T::Interval => EXTRACT_FIELD_INTERVAL,
                     t => panic!("unexpected type: {t:?}"),
                 },
                 (PbType::Position, 0) => POSITION_SUB,

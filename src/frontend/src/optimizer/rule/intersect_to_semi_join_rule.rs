@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::types::DataType::Boolean;
+use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_pb::plan_common::JoinType;
 
@@ -66,7 +66,7 @@ impl IntersectToSemiJoinRule {
                         right_field.data_type(),
                     ))),
                 ],
-                Boolean,
+                DataType::Boolean,
             )))
         });
         ExprImpl::and(arms)

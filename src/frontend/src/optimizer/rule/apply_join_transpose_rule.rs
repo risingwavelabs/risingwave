@@ -15,7 +15,6 @@
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::types::DataType;
-use risingwave_common::types::DataType::Boolean;
 use risingwave_pb::plan_common::JoinType;
 
 use super::{BoxedRule, Rule};
@@ -615,7 +614,7 @@ impl ApplyJoinTransposeRule {
                 ExprImpl::InputRef(Box::new(InputRef::new(left, left_data_type))),
                 ExprImpl::InputRef(Box::new(InputRef::new(right, right_data_type))),
             ],
-            Boolean,
+            DataType::Boolean,
         )))
     }
 }

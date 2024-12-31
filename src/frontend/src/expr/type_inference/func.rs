@@ -1096,7 +1096,7 @@ mod tests {
 
     #[test]
     fn test_arithmetics() {
-        use DataType::*;
+        use DataType as T;
         let atm_exprs = vec![
             ExprType::Add,
             ExprType::Subtract,
@@ -1104,42 +1104,42 @@ mod tests {
             ExprType::Divide,
         ];
         let num_promote_table = vec![
-            (Int16, Int16, Int16),
-            (Int16, Int32, Int32),
-            (Int16, Int64, Int64),
-            (Int16, Decimal, Decimal),
-            (Int16, Float32, Float64),
-            (Int16, Float64, Float64),
-            (Int32, Int16, Int32),
-            (Int32, Int32, Int32),
-            (Int32, Int64, Int64),
-            (Int32, Decimal, Decimal),
-            (Int32, Float32, Float64),
-            (Int32, Float64, Float64),
-            (Int64, Int16, Int64),
-            (Int64, Int32, Int64),
-            (Int64, Int64, Int64),
-            (Int64, Decimal, Decimal),
-            (Int64, Float32, Float64),
-            (Int64, Float64, Float64),
-            (Decimal, Int16, Decimal),
-            (Decimal, Int32, Decimal),
-            (Decimal, Int64, Decimal),
-            (Decimal, Decimal, Decimal),
-            (Decimal, Float32, Float64),
-            (Decimal, Float64, Float64),
-            (Float32, Int16, Float64),
-            (Float32, Int32, Float64),
-            (Float32, Int64, Float64),
-            (Float32, Decimal, Float64),
-            (Float32, Float32, Float32),
-            (Float32, Float64, Float64),
-            (Float64, Int16, Float64),
-            (Float64, Int32, Float64),
-            (Float64, Int64, Float64),
-            (Float64, Decimal, Float64),
-            (Float64, Float32, Float64),
-            (Float64, Float64, Float64),
+            (T::Int16, T::Int16, T::Int16),
+            (T::Int16, T::Int32, T::Int32),
+            (T::Int16, T::Int64, T::Int64),
+            (T::Int16, T::Decimal, T::Decimal),
+            (T::Int16, T::Float32, T::Float64),
+            (T::Int16, T::Float64, T::Float64),
+            (T::Int32, T::Int16, T::Int32),
+            (T::Int32, T::Int32, T::Int32),
+            (T::Int32, T::Int64, T::Int64),
+            (T::Int32, T::Decimal, T::Decimal),
+            (T::Int32, T::Float32, T::Float64),
+            (T::Int32, T::Float64, T::Float64),
+            (T::Int64, T::Int16, T::Int64),
+            (T::Int64, T::Int32, T::Int64),
+            (T::Int64, T::Int64, T::Int64),
+            (T::Int64, T::Decimal, T::Decimal),
+            (T::Int64, T::Float32, T::Float64),
+            (T::Int64, T::Float64, T::Float64),
+            (T::Decimal, T::Int16, T::Decimal),
+            (T::Decimal, T::Int32, T::Decimal),
+            (T::Decimal, T::Int64, T::Decimal),
+            (T::Decimal, T::Decimal, T::Decimal),
+            (T::Decimal, T::Float32, T::Float64),
+            (T::Decimal, T::Float64, T::Float64),
+            (T::Float32, T::Int16, T::Float64),
+            (T::Float32, T::Int32, T::Float64),
+            (T::Float32, T::Int64, T::Float64),
+            (T::Float32, T::Decimal, T::Float64),
+            (T::Float32, T::Float32, T::Float32),
+            (T::Float32, T::Float64, T::Float64),
+            (T::Float64, T::Int16, T::Float64),
+            (T::Float64, T::Int32, T::Float64),
+            (T::Float64, T::Int64, T::Float64),
+            (T::Float64, T::Decimal, T::Float64),
+            (T::Float64, T::Float32, T::Float64),
+            (T::Float64, T::Float64, T::Float64),
         ];
         for (expr, (t1, t2, tr)) in iproduct!(atm_exprs, num_promote_table) {
             test_simple_infer_type(expr, vec![t1, t2], tr);
@@ -1148,22 +1148,22 @@ mod tests {
 
     #[test]
     fn test_bitwise() {
-        use DataType::*;
+        use DataType as T;
         let bitwise_exprs = vec![
             ExprType::BitwiseAnd,
             ExprType::BitwiseOr,
             ExprType::BitwiseXor,
         ];
         let num_promote_table = vec![
-            (Int16, Int16, Int16),
-            (Int16, Int32, Int32),
-            (Int16, Int64, Int64),
-            (Int32, Int16, Int32),
-            (Int32, Int32, Int32),
-            (Int32, Int64, Int64),
-            (Int64, Int16, Int64),
-            (Int64, Int32, Int64),
-            (Int64, Int64, Int64),
+            (T::Int16, T::Int16, T::Int16),
+            (T::Int16, T::Int32, T::Int32),
+            (T::Int16, T::Int64, T::Int64),
+            (T::Int32, T::Int16, T::Int32),
+            (T::Int32, T::Int32, T::Int32),
+            (T::Int32, T::Int64, T::Int64),
+            (T::Int64, T::Int16, T::Int64),
+            (T::Int64, T::Int32, T::Int64),
+            (T::Int64, T::Int64, T::Int64),
         ];
         for (expr, (t1, t2, tr)) in iproduct!(bitwise_exprs, num_promote_table) {
             test_simple_infer_type(expr, vec![t1, t2], tr);
@@ -1172,12 +1172,12 @@ mod tests {
         for (expr, (t1, t2, tr)) in iproduct!(
             vec![ExprType::BitwiseShiftLeft, ExprType::BitwiseShiftRight,],
             vec![
-                (Int16, Int16, Int16),
-                (Int32, Int16, Int32),
-                (Int64, Int16, Int64),
-                (Int16, Int32, Int16),
-                (Int64, Int32, Int64),
-                (Int32, Int32, Int32),
+                (T::Int16, T::Int16, T::Int16),
+                (T::Int32, T::Int16, T::Int32),
+                (T::Int64, T::Int16, T::Int64),
+                (T::Int16, T::Int32, T::Int16),
+                (T::Int64, T::Int32, T::Int64),
+                (T::Int32, T::Int32, T::Int32),
             ]
         ) {
             test_simple_infer_type(expr, vec![t1, t2], tr);
