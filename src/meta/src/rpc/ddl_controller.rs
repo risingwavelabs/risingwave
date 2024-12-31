@@ -1734,7 +1734,8 @@ impl DdlController {
             .get_table_catalog_by_ids(old_internal_table_ids)
             .await?;
 
-        fragment_graph.fit_internal_table_ids(old_internal_tables, drop_connector)?;
+        let table_ids_to_clean_up =
+            fragment_graph.fit_internal_table_ids(old_internal_tables, drop_connector)?;
 
         // 1. Resolve the edges to the downstream fragments, extend the fragment graph to a complete
         // graph that contains all information needed for building the actor graph.
@@ -1831,6 +1832,8 @@ impl DdlController {
         // Note: no need to set `vnode_count` as it's already set by the frontend.
         // See `get_replace_table_plan`.
 
+        tracing::info!(?table_ids_to_clean_up, "meta send: table_ids_to_clean_up");
+
         let ctx = ReplaceStreamJobContext {
             old_fragments,
             merge_updates,
@@ -1839,6 +1842,7 @@ impl DdlController {
             existing_locations,
             streaming_job: stream_job.clone(),
             tmp_id: tmp_job_id as _,
+            table_ids_to_clean_up,
         };
 
         Ok((ctx, stream_job_fragments))

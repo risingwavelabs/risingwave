@@ -491,7 +491,7 @@ impl StreamFragmentGraph {
         &mut self,
         mut old_internal_tables: Vec<Table>,
         drop_connector: bool,
-    ) -> MetaResult<()> {
+    ) -> MetaResult<Vec<u32>> {
         let mut new_internal_table_ids = Vec::new();
         for fragment in self.fragments.values() {
             for table in &fragment.extract_internal_tables() {
@@ -500,7 +500,7 @@ impl StreamFragmentGraph {
         }
 
         if new_internal_table_ids.is_empty() && drop_connector {
-            return Ok(());
+            return Ok(old_internal_tables.iter().map(|t| t.id).collect());
         }
 
         if new_internal_table_ids.len() != old_internal_tables.len() {
@@ -528,7 +528,7 @@ impl StreamFragmentGraph {
             );
         }
 
-        Ok(())
+        Ok(vec![])
     }
 
     /// Returns the fragment id where the streaming job node located.

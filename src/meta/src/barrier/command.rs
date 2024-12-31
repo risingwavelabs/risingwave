@@ -104,6 +104,9 @@ pub struct ReplaceStreamJobPlan {
     pub streaming_job: StreamingJob,
     /// The temporary dummy table fragments id of new table fragment
     pub tmp_id: u32,
+
+    // When applying `alter table drop connector`, we need to clean up the state table of the connector.
+    pub table_ids_to_clean_up: Vec<u32>,
 }
 
 impl ReplaceStreamJobPlan {

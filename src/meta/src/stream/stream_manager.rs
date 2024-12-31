@@ -188,6 +188,8 @@ pub struct ReplaceStreamJobContext {
     pub streaming_job: StreamingJob,
 
     pub tmp_id: u32,
+
+    pub table_ids_to_clean_up: Vec<u32>,
 }
 
 /// `GlobalStreamManager` manages all the streams in the system.
@@ -372,6 +374,7 @@ impl GlobalStreamManager {
                 init_split_assignment,
                 streaming_job,
                 tmp_id: tmp_table_id.table_id,
+                table_ids_to_clean_up: vec![],
             });
         }
 
@@ -472,6 +475,7 @@ impl GlobalStreamManager {
             dispatchers,
             tmp_id,
             streaming_job,
+            table_ids_to_clean_up,
             ..
         }: ReplaceStreamJobContext,
     ) -> MetaResult<()> {
@@ -495,6 +499,7 @@ impl GlobalStreamManager {
                     init_split_assignment,
                     streaming_job,
                     tmp_id,
+                    table_ids_to_clean_up,
                 }),
             )
             .await?;

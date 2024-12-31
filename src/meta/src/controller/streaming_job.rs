@@ -34,7 +34,7 @@ use risingwave_meta_model::{
     actor, actor_dispatcher, fragment, index, object, object_dependency, sink, source,
     streaming_job, table, ActorId, ActorUpstreamActors, ColumnCatalogArray, CreateType, DatabaseId,
     ExprNodeArray, FragmentId, I32Array, IndexId, JobStatus, ObjectId, SchemaId, SinkId, SourceId,
-    StreamNode, StreamingParallelism, UserId,
+    StreamNode, StreamingParallelism, TableId, UserId,
 };
 use risingwave_pb::catalog::source::PbOptionalAssociatedTableId;
 use risingwave_pb::catalog::table::PbOptionalAssociatedSourceId;
@@ -623,6 +623,7 @@ impl CatalogController {
         actor_ids: Vec<crate::model::ActorId>,
         new_actor_dispatchers: HashMap<crate::model::ActorId, Vec<PbDispatcher>>,
         split_assignment: &SplitAssignment,
+        table_ids_to_clean_up: &[u32],
     ) -> MetaResult<()> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
@@ -665,6 +666,16 @@ impl CatalogController {
 
         if !actor_dispatchers.is_empty() {
             ActorDispatcher::insert_many(actor_dispatchers)
+                .exec(&txn)
+                .await?;
+        }
+
+        if !table_ids_to_clean_up.is_empty() {
+            Table::delete_many()
+                .filter(
+                    table::Column::TableId
+                        .is_in(table_ids_to_clean_up.iter().map(|id| *id as TableId)),
+                )
                 .exec(&txn)
                 .await?;
         }

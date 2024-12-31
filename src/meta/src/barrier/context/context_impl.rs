@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use futures::future::try_join_all;
-use risingwave_common::catalog::DatabaseId;
+use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::meta::PausedReason;
@@ -194,6 +194,7 @@ impl CommandContext {
                         stream_job_fragments.actor_ids(),
                         dispatchers.clone(),
                         init_split_assignment,
+                        &[],
                     )
                     .await?;
 
@@ -216,6 +217,7 @@ impl CommandContext {
                             new_fragments.actor_ids(),
                             dispatchers.clone(),
                             init_split_assignment,
+                            &[],
                         )
                         .await?;
                     fragment_replacements = Some(replace_plan.fragment_replacements());
@@ -253,6 +255,7 @@ impl CommandContext {
                     new_fragments,
                     dispatchers,
                     init_split_assignment,
+                    table_ids_to_clean_up,
                     ..
                 },
             ) => {
@@ -265,7 +268,17 @@ impl CommandContext {
                         new_fragments.actor_ids(),
                         dispatchers.clone(),
                         init_split_assignment,
+                        table_ids_to_clean_up,
                     )
+                    .await?;
+
+                tracing::info!(
+                    ?table_ids_to_clean_up,
+                    "meta post_collect: table_ids_to_clean_up"
+                );
+                barrier_manager_context
+                    .hummock_manager
+                    .unregister_table_ids(table_ids_to_clean_up.iter().map(|id| TableId::new(*id)))
                     .await?;
 
                 // Apply the split changes in source manager.
