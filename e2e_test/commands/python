@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+
+set -e
+
+# A wrapper around `python` to run the script in the provisioned environment.
+
+# If `uv` not installed, delegate to the system `python`.
+if ! command -v uv >/dev/null; then
+  exec python "$@"
+fi
+
+exec uv run --with-requirements "e2e_test/requirements.txt" "$@"
