@@ -86,6 +86,7 @@ risingwave_hummock_sdk = { workspace = true }
 risingwave_hummock_test = { path = "../storage/hummock_test", features = [
   "test",
 ] }
+pretty_assertions = "1"
 serde_yaml = "0.9"
 tracing-test = "0.2"
 

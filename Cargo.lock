@@ -12166,6 +12166,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "pin-project",
  "prehash",
+ "pretty_assertions",
  "prometheus",
  "prost 0.13.1",
  "rand",
