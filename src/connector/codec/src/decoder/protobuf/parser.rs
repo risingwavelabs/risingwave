@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
+
 use anyhow::Context;
 use itertools::Itertools;
 use prost_reflect::{Cardinality, FieldDescriptor, Kind, MessageDescriptor, ReflectMessage, Value};
@@ -25,14 +27,22 @@ use thiserror_ext::Macro;
 
 use crate::decoder::{uncategorized, AccessError, AccessResult};
 
+pub const PROTOBUF_MESSAGES_AS_JSONB: &str = "messages_as_jsonb";
+
 pub fn pb_schema_to_column_descs(
     message_descriptor: &MessageDescriptor,
+    messages_as_jsonb: &HashSet<String>,
 ) -> anyhow::Result<Vec<ColumnDesc>> {
     let mut columns = Vec::with_capacity(message_descriptor.fields().len());
     let mut index = 0;
     let mut parse_trace: Vec<String> = vec![];
     for field in message_descriptor.fields() {
-        columns.push(pb_field_to_col_desc(&field, &mut index, &mut parse_trace)?);
+        columns.push(pb_field_to_col_desc(
+            &field,
+            &mut index,
+            &mut parse_trace,
+            messages_as_jsonb,
+        )?);
     }
 
     Ok(columns)
@@ -43,15 +53,18 @@ fn pb_field_to_col_desc(
     field_descriptor: &FieldDescriptor,
     index: &mut i32,
     parse_trace: &mut Vec<String>,
+    messages_as_jsonb: &HashSet<String>,
 ) -> anyhow::Result<ColumnDesc> {
-    let field_type = protobuf_type_mapping(field_descriptor, parse_trace)
+    let field_type = protobuf_type_mapping(field_descriptor, parse_trace, messages_as_jsonb)
         .context("failed to map protobuf type")?;
-    if let Kind::Message(m) = field_descriptor.kind() {
+    if let Kind::Message(m) = field_descriptor.kind()
+        && !messages_as_jsonb.contains(m.full_name())
+    {
         let field_descs = if let DataType::List { .. } = field_type {
             vec![]
         } else {
             m.fields()
-                .map(|f| pb_field_to_col_desc(&f, index, parse_trace))
+                .map(|f| pb_field_to_col_desc(&f, index, parse_trace, messages_as_jsonb))
                 .try_collect()?
         };
         *index += 1;
@@ -91,10 +104,12 @@ fn detect_loop_and_push(
     let identifier = format!("{}({})", fd.name(), fd.full_name());
     if trace.iter().any(|s| s == identifier.as_str()) {
         bail_protobuf_type_error!(
-            "circular reference detected: {}, conflict with {}, kind {:?}",
+            "circular reference detected: {}, conflict with {}, kind {:?}. Adding {:?} to {:?} may help.",
             trace.iter().format("->"),
             identifier,
             fd.kind(),
+            fd.kind(),
+            PROTOBUF_MESSAGES_AS_JSONB,
         );
     }
     trace.push(identifier);
@@ -105,6 +120,7 @@ pub fn from_protobuf_value<'a>(
     field_desc: &FieldDescriptor,
     value: &'a Value,
     type_expected: &DataType,
+    messages_as_jsonb: &'a HashSet<String>,
 ) -> AccessResult<DatumCow<'a>> {
     let kind = field_desc.kind();
 
@@ -135,7 +151,7 @@ pub fn from_protobuf_value<'a>(
             ScalarImpl::Utf8(enum_symbol.name().into())
         }
         Value::Message(dyn_msg) => {
-            if dyn_msg.descriptor().full_name() == "google.protobuf.Any" {
+            if messages_as_jsonb.contains(dyn_msg.descriptor().full_name()) {
                 ScalarImpl::Jsonb(JsonbVal::from(
                     serde_json::to_value(dyn_msg).map_err(AccessError::ProtobufAnyToJson)?,
                 ))
@@ -158,8 +174,13 @@ pub fn from_protobuf_value<'a>(
                     };
                     let value = dyn_msg.get_field(&field_desc);
                     rw_values.push(
-                        from_protobuf_value(&field_desc, &value, expected_field_type)?
-                            .to_owned_datum(),
+                        from_protobuf_value(
+                            &field_desc,
+                            &value,
+                            expected_field_type,
+                            messages_as_jsonb,
+                        )?
+                        .to_owned_datum(),
                     );
                 }
                 ScalarImpl::Struct(StructValue::new(rw_values))
@@ -175,7 +196,12 @@ pub fn from_protobuf_value<'a>(
             };
             let mut builder = element_type.create_array_builder(values.len());
             for value in values {
-                builder.append(from_protobuf_value(field_desc, value, element_type)?);
+                builder.append(from_protobuf_value(
+                    field_desc,
+                    value,
+                    element_type,
+                    messages_as_jsonb,
+                )?);
             }
             ScalarImpl::List(ListValue::new(builder.finish()))
         }
@@ -208,11 +234,13 @@ pub fn from_protobuf_value<'a>(
                     &map_desc.map_entry_key_field(),
                     &key.clone().into(),
                     map_type.key(),
+                    messages_as_jsonb,
                 )?);
                 value_builder.append(from_protobuf_value(
                     &map_desc.map_entry_value_field(),
                     value,
                     map_type.value(),
+                    messages_as_jsonb,
                 )?);
             }
             let keys = key_builder.finish();
@@ -230,6 +258,7 @@ pub fn from_protobuf_value<'a>(
 fn protobuf_type_mapping(
     field_descriptor: &FieldDescriptor,
     parse_trace: &mut Vec<String>,
+    messages_as_jsonb: &HashSet<String>,
 ) -> std::result::Result<DataType, ProtobufTypeError> {
     detect_loop_and_push(parse_trace, field_descriptor)?;
     let mut t = match field_descriptor.kind() {
@@ -244,20 +273,28 @@ fn protobuf_type_mapping(
         Kind::Uint64 | Kind::Fixed64 => DataType::Decimal,
         Kind::String => DataType::Varchar,
         Kind::Message(m) => {
-            if m.full_name() == "google.protobuf.Any" {
+            if messages_as_jsonb.contains(m.full_name()) {
                 // Well-Known Types are identified by their full name
                 DataType::Jsonb
             } else if m.is_map_entry() {
                 // Map is equivalent to `repeated MapFieldEntry map_field = N;`
                 debug_assert!(field_descriptor.is_map());
-                let key = protobuf_type_mapping(&m.map_entry_key_field(), parse_trace)?;
-                let value = protobuf_type_mapping(&m.map_entry_value_field(), parse_trace)?;
+                let key = protobuf_type_mapping(
+                    &m.map_entry_key_field(),
+                    parse_trace,
+                    messages_as_jsonb,
+                )?;
+                let value = protobuf_type_mapping(
+                    &m.map_entry_value_field(),
+                    parse_trace,
+                    messages_as_jsonb,
+                )?;
                 _ = parse_trace.pop();
                 return Ok(DataType::Map(MapType::from_kv(key, value)));
             } else {
                 let fields = m
                     .fields()
-                    .map(|f| protobuf_type_mapping(&f, parse_trace))
+                    .map(|f| protobuf_type_mapping(&f, parse_trace, messages_as_jsonb))
                     .try_collect()?;
                 let field_names = m.fields().map(|f| f.name().to_string()).collect_vec();
                 DataType::new_struct(fields, field_names)
