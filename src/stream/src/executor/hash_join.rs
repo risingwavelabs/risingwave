@@ -1101,15 +1101,16 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             // update degree
             *update_row_degree += 1;
             // send matched row downstream
-            if !forward_exactly_once(T, SIDE) {
+
+            // Inserts must happen before degrees are updated,
+            // FIXME(kwannoel): We should let deletes and inserts happen BEFORE degree updates.
+            if matches!(JOIN_OP, JoinOp::Insert) && !forward_exactly_once(T, SIDE) {
                 if let Some(chunk) =
                     hashjoin_chunk_builder.with_match::<JOIN_OP>(&update_row, &matched_row)
                 {
                     chunk_opt = Some(chunk);
                 }
             }
-
-            //
             if let Some(degree_table) = degree_table {
                 update_degree::<S, { JOIN_OP }>(degree_table, &mut matched_row);
                 if MATCHED_ROWS_FROM_CACHE {
@@ -1124,6 +1125,17 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     }
                 }
             }
+
+            // Deletes must happen after degree table is updated.
+            // FIXME(kwannoel): We should let deletes and inserts happen BEFORE degree updates.
+            if matches!(JOIN_OP, JoinOp::Delete) && !forward_exactly_once(T, SIDE) {
+                if let Some(chunk) =
+                    hashjoin_chunk_builder.with_match::<JOIN_OP>(&update_row, &matched_row)
+                {
+                    chunk_opt = Some(chunk);
+                }
+            }
+
         } else {
             // check if need state cleaning
             for (column_idx, watermark) in useful_state_clean_columns {
