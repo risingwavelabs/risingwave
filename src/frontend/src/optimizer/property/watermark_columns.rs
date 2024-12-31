@@ -59,20 +59,17 @@ impl WatermarkColumns {
         self.col_idx_to_wtmk_group_id.keys().copied()
     }
 
-    pub fn grouped(&self) -> HashMap<WatermarkGroupId, IndexSet> {
-        self.col_idx_to_wtmk_group_id
-            .iter()
-            .map(|(col_idx, group_id)| (*group_id, *col_idx))
-            .into_grouping_map()
-            .fold_with(
-                |_, _| IndexSet::empty(),
-                |mut idx_set, group_id, col_idx| {
-                    idx_set.insert(col_idx);
-                    idx_set
-                },
-            )
+    /// Get all watermark groups and their corresponding column indices.
+    pub fn grouped(&self) -> BTreeMap<WatermarkGroupId, IndexSet> {
+        let mut groups = BTreeMap::new();
+        for (col_idx, group_id) in &self.col_idx_to_wtmk_group_id {
+            groups
+                .entry(*group_id)
+                .or_insert_with(IndexSet::empty)
+                .insert(*col_idx);
+        }
+        groups
     }
-
     pub fn iter(&self) -> impl Iterator<Item = (usize, WatermarkGroupId)> + '_ {
         self.col_idx_to_wtmk_group_id
             .iter()

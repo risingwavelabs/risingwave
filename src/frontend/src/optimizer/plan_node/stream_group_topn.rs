@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use fixedbitset::FixedBitSet;
 use pretty_xmlish::XmlNode;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
@@ -47,13 +46,7 @@ impl StreamGroupTopN {
         let watermark_columns = if input.append_only() {
             input.watermark_columns().clone()
         } else {
-            let mut watermark_columns = FixedBitSet::with_capacity(schema.len());
-            for &idx in &core.group_key {
-                if input.watermark_columns().contains(idx) {
-                    watermark_columns.insert(idx);
-                }
-            }
-            watermark_columns
+            input.watermark_columns().retain_clone(&core.group_key)
         };
 
         let mut stream_key = core
