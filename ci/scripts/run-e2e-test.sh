@@ -22,6 +22,8 @@ while getopts 'p:m:' opt; do
 done
 shift $((OPTIND -1))
 
+source ci/scripts/common.sh
+
 if [[ $mode == "standalone" ]]; then
   source ci/scripts/standalone-utils.sh
 fi

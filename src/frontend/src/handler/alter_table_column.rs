@@ -15,7 +15,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use anyhow::{anyhow, Context};
+use anyhow::anyhow;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{ColumnCatalog, Engine};
@@ -32,7 +32,6 @@ use risingwave_sqlparser::ast::{
     AlterTableOperation, ColumnDef, ColumnOption, DataType as AstDataType, Ident, ObjectName,
     Statement, StructField, TableConstraint,
 };
-use risingwave_sqlparser::parser::Parser;
 
 use super::create_source::schema_has_schema_registry;
 use super::create_table::{generate_stream_graph_for_replace_table, ColumnIdGenerator};
@@ -56,10 +55,7 @@ pub async fn get_new_table_definition_for_cdc_table(
     let original_catalog = fetch_table_catalog_for_alter(session.as_ref(), &table_name)?;
 
     // Retrieve the original table definition and parse it to AST.
-    let [mut definition]: [_; 1] = Parser::parse_sql(&original_catalog.definition)
-        .context("unable to parse original table definition")?
-        .try_into()
-        .unwrap();
+    let mut definition = original_catalog.create_sql_ast()?;
 
     let Statement::CreateTable {
         columns: original_columns,
@@ -328,10 +324,7 @@ pub async fn handle_alter_table_column(
     }
 
     // Retrieve the original table definition and parse it to AST.
-    let [mut definition]: [_; 1] = Parser::parse_sql(&original_catalog.definition)
-        .context("unable to parse original table definition")?
-        .try_into()
-        .unwrap();
+    let mut definition = original_catalog.create_sql_ast()?;
     let Statement::CreateTable {
         columns,
         format_encode,
@@ -479,11 +472,11 @@ pub fn fetch_table_catalog_for_alter(
     session: &SessionImpl,
     table_name: &ObjectName,
 ) -> Result<Arc<TableCatalog>> {
-    let db_name = session.database();
+    let db_name = &session.database();
     let (schema_name, real_table_name) =
         Binder::resolve_schema_qualified_name(db_name, table_name.clone())?;
     let search_path = session.config().search_path();
-    let user_name = &session.auth_context().user_name;
+    let user_name = &session.user_name();
 
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 

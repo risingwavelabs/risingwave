@@ -11,6 +11,9 @@ repository = { workspace = true }
 [lints]
 workspace = true
 
+[package.metadata.cargo-machete]
+ignored = ["aws-credential-types"]
+
 [dependencies]
 async-trait = "0.1"
 await-tree = { workspace = true }

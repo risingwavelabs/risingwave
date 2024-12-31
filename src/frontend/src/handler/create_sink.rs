@@ -15,7 +15,6 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::{Arc, LazyLock};
 
-use anyhow::Context;
 use either::Either;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap, hashset};
@@ -43,7 +42,6 @@ use risingwave_sqlparser::ast::{
     CreateSink, CreateSinkStatement, EmitMode, Encode, ExplainOptions, Format, FormatEncodeOptions,
     Query, Statement,
 };
-use risingwave_sqlparser::parser::Parser;
 
 use super::create_mv::get_column_names;
 use super::create_source::UPSTREAM_SOURCE_KEY;
@@ -102,7 +100,7 @@ pub async fn gen_sink_plan(
     let session = handler_args.session.clone();
     let session = session.as_ref();
     let user_specified_columns = !stmt.columns.is_empty();
-    let db_name = session.database();
+    let db_name = &session.database();
     let (sink_schema_name, sink_table_name) =
         Binder::resolve_schema_qualified_name(db_name, stmt.sink_name.clone())?;
 
@@ -487,7 +485,7 @@ pub fn fetch_incoming_sinks(
 ) -> Result<Vec<Arc<SinkCatalog>>> {
     let reader = session.env().catalog_reader().read_guard();
     let mut sinks = Vec::with_capacity(incoming_sink_ids.len());
-    let db_name = session.database();
+    let db_name = &session.database();
     for schema in reader.iter_schemas(db_name)? {
         for sink in schema.iter_sink() {
             if incoming_sink_ids.contains(&sink.id.sink_id) {
@@ -504,10 +502,7 @@ pub(crate) async fn reparse_table_for_sink(
     table_catalog: &Arc<TableCatalog>,
 ) -> Result<(StreamFragmentGraph, Table, Option<PbSource>)> {
     // Retrieve the original table definition and parse it to AST.
-    let [definition]: [_; 1] = Parser::parse_sql(&table_catalog.definition)
-        .context("unable to parse original table definition")?
-        .try_into()
-        .unwrap();
+    let definition = table_catalog.create_sql_ast()?;
     let Statement::CreateTable {
         name,
         format_encode,

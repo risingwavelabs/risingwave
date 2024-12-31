@@ -331,6 +331,7 @@ impl Parser<'_> {
                 Keyword::FLUSH => Ok(Statement::Flush),
                 Keyword::WAIT => Ok(Statement::Wait),
                 Keyword::RECOVER => Ok(Statement::Recover),
+                Keyword::USE => Ok(self.parse_use()?),
                 _ => self.expected_at(checkpoint, "statement"),
             },
             Token::LParen => {
@@ -5357,16 +5358,12 @@ impl Parser<'_> {
     }
 
     /// Parse a LIMIT clause
-    pub fn parse_limit(&mut self) -> PResult<Option<String>> {
+    pub fn parse_limit(&mut self) -> PResult<Option<Expr>> {
         if self.parse_keyword(Keyword::ALL) {
             Ok(None)
         } else {
-            let number = self.parse_number_value()?;
-            // TODO(Kexiang): support LIMIT expr
-            if self.consume_token(&Token::DoubleColon) {
-                self.expect_keyword(Keyword::BIGINT)?
-            }
-            Ok(Some(number))
+            let expr = self.parse_expr()?;
+            Ok(Some(expr))
         }
     }
 
@@ -5554,6 +5551,11 @@ impl Parser<'_> {
             object_name,
             comment,
         })
+    }
+
+    fn parse_use(&mut self) -> PResult<Statement> {
+        let db_name = self.parse_object_name()?;
+        Ok(Statement::Use { db_name })
     }
 }
 
