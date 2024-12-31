@@ -145,41 +145,44 @@ pub fn new_gcs_operator(
     Ok(operator)
 }
 
-pub fn extract_s3_bucket_and_file_name(location: &str) -> ConnectorResult<(String, String)> {
+#[derive(Debug, Clone)]
+pub enum FileScanBackend {
+    S3,
+    Gcs,
+}
+
+pub fn extract_bucket_and_file_name(
+    location: &str,
+    file_scan_backend: &FileScanBackend,
+) -> ConnectorResult<(String, String)> {
     let url = Url::parse(location)?;
     let bucket = url
         .host_str()
         .ok_or_else(|| {
             Error::new(
                 ErrorKind::DataInvalid,
-                format!("Invalid s3 url: {}, missing bucket", location),
+                format!("Invalid url: {}, missing bucket", location),
             )
         })?
         .to_owned();
-    let prefix = format!("s3://{}/", bucket);
+    let prefix = match file_scan_backend {
+        FileScanBackend::S3 => format!("s3://{}/", bucket),
+        FileScanBackend::Gcs => format!("gcs://{}/", bucket),
+    };
     let file_name = location[prefix.len()..].to_string();
     Ok((bucket, file_name))
 }
 
-pub fn extract_gcs_bucket_and_file_name(location: &str) -> ConnectorResult<(String, String)> {
-    let url = Url::parse(location)?;
-    let bucket = url
-        .host_str()
-        .ok_or_else(|| {
-            Error::new(
-                ErrorKind::DataInvalid,
-                format!("Invalid gcs url: {}, missing bucket", location),
-            )
-        })?
-        .to_owned();
-    let prefix = format!("gcs://{}/", bucket);
-    let file_name = location[prefix.len()..].to_string();
-    Ok((bucket, file_name))
-}
-
-pub async fn list_gcs_directory(op: Operator, dir: String) -> Result<Vec<String>, anyhow::Error> {
-    let (bucket, file_name) = extract_gcs_bucket_and_file_name(&dir)?;
-    let prefix = format!("gcs://{}/", bucket);
+pub async fn list_data_directory(
+    op: Operator,
+    dir: String,
+    file_scan_backend: &FileScanBackend,
+) -> Result<Vec<String>, anyhow::Error> {
+    let (bucket, file_name) = extract_bucket_and_file_name(&dir, file_scan_backend)?;
+    let prefix = match file_scan_backend {
+        FileScanBackend::S3 => format!("s3://{}/", bucket),
+        FileScanBackend::Gcs => format!("gcs://{}/", bucket),
+    };
     if dir.starts_with(&prefix) {
         op.list(&file_name)
             .await
@@ -192,27 +195,7 @@ pub async fn list_gcs_directory(op: Operator, dir: String) -> Result<Vec<String>
     } else {
         Err(Error::new(
             ErrorKind::DataInvalid,
-            format!("Invalid gcs url: {}, should start with {}", dir, prefix),
-        ))?
-    }
-}
-
-pub async fn list_s3_directory(op: Operator, dir: String) -> Result<Vec<String>, anyhow::Error> {
-    let (bucket, file_name) = extract_s3_bucket_and_file_name(&dir)?;
-    let prefix = format!("s3://{}/", bucket);
-    if dir.starts_with(&prefix) {
-        op.list(&file_name)
-            .await
-            .map_err(|e| anyhow!(e))
-            .map(|list| {
-                list.into_iter()
-                    .map(|entry| prefix.clone() + entry.path())
-                    .collect()
-            })
-    } else {
-        Err(Error::new(
-            ErrorKind::DataInvalid,
-            format!("Invalid s3 url: {}, should start with {}", dir, prefix),
+            format!("Invalid url: {}, should start with {}", dir, prefix),
         ))?
     }
 }

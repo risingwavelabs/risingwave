@@ -21,8 +21,8 @@ use mysql_async::prelude::*;
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::types::{DataType, ScalarImpl, StructType};
 use risingwave_connector::source::iceberg::{
-    extract_gcs_bucket_and_file_name, extract_s3_bucket_and_file_name, get_parquet_fields,
-    list_gcs_directory, list_s3_directory, new_gcs_operator, new_s3_operator,
+    extract_bucket_and_file_name, get_parquet_fields, list_data_directory, new_gcs_operator,
+    new_s3_operator, FileScanBackend,
 };
 pub use risingwave_pb::expr::table_function::PbType as TableFunctionType;
 use risingwave_pb::expr::PbTableFunction;
@@ -151,107 +151,68 @@ impl TableFunction {
 
             #[cfg(not(madsim))]
             {
-                let files = if "s3".eq_ignore_ascii_case(&eval_args[1]) {
-                    let (bucket, _) = extract_s3_bucket_and_file_name(&eval_args[5].clone())?;
-                    let op = new_s3_operator(
-                        eval_args[2].clone(),
-                        eval_args[3].clone(),
-                        eval_args[4].clone(),
-                        bucket.clone(),
-                    )?;
-                    let files = if eval_args[5].ends_with('/') {
-                        let files = tokio::task::block_in_place(|| {
-                            FRONTEND_RUNTIME.block_on(async {
-                                let files =
-                                    list_s3_directory(op.clone(), eval_args[5].clone()).await?;
-
-                                Ok::<Vec<String>, anyhow::Error>(files)
-                            })
-                        })?;
-
-                        if files.is_empty() {
-                            return Err(BindError(
-                                "file_scan function only accepts non-empty directory".to_owned(),
-                            )
-                            .into());
-                        }
-
-                        Some(files)
+                let (file_scan_backend, input_file_location) =
+                    if "s3".eq_ignore_ascii_case(&eval_args[1]) {
+                        (FileScanBackend::S3, eval_args[5].clone())
+                    } else if "gcs".eq_ignore_ascii_case(&eval_args[1]) {
+                        (FileScanBackend::Gcs, eval_args[4].clone())
                     } else {
-                        None
+                        unreachable!();
                     };
-                    files
-                } else if "gcs".eq_ignore_ascii_case(&eval_args[1]) {
-                    let (bucket, _) = extract_gcs_bucket_and_file_name(&eval_args[4].clone())?;
-                    let op = new_gcs_operator(
-                        eval_args[2].clone(),
-                        eval_args[3].clone(),
-                        bucket.clone(),
-                    )?;
-
-                    let files = if eval_args[4].ends_with('/') {
-                        let files = tokio::task::block_in_place(|| {
-                            FRONTEND_RUNTIME.block_on(async {
-                                let files =
-                                    list_gcs_directory(op.clone(), eval_args[4].clone()).await?;
-
-                                Ok::<Vec<String>, anyhow::Error>(files)
-                            })
-                        })?;
-
-                        if files.is_empty() {
-                            return Err(BindError(
-                                "file_scan function only accepts non-empty directory".to_owned(),
-                            )
-                            .into());
-                        }
-
-                        Some(files)
-                    } else {
-                        None
-                    };
-                    files
-                } else {
-                    unreachable!()
+                let (op, file_name) = match file_scan_backend {
+                    FileScanBackend::S3 => {
+                        let (bucket, file_name) =
+                            extract_bucket_and_file_name(&input_file_location, &file_scan_backend)?;
+                        (
+                            new_s3_operator(
+                                eval_args[2].clone(),
+                                eval_args[3].clone(),
+                                eval_args[4].clone(),
+                                bucket.clone(),
+                            )?,
+                            file_name,
+                        )
+                    }
+                    FileScanBackend::Gcs => {
+                        let (bucket, file_name) =
+                            extract_bucket_and_file_name(&input_file_location, &file_scan_backend)?;
+                        (
+                            new_gcs_operator(
+                                eval_args[2].clone(),
+                                eval_args[3].clone(),
+                                bucket.clone(),
+                            )?,
+                            file_name,
+                        )
+                    }
                 };
+                let files = if input_file_location.ends_with('/') {
+                    let files = tokio::task::block_in_place(|| {
+                        FRONTEND_RUNTIME.block_on(async {
+                            let files = list_data_directory(
+                                op.clone(),
+                                input_file_location.clone(),
+                                &file_scan_backend,
+                            )
+                            .await?;
 
+                            Ok::<Vec<String>, anyhow::Error>(files)
+                        })
+                    })?;
+
+                    if files.is_empty() {
+                        return Err(BindError(
+                            "file_scan function only accepts non-empty directory".to_owned(),
+                        )
+                        .into());
+                    }
+
+                    Some(files)
+                } else {
+                    None
+                };
                 let schema = tokio::task::block_in_place(|| {
                     FRONTEND_RUNTIME.block_on(async {
-                        let location = match files.as_ref() {
-                            Some(files) => files[0].clone(),
-                            None => {
-                                if "s3".eq_ignore_ascii_case(&eval_args[1]) {
-                                    eval_args[5].clone()
-                                } else if "gcs".eq_ignore_ascii_case(&eval_args[1]) {
-                                    eval_args[4].clone()
-                                } else {
-                                    unreachable!()
-                                }
-                            }
-                        };
-                        let (op, file_name) = if "s3".eq_ignore_ascii_case(&eval_args[1]) {
-                            let (bucket, file_name) = extract_s3_bucket_and_file_name(&location)?;
-                            (
-                                new_s3_operator(
-                                    eval_args[2].clone(),
-                                    eval_args[3].clone(),
-                                    eval_args[4].clone(),
-                                    bucket.clone(),
-                                )?,
-                                file_name,
-                            )
-                        } else {
-                            let (bucket, file_name) = extract_gcs_bucket_and_file_name(&location)?;
-                            (
-                                new_gcs_operator(
-                                    eval_args[2].clone(),
-                                    eval_args[3].clone(),
-                                    bucket.clone(),
-                                )?,
-                                file_name,
-                            )
-                        };
-
                         let fields = get_parquet_fields(op, file_name).await?;
 
                         let mut rw_types = vec![];

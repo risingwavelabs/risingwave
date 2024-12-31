@@ -17,7 +17,7 @@ use futures_util::stream::StreamExt;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_connector::source::iceberg::{
-    extract_s3_bucket_and_file_name, new_s3_operator, read_parquet_file,
+    extract_bucket_and_file_name, new_s3_operator, read_parquet_file, FileScanBackend,
 };
 use risingwave_pb::batch_plan::file_scan_node;
 use risingwave_pb::batch_plan::file_scan_node::StorageType;
@@ -84,7 +84,7 @@ impl S3FileScanExecutor {
     async fn do_execute(self: Box<Self>) {
         assert_eq!(self.file_format, FileFormat::Parquet);
         for file in self.file_location {
-            let (bucket, file_name) = extract_s3_bucket_and_file_name(&file)?;
+            let (bucket, file_name) = extract_bucket_and_file_name(&file, &FileScanBackend::S3)?;
             let op = new_s3_operator(
                 self.s3_region.clone(),
                 self.s3_access_key.clone(),

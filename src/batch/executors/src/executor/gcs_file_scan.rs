@@ -17,8 +17,7 @@ use futures_util::stream::StreamExt;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_connector::source::iceberg::{
-    extract_gcs_bucket_and_file_name, extract_s3_bucket_and_file_name, new_gcs_operator,
-    read_parquet_file,
+    extract_bucket_and_file_name, new_gcs_operator, read_parquet_file, FileScanBackend,
 };
 use risingwave_pb::batch_plan::file_scan_node;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -81,7 +80,7 @@ impl GcsFileScanExecutor {
     async fn do_execute(self: Box<Self>) {
         assert_eq!(self.file_format, FileFormat::Parquet);
         for file in self.file_location {
-            let (bucket, file_name) = extract_gcs_bucket_and_file_name(&file)?;
+            let (bucket, file_name) = extract_bucket_and_file_name(&file, &FileScanBackend::Gcs)?;
             let op = new_gcs_operator(
                 self.gcs_credential.clone(),
                 self.service_account.clone(),
