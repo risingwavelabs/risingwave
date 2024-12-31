@@ -1012,7 +1012,9 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         matched_row_ref = Some(row_ref);
                         entry_state_count += 1;
                     }
-                    if let Some(chunk) = match_row!(degree_table, matched_row, matched_row_ref, false).await {
+                    if let Some(chunk) =
+                        match_row!(degree_table, matched_row, matched_row_ref, false).await
+                    {
                         yield chunk;
                     }
                 }
@@ -1138,7 +1140,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     chunk_opt = Some(chunk);
                 }
             }
-
         } else {
             // check if need state cleaning
             for (column_idx, watermark) in useful_state_clean_columns {
@@ -1206,9 +1207,9 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
 
 #[cfg(test)]
 mod tests {
-    use pretty_assertions::assert_eq;
     use std::sync::atomic::AtomicU64;
 
+    use pretty_assertions::assert_eq;
     use risingwave_common::array::*;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, TableId};
     use risingwave_common::hash::{Key128, Key64};

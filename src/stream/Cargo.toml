@@ -81,12 +81,12 @@ workspace-hack = { path = "../workspace-hack" }
 assert_matches = "1"
 criterion = { workspace = true, features = ["async_tokio", "async"] }
 expect-test = "1"
+pretty_assertions = "1"
 risingwave_expr_impl = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
 risingwave_hummock_test = { path = "../storage/hummock_test", features = [
   "test",
 ] }
-pretty_assertions = "1"
 serde_yaml = "0.9"
 tracing-test = "0.2"
 
