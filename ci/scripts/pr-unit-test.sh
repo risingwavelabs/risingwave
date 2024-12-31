@@ -4,5 +4,4 @@
 set -euo pipefail
 
 source ci/scripts/common.sh
-source ci/scripts/pr.env.sh
 ./ci/scripts/run-unit-test.sh
