@@ -101,6 +101,8 @@ pub type F32 = ordered_float::OrderedFloat<f32>;
 /// A 64-bit floating point type with total order.
 pub type F64 = ordered_float::OrderedFloat<f64>;
 
+pub type DataType = DataTypeGeneric<()>;
+
 /// The set of datatypes that are supported in RisingWave.
 ///
 /// # Trait implementations
@@ -116,7 +118,7 @@ pub type F64 = ordered_float::OrderedFloat<f64>;
 #[strum_discriminants(name(DataTypeName))]
 #[strum_discriminants(vis(pub))]
 #[cfg_attr(test, strum_discriminants(derive(strum_macros::EnumIter)))]
-pub enum DataType {
+pub enum DataTypeGeneric<T> {
     #[display("boolean")]
     #[from_str(regex = "(?i)^bool$|^boolean$")]
     Boolean,
@@ -158,7 +160,7 @@ pub enum DataType {
     Interval,
     #[display("{0}")]
     #[from_str(regex = "(?i)^(?P<0>.+)$")]
-    Struct(StructType),
+    Struct(StructType<T>),
     #[display("{0}[]")]
     #[from_str(regex = r"(?i)^(?P<0>.+)\[\]$")]
     List(Box<DataType>),

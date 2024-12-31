@@ -24,9 +24,9 @@ use crate::util::iter_util::{ZipEqDebug, ZipEqFast};
 
 /// A cheaply cloneable struct type.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct StructType(Arc<StructTypeInner>);
+pub struct StructType<T = ()>(Arc<StructTypeInner>, std::marker::PhantomData<T>);
 
-impl Debug for StructType {
+impl<T> Debug for StructType<T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("StructType")
             .field("field_names", &self.0.field_names)
@@ -56,27 +56,36 @@ impl StructType {
             field_names.push(name.into());
             field_types.push(ty);
         }
-        Self(Arc::new(StructTypeInner {
-            field_types: field_types.into(),
-            field_names: field_names.into(),
-        }))
+        Self(
+            Arc::new(StructTypeInner {
+                field_types: field_types.into(),
+                field_names: field_names.into(),
+            }),
+            std::marker::PhantomData,
+        )
     }
 
     /// Creates a struct type with no fields.
     #[cfg(test)]
     pub fn empty() -> Self {
-        Self(Arc::new(StructTypeInner {
-            field_types: Box::new([]),
-            field_names: Box::new([]),
-        }))
+        Self(
+            Arc::new(StructTypeInner {
+                field_types: Box::new([]),
+                field_names: Box::new([]),
+            }),
+            std::marker::PhantomData,
+        )
     }
 
     /// Creates a struct type with unnamed fields.
     pub fn unnamed(fields: Vec<DataType>) -> Self {
-        Self(Arc::new(StructTypeInner {
-            field_types: fields.into(),
-            field_names: Box::new([]),
-        }))
+        Self(
+            Arc::new(StructTypeInner {
+                field_types: fields.into(),
+                field_names: Box::new([]),
+            }),
+            std::marker::PhantomData,
+        )
     }
 
     /// Returns the number of fields.
@@ -161,9 +170,12 @@ impl FromStr for StructType {
             field_names.push(field_name.to_owned());
             field_types.push(DataType::from_str(field_type)?);
         }
-        Ok(Self(Arc::new(StructTypeInner {
-            field_types: field_types.into(),
-            field_names: field_names.into(),
-        })))
+        Ok(Self(
+            Arc::new(StructTypeInner {
+                field_types: field_types.into(),
+                field_names: field_names.into(),
+            }),
+            std::marker::PhantomData,
+        ))
     }
 }
