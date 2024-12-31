@@ -22,20 +22,10 @@ select count(*) from opentelemetry_test;
 ----
 1
 
-query TTIITTT
-select (any_value).string_value, (any_value).bool_value, (any_value).int_value, (any_value).double_value, (any_value).array_value, (any_value).kvlist_value, (any_value).bytes_value from opentelemetry_test ;
+query TTT
+select any_value, key_value_list, instrumentation_scope from opentelemetry_test;
 ----
-example f 0 0 {} {} \x
-
-query T
-select key_value_list from opentelemetry_test;
-----
-{"values": [{"key": "key1", "value": {"stringValue": "value1"}}, {"key": "key2", "value": {"intValue": "42"}}]}
-
-query TTTI
-select (instrumentation_scope).name, (instrumentation_scope).version, (instrumentation_scope).attributes, (instrumentation_scope).dropped_attributes_count from opentelemetry_test;
-----
-test-scope 1.0 {} 0
+{"stringValue": "example"} {"values": [{"key": "key1", "value": {"stringValue": "value1"}}, {"key": "key2", "value": {"intValue": "42"}}]} (test-scope,1.0,{},0)
 
 # ==== clean up ====
 
