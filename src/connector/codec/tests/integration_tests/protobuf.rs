@@ -456,7 +456,7 @@ fn test_any_schema() -> anyhow::Result<()> {
         expect![[r#"
             [
                 id(#1): Int32,
-                any_value(#4): Jsonb, type_name: google.protobuf.Any, field_descs: [type_url(#2): Varchar, value(#3): Bytea],
+                any_value(#2): Jsonb,
             ]"#]],
         expect![[r#"
             Owned(Int32(12345))
@@ -607,14 +607,14 @@ fn test_all_types() -> anyhow::Result<()> {
                     seconds: Int64,
                     nanos: Int32,
                 }, type_name: google.protobuf.Duration, field_descs: [seconds(#30): Int64, nanos(#31): Int32],
-                any_field(#35): Jsonb, type_name: google.protobuf.Any, field_descs: [type_url(#33): Varchar, value(#34): Bytea],
-                int32_value_field(#37): Struct { value: Int32 }, type_name: google.protobuf.Int32Value, field_descs: [value(#36): Int32],
-                string_value_field(#39): Struct { value: Varchar }, type_name: google.protobuf.StringValue, field_descs: [value(#38): Varchar],
-                map_struct_field(#44): Map(Varchar,Struct { id: Int32, name: Varchar }), type_name: all_types.AllTypes.MapStructFieldEntry, field_descs: [key(#40): Varchar, value(#43): Struct {
+                any_field(#33): Jsonb,
+                int32_value_field(#35): Struct { value: Int32 }, type_name: google.protobuf.Int32Value, field_descs: [value(#34): Int32],
+                string_value_field(#37): Struct { value: Varchar }, type_name: google.protobuf.StringValue, field_descs: [value(#36): Varchar],
+                map_struct_field(#42): Map(Varchar,Struct { id: Int32, name: Varchar }), type_name: all_types.AllTypes.MapStructFieldEntry, field_descs: [key(#38): Varchar, value(#41): Struct {
                     id: Int32,
                     name: Varchar,
-                }, type_name: all_types.AllTypes.NestedMessage, field_descs: [id(#41): Int32, name(#42): Varchar]],
-                map_enum_field(#47): Map(Int32,Varchar), type_name: all_types.AllTypes.MapEnumFieldEntry, field_descs: [key(#45): Int32, value(#46): Varchar],
+                }, type_name: all_types.AllTypes.NestedMessage, field_descs: [id(#39): Int32, name(#40): Varchar]],
+                map_enum_field(#45): Map(Int32,Varchar), type_name: all_types.AllTypes.MapEnumFieldEntry, field_descs: [key(#43): Int32, value(#44): Varchar],
             ]"#]],
         expect![[r#"
             Owned(Float64(OrderedFloat(1.2345)))
