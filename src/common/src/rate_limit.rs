@@ -150,17 +150,15 @@ impl<T> RateLimiterTraitExt for T
 where
     T: RateLimiterTrait + Sized,
 {
-    fn wait(&self, quota: u64) -> impl Future<Output = ()> + Send {
-        async move {
-            loop {
-                match self.check(quota) {
-                    Check::Ok => return,
-                    Check::Retry(duration) => {
-                        tokio::time::sleep(duration).await;
-                    }
-                    Check::RetryAfter(rx) => {
-                        let _ = rx.await;
-                    }
+    async fn wait(&self, quota: u64) {
+        loop {
+            match self.check(quota) {
+                Check::Ok => return,
+                Check::Retry(duration) => {
+                    tokio::time::sleep(duration).await;
+                }
+                Check::RetryAfter(rx) => {
+                    let _ = rx.await;
                 }
             }
         }
