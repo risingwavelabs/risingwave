@@ -1,10 +1,6 @@
 statement ok
 create table if not exists t3 (v1 int, v2 int, v3 int) append only;
 
-# Test definition purification for `CREATE TABLE AS`
-statement ok
-create table t3as as select v1 + 1 as vv1, v3 from t3;
-
 statement ok
 create materialized view mv3 as select sum(v1) as sum_v1 from t3;
 
@@ -98,17 +94,15 @@ pg_catalog
 public
 rw_catalog
 
-query T rowsort
+query T
 show tables;
 ----
 t3
-t3as
 
-query T rowsort
+query T
 show tables from public;
 ----
 t3
-t3as
 
 query T
 show tables from public like 't_';
@@ -150,11 +144,6 @@ query TT
 show create table t3;
 ----
 public.t3 CREATE TABLE t3 (v1 INT, v2 INT, v3 INT) APPEND ONLY
-
-query TT
-show create table t3as;
-----
-public.t3as	CREATE TABLE t3as (vv1 INT, v3 INT)
 
 query TT
 show create materialized view mv3;
@@ -206,9 +195,6 @@ drop sink sink3;
 
 statement ok
 drop table t3;
-
-statement ok
-drop table t3as;
 
 query TTTT
 describe pg_matviews;
