@@ -87,7 +87,7 @@ impl SingleNodeOpts {
 #[derive(Eq, PartialOrd, PartialEq, Debug, Clone, Parser)]
 pub struct NodeSpecificOpts {
     // ------- Compute Node Options -------
-    /// Total available memory for the compute node in bytes. Used by both computing and storage.
+    /// Total available memory for all the nodes
     #[clap(long)]
     pub total_memory_bytes: Option<usize>,
 
@@ -210,19 +210,20 @@ pub fn map_single_node_opts_to_standalone_opts(opts: SingleNodeOpts) -> ParsedSt
     compactor_opts.meta_address = meta_addr.parse().unwrap();
 
     // Allocate memory for each node
-    let system_total_mem = system_memory_available_bytes();
-    frontend_opts.frontend_total_memory_bytes = memory_for_frontend(system_total_mem);
-    compactor_opts.compactor_total_memory_bytes = memory_for_compactor(system_total_mem);
-    compute_opts.total_memory_bytes = system_total_mem
-        - memory_for_frontend(system_total_mem)
-        - memory_for_compactor(system_total_mem);
+    let total_memory_bytes = if let Some(total_memory_bytes) = opts.node_opts.total_memory_bytes {
+        total_memory_bytes
+    } else {
+        system_memory_available_bytes()
+    };
+    frontend_opts.frontend_total_memory_bytes = memory_for_frontend(total_memory_bytes);
+    compactor_opts.compactor_total_memory_bytes = memory_for_compactor(total_memory_bytes);
+    compute_opts.total_memory_bytes = total_memory_bytes
+        - memory_for_frontend(total_memory_bytes)
+        - memory_for_compactor(total_memory_bytes);
     compute_opts.memory_manager_target_bytes =
-        Some(gradient_reserve_memory_bytes(system_total_mem));
+        Some(gradient_reserve_memory_bytes(total_memory_bytes));
 
     // Apply node-specific options
-    if let Some(total_memory_bytes) = opts.node_opts.total_memory_bytes {
-        compute_opts.total_memory_bytes = total_memory_bytes;
-    }
     if let Some(parallelism) = opts.node_opts.parallelism {
         compute_opts.parallelism = parallelism;
     }
