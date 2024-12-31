@@ -65,19 +65,20 @@ pub fn stream_enforce_eowc_requirement(
     emit_on_window_close: bool,
 ) -> Result<PlanRef> {
     if emit_on_window_close && !plan.emit_on_window_close() {
-        let watermark_cols = plan.watermark_columns();
-        let n_watermark_cols = watermark_cols.count_ones(..);
-        if n_watermark_cols == 0 {
+        let watermark_groups = plan.watermark_columns().grouped();
+        let n_watermark_groups = watermark_groups.len();
+        if n_watermark_groups == 0 {
             Err(ErrorCode::NotSupported(
                 "The query cannot be executed in Emit-On-Window-Close mode.".to_owned(),
                 "Try define a watermark column in the source, or avoid aggregation without GROUP BY".to_owned(),
             )
             .into())
         } else {
-            let watermark_col_idx = watermark_cols.ones().next().unwrap();
-            if n_watermark_cols > 1 {
+            let first_watermark_group = watermark_groups.iter().next().unwrap().1;
+            let watermark_col_idx = first_watermark_group.indices().next().unwrap();
+            if n_watermark_groups > 1 {
                 ctx.warn_to_user(format!(
-                    "There are multiple watermark columns in the query, the first one `{}` is used.",
+                    "There are multiple unrelated watermark columns in the query, the first one `{}` is used.",
                     FieldDisplay(&plan.schema()[watermark_col_idx])
                 ));
             }
