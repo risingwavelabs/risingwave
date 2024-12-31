@@ -21,7 +21,7 @@ use crate::error::Result;
 use crate::utils::data_type::DataTypeToAst as _;
 
 /// Try to restore missing column definitions and constraints in the persisted table (or source)
-/// definition, if the schemais derived from external systems (like schema registry) or it's
+/// definition, if the schema is derived from external systems (like schema registry) or it's
 /// created by `CREATE TABLE AS`.
 ///
 /// Returns error if restoring failed, or the persisted definition is invalid.
