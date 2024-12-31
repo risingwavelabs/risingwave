@@ -28,7 +28,7 @@ use iceberg::io::{
 use iceberg::{Error, ErrorKind};
 use itertools::Itertools;
 use opendal::layers::{LoggingLayer, RetryLayer};
-use opendal::services::S3;
+use opendal::services::{Gcs, S3};
 use opendal::Operator;
 use parquet::arrow::async_reader::AsyncFileReader;
 use parquet::arrow::{parquet_to_arrow_schema, ParquetRecordBatchStreamBuilder, ProjectionMask};
@@ -127,7 +127,25 @@ pub fn new_s3_operator(
     Ok(op)
 }
 
-pub fn extract_bucket_and_file_name(location: &str) -> ConnectorResult<(String, String)> {
+pub fn new_gcs_operator(
+    credential: String,
+    service_account: String,
+    bucket: String,
+) -> ConnectorResult<Operator> {
+    // Create gcs builder.
+    let builder = Gcs::default()
+        .bucket(&bucket)
+        .credential(&credential)
+        .service_account(&service_account);
+
+    let operator: Operator = Operator::new(builder)?
+        .layer(LoggingLayer::default())
+        .layer(RetryLayer::default())
+        .finish();
+    Ok(operator)
+}
+
+pub fn extract_s3_bucket_and_file_name(location: &str) -> ConnectorResult<(String, String)> {
     let url = Url::parse(location)?;
     let bucket = url
         .host_str()
@@ -143,29 +161,46 @@ pub fn extract_bucket_and_file_name(location: &str) -> ConnectorResult<(String, 
     Ok((bucket, file_name))
 }
 
-pub async fn list_s3_directory(
-    s3_region: String,
-    s3_access_key: String,
-    s3_secret_key: String,
-    dir: String,
-) -> Result<Vec<String>, anyhow::Error> {
-    let (bucket, file_name) = extract_bucket_and_file_name(&dir)?;
+pub fn extract_gcs_bucket_and_file_name(location: &str) -> ConnectorResult<(String, String)> {
+    let url = Url::parse(location)?;
+    let bucket = url
+        .host_str()
+        .ok_or_else(|| {
+            Error::new(
+                ErrorKind::DataInvalid,
+                format!("Invalid gcs url: {}, missing bucket", location),
+            )
+        })?
+        .to_owned();
+    let prefix = format!("gcs://{}/", bucket);
+    let file_name = location[prefix.len()..].to_string();
+    Ok((bucket, file_name))
+}
+
+pub async fn list_gcs_directory(op: Operator, dir: String) -> Result<Vec<String>, anyhow::Error> {
+    let (bucket, file_name) = extract_gcs_bucket_and_file_name(&dir)?;
+    let prefix = format!("gcs://{}/", bucket);
+    if dir.starts_with(&prefix) {
+        op.list(&file_name)
+            .await
+            .map_err(|e| anyhow!(e))
+            .map(|list| {
+                list.into_iter()
+                    .map(|entry| prefix.clone() + entry.path())
+                    .collect()
+            })
+    } else {
+        Err(Error::new(
+            ErrorKind::DataInvalid,
+            format!("Invalid gcs url: {}, should start with {}", dir, prefix),
+        ))?
+    }
+}
+
+pub async fn list_s3_directory(op: Operator, dir: String) -> Result<Vec<String>, anyhow::Error> {
+    let (bucket, file_name) = extract_s3_bucket_and_file_name(&dir)?;
     let prefix = format!("s3://{}/", bucket);
     if dir.starts_with(&prefix) {
-        let mut builder = S3::default();
-        builder = builder
-            .region(&s3_region)
-            .access_key_id(&s3_access_key)
-            .secret_access_key(&s3_secret_key)
-            .bucket(&bucket);
-        builder = builder.endpoint(&format!(
-            "https://{}.s3.{}.amazonaws.com",
-            bucket, s3_region
-        ));
-        let op = Operator::new(builder)?
-            .layer(RetryLayer::default())
-            .finish();
-
         op.list(&file_name)
             .await
             .map_err(|e| anyhow!(e))

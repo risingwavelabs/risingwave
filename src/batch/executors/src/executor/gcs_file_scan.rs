@@ -17,10 +17,10 @@ use futures_util::stream::StreamExt;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_connector::source::iceberg::{
-    extract_s3_bucket_and_file_name, new_s3_operator, read_parquet_file,
+    extract_gcs_bucket_and_file_name, extract_s3_bucket_and_file_name, new_gcs_operator,
+    read_parquet_file,
 };
 use risingwave_pb::batch_plan::file_scan_node;
-use risingwave_pb::batch_plan::file_scan_node::StorageType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::error::BatchError;
@@ -31,19 +31,18 @@ pub enum FileFormat {
     Parquet,
 }
 
-/// S3 file scan executor. Currently only support parquet file format.
-pub struct S3FileScanExecutor {
+/// Gcs file scan executor. Currently only support parquet file format.
+pub struct GcsFileScanExecutor {
     file_format: FileFormat,
     file_location: Vec<String>,
-    s3_region: String,
-    s3_access_key: String,
-    s3_secret_key: String,
+    gcs_credential: String,
+    service_account: String,
     batch_size: usize,
     schema: Schema,
     identity: String,
 }
 
-impl Executor for S3FileScanExecutor {
+impl Executor for GcsFileScanExecutor {
     fn schema(&self) -> &risingwave_common::catalog::Schema {
         &self.schema
     }
@@ -57,13 +56,12 @@ impl Executor for S3FileScanExecutor {
     }
 }
 
-impl S3FileScanExecutor {
+impl GcsFileScanExecutor {
     pub fn new(
         file_format: FileFormat,
         file_location: Vec<String>,
-        s3_region: String,
-        s3_access_key: String,
-        s3_secret_key: String,
+        gcs_credential: String,
+        service_account: String,
         batch_size: usize,
         schema: Schema,
         identity: String,
@@ -71,9 +69,8 @@ impl S3FileScanExecutor {
         Self {
             file_format,
             file_location,
-            s3_region,
-            s3_access_key,
-            s3_secret_key,
+            gcs_credential,
+            service_account,
             batch_size,
             schema,
             identity,
@@ -84,11 +81,10 @@ impl S3FileScanExecutor {
     async fn do_execute(self: Box<Self>) {
         assert_eq!(self.file_format, FileFormat::Parquet);
         for file in self.file_location {
-            let (bucket, file_name) = extract_s3_bucket_and_file_name(&file)?;
-            let op = new_s3_operator(
-                self.s3_region.clone(),
-                self.s3_access_key.clone(),
-                self.s3_secret_key.clone(),
+            let (bucket, file_name) = extract_gcs_bucket_and_file_name(&file)?;
+            let op = new_gcs_operator(
+                self.gcs_credential.clone(),
+                self.service_account.clone(),
                 bucket.clone(),
             )?;
             let chunk_stream =
@@ -103,29 +99,26 @@ impl S3FileScanExecutor {
     }
 }
 
-pub struct FileScanExecutorBuilder {}
+pub struct GcsFileScanExecutorBuilder {}
 
-impl BoxedExecutorBuilder for FileScanExecutorBuilder {
+impl BoxedExecutorBuilder for GcsFileScanExecutorBuilder {
     async fn new_boxed_executor(
         source: &ExecutorBuilder<'_>,
         _inputs: Vec<BoxedExecutor>,
     ) -> crate::error::Result<BoxedExecutor> {
         let file_scan_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
-            NodeBody::FileScan
+            NodeBody::GcsFileScan
         )?;
 
-        assert_eq!(file_scan_node.storage_type, StorageType::S3 as i32);
-
-        Ok(Box::new(S3FileScanExecutor::new(
+        Ok(Box::new(GcsFileScanExecutor::new(
             match file_scan_node::FileFormat::try_from(file_scan_node.file_format).unwrap() {
                 file_scan_node::FileFormat::Parquet => FileFormat::Parquet,
                 file_scan_node::FileFormat::Unspecified => unreachable!(),
             },
             file_scan_node.file_location.clone(),
-            file_scan_node.s3_region.clone(),
-            file_scan_node.s3_access_key.clone(),
-            file_scan_node.s3_secret_key.clone(),
+            file_scan_node.credential.clone(),
+            file_scan_node.service_account.clone(),
             source.context().get_config().developer.chunk_size,
             Schema::from_iter(file_scan_node.columns.iter().map(Field::from)),
             source.plan_node().get_identity().clone(),
