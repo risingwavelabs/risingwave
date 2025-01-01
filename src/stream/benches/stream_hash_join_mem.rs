@@ -60,8 +60,11 @@ async fn main() {
         let _profiler = dhat::Profiler::new_heap();
 
         handle_streams(workload, join_type, amp, tx_l, tx_r, out).await;
-        let stats = dhat::HeapStats::get();
-        println!("max_blocks: {}", stats.max_blocks);
-        println!("max_bytes: {}", stats.max_bytes);
+        #[cfg(feature = "dhat-heap")]
+        {
+            let stats = dhat::HeapStats::get();
+            println!("max_blocks: {}", stats.max_blocks);
+            println!("max_bytes: {}", stats.max_bytes);
+        }
     }
 }
