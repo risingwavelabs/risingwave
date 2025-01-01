@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
+
 use risingwave_common::bail;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_connector_codec::decoder::avro::MapHandling;
@@ -21,6 +23,7 @@ use super::utils::get_kafka_topic;
 use super::{DebeziumProps, TimestamptzHandling};
 use crate::connector_common::AwsAuthProps;
 use crate::error::ConnectorResult;
+use crate::parser::PROTOBUF_MESSAGES_AS_JSONB;
 use crate::schema::schema_registry::SchemaRegistryAuth;
 use crate::schema::AWS_GLUE_SCHEMA_ARN_KEY;
 use crate::source::{extract_source_struct, SourceColumnDesc, SourceEncode, SourceFormat};
@@ -102,8 +105,12 @@ impl SpecificParserConfig {
         let format_encode_options_with_secret = LocalSecretManager::global()
             .fill_secrets(info.format_encode_options, info.format_encode_secret_refs)?;
         let (options, secret_refs) = with_properties.clone().into_parts();
+        // Make sure `with_properties` is no longer used by accident.
+        // All reads shall go to `options_with_secret` instead.
+        #[expect(unused_variables)]
+        let with_properties = ();
         let options_with_secret =
-            LocalSecretManager::global().fill_secrets(options.clone(), secret_refs.clone())?;
+            LocalSecretManager::global().fill_secrets(options, secret_refs)?;
         let format = source_struct.format;
         let encode = source_struct.encode;
         // this transformation is needed since there may be config for the protocol
@@ -165,7 +172,7 @@ impl SpecificParserConfig {
                         client_config: SchemaRegistryAuth::from(&format_encode_options_with_secret),
                         name_strategy: PbSchemaRegistryNameStrategy::try_from(info.name_strategy)
                             .unwrap(),
-                        topic: get_kafka_topic(with_properties)?.clone(),
+                        topic: get_kafka_topic(&options_with_secret)?.clone(),
                     }
                 } else {
                     SchemaLocation::File {
@@ -186,6 +193,15 @@ impl SpecificParserConfig {
                 if info.row_schema_location.is_empty() {
                     bail!("protobuf file location not provided");
                 }
+                let mut messages_as_jsonb = if let Some(messages_as_jsonb) =
+                    format_encode_options_with_secret.get(PROTOBUF_MESSAGES_AS_JSONB)
+                {
+                    messages_as_jsonb.split(',').map(|s| s.to_owned()).collect()
+                } else {
+                    HashSet::new()
+                };
+                messages_as_jsonb.insert("google.protobuf.Any".to_owned());
+
                 let mut config = ProtobufProperties {
                     message_name: info.proto_message_name.clone(),
                     use_schema_registry: info.use_schema_registry,
@@ -193,6 +209,7 @@ impl SpecificParserConfig {
                     name_strategy: PbSchemaRegistryNameStrategy::try_from(info.name_strategy)
                         .unwrap(),
                     key_message_name: info.key_message_name.clone(),
+                    messages_as_jsonb,
                     ..Default::default()
                 };
                 if format == SourceFormat::Upsert {
@@ -228,7 +245,7 @@ impl SpecificParserConfig {
                         client_config: SchemaRegistryAuth::from(&format_encode_options_with_secret),
                         name_strategy: PbSchemaRegistryNameStrategy::try_from(info.name_strategy)
                             .unwrap(),
-                        topic: get_kafka_topic(with_properties).unwrap().clone(),
+                        topic: get_kafka_topic(&options_with_secret).unwrap().clone(),
                     },
                     ..Default::default()
                 })
@@ -322,6 +339,7 @@ pub struct ProtobufProperties {
     pub topic: String,
     pub key_message_name: Option<String>,
     pub name_strategy: PbSchemaRegistryNameStrategy,
+    pub messages_as_jsonb: HashSet<String>,
 }
 
 #[derive(Debug, Default, Clone, Copy)]
