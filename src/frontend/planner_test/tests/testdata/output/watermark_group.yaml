@@ -140,3 +140,30 @@
             └─StreamProject { exprs: [(t.foo + 1:Int32) as $expr2, TumbleStart(t.ts, '00:10:00':Interval) as $expr3, t._row_id], output_watermarks: [[$expr3]] }
               └─StreamShare { id: 1 }
                 └─StreamTableScan { table: t, columns: [t.foo, t.ts, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- name: group by tumble window_start + window_end
+  sql: |
+    create table t (
+      foo int,
+      ts timestamp,
+      watermark for ts as ts - interval '5 minutes'
+    ) append only;
+    select
+      window_start, window_end, count(foo) as count
+    from tumble(t, ts, interval '1 hour')
+    group by window_start, window_end;
+  stream_plan: |-
+    StreamMaterialize { columns: [window_start, window_end, count], stream_key: [window_start, window_end], pk_columns: [window_start, window_end], pk_conflict: NoCheck, watermark_columns: [window_start, window_end] }
+    └─StreamProject { exprs: [$expr1, $expr2, count(t.foo)], output_watermarks: [[$expr1, $expr2]] }
+      └─StreamHashAgg [append_only] { group_key: [$expr1, $expr2], aggs: [count(t.foo), count], output_watermarks: [[$expr1, $expr2]] }
+        └─StreamExchange { dist: HashShard($expr1, $expr2) }
+          └─StreamProject { exprs: [$expr1, ($expr1 + '01:00:00':Interval) as $expr2, t.foo, t._row_id], output_watermarks: [[$expr1, $expr2]] }
+            └─StreamProject { exprs: [t.foo, t.ts, TumbleStart(t.ts, '01:00:00':Interval) as $expr1, t._row_id], output_watermarks: [[t.ts, $expr1]] }
+              └─StreamTableScan { table: t, columns: [t.foo, t.ts, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+  eowc_stream_plan: |-
+    StreamMaterialize { columns: [window_start, window_end, count], stream_key: [window_start, window_end], pk_columns: [window_start, window_end], pk_conflict: NoCheck, watermark_columns: [window_start] }
+    └─StreamProject { exprs: [$expr1, $expr2, count(t.foo)], output_watermarks: [[$expr1]] }
+      └─StreamHashAgg [append_only, eowc] { group_key: [$expr1, $expr2], aggs: [count(t.foo), count], output_watermarks: [[$expr1]] }
+        └─StreamExchange { dist: HashShard($expr1, $expr2) }
+          └─StreamProject { exprs: [$expr1, ($expr1 + '01:00:00':Interval) as $expr2, t.foo, t._row_id], output_watermarks: [[$expr1, $expr2]] }
+            └─StreamProject { exprs: [t.foo, t.ts, TumbleStart(t.ts, '01:00:00':Interval) as $expr1, t._row_id], output_watermarks: [[t.ts, $expr1]] }
+              └─StreamTableScan { table: t, columns: [t.foo, t.ts, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
