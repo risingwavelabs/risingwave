@@ -97,6 +97,7 @@ async fn get_new_table_plan(
         .map(|c| c.into())
         .collect_vec();
     let table_name = ObjectName::from(vec![table_name.as_str().into()]);
+
     let (new_table_definition, original_catalog) =
         get_new_table_definition_for_cdc_table(&session, table_name.clone(), &new_version_columns)
             .await?;
