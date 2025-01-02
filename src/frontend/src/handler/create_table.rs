@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -520,7 +520,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
     let session = &handler_args.session;
     let with_properties = bind_connector_props(&handler_args, &format_encode, false)?;
 
-    let db_name: &str = session.database();
+    let db_name: &str = &session.database();
     let (schema_name, _) = Binder::resolve_schema_qualified_name(db_name, table_name.clone())?;
 
     let (columns_from_resolve_source, source_info) = bind_columns_from_source(
@@ -632,7 +632,7 @@ pub(crate) fn gen_create_table_plan_without_source(
     )?;
     let session = context.session_ctx().clone();
 
-    let db_name = session.database();
+    let db_name = &session.database();
     let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
 
     let info = CreateTableInfo {
@@ -1096,8 +1096,8 @@ pub(super) async fn handle_create_table_plan(
             )?;
 
             let session = &handler_args.session;
-            let db_name = session.database();
-            let user_name = &session.auth_context().user_name;
+            let db_name = &session.database();
+            let user_name = &session.user_name();
             let search_path = session.config().search_path();
             let (schema_name, resolved_table_name) =
                 Binder::resolve_schema_qualified_name(db_name, table_name.clone())?;
@@ -1921,7 +1921,7 @@ fn get_source_and_resolved_table_name(
     cdc_table: CdcTableInfo,
     table_name: ObjectName,
 ) -> Result<(Arc<SourceCatalog>, String, DatabaseId, SchemaId)> {
-    let db_name = session.database();
+    let db_name = &session.database();
     let (schema_name, resolved_table_name) =
         Binder::resolve_schema_qualified_name(db_name, table_name)?;
     let (database_id, schema_id) =
@@ -1965,7 +1965,7 @@ fn bind_webhook_info(
     } = webhook_info;
 
     // validate secret_ref
-    let db_name = session.database();
+    let db_name = &session.database();
     let (schema_name, secret_name) =
         Binder::resolve_schema_qualified_name(db_name, secret_ref.secret_name.clone())?;
     let secret_catalog = session.get_secret_by_name(schema_name, &secret_name)?;

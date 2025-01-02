@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -31,7 +31,7 @@ pub fn create_subscription_catalog(
     context: OptimizerContextRef,
     stmt: CreateSubscriptionStatement,
 ) -> Result<SubscriptionCatalog> {
-    let db_name = session.database();
+    let db_name = &session.database();
     let (subscription_schema_name, subscription_name) =
         Binder::resolve_schema_qualified_name(db_name, stmt.subscription_name.clone())?;
     let (table_schema_name, subscription_from_table_name) =

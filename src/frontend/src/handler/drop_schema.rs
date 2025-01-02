@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -41,7 +41,7 @@ pub async fn handle_drop_schema(
 
     let schema = {
         let reader = catalog_reader.read_guard();
-        match reader.get_schema_by_name(session.database(), &schema_name) {
+        match reader.get_schema_by_name(&session.database(), &schema_name) {
             Ok(schema) => schema.clone(),
             Err(err) => {
                 // If `if_exist` is true, not return error.

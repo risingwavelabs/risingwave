@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -95,10 +95,8 @@ pub struct MetaMetrics {
     // ********************************** Hummock ************************************
     /// Max committed epoch
     pub max_committed_epoch: IntGauge,
-    /// The smallest epoch that has not been `GCed`.
-    pub safe_epoch: IntGauge,
-    /// The smallest epoch that is being pinned.
-    pub min_pinned_epoch: IntGauge,
+    /// Min committed epoch
+    pub min_committed_epoch: IntGauge,
     /// The number of SSTs in each level
     pub level_sst_num: IntGaugeVec,
     /// The number of SSTs to be merged to next level in each level
@@ -309,13 +307,9 @@ impl MetaMetrics {
         )
         .unwrap();
 
-        let safe_epoch =
-            register_int_gauge_with_registry!("storage_safe_epoch", "safe epoch", registry)
-                .unwrap();
-
-        let min_pinned_epoch = register_int_gauge_with_registry!(
-            "storage_min_pinned_epoch",
-            "min pinned epoch",
+        let min_committed_epoch = register_int_gauge_with_registry!(
+            "storage_min_committed_epoch",
+            "min committed epoch",
             registry
         )
         .unwrap();
@@ -794,8 +788,7 @@ impl MetaMetrics {
             recovery_latency,
 
             max_committed_epoch,
-            safe_epoch,
-            min_pinned_epoch,
+            min_committed_epoch,
             level_sst_num,
             level_compact_cnt,
             compact_frequency,

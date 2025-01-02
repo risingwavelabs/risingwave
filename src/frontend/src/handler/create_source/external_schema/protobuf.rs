@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,6 +11,8 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
+use risingwave_connector::parser::PROTOBUF_MESSAGES_AS_JSONB;
 
 use super::*;
 
@@ -32,6 +34,7 @@ pub async fn extract_protobuf_table_schema(
     let parser_config = SpecificParserConfig::new(&info, with_properties)?;
     try_consume_string_from_options(format_encode_options, SCHEMA_REGISTRY_USERNAME);
     try_consume_string_from_options(format_encode_options, SCHEMA_REGISTRY_PASSWORD);
+    try_consume_string_from_options(format_encode_options, PROTOBUF_MESSAGES_AS_JSONB);
     consume_aws_config_from_options(format_encode_options);
 
     let conf = ProtobufParserConfig::new(parser_config.encoding_config).await?;
