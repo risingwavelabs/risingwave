@@ -20,7 +20,7 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_pb::stream_service::barrier_complete_response::PbCreateMviewProgress;
 
 use super::LocalBarrierManager;
-use crate::executor::ActorContextRef;
+use crate::executor::{ActorContext, ActorContextRef};
 use crate::task::barrier_manager::managed_state::DatabaseManagedBarrierState;
 use crate::task::barrier_manager::LocalBarrierEvent::ReportCreateProgress;
 use crate::task::{ActorId, FragmentId};
@@ -176,7 +176,7 @@ pub struct CreateMviewProgressReporter {
     // /// The id of the actor containing the backfill executors.
     // backfill_actor_id: ActorId,
     state: Option<BackfillState>,
-    vnodes: Option<Bitmap>,
+    vnode_bitmap: Option<Bitmap>,
 
     actor_context: ActorContextRef,
 }
@@ -185,13 +185,13 @@ impl CreateMviewProgressReporter {
     pub fn new(
         barrier_manager: LocalBarrierManager,
         actor_context: ActorContextRef,
-        vnodes: Option<Bitmap>,
+        vnode_bitmap: Option<Bitmap>,
     ) -> Self {
         Self {
             barrier_manager,
             actor_context,
             state: None,
-            vnodes,
+            vnode_bitmap,
         }
     }
 
@@ -211,7 +211,7 @@ impl CreateMviewProgressReporter {
             self.actor_context.id,
             self.actor_context.fragment_id,
             state,
-            self.vnodes.clone(),
+            self.vnode_bitmap.clone(),
         );
     }
 

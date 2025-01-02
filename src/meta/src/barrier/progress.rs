@@ -637,7 +637,10 @@ impl CreateMviewProgressTracker {
         let Some(table_id) = self
             .actor_map
             .get(&actor)
-            .or_else(|| self.fragment_map.get(&fragment))
+            .or_else(|| {
+                // for new created actors
+                self.fragment_map.get(&fragment)
+            })
             .cloned()
         else {
             // On restart, backfill will ALWAYS notify CreateMviewProgressTracker,
