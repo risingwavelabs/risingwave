@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -35,7 +35,7 @@ pub async fn handle_create_view(
     query: Query,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
-    let db_name = session.database();
+    let db_name = &session.database();
     let (schema_name, view_name) = Binder::resolve_schema_qualified_name(db_name, name.clone())?;
 
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;

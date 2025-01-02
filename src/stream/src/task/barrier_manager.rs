@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -417,7 +417,7 @@ impl LocalBarrierWorker {
                         match actor_op {
                             LocalActorOperation::NewControlStream { handle, init_request  } => {
                                 self.control_stream_handle.reset_stream_with_err(Status::internal("control stream has been reset to a new one"));
-                                self.reset(init_request.databases).await;
+                                self.reset(init_request).await;
                                 self.control_stream_handle = handle;
                                 self.control_stream_handle.send_response(streaming_control_stream_response::Response::Init(InitResponse {}));
                             }
@@ -470,7 +470,7 @@ impl LocalBarrierWorker {
                 let database_id = DatabaseId::new(req.database_id);
                 let result: StreamResult<()> = try {
                     let barrier = Barrier::from_protobuf(req.get_barrier().unwrap())?;
-                    self.update_actor_info(database_id, req.broadcast_info.iter().cloned())?;
+                    self.update_actor_info(database_id, req.broadcast_info.iter().cloned());
                     self.send_barrier(&barrier, req)?;
                 };
                 result.map_err(|e| (database_id, e))?;
@@ -904,11 +904,6 @@ impl LocalBarrierWorker {
         );
     }
 
-    /// Reset all internal states.
-    pub(super) fn reset_state(&mut self, initial_partial_graphs: Vec<DatabaseInitialPartialGraph>) {
-        *self = Self::new(self.actor_manager.clone(), initial_partial_graphs);
-    }
-
     /// When some other failure happens (like failed to send barrier), the error is reported using
     /// this function. The control stream will be responded with a message to notify about the error,
     /// and the global barrier worker will later reset and rerun the database.
@@ -1219,6 +1214,7 @@ pub(crate) mod barrier_test_utils {
                         graphs: vec![PbInitialPartialGraph {
                             partial_graph_id: TEST_PARTIAL_GRAPH_ID.into(),
                             subscriptions: vec![],
+                            actor_infos: vec![],
                         }],
                     }],
                 },

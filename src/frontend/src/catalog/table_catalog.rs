@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
 use std::assert_matches::assert_matches;
 use std::collections::{HashMap, HashSet};
 
+use anyhow::Context as _;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{
@@ -30,9 +31,11 @@ use risingwave_pb::catalog::table::{
 use risingwave_pb::catalog::{PbCreateType, PbStreamJobStatus, PbTable, PbWebhookSourceInfo};
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::DefaultColumnDesc;
+use risingwave_sqlparser::ast;
+use risingwave_sqlparser::parser::Parser;
 
 use super::{ColumnId, DatabaseId, FragmentId, OwnedByUserCatalog, SchemaId, SinkId};
-use crate::error::{ErrorCode, RwError};
+use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::ExprImpl;
 use crate::optimizer::property::Cardinality;
 use crate::user::UserId;
@@ -422,9 +425,20 @@ impl TableCatalog {
         )
     }
 
-    /// Returns the SQL statement that can be used to create this table.
+    /// Returns the SQL definition when the table was created.
     pub fn create_sql(&self) -> String {
         self.definition.clone()
+    }
+
+    /// Returns the parsed SQL definition when the table was created.
+    ///
+    /// Returns error if it's invalid.
+    pub fn create_sql_ast(&self) -> Result<ast::Statement> {
+        Ok(Parser::parse_sql(&self.definition)
+            .context("unable to parse definition sql")?
+            .into_iter()
+            .exactly_one()
+            .context("expecting exactly one statement in definition")?)
     }
 
     /// Get a reference to the table catalog's version.

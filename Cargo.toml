@@ -152,10 +152,10 @@ prost-build = { version = "0.13" }
 icelake = { git = "https://github.com/risingwavelabs/icelake.git", rev = "0ec44fa826c91139c9cf459b005741df990ae9da", features = [
     "prometheus",
 ] }
-# branch dev-rebase-main-20241030
-iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "892aaaa00c3378a72cbef59437f9ac717baf9bca", features = ["storage-s3", "storage-gcs"] }
-iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "892aaaa00c3378a72cbef59437f9ac717baf9bca" }
-iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "892aaaa00c3378a72cbef59437f9ac717baf9bca" }
+# branch dev_rebase_main_20241230
+iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "683fb89edeaf8d1baae69e1f376d68b92be1d496", features = ["storage-s3", "storage-gcs"] }
+iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "683fb89edeaf8d1baae69e1f376d68b92be1d496" }
+iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "683fb89edeaf8d1baae69e1f376d68b92be1d496" }
 opendal = "0.49"
 # used only by arrow-udf-flight
 arrow-flight = "53"

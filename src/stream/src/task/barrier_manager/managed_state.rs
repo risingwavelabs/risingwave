@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -525,6 +525,13 @@ impl ManagedBarrierState {
             let database_id = DatabaseId::new(database.database_id);
             assert!(!databases.contains_key(&database_id));
             let shared_context = Arc::new(SharedContext::new(database_id, &actor_manager.env));
+            shared_context.add_actors(
+                database
+                    .graphs
+                    .iter()
+                    .flat_map(|graph| graph.actor_infos.iter())
+                    .cloned(),
+            );
             let state = DatabaseManagedBarrierState::new(
                 database_id,
                 actor_manager.clone(),
