@@ -82,6 +82,7 @@ fi
 if [ "${BUILDKITE_SOURCE}" == "schedule" ]; then
   # If this is a schedule build, tag the image with the date.
   TAG="nightly-${date}"
+  SEMVER_TAG=
   pushGchr "${TAG}"
   pushDockerhub "${TAG}"
   TAG="latest"
