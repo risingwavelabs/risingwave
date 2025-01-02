@@ -10927,6 +10927,7 @@ dependencies = [
  "risingwave_rpc_client",
  "risingwave_storage",
  "serde",
+ "tokio-retry",
  "tracing",
  "workspace-hack",
 ]
@@ -10971,6 +10972,7 @@ dependencies = [
  "tempfile",
  "thiserror-ext",
  "tikv-jemalloc-ctl",
+ "tokio-retry",
  "tokio-stream 0.1.15",
  "tower 0.5.0",
  "tracing",

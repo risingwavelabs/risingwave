@@ -104,7 +104,13 @@ mod test {
         let pb_report = report.to_pb_bytes();
         let url =
             (TELEMETRY_REPORT_URL.to_owned() + "/" + TELEMETRY_COMPUTE_REPORT_TYPE).to_owned();
-        let post_res = post_telemetry_report_pb(&url, pb_report).await;
-        assert!(post_res.is_ok());
+
+        // Retry 3 times to mitigate occasional failures on CI.
+        tokio_retry::Retry::spawn(
+            tokio_retry::strategy::ExponentialBackoff::from_millis(10).take(3),
+            || post_telemetry_report_pb(&url, pb_report.clone()),
+        )
+        .await
+        .unwrap();
     }
 }
