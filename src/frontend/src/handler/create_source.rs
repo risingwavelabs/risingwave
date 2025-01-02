@@ -38,7 +38,7 @@ use risingwave_connector::parser::additional_columns::{
 use risingwave_connector::parser::{
     fetch_json_schema_and_map_to_columns, AvroParserConfig, DebeziumAvroParserConfig,
     ProtobufParserConfig, SchemaLocation, SpecificParserConfig, TimestamptzHandling,
-    DEBEZIUM_IGNORE_KEY,
+    DEBEZIUM_IGNORE_KEY, PROTOBUF_MESSAGES_AS_JSONB,
 };
 use risingwave_connector::schema::schema_registry::{
     name_strategy_from_str, SchemaRegistryAuth, SCHEMA_REGISTRY_PASSWORD, SCHEMA_REGISTRY_USERNAME,
@@ -209,6 +209,7 @@ async fn extract_protobuf_table_schema(
     let parser_config = SpecificParserConfig::new(&info, with_properties)?;
     try_consume_string_from_options(format_encode_options, SCHEMA_REGISTRY_USERNAME);
     try_consume_string_from_options(format_encode_options, SCHEMA_REGISTRY_PASSWORD);
+    try_consume_string_from_options(format_encode_options, PROTOBUF_MESSAGES_AS_JSONB);
     consume_aws_config_from_options(format_encode_options);
 
     let conf = ProtobufParserConfig::new(parser_config.encoding_config).await?;
