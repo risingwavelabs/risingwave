@@ -21,8 +21,7 @@ use mysql_async::prelude::*;
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::types::{DataType, ScalarImpl, StructType};
 use risingwave_connector::source::iceberg::{
-    extract_bucket_and_file_name, get_parquet_fields, list_data_directory, new_gcs_operator,
-    new_s3_operator, FileScanBackend,
+    extract_bucket_and_file_name, get_parquet_fields, list_data_directory, new_azblob_operator, new_gcs_operator, new_s3_operator, FileScanBackend
 };
 pub use risingwave_pb::expr::table_function::PbType as TableFunctionType;
 use risingwave_pb::expr::PbTableFunction;
@@ -135,10 +134,10 @@ impl TableFunction {
             }
 
             if !"s3".eq_ignore_ascii_case(&eval_args[1])
-                && !"gcs".eq_ignore_ascii_case(&eval_args[1])
+                && !"gcs".eq_ignore_ascii_case(&eval_args[1])  && !"azblob".eq_ignore_ascii_case(&eval_args[1])
             {
                 return Err(BindError(
-                    "file_scan function only accepts 's3' or 'gcs' as storage type".to_owned(),
+                    "file_scan function only accepts 's3', 'gcs' or 'azblob' as storage type".to_owned(),
                 )
                 .into());
             }
@@ -156,7 +155,11 @@ impl TableFunction {
                         (FileScanBackend::S3, eval_args[5].clone())
                     } else if "gcs".eq_ignore_ascii_case(&eval_args[1]) {
                         (FileScanBackend::Gcs, eval_args[4].clone())
-                    } else {
+                    }
+                    else if "azblob".eq_ignore_ascii_case(&eval_args[1]) {
+                        (FileScanBackend::Azblob, eval_args[5].clone())
+                    }
+                    else {
                         unreachable!();
                     };
                 let op = match file_scan_backend {
@@ -181,6 +184,17 @@ impl TableFunction {
                             bucket.clone(),
                         )?
                     }
+                    FileScanBackend::Azblob =>{
+                        let (bucket, _) =
+                        extract_bucket_and_file_name(&input_file_location, &file_scan_backend)?;
+
+                    new_azblob_operator(
+                        eval_args[2].clone(),
+                        eval_args[3].clone(),
+                        eval_args[4].clone(),
+                        bucket.clone(),
+                    )?
+                    },
                 };
                 let files = if input_file_location.ends_with('/') {
                     let files = tokio::task::block_in_place(|| {
@@ -237,6 +251,7 @@ impl TableFunction {
                     match file_scan_backend {
                         FileScanBackend::S3 => args.remove(5),
                         FileScanBackend::Gcs => args.remove(4),
+                        FileScanBackend::Azblob => args.remove(5),
                     };
                     for file in files {
                         args.push(ExprImpl::Literal(Box::new(Literal::new(

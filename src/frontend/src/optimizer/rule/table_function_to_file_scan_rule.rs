@@ -60,6 +60,7 @@ impl Rule for TableFunctionToFileScanRule {
             assert!(
                 ("s3".eq_ignore_ascii_case(&eval_args[1]))
                     || "gcs".eq_ignore_ascii_case(&eval_args[1])
+                    || "azblob".eq_ignore_ascii_case(&eval_args[1])
             );
 
             if "s3".eq_ignore_ascii_case(&eval_args[1]) {
@@ -81,19 +82,22 @@ impl Rule for TableFunctionToFileScanRule {
                     )
                     .into(),
                 )
-            } else if "gcs".eq_ignore_ascii_case(&eval_args[1]) {
-                let creditial = eval_args[2].clone();
-                let service_account = eval_args[3].clone();
+            }
+            else if "azblob".eq_ignore_ascii_case(&eval_args[1]) {
+                let account_name = eval_args[2].clone();
+                let account_key = eval_args[3].clone();
+                let endpoint = eval_args[4].clone();
                 // The rest of the arguments are file locations
-                let file_location = eval_args[4..].iter().cloned().collect_vec();
+                let file_location = eval_args[5..].iter().cloned().collect_vec();
                 Some(
-                    LogicalFileScan::new_gcs_logical_file_scan(
+                    LogicalFileScan::new_azblob_logical_file_scan(
                         logical_table_function.ctx(),
                         schema,
                         "parquet".to_owned(),
-                        "gcs".to_owned(),
-                        creditial,
-                        service_account,
+                        "azblob".to_owned(),
+                        account_name,
+                        account_key,
+                        endpoint,
                         file_location,
                     )
                     .into(),

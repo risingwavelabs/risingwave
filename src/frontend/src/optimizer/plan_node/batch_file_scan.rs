@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use pretty_xmlish::XmlNode;
-use risingwave_pb::batch_plan::file_scan_node::{FileFormat, StorageType};
+use risingwave_pb::batch_plan::{file_scan_node::{FileFormat, StorageType}, AzblobFileScanNode};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{FileScanNode, GcsFileScanNode};
 
@@ -107,6 +107,22 @@ impl ToBatchPb for BatchFileScan {
                     credential: gcs_file_scan.creditial.clone(),
                     service_account: gcs_file_scan.service_account.clone(),
                     file_location: gcs_file_scan.file_location.clone(),
+                })
+            }
+            generic::FileScanBackend::AzblobFileScan(azblob_file_scan) => {
+                NodeBody::AzblobFileScan(AzblobFileScanNode {
+                    columns: azblob_file_scan
+                        .columns()
+                        .into_iter()
+                        .map(|col| col.to_protobuf())
+                        .collect(),
+                    file_format: match azblob_file_scan.file_format {
+                        generic::FileFormat::Parquet => FileFormat::Parquet as i32,
+                    },
+                    account_name: azblob_file_scan.account_name.clone(),
+                    account_key: azblob_file_scan.account_key.clone(),
+                    endpoint: azblob_file_scan.endpoint.clone(),
+                    file_location: azblob_file_scan.file_location.clone(),
                 })
             }
         }

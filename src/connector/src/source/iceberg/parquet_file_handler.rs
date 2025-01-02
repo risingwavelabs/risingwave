@@ -27,7 +27,7 @@ use iceberg::io::{
 };
 use iceberg::{Error, ErrorKind};
 use itertools::Itertools;
-use opendal::layers::{LoggingLayer, RetryLayer};
+use opendal::{layers::{LoggingLayer, RetryLayer}, services::Azblob};
 use opendal::services::{Gcs, S3};
 use opendal::Operator;
 use parquet::arrow::async_reader::AsyncFileReader;
@@ -145,10 +145,32 @@ pub fn new_gcs_operator(
     Ok(operator)
 }
 
+pub fn new_azblob_operator(
+    account_name: String,
+    account_key: String,
+    endpoint: String,
+    container_name: String,
+) -> ConnectorResult<Operator> {
+    // Create gcs builder.
+    let mut builder = Azblob::default();
+    builder = builder
+        .container(&container_name)
+        .endpoint(&endpoint)
+        .account_name(&account_name)
+        .account_key(&account_key);
+
+    let operator: Operator = Operator::new(builder)?
+        .layer(LoggingLayer::default())
+        .layer(RetryLayer::default())
+        .finish();
+    Ok(operator)
+}
+
 #[derive(Debug, Clone)]
 pub enum FileScanBackend {
     S3,
     Gcs,
+    Azblob,
 }
 
 pub fn extract_bucket_and_file_name(
@@ -168,6 +190,7 @@ pub fn extract_bucket_and_file_name(
     let prefix = match file_scan_backend {
         FileScanBackend::S3 => format!("s3://{}/", bucket),
         FileScanBackend::Gcs => format!("gcs://{}/", bucket),
+        FileScanBackend::Azblob => format!("azblob://{}/", bucket),
     };
     let file_name = location[prefix.len()..].to_string();
     Ok((bucket, file_name))
@@ -182,6 +205,7 @@ pub async fn list_data_directory(
     let prefix = match file_scan_backend {
         FileScanBackend::S3 => format!("s3://{}/", bucket),
         FileScanBackend::Gcs => format!("gcs://{}/", bucket),
+        FileScanBackend::Azblob => format!("azblob://{}/", bucket),
     };
     if dir.starts_with(&prefix) {
         op.list(&file_name)

@@ -94,6 +94,35 @@ impl LogicalFileScan {
 
         LogicalFileScan { base, core }
     }
+    pub fn new_azblob_logical_file_scan(
+        ctx: OptimizerContextRef,
+        schema: Schema,
+        file_format: String,
+        storage_type: String,
+        account_name: String,
+        account_key: String,
+        endpoint: String,
+        file_location: Vec<String>,
+    ) -> Self {
+        assert!("parquet".eq_ignore_ascii_case(&file_format));
+        assert!("azblob".eq_ignore_ascii_case(&storage_type));
+
+        let core = generic::FileScanBackend::AzblobFileScan(generic::AzblobFileScan {
+            schema,
+            file_format: generic::FileFormat::Parquet,
+            storage_type: generic::StorageType::Azblob,
+            account_name,
+            account_key,
+            endpoint,
+            file_location,
+            ctx,
+        });
+
+        let base = PlanBase::new_logical_with_core(&core);
+
+        LogicalFileScan { base, core }
+    }
+
 }
 
 impl_plan_tree_node_for_leaf! {LogicalFileScan}
