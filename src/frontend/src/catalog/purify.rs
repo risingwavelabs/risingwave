@@ -142,7 +142,10 @@ pub fn try_purify_table_source_create_sql_ast(
         let mut pk_columns = Vec::new();
 
         for &id in pk_column_ids {
-            let column = columns.iter().find(|c| c.column_id() == id).unwrap();
+            let column = columns
+                .iter()
+                .find(|c| c.column_id() == id)
+                .context("primary key column not found")?;
             if !column.is_user_defined() {
                 bail /* unlikely */ !(
                     "primary key column \"{}\" is not user-defined",
