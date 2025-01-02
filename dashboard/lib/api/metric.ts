@@ -14,12 +14,13 @@
  * limitations under the License.
  *
  */
-import { MetricsSample } from "../../components/metrics"
-import {
-  BackPressureInfo,
-  GetBackPressureResponse,
-} from "../../proto/gen/monitor_service"
+import {Metrics, MetricsSample} from "../../components/metrics"
+import {BackPressureInfo, GetBackPressureResponse,} from "../../proto/gen/monitor_service"
 import api from "./api"
+
+export interface BackPressuresMetrics {
+    outputBufferBlockingDuration: Metrics[]
+}
 
 export interface BackPressureRateInfo {
   actorId: number
