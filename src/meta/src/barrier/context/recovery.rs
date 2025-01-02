@@ -138,6 +138,38 @@ impl GlobalBarrierWorkerContextImpl {
                         .await
                         .context("clean dirty streaming jobs")?;
 
+                    // This is a quick path to accelerate the process of dropping and canceling streaming jobs.
+                    let _ = self.scheduled_barriers.pre_apply_drop_cancel(None);
+
+                    let mut active_streaming_nodes =
+                        ActiveStreamingWorkerNodes::new_snapshot(self.metadata_manager.clone())
+                            .await?;
+
+                    // Resolve actor info for recovery. If there's no actor to recover, most of the
+                    // following steps will be no-op, while the compute nodes will still be reset.
+                    // FIXME: Transactions should be used.
+                    // TODO(error-handling): attach context to the errors and log them together, instead of inspecting everywhere.
+                    let mut info = if !self.env.opts.disable_automatic_parallelism_control {
+                        info!("trigger offline scaling");
+                        self.scale_actors(&active_streaming_nodes)
+                            .await
+                            .inspect_err(|err| {
+                                warn!(error = %err.as_report(), "scale actors failed");
+                            })?;
+
+                        self.resolve_graph_info(None).await.inspect_err(|err| {
+                            warn!(error = %err.as_report(), "resolve actor info failed");
+                        })?
+                    } else {
+                        info!("trigger actor migration");
+                        // Migrate actors in expired CN to newly joined one.
+                        self.migrate_actors(&mut active_streaming_nodes)
+                            .await
+                            .inspect_err(|err| {
+                                warn!(error = %err.as_report(), "migrate actors failed");
+                            })?
+                    };
+
                     // Mview progress needs to be recovered.
                     tracing::info!("recovering mview progress");
                     let background_jobs = {
@@ -172,46 +204,12 @@ impl GlobalBarrierWorkerContextImpl {
                     };
                     tracing::info!("recovered mview progress");
 
-                    // This is a quick path to accelerate the process of dropping and canceling streaming jobs.
-                    let _ = self.scheduled_barriers.pre_apply_drop_cancel(None);
-
-                    let mut active_streaming_nodes =
-                        ActiveStreamingWorkerNodes::new_snapshot(self.metadata_manager.clone())
-                            .await?;
-
                     let background_streaming_jobs = background_jobs.keys().cloned().collect_vec();
                     info!(
                         "background streaming jobs: {:?} total {}",
                         background_streaming_jobs,
                         background_streaming_jobs.len()
                     );
-
-                    // Resolve actor info for recovery. If there's no actor to recover, most of the
-                    // following steps will be no-op, while the compute nodes will still be reset.
-                    // FIXME: Transactions should be used.
-                    // TODO(error-handling): attach context to the errors and log them together, instead of inspecting everywhere.
-                    let mut info = if !self.env.opts.disable_automatic_parallelism_control
-                        && background_streaming_jobs.is_empty()
-                    {
-                        info!("trigger offline scaling");
-                        self.scale_actors(&active_streaming_nodes)
-                            .await
-                            .inspect_err(|err| {
-                                warn!(error = %err.as_report(), "scale actors failed");
-                            })?;
-
-                        self.resolve_graph_info(None).await.inspect_err(|err| {
-                            warn!(error = %err.as_report(), "resolve actor info failed");
-                        })?
-                    } else {
-                        info!("trigger actor migration");
-                        // Migrate actors in expired CN to newly joined one.
-                        self.migrate_actors(&mut active_streaming_nodes)
-                            .await
-                            .inspect_err(|err| {
-                                warn!(error = %err.as_report(), "migrate actors failed");
-                            })?
-                    };
 
                     if self.scheduled_barriers.pre_apply_drop_cancel(None) {
                         info = self.resolve_graph_info(None).await.inspect_err(|err| {
