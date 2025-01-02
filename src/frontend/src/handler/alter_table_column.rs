@@ -88,7 +88,6 @@ pub async fn get_replace_table_plan(
     table_name: ObjectName,
     new_definition: Statement,
     old_catalog: &Arc<TableCatalog>,
-    new_version_columns: Option<Vec<ColumnCatalog>>, // only provided in auto schema change
 ) -> Result<(
     Option<Source>,
     Table,
@@ -141,7 +140,6 @@ pub async fn get_replace_table_plan(
         on_conflict,
         with_version_column,
         cdc_table_info,
-        new_version_columns,
         include_column_options,
         engine,
     )
@@ -391,7 +389,7 @@ pub async fn handle_alter_table_column(
     };
 
     let (source, table, graph, col_index_mapping, job_type) =
-        get_replace_table_plan(&session, table_name, definition, &original_catalog, None).await?;
+        get_replace_table_plan(&session, table_name, definition, &original_catalog).await?;
 
     let catalog_writer = session.catalog_writer()?;
 

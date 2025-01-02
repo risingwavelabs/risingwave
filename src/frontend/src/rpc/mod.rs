@@ -106,7 +106,6 @@ async fn get_new_table_plan(
         table_name,
         new_table_definition,
         &original_catalog,
-        Some(new_version_columns),
     )
     .await?;
 
