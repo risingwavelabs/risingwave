@@ -190,7 +190,8 @@ impl IcebergScanExecutor {
                 .build();
             let file_scan_stream = tokio_stream::once(Ok(data_file_scan_task));
 
-            let mut record_batch_stream = reader.read(Box::pin(file_scan_stream))?.enumerate();
+            let mut record_batch_stream =
+                reader.read(Box::pin(file_scan_stream)).await?.enumerate();
 
             while let Some((index, record_batch)) = record_batch_stream.next().await {
                 let record_batch = record_batch?;
@@ -321,7 +322,9 @@ impl PositionDeleteFilter {
 
         let reader = table.reader_builder().with_batch_size(batch_size).build();
 
-        let mut record_batch_stream = reader.read(Box::pin(position_delete_file_scan_stream))?;
+        let mut record_batch_stream = reader
+            .read(Box::pin(position_delete_file_scan_stream))
+            .await?;
 
         while let Some(record_batch) = record_batch_stream.next().await {
             let record_batch = record_batch?;
