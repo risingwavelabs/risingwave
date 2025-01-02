@@ -1400,6 +1400,7 @@ mod test {
                 endpoint: Some("http://127.0.0.1:9301".to_owned()),
                 access_key: Some("hummockadmin".to_owned()),
                 secret_key: Some("hummockadmin".to_owned()),
+                gcs_credential: None,
                 catalog_type: Some("jdbc".to_owned()),
                 catalog_name: Some("demo".to_owned()),
                 database_name: Some("demo_db".to_owned()),
