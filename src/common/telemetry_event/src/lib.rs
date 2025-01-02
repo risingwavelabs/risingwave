@@ -17,13 +17,14 @@
 mod util;
 
 use std::env;
-use std::sync::OnceLock;
+use std::sync::{LazyLock, OnceLock};
 
 use prost::Message;
 use risingwave_pb::telemetry::{
-    EventMessage as PbEventMessage, PbTelemetryDatabaseObject,
+    EventMessage as PbEventMessage, PbBatchEventMessage, PbTelemetryDatabaseObject,
     TelemetryEventStage as PbTelemetryEventStage,
 };
+use tokio::sync::Mutex;
 pub use util::*;
 
 pub type TelemetryResult<T> = core::result::Result<T, TelemetryError>;
@@ -41,6 +42,27 @@ pub const TELEMETRY_RISINGWAVE_CLOUD_UUID: &str = "RISINGWAVE_CLOUD_UUID";
 pub fn get_telemetry_risingwave_cloud_uuid() -> Option<String> {
     env::var(TELEMETRY_RISINGWAVE_CLOUD_UUID).ok()
 }
+
+static TELEMETRY_EVENT_REPORT_STASH: LazyLock<Mutex<Vec<PbEventMessage>>> =
+    LazyLock::new(|| Mutex::new(Vec::new()));
+
+pub async fn do_telemetry_event_report() {
+    const TELEMETRY_EVENT_REPORT_TYPE: &str = "event";
+    let url = (TELEMETRY_REPORT_URL.to_owned() + "/" + TELEMETRY_EVENT_REPORT_TYPE).to_owned();
+    let mut batch_message = PbBatchEventMessage { events: Vec::new() };
+
+    let mut stash_guard = TELEMETRY_EVENT_REPORT_STASH.lock().await;
+    for event in stash_guard.drain(..) {
+        batch_message.events.push(event);
+    }
+    drop(stash_guard);
+
+    post_telemetry_report_pb(&url, batch_message.encode_to_vec())
+        .await
+        .unwrap_or_else(|e| tracing::debug!("{}", e));
+}
+
+pub const TELEMETRY_EVENT_REPORT_INTERVAL: u64 = 10; // 10 seconds
 
 pub fn report_event_common(
     event_stage: PbTelemetryEventStage,
@@ -95,15 +117,8 @@ pub fn request_to_telemetry_event(
         node,
         is_test,
     };
-    let report_bytes = event.encode_to_vec();
 
-    tokio::spawn(async move {
-        const TELEMETRY_EVENT_REPORT_TYPE: &str = "event";
-        let url = (TELEMETRY_REPORT_URL.to_owned() + "/" + TELEMETRY_EVENT_REPORT_TYPE).to_owned();
-        post_telemetry_report_pb(&url, report_bytes)
-            .await
-            .unwrap_or_else(|e| tracing::info!("{}", e))
-    });
+    TELEMETRY_EVENT_REPORT_STASH.blocking_lock().push(event);
 }
 
 #[cfg(test)]

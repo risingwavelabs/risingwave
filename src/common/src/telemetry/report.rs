@@ -16,11 +16,12 @@ use std::sync::Arc;
 
 use risingwave_telemetry_event::get_telemetry_risingwave_cloud_uuid;
 pub use risingwave_telemetry_event::{
-    current_timestamp, post_telemetry_report_pb, TELEMETRY_REPORT_URL, TELEMETRY_TRACKING_ID,
+    current_timestamp, do_telemetry_event_report, post_telemetry_report_pb,
+    TELEMETRY_EVENT_REPORT_INTERVAL, TELEMETRY_REPORT_URL, TELEMETRY_TRACKING_ID,
 };
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
-use tokio::time::{interval, Duration};
+use tokio::time::{interval as tokio_interval_fn, Duration};
 use uuid::Uuid;
 
 use super::{Result, TELEMETRY_REPORT_INTERVAL};
@@ -60,8 +61,12 @@ where
 
         let begin_time = std::time::Instant::now();
         let session_id = Uuid::new_v4().to_string();
-        let mut interval = interval(Duration::from_secs(TELEMETRY_REPORT_INTERVAL));
+        let mut interval = tokio_interval_fn(Duration::from_secs(TELEMETRY_REPORT_INTERVAL));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+        let mut event_interval =
+            tokio_interval_fn(Duration::from_secs(TELEMETRY_EVENT_REPORT_INTERVAL));
+        event_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
         // fetch telemetry tracking_id from the meta node only at the beginning
         // There is only one case tracking_id updated at the runtime ---- metastore data has been
@@ -94,6 +99,10 @@ where
         loop {
             tokio::select! {
                 _ = interval.tick() => {},
+                _ = event_interval.tick() => {
+                    do_telemetry_event_report().await;
+                    continue;
+                },
                 _ = &mut shutdown_rx => {
                     tracing::info!("Telemetry exit");
                     return;
