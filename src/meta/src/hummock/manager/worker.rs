@@ -92,21 +92,46 @@ impl HummockManager {
     }
 
     async fn handle_local_notification(&self, notification: LocalNotification) {
-        if let LocalNotification::WorkerNodeDeleted(worker_node) = notification {
-            if worker_node.get_type().unwrap() == WorkerType::Compactor {
-                self.compactor_manager.remove_compactor(worker_node.id);
+        match notification {
+            LocalNotification::WorkerNodeDeleted(worker_node) => {
+                if worker_node.get_type().unwrap() == WorkerType::Compactor {
+                    self.compactor_manager.remove_compactor(worker_node.id);
+                }
+                self.release_contexts(vec![worker_node.id])
+                    .await
+                    .unwrap_or_else(|err| {
+                        panic!(
+                            "Failed to release hummock context {}, error={}",
+                            worker_node.id,
+                            err.as_report()
+                        )
+                    });
+                tracing::info!("Released hummock context {}", worker_node.id);
+                sync_point!("AFTER_RELEASE_HUMMOCK_CONTEXTS_ASYNC");
             }
-            self.release_contexts(vec![worker_node.id])
-                .await
-                .unwrap_or_else(|err| {
-                    panic!(
-                        "Failed to release hummock context {}, error={}",
-                        worker_node.id,
-                        err.as_report()
-                    )
+            LocalNotification::MayUnregisterTablesFromHummock(table_ids) => {
+                let mut write_limit_compaction_groups = vec![];
+                self.write_limits().await.iter().for_each(|(cg, wl)| {
+                    if wl.table_ids.iter().any(|t| table_ids.contains(t)) {
+                        write_limit_compaction_groups.push(*cg);
+                    }
                 });
-            tracing::info!("Released hummock context {}", worker_node.id);
-            sync_point!("AFTER_RELEASE_HUMMOCK_CONTEXTS_ASYNC");
+                if !write_limit_compaction_groups.is_empty() {
+                    // Normally tables are unregistered from Hummock either after the drop-stream-job barrier succeeds or during recovery. However, there is a corner case that can cause a deadlock situation:
+                    // 1. The cluster encounters backpressure originating from Hummock. So the earliest barrier becomes stuck. It is expected to be resolved via Hummock compaction.
+                    // 2. User drops the table. Meta removes the table from catalog immediately on receiving the drop command. But Hummock manager won't remove the table until the barrier finishes, which is stuck already.
+                    // 3. At the moment, compaction task related to this dropped table will always fail due to the inconsistency between catalog and Hummock. So the backpressure will never recover. It's a deadlock situation. Neither the barrier or the compaction can make any progress.
+                    // So unregister tables immediately here to resolve this deadlock scenario.
+                    self.unregister_table_ids(table_ids.into_iter().map(Into::into))
+                        .await
+                        .unwrap_or_else(|e| {
+                            panic!("Failed to unregister table from Hummock {:?}.", e);
+                        });
+                    self.try_update_write_limits(&write_limit_compaction_groups)
+                        .await;
+                }
+            }
+            _ => {}
         }
     }
 }

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use super::*;
+use crate::manager::LocalNotification;
 
 impl CatalogController {
     pub async fn drop_relation(
@@ -236,6 +237,19 @@ impl CatalogController {
         let user_infos = list_user_info_by_ids(to_update_user_ids, &txn).await?;
 
         txn.commit().await?;
+
+        // After catalog changes have been saved, synchronize them with Hummock.
+        tracing::debug!(?to_drop_state_table_ids, "May unregister from Hummock.");
+        let tables_to_unregister_from_hummock = to_drop_state_table_ids
+            .iter()
+            .map(|id| u32::try_from(*id).unwrap())
+            .collect_vec();
+        self.env
+            .notification_manager()
+            .notify_local_subscribers(LocalNotification::MayUnregisterTablesFromHummock(
+                tables_to_unregister_from_hummock,
+            ))
+            .await;
 
         // notify about them.
         self.notify_users_update(user_infos).await;

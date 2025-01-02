@@ -186,7 +186,7 @@ impl HummockManager {
         if new_write_limits == cg_manager.write_limit {
             return false;
         }
-        tracing::debug!("Hummock stopped write is updated: {:#?}", new_write_limits);
+        tracing::debug!(?new_write_limits, "Hummock stopped write is updated.");
         trigger_write_stop_stats(&self.metrics, &new_write_limits);
         cg_manager.write_limit = new_write_limits;
         self.env

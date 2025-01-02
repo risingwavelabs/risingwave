@@ -47,6 +47,7 @@ pub enum LocalNotification {
     SystemParamsChange(SystemParamsReader),
     FragmentMappingsUpsert(Vec<FragmentId>),
     FragmentMappingsDelete(Vec<FragmentId>),
+    MayUnregisterTablesFromHummock(Vec<u32>),
 }
 
 #[derive(Debug)]

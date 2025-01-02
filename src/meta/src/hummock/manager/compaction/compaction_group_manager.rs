@@ -326,6 +326,10 @@ impl HummockManager {
             new_version_delta.removed_table_ids.insert(table_id);
         }
 
+        if modified_groups.is_empty() {
+            return Ok(());
+        }
+
         let groups_to_remove = modified_groups
             .into_iter()
             .filter_map(|(group_id, member_count)| {
