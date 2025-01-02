@@ -268,8 +268,7 @@ impl CatalogController {
             }
             ObjectType::Schema => {
                 let (schema_obj, mut to_notify_objs): (Vec<_>, Vec<_>) = to_drop_objects
-                    .into_iter()
-                    .map(|(_, obj)| obj)
+                    .into_values()
                     .partition(|obj| obj.obj_type == ObjectType::Schema && obj.oid == object_id);
 
                 let schema_obj = schema_obj
@@ -283,9 +282,8 @@ impl CatalogController {
                     .await
             }
             _ => {
-                let relation_group = build_object_group_for_delete(
-                    to_drop_objects.into_iter().map(|(_, obj)| obj).collect(),
-                );
+                let relation_group =
+                    build_object_group_for_delete(to_drop_objects.into_values().collect());
                 self.notify_frontend(NotificationOperation::Delete, relation_group)
                     .await
             }
