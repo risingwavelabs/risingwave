@@ -238,7 +238,7 @@ impl CatalogController {
 
         txn.commit().await?;
 
-        // After catalog changes have been saved, synchronize them with Hummock.
+        // After catalog changes have been saved, may need to synchronize them with Hummock to resolve a corner case.
         tracing::debug!(?to_drop_state_table_ids, "May unregister from Hummock.");
         let tables_to_unregister_from_hummock = to_drop_state_table_ids
             .iter()

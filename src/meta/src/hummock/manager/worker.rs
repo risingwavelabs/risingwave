@@ -125,10 +125,7 @@ impl HummockManager {
                     self.unregister_table_ids(table_ids.into_iter().map(Into::into))
                         .await
                         .unwrap_or_else(|e| {
-                            panic!(
-                                "Failed to unregister table from Hummock {}.",
-                                e.as_report()
-                            );
+                            panic!("Failed to unregister table from Hummock {}.", e.as_report());
                         });
                     self.try_update_write_limits(&write_limit_compaction_groups)
                         .await;
