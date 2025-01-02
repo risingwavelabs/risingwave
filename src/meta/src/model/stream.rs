@@ -369,6 +369,29 @@ impl StreamJobFragments {
         actor_ids
     }
 
+    pub fn tracking_progress_fragment_ids(&self) -> Vec<(FragmentId, BackfillUpstreamType)> {
+        let mut fragment_ids = vec![];
+        for fragment in self.fragments.values() {
+            if fragment.fragment_type_mask & FragmentTypeFlag::CdcFilter as u32 != 0 {
+                // Note: CDC table job contains a StreamScan fragment (StreamCdcScan node) and a CdcFilter fragment.
+                // We don't track any fragments' progress.
+                return vec![];
+            }
+            if (fragment.fragment_type_mask
+                & (FragmentTypeFlag::Values as u32
+                    | FragmentTypeFlag::StreamScan as u32
+                    | FragmentTypeFlag::SourceScan as u32))
+                != 0
+            {
+                fragment_ids.push((
+                    fragment.fragment_id,
+                    BackfillUpstreamType::from_fragment_type_mask(fragment.fragment_type_mask),
+                ))
+            }
+        }
+        fragment_ids
+    }
+
     pub fn root_fragment(&self) -> Option<Fragment> {
         self.mview_fragment()
             .or_else(|| self.sink_fragment())

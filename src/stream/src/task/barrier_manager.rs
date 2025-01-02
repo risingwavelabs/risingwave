@@ -42,7 +42,8 @@ use tracing::warn;
 use self::managed_state::ManagedBarrierState;
 use crate::error::{IntoUnexpectedExit, StreamError, StreamResult};
 use crate::task::{
-    ActorId, AtomicU64Ref, PartialGraphId, SharedContext, StreamEnvironment, UpDownActorIds,
+    ActorId, AtomicU64Ref, FragmentId, PartialGraphId, SharedContext, StreamEnvironment,
+    UpDownActorIds,
 };
 
 mod managed_state;
@@ -215,6 +216,7 @@ pub(super) enum LocalBarrierEvent {
     ReportCreateProgress {
         epoch: EpochPair,
         actor: ActorId,
+        fragment: FragmentId,
         state: BackfillState,
         vnodes: Option<Bitmap>,
     },

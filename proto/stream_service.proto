@@ -36,6 +36,8 @@ message BarrierCompleteResponse {
     uint32 pending_barrier_num = 5;
 
     common.Buffer backfill_vnodes = 6;
+
+    uint32 fragment_id = 7;
   }
   string request_id = 1;
   common.Status status = 2;

@@ -20,9 +20,10 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_pb::stream_service::barrier_complete_response::PbCreateMviewProgress;
 
 use super::LocalBarrierManager;
+use crate::executor::ActorContextRef;
 use crate::task::barrier_manager::managed_state::DatabaseManagedBarrierState;
 use crate::task::barrier_manager::LocalBarrierEvent::ReportCreateProgress;
-use crate::task::ActorId;
+use crate::task::{ActorId, FragmentId};
 
 type ConsumedEpoch = u64;
 type ConsumedRows = u64;
@@ -36,7 +37,12 @@ pub(crate) enum BackfillState {
 }
 
 impl BackfillState {
-    pub fn to_pb(self, actor_id: ActorId, vnodes: Option<Bitmap>) -> PbCreateMviewProgress {
+    pub fn to_pb(
+        self,
+        actor_id: ActorId,
+        fragment_id: FragmentId,
+        vnodes: Option<Bitmap>,
+    ) -> PbCreateMviewProgress {
         let (done, consumed_epoch, consumed_rows, pending_barrier_num) = match self {
             BackfillState::ConsumingUpstreamTableOrSource(consumed_epoch, consumed_rows) => {
                 (false, consumed_epoch, consumed_rows, 0)
@@ -57,6 +63,7 @@ impl BackfillState {
             consumed_rows,
             pending_barrier_num,
             backfill_vnodes: vnodes.map(|v| v.to_protobuf()),
+            fragment_id,
         }
     }
 }
@@ -94,10 +101,10 @@ impl DatabaseManagedBarrierState {
         &mut self,
         epoch: EpochPair,
         actor: ActorId,
+        fragment_id: FragmentId,
         state: BackfillState,
         vnodes: Option<Bitmap>,
     ) {
-
         println!("2222222222");
         if let Some(actor_state) = self.actor_states.get(&actor)
             && let Some(partial_graph_id) = actor_state.inflight_barriers.get(&epoch.prev)
@@ -107,7 +114,7 @@ impl DatabaseManagedBarrierState {
                 .create_mview_progress
                 .entry(epoch.curr)
                 .or_default()
-                .insert(actor, (state, vnodes));
+                .insert(actor, (state, fragment_id, vnodes));
         } else {
             warn!(?epoch, actor, ?state, "ignore create mview progress");
         }
@@ -119,12 +126,14 @@ impl LocalBarrierManager {
         &self,
         epoch: EpochPair,
         actor: ActorId,
+        fragment: FragmentId,
         state: BackfillState,
         vnodes: Option<Bitmap>,
     ) {
         self.send_event(ReportCreateProgress {
             epoch,
             actor,
+            fragment,
             state,
             vnodes,
         })
@@ -164,22 +173,23 @@ impl LocalBarrierManager {
 pub struct CreateMviewProgressReporter {
     barrier_manager: LocalBarrierManager,
 
-    /// The id of the actor containing the backfill executors.
-    backfill_actor_id: ActorId,
-
+    // /// The id of the actor containing the backfill executors.
+    // backfill_actor_id: ActorId,
     state: Option<BackfillState>,
     vnodes: Option<Bitmap>,
+
+    actor_context: ActorContextRef,
 }
 
 impl CreateMviewProgressReporter {
     pub fn new(
         barrier_manager: LocalBarrierManager,
-        backfill_actor_id: ActorId,
+        actor_context: ActorContextRef,
         vnodes: Option<Bitmap>,
     ) -> Self {
         Self {
             barrier_manager,
-            backfill_actor_id,
+            actor_context,
             state: None,
             vnodes,
         }
@@ -191,14 +201,15 @@ impl CreateMviewProgressReporter {
     }
 
     pub fn actor_id(&self) -> u32 {
-        self.backfill_actor_id
+        self.actor_context.id
     }
 
     fn update_inner(&mut self, epoch: EpochPair, state: BackfillState) {
         self.state = Some(state);
         self.barrier_manager.update_create_mview_progress(
             epoch,
-            self.backfill_actor_id,
+            self.actor_context.id,
+            self.actor_context.fragment_id,
             state,
             self.vnodes.clone(),
         );
@@ -322,10 +333,13 @@ impl LocalBarrierManager {
     /// frontend and the mview will be exposed to the user.
     pub(crate) fn register_create_mview_progress(
         &self,
-        backfill_actor_id: ActorId,
+        actor_context: ActorContextRef,
         vnodes: Option<Bitmap>,
     ) -> CreateMviewProgressReporter {
-        debug!("register create mview progress: {}, vnodes: {:?}", backfill_actor_id, vnodes);
-        CreateMviewProgressReporter::new(self.clone(), backfill_actor_id, vnodes)
+        debug!(
+            "register create mview progress: {}, vnodes: {:?}",
+            actor_context.id, vnodes
+        );
+        CreateMviewProgressReporter::new(self.clone(), actor_context, vnodes)
     }
 }

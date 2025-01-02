@@ -77,7 +77,7 @@ pub struct BackfillExecutor<S: StateStore> {
     /// PTAL at the docstring for `CreateMviewProgress` to understand how we compute it.
     progress: CreateMviewProgressReporter,
 
-    actor_id: ActorId,
+    actor_context: ActorContextRef,
 
     metrics: Arc<StreamingMetrics>,
 
@@ -103,15 +103,15 @@ where
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
         rate_limit: Option<usize>,
+        actor_context: Arc<ActorContext>,
     ) -> Self {
-        let actor_id = progress.actor_id();
         Self {
             upstream_table,
             upstream,
             state_table,
             output_indices,
             progress,
-            actor_id,
+            actor_context,
             metrics,
             chunk_size,
             rate_limit,
@@ -211,7 +211,7 @@ where
 
             let metrics = self
                 .metrics
-                .new_backfill_metrics(upstream_table_id, self.actor_id);
+                .new_backfill_metrics(upstream_table_id, self.actor_context.id);
 
             'backfill_loop: loop {
                 let mut cur_barrier_snapshot_processed_rows: u64 = 0;
@@ -414,7 +414,7 @@ where
                     .inc_by(cur_barrier_upstream_processed_rows);
 
                 if let Some(Mutation::Update(mutation)) = barrier.mutation.as_deref() {
-                    if let Some(bitmap) = mutation.vnode_bitmaps.get(&self.actor_id) {
+                    if let Some(bitmap) = mutation.vnode_bitmaps.get(&self.actor_context.id) {
                         if let Some(state_table) = self.state_table.as_mut() {
                             let (_prev, _res) = state_table.update_vnode_bitmap(bitmap.clone());
                         }
@@ -459,13 +459,13 @@ where
                             paused = false;
                         }
                         Mutation::Throttle(actor_to_apply) => {
-                            let new_rate_limit_entry = actor_to_apply.get(&self.actor_id);
+                            let new_rate_limit_entry = actor_to_apply.get(&self.actor_context.id);
                             if let Some(new_rate_limit) = new_rate_limit_entry {
                                 let new_rate_limit = new_rate_limit.as_ref().map(|x| *x as _);
                                 if new_rate_limit != rate_limit {
                                     rate_limit = new_rate_limit;
                                     tracing::info!(
-                                        id = self.actor_id,
+                                        id = self.actor_context.id,
                                         new_rate_limit = ?rate_limit,
                                         "actor rate limit changed",
                                     );

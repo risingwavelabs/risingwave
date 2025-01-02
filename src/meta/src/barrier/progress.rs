@@ -33,7 +33,7 @@ use crate::barrier::{
     Command, CreateStreamingJobCommandInfo, CreateStreamingJobType, ReplaceStreamJobPlan,
 };
 use crate::manager::{MetadataManager, StreamingJobType};
-use crate::model::{ActorId, BackfillUpstreamType, StreamJobFragments};
+use crate::model::{ActorId, BackfillUpstreamType, FragmentId, StreamJobFragments};
 use crate::MetaResult;
 
 type ConsumedRows = u64;
@@ -308,10 +308,12 @@ pub(super) struct CreateMviewProgressTracker {
     /// Progress of the create-mview DDL indicated by the `TableId`.
     progress_map: HashMap<TableId, (Progress, TrackingJob)>,
 
-    actor_map: HashMap<ActorId, TableId>,
+    // actor_map: HashMap<ActorId, TableId>,
+    fragment_map: HashMap<FragmentId, TableId>,
 
     /// Stash of finished jobs. They will be finally finished on checkpoint.
     pending_finished_jobs: Vec<TrackingJob>,
+    actor_map: HashMap<ActorId, TableId>,
 }
 
 impl CreateMviewProgressTracker {
@@ -326,13 +328,16 @@ impl CreateMviewProgressTracker {
         mview_map: HashMap<TableId, (String, StreamJobFragments)>,
         version_stats: &HummockVersionStats,
     ) -> Self {
+        let mut fragment_map = HashMap::new();
         let mut actor_map = HashMap::new();
         let mut progress_map = HashMap::new();
         for (creating_table_id, (definition, table_fragments)) in mview_map {
             let mut states = HashMap::new();
             let mut backfill_upstream_types = HashMap::new();
+            // let fragments = table_fragments.tracking_progress_fragment_ids();
             let actors = table_fragments.tracking_progress_actor_ids();
             for (actor, backfill_upstream_type) in actors {
+                fragment_map.insert(actor, creating_table_id);
                 actor_map.insert(actor, creating_table_id);
                 states.insert(actor, BackfillState::ConsumingUpstream(Epoch(0), 0));
                 backfill_upstream_types.insert(actor, backfill_upstream_type);
@@ -354,6 +359,7 @@ impl CreateMviewProgressTracker {
             progress_map,
             actor_map,
             pending_finished_jobs: Vec::new(),
+            fragment_map,
         }
     }
 
@@ -626,9 +632,15 @@ impl CreateMviewProgressTracker {
     ) -> Option<TrackingJob> {
         tracing::debug!(?progress, "update progress");
         let actor = progress.backfill_actor_id;
+        let fragment = progress.fragment_id;
 
-        //let table_id = self.actor_map.get(&3).unwrap().clone();
-        let Some(table_id) = self.actor_map.get(&actor).copied() else {
+        // let table_id = self.actor_map.get(&3).unwrap().clone();
+        let Some(table_id) = self
+            .actor_map
+            .get(&actor)
+            .or_else(|| self.fragment_map.get(&fragment))
+            .cloned()
+        else {
             // On restart, backfill will ALWAYS notify CreateMviewProgressTracker,
             // even if backfill is finished on recovery.
             // This is because we don't know if only this actor is finished,

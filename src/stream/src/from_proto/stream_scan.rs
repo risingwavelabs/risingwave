@@ -42,7 +42,7 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
         // For reporting the progress.
         let progress = params
             .local_barrier_manager
-            .register_create_mview_progress(params.actor_context.id, params.vnode_bitmap.clone());
+            .register_create_mview_progress(params.actor_context.clone(), params.vnode_bitmap.clone());
 
         let output_indices = node
             .output_indices
@@ -91,6 +91,7 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                     params.executor_stats.clone(),
                     params.env.config().developer.chunk_size,
                     node.rate_limit.map(|x| x as _),
+                    params.actor_context.clone(),
                 )
                 .boxed()
             }
