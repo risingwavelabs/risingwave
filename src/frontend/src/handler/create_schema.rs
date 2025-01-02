@@ -32,7 +32,7 @@ pub async fn handle_create_schema(
     owner: Option<ObjectName>,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
-    let database_name = session.database();
+    let database_name = &session.database();
     let schema_name = Binder::resolve_schema_name(schema_name)?;
 
     if schema_name.starts_with(RESERVED_PG_SCHEMA_PREFIX) {

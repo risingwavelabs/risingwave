@@ -32,12 +32,12 @@ pub async fn handle_rename_table(
     new_table_name: ObjectName,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
-    let db_name = session.database();
+    let db_name = &session.database();
     let (schema_name, real_table_name) =
         Binder::resolve_schema_qualified_name(db_name, table_name.clone())?;
     let new_table_name = Binder::resolve_table_name(new_table_name)?;
     let search_path = session.config().search_path();
-    let user_name = &session.auth_context().user_name;
+    let user_name = &session.user_name();
 
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
@@ -79,12 +79,12 @@ pub async fn handle_rename_index(
     new_index_name: ObjectName,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
-    let db_name = session.database();
+    let db_name = &session.database();
     let (schema_name, real_index_name) =
         Binder::resolve_schema_qualified_name(db_name, index_name.clone())?;
     let new_index_name = Binder::resolve_index_name(new_index_name)?;
     let search_path = session.config().search_path();
-    let user_name = &session.auth_context().user_name;
+    let user_name = &session.user_name();
 
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
@@ -113,12 +113,12 @@ pub async fn handle_rename_view(
     new_view_name: ObjectName,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
-    let db_name = session.database();
+    let db_name = &session.database();
     let (schema_name, real_view_name) =
         Binder::resolve_schema_qualified_name(db_name, view_name.clone())?;
     let new_view_name = Binder::resolve_view_name(new_view_name)?;
     let search_path = session.config().search_path();
-    let user_name = &session.auth_context().user_name;
+    let user_name = &session.user_name();
 
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
@@ -143,12 +143,12 @@ pub async fn handle_rename_sink(
     new_sink_name: ObjectName,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
-    let db_name = session.database();
+    let db_name = &session.database();
     let (schema_name, real_sink_name) =
         Binder::resolve_schema_qualified_name(db_name, sink_name.clone())?;
     let new_sink_name = Binder::resolve_sink_name(new_sink_name)?;
     let search_path = session.config().search_path();
-    let user_name = &session.auth_context().user_name;
+    let user_name = &session.user_name();
 
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
@@ -176,12 +176,12 @@ pub async fn handle_rename_subscription(
     new_subscription_name: ObjectName,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
-    let db_name = session.database();
+    let db_name = &session.database();
     let (schema_name, real_subscription_name) =
         Binder::resolve_schema_qualified_name(db_name, subscription_name.clone())?;
     let new_subscription_name = Binder::resolve_subscription_name(new_subscription_name)?;
     let search_path = session.config().search_path();
-    let user_name = &session.auth_context().user_name;
+    let user_name = &session.user_name();
 
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
@@ -210,12 +210,12 @@ pub async fn handle_rename_source(
     new_source_name: ObjectName,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
-    let db_name = session.database();
+    let db_name = &session.database();
     let (schema_name, real_source_name) =
         Binder::resolve_schema_qualified_name(db_name, source_name.clone())?;
     let new_source_name = Binder::resolve_source_name(new_source_name)?;
     let search_path = session.config().search_path();
-    let user_name = &session.auth_context().user_name;
+    let user_name = &session.user_name();
 
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
@@ -253,7 +253,7 @@ pub async fn handle_rename_schema(
     new_schema_name: ObjectName,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
-    let db_name = session.database();
+    let db_name = &session.database();
     let schema_name = Binder::resolve_schema_name(schema_name)?;
     let new_schema_name = Binder::resolve_schema_name(new_schema_name)?;
 
@@ -275,7 +275,7 @@ pub async fn handle_rename_schema(
         session.check_privilege_for_drop_alter_db_schema(schema)?;
 
         // To rename a schema you must also have the CREATE privilege for the database.
-        if let Some(user) = user_reader.get_user_by_name(session.user_name()) {
+        if let Some(user) = user_reader.get_user_by_name(&session.user_name()) {
             if !user.is_super
                 && !user
                     .check_privilege(&grant_privilege::Object::DatabaseId(db_id), AclMode::Create)
@@ -321,7 +321,7 @@ pub async fn handle_rename_database(
         session.check_privilege_for_drop_alter_db_schema(database)?;
 
         // Non-superuser owners must also have the CREATEDB privilege.
-        if let Some(user) = user_reader.get_user_by_name(session.user_name()) {
+        if let Some(user) = user_reader.get_user_by_name(&session.user_name()) {
             if !user.is_super && !user.can_create_db {
                 return Err(ErrorCode::PermissionDenied(
                     "Non-superuser owners must also have the CREATEDB privilege".to_owned(),

@@ -5,6 +5,12 @@ set -euo pipefail
 
 REPO_ROOT=${PWD}
 
+source ci/scripts/common.sh
+
 echo "+++ Run unit tests"
 # use tee to disable progress bar
 NEXTEST_PROFILE=ci cargo nextest run --features failpoints,sync_point --workspace --exclude risingwave_simulation
+
+echo "--- Show sccache stats"
+sccache --show-stats
+sccache --zero-stats

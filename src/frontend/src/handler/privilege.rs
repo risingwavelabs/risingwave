@@ -143,7 +143,7 @@ impl SessionImpl {
         let user_reader = self.env().user_info_reader();
         let reader = user_reader.read_guard();
 
-        if let Some(user) = reader.get_user_by_name(self.user_name()) {
+        if let Some(user) = reader.get_user_by_name(&self.user_name()) {
             if user.is_super {
                 return Ok(());
             }
@@ -167,7 +167,7 @@ impl SessionImpl {
     pub fn is_super_user(&self) -> bool {
         let reader = self.env().user_info_reader().read_guard();
 
-        if let Some(info) = reader.get_user_by_name(self.user_name()) {
+        if let Some(info) = reader.get_user_by_name(&self.user_name()) {
             info.is_super
         } else {
             false
@@ -193,7 +193,7 @@ impl SessionImpl {
             .env()
             .catalog_reader()
             .read_guard()
-            .get_schema_by_name(self.database(), schema_name)
+            .get_schema_by_name(&self.database(), schema_name)
             .unwrap()
             .owner();
 

@@ -331,6 +331,7 @@ impl Parser<'_> {
                 Keyword::FLUSH => Ok(Statement::Flush),
                 Keyword::WAIT => Ok(Statement::Wait),
                 Keyword::RECOVER => Ok(Statement::Recover),
+                Keyword::USE => Ok(self.parse_use()?),
                 _ => self.expected_at(checkpoint, "statement"),
             },
             Token::LParen => {
@@ -5575,6 +5576,11 @@ impl Parser<'_> {
             object_name,
             comment,
         })
+    }
+
+    fn parse_use(&mut self) -> PResult<Statement> {
+        let db_name = self.parse_object_name()?;
+        Ok(Statement::Use { db_name })
     }
 }
 

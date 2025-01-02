@@ -555,6 +555,7 @@ define_keywords!(
     UPDATE,
     UPPER,
     USAGE,
+    USE,
     USER,
     USING,
     UUID,
