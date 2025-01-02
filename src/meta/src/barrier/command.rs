@@ -307,7 +307,7 @@ pub enum Command {
 
     /// `ReplaceStreamJob` command generates a `Update` barrier with the given `merge_updates`. This is
     /// essentially switching the downstream of the old job fragments to the new ones, and
-    /// dropping the old job fragments. Used for table schema change.
+    /// dropping the old job fragments. Used for schema change.
     ///
     /// This can be treated as a special case of `RescheduleFragment`, while the upstream fragment
     /// of the Merge executors are changed additionally.

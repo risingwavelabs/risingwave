@@ -33,6 +33,7 @@ use crate::barrier::{
     Scheduled,
 };
 use crate::hummock::CommitEpochInfo;
+use crate::stream::SourceChange;
 use crate::{MetaError, MetaResult};
 
 impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
@@ -166,7 +167,7 @@ impl CommandContext {
                     .await?;
                 barrier_manager_context
                     .source_manager
-                    .apply_source_change(None, None, Some(split_assignment.clone()), None, None)
+                    .apply_source_change(SourceChange::SplitChange(split_assignment.clone()))
                     .await;
             }
 
@@ -180,17 +181,18 @@ impl CommandContext {
                     .await?;
             }
             Command::CreateStreamingJob { info, job_type } => {
-                let mut fragment_replacements = None;
-                let mut dropped_actors = None;
+                let mut is_sink_into_table = false;
                 match job_type {
                     CreateStreamingJobType::SinkIntoTable(
                         replace_plan @ ReplaceStreamJobPlan {
+                            old_fragments,
                             new_fragments,
                             dispatchers,
                             init_split_assignment,
                             ..
                         },
                     ) => {
+                        is_sink_into_table = true;
                         barrier_manager_context
                             .metadata_manager
                             .catalog_controller
@@ -201,8 +203,15 @@ impl CommandContext {
                                 init_split_assignment,
                             )
                             .await?;
-                        fragment_replacements = Some(replace_plan.fragment_replacements());
-                        dropped_actors = Some(replace_plan.dropped_actors());
+                        barrier_manager_context
+                            .source_manager
+                            .handle_replace_job(
+                                old_fragments,
+                                new_fragments.stream_source_fragments(),
+                                init_split_assignment.clone(),
+                                replace_plan.fragment_replacements(),
+                            )
+                            .await;
                     }
                     CreateStreamingJobType::Normal => {}
                     CreateStreamingJobType::SnapshotBackfill(snapshot_backfill_info) => {
@@ -247,19 +256,17 @@ impl CommandContext {
                     )
                     .await?;
 
-                // Extract the fragments that include source operators.
-                let source_fragments = stream_job_fragments.stream_source_fragments();
-                let backfill_fragments = stream_job_fragments.source_backfill_fragments()?;
-                barrier_manager_context
-                    .source_manager
-                    .apply_source_change(
-                        Some(source_fragments),
-                        Some(backfill_fragments),
-                        Some(init_split_assignment.clone()),
-                        dropped_actors,
-                        fragment_replacements,
-                    )
-                    .await;
+                if !is_sink_into_table {
+                    barrier_manager_context
+                        .source_manager
+                        .apply_source_change(SourceChange::CreateJob {
+                            added_source_fragments: stream_job_fragments.stream_source_fragments(),
+                            added_backfill_fragments: stream_job_fragments
+                                .source_backfill_fragments()?,
+                            split_assignment: init_split_assignment.clone(),
+                        })
+                        .await;
+                }
             }
             Command::RescheduleFragment {
                 reschedules,
@@ -296,19 +303,11 @@ impl CommandContext {
                 // Apply the split changes in source manager.
                 barrier_manager_context
                     .source_manager
-                    .drop_source_fragments_vec(std::slice::from_ref(old_fragments))
-                    .await;
-                let source_fragments = new_fragments.stream_source_fragments();
-                // XXX: is it possible to have backfill fragments here?
-                let backfill_fragments = new_fragments.source_backfill_fragments()?;
-                barrier_manager_context
-                    .source_manager
-                    .apply_source_change(
-                        Some(source_fragments),
-                        Some(backfill_fragments),
-                        Some(init_split_assignment.clone()),
-                        Some(replace_plan.dropped_actors()),
-                        Some(replace_plan.fragment_replacements()),
+                    .handle_replace_job(
+                        old_fragments,
+                        new_fragments.stream_source_fragments(),
+                        init_split_assignment.clone(),
+                        replace_plan.fragment_replacements(),
                     )
                     .await;
             }
