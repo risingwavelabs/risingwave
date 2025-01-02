@@ -32,7 +32,7 @@ use typed_builder::TypedBuilder;
 #[derive(Debug)]
 pub enum StorageCatalogConfig {
     S3(StorageCatalogS3Config),
-    GCS(StorageCatalogGCSConfig),
+    Gcs(StorageCatalogGcsConfig),
 }
 
 #[derive(Clone, Debug, TypedBuilder)]
@@ -45,7 +45,7 @@ pub struct StorageCatalogS3Config {
 }
 
 #[derive(Clone, Debug, TypedBuilder)]
-pub struct StorageCatalogGCSConfig {
+pub struct StorageCatalogGcsConfig {
     warehouse: String,
     credential: String,
 }
@@ -76,7 +76,7 @@ impl StorageCatalog {
                 };
                 (config.warehouse.clone(), file_io_builder.build()?)
             }
-            StorageCatalogConfig::GCS(config) => {
+            StorageCatalogConfig::Gcs(config) => {
                 let file_io_builder = FileIO::from_path(&config.warehouse)?
                     .with_prop(GCS_CREDENTIALS_JSON, &config.credential);
                 (config.warehouse.clone(), file_io_builder.build()?)

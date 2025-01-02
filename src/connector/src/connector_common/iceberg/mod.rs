@@ -303,8 +303,8 @@ impl IcebergCommon {
             "storage" => {
                 // check gcs credential or s3 access key and secret key
                 let config = if let Some(gcs_credential) = &self.gcs_credential {
-                    StorageCatalogConfig::GCS(
-                        storage_catalog::StorageCatalogGCSConfig::builder()
+                    StorageCatalogConfig::Gcs(
+                        storage_catalog::StorageCatalogGcsConfig::builder()
                             .warehouse(self.warehouse_path.clone().ok_or_else(|| {
                                 anyhow!("`warehouse.path` must be set in storage catalog")
                             })?)
@@ -494,8 +494,8 @@ impl IcebergCommon {
                             .build(),
                     )
                 } else {
-                    StorageCatalogConfig::GCS(
-                        storage_catalog::StorageCatalogGCSConfig::builder()
+                    StorageCatalogConfig::Gcs(
+                        storage_catalog::StorageCatalogGcsConfig::builder()
                             .warehouse(self.warehouse_path.clone().ok_or_else(|| {
                                 anyhow!("`warehouse.path` must be set in storage catalog")
                             })?)
