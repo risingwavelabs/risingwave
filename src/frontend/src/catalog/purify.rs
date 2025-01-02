@@ -122,7 +122,20 @@ pub fn try_purify_table_create_sql_ast(
             columns: pk_columns,
             is_primary: true,
         };
+
         // We don't support table constraints other than `PRIMARY KEY`, thus simply overwrite.
+        assert!(
+            constraints.len() <= 1
+                && constraints.iter().all(|c| matches!(
+                    c,
+                    TableConstraint::Unique {
+                        is_primary: true,
+                        ..
+                    }
+                )),
+            "unexpected table constraints: {constraints:?}",
+        );
+
         *constraints = vec![pk_constraint];
     }
 
