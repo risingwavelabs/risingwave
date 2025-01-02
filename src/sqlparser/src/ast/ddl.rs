@@ -736,6 +736,10 @@ pub enum ColumnOption {
     NotNull,
     /// `DEFAULT <restricted-expr>`
     DefaultValue(Expr),
+    DefaultValuePersisted {
+        persisted: Box<[u8]>,
+        expr: Option<Expr>,
+    },
     /// `{ PRIMARY KEY | UNIQUE }`
     Unique { is_primary: bool },
     /// A referential integrity constraint (`[FOREIGN KEY REFERENCES
@@ -766,6 +770,13 @@ impl fmt::Display for ColumnOption {
             Null => write!(f, "NULL"),
             NotNull => write!(f, "NOT NULL"),
             DefaultValue(expr) => write!(f, "DEFAULT {}", expr),
+            DefaultValuePersisted { persisted: _, expr } => {
+                if let Some(expr) = expr {
+                    write!(f, "DEFAULT {}", expr)
+                } else {
+                    write!(f, "DEFAULT ...")
+                }
+            }
             Unique { is_primary } => {
                 write!(f, "{}", if *is_primary { "PRIMARY KEY" } else { "UNIQUE" })
             }

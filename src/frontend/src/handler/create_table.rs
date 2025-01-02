@@ -22,6 +22,7 @@ use either::Either;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
+use prost::Message as _;
 use risingwave_common::catalog::{
     CdcTableDesc, ColumnCatalog, ColumnDesc, ConflictBehavior, Engine, FieldLike, TableId,
     TableVersionId, DEFAULT_SCHEMA_NAME, INITIAL_TABLE_VERSION_ID, RISINGWAVE_ICEBERG_ROW_ID,
@@ -180,6 +181,7 @@ fn ensure_column_options_supported(c: &ColumnDef) -> Result<()> {
         match option_def.option {
             ColumnOption::GeneratedColumns(_) => {}
             ColumnOption::DefaultValue(_) => {}
+            ColumnOption::DefaultValuePersisted { .. } => {}
             ColumnOption::Unique { is_primary: true } => {}
             _ => bail_not_implemented!("column constraints \"{}\"", option_def),
         }
@@ -323,12 +325,13 @@ pub fn bind_sql_column_constraints(
     binder.bind_columns_to_context(table_name.clone(), column_catalogs)?;
 
     for column in columns {
+        let idx = binder.get_column_binding_index(table_name.clone(), &column.name.real_value())?;
+
         for option_def in column.options {
             match option_def.option {
                 ColumnOption::GeneratedColumns(expr) => {
                     binder.set_clause(Some(Clause::GeneratedColumn));
-                    let idx = binder
-                        .get_column_binding_index(table_name.clone(), &column.name.real_value())?;
+
                     let expr_impl = binder.bind_expr(expr).with_context(|| {
                         format!(
                             "fail to bind expression in generated column \"{}\"",
@@ -353,8 +356,6 @@ pub fn bind_sql_column_constraints(
                     binder.set_clause(None);
                 }
                 ColumnOption::DefaultValue(expr) => {
-                    let idx = binder
-                        .get_column_binding_index(table_name.clone(), &column.name.real_value())?;
                     let expr_impl = binder
                         .bind_expr(expr)?
                         .cast_assign(column_catalogs[idx].data_type().clone())?;
@@ -388,6 +389,13 @@ pub fn bind_sql_column_constraints(
                         ))
                         .into());
                     }
+                }
+                ColumnOption::DefaultValuePersisted { persisted, expr: _ } => {
+                    let desc = DefaultColumnDesc::decode(&*persisted)
+                        .expect("failed to decode persisted `DefaultColumnDesc`");
+
+                    column_catalogs[idx].column_desc.generated_or_default_column =
+                        Some(GeneratedOrDefaultColumn::DefaultColumn(desc));
                 }
                 _ => {}
             }
@@ -1128,7 +1136,9 @@ pub(super) async fn handle_create_table_plan(
                 None => {
                     for column_def in &column_defs {
                         for option_def in &column_def.options {
-                            if let ColumnOption::DefaultValue(_) = option_def.option {
+                            if let ColumnOption::DefaultValue(_)
+                            | ColumnOption::DefaultValuePersisted { .. } = option_def.option
+                            {
                                 return Err(ErrorCode::NotSupported(
                                             "Default value for columns defined on the table created from a CDC source".into(),
                                             "Remove the default value expression in the column definitions".into(),
