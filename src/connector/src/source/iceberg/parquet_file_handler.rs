@@ -119,7 +119,7 @@ pub fn new_s3_operator(
                 .region("us-east-1") // hard code as not used but needed.
                 .access_key_id(&s3_access_key)
                 .secret_access_key(&s3_secret_key)
-                .endpoint(&s3_region) // for minio backend, the `s3_region`` parameter is passed in as the endpoint.
+                .endpoint(&s3_region) // for minio backend, the `s3_region` parameter is passed in as the endpoint.
                 .bucket(&bucket)
         }
         false => builder
