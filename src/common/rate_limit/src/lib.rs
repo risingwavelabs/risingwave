@@ -488,7 +488,7 @@ mod tests {
     #[test]
     fn test_leak_bucket() {
         let v = Arc::new(AtomicU64::new(0));
-        let vs = Arc::new(LeakBucket::new(RATE.try_into().unwrap()));
+        let lb = Arc::new(LeakBucket::new(RATE.try_into().unwrap()));
         let task = |quota: u64, v: Arc<AtomicU64>, vs: Arc<LeakBucket>| {
             let start = Instant::now();
             loop {
@@ -497,6 +497,9 @@ mod tests {
                 }
                 while let Err(dur) = vs.check(quota) {
                     std::thread::sleep(dur);
+                }
+                if start.elapsed() >= DURATION {
+                    break;
                 }
 
                 v.fetch_add(quota, Ordering::Relaxed);
@@ -508,7 +511,7 @@ mod tests {
             let rate = rng.gen_range(10..20);
             let handle = std::thread::spawn({
                 let v = v.clone();
-                let limiter = vs.clone();
+                let limiter = lb.clone();
                 move || task(rate, v, limiter)
             });
             handles.push(handle);
@@ -523,6 +526,59 @@ mod tests {
             .unsigned_abs();
         let eratio = error as f64 / (RATE as f64 * DURATION.as_secs_f64());
         assert!(eratio < ERATIO, "eratio: {}, target: {}", eratio, ERATIO);
+        println!("eratio {eratio} < ERATIO {ERATIO}");
+    }
+
+    #[test]
+    fn test_leak_bucket_overflow() {
+        let v = Arc::new(AtomicU64::new(0));
+        let lb = Arc::new(LeakBucket::new(RATE.try_into().unwrap()));
+        let task = |quota: u64, v: Arc<AtomicU64>, vs: Arc<LeakBucket>| {
+            let start = Instant::now();
+            loop {
+                if start.elapsed() >= DURATION {
+                    break;
+                }
+                while let Err(dur) = vs.check(quota) {
+                    std::thread::sleep(dur);
+                }
+                if start.elapsed() >= DURATION {
+                    break;
+                }
+
+                v.fetch_add(quota, Ordering::Relaxed);
+            }
+        };
+        let mut handles = vec![];
+        let mut rng = thread_rng();
+        for _ in 0..THREADS {
+            let rate = rng.gen_range(500..2000);
+            let handle = std::thread::spawn({
+                let v = v.clone();
+                let limiter = lb.clone();
+                move || task(rate, v, limiter)
+            });
+            handles.push(handle);
+        }
+
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        let got = v.load(Ordering::Relaxed);
+        let expected = RATE * DURATION.as_secs();
+        let error = (v.load(Ordering::Relaxed) as isize
+            - RATE as isize * DURATION.as_secs() as isize)
+            .unsigned_abs();
+        let eratio = error as f64 / (RATE as f64 * DURATION.as_secs_f64());
+        assert!(
+            eratio < ERATIO,
+            "eratio: {}, target: {}, got: {}, expected: {}",
+            eratio,
+            ERATIO,
+            got,
+            expected
+        );
         println!("eratio {eratio} < ERATIO {ERATIO}");
     }
 
