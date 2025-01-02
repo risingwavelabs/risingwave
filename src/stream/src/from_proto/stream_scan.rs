@@ -40,9 +40,10 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
     ) -> StreamResult<Executor> {
         let [upstream, snapshot]: [_; 2] = params.input.try_into().unwrap();
         // For reporting the progress.
-        let progress = params
-            .local_barrier_manager
-            .register_create_mview_progress(params.actor_context.clone(), params.vnode_bitmap.clone());
+        let progress = params.local_barrier_manager.register_create_mview_progress(
+            params.actor_context.clone(),
+            params.vnode_bitmap.clone(),
+        );
 
         let output_indices = node
             .output_indices

@@ -15,14 +15,13 @@
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::mem::take;
-use std::ops::{BitAndAssign, BitOrAssign};
+use std::ops::BitOrAssign;
 
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_meta_model::ObjectId;
 use risingwave_pb::catalog::CreateType;
-use risingwave_pb::common::Buffer;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
@@ -660,7 +659,7 @@ impl CreateMviewProgressTracker {
             BackfillState::ConsumingUpstream(progress.consumed_epoch.into(), progress.consumed_rows)
         };
 
-        let vnodes = progress.backfill_vnodes.as_ref().map(|x| Bitmap::from(x));
+        let vnodes = progress.backfill_vnodes.as_ref().map(Bitmap::from);
 
         match self.progress_map.entry(table_id) {
             Entry::Occupied(mut o) => {

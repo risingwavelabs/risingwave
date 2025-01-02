@@ -72,9 +72,10 @@ impl ExecutorBuilder for SourceBackfillExecutorBuilder {
             source_desc_builder,
             state_table_handler,
         );
-        let progress = params
-            .local_barrier_manager
-            .register_create_mview_progress(params.actor_context.clone(), params.vnode_bitmap.clone());
+        let progress = params.local_barrier_manager.register_create_mview_progress(
+            params.actor_context.clone(),
+            params.vnode_bitmap.clone(),
+        );
 
         let exec = SourceBackfillExecutorInner::new(
             params.actor_context.clone(),

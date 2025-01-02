@@ -390,7 +390,8 @@ impl StreamActorManager {
             .map(ColumnId::from)
             .collect_vec();
 
-        let progress = local_barrier_manager.register_create_mview_progress(actor_context.clone(), vnode_bitmap.clone());
+        let progress = local_barrier_manager
+            .register_create_mview_progress(actor_context.clone(), vnode_bitmap.clone());
 
         let vnodes = vnode_bitmap.map(Arc::new);
         let barrier_rx = local_barrier_manager.subscribe_barrier(actor_context.id);

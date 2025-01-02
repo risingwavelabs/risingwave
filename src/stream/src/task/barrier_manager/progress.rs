@@ -197,7 +197,7 @@ impl CreateMviewProgressReporter {
 
     #[cfg(test)]
     pub fn for_test(barrier_manager: LocalBarrierManager) -> Self {
-        Self::new(barrier_manager, 0, None)
+        Self::new(barrier_manager, ActorContext::for_test(0), None)
     }
 
     pub fn actor_id(&self) -> u32 {
