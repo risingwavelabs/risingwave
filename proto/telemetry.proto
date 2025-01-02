@@ -167,3 +167,7 @@ message EventMessage {
   // mark the event is a test message
   bool is_test = 11;
 }
+
+message BatchEventMessage {
+  repeated EventMessage events = 1;
+}
