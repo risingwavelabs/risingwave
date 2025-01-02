@@ -21,11 +21,14 @@ use axum::extract::{Extension, Path};
 use axum::http::{HeaderMap, Method, StatusCode};
 use axum::routing::post;
 use axum::Router;
+use futures_async_stream::for_await;
 use pgwire::net::Address;
 use pgwire::pg_server::SessionManager;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_sqlparser::ast::{Expr, ObjectName};
 use tokio::net::TcpListener;
+use tokio::sync::broadcast;
+use tokio::time::{sleep, Duration};
 use tower::ServiceBuilder;
 use tower_http::add_extension::AddExtensionLayer;
 use tower_http::compression::CompressionLayer;
@@ -39,10 +42,17 @@ pub type Service = Arc<WebhookService>;
 
 // We always use the `root` user to connect to the database to allow the webhook service to access all tables.
 const USER: &str = "root";
+const BROADCAST_CHANNEL_CAPACITY: usize = 1000;
+const BROADCAST_INTERVAL_MS: u64 = 3000;
+
+pub struct AppState {
+    pub tx: broadcast::Sender<()>,
+}
 
 #[derive(Clone)]
 pub struct WebhookService {
     webhook_addr: SocketAddr,
+    app_state: Arc<AppState>, // Embed AppState
 }
 
 pub(super) mod handlers {
@@ -57,7 +67,7 @@ pub(super) mod handlers {
     use crate::session::SESSION_MANAGER;
 
     pub async fn handle_post_request(
-        Extension(_srv): Extension<Service>,
+        Extension(srv): Extension<Service>,
         headers: HeaderMap,
         Path((database, schema, table)): Path<(String, String, String)>,
         body: Bytes,
@@ -65,7 +75,10 @@ pub(super) mod handlers {
         let session_mgr = SESSION_MANAGER
             .get()
             .expect("session manager has been initialized");
-
+        tracing::info!(
+            "WKXLOG Received webhook request, body: {}",
+            String::from_utf8(body.to_vec()).unwrap()
+        );
         // Can be any address, we use the port of meta to indicate that it's a internal request.
         let dummy_addr = Address::Tcp(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 5691));
 
@@ -153,7 +166,7 @@ pub(super) mod handlers {
             returning: vec![],
         };
 
-        let _rsp = handle(session, insert_stmt, Arc::from(""), vec![])
+        let mut rsp = handle(session, insert_stmt, Arc::from(""), vec![])
             .await
             .map_err(|e| {
                 err(
@@ -162,13 +175,27 @@ pub(super) mod handlers {
                 )
             })?;
 
+        #[for_await]
+        for row_set in rsp.values_stream() {
+            for _row in row_set.unwrap() {}
+        }
+
+        let mut rx = srv.app_state.tx.subscribe();
+        // Wait for broadcast signal
+        let _ = rx.recv().await;
+
         Ok(())
     }
 }
 
 impl WebhookService {
     pub fn new(webhook_addr: SocketAddr) -> Self {
-        Self { webhook_addr }
+        let (tx, _) = broadcast::channel(BROADCAST_CHANNEL_CAPACITY); // Example broadcast channel for notifications
+        let app_state = AppState { tx };
+        Self {
+            webhook_addr,
+            app_state: Arc::new(app_state),
+        }
     }
 
     pub async fn serve(self) -> anyhow::Result<()> {
@@ -196,6 +223,10 @@ impl WebhookService {
             .await
             .context("Failed to bind dashboard address")?;
 
+        let tx = srv.app_state.tx.clone();
+        // Start periodic timer
+        start_periodic_broadcast(tx).await;
+
         #[cfg(not(madsim))]
         axum::serve(listener, app)
             .await
@@ -203,6 +234,18 @@ impl WebhookService {
 
         Ok(())
     }
+}
+
+// Periodic broadcast to release all waiting tasks
+async fn start_periodic_broadcast(tx: broadcast::Sender<()>) {
+    tokio::spawn(async move {
+        let interval = Duration::from_millis(BROADCAST_INTERVAL_MS);
+        loop {
+            sleep(interval).await;
+            // Notify all subscribers
+            let _ = tx.send(()); // Ignore errors (no active listeners)
+        }
+    });
 }
 
 #[cfg(test)]
