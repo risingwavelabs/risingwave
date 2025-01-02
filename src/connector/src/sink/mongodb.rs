@@ -530,7 +530,9 @@ impl UpsertCommandBuilder {
 
         self.updates.push(bson!( {
             "q": pk,
-            "u": row,
+            "u": bson!( {
+                "$set": row,
+            }),
             "upsert": true,
             "multi": false,
         }));
