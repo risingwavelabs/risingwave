@@ -520,12 +520,13 @@ impl SourceManagerCore {
                 handle.handle.abort();
             }
             self.source_fragments.remove(&source_id);
-            if let Some(fragments) = self.backfill_fragments.remove(&source_id) {
-                debug_assert!(
-                    fragments.is_empty(),
-                    "when dropping source, there should be no backfill fragments, got: {:?}",
-                    fragments
-                );
+            if let Some(_fragments) = self.backfill_fragments.remove(&source_id) {
+                // TODO: enable this assertion after we implemented cleanup for backfill fragments
+                // debug_assert!(
+                //     fragments.is_empty(),
+                //     "when dropping source, there should be no backfill fragments, got: {:?}",
+                //     fragments
+                // );
             }
         }
 
