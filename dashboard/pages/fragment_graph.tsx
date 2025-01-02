@@ -1,5 +1,5 @@
 /*
- * Copyright 2024 RisingWave Labs
+ * Copyright 2025 RisingWave Labs
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -47,7 +47,6 @@ import {
   calculateBPRate,
   calculateCumulativeBp,
   fetchEmbeddedBackPressure,
-  fetchPrometheusBackPressure,
 } from "../lib/api/metric"
 import {
   getFragmentsByJobId,
@@ -191,8 +190,6 @@ function buildFragmentDependencyAsEdges(
 
 const SIDEBAR_WIDTH = 225
 
-type BackPressureDataSource = "Embedded" | "Prometheus"
-
 // The state of the embedded back pressure metrics.
 // The metrics from previous fetch are stored here to calculate the rate.
 interface EmbeddedBackPressureInfo {
@@ -311,16 +308,6 @@ export default function Streaming() {
     toast(new Error(`Actor ${searchActorIdInt} not found`))
   }
 
-  const [backPressureDataSource, setBackPressureDataSource] =
-    useState<BackPressureDataSource>("Embedded")
-
-  // Periodically fetch Prometheus back-pressure from Meta node
-  const { response: promethusMetrics } = useFetch(
-    fetchPrometheusBackPressure,
-    INTERVAL_MS,
-    backPressureDataSource === "Prometheus"
-  )
-
   // Periodically fetch embedded back-pressure from Meta node
   // Didn't call `useFetch()` because the `setState` way is special.
   const [embeddedBackPressureInfo, setEmbeddedBackPressureInfo] =
@@ -330,53 +317,51 @@ export default function Streaming() {
   }>()
 
   useEffect(() => {
-    if (backPressureDataSource === "Embedded") {
-      function refresh() {
-        fetchEmbeddedBackPressure().then(
-          (response) => {
-            let newBP =
-              response.backPressureInfos?.map(BackPressureInfo.fromJSON) ?? []
-            setEmbeddedBackPressureInfo((prev) =>
-              prev
-                ? {
-                    previous: prev.current,
-                    current: newBP,
-                    totalBackpressureNs: calculateCumulativeBp(
-                      prev.totalBackpressureNs,
-                      prev.current,
-                      newBP
-                    ),
-                    totalDurationNs:
-                      prev.totalDurationNs + INTERVAL_MS * 1000 * 1000,
-                  }
-                : {
-                    previous: newBP, // Use current value to show zero rate, but it's fine
-                    current: newBP,
-                    totalBackpressureNs: [],
-                    totalDurationNs: 0,
-                  }
-            )
-            setFragmentStats(response.fragmentStats)
-          },
-          (e) => {
-            console.error(e)
-            toast(e, "error")
-          }
-        )
-      }
-      refresh()
-      const interval = setInterval(refresh, INTERVAL_MS)
-      return () => {
-        clearInterval(interval)
-      }
+    function refresh() {
+      fetchEmbeddedBackPressure().then(
+        (response) => {
+          let newBP =
+            response.backPressureInfos?.map(BackPressureInfo.fromJSON) ?? []
+          setEmbeddedBackPressureInfo((prev) =>
+            prev
+              ? {
+                  previous: prev.current,
+                  current: newBP,
+                  totalBackpressureNs: calculateCumulativeBp(
+                    prev.totalBackpressureNs,
+                    prev.current,
+                    newBP
+                  ),
+                  totalDurationNs:
+                    prev.totalDurationNs + INTERVAL_MS * 1000 * 1000,
+                }
+              : {
+                  previous: newBP, // Use current value to show zero rate, but it's fine
+                  current: newBP,
+                  totalBackpressureNs: [],
+                  totalDurationNs: 0,
+                }
+          )
+          setFragmentStats(response.fragmentStats)
+        },
+        (e) => {
+          console.error(e)
+          toast(e, "error")
+        }
+      )
     }
-  }, [backPressureDataSource, toast])
+    refresh()
+    const interval = setInterval(refresh, INTERVAL_MS)
+    return () => {
+      clearInterval(interval)
+    }
+  }, [toast])
 
   const backPressures = useMemo(() => {
-    if (promethusMetrics || embeddedBackPressureInfo) {
+    if (embeddedBackPressureInfo) {
       let map = new Map()
 
-      if (backPressureDataSource === "Embedded" && embeddedBackPressureInfo) {
+      if (embeddedBackPressureInfo) {
         const metrics = calculateBPRate(
           embeddedBackPressureInfo.totalBackpressureNs,
           embeddedBackPressureInfo.totalDurationNs
@@ -387,26 +372,10 @@ export default function Streaming() {
             m.sample[0].value
           )
         }
-      } else if (backPressureDataSource === "Prometheus" && promethusMetrics) {
-        for (const m of promethusMetrics.outputBufferBlockingDuration) {
-          if (m.sample.length > 0) {
-            // Note: We issue an instant query to Prometheus to get the most recent value.
-            // So there should be only one sample here.
-            //
-            // Due to https://github.com/risingwavelabs/risingwave/issues/15280, it's still
-            // possible that an old version of meta service returns a range-query result.
-            // So we take the one with the latest timestamp here.
-            const value = _(m.sample).maxBy((s) => s.timestamp)!.value * 100
-            map.set(
-              `${m.metric.fragment_id}_${m.metric.downstream_fragment_id}`,
-              value
-            )
-          }
-        }
       }
       return map
     }
-  }, [backPressureDataSource, promethusMetrics, embeddedBackPressureInfo])
+  }, [embeddedBackPressureInfo])
 
   const retVal = (
     <Flex p={3} height="calc(100vh - 20px)" flexDirection="column">
@@ -504,25 +473,6 @@ export default function Streaming() {
                 <Button onClick={(_) => handleSearchActor()}>Go</Button>
               </HStack>
             </VStack>
-          </FormControl>
-          <FormControl>
-            <FormLabel>Back Pressure Data Source</FormLabel>
-            <Select
-              value={backPressureDataSource}
-              onChange={(event) =>
-                setBackPressureDataSource(
-                  event.target.value as BackPressureDataSource
-                )
-              }
-              defaultValue="Embedded"
-            >
-              <option value="Embedded" key="Embedded">
-                Embedded (5 secs)
-              </option>
-              <option value="Prometheus" key="Prometheus">
-                Prometheus (1 min)
-              </option>
-            </Select>
           </FormControl>
           <Flex height="full" width="full" flexDirection="column">
             <Text fontWeight="semibold">Fragments</Text>

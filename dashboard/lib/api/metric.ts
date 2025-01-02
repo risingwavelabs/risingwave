@@ -1,5 +1,5 @@
 /*
- * Copyright 2024 RisingWave Labs
+ * Copyright 2025 RisingWave Labs
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,24 +14,12 @@
  * limitations under the License.
  *
  */
-import { Metrics, MetricsSample } from "../../components/metrics"
+import { MetricsSample } from "../../components/metrics"
 import {
   BackPressureInfo,
   GetBackPressureResponse,
 } from "../../proto/gen/monitor_service"
 import api from "./api"
-
-export interface BackPressuresMetrics {
-  outputBufferBlockingDuration: Metrics[]
-}
-
-// Get back pressure from Prometheus
-export async function fetchPrometheusBackPressure() {
-  const res: BackPressuresMetrics = await api.get(
-    "/metrics/fragment/prometheus_back_pressures"
-  )
-  return res
-}
 
 export interface BackPressureRateInfo {
   actorId: number
