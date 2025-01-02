@@ -133,9 +133,7 @@ impl TableFunction {
                 .into());
             }
 
-            if !"s3".eq_ignore_ascii_case(&eval_args[1])
-                && !"minio".eq_ignore_ascii_case(&eval_args[1])
-            {
+            if !"s3".eq_ignore_ascii_case(&eval_args[1]) {
                 return Err(BindError(
                     "file_scan function only accepts 's3' as storage type".to_owned(),
                 )
@@ -157,7 +155,6 @@ impl TableFunction {
                     eval_args[3].clone(),
                     eval_args[4].clone(),
                     bucket.clone(),
-                    "minio".eq_ignore_ascii_case(&eval_args[1]),
                 )?;
                 let files = if eval_args[5].ends_with('/') {
                     let files = tokio::task::block_in_place(|| {

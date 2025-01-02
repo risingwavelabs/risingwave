@@ -88,7 +88,6 @@ message FileScanNode {
   enum StorageType {
     STORAGE_TYPE_UNSPECIFIED = 0;
     S3 = 1;
-    MINIO = 2;
   }
 
   repeated plan_common.ColumnDesc columns = 1;

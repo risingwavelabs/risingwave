@@ -50,14 +50,8 @@ impl LogicalFileScan {
         file_location: Vec<String>,
     ) -> Self {
         assert!("parquet".eq_ignore_ascii_case(&file_format));
-        assert!(
-            "s3".eq_ignore_ascii_case(&storage_type) || "minio".eq_ignore_ascii_case(&storage_type)
-        );
-        let storage_type = if "s3".eq_ignore_ascii_case(&storage_type) {
-            generic::StorageType::S3
-        } else {
-            generic::StorageType::Minio
-        };
+        assert!("s3".eq_ignore_ascii_case(&storage_type));
+        let storage_type = generic::StorageType::S3;
         let core = generic::FileScan {
             schema,
             file_format: generic::FileFormat::Parquet,

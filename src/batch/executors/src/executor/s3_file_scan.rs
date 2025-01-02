@@ -20,7 +20,6 @@ use risingwave_connector::source::iceberg::{
     extract_bucket_and_file_name, new_s3_operator, read_parquet_file,
 };
 use risingwave_pb::batch_plan::file_scan_node;
-use risingwave_pb::batch_plan::file_scan_node::StorageType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::error::BatchError;
@@ -41,7 +40,6 @@ pub struct S3FileScanExecutor {
     batch_size: usize,
     schema: Schema,
     identity: String,
-    is_minio: bool,
 }
 
 impl Executor for S3FileScanExecutor {
@@ -68,7 +66,6 @@ impl S3FileScanExecutor {
         batch_size: usize,
         schema: Schema,
         identity: String,
-        is_minio: bool,
     ) -> Self {
         Self {
             file_format,
@@ -79,7 +76,6 @@ impl S3FileScanExecutor {
             batch_size,
             schema,
             identity,
-            is_minio,
         }
     }
 
@@ -93,7 +89,6 @@ impl S3FileScanExecutor {
                 self.s3_access_key.clone(),
                 self.s3_secret_key.clone(),
                 bucket.clone(),
-                self.is_minio,
             )?;
             let chunk_stream =
                 read_parquet_file(op, file_name, None, None, self.batch_size, 0).await?;
@@ -119,15 +114,6 @@ impl BoxedExecutorBuilder for FileScanExecutorBuilder {
             NodeBody::FileScan
         )?;
 
-        let storage_type = file_scan_node.storage_type;
-        let is_minio = if storage_type == (StorageType::S3 as i32) {
-            false
-        } else if storage_type == (StorageType::Minio as i32) {
-            true
-        } else {
-            todo!()
-        };
-
         Ok(Box::new(S3FileScanExecutor::new(
             match file_scan_node::FileFormat::try_from(file_scan_node.file_format).unwrap() {
                 file_scan_node::FileFormat::Parquet => FileFormat::Parquet,
@@ -140,7 +126,6 @@ impl BoxedExecutorBuilder for FileScanExecutorBuilder {
             source.context().get_config().developer.chunk_size,
             Schema::from_iter(file_scan_node.columns.iter().map(Field::from)),
             source.plan_node().get_identity().clone(),
-            is_minio,
         )))
     }
 }

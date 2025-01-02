@@ -92,8 +92,8 @@ def do_test(config, file_num, item_num_per_file, prefix):
         test_timestamptz_ns
          FROM file_scan(
         'parquet',
-        'minio',
-        'custom',
+        's3',
+        'http://127.0.0.1:9301',
         'hummockadmin',
         'hummockadmin',
         's3://hummock001/test_file_scan/test_file_scan.parquet'

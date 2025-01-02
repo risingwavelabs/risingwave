@@ -109,23 +109,32 @@ pub fn new_s3_operator(
     s3_access_key: String,
     s3_secret_key: String,
     bucket: String,
-    is_minio: bool,
 ) -> ConnectorResult<Operator> {
-    // Create s3 builder.
+    let is_minio = s3_region.starts_with("http");
+
     let mut builder = S3::default();
-    builder = builder
-        .region(&s3_region)
-        .access_key_id(&s3_access_key)
-        .secret_access_key(&s3_secret_key)
-        .bucket(&bucket);
     builder = match is_minio {
-        true => builder.endpoint(&format!("http://{}.127.0.0.1:9301", bucket)),
-        false => builder.endpoint(&format!(
-            "https://{}.s3.{}.amazonaws.com",
-            bucket, s3_region
-        )),
+        true => {
+            builder
+                .region("us-east-1") // hard code as not used but needed.
+                .access_key_id(&s3_access_key)
+                .secret_access_key(&s3_secret_key)
+                .endpoint(&s3_region) // for minio backend, the `s3_region`` parameter is passed in as the endpoint.
+                .bucket(&bucket)
+        }
+        false => builder
+            .region(&s3_region)
+            .access_key_id(&s3_access_key)
+            .secret_access_key(&s3_secret_key)
+            .endpoint(&format!(
+                "https://{}.s3.{}.amazonaws.com",
+                bucket, s3_region
+            ))
+            .bucket(&bucket),
     };
+
     builder = builder.disable_config_load();
+
     let op: Operator = Operator::new(builder)?
         .layer(LoggingLayer::default())
         .layer(RetryLayer::default())

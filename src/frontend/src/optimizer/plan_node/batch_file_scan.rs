@@ -89,7 +89,6 @@ impl ToBatchPb for BatchFileScan {
             },
             storage_type: match self.core.storage_type {
                 generic::StorageType::S3 => StorageType::S3 as i32,
-                generic::StorageType::Minio => StorageType::Minio as i32,
             },
             s3_region: self.core.s3_region.clone(),
             s3_access_key: self.core.s3_access_key.clone(),
