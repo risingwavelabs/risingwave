@@ -125,7 +125,7 @@ fn refill_table_change_log(
     table_change_log: &mut TableChangeLog,
     sst_id_to_info: &HashMap<HummockSstableId, SstableInfo>,
 ) {
-    for c in &mut table_change_log.0 {
+    for c in table_change_log.iter_mut() {
         for s in &mut c.old_value {
             refill_sstable_info(s, sst_id_to_info);
         }
@@ -221,11 +221,10 @@ impl From<(&HummockVersion, &HashSet<CompactionGroupId>)> for IncompleteHummockV
                 .iter()
                 .map(|(table_id, change_log)| {
                     let incomplete_table_change_log = change_log
-                        .0
                         .iter()
                         .map(stripped_epoch_new_change_log)
-                        .collect();
-                    (*table_id, TableChangeLog(incomplete_table_change_log))
+                        ;
+                    (*table_id, TableChangeLog::new(incomplete_table_change_log))
                 })
                 .collect(),
             state_table_info: version.state_table_info.clone(),
