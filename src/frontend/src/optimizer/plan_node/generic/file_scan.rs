@@ -34,17 +34,16 @@ pub enum StorageType {
 #[educe(PartialEq, Eq, Hash)]
 pub enum FileScanBackend {
     FileScan(FileScan),
-    GcsFileScan(GcsFileScan), // Assume GcsFileScan is defined elsewhere
+    GcsFileScan(GcsFileScan),
 }
 
-// Example definition of GcsFileScan (you may need to adjust it)
 #[derive(Debug, Clone, Educe)]
 #[educe(PartialEq, Eq, Hash)]
 pub struct GcsFileScan {
     pub schema: Schema,
     pub file_format: FileFormat,
     pub storage_type: StorageType,
-    pub creditial: String,
+    pub credential: String,
     pub service_account: String,
     pub file_location: Vec<String>,
 

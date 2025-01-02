@@ -80,13 +80,11 @@ impl TableFunction {
         let return_type = {
             // arguments:
             // file format e.g. parquet
-            // storage type e.g. s3
-            // s3 region
-            // s3 access key
-            // s3 secret key
-            // file location
+            // storage type e.g. s3, gcs
+            // For s3: file_scan(file_format, s3, s3_region, s3_access_key, s3_secret_key, file_location_or_directory)
+            // For gcs: file_scan(file_format, gcs, credential, service_account, file_location_or_directory)
             if args.len() != 6 && args.len() != 5 {
-                return Err(BindError("file_scan function only accepts 6 arguments: file_scan('parquet', 's3', s3 region, s3 access key, s3 secret key, file location)".to_owned()).into());
+                return Err(BindError("file_scan function only accepts: file_scan('parquet', 's3', s3 region, s3 access key, s3 secret key, file location) or file_scan('parquet', 'gcs', credential, service_account, file location)".to_owned()).into());
             }
             let mut eval_args: Vec<String> = vec![];
             for arg in &args {

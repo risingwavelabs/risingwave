@@ -73,7 +73,7 @@ impl LogicalFileScan {
         schema: Schema,
         file_format: String,
         storage_type: String,
-        creditial: String,
+        credential: String,
         service_account: String,
         file_location: Vec<String>,
     ) -> Self {
@@ -84,7 +84,7 @@ impl LogicalFileScan {
             schema,
             file_format: generic::FileFormat::Parquet,
             storage_type: generic::StorageType::Gcs,
-            creditial,
+            credential,
             service_account,
             file_location,
             ctx,

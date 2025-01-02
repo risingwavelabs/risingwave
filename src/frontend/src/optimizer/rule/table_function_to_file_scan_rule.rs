@@ -82,7 +82,7 @@ impl Rule for TableFunctionToFileScanRule {
                     .into(),
                 )
             } else if "gcs".eq_ignore_ascii_case(&eval_args[1]) {
-                let creditial = eval_args[2].clone();
+                let credential = eval_args[2].clone();
                 let service_account = eval_args[3].clone();
                 // The rest of the arguments are file locations
                 let file_location = eval_args[4..].iter().cloned().collect_vec();
@@ -92,7 +92,7 @@ impl Rule for TableFunctionToFileScanRule {
                         schema,
                         "parquet".to_owned(),
                         "gcs".to_owned(),
-                        creditial,
+                        credential,
                         service_account,
                         file_location,
                     )
