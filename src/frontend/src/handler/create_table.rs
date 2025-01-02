@@ -179,7 +179,7 @@ fn ensure_column_options_supported(c: &ColumnDef) -> Result<()> {
     for option_def in &c.options {
         match option_def.option {
             ColumnOption::GeneratedColumns(_) => {}
-            ColumnOption::DefaultColumns(_) => {}
+            ColumnOption::DefaultValue(_) => {}
             ColumnOption::Unique { is_primary: true } => {}
             _ => bail_not_implemented!("column constraints \"{}\"", option_def),
         }
@@ -352,7 +352,7 @@ pub fn bind_sql_column_constraints(
                     );
                     binder.set_clause(None);
                 }
-                ColumnOption::DefaultColumns(expr) => {
+                ColumnOption::DefaultValue(expr) => {
                     let idx = binder
                         .get_column_binding_index(table_name.clone(), &column.name.real_value())?;
                     let expr_impl = binder
@@ -1128,7 +1128,7 @@ pub(super) async fn handle_create_table_plan(
                 None => {
                     for column_def in &column_defs {
                         for option_def in &column_def.options {
-                            if let ColumnOption::DefaultColumns(_) = option_def.option {
+                            if let ColumnOption::DefaultValue(_) = option_def.option {
                                 return Err(ErrorCode::NotSupported(
                                             "Default value for columns defined on the table created from a CDC source".into(),
                                             "Remove the default value expression in the column definitions".into(),
