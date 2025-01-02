@@ -735,7 +735,7 @@ pub enum ColumnOption {
     /// `NOT NULL`
     NotNull,
     /// `DEFAULT <restricted-expr>`
-    DefaultColumns(Expr),
+    DefaultValue(Expr),
     /// `{ PRIMARY KEY | UNIQUE }`
     Unique { is_primary: bool },
     /// A referential integrity constraint (`[FOREIGN KEY REFERENCES
@@ -765,7 +765,7 @@ impl fmt::Display for ColumnOption {
         match self {
             Null => write!(f, "NULL"),
             NotNull => write!(f, "NOT NULL"),
-            DefaultColumns(expr) => write!(f, "DEFAULT {}", expr),
+            DefaultValue(expr) => write!(f, "DEFAULT {}", expr),
             Unique { is_primary } => {
                 write!(f, "{}", if *is_primary { "PRIMARY KEY" } else { "UNIQUE" })
             }
