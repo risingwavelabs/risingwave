@@ -141,30 +141,6 @@ impl Check {
     }
 }
 
-pub trait RateLimiterTraitExt: RateLimiterTrait + Sized {
-    // fn wait(&self, quota: u64) -> DelayV2<'_, Self>;
-    fn wait(&self, quota: u64) -> impl Future<Output = ()> + Send;
-}
-
-impl<T> RateLimiterTraitExt for T
-where
-    T: RateLimiterTrait + Sized,
-{
-    async fn wait(&self, quota: u64) {
-        loop {
-            match self.check(quota) {
-                Check::Ok => return,
-                Check::Retry(duration) => {
-                    tokio::time::sleep(duration).await;
-                }
-                Check::RetryAfter(rx) => {
-                    let _ = rx.await;
-                }
-            }
-        }
-    }
-}
-
 /// Shared behavior for rate limiters.
 pub trait RateLimiterTrait: Send + Sync + 'static {
     /// Return current throttle policy.
@@ -224,15 +200,45 @@ impl RateLimiter {
             rate_limit,
         }
     }
-}
 
-impl RateLimiterTrait for RateLimiter {
-    fn rate_limit(&self) -> RateLimit {
+    pub fn rate_limit(&self) -> RateLimit {
         self.inner.load().rate_limit()
     }
 
-    fn check(&self, quota: u64) -> Check {
+    pub fn check(&self, quota: u64) -> Check {
         self.inner.load().check(quota)
+    }
+
+    pub async fn wait(&self, quota: u64) {
+        loop {
+            match self.check(quota) {
+                Check::Ok => return,
+                Check::Retry(duration) => {
+                    tokio::time::sleep(duration).await;
+                }
+                Check::RetryAfter(rx) => {
+                    let _ = rx.await;
+                }
+            }
+        }
+    }
+}
+
+impl RateLimiterTrait for RateLimiter {
+    /// Return current throttle policy.
+    fn rate_limit(&self) -> RateLimit {
+        self.rate_limit()
+    }
+
+    /// Check if the request with the given quota is supposed to be allowed at the moment.
+    ///
+    /// On success, the quota will be consumed. [`Check::Ok`] is returned.
+    /// The caller is supposed to proceed the request with the given quota.
+    ///
+    /// On failure, [`Check::Retry`] or [`Check::RetryAfter`] is returned.
+    /// The caller is supposed to retry the check after the given duration or retry after receiving the signal.
+    fn check(&self, quota: u64) -> Check {
+        self.check(quota)
     }
 }
 

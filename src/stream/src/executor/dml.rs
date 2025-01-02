@@ -18,11 +18,9 @@ use std::mem;
 use either::Either;
 use futures::TryStreamExt;
 use risingwave_common::catalog::{ColumnDesc, TableId, TableVersionId};
-use risingwave_common::rate_limit::{
-    MonitoredRateLimiter, RateLimit, RateLimiter, RateLimiterTrait, RateLimiterTraitExt,
-};
 use risingwave_common::transaction::transaction_id::TxnId;
 use risingwave_common::transaction::transaction_message::TxnMsg;
+use risingwave_common_rate_limit::{MonitoredRateLimiter, RateLimit, RateLimiter};
 use risingwave_dml::dml_manager::DmlManagerRef;
 use risingwave_expr::codegen::BoxStream;
 

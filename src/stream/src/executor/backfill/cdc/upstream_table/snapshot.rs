@@ -19,10 +19,10 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::ColumnDesc;
-use risingwave_common::rate_limit::{RateLimiter, RateLimiterTraitExt};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{Scalar, ScalarImpl, Timestamptz};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+use risingwave_common_rate_limit::RateLimiter;
 use risingwave_connector::source::cdc::external::{
     CdcOffset, ExternalTableReader, ExternalTableReaderImpl, SchemaTableName,
 };

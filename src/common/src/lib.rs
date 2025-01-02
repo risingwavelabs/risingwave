@@ -82,7 +82,6 @@ pub use {
 pub mod lru;
 pub mod opts;
 pub mod range;
-pub mod rate_limit;
 pub mod row;
 pub mod sequence;
 pub mod session_config;

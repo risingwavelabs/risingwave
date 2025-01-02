@@ -42,6 +42,7 @@ prost = { workspace = true }
 rand = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_common_estimate_size = { workspace = true }
+risingwave_common_rate_limit = { workspace = true }
 risingwave_connector = { workspace = true }
 risingwave_dml = { workspace = true }
 risingwave_expr = { workspace = true }

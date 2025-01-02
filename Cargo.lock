@@ -10846,6 +10846,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "risingwave_common_rate_limit"
+version = "2.3.0-alpha"
+dependencies = [
+ "arc-swap",
+ "madsim-tokio",
+ "parking_lot 0.12.1",
+ "pin-project-lite",
+ "prometheus",
+ "rand",
+ "risingwave_common",
+ "risingwave_common_metrics",
+]
+
+[[package]]
 name = "risingwave_common_secret"
 version = "2.3.0-alpha"
 dependencies = [
@@ -10956,6 +10970,7 @@ dependencies = [
  "risingwave_batch_executors",
  "risingwave_common",
  "risingwave_common_heap_profiling",
+ "risingwave_common_rate_limit",
  "risingwave_common_service",
  "risingwave_connector",
  "risingwave_dml",
@@ -11064,6 +11079,7 @@ dependencies = [
  "reqwest 0.12.4",
  "risingwave_common",
  "risingwave_common_estimate_size",
+ "risingwave_common_rate_limit",
  "risingwave_connector_codec",
  "risingwave_jni_core",
  "risingwave_pb",
@@ -12129,6 +12145,7 @@ dependencies = [
  "rand",
  "risingwave_common",
  "risingwave_common_estimate_size",
+ "risingwave_common_rate_limit",
  "risingwave_connector",
  "risingwave_dml",
  "risingwave_expr",
