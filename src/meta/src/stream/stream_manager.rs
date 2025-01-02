@@ -423,43 +423,25 @@ impl GlobalStreamManager {
                 }
             }
         };
-        let result: MetaResult<NotificationVersion> = try {
-            if need_pause {
-                // Special handling is required when creating sink into table, we need to pause the stream to avoid data loss.
-                self.barrier_scheduler
-                    .run_config_change_command_with_pause(
-                        streaming_job.database_id().into(),
-                        command,
-                    )
-                    .await?;
-            } else {
-                self.barrier_scheduler
-                    .run_command(streaming_job.database_id().into(), command)
-                    .await?;
-            }
 
-            tracing::debug!(?streaming_job, "first barrier collected for stream job");
-            let result = self
-                .metadata_manager
-                .wait_streaming_job_finished(streaming_job.id() as _)
+        if need_pause {
+            // Special handling is required when creating sink into table, we need to pause the stream to avoid data loss.
+            self.barrier_scheduler
+                .run_config_change_command_with_pause(streaming_job.database_id().into(), command)
                 .await?;
-            tracing::debug!(?streaming_job, "stream job finish");
-            result
-        };
-        match result {
-            Err(err) => {
-                if create_type == CreateType::Foreground || err.is_cancelled() {
-                    let mut table_ids: HashSet<TableId> =
-                        HashSet::from_iter(std::iter::once(table_id));
-                    if let Some(tmp_table_id) = replace_table_id {
-                        table_ids.insert(tmp_table_id);
-                    }
-                }
-
-                Err(err)
-            }
-            Ok(version) => Ok(version),
+        } else {
+            self.barrier_scheduler
+                .run_command(streaming_job.database_id().into(), command)
+                .await?;
         }
+
+        tracing::debug!(?streaming_job, "first barrier collected for stream job");
+        let result = self
+            .metadata_manager
+            .wait_streaming_job_finished(streaming_job.id() as _)
+            .await?;
+        tracing::debug!(?streaming_job, "stream job finish");
+        result
     }
 
     /// Send replace job command to barrier scheduler.
