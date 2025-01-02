@@ -24,6 +24,7 @@ use risingwave_hummock_sdk::compact::{
     compact_task_to_string, estimate_memory_for_compact_task, statistics_compact_task,
 };
 use risingwave_hummock_sdk::compact_task::CompactTask;
+use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::key::{FullKey, FullKeyTracker};
 use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
@@ -40,7 +41,7 @@ use tokio::sync::oneshot::Receiver;
 use super::iterator::MonitoredCompactorIterator;
 use super::task_progress::TaskProgress;
 use super::{CompactionStatistics, TaskConfig};
-use crate::filter_key_extractor::{FilterKeyExtractorImpl, FilterKeyExtractorManager};
+use crate::compaction_catalog_manager::{CompactionCatalogAgentRef, CompactionCatalogManagerRef};
 use crate::hummock::compactor::compaction_utils::{
     build_multi_compaction_filter, estimate_task_output_capacity, generate_splits_for_task,
     metrics_report_for_task, optimize_by_copy_block,
@@ -134,7 +135,7 @@ impl CompactorRunner {
     pub async fn run(
         &self,
         compaction_filter: impl CompactionFilter,
-        filter_key_extractor: Arc<FilterKeyExtractorImpl>,
+        compaction_catalog_agent_ref: CompactionCatalogAgentRef,
         task_progress: Arc<TaskProgress>,
     ) -> HummockResult<CompactOutput> {
         let iter = self.build_sst_iter(task_progress.clone())?;
@@ -143,7 +144,7 @@ impl CompactorRunner {
             .compact_key_range(
                 iter,
                 compaction_filter,
-                filter_key_extractor,
+                compaction_catalog_agent_ref,
                 Some(task_progress),
                 Some(self.compact_task.task_id),
                 Some(self.split_index),
@@ -302,12 +303,12 @@ pub fn partition_overlapping_sstable_infos(
 
 /// Handles a compaction task and reports its status to hummock manager.
 /// Always return `Ok` and let hummock manager handle errors.
-pub async fn compact(
+pub async fn compact_with_agent(
     compactor_context: CompactorContext,
     mut compact_task: CompactTask,
     mut shutdown_rx: Receiver<()>,
     object_id_getter: Box<dyn GetObjectId>,
-    filter_key_extractor_manager: FilterKeyExtractorManager,
+    compaction_catalog_agent_ref: CompactionCatalogAgentRef,
 ) -> (
     (
         CompactTask,
@@ -330,35 +331,6 @@ pub async fn compact(
         .start_timer();
 
     let multi_filter = build_multi_compaction_filter(&compact_task);
-
-    let existing_table_ids: HashSet<u32> =
-        HashSet::from_iter(compact_task.existing_table_ids.clone());
-    let compact_table_ids = HashSet::from_iter(
-        compact_task
-            .input_ssts
-            .iter()
-            .flat_map(|level| level.table_infos.iter())
-            .flat_map(|sst| sst.table_ids.clone())
-            .filter(|table_id| existing_table_ids.contains(table_id)),
-    );
-
-    let multi_filter_key_extractor = match build_filter_key_extractor(
-        &compact_task,
-        filter_key_extractor_manager,
-        &compact_table_ids,
-    )
-    .await
-    {
-        Some(multi_filter_key_extractor) => multi_filter_key_extractor,
-        None => {
-            let task_status = TaskStatus::ExecuteFailed;
-            return (
-                compact_done(compact_task, context.clone(), vec![], task_status),
-                None,
-            );
-        }
-    };
-
     let mut task_status = TaskStatus::Success;
     let optimize_by_copy_block = optimize_by_copy_block(&compact_task, &context);
 
@@ -446,7 +418,7 @@ pub async fn compact(
         let runner = fast_compactor_runner::CompactorRunner::new(
             context.clone(),
             compact_task.clone(),
-            multi_filter_key_extractor.clone(),
+            compaction_catalog_agent_ref.clone(),
             object_id_getter.clone(),
             task_progress_guard.progress.clone(),
         );
@@ -490,7 +462,7 @@ pub async fn compact(
     }
     for (split_index, _) in compact_task.splits.iter().enumerate() {
         let filter = multi_filter.clone();
-        let multi_filter_key_extractor = multi_filter_key_extractor.clone();
+        let compaction_catalog_agent_ref = compaction_catalog_agent_ref.clone();
         let compactor_runner = CompactorRunner::new(
             split_index,
             compactor_context.clone(),
@@ -500,7 +472,7 @@ pub async fn compact(
         let task_progress = task_progress_guard.progress.clone();
         let runner = async move {
             compactor_runner
-                .run(filter, multi_filter_key_extractor, task_progress)
+                .run(filter, compaction_catalog_agent_ref, task_progress)
                 .await
         };
         let traced = match context.await_tree_reg.as_ref() {
@@ -585,6 +557,93 @@ pub async fn compact(
         (compact_task, table_stats, object_timestamps),
         memory_detector,
     )
+}
+
+/// Handles a compaction task and reports its status to hummock manager.
+/// Always return `Ok` and let hummock manager handle errors.
+pub async fn compact(
+    compactor_context: CompactorContext,
+    compact_task: CompactTask,
+    shutdown_rx: Receiver<()>,
+    object_id_getter: Box<dyn GetObjectId>,
+    compaction_catalog_manager_ref: CompactionCatalogManagerRef,
+) -> (
+    (
+        CompactTask,
+        HashMap<u32, TableStats>,
+        HashMap<HummockSstableObjectId, u64>,
+    ),
+    Option<MemoryTracker>,
+) {
+    let existing_table_ids: HashSet<u32> =
+        HashSet::from_iter(compact_task.existing_table_ids.clone());
+    let compact_table_ids = Vec::from_iter(
+        compact_task
+            .input_ssts
+            .iter()
+            .flat_map(|level| level.table_infos.iter())
+            .flat_map(|sst| sst.table_ids.clone())
+            .filter(|table_id| existing_table_ids.contains(table_id))
+            .sorted()
+            .unique(),
+    );
+
+    let compaction_catalog_agent_ref = match compaction_catalog_manager_ref
+        .acquire(compact_table_ids.clone())
+        .await
+    {
+        Ok(compaction_catalog_agent_ref) => {
+            let acquire_table_ids: HashSet<StateTableId> =
+                compaction_catalog_agent_ref.table_ids().collect();
+            if acquire_table_ids.len() != compact_table_ids.len() {
+                let diff = compact_table_ids
+                    .into_iter()
+                    .collect::<HashSet<_>>()
+                    .symmetric_difference(&acquire_table_ids)
+                    .cloned()
+                    .collect::<Vec<_>>();
+                tracing::warn!(
+                    dif= ?diff,
+                    "Some table ids are not acquired."
+                );
+                return (
+                    compact_done(
+                        compact_task,
+                        compactor_context.clone(),
+                        vec![],
+                        TaskStatus::ExecuteFailed,
+                    ),
+                    None,
+                );
+            }
+
+            compaction_catalog_agent_ref
+        }
+        Err(e) => {
+            tracing::warn!(
+                error = %e.as_report(),
+                "Failed to acquire compaction catalog agent"
+            );
+            return (
+                compact_done(
+                    compact_task,
+                    compactor_context.clone(),
+                    vec![],
+                    TaskStatus::ExecuteFailed,
+                ),
+                None,
+            );
+        }
+    };
+
+    compact_with_agent(
+        compactor_context,
+        compact_task,
+        shutdown_rx,
+        object_id_getter,
+        compaction_catalog_agent_ref,
+    )
+    .await
 }
 
 /// Fills in the compact task and tries to report the task result to meta node.
@@ -808,39 +867,6 @@ where
     compaction_statistics.delta_drop_stat = table_stats_drop;
 
     Ok(compaction_statistics)
-}
-
-async fn build_filter_key_extractor(
-    compact_task: &CompactTask,
-    filter_key_extractor_manager: FilterKeyExtractorManager,
-    compact_table_ids: &HashSet<u32>,
-) -> Option<Arc<FilterKeyExtractorImpl>> {
-    let multi_filter_key_extractor = match filter_key_extractor_manager
-        .acquire(compact_table_ids.clone())
-        .await
-    {
-        Err(e) => {
-            tracing::error!(error = %e.as_report(), "Failed to fetch filter key extractor tables [{:?}], it may caused by some RPC error", compact_task.existing_table_ids);
-            return None;
-        }
-        Ok(extractor) => extractor,
-    };
-
-    if let FilterKeyExtractorImpl::Multi(multi) = &multi_filter_key_extractor {
-        let found_tables = multi.get_existing_table_ids();
-        let removed_tables = compact_table_ids
-            .iter()
-            .filter(|table_id| !found_tables.contains(table_id))
-            .collect_vec();
-        if !removed_tables.is_empty() {
-            tracing::error!("Failed to fetch filter key extractor tables [{:?}. [{:?}] may be removed by meta-service. ", compact_table_ids, removed_tables);
-            return None;
-        }
-    }
-
-    let multi_filter_key_extractor = Arc::new(multi_filter_key_extractor);
-
-    Some(multi_filter_key_extractor)
 }
 
 #[cfg(test)]

@@ -17,6 +17,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
+use risingwave_common::hash::VirtualNode;
 use risingwave_common_service::ObserverManager;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::TableKey;
@@ -29,11 +30,10 @@ use risingwave_meta::hummock::{HummockManagerRef, MockHummockMetaClient};
 use risingwave_meta::manager::MetaSrvEnv;
 use risingwave_pb::catalog::{PbTable, Table};
 use risingwave_rpc_client::HummockMetaClient;
-use risingwave_storage::error::StorageResult;
-use risingwave_storage::filter_key_extractor::{
-    FilterKeyExtractorImpl, FilterKeyExtractorManager, FullKeyFilterKeyExtractor,
-    RpcFilterKeyExtractorManager,
+use risingwave_storage::compaction_catalog_manager::{
+    CompactionCatalogManager, CompactionCatalogManagerRef,
 };
+use risingwave_storage::error::StorageResult;
 use risingwave_storage::hummock::backup_reader::BackupReader;
 use risingwave_storage::hummock::event_handler::HummockVersionUpdate;
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
@@ -71,7 +71,7 @@ pub async fn prepare_first_valid_version(
     let observer_manager = ObserverManager::new(
         notification_client,
         HummockObserverNode::new(
-            Arc::new(RpcFilterKeyExtractorManager::default()),
+            Arc::new(CompactionCatalogManager::default()),
             backup_manager,
             tx.clone(),
             write_limiter,
@@ -145,7 +145,7 @@ pub async fn with_hummock_storage_v2(
     .unwrap();
 
     register_tables_with_id_for_test(
-        hummock_storage.filter_key_extractor_manager(),
+        hummock_storage.compaction_catalog_manager_ref(),
         &hummock_manager_ref,
         &[table_id.table_id()],
     )
@@ -153,31 +153,28 @@ pub async fn with_hummock_storage_v2(
 
     (hummock_storage, meta_client)
 }
+
 pub fn update_filter_key_extractor_for_table_ids(
-    filter_key_extractor_manager_ref: &FilterKeyExtractorManager,
+    compaction_catalog_manager_ref: CompactionCatalogManagerRef,
     table_ids: &[u32],
 ) {
-    let rpc_filter_key_extractor_manager = match filter_key_extractor_manager_ref {
-        FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
-            rpc_filter_key_extractor_manager,
-        ) => rpc_filter_key_extractor_manager,
-        FilterKeyExtractorManager::StaticFilterKeyExtractorManager(_) => unreachable!(),
-    };
-
     for table_id in table_ids {
-        rpc_filter_key_extractor_manager.update(
-            *table_id,
-            Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor)),
-        )
+        let mock_table = PbTable {
+            id: *table_id,
+            read_prefix_len_hint: 0,
+            maybe_vnode_count: Some(VirtualNode::COUNT_FOR_TEST as u32),
+            ..Default::default()
+        };
+        compaction_catalog_manager_ref.update(*table_id, mock_table);
     }
 }
 
 pub async fn register_tables_with_id_for_test(
-    filter_key_extractor_manager: &FilterKeyExtractorManager,
+    compaction_catalog_manager_ref: CompactionCatalogManagerRef,
     hummock_manager_ref: &HummockManagerRef,
     table_ids: &[u32],
 ) {
-    update_filter_key_extractor_for_table_ids(filter_key_extractor_manager, table_ids);
+    update_filter_key_extractor_for_table_ids(compaction_catalog_manager_ref, table_ids);
     register_table_ids_to_compaction_group(
         hummock_manager_ref,
         table_ids,
@@ -187,28 +184,19 @@ pub async fn register_tables_with_id_for_test(
 }
 
 pub fn update_filter_key_extractor_for_tables(
-    filter_key_extractor_manager: &FilterKeyExtractorManager,
+    compaction_catalog_manager_ref: CompactionCatalogManagerRef,
     tables: &[PbTable],
 ) {
-    let rpc_filter_key_extractor_manager = match filter_key_extractor_manager {
-        FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
-            rpc_filter_key_extractor_manager,
-        ) => rpc_filter_key_extractor_manager,
-        FilterKeyExtractorManager::StaticFilterKeyExtractorManager(_) => unreachable!(),
-    };
     for table in tables {
-        rpc_filter_key_extractor_manager.update(
-            table.id,
-            Arc::new(FilterKeyExtractorImpl::from_table(table)),
-        )
+        compaction_catalog_manager_ref.update(table.id, table.clone())
     }
 }
 pub async fn register_tables_with_catalog_for_test(
-    filter_key_extractor_manager: &FilterKeyExtractorManager,
+    compaction_catalog_manager_ref: CompactionCatalogManagerRef,
     hummock_manager_ref: &HummockManagerRef,
     tables: &[Table],
 ) {
-    update_filter_key_extractor_for_tables(filter_key_extractor_manager, tables);
+    update_filter_key_extractor_for_tables(compaction_catalog_manager_ref, tables);
     let table_ids = tables.iter().map(|t| t.id).collect_vec();
     register_table_ids_to_compaction_group(
         hummock_manager_ref,
@@ -233,7 +221,7 @@ impl HummockTestEnv {
 
     pub async fn register_table_id(&self, table_id: TableId) {
         register_tables_with_id_for_test(
-            self.storage.filter_key_extractor_manager(),
+            self.storage.compaction_catalog_manager_ref(),
             &self.manager,
             &[table_id.table_id()],
         )
@@ -243,7 +231,7 @@ impl HummockTestEnv {
 
     pub async fn register_table(&self, table: PbTable) {
         register_tables_with_catalog_for_test(
-            self.storage.filter_key_extractor_manager(),
+            self.storage.compaction_catalog_manager_ref(),
             &self.manager,
             &[table],
         )

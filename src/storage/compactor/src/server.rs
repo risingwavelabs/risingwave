@@ -36,8 +36,8 @@ use risingwave_pb::common::WorkerType;
 use risingwave_pb::compactor::compactor_service_server::CompactorServiceServer;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
 use risingwave_rpc_client::{GrpcCompactorProxyClient, MetaClient};
-use risingwave_storage::filter_key_extractor::{
-    FilterKeyExtractorManager, RemoteTableAccessor, RpcFilterKeyExtractorManager,
+use risingwave_storage::compaction_catalog_manager::{
+    CompactionCatalogManager, RemoteTableAccessor,
 };
 use risingwave_storage::hummock::compactor::{
     new_compaction_await_tree_reg_ref, CompactionAwaitTreeRegRef, CompactionExecutor,
@@ -59,6 +59,7 @@ use crate::telemetry::CompactorTelemetryCreator;
 use crate::CompactorOpts;
 
 pub async fn prepare_start_parameters(
+    compactor_opts: &CompactorOpts,
     config: RwConfig,
     system_params_reader: SystemParamsReader,
 ) -> (
@@ -81,7 +82,7 @@ pub async fn prepare_start_parameters(
         &system_params_reader,
         &storage_memory_config,
     )));
-    let non_reserved_memory_bytes = (system_memory_available_bytes() as f64
+    let non_reserved_memory_bytes = (compactor_opts.compactor_total_memory_bytes as f64
         * config.storage.compactor_memory_available_proportion)
         as usize;
     let meta_cache_capacity_bytes = storage_opts.meta_cache_capacity_mb * (1 << 20);
@@ -186,7 +187,7 @@ pub async fn compactor_serve(
 
     // Register to the cluster.
     let (meta_client, system_params_reader) = MetaClient::register_new(
-        opts.meta_address,
+        opts.meta_address.clone(),
         WorkerType::Compactor,
         &advertise_addr,
         Default::default(),
@@ -210,14 +211,15 @@ pub async fn compactor_serve(
         await_tree_reg,
         storage_opts,
         compactor_metrics,
-    ) = prepare_start_parameters(config.clone(), system_params_reader.clone()).await;
+    ) = prepare_start_parameters(&opts, config.clone(), system_params_reader.clone()).await;
 
-    let filter_key_extractor_manager = Arc::new(RpcFilterKeyExtractorManager::new(Box::new(
+    let compaction_catalog_manager_ref = Arc::new(CompactionCatalogManager::new(Box::new(
         RemoteTableAccessor::new(meta_client.clone()),
     )));
+
     let system_params_manager = Arc::new(LocalSystemParamsManager::new(system_params_reader));
     let compactor_observer_node = CompactorObserverNode::new(
-        filter_key_extractor_manager.clone(),
+        compaction_catalog_manager_ref.clone(),
         system_params_manager.clone(),
     );
     let observer_manager =
@@ -234,9 +236,6 @@ pub async fn compactor_serve(
         hummock_meta_client.clone(),
         storage_opts.sstable_id_remote_fetch_number,
     ));
-    let filter_key_extractor_manager = FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
-        filter_key_extractor_manager.clone(),
-    );
 
     let compaction_executor = Arc::new(CompactionExecutor::new(
         opts.compaction_worker_threads_number,
@@ -263,7 +262,7 @@ pub async fn compactor_serve(
             compactor_context.clone(),
             hummock_meta_client.clone(),
             sstable_object_id_manager.clone(),
-            filter_key_extractor_manager.clone(),
+            compaction_catalog_manager_ref,
         ),
     ];
 
@@ -340,7 +339,7 @@ pub async fn shared_compactor_serve(
         await_tree_reg,
         storage_opts,
         compactor_metrics,
-    ) = prepare_start_parameters(config.clone(), system_params.into()).await;
+    ) = prepare_start_parameters(&opts, config.clone(), system_params.into()).await;
     let (sender, receiver) = mpsc::unbounded_channel();
     let compactor_srv: CompactorServiceImpl = CompactorServiceImpl::new(sender);
 

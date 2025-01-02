@@ -59,10 +59,10 @@ use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common::types::DataType;
 use risingwave_common::util::addr::HostAddr;
+use risingwave_common::util::cluster_limit;
 use risingwave_common::util::cluster_limit::ActorCountPerParallelism;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
-use risingwave_common::util::{cluster_limit, resource_util};
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_heap_profiling::HeapProfiler;
 use risingwave_common_service::{MetricsManager, ObserverManager};
@@ -444,7 +444,7 @@ impl FrontendEnv {
                 .map_err(|err| anyhow!(err))?;
         }
 
-        let total_memory_bytes = resource_util::memory::system_memory_available_bytes();
+        let total_memory_bytes = opts.frontend_total_memory_bytes;
         let heap_profiler =
             HeapProfiler::new(total_memory_bytes, config.server.heap_profiling.clone());
         // Run a background heap profiler
