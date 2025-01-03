@@ -44,7 +44,7 @@ use risingwave_pb::stream_plan::{
     PbUpdateMutation, PbWatermark, ResumeMutation, SourceChangeSplitMutation, StopMutation,
     SubscriptionUpstreamInfo, ThrottleMutation,
 };
-use smallvec::SmallVec;
+use smallvec::{smallvec, SmallVec};
 
 use crate::error::StreamResult;
 use crate::task::{ActorId, FragmentId};
@@ -1047,23 +1047,24 @@ impl<M> MessageInner<M> {
 pub type Message = MessageInner<BarrierMutationType>;
 pub type DispatcherMessage = MessageInner<()>;
 
+const EMPIRICAL_BARRIER_BATCH_SIZE: usize = 8;
 /// `MessageBatchInner` is used exclusively by `Dispatcher` and the `Merger`/`Receiver` for exchanging messages between them.
 /// It shares the same message type as the fundamental `MessageInner`, but batches multiple barriers into a single message.
 #[derive(Debug, EnumAsInner, PartialEq, Clone)]
 pub enum MessageBatchInner<M> {
     Chunk(StreamChunk),
-    BarrierBatch(Vec<BarrierInner<M>>),
+    BarrierBatch(SmallVec<[BarrierInner<M>; EMPIRICAL_BARRIER_BATCH_SIZE]>),
     Watermark(Watermark),
 }
 pub type MessageBatch = MessageBatchInner<BarrierMutationType>;
-pub type DispatcherBarriers = Vec<DispatcherBarrier>;
+pub type DispatcherBarriers = SmallVec<[DispatcherBarrier; EMPIRICAL_BARRIER_BATCH_SIZE]>;
 pub type DispatcherMessageBatch = MessageBatchInner<()>;
 
 impl From<DispatcherMessage> for DispatcherMessageBatch {
     fn from(m: DispatcherMessage) -> Self {
         match m {
             DispatcherMessage::Chunk(c) => Self::Chunk(c),
-            DispatcherMessage::Barrier(b) => Self::BarrierBatch(vec![b]),
+            DispatcherMessage::Barrier(b) => Self::BarrierBatch(smallvec![b]),
             DispatcherMessage::Watermark(w) => Self::Watermark(w),
         }
     }

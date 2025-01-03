@@ -359,7 +359,9 @@ impl StreamConsumer for SenderConsumer {
                     .send(match msg {
                         Message::Chunk(chunk) => DispatcherMessageBatch::Chunk(chunk),
                         Message::Barrier(barrier) => {
-                            DispatcherMessageBatch::BarrierBatch(vec![barrier.into_dispatcher()])
+                            DispatcherMessageBatch::BarrierBatch(smallvec![
+                                barrier.into_dispatcher()
+                            ])
                         }
                         Message::Watermark(watermark) => {
                             DispatcherMessageBatch::Watermark(watermark)
