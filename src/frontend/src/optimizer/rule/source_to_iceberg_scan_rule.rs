@@ -108,7 +108,7 @@ fn build_equality_delete_hashjoin_scan(
 
     let data_columns_len = data_iceberg_scan.schema().len();
     // The join condition is delete_column_names is equal and sequence number is less than, join type is left anti
-    let build_inputs = |scan: &PlanRef, add_index: usize| {
+    let build_inputs = |scan: &PlanRef, offset: usize| {
         let delete_column_inputs = scan
             .schema()
             .fields()
@@ -117,7 +117,7 @@ fn build_equality_delete_hashjoin_scan(
             .filter_map(|(index, data_column)| {
                 if delete_column_names.contains(&data_column.name) {
                     Some(InputRef {
-                        index: add_index + index,
+                        index: offset + index,
                         data_type: data_column.data_type(),
                     })
                 } else {
@@ -132,7 +132,7 @@ fn build_equality_delete_hashjoin_scan(
                 .iter()
                 .position(|f| f.name.eq(ICEBERG_SEQUENCE_NUM_COLUMN_NAME))
                 .unwrap()
-                + add_index,
+                + offset,
             data_type: risingwave_common::types::DataType::Int64,
         };
         (delete_column_inputs, seq_num_inputs)
@@ -196,7 +196,7 @@ fn build_position_delete_hashjoin_scan(
         LogicalIcebergScan::new(&position_delete_source, IcebergScanType::PositionDeleteScan);
     let data_columns_len = data_iceberg_scan.schema().len();
 
-    let build_inputs = |scan: &PlanRef, add_index: usize| {
+    let build_inputs = |scan: &PlanRef, offset: usize| {
         let delete_column_inputs = scan
             .schema()
             .fields()
@@ -207,7 +207,7 @@ fn build_position_delete_hashjoin_scan(
                     || data_column.name.eq(ICEBERG_FILE_POS_COLUMN_NAME)
                 {
                     Some(InputRef {
-                        index: add_index + index,
+                        index: offset + index,
                         data_type: data_column.data_type(),
                     })
                 } else {

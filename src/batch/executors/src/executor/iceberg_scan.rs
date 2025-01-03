@@ -207,7 +207,6 @@ impl IcebergScanExecutor {
                     ))));
                     chunk = DataChunk::from_parts(columns.into(), visibility)
                 }
-                println!("chunk: {:?}, {:?}", chunk.data_types(), data_types);
                 assert_eq!(chunk.data_types(), data_types);
                 read_bytes += chunk.estimated_heap_size() as u64;
                 yield chunk;

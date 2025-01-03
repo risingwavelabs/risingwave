@@ -162,10 +162,10 @@ impl IcebergFileScanTaskJsonStrEnum {
                 IcebergFileScanTaskJsonStrEnum::EqualityDelete(equality_delete_files)
             }
             IcebergScanType::DataScan => IcebergFileScanTaskJsonStrEnum::Data(data_files),
-            IcebergScanType::Unspecified => unreachable!("Unspecified iceberg scan type"),
             IcebergScanType::PositionDeleteScan => {
                 IcebergFileScanTaskJsonStrEnum::PositionDelete(position_delete_files)
             }
+            IcebergScanType::Unspecified => unreachable!("Unspecified iceberg scan type"),
         }
     }
 
