@@ -24,6 +24,7 @@ use risingwave_pb::telemetry::{
     EventMessage as PbEventMessage, PbBatchEventMessage, PbTelemetryDatabaseObject,
     TelemetryEventStage as PbTelemetryEventStage,
 };
+use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::Mutex;
 pub use util::*;
 
@@ -33,6 +34,7 @@ pub type TelemetryResult<T> = core::result::Result<T, TelemetryError>;
 pub type TelemetryError = String;
 
 pub static TELEMETRY_TRACKING_ID: OnceLock<String> = OnceLock::new();
+pub static TELEMETRY_EVENT_REPORT_TX: OnceLock<UnboundedSender<PbEventMessage>> = OnceLock::new();
 
 pub const TELEMETRY_REPORT_URL: &str = "https://telemetry.risingwave.dev/api/v2/report";
 
@@ -43,7 +45,7 @@ pub fn get_telemetry_risingwave_cloud_uuid() -> Option<String> {
     env::var(TELEMETRY_RISINGWAVE_CLOUD_UUID).ok()
 }
 
-static TELEMETRY_EVENT_REPORT_STASH: LazyLock<Mutex<Vec<PbEventMessage>>> =
+pub static TELEMETRY_EVENT_REPORT_STASH: LazyLock<Mutex<Vec<PbEventMessage>>> =
     LazyLock::new(|| Mutex::new(Vec::new()));
 
 pub async fn do_telemetry_event_report() {
@@ -63,6 +65,7 @@ pub async fn do_telemetry_event_report() {
 }
 
 pub const TELEMETRY_EVENT_REPORT_INTERVAL: u64 = 10; // 10 seconds
+pub const TELEMETRY_EVENT_REPORT_STASH_SIZE: usize = 100; // 100 events to trigger a report action
 
 pub fn report_event_common(
     event_stage: PbTelemetryEventStage,
@@ -118,7 +121,9 @@ pub fn request_to_telemetry_event(
         is_test,
     };
 
-    TELEMETRY_EVENT_REPORT_STASH.blocking_lock().push(event);
+    if let Some(tx) = TELEMETRY_EVENT_REPORT_TX.get() {
+        tx.send(event).unwrap();
+    }
 }
 
 #[cfg(test)]

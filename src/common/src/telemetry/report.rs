@@ -14,10 +14,15 @@
 
 use std::sync::Arc;
 
-use risingwave_telemetry_event::get_telemetry_risingwave_cloud_uuid;
+use risingwave_pb::telemetry::PbEventMessage;
 pub use risingwave_telemetry_event::{
     current_timestamp, do_telemetry_event_report, post_telemetry_report_pb,
-    TELEMETRY_EVENT_REPORT_INTERVAL, TELEMETRY_REPORT_URL, TELEMETRY_TRACKING_ID,
+    TELEMETRY_EVENT_REPORT_INTERVAL, TELEMETRY_EVENT_REPORT_STASH, TELEMETRY_REPORT_URL,
+    TELEMETRY_TRACKING_ID,
+};
+use risingwave_telemetry_event::{
+    get_telemetry_risingwave_cloud_uuid, TELEMETRY_EVENT_REPORT_STASH_SIZE,
+    TELEMETRY_EVENT_REPORT_TX,
 };
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
@@ -96,9 +101,25 @@ where
                 )
             });
 
+        let (tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel::<PbEventMessage>();
+        TELEMETRY_EVENT_REPORT_TX.set(tx).unwrap_or_else(|_| {
+            tracing::warn!(
+                "Telemetry failed to set event reporting tx, event reporting will be disabled"
+            );
+        });
+
         loop {
             tokio::select! {
                 _ = interval.tick() => {},
+                event = event_rx.recv() => {
+                    if let Some(event) = event {
+                        TELEMETRY_EVENT_REPORT_STASH.lock().await.push(event);
+                    }
+                    if TELEMETRY_EVENT_REPORT_STASH.lock().await.len() >= TELEMETRY_EVENT_REPORT_STASH_SIZE {
+                        do_telemetry_event_report().await;
+                    }
+                    continue;
+                }
                 _ = event_interval.tick() => {
                     do_telemetry_event_report().await;
                     continue;
