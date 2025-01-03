@@ -109,6 +109,7 @@ def test_cursor_since_begin():
     execute_insert("insert into t1 values(6,6)",conn)
     execute_insert("flush",conn)
     row = execute_query("fetch next from cur",conn)
+    row = execute_query("fetch next from cur",conn)
     check_rows_data([4,4],row[0],"Insert")
     row = execute_query("fetch next from cur",conn)
     check_rows_data([5,5],row[0],"Insert")
@@ -138,6 +139,7 @@ def test_cursor_since_now():
     execute_insert("insert into t1 values(6,6)",conn)
     execute_insert("flush",conn)
     row = execute_query("fetch next from cur",conn)
+    row = execute_query("fetch next from cur",conn)
     check_rows_data([6,6],row[0],"Insert")
     row = execute_query("fetch next from cur",conn)
     assert row == []
@@ -163,6 +165,7 @@ def test_cursor_without_since():
     execute_insert("insert into t1 values(6,6)",conn)
     execute_insert("flush",conn)
     row = execute_query("fetch next from cur",conn)
+    row = execute_query("fetch next from cur",conn)
     check_rows_data([6,6],row[0],"Insert")
     row = execute_query("fetch next from cur",conn)
     assert row == []
@@ -187,6 +190,7 @@ def test_cursor_since_rw_timestamp():
     execute_insert("insert into t1 values(6,6)",conn)
     execute_insert("flush",conn)
     row = execute_query("fetch next from cur",conn)
+    row = execute_query("fetch next from cur",conn)
     valuelen = len(row[0])
     rw_timestamp_1 = row[0][valuelen - 1]
     check_rows_data([4,4],row[0],"Insert")
@@ -204,15 +208,18 @@ def test_cursor_since_rw_timestamp():
 
     execute_insert(f"declare cur subscription cursor for sub since {rw_timestamp_1}",conn)
     row = execute_query("fetch next from cur",conn)
+    row = execute_query("fetch next from cur",conn)
     check_rows_data([4,4],row[0],"Insert")
     execute_insert("close cur",conn)
 
     execute_insert(f"declare cur subscription cursor for sub since {rw_timestamp_2}",conn)
     row = execute_query("fetch next from cur",conn)
+    row = execute_query("fetch next from cur",conn)
     check_rows_data([5,5],row[0],"Insert")
     execute_insert("close cur",conn)
 
     execute_insert(f"declare cur subscription cursor for sub since {rw_timestamp_3}",conn)
+    row = execute_query("fetch next from cur",conn)
     row = execute_query("fetch next from cur",conn)
     assert row == []
     execute_insert("close cur",conn)
@@ -543,6 +550,41 @@ def test_order_multi_pk():
     check_rows_data([17,17,17,17],row[4],"Insert")
     drop_table_subscription()
 
+def test_explain_cursor():
+    print(f"test_explain_cursor")
+    create_table_subscription()
+    conn = psycopg2.connect(
+        host="localhost",
+        port="4566",
+        user="root",
+        database="dev"
+    )
+    execute_insert("insert into t5 values(1,1,1,1)",conn)
+    execute_insert("flush",conn)
+    execute_insert("insert into t5 values(2,2,2,2)",conn)
+    execute_insert("flush",conn)
+    execute_insert("declare cur subscription cursor for sub5 full",conn)
+    execute_insert("insert into t5 values(3,3,3,3)",conn)
+    execute_insert("flush",conn)
+    execute_insert("insert into t5 values(4,4,4,4)",conn)
+    execute_insert("flush",conn)
+    plan = execute_query("explain fetch next from cur",conn)
+    assert plan[0][0] == "BatchExchange { order: [t5.v1 ASC, t5.v2 ASC], dist: Single }"
+    assert plan[1][0] == "└─BatchScan { table: t5, columns: [v1, v2, v3, v4] }"
+    execute_query("fetch next from cur",conn)
+    plan = execute_query("explain fetch next from cur",conn)
+    assert plan[0][0] == "BatchExchange { order: [t5.v1 ASC, t5.v2 ASC], dist: Single }"
+    assert plan[1][0] == "└─BatchScan { table: t5, columns: [v1, v2, v3, v4], scan_ranges: [(v1, v2) > (Int32(1), Int32(1))] }"
+    execute_query("fetch next from cur",conn)
+    execute_query("fetch next from cur",conn)
+    plan = execute_query("explain fetch next from cur",conn)
+    print(plan)
+    assert plan[0][0] == "BatchExchange { order: [t5.v1 ASC, t5.v2 ASC], dist: Single }"
+    assert "└─BatchLogSeqScan { table: t5, columns: [v1, v2, v3, v4, op]" in plan[1][0]
+    assert "scan_ranges: [(v1, v2) > (Int32(3), Int32(3))] }" in plan[1][0]
+    execute_query("fetch next from cur",conn)
+    drop_table_subscription()
+
 if __name__ == "__main__":
     test_cursor_snapshot()
     test_cursor_op()
@@ -559,3 +601,4 @@ if __name__ == "__main__":
     test_order_mv()
     test_order_multi_pk()
     test_block_cursor()
+    test_explain_cursor()
