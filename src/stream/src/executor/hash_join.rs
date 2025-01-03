@@ -1165,6 +1165,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         let mut need_state_clean = false;
         let mut chunk_opt = None;
 
+        // TODO(kwannoel): Instead of evaluating this every loop,
+        // we can call this only if there's a non-equi expression.
         // check join cond
         let join_condition_satisfied = Self::check_join_condition(
             update_row,
@@ -1258,6 +1260,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
     // without concat two rows.
     // if there are non-equi expressions
     // NOTE(kwannoel): We can probably let `eval` use `impl Row` instead of `OwnedRow`.
+    #[inline]
     async fn check_join_condition(
         row: impl Row,
         side_update_start_pos: usize,
