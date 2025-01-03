@@ -64,48 +64,49 @@ impl CatalogController {
         };
         removed_objects.push(obj);
 
-        let removed_object_ids: HashSet<_> = removed_objects.iter().map(|obj| obj.oid).collect();
+        let mut removed_object_ids: HashSet<_> =
+            removed_objects.iter().map(|obj| obj.oid).collect();
 
         // TODO: record dependency info in object_dependency table for sink into table.
         // Special handling for 'sink into table'.
-        if object_type != ObjectType::Sink {
-            // When dropping a table downstream, all incoming sinks of the table should be dropped as well.
-            if object_type == ObjectType::Table {
-                let table = Table::find_by_id(object_id)
+        let removed_incoming_sinks: Vec<I32Array> = Table::find()
+            .select_only()
+            .column(table::Column::IncomingSinks)
+            .filter(table::Column::TableId.is_in(removed_object_ids.clone()))
+            .into_tuple()
+            .all(&txn)
+            .await?;
+        let removed_sink_objs: Vec<PartialObject> = Object::find()
+            .filter(
+                object::Column::Oid.is_in(
+                    removed_incoming_sinks
+                        .into_iter()
+                        .flat_map(|arr| arr.into_inner().into_iter()),
+                ),
+            )
+            .into_partial_model()
+            .all(&txn)
+            .await?;
+
+        removed_object_ids.extend(removed_sink_objs.iter().map(|obj| obj.oid));
+        removed_objects.extend(removed_sink_objs);
+
+        // When there is a table sink in the dependency chain of drop cascade, an error message needs to be returned currently to manually drop the sink.
+        for obj in &removed_objects {
+            if obj.obj_type == ObjectType::Sink {
+                let sink = Sink::find_by_id(obj.oid)
                     .one(&txn)
                     .await?
-                    .ok_or_else(|| MetaError::catalog_id_not_found("table", object_id))?;
+                    .ok_or_else(|| MetaError::catalog_id_not_found("sink", obj.oid))?;
 
-                let incoming_sinks = table.incoming_sinks.into_inner();
-
-                if !incoming_sinks.is_empty() {
-                    let objs: Vec<PartialObject> = Object::find()
-                        .filter(object::Column::Oid.is_in(incoming_sinks))
-                        .into_partial_model()
-                        .all(&txn)
-                        .await?;
-
-                    removed_objects.extend(objs);
-                }
-            }
-
-            // When there is a table sink in the dependency chain of drop cascade, an error message needs to be returned currently to manually drop the sink.
-            for obj in &removed_objects {
-                if obj.obj_type == ObjectType::Sink {
-                    let sink = Sink::find_by_id(obj.oid)
-                        .one(&txn)
-                        .await?
-                        .ok_or_else(|| MetaError::catalog_id_not_found("sink", obj.oid))?;
-
-                    // Since dropping the sink into the table requires the frontend to handle some of the logic (regenerating the plan), it’s not compatible with the current cascade dropping.
-                    if let Some(target_table) = sink.target_table
-                        && !removed_object_ids.contains(&target_table)
-                    {
-                        bail!(
+                // Since dropping the sink into the table requires the frontend to handle some of the logic (regenerating the plan), it’s not compatible with the current cascade dropping.
+                if let Some(target_table) = sink.target_table
+                    && !removed_object_ids.contains(&target_table)
+                {
+                    bail!(
                             "Found sink into table with sink id {} in dependency, please drop them manually",
                             obj.oid,
                         );
-                    }
                 }
             }
         }
