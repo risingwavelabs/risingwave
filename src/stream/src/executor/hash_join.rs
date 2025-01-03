@@ -921,19 +921,24 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 };
             }
 
-            // NOTE(kwannoel): The performance might be slightly worse because of the `box`.
-            // But the code readability is better.
-            let stream = match op {
-                Op::Insert | Op::UpdateInsert => match_rows!(Insert).boxed(),
-                Op::Delete | Op::UpdateDelete => match_rows!(Delete).boxed(),
+            match op {
+                Op::Insert | Op::UpdateInsert => {
+                    #[for_await]
+                    for chunk in match_rows!(Insert) {
+                        let chunk = chunk?;
+                        total_matches += chunk.cardinality();
+                        yield chunk;
+                    }
+                }
+                Op::Delete | Op::UpdateDelete => {
+                    #[for_await]
+                    for chunk in match_rows!(Delete) {
+                        let chunk = chunk?;
+                        total_matches += chunk.cardinality();
+                        yield chunk;
+                    }
+                }
             };
-
-            #[for_await]
-            for chunk in stream {
-                let chunk = chunk?;
-                total_matches += chunk.cardinality();
-                yield chunk;
-            }
 
             join_matched_join_keys.observe(total_matches as _);
             if total_matches > high_join_amplification_threshold {
@@ -1135,6 +1140,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
     }
 
     #[allow(clippy::too_many_arguments)]
+    #[inline]
     async fn handle_match_row<
         'a,
         const SIDE: SideTypePrimitive,
