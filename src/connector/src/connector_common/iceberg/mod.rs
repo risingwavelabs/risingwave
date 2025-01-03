@@ -500,7 +500,7 @@ impl IcebergCommon {
                                 anyhow!("`warehouse.path` must be set in storage catalog")
                             })?)
                             .credential(self.gcs_credential.clone().ok_or_else(|| {
-                                anyhow!("`gcs.gcs_credential` must be set in storage catalog")
+                                anyhow!("`gcs.credential` must be set in storage catalog")
                             })?)
                             .build(),
                     )
