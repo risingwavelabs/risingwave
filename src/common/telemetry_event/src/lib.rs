@@ -47,11 +47,9 @@ pub fn get_telemetry_risingwave_cloud_uuid() -> Option<String> {
 pub async fn do_telemetry_event_report(event_stash: &mut Vec<PbEventMessage>) {
     const TELEMETRY_EVENT_REPORT_TYPE: &str = "events"; // the batch report url
     let url = (TELEMETRY_REPORT_URL.to_owned() + "/" + TELEMETRY_EVENT_REPORT_TYPE).to_owned();
-    let mut batch_message = PbBatchEventMessage { events: Vec::new() };
-
-    for event in event_stash.drain(..) {
-        batch_message.events.push(event);
-    }
+    let batch_message = PbBatchEventMessage {
+        events: std::mem::take(event_stash),
+    };
 
     post_telemetry_report_pb(&url, batch_message.encode_to_vec())
         .await
@@ -116,7 +114,9 @@ pub fn request_to_telemetry_event(
     };
 
     if let Some(tx) = TELEMETRY_EVENT_REPORT_TX.get() {
-        tx.send(event).unwrap();
+        let _ = tx
+            .send(event)
+            .inspect_err(|e| tracing::warn!("Failed to send telemetry event queue: {}", e));
     }
 }
 

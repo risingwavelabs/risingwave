@@ -112,9 +112,8 @@ where
             tokio::select! {
                 _ = interval.tick() => {},
                 event = event_rx.recv() => {
-                    if let Some(event) = event {
-                        event_stash.push(event);
-                    }
+                    debug_assert!(event.is_some());
+                    event_stash.push(event.unwrap());
                     if event_stash.len() >= TELEMETRY_EVENT_REPORT_STASH_SIZE {
                         do_telemetry_event_report(&mut event_stash).await;
                     }
