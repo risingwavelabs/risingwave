@@ -39,7 +39,7 @@ impl CatalogController {
                 .ok_or_else(|| anyhow!("dropped object should have database_id"))?
         };
 
-        let mut to_drop_objects = match drop_mode {
+        let mut removed_objects = match drop_mode {
             DropMode::Cascade => get_referring_objects_cascade(object_id, &txn).await?,
             DropMode::Restrict => match object_type {
                 ObjectType::Database => unreachable!("database always be dropped in cascade mode"),
@@ -62,9 +62,9 @@ impl CatalogController {
                 }
             },
         };
-        to_drop_objects.push(obj);
+        removed_objects.push(obj);
 
-        let to_drop_object_ids: HashSet<_> = to_drop_objects.iter().map(|obj| obj.oid).collect();
+        let removed_object_ids: HashSet<_> = removed_objects.iter().map(|obj| obj.oid).collect();
 
         // TODO: record dependency info in object_dependency table for sink into table.
         // Special handling for 'sink into table'.
@@ -85,12 +85,12 @@ impl CatalogController {
                         .all(&txn)
                         .await?;
 
-                    to_drop_objects.extend(objs);
+                    removed_objects.extend(objs);
                 }
             }
 
             // When there is a table sink in the dependency chain of drop cascade, an error message needs to be returned currently to manually drop the sink.
-            for obj in &to_drop_objects {
+            for obj in &removed_objects {
                 if obj.obj_type == ObjectType::Sink {
                     let sink = Sink::find_by_id(obj.oid)
                         .one(&txn)
@@ -99,7 +99,7 @@ impl CatalogController {
 
                     // Since dropping the sink into the table requires the frontend to handle some of the logic (regenerating the plan), it’s not compatible with the current cascade dropping.
                     if let Some(target_table) = sink.target_table
-                        && !to_drop_object_ids.contains(&target_table)
+                        && !removed_object_ids.contains(&target_table)
                     {
                         bail!(
                             "Found sink into table with sink id {} in dependency, please drop them manually",
@@ -110,7 +110,7 @@ impl CatalogController {
             }
         }
 
-        let removed_table_ids = to_drop_objects
+        let removed_table_ids = removed_objects
             .iter()
             .filter(|obj| obj.obj_type == ObjectType::Table || obj.obj_type == ObjectType::Index)
             .map(|obj| obj.oid);
@@ -118,7 +118,7 @@ impl CatalogController {
         let removed_streaming_job_ids: Vec<ObjectId> = StreamingJob::find()
             .select_only()
             .column(streaming_job::Column::JobId)
-            .filter(streaming_job::Column::JobId.is_in(to_drop_object_ids))
+            .filter(streaming_job::Column::JobId.is_in(removed_object_ids))
             .into_tuple()
             .all(&txn)
             .await?;
@@ -159,19 +159,19 @@ impl CatalogController {
             .into_partial_model()
             .all(&txn)
             .await?;
-        to_drop_objects.extend(removed_source_objs);
+        removed_objects.extend(removed_source_objs);
         if object_type == ObjectType::Source {
             removed_source_ids.push(object_id);
         }
 
-        let removed_secret_ids = to_drop_objects
+        let removed_secret_ids = removed_objects
             .iter()
             .filter(|obj| obj.obj_type == ObjectType::Secret)
             .map(|obj| obj.oid)
             .collect_vec();
 
         if !removed_streaming_job_ids.is_empty() {
-            let to_drop_internal_table_objs: Vec<PartialObject> = Object::find()
+            let removed_internal_table_objs: Vec<PartialObject> = Object::find()
                 .select_only()
                 .columns([
                     object::Column::Oid,
@@ -185,17 +185,17 @@ impl CatalogController {
                 .all(&txn)
                 .await?;
 
-            removed_state_table_ids.extend(to_drop_internal_table_objs.iter().map(|obj| obj.oid));
-            to_drop_objects.extend(to_drop_internal_table_objs);
+            removed_state_table_ids.extend(removed_internal_table_objs.iter().map(|obj| obj.oid));
+            removed_objects.extend(removed_internal_table_objs);
         }
 
-        let to_drop_objects: HashMap<_, _> = to_drop_objects
+        let removed_objects: HashMap<_, _> = removed_objects
             .into_iter()
             .map(|obj| (obj.oid, obj))
             .collect();
 
         // TODO: Remove this assertion when the cross-database query is supported.
-        to_drop_objects.values().for_each(|obj| {
+        removed_objects.values().for_each(|obj| {
             if let Some(obj_database_id) = obj.database_id {
                 assert_eq!(
                     database_id, obj_database_id,
@@ -209,18 +209,18 @@ impl CatalogController {
             get_fragments_for_jobs(&txn, removed_streaming_job_ids.clone()).await?;
 
         // Find affect users with privileges on all this objects.
-        let to_update_user_ids: Vec<UserId> = UserPrivilege::find()
+        let updated_user_ids: Vec<UserId> = UserPrivilege::find()
             .select_only()
             .distinct()
             .column(user_privilege::Column::UserId)
-            .filter(user_privilege::Column::Oid.is_in(to_drop_objects.keys().cloned()))
+            .filter(user_privilege::Column::Oid.is_in(removed_objects.keys().cloned()))
             .into_tuple()
             .all(&txn)
             .await?;
 
         // delete all in to_drop_objects.
         let res = Object::delete_many()
-            .filter(object::Column::Oid.is_in(to_drop_objects.keys().cloned()))
+            .filter(object::Column::Oid.is_in(removed_objects.keys().cloned()))
             .exec(&txn)
             .await?;
         if res.rows_affected == 0 {
@@ -229,7 +229,7 @@ impl CatalogController {
                 object_id,
             ));
         }
-        let user_infos = list_user_info_by_ids(to_update_user_ids, &txn).await?;
+        let user_infos = list_user_info_by_ids(updated_user_ids, &txn).await?;
 
         txn.commit().await?;
 
@@ -249,7 +249,7 @@ impl CatalogController {
                 .await
             }
             ObjectType::Schema => {
-                let (schema_obj, mut to_notify_objs): (Vec<_>, Vec<_>) = to_drop_objects
+                let (schema_obj, mut to_notify_objs): (Vec<_>, Vec<_>) = removed_objects
                     .into_values()
                     .partition(|obj| obj.obj_type == ObjectType::Schema && obj.oid == object_id);
 
@@ -265,7 +265,7 @@ impl CatalogController {
             }
             _ => {
                 let relation_group =
-                    build_object_group_for_delete(to_drop_objects.into_values().collect());
+                    build_object_group_for_delete(removed_objects.into_values().collect());
                 self.notify_frontend(NotificationOperation::Delete, relation_group)
                     .await
             }
