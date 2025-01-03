@@ -12,8 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::*;
+use risingwave_pb::catalog::PbTable;
 
+use super::*;
 impl CatalogController {
     pub async fn drop_relation(
         &self,
@@ -21,7 +22,7 @@ impl CatalogController {
         object_id: ObjectId,
         drop_mode: DropMode,
     ) -> MetaResult<(ReleaseContext, NotificationVersion)> {
-        let inner = self.inner.write().await;
+        let mut inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
         let obj: PartialObject = Object::find_by_id(object_id)
             .into_partial_model()
@@ -239,11 +240,21 @@ impl CatalogController {
 
         // notify about them.
         self.notify_users_update(user_infos).await;
+        let dropped_tables = inner
+            .list_all_state_tables(Some(to_drop_state_table_ids.iter().copied().collect()))
+            .await?;
+        inner.dropped_tables.extend(
+            dropped_tables
+                .into_iter()
+                .map(|t| (TableId::try_from(t.id).unwrap(), t)),
+        );
         let relation_group = build_relation_group_for_delete(to_drop_objects);
 
         let version = self
             .notify_frontend(NotificationOperation::Delete, relation_group)
             .await;
+        // Hummock observers and compactor observers are notified once the corresponding barrier is completed.
+        // They only need RelationInfo::Table.
 
         let fragment_mappings = fragment_ids
             .into_iter()
@@ -575,5 +586,13 @@ impl CatalogController {
             )
             .await;
         Ok(version)
+    }
+
+    pub async fn complete_dropped_tables(
+        &self,
+        table_ids: impl Iterator<Item = TableId>,
+    ) -> Vec<PbTable> {
+        let mut inner = self.inner.write().await;
+        inner.complete_dropped_tables(table_ids)
     }
 }
