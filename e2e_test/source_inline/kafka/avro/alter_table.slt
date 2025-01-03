@@ -28,6 +28,12 @@ FORMAT PLAIN ENCODE AVRO (
     schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}'
 );
 
+# Demonstrate purified definition
+query T
+SELECT SUBSTRING(definition, 1, POSITION(' WITH' IN definition) - 1) FROM rw_tables WHERE name = 't';
+----
+CREATE TABLE t (bar INT, foo CHARACTER VARYING, gen_col INT AS bar + 1)
+
 sleep 4s
 
 query ?
@@ -42,6 +48,12 @@ sr_register avro_alter_table_test-value AVRO <<< '{"type":"record","name":"Root"
 # Refresh table schema should succeed
 statement ok
 ALTER TABLE t REFRESH SCHEMA;
+
+# Demonstrate purified definition
+query T
+SELECT SUBSTRING(definition, 1, POSITION(' WITH' IN definition) - 1) FROM rw_tables WHERE name = 't';
+----
+CREATE TABLE t (bar INT, foo CHARACTER VARYING, nested STRUCT<baz INT>, gen_col INT AS bar + 1)
 
 query ?
 select * from t
