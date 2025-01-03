@@ -1189,6 +1189,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     chunk_opt = Some(chunk);
                 }
             }
+            // TODO(kwannoel): We can actually statically decide this, using join side + join type.
             if let Some(degree_table) = match_degree_table {
                 update_degree::<S, { JOIN_OP }>(
                     match_order_key_indices,
