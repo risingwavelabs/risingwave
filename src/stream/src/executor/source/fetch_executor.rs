@@ -20,6 +20,7 @@ use futures::{stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::{ColumnId, TableId};
 use risingwave_common::hash::VnodeBitmapExt;
+use risingwave_common::rate_limit::RateLimit;
 use risingwave_common::types::ScalarRef;
 use risingwave_connector::parser::parquet_parser::get_total_row_nums_for_parquet_file;
 use risingwave_connector::parser::EncodingProperties;
@@ -55,8 +56,8 @@ pub struct FsFetchExecutor<S: StateStore, Src: OpendalSource> {
     /// Upstream list executor.
     upstream: Option<Executor>,
 
-    /// Rate limit in rows/s.
-    rate_limit_rps: Option<u32>,
+    /// Rate limit.
+    rate_limit: RateLimit,
 
     _marker: PhantomData<Src>,
 }
@@ -66,13 +67,13 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
         actor_ctx: ActorContextRef,
         stream_source_core: StreamSourceCore<S>,
         upstream: Executor,
-        rate_limit_rps: Option<u32>,
+        rate_limit: RateLimit,
     ) -> Self {
         Self {
             actor_ctx,
             stream_source_core: Some(stream_source_core),
             upstream: Some(upstream),
-            rate_limit_rps,
+            rate_limit,
             _marker: PhantomData,
         }
     }
@@ -84,7 +85,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
         source_ctx: SourceContext,
         source_desc: &SourceDesc,
         stream: &mut StreamReaderWithPause<BIASED, StreamChunk>,
-        rate_limit_rps: Option<u32>,
+        rate_limit: RateLimit,
     ) -> StreamExecutorResult<()> {
         let mut batch = Vec::with_capacity(SPLIT_BATCH_SIZE);
         'vnodes: for vnode in state_store_handler.state_table.vnodes().iter_vnodes() {
@@ -143,7 +144,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                 source_ctx,
                 source_desc,
                 Some(batch),
-                rate_limit_rps,
+                rate_limit,
             )
             .await?
             .map_err(StreamExecutorError::connector_error);
@@ -158,14 +159,14 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
         source_ctx: SourceContext,
         source_desc: &SourceDesc,
         batch: SplitBatch,
-        rate_limit_rps: Option<u32>,
+        rate_limit: RateLimit,
     ) -> StreamExecutorResult<BoxSourceChunkStream> {
         let (stream, _) = source_desc
             .source
             .build_stream(batch, column_ids, Arc::new(source_ctx), false)
             .await
             .map_err(StreamExecutorError::connector_error)?;
-        Ok(apply_rate_limit(stream, rate_limit_rps).boxed())
+        Ok(apply_rate_limit(stream, rate_limit).boxed())
     }
 
     fn build_source_ctx(
@@ -181,8 +182,8 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
             source_name.to_owned(),
             source_desc.metrics.clone(),
             SourceCtrlOpts {
-                chunk_size: limited_chunk_size(self.rate_limit_rps),
-                split_txn: self.rate_limit_rps.is_some(), // when rate limiting, we may split txn
+                chunk_size: limited_chunk_size(self.rate_limit),
+                split_txn: !self.rate_limit.is_unlimited(), // when rate limiting, we may split txn
             },
             source_desc.source.config.clone(),
             None,
@@ -232,7 +233,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
             self.build_source_ctx(&source_desc, core.source_id, &core.source_name),
             &source_desc,
             &mut stream,
-            self.rate_limit_rps,
+            self.rate_limit,
         )
         .await?;
 
@@ -257,14 +258,14 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                             Mutation::Throttle(actor_to_apply) => {
                                                 if let Some(new_rate_limit) =
                                                     actor_to_apply.get(&self.actor_ctx.id)
-                                                    && *new_rate_limit != self.rate_limit_rps
+                                                    && *new_rate_limit != self.rate_limit
                                                 {
                                                     tracing::debug!(
                                                         "updating rate limit from {:?} to {:?}",
-                                                        self.rate_limit_rps,
+                                                        self.rate_limit,
                                                         *new_rate_limit
                                                     );
-                                                    self.rate_limit_rps = *new_rate_limit;
+                                                    self.rate_limit = *new_rate_limit;
                                                     need_rebuild_reader = true;
                                                 }
                                             }
@@ -303,7 +304,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                             ),
                                             &source_desc,
                                             &mut stream,
-                                            self.rate_limit_rps,
+                                            self.rate_limit,
                                         )
                                         .await?;
                                     }

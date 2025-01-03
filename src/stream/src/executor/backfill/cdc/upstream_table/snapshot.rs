@@ -19,10 +19,10 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::ColumnDesc;
+use risingwave_common::rate_limit::{RateLimit, RateLimiter};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{Scalar, ScalarImpl, Timestamptz};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
-use risingwave_common::rate_limit::RateLimiter;
 use risingwave_connector::source::cdc::external::{
     CdcOffset, ExternalTableReader, ExternalTableReaderImpl, SchemaTableName,
 };
@@ -48,7 +48,7 @@ pub trait UpstreamTableRead {
 #[derive(Debug, Clone)]
 pub struct SnapshotReadArgs {
     pub current_pos: Option<OwnedRow>,
-    pub rate_limit_rps: Option<u32>,
+    pub rate_limit: RateLimit,
     pub pk_indices: Vec<usize>,
     pub additional_columns: Vec<ColumnDesc>,
     pub schema_table_name: SchemaTableName,
@@ -58,7 +58,7 @@ pub struct SnapshotReadArgs {
 impl SnapshotReadArgs {
     pub fn new(
         current_pos: Option<OwnedRow>,
-        rate_limit_rps: Option<u32>,
+        rate_limit: RateLimit,
         pk_indices: Vec<usize>,
         additional_columns: Vec<ColumnDesc>,
         schema_table_name: SchemaTableName,
@@ -66,7 +66,7 @@ impl SnapshotReadArgs {
     ) -> Self {
         Self {
             current_pos,
-            rate_limit_rps,
+            rate_limit,
             pk_indices,
             additional_columns,
             schema_table_name,
@@ -147,19 +147,18 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
             .collect_vec();
 
         // prepare rate limiter
-        if args.rate_limit_rps == Some(0) {
-            // If limit is 0, we should not read any data from the upstream table.
+        if args.rate_limit.is_paused() {
+            // If limit is "paused", we should not read any data from the upstream table.
             // Keep waiting util the stream is rebuilt.
             let future = futures::future::pending::<()>();
             future.await;
             unreachable!();
         }
 
-        let rate_limiter = RateLimiter::new(
-            args.rate_limit_rps
-                .inspect(|limit| tracing::info!(rate_limit = limit, "rate limit applied"))
-                .into(),
-        );
+        if !args.rate_limit.is_unlimited() {
+            tracing::info!(rate_limit = ?args.rate_limit, "rate limit applied")
+        }
+        let rate_limiter = RateLimiter::new(args.rate_limit);
 
         let mut read_args = args;
         let schema_table_name = read_args.schema_table_name.clone();
@@ -183,7 +182,7 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
             pin_mut!(row_stream);
             let mut builder = DataChunkBuilder::new(
                 self.table.schema().data_types(),
-                limited_chunk_size(read_args.rate_limit_rps),
+                limited_chunk_size(read_args.rate_limit),
             );
             let chunk_stream = iter_chunks(row_stream, &mut builder);
             let mut current_pk_pos = read_args.current_pos.clone().unwrap_or_default();
@@ -195,7 +194,7 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
                 read_count += chunk.cardinality();
                 current_pk_pos = get_new_pos(&chunk, &read_args.pk_indices);
 
-                if read_args.rate_limit_rps.is_none() || chunk_size == 0 {
+                if read_args.rate_limit.is_unlimited() || chunk_size == 0 {
                     // no limit, or empty chunk
                     yield Some(with_additional_columns(
                         chunk,
@@ -207,7 +206,7 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
                 } else {
                     // Apply rate limit, see `risingwave_stream::executor::source::apply_rate_limit` for more.
                     // May be should be refactored to a common function later.
-                    let limit = read_args.rate_limit_rps.unwrap() as usize;
+                    let limit = read_args.rate_limit.to_u64() as usize;
 
                     // Because we produce chunks with limited-sized data chunk builder and all rows
                     // are `Insert`s, the chunk size should never exceed the limit.

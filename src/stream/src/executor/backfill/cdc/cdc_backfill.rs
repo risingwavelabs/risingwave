@@ -22,6 +22,7 @@ use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::bail;
 use risingwave_common::catalog::ColumnDesc;
+use risingwave_common::rate_limit::RateLimit;
 use risingwave_connector::parser::{
     ByteStreamSourceParser, DebeziumParser, DebeziumProps, EncodingProperties, JsonProperties,
     ProtocolProperties, SourceStreamChunkBuilder, SpecificParserConfig,
@@ -74,8 +75,8 @@ pub struct CdcBackfillExecutor<S: StateStore> {
 
     metrics: CdcBackfillMetrics,
 
-    /// Rate limit in rows/s.
-    rate_limit_rps: Option<u32>,
+    /// Rate limit.
+    rate_limit: RateLimit,
 
     options: CdcScanOptions,
 }
@@ -91,7 +92,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         progress: Option<CreateMviewProgressReporter>,
         metrics: Arc<StreamingMetrics>,
         state_table: StateTable<S>,
-        rate_limit_rps: Option<u32>,
+        rate_limit: RateLimit,
         options: CdcScanOptions,
     ) -> Self {
         let pk_indices = external_table.pk_indices();
@@ -113,7 +114,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             state_impl,
             progress,
             metrics,
-            rate_limit_rps,
+            rate_limit,
             options,
         }
     }
@@ -163,7 +164,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         let first_barrier_epoch = first_barrier.epoch;
         // The first barrier message should be propagated.
         yield Message::Barrier(first_barrier);
-        let mut rate_limit_to_zero = self.rate_limit_rps.is_some_and(|val| val == 0);
+        let mut is_rate_limit_paused = self.rate_limit.is_paused();
 
         // Check whether this parallelism has been assigned splits,
         // if not, we should bypass the backfill directly.
@@ -258,7 +259,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             is_finished = state.is_finished,
             is_snapshot_paused,
             snapshot_row_count = total_snapshot_row_count,
-            rate_limit = self.rate_limit_rps,
+            rate_limit = ?self.rate_limit,
             disable_backfill = self.options.disable_backfill,
             snapshot_interval = self.options.snapshot_interval,
             snapshot_batch_size = self.options.snapshot_batch_size,
@@ -345,7 +346,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 let mut snapshot_read_row_cnt: usize = 0;
                 let read_args = SnapshotReadArgs::new(
                     current_pk_pos.clone(),
-                    self.rate_limit_rps,
+                    self.rate_limit,
                     pk_indices.clone(),
                     additional_columns.clone(),
                     schema_table_name.clone(),
@@ -398,12 +399,11 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                             Mutation::Throttle(some) => {
                                                 if let Some(new_rate_limit) =
                                                     some.get(&self.actor_ctx.id)
-                                                    && *new_rate_limit != self.rate_limit_rps
+                                                    && *new_rate_limit != self.rate_limit
                                                 {
-                                                    self.rate_limit_rps = *new_rate_limit;
-                                                    rate_limit_to_zero = self
-                                                        .rate_limit_rps
-                                                        .is_some_and(|val| val == 0);
+                                                    self.rate_limit = *new_rate_limit;
+                                                    is_rate_limit_paused =
+                                                        self.rate_limit.is_paused();
 
                                                     // update and persist current backfill progress without draining the buffered upstream chunks
                                                     state_impl
@@ -573,7 +573,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
                 // skip consume the snapshot stream if it is paused or rate limit to 0
                 if !is_snapshot_paused
-                    && !rate_limit_to_zero
+                    && !is_rate_limit_paused
                     && let Some(msg) = snapshot_stream
                         .next()
                         .instrument_await("consume_snapshot_stream_once")

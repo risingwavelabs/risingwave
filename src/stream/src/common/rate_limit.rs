@@ -12,10 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::rate_limit::RateLimit;
+
 /// Get the rate-limited max chunk size.
-pub(crate) fn limited_chunk_size(rate_limit_burst: Option<u32>) -> usize {
-    let config_chunk_size = crate::config::chunk_size();
-    rate_limit_burst
-        .map(|burst| config_chunk_size.min(burst as usize))
-        .unwrap_or(config_chunk_size)
+pub(crate) fn limited_chunk_size(rate_limit: RateLimit) -> usize {
+    std::cmp::min(crate::config::chunk_size(), rate_limit.to_u64() as _)
 }

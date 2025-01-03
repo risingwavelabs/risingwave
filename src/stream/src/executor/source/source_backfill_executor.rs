@@ -23,6 +23,7 @@ use futures::stream::{select_with_strategy, PollNext};
 use itertools::Itertools;
 use risingwave_common::bitmap::BitmapBuilder;
 use risingwave_common::metrics::{LabelGuardedIntCounter, GLOBAL_ERROR_METRICS};
+use risingwave_common::rate_limit::RateLimit;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::types::JsonbVal;
@@ -102,8 +103,8 @@ pub struct SourceBackfillExecutorInner<S: StateStore> {
     /// System parameter reader to read barrier interval
     system_params: SystemParamsReaderRef,
 
-    /// Rate limit in rows/s.
-    rate_limit_rps: Option<u32>,
+    /// Rate limit.
+    rate_limit: RateLimit,
 
     progress: CreateMviewProgressReporter,
 }
@@ -254,7 +255,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         metrics: Arc<StreamingMetrics>,
         system_params: SystemParamsReaderRef,
         backfill_state_store: BackfillStateTableHandler<S>,
-        rate_limit_rps: Option<u32>,
+        rate_limit: RateLimit,
         progress: CreateMviewProgressReporter,
     ) -> Self {
         let source_split_change_count = metrics
@@ -274,7 +275,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             metrics,
             source_split_change_count,
             system_params,
-            rate_limit_rps,
+            rate_limit,
             progress,
         }
     }
@@ -296,8 +297,8 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             self.stream_source_core.source_name.clone(),
             source_desc.metrics.clone(),
             SourceCtrlOpts {
-                chunk_size: limited_chunk_size(self.rate_limit_rps),
-                split_txn: self.rate_limit_rps.is_some(), // when rate limiting, we may split txn
+                chunk_size: limited_chunk_size(self.rate_limit),
+                split_txn: !self.rate_limit.is_unlimited(), // when rate limiting, we may split txn
             },
             source_desc.source.config.clone(),
             None,
@@ -315,7 +316,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             .await
             .map_err(StreamExecutorError::connector_error)?;
         Ok((
-            apply_rate_limit(stream, self.rate_limit_rps).boxed(),
+            apply_rate_limit(stream, self.rate_limit).boxed(),
             backfill_info,
         ))
     }
@@ -573,14 +574,14 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                         Mutation::Throttle(actor_to_apply) => {
                                             if let Some(new_rate_limit) =
                                                 actor_to_apply.get(&self.actor_ctx.id)
-                                                && *new_rate_limit != self.rate_limit_rps
+                                                && *new_rate_limit != self.rate_limit
                                             {
                                                 tracing::info!(
                                                     "updating rate limit from {:?} to {:?}",
-                                                    self.rate_limit_rps,
+                                                    self.rate_limit,
                                                     *new_rate_limit
                                                 );
-                                                self.rate_limit_rps = *new_rate_limit;
+                                                self.rate_limit = *new_rate_limit;
                                                 // rebuild reader
                                                 let (reader, _backfill_info) = self
                                                     .build_stream_source_reader(

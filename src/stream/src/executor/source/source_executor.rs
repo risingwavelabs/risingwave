@@ -25,6 +25,7 @@ use itertools::Itertools;
 use risingwave_common::array::ArrayRef;
 use risingwave_common::catalog::{ColumnId, TableId};
 use risingwave_common::metrics::{LabelGuardedIntCounter, GLOBAL_ERROR_METRICS};
+use risingwave_common::rate_limit::RateLimit;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::epoch::{Epoch, EpochPair};
@@ -73,8 +74,8 @@ pub struct SourceExecutor<S: StateStore> {
     /// System parameter reader to read barrier interval
     system_params: SystemParamsReaderRef,
 
-    /// Rate limit in rows/s.
-    rate_limit_rps: Option<u32>,
+    /// Rate limit.
+    rate_limit: RateLimit,
 
     is_shared_non_cdc: bool,
 }
@@ -86,7 +87,7 @@ impl<S: StateStore> SourceExecutor<S> {
         metrics: Arc<StreamingMetrics>,
         barrier_receiver: UnboundedReceiver<Barrier>,
         system_params: SystemParamsReaderRef,
-        rate_limit_rps: Option<u32>,
+        rate_limit: RateLimit,
         is_shared_non_cdc: bool,
     ) -> Self {
         Self {
@@ -95,7 +96,7 @@ impl<S: StateStore> SourceExecutor<S> {
             metrics,
             barrier_receiver: Some(barrier_receiver),
             system_params,
-            rate_limit_rps,
+            rate_limit,
             is_shared_non_cdc,
         }
     }
@@ -136,7 +137,7 @@ impl<S: StateStore> SourceExecutor<S> {
             .map_err(StreamExecutorError::connector_error)?;
 
         Ok((
-            apply_rate_limit(stream, self.rate_limit_rps).boxed(),
+            apply_rate_limit(stream, self.rate_limit).boxed(),
             latest_splits,
         ))
     }
@@ -202,8 +203,8 @@ impl<S: StateStore> SourceExecutor<S> {
                 .clone(),
             source_desc.metrics.clone(),
             SourceCtrlOpts {
-                chunk_size: limited_chunk_size(self.rate_limit_rps),
-                split_txn: self.rate_limit_rps.is_some(), // when rate limiting, we may split txn
+                chunk_size: limited_chunk_size(self.rate_limit),
+                split_txn: !self.rate_limit.is_unlimited(), // when rate limiting, we may split txn
             },
             source_desc.source.config.clone(),
             schema_change_tx,
@@ -581,17 +582,17 @@ impl<S: StateStore> SourceExecutor<S> {
                                 Mutation::Throttle(actor_to_apply) => {
                                     if let Some(new_rate_limit) =
                                         actor_to_apply.get(&self.actor_ctx.id)
-                                        && *new_rate_limit != self.rate_limit_rps
+                                        && *new_rate_limit != self.rate_limit
                                     {
                                         tracing::info!(
                                             "updating rate limit from {:?} to {:?}",
-                                            self.rate_limit_rps,
+                                            self.rate_limit,
                                             *new_rate_limit
                                         );
 
                                         // update the rate limit option, we will apply the rate limit
                                         // when we finish building the source stream.
-                                        self.rate_limit_rps = *new_rate_limit;
+                                        self.rate_limit = *new_rate_limit;
                                     }
                                 }
                                 Mutation::Resume => {
@@ -628,7 +629,7 @@ impl<S: StateStore> SourceExecutor<S> {
                 reader_and_splits.expect("source chunk reader and splits must be created");
 
             (
-                apply_rate_limit(source_chunk_reader, self.rate_limit_rps)
+                apply_rate_limit(source_chunk_reader, self.rate_limit)
                     .boxed()
                     .map_err(StreamExecutorError::connector_error),
                 latest_splits,
@@ -736,14 +737,14 @@ impl<S: StateStore> SourceExecutor<S> {
                             }
                             Mutation::Throttle(actor_to_apply) => {
                                 if let Some(new_rate_limit) = actor_to_apply.get(&self.actor_ctx.id)
-                                    && *new_rate_limit != self.rate_limit_rps
+                                    && *new_rate_limit != self.rate_limit
                                 {
                                     tracing::info!(
                                         "updating rate limit from {:?} to {:?}",
-                                        self.rate_limit_rps,
+                                        self.rate_limit,
                                         *new_rate_limit
                                     );
-                                    self.rate_limit_rps = *new_rate_limit;
+                                    self.rate_limit = *new_rate_limit;
                                     // recreate from latest_split_info
                                     self.rebuild_stream_reader(&source_desc, &mut stream)
                                         .await?;

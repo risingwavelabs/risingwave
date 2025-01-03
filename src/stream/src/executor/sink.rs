@@ -22,9 +22,9 @@ use risingwave_common::array::stream_chunk::StreamChunkMut;
 use risingwave_common::array::Op;
 use risingwave_common::catalog::{ColumnCatalog, Field};
 use risingwave_common::metrics::{LabelGuardedIntGauge, GLOBAL_ERROR_METRICS};
+use risingwave_common::rate_limit::RateLimit;
 use risingwave_common_estimate_size::collections::EstimatedVec;
 use risingwave_common_estimate_size::EstimateSize;
-use risingwave_common::rate_limit::RateLimit;
 use risingwave_connector::dispatch_sink;
 use risingwave_connector::sink::catalog::SinkType;
 use risingwave_connector::sink::log_store::{
@@ -330,10 +330,10 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                             Mutation::Throttle(actor_to_apply) => {
                                 if let Some(new_rate_limit) = actor_to_apply.get(&actor_id) {
                                     tracing::info!(
-                                        rate_limit = new_rate_limit,
+                                        rate_limit = ?new_rate_limit,
                                         "received sink rate limit on actor {actor_id}"
                                     );
-                                    if let Err(e) = rate_limit_tx.send((*new_rate_limit).into()) {
+                                    if let Err(e) = rate_limit_tx.send(*new_rate_limit) {
                                         error!(
                                             error = %e.as_report(),
                                             "fail to send sink ate limit update"

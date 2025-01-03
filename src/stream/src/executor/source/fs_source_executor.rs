@@ -21,6 +21,7 @@ use anyhow::anyhow;
 use either::Either;
 use futures::TryStreamExt;
 use itertools::Itertools;
+use risingwave_common::rate_limit::RateLimit;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::epoch::EpochPair;
@@ -64,8 +65,8 @@ pub struct FsSourceExecutor<S: StateStore> {
     /// System parameter reader to read barrier interval
     system_params: SystemParamsReaderRef,
 
-    /// Rate limit in rows/s.
-    rate_limit_rps: Option<u32>,
+    /// Rate limit.
+    rate_limit: RateLimit,
 }
 
 impl<S: StateStore> FsSourceExecutor<S> {
@@ -75,7 +76,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
         metrics: Arc<StreamingMetrics>,
         barrier_receiver: UnboundedReceiver<Barrier>,
         system_params: SystemParamsReaderRef,
-        rate_limit_rps: Option<u32>,
+        rate_limit: RateLimit,
     ) -> StreamResult<Self> {
         Ok(Self {
             actor_ctx,
@@ -83,7 +84,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
             metrics,
             barrier_receiver: Some(barrier_receiver),
             system_params,
-            rate_limit_rps,
+            rate_limit,
         })
     }
 
@@ -104,8 +105,8 @@ impl<S: StateStore> FsSourceExecutor<S> {
             self.stream_source_core.source_name.clone(),
             source_desc.metrics.clone(),
             SourceCtrlOpts {
-                chunk_size: limited_chunk_size(self.rate_limit_rps),
-                split_txn: self.rate_limit_rps.is_some(), // when rate limiting, we may split txn
+                chunk_size: limited_chunk_size(self.rate_limit),
+                split_txn: !self.rate_limit.is_unlimited(), // when rate limiting, we may split txn
             },
             source_desc.source.config.clone(),
             None,
@@ -116,7 +117,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
             .await
             .map_err(StreamExecutorError::connector_error)?;
 
-        Ok(apply_rate_limit(stream, self.rate_limit_rps).boxed())
+        Ok(apply_rate_limit(stream, self.rate_limit).boxed())
     }
 
     async fn rebuild_stream_reader<const BIASED: bool>(
@@ -430,9 +431,9 @@ impl<S: StateStore> FsSourceExecutor<S> {
                                 Mutation::Throttle(actor_to_apply) => {
                                     if let Some(new_rate_limit) =
                                         actor_to_apply.get(&self.actor_ctx.id)
-                                        && *new_rate_limit != self.rate_limit_rps
+                                        && *new_rate_limit != self.rate_limit
                                     {
-                                        self.rate_limit_rps = *new_rate_limit;
+                                        self.rate_limit = *new_rate_limit;
                                         self.rebuild_stream_reader(&source_desc, &mut stream)
                                             .await?;
                                     }

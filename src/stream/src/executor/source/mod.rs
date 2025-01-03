@@ -19,8 +19,8 @@ use await_tree::InstrumentAwait;
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
+use risingwave_common::rate_limit::{RateLimit, RateLimiter};
 use risingwave_common::row::Row;
-use risingwave_common::rate_limit::RateLimiter;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::source::{BoxSourceChunkStream, SourceColumnDesc, SplitId};
 use risingwave_pb::plan_common::additional_column::ColumnType;
@@ -117,32 +117,33 @@ pub fn prune_additional_cols(
 }
 
 #[try_stream(ok = StreamChunk, error = ConnectorError)]
-pub async fn apply_rate_limit(stream: BoxSourceChunkStream, rate_limit_rps: Option<u32>) {
-    if rate_limit_rps == Some(0) {
-        // block the stream until the rate limit is reset
-        let future = futures::future::pending::<()>();
-        future.await;
-        unreachable!();
-    }
-
-    let limiter = RateLimiter::new(
-        rate_limit_rps
-            .inspect(|limit| tracing::info!(rate_limit = limit, "rate limit applied"))
-            .into(),
-    );
+pub async fn apply_rate_limit(stream: BoxSourceChunkStream, rate_limit: RateLimit) {
+    let limiter = match rate_limit {
+        RateLimit::Pause => {
+            // block the stream until the rate limit is reset
+            let future = futures::future::pending::<()>();
+            future.await;
+            unreachable!();
+        }
+        RateLimit::Unlimited => RateLimiter::new(rate_limit),
+        RateLimit::Fixed(limit) => {
+            tracing::info!(rate_limit = limit, "rate limit applied");
+            RateLimiter::new(rate_limit)
+        }
+    };
 
     #[for_await]
     for chunk in stream {
         let chunk = chunk?;
         let chunk_size = chunk.capacity();
 
-        if rate_limit_rps.is_none() || chunk_size == 0 {
+        if rate_limit.is_unlimited() || chunk_size == 0 {
             // no limit, or empty chunk
             yield chunk;
             continue;
         }
 
-        let limit = rate_limit_rps.unwrap() as usize;
+        let limit = rate_limit.to_u64() as usize;
 
         let required_permits: usize = chunk.compute_rate_limit_chunk_permits(limit);
         if required_permits <= limit {
