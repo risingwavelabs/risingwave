@@ -214,10 +214,10 @@ export default function RelationGraph({
             d.target
           }</b><br>Backpressure: ${
             stats != null ? `${(stats.backPressure * 100).toFixed(2)}%` : "N/A"
-          }<br>Input Throughput: ${
-            stats != null ? `${stats.inputThroughput.toFixed(2)} rows/s` : "N/A"
-          }<br>Output Throughput: ${
-            stats != null ? `${stats.outputThroughput.toFixed(2)} rows/s` : "N/A"
+          }<br>Recv Throughput: ${
+            stats != null ? `${stats.recvThroughput.toFixed(2)} rows/s` : "N/A"
+          }<br>Send Throughput: ${
+            stats != null ? `${stats.sendThroughput.toFixed(2)} rows/s` : "N/A"
           }`
           d3.select("body")
             .append("div")
@@ -366,9 +366,7 @@ export default function RelationGraph({
           : "N/A"
         const epoch = stats?.currentEpoch ?? "N/A"
 
-        return `<b>${relation.name} (${relationTypeTitleCase(
-          relation
-        )})</b><br>Epoch: ${epoch}<br>Latency: ${latencySeconds} seconds`
+        return `<b>${relationTypeTitleCase(relation)} ${id}: ${relation.name}</b><br>Epoch: ${epoch}<br>Latency: ${latencySeconds} seconds`
       }
 
       g.on("mouseover", (event, { relation, id }) => {

@@ -76,10 +76,10 @@ export interface ChannelStatsDerived {
   actorCount: number;
   /** Rate of blocking duration of all actors */
   backPressure: number;
-  /** Rate of input row count of all actors */
-  inputThroughput: number;
-  /** Rate of output row count of all actors */
-  outputThroughput: number;
+  /** Rate of received row count of all actors */
+  recvThroughput: number;
+  /** Rate of sent row count of all actors */
+  sendThroughput: number;
 }
 
 function buildPlanNodeDependency(
@@ -200,29 +200,29 @@ const SIDEBAR_WIDTH = 225
 export class ChannelStatsSnapshot {
   // The first fetch result.
   // key: `<fragmentId>_<downstreamFragmentId>`
-  result: Map<string, ChannelStats>
+  metrics: Map<string, ChannelStats>
 
   // The time of the current fetch in milliseconds. (`Date.now()`)
   time: number
 
-  constructor(result: Map<string, ChannelStats>, time: number) {
-    this.result = result
+  constructor(metrics: Map<string, ChannelStats>, time: number) {
+    this.metrics = metrics
     this.time = time
   }
 
   getRate(initial: ChannelStatsSnapshot): Map<string, ChannelStatsDerived> {
     const result = new Map<string, ChannelStatsDerived>()
-    for (const [key, s] of this.result) {
-      const init = initial.result.get(key)
+    for (const [key, s] of this.metrics) {
+      const init = initial.metrics.get(key)
       if (init) {
         const delta = this.time - initial.time; // in microseconds
         result.set(
           key,
           {
             actorCount: s.actorCount,
-            backPressure: (s.blockingDuration - init.blockingDuration) / init.actorCount / delta / 1000000,
-            inputThroughput: (s.inputRowCount - init.inputRowCount) / delta * 1000,
-            outputThroughput: (s.outputRowCount - init.outputRowCount) / delta * 1000,
+            backPressure: (s.outputBlockingDuration - init.outputBlockingDuration) / init.actorCount / delta / 1000000,
+            recvThroughput: (s.recvRowCount - init.recvRowCount) / delta * 1000,
+            sendThroughput: (s.sendRowCount - init.sendRowCount) / delta * 1000,
           }
         )
       }

@@ -391,9 +391,9 @@ impl MonitorService for MonitorServiceImpl {
             let key = format!("{}_{}", fragment_id, downstream_fragment_id);
             let channel_stat = channel_stats.entry(key).or_insert_with(|| ChannelStats {
                 actor_count: 0,
-                blocking_duration: 0.,
-                input_row_count: 0,
-                output_row_count: 0,
+                output_blocking_duration: 0.,
+                recv_row_count: 0,
+                send_row_count: 0,
             });
 
             // When metrics level is Debug, `actor_id` will be removed to reduce metrics.
@@ -403,7 +403,7 @@ impl MonitorService for MonitorServiceImpl {
             } else {
                 1
             };
-            channel_stat.blocking_duration += metric.get_counter().get_value();
+            channel_stat.output_blocking_duration += metric.get_counter().get_value();
         }
 
         let actor_output_row_count = collect(&metrics.actor_out_record_cnt);
@@ -414,7 +414,7 @@ impl MonitorService for MonitorServiceImpl {
             let key_prefix = format!("{}_", fragment_id);
             let key_range_end = format!("{}`", fragment_id); // '`' is next to `_`
             for (_, s) in channel_stats.range_mut(key_prefix..key_range_end) {
-                s.output_row_count += metric.get_counter().get_value() as u64;
+                s.send_row_count += metric.get_counter().get_value() as u64;
             }
         }
 
@@ -425,7 +425,7 @@ impl MonitorService for MonitorServiceImpl {
 
             let key = format!("{}_{}", upstream_fragment_id, fragment_id);
             if let Some(s) = channel_stats.get_mut(&key) {
-                s.input_row_count += metric.get_counter().get_value() as u64;
+                s.recv_row_count += metric.get_counter().get_value() as u64;
             }
         }
 

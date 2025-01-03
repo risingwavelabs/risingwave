@@ -516,9 +516,9 @@ export default function FragmentGraph({
             }</b><br>Backpressure: ${
               stats?.backPressure != null ? `${(stats.backPressure * 100).toFixed(2)}%` : "N/A"
             }<br>Recv Throughput: ${
-              stats?.inputThroughput != null ? `${stats.inputThroughput.toFixed(2)} rows/s` : "N/A"
+              stats?.recvThroughput != null ? `${stats.recvThroughput.toFixed(2)} rows/s` : "N/A"
             }<br>Send Throughput: ${
-              stats?.outputThroughput != null ? `${stats.outputThroughput.toFixed(2)} rows/s` : "N/A"
+              stats?.sendThroughput != null ? `${stats.sendThroughput.toFixed(2)} rows/s` : "N/A"
             }`
             d3.select("body")
               .append("div")
