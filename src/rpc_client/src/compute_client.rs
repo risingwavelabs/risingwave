@@ -220,11 +220,11 @@ impl ComputeClient {
             .into_inner())
     }
 
-    pub async fn get_back_pressure(&self) -> Result<GetStreamingStatsResponse> {
+    pub async fn get_streaming_stats(&self) -> Result<GetStreamingStatsResponse> {
         Ok(self
             .monitor_client
             .to_owned()
-            .get_back_pressure(GetStreamingStatsRequest::default())
+            .get_streaming_stats(GetStreamingStatsRequest::default())
             .await
             .map_err(RpcError::from_compute_status)?
             .into_inner())

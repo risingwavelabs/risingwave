@@ -471,7 +471,7 @@ pub(super) mod handlers {
             let client = srv.compute_clients.get(&worker_node).await.map_err(err)?;
             let client = Arc::new(client);
             let fut = async move {
-                let result = client.get_back_pressure().await.map_err(err)?;
+                let result = client.get_streaming_stats().await.map_err(err)?;
                 Ok::<_, DashboardError>(result)
             };
             futures.push(fut);

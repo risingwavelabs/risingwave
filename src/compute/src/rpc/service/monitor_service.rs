@@ -289,7 +289,7 @@ impl MonitorService for MonitorServiceImpl {
     }
 
     #[cfg_attr(coverage, coverage(off))]
-    async fn get_back_pressure(
+    async fn get_streaming_stats(
         &self,
         _request: Request<GetStreamingStatsRequest>,
     ) -> Result<Response<GetStreamingStatsResponse>, Status> {

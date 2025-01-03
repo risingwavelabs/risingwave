@@ -133,7 +133,7 @@ impl MonitorService for MonitorServiceImpl {
         ))
     }
 
-    async fn get_back_pressure(
+    async fn get_streaming_stats(
         &self,
         _request: Request<GetStreamingStatsRequest>,
     ) -> Result<Response<GetStreamingStatsResponse>, Status> {
