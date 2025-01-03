@@ -278,10 +278,11 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         entry_state_max_rows: Option<usize>,
     ) -> Self {
         let entry_state_max_rows = match entry_state_max_rows {
-            None => ctx
-                .streaming_config
-                .developer
-                .hash_join_entry_state_max_rows,
+            None => {
+                ctx.streaming_config
+                    .developer
+                    .hash_join_entry_state_max_rows
+            }
             Some(entry_state_max_rows) => entry_state_max_rows,
         };
         let side_l_column_n = input_l.schema().len();
@@ -922,7 +923,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             }
 
             match op {
-                Op::Insert | Op::UpdateInsert => {
+                Op::Insert | Op::UpdateInsert =>
+                {
                     #[for_await]
                     for chunk in match_rows!(Insert) {
                         let chunk = chunk?;
@@ -930,7 +932,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         yield chunk;
                     }
                 }
-                Op::Delete | Op::UpdateDelete => {
+                Op::Delete | Op::UpdateDelete =>
+                {
                     #[for_await]
                     for chunk in match_rows!(Delete) {
                         let chunk = chunk?;
