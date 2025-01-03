@@ -354,7 +354,7 @@ export default function Streaming() {
     let initialSnapshot: ChannelStatsSnapshot | undefined
 
     function refresh() {
-      api.get("/metrics/fragment/embedded_back_pressures").then(
+      api.get("/metrics/streaming_stats").then(
         (res) => {
           let response = GetStreamingStatsResponse.fromJSON(res)
           let snapshot = new ChannelStatsSnapshot(

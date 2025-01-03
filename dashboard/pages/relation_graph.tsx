@@ -27,7 +27,7 @@ import api from "../lib/api/api"
 import useFetch from "../lib/api/fetch"
 import {
   Relation,
-  getFragmentVertexToRelationMap,
+  getFragmentToRelationMap,
   getRelationDependencies,
   getRelations,
   relationIsStreamingJob,
@@ -73,7 +73,7 @@ export default function StreamingGraph() {
   const { response: relationDeps } = useFetch(getRelationDependencies)
   const [selectedId, setSelectedId] = useQueryState("id", parseAsInteger)
   const { response: fragmentVertexToRelationMap } = useFetch(
-    getFragmentVertexToRelationMap
+    getFragmentToRelationMap
   )
   const [resetEmbeddedBackPressures, setResetEmbeddedBackPressures] =
     useState<boolean>(false)
@@ -114,7 +114,7 @@ export default function StreamingGraph() {
     }
 
     function refresh() {
-      api.get("/metrics/fragment/embedded_back_pressures").then(
+      api.get("/metrics/streaming_stats").then(
         (res) => {
           let response = GetStreamingStatsResponse.fromJSON(res)
           let snapshot = new ChannelStatsSnapshot(

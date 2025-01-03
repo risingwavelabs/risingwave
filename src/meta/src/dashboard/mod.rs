@@ -64,8 +64,7 @@ pub(super) mod handlers {
     use risingwave_pb::common::{WorkerNode, WorkerType};
     use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
     use risingwave_pb::meta::{
-        ActorIds, FragmentIdToActorIdMap, FragmentVertexToRelationMap, PbTableFragments,
-        RelationIdInfos,
+        ActorIds, FragmentIdToActorIdMap, FragmentToRelationMap, PbTableFragments, RelationIdInfos,
     };
     use risingwave_pb::monitor_service::{
         GetStreamingStatsResponse, HeapProfilingResponse, ListHeapProfilingResponse,
@@ -211,11 +210,11 @@ pub(super) mod handlers {
     /// These fragments form the vertices of the graph.
     /// We can get collection of backpressure values, keyed by vertex_id-vertex_id.
     /// This function will return a map of fragment vertex id to relation id.
-    /// We can convert `vertex_id-vertex_id` to `relation_id-relation_id` using that.
+    /// We can convert `fragment_id-fragment_id` to `relation_id-relation_id` using that.
     /// Finally, we have a map of `relation_id-relation_id` to backpressure values.
-    pub async fn get_fragment_vertex_to_relation_id_map(
+    pub async fn get_fragment_to_relation_map(
         Extension(srv): Extension<Service>,
-    ) -> Result<Json<FragmentVertexToRelationMap>> {
+    ) -> Result<Json<FragmentToRelationMap>> {
         let table_fragments = srv
             .metadata_manager
             .catalog_controller
@@ -226,11 +225,7 @@ pub(super) mod handlers {
         let mut out_map = HashMap::new();
         for (relation_id, tf) in table_fragments {
             for (fragment_id, fragment) in &tf.fragments {
-                if (fragment.fragment_type_mask & FragmentTypeFlag::StreamScan as u32) != 0
-                    || (fragment.fragment_type_mask
-                        & FragmentTypeFlag::SnapshotBackfillStreamScan as u32)
-                        != 0
-                {
+                if (fragment.fragment_type_mask & FragmentTypeFlag::StreamScan as u32) != 0 {
                     in_map.insert(*fragment_id, relation_id as u32);
                 }
                 if (fragment.fragment_type_mask & FragmentTypeFlag::Mview as u32) != 0 {
@@ -238,7 +233,7 @@ pub(super) mod handlers {
                 }
             }
         }
-        let map = FragmentVertexToRelationMap { in_map, out_map };
+        let map = FragmentToRelationMap { in_map, out_map };
         Ok(Json(map))
     }
 
@@ -461,7 +456,7 @@ pub(super) mod handlers {
     /// In most cases, we can safely assume each node has most 2 outgoing edges (e.g. join).
     /// In such a scenario, the number of edges is linear to the number of nodes.
     /// So the workload is proportional to the relation id graph we fetch in `get_relation_id_infos`.
-    pub async fn get_embedded_back_pressures(
+    pub async fn get_streaming_stats(
         Extension(srv): Extension<Service>,
     ) -> Result<Json<GetStreamingStatsResponse>> {
         let worker_nodes = srv
@@ -547,8 +542,8 @@ impl DashboardService {
             .route("/fragments/job_id/:job_id", get(list_fragments_by_job_id))
             .route("/relation_id_infos", get(get_relation_id_infos))
             .route(
-                "/fragment_vertex_to_relation_id_map",
-                get(get_fragment_vertex_to_relation_id_map),
+                "/fragment_to_relation_map",
+                get(get_fragment_to_relation_map),
             )
             .route("/views", get(list_views))
             .route("/materialized_views", get(list_materialized_views))
@@ -563,14 +558,7 @@ impl DashboardService {
             .route("/schemas", get(list_schemas))
             .route("/object_dependencies", get(list_object_dependencies))
             .route("/metrics/cluster", get(prometheus::list_prometheus_cluster))
-            .route(
-                "/metrics/fragment/prometheus_back_pressures",
-                get(prometheus::list_prometheus_fragment_back_pressure),
-            )
-            .route(
-                "/metrics/fragment/embedded_back_pressures",
-                get(get_embedded_back_pressures),
-            )
+            .route("/metrics/streaming_stats", get(get_streaming_stats))
             .route("/monitor/await_tree/:worker_id", get(dump_await_tree))
             .route("/monitor/await_tree/", get(dump_await_tree_all))
             .route("/monitor/dump_heap_profile/:worker_id", get(heap_profile))
