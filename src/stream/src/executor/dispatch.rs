@@ -414,7 +414,7 @@ impl StreamConsumer for DispatchExecutor {
                     end_of_stream = true;
                     continue;
                 };
-                let mut barrier_batch = smallvec![];
+                let mut barrier_batch = vec![];
                 let msg: Message = msg?;
                 let max_peek_attempts = match msg {
                     Message::Chunk(c) => {

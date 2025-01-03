@@ -212,7 +212,6 @@ mod tests {
     use std::pin::pin;
 
     use futures::FutureExt;
-    use smallvec::smallvec;
 
     use super::*;
     use crate::executor::DispatcherBarrier as Barrier;
@@ -222,7 +221,7 @@ mod tests {
         let (tx, mut rx) = channel(0, 0, 1);
 
         let send = || {
-            tx.send(Message::BarrierBatch(smallvec![
+            tx.send(Message::BarrierBatch(vec![
                 Barrier::with_prev_epoch_for_test(514, 114),
             ]))
         };
