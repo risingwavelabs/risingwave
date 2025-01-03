@@ -26,7 +26,7 @@ use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::metrics::LabelGuardedIntCounter;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_common_rate_limit::RateLimit;
+use risingwave_common::rate_limit::RateLimit;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
@@ -84,7 +84,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
         snapshot_epoch: Option<u64>,
     ) -> Self {
         assert_eq!(&upstream.info.schema, upstream_table.schema());
-        if !matches!(rate_limit, RateLimit::Disabled) {
+        if !matches!(rate_limit, RateLimit::Unlimited) {
             debug!(
                 ?rate_limit,
                 "create snapshot backfill executor with rate limit"
@@ -506,7 +506,7 @@ async fn make_log_stream(
             })
     }))
     .await?;
-    let builder = create_builder(RateLimit::Disabled, chunk_size, data_types.clone());
+    let builder = create_builder(RateLimit::Unlimited, chunk_size, data_types.clone());
     Ok(VnodeStream::new(vnode_streams, builder))
 }
 

@@ -30,6 +30,8 @@ use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common_metrics::{
     register_guarded_uint_gauge_vec_with_registry, LabelGuardedUintGauge,
 };
+use risingwave_pb::stream_plan::rate_limit::PbRateLimitPolicy;
+use risingwave_pb::stream_plan::PbRateLimit;
 use tokio::sync::oneshot;
 use tokio::time::Sleep;
 
@@ -88,8 +90,8 @@ impl Future for Delay {
 /// Rate limit policy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RateLimit {
-    /// Rate limit disabled.
-    Disabled,
+    /// Unlimited.
+    Unlimited,
     /// Rate limit with fixed rate.
     Fixed(NonZeroU64),
     /// Pause with 0 rate.
@@ -105,12 +107,37 @@ impl RateLimit {
     pub fn to_u64(self) -> u64 {
         self.into()
     }
+
+    pub fn from_protobuf(pb: &PbRateLimit) -> Self {
+        match pb.policy() {
+            PbRateLimitPolicy::Unlimited => Self::Unlimited,
+            PbRateLimitPolicy::Fixed if pb.rate == 0 => Self::Pause,
+            PbRateLimitPolicy::Fixed => Self::Fixed(unsafe { NonZeroU64::new_unchecked(pb.rate) }),
+        }
+    }
+
+    pub fn to_protobuf(self) -> PbRateLimit {
+        match self {
+            RateLimit::Unlimited => PbRateLimit {
+                policy: PbRateLimitPolicy::Unlimited.into(),
+                ..Default::default()
+            },
+            RateLimit::Fixed(rate) => PbRateLimit {
+                policy: PbRateLimitPolicy::Fixed.into(),
+                rate: rate.get(),
+            },
+            RateLimit::Pause => PbRateLimit {
+                policy: PbRateLimitPolicy::Fixed.into(),
+                rate: 0,
+            },
+        }
+    }
 }
 
 impl From<RateLimit> for u64 {
     fn from(rate_limit: RateLimit) -> Self {
         match rate_limit {
-            RateLimit::Disabled => u64::MAX,
+            RateLimit::Unlimited => u64::MAX,
             RateLimit::Fixed(rate) => rate.get(),
             RateLimit::Pause => 0,
         }
@@ -121,7 +148,7 @@ impl From<RateLimit> for u64 {
 impl From<Option<u32>> for RateLimit {
     fn from(value: Option<u32>) -> Self {
         match value {
-            None => Self::Disabled,
+            None => Self::Unlimited,
             Some(0) => Self::Pause,
             Some(rate) => Self::Fixed(unsafe { NonZeroU64::new_unchecked(rate as _) }),
         }
@@ -164,7 +191,7 @@ pub struct RateLimiter {
 impl RateLimiter {
     fn new_inner(rate_limit: RateLimit) -> Box<dyn RateLimiterTrait> {
         match rate_limit {
-            RateLimit::Disabled => Box::new(InfiniteRatelimiter),
+            RateLimit::Unlimited => Box::new(InfiniteRatelimiter),
             RateLimit::Fixed(rate) => Box::new(FixedRateLimiter::new(rate)),
             RateLimit::Pause => Box::new(PausedRateLimiter::default()),
         }
@@ -289,7 +316,7 @@ pub struct InfiniteRatelimiter;
 
 impl RateLimiterTrait for InfiniteRatelimiter {
     fn rate_limit(&self) -> RateLimit {
-        RateLimit::Disabled
+        RateLimit::Unlimited
     }
 
     fn check(&self, _: u64) -> Check {
@@ -593,7 +620,7 @@ mod tests {
         let ll = l.clone();
         tokio::spawn(async move {
             tokio::time::sleep(Duration::from_millis(100)).await;
-            ll.update(RateLimit::Disabled);
+            ll.update(RateLimit::Unlimited);
         });
 
         tokio::time::sleep(Duration::from_millis(1000)).await;

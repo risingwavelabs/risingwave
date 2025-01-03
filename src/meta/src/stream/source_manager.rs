@@ -23,6 +23,7 @@ use std::time::Duration;
 use anyhow::Context;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::metrics::LabelGuardedIntGauge;
+use risingwave_common::rate_limit::RateLimit;
 use risingwave_connector::error::ConnectorResult;
 use risingwave_connector::source::{
     fill_adaptive_split, ConnectorProperties, SourceEnumeratorContext, SourceEnumeratorInfo,
@@ -49,7 +50,7 @@ use crate::MetaResult;
 
 pub type SourceManagerRef = Arc<SourceManager>;
 pub type SplitAssignment = HashMap<FragmentId, HashMap<ActorId, Vec<SplitImpl>>>;
-pub type ThrottleConfig = HashMap<FragmentId, HashMap<ActorId, Option<u32>>>;
+pub type ThrottleConfig = HashMap<FragmentId, HashMap<ActorId, RateLimit>>;
 
 /// `SourceManager` keeps fetching the latest split metadata from the external source services ([`ConnectorSourceWorker::tick`]),
 /// and sends a split assignment command if split changes detected ([`Self::tick`]).

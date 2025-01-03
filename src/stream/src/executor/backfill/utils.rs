@@ -32,7 +32,7 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::sort_util::{cmp_datum_iter, OrderType};
 use risingwave_common::util::value_encoding::BasicSerde;
-use risingwave_common_rate_limit::RateLimit;
+use risingwave_common::rate_limit::RateLimit;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::source::cdc::external::{CdcOffset, CdcOffsetParseFunc};
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
@@ -796,7 +796,7 @@ pub fn create_builder(
     data_types: Vec<DataType>,
 ) -> DataChunkBuilder {
     let batch_size = match rate_limit {
-        RateLimit::Disabled | RateLimit::Pause => chunk_size,
+        RateLimit::Unlimited | RateLimit::Pause => chunk_size,
         RateLimit::Fixed(limit) if limit.get() as usize >= chunk_size => chunk_size,
         RateLimit::Fixed(limit) => limit.get() as usize,
     };

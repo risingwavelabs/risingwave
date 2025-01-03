@@ -20,7 +20,7 @@ use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
 use risingwave_common::row::Row;
-use risingwave_common_rate_limit::RateLimiter;
+use risingwave_common::rate_limit::RateLimiter;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::source::{BoxSourceChunkStream, SourceColumnDesc, SplitId};
 use risingwave_pb::plan_common::additional_column::ColumnType;

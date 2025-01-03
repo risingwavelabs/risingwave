@@ -30,7 +30,7 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::metrics::{LabelGuardedIntCounter, LabelGuardedIntGauge};
 use risingwave_common::util::epoch::{EpochPair, INVALID_EPOCH};
 use risingwave_common_estimate_size::EstimateSize;
-use risingwave_common_rate_limit::{RateLimit, RateLimiter};
+use risingwave_common::rate_limit::{RateLimit, RateLimiter};
 use tokio::select;
 use tokio::sync::mpsc::UnboundedReceiver;
 
@@ -395,7 +395,7 @@ impl<R: LogReader> RateLimitedLogReader<R> {
                 unconsumed_chunk_queue: VecDeque::new(),
                 next_chunk_id: 0,
             },
-            rate_limiter: RateLimiter::new(RateLimit::Disabled),
+            rate_limiter: RateLimiter::new(RateLimit::Unlimited),
             control_rx,
         }
     }
@@ -410,7 +410,7 @@ impl<R: LogReader> RateLimitedLogReader<R> {
             RateLimit::Pause => unreachable!(
                 "apply_rate_limit is not supposed to be called while the stream is paused"
             ),
-            RateLimit::Disabled => split_chunk,
+            RateLimit::Unlimited => split_chunk,
             RateLimit::Fixed(limit) => {
                 let limit = limit.get();
                 let required_permits: usize = split_chunk

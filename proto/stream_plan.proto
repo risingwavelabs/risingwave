@@ -89,11 +89,11 @@ message PauseMutation {}
 message ResumeMutation {}
 
 message ThrottleMutation {
-  message RateLimit {
-    optional uint32 rate_limit = 1;
-  }
+  // NOTE(for reviewers): The mutation is not persisted. It is okay not to support migration.
+  reserved 1;
+  reserved "actor_throttle";
 
-  map<uint32, RateLimit> actor_throttle = 1;
+  map<uint32, RateLimit> actor_throttles = 2;
 }
 
 message CombinedMutation {
@@ -191,9 +191,12 @@ message StreamSource {
   map<string, string> with_properties = 6;
   catalog.StreamSourceInfo info = 7;
   string source_name = 8;
-  // Source rate limit
-  optional uint32 rate_limit = 9;
+  // Source rate limit (deprecated)
+  // Keep it here to make it compatible with the old version of the plan.
+  optional uint32 deprecated_rate_limit = 9;
   map<string, secret.SecretRef> secret_refs = 10;
+  // Source rate limit
+  RateLimit rate_limit = 11;
 }
 
 // copy contents from StreamSource to prevent compatibility issues in the future
@@ -207,9 +210,11 @@ message StreamFsFetch {
   map<string, string> with_properties = 6;
   catalog.StreamSourceInfo info = 7;
   string source_name = 8;
-  // Source rate limit
-  optional uint32 rate_limit = 9;
+  // Source rate limit (deprecated)
+  // Keep it here to make it compatible with the old version of the plan.
+  optional uint32 deprecated_rate_limit = 9;
   map<string, secret.SecretRef> secret_refs = 10;
+  RateLimit rate_limit = 11;
 }
 
 // The executor only for receiving barrier from the meta service. It always resides in the leaves
@@ -235,14 +240,17 @@ message SourceBackfillNode {
   catalog.StreamSourceInfo info = 4;
   string source_name = 5;
   map<string, string> with_properties = 6;
-  // Backfill rate limit
-  optional uint32 rate_limit = 7;
+
+  // Backfill rate limit (deprecated)
+  // Keep it here to make it compatible with the old version of the plan.
+  optional uint32 deprecated_rate_limit = 7;
 
   // fields above are the same as StreamSource
 
   // `| partition_id | backfill_progress |`
   catalog.Table state_table = 8;
   map<string, secret.SecretRef> secret_refs = 9;
+  RateLimit rate_limit = 10;
 }
 
 message SinkDesc {
@@ -279,7 +287,10 @@ message SinkNode {
   // A sink with a kv log store should have a table.
   catalog.Table table = 2;
   SinkLogStoreType log_store_type = 3;
-  optional uint32 rate_limit = 4;
+  // (deprecated)
+  // Keep it here to make it compatible with the old version of the plan.
+  optional uint32 deprecated_rate_limit = 4;
+  RateLimit rate_limit = 5;
 }
 
 message ProjectNode {
@@ -618,8 +629,9 @@ message StreamScanNode {
   // Used iff `ChainType::Backfill`.
   plan_common.StorageTableDesc table_desc = 7;
 
-  // The backfill rate limit for the stream scan node.
-  optional uint32 rate_limit = 8;
+  // The backfill rate limit for the stream scan node. (deprecated)
+  // Keep it here to make it compatible with the old version of the plan.
+  optional uint32 deprecated_rate_limit = 8;
 
   // Snapshot read every N barriers
   uint32 snapshot_read_barrier_interval = 9 [deprecated = true];
@@ -629,6 +641,10 @@ message StreamScanNode {
   catalog.Table arrangement_table = 10;
 
   optional uint64 snapshot_backfill_epoch = 11;
+
+  // The backfill rate limit for the stream scan node.
+  RateLimit rate_limit = 12;
+
 }
 
 // Config options for CDC backfill
@@ -657,14 +673,18 @@ message StreamCdcScanNode {
   // The external table that will be backfilled for CDC.
   plan_common.ExternalTableDesc cdc_table_desc = 5;
 
-  // The backfill rate limit for the stream cdc scan node.
-  optional uint32 rate_limit = 6;
+  // The backfill rate limit for the stream cdc scan node. (deprecated)
+  // Keep it here to make it compatible with the old version of the plan.
+  optional uint32 deprecated_rate_limit = 6;
 
   // Whether skip the backfill and only consume from upstream.
   // keep it for backward compatibility, new stream plan will use `options.disable_backfill`
   bool disable_backfill = 7;
 
   StreamCdcScanOptions options = 8;
+
+  // The backfill rate limit for the stream cdc scan node.
+  RateLimit rate_limit = 9;
 }
 
 // BatchPlanNode is used for mv on mv snapshot read.
@@ -772,7 +792,10 @@ message DmlNode {
   uint64 table_version_id = 3;
   // Column descriptions of the table.
   repeated plan_common.ColumnDesc column_descs = 2;
-  optional uint32 rate_limit = 4;
+  // (deprecated)
+  // Keep it here to make it compatible with the old version of the plan.
+  optional uint32 deprecated_rate_limit = 4;
+  RateLimit rate_limit = 5;
 }
 
 message RowIdGenNode {
@@ -1068,4 +1091,15 @@ message StreamFragmentGraph {
   // upstream fragment graph requires two fragments to be in the same distribution,
   // thus the same vnode count.
   uint32 max_parallelism = 7;
+}
+
+message RateLimit {
+  enum RateLimitPolicy {
+    RATE_LIMIT_POLICY_UNLIMITED = 0;
+    RATE_LIMIT_POLICY_FIXED = 1;
+  }
+
+  RateLimitPolicy policy = 1;
+  // Only valid when `policy` is `RATE_LIMIT_POLICY_FIXED`.
+  uint64 rate = 2;
 }
