@@ -222,7 +222,9 @@ impl CatalogController {
             .into_tuple()
             .all(&txn)
             .await?;
-
+        let dropped_tables = inner
+            .list_all_state_tables(Some(to_drop_state_table_ids.iter().copied().collect()))
+            .await?;
         // delete all in to_drop_objects.
         let res = Object::delete_many()
             .filter(object::Column::Oid.is_in(to_drop_objects.iter().map(|obj| obj.oid)))
@@ -235,14 +237,10 @@ impl CatalogController {
             ));
         }
         let user_infos = list_user_info_by_ids(to_update_user_ids, &txn).await?;
-
         txn.commit().await?;
 
         // notify about them.
         self.notify_users_update(user_infos).await;
-        let dropped_tables = inner
-            .list_all_state_tables(Some(to_drop_state_table_ids.iter().copied().collect()))
-            .await?;
         inner.dropped_tables.extend(
             dropped_tables
                 .into_iter()
