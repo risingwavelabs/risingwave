@@ -30,7 +30,7 @@ use risingwave_pb::compute::{
 };
 use risingwave_pb::monitor_service::monitor_service_client::MonitorServiceClient;
 use risingwave_pb::monitor_service::{
-    AnalyzeHeapRequest, AnalyzeHeapResponse, GetBackPressureRequest, GetBackPressureResponse,
+    AnalyzeHeapRequest, AnalyzeHeapResponse, GetStreamingStatsRequest, GetStreamingStatsResponse,
     HeapProfilingRequest, HeapProfilingResponse, ListHeapProfilingRequest,
     ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse, StackTraceRequest,
     StackTraceResponse,
@@ -220,11 +220,11 @@ impl ComputeClient {
             .into_inner())
     }
 
-    pub async fn get_back_pressure(&self) -> Result<GetBackPressureResponse> {
+    pub async fn get_back_pressure(&self) -> Result<GetStreamingStatsResponse> {
         Ok(self
             .monitor_client
             .to_owned()
-            .get_back_pressure(GetBackPressureRequest::default())
+            .get_back_pressure(GetStreamingStatsRequest::default())
             .await
             .map_err(RpcError::from_compute_status)?
             .into_inner())

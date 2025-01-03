@@ -51,7 +51,7 @@ import {
 } from "../lib/api/streaming"
 import { FragmentBox } from "../lib/layout"
 import { TableFragments, TableFragments_Fragment } from "../proto/gen/meta"
-import { ChannelStats, FragmentStats, GetBackPressureResponse } from "../proto/gen/monitor_service"
+import { ChannelStats, FragmentStats, GetStreamingStatsResponse } from "../proto/gen/monitor_service"
 import { Dispatcher, MergeNode, StreamNode } from "../proto/gen/stream_plan"
 
 interface DispatcherNode {
@@ -356,7 +356,7 @@ export default function Streaming() {
     function refresh() {
       api.get("/metrics/fragment/embedded_back_pressures").then(
         (res) => {
-          let response = GetBackPressureResponse.fromJSON(res)
+          let response = GetStreamingStatsResponse.fromJSON(res)
           let snapshot = new ChannelStatsSnapshot(
             new Map(Object.entries(response.channelStats)),
             Date.now()

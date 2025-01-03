@@ -35,7 +35,7 @@ import {
 import { RelationPoint } from "../lib/layout"
 import { RelationStats } from "../proto/gen/monitor_service"
 import { ChannelStatsDerived, ChannelStatsSnapshot } from "./fragment_graph"
-import { GetBackPressureResponse } from "../proto/gen/monitor_service"
+import { GetStreamingStatsResponse } from "../proto/gen/monitor_service"
 
 const SIDEBAR_WIDTH = "200px"
 const INTERVAL_MS = 5000
@@ -116,7 +116,7 @@ export default function StreamingGraph() {
     function refresh() {
       api.get("/metrics/fragment/embedded_back_pressures").then(
         (res) => {
-          let response = GetBackPressureResponse.fromJSON(res)
+          let response = GetStreamingStatsResponse.fromJSON(res)
           let snapshot = new ChannelStatsSnapshot(
             new Map(Object.entries(response.channelStats)),
             Date.now()

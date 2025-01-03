@@ -28,10 +28,11 @@ use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_jni_core::jvm_runtime::dump_jvm_stack_traces;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorService;
 use risingwave_pb::monitor_service::{
-    AnalyzeHeapRequest, AnalyzeHeapResponse, ChannelStats, FragmentStats, GetBackPressureRequest,
-    GetBackPressureResponse, HeapProfilingRequest, HeapProfilingResponse, ListHeapProfilingRequest,
-    ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse, RelationStats,
-    StackTraceRequest, StackTraceResponse, TieredCacheTracingRequest, TieredCacheTracingResponse,
+    AnalyzeHeapRequest, AnalyzeHeapResponse, ChannelStats, FragmentStats, GetStreamingStatsRequest,
+    GetStreamingStatsResponse, HeapProfilingRequest, HeapProfilingResponse,
+    ListHeapProfilingRequest, ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse,
+    RelationStats, StackTraceRequest, StackTraceResponse, TieredCacheTracingRequest,
+    TieredCacheTracingResponse,
 };
 use risingwave_rpc_client::error::ToTonicStatus;
 use risingwave_storage::hummock::compactor::await_tree_key::Compaction;
@@ -290,8 +291,8 @@ impl MonitorService for MonitorServiceImpl {
     #[cfg_attr(coverage, coverage(off))]
     async fn get_back_pressure(
         &self,
-        _request: Request<GetBackPressureRequest>,
-    ) -> Result<Response<GetBackPressureResponse>, Status> {
+        _request: Request<GetStreamingStatsRequest>,
+    ) -> Result<Response<GetStreamingStatsResponse>, Status> {
         let metrics = global_streaming_metrics(MetricLevel::Info);
 
         fn collect<T: Collector>(m: &T) -> Vec<Metric> {
@@ -429,7 +430,7 @@ impl MonitorService for MonitorServiceImpl {
         }
 
         let channel_stats = channel_stats.into_iter().collect();
-        Ok(Response::new(GetBackPressureResponse {
+        Ok(Response::new(GetStreamingStatsResponse {
             channel_stats,
             fragment_stats,
             relation_stats,

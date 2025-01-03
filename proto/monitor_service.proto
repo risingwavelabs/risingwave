@@ -51,8 +51,8 @@ message AnalyzeHeapResponse {
   bytes result = 1;
 }
 
-// Back pressure
-message GetBackPressureRequest {}
+// Streaming Runtime Stats
+message GetStreamingStatsRequest {}
 
 message ChannelStats {
   uint32 actor_count = 1 [json_name = "n"];
@@ -74,7 +74,7 @@ message RelationStats {
   uint64 current_epoch = 3 [json_name = "e"];
 }
 
-message GetBackPressureResponse {
+message GetStreamingStatsResponse {
   // Key: "<upstream_fragment_id>_<downstream_fragment_id>"
   map<string, ChannelStats> channel_stats = 1;
   map<uint32, FragmentStats> fragment_stats = 2;
@@ -98,6 +98,6 @@ service MonitorService {
   rpc HeapProfiling(HeapProfilingRequest) returns (HeapProfilingResponse);
   rpc ListHeapProfiling(ListHeapProfilingRequest) returns (ListHeapProfilingResponse);
   rpc AnalyzeHeap(AnalyzeHeapRequest) returns (AnalyzeHeapResponse);
-  rpc GetBackPressure(GetBackPressureRequest) returns (GetBackPressureResponse);
+  rpc GetStreamingStats(GetStreamingStatsRequest) returns (GetStreamingStatsResponse);
   rpc TieredCacheTracing(TieredCacheTracingRequest) returns (TieredCacheTracingResponse);
 }

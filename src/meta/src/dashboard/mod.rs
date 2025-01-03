@@ -68,7 +68,7 @@ pub(super) mod handlers {
         RelationIdInfos,
     };
     use risingwave_pb::monitor_service::{
-        GetBackPressureResponse, HeapProfilingResponse, ListHeapProfilingResponse,
+        GetStreamingStatsResponse, HeapProfilingResponse, ListHeapProfilingResponse,
         StackTraceResponse,
     };
     use risingwave_pb::stream_plan::FragmentTypeFlag;
@@ -463,7 +463,7 @@ pub(super) mod handlers {
     /// So the workload is proportional to the relation id graph we fetch in `get_relation_id_infos`.
     pub async fn get_embedded_back_pressures(
         Extension(srv): Extension<Service>,
-    ) -> Result<Json<GetBackPressureResponse>> {
+    ) -> Result<Json<GetStreamingStatsResponse>> {
         let worker_nodes = srv
             .metadata_manager
             .list_active_streaming_compute_nodes()
@@ -483,7 +483,7 @@ pub(super) mod handlers {
         }
         let results = join_all(futures).await;
 
-        let mut all = GetBackPressureResponse::default();
+        let mut all = GetStreamingStatsResponse::default();
 
         for result in results {
             let result = result
