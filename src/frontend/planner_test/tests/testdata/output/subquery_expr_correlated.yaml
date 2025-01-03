@@ -1203,6 +1203,39 @@
                   └─StreamProject { exprs: [t2.d, t2.c, t2._row_id] }
                     └─StreamFilter { predicate: IsNotNull(t2.d) }
                       └─StreamTableScan { table: t2, columns: [t2.c, t2.d, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+- name: a case can't be optimized by PullUpCorrelatedPredicateAggRule
+  sql: |
+    CREATE TABLE T (A INT, B INT);
+    CREATE TABLE T2 (C INT, D INT);
+    SELECT * FROM T
+    -- Can apply if any of the conjunction is null
+    WHERE null AND T.A > (SELECT coalesce(avg(c), 114514) FROM T2 WHERE B = D);
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchHashJoin { type: Inner, predicate: t.b = t2.d AND ($expr1 > $expr2), output: [t.a, t.b] }
+      ├─BatchExchange { order: [], dist: HashShard(t.b) }
+      │ └─BatchProject { exprs: [t.a, t.b, t.a::Decimal as $expr1] }
+      │   └─BatchFilter { predicate: null:Boolean }
+      │     └─BatchScan { table: t, columns: [t.a, t.b], distribution: SomeShard }
+      └─BatchProject { exprs: [Coalesce((sum(t2.c)::Decimal / count(t2.c)::Decimal), 114514:Decimal) as $expr2, t2.d] }
+        └─BatchHashAgg { group_key: [t2.d], aggs: [sum(t2.c), count(t2.c)] }
+          └─BatchExchange { order: [], dist: HashShard(t2.d) }
+            └─BatchFilter { predicate: null:Boolean }
+              └─BatchScan { table: t2, columns: [t2.c, t2.d], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [a, b, t._row_id(hidden), t2.d(hidden)], stream_key: [t._row_id, b], pk_columns: [t._row_id, b], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [t.a, t.b, t._row_id, t2.d] }
+      └─StreamFilter { predicate: ($expr1 > $expr2) }
+        └─StreamHashJoin { type: Inner, predicate: t.b = t2.d, output: all }
+          ├─StreamExchange { dist: HashShard(t.b) }
+          │ └─StreamProject { exprs: [t.a, t.b, t.a::Decimal as $expr1, t._row_id] }
+          │   └─StreamFilter { predicate: null:Boolean }
+          │     └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+          └─StreamProject { exprs: [Coalesce((sum(t2.c)::Decimal / count(t2.c)::Decimal), 114514:Decimal) as $expr2, t2.d] }
+            └─StreamHashAgg { group_key: [t2.d], aggs: [sum(t2.c), count(t2.c), count] }
+              └─StreamExchange { dist: HashShard(t2.d) }
+                └─StreamFilter { predicate: null:Boolean }
+                  └─StreamTableScan { table: t2, columns: [t2.c, t2.d, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
 - name: improve multi scalar subqueries optimization time. issue 16952. case 1.
   sql: |
     create table t1(a int, b int);
