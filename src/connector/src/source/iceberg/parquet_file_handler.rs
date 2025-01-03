@@ -110,14 +110,30 @@ pub fn new_s3_operator(
     s3_secret_key: String,
     bucket: String,
 ) -> ConnectorResult<Operator> {
-    // Create s3 builder.
-    let mut builder = S3::default().bucket(&bucket).region(&s3_region);
-    builder = builder.secret_access_key(&s3_access_key);
-    builder = builder.secret_access_key(&s3_secret_key);
-    builder = builder.endpoint(&format!(
-        "https://{}.s3.{}.amazonaws.com",
-        bucket, s3_region
-    ));
+    let is_minio = s3_region.starts_with("http");
+
+    let mut builder = S3::default();
+    builder = match is_minio {
+        true => {
+            builder
+                .region("us-east-1") // hard code as not used but needed.
+                .access_key_id(&s3_access_key)
+                .secret_access_key(&s3_secret_key)
+                .endpoint(&s3_region) // for minio backend, the `s3_region` parameter is passed in as the endpoint.
+                .bucket(&bucket)
+        }
+        false => builder
+            .region(&s3_region)
+            .access_key_id(&s3_access_key)
+            .secret_access_key(&s3_secret_key)
+            .endpoint(&format!(
+                "https://{}.s3.{}.amazonaws.com",
+                bucket, s3_region
+            ))
+            .bucket(&bucket),
+    };
+
+    builder = builder.disable_config_load();
 
     let op: Operator = Operator::new(builder)?
         .layer(LoggingLayer::default())
@@ -143,29 +159,10 @@ pub fn extract_bucket_and_file_name(location: &str) -> ConnectorResult<(String, 
     Ok((bucket, file_name))
 }
 
-pub async fn list_s3_directory(
-    s3_region: String,
-    s3_access_key: String,
-    s3_secret_key: String,
-    dir: String,
-) -> Result<Vec<String>, anyhow::Error> {
+pub async fn list_s3_directory(op: Operator, dir: String) -> Result<Vec<String>, anyhow::Error> {
     let (bucket, file_name) = extract_bucket_and_file_name(&dir)?;
     let prefix = format!("s3://{}/", bucket);
     if dir.starts_with(&prefix) {
-        let mut builder = S3::default();
-        builder = builder
-            .region(&s3_region)
-            .access_key_id(&s3_access_key)
-            .secret_access_key(&s3_secret_key)
-            .bucket(&bucket);
-        builder = builder.endpoint(&format!(
-            "https://{}.s3.{}.amazonaws.com",
-            bucket, s3_region
-        ));
-        let op = Operator::new(builder)?
-            .layer(RetryLayer::default())
-            .finish();
-
         op.list(&file_name)
             .await
             .map_err(|e| anyhow!(e))

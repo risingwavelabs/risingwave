@@ -20,7 +20,6 @@ use risingwave_connector::source::iceberg::{
     extract_bucket_and_file_name, new_s3_operator, read_parquet_file,
 };
 use risingwave_pb::batch_plan::file_scan_node;
-use risingwave_pb::batch_plan::file_scan_node::StorageType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::error::BatchError;
@@ -114,8 +113,6 @@ impl BoxedExecutorBuilder for FileScanExecutorBuilder {
             source.plan_node().get_node_body().unwrap(),
             NodeBody::FileScan
         )?;
-
-        assert_eq!(file_scan_node.storage_type, StorageType::S3 as i32);
 
         Ok(Box::new(S3FileScanExecutor::new(
             match file_scan_node::FileFormat::try_from(file_scan_node.file_format).unwrap() {

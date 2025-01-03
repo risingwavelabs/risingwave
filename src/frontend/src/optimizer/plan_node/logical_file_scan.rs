@@ -51,11 +51,11 @@ impl LogicalFileScan {
     ) -> Self {
         assert!("parquet".eq_ignore_ascii_case(&file_format));
         assert!("s3".eq_ignore_ascii_case(&storage_type));
-
+        let storage_type = generic::StorageType::S3;
         let core = generic::FileScan {
             schema,
             file_format: generic::FileFormat::Parquet,
-            storage_type: generic::StorageType::S3,
+            storage_type,
             s3_region,
             s3_access_key,
             s3_secret_key,

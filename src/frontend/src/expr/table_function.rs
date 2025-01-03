@@ -148,21 +148,22 @@ impl TableFunction {
 
             #[cfg(not(madsim))]
             {
+                let (bucket, _) = extract_bucket_and_file_name(&eval_args[5].clone())?;
+
+                let op = new_s3_operator(
+                    eval_args[2].clone(),
+                    eval_args[3].clone(),
+                    eval_args[4].clone(),
+                    bucket.clone(),
+                )?;
                 let files = if eval_args[5].ends_with('/') {
                     let files = tokio::task::block_in_place(|| {
                         FRONTEND_RUNTIME.block_on(async {
-                            let files = list_s3_directory(
-                                eval_args[2].clone(),
-                                eval_args[3].clone(),
-                                eval_args[4].clone(),
-                                eval_args[5].clone(),
-                            )
-                            .await?;
+                            let files = list_s3_directory(op.clone(), eval_args[5].clone()).await?;
 
                             Ok::<Vec<String>, anyhow::Error>(files)
                         })
                     })?;
-
                     if files.is_empty() {
                         return Err(BindError(
                             "file_scan function only accepts non-empty directory".to_owned(),
@@ -181,13 +182,7 @@ impl TableFunction {
                             Some(files) => files[0].clone(),
                             None => eval_args[5].clone(),
                         };
-                        let (bucket, file_name) = extract_bucket_and_file_name(&location)?;
-                        let op = new_s3_operator(
-                            eval_args[2].clone(),
-                            eval_args[3].clone(),
-                            eval_args[4].clone(),
-                            bucket.clone(),
-                        )?;
+                        let (_, file_name) = extract_bucket_and_file_name(&location)?;
 
                         let fields = get_parquet_fields(op, file_name).await?;
 
