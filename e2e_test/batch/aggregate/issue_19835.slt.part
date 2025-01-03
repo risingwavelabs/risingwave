@@ -52,3 +52,9 @@ select foo.id, (select coalesce( max(id), 114514) from bar where bar.foo_id = fo
 ----
 1 114514
 2 114514
+
+statement ok
+drop table foo;
+
+statement ok
+drop table bar;
