@@ -757,7 +757,7 @@ pub mod hash_join_executor {
         let params_r = JoinParams::new(vec![0], vec![1]);
 
         let cache_size = match workload {
-            HashJoinWorkload::InCache => Some(1000_000),
+            HashJoinWorkload::InCache => Some(1_000_000),
             HashJoinWorkload::NotInCache => None,
         };
 
