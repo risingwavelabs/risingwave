@@ -27,14 +27,17 @@ import api from "../lib/api/api"
 import useFetch from "../lib/api/fetch"
 import {
   Relation,
-  getFragmentVertexToRelationMap,
+  getFragmentToRelationMap,
   getRelationDependencies,
   getRelations,
   relationIsStreamingJob,
 } from "../lib/api/streaming"
 import { RelationPoint } from "../lib/layout"
-import { RelationStats } from "../proto/gen/monitor_service"
-import { BackPressureSnapshot } from "./fragment_graph"
+import {
+  GetStreamingStatsResponse,
+  RelationStats,
+} from "../proto/gen/monitor_service"
+import { ChannelStatsDerived, ChannelStatsSnapshot } from "./fragment_graph"
 
 const SIDEBAR_WIDTH = "200px"
 const INTERVAL_MS = 5000
@@ -71,9 +74,7 @@ export default function StreamingGraph() {
   // Since dependentRelations will be deprecated, we need to use getRelationDependencies here to separately obtain the dependency relationship.
   const { response: relationDeps } = useFetch(getRelationDependencies)
   const [selectedId, setSelectedId] = useQueryState("id", parseAsInteger)
-  const { response: fragmentVertexToRelationMap } = useFetch(
-    getFragmentVertexToRelationMap
-  )
+  const { response: fragmentToRelationMap } = useFetch(getFragmentToRelationMap)
   const [resetEmbeddedBackPressures, setResetEmbeddedBackPressures] =
     useState<boolean>(false)
 
@@ -96,8 +97,8 @@ export default function StreamingGraph() {
   const relationDependency = relationDependencyCallback()
 
   // Periodically fetch fragment-level back-pressure from Meta node
-  const [backPressureRate, setBackPressureRate] =
-    useState<Map<string, number>>()
+  const [channelStats, setChannelStats] =
+    useState<Map<string, ChannelStatsDerived>>()
   const [relationStats, setRelationStats] = useState<{
     [key: number]: RelationStats
   }>()
@@ -105,23 +106,25 @@ export default function StreamingGraph() {
   useEffect(() => {
     // The initial snapshot is used to calculate the rate of back pressure
     // It's not used to render the page directly, so we don't need to set it in the state
-    let initialSnapshot: BackPressureSnapshot | undefined
+    let initialSnapshot: ChannelStatsSnapshot | undefined
 
     if (resetEmbeddedBackPressures) {
-      setBackPressureRate(undefined)
+      setChannelStats(undefined)
       toggleResetEmbeddedBackPressures()
     }
 
     function refresh() {
-      api.get("/metrics/fragment/embedded_back_pressures").then(
-        (response) => {
-          let snapshot = BackPressureSnapshot.fromResponse(
-            response.channelStats
+      api.get("/metrics/streaming_stats").then(
+        (res) => {
+          let response = GetStreamingStatsResponse.fromJSON(res)
+          let snapshot = new ChannelStatsSnapshot(
+            new Map(Object.entries(response.channelStats)),
+            Date.now()
           )
           if (!initialSnapshot) {
             initialSnapshot = snapshot
           } else {
-            setBackPressureRate(snapshot.getRate(initialSnapshot!))
+            setChannelStats(snapshot.getRate(initialSnapshot))
           }
           setRelationStats(response.relationStats)
         },
@@ -139,26 +142,27 @@ export default function StreamingGraph() {
   }, [toast, resetEmbeddedBackPressures])
 
   // Convert fragment-level backpressure rate map to relation-level backpressure rate
-  const backPressures: Map<string, number> | undefined = useMemo(() => {
-    if (!fragmentVertexToRelationMap) {
-      return new Map<string, number>()
-    }
-    let inMap = fragmentVertexToRelationMap.inMap
-    let outMap = fragmentVertexToRelationMap.outMap
-    if (backPressureRate) {
-      let map = new Map<string, number>()
-      for (const [key, value] of backPressureRate) {
-        const [outputFragment, inputFragment] = key.split("_").map(Number)
-        if (outMap[outputFragment] && inMap[inputFragment]) {
-          const outputRelation = outMap[outputFragment]
-          const inputRelation = inMap[inputFragment]
-          let key = `${outputRelation}_${inputRelation}`
-          map.set(key, value)
-        }
+  const relationChannelStats: Map<string, ChannelStatsDerived> | undefined =
+    useMemo(() => {
+      if (!fragmentToRelationMap) {
+        return new Map<string, ChannelStatsDerived>()
       }
-      return map
-    }
-  }, [backPressureRate, fragmentVertexToRelationMap])
+      let inMap = fragmentToRelationMap.inMap
+      let outMap = fragmentToRelationMap.outMap
+      if (channelStats) {
+        let map = new Map<string, ChannelStatsDerived>()
+        for (const [key, stats] of channelStats) {
+          const [outputFragment, inputFragment] = key.split("_").map(Number)
+          if (outMap[outputFragment] && inMap[inputFragment]) {
+            const outputRelation = outMap[outputFragment]
+            const inputRelation = inMap[inputFragment]
+            let key = `${outputRelation}_${inputRelation}`
+            map.set(key, stats)
+          }
+        }
+        return map
+      }
+    }, [channelStats, fragmentToRelationMap])
 
   const retVal = (
     <Flex p={3} height="calc(100vh - 20px)" flexDirection="column">
@@ -214,7 +218,7 @@ export default function StreamingGraph() {
               nodes={relationDependency}
               selectedId={selectedId?.toString()}
               setSelectedId={(id) => setSelectedId(parseInt(id))}
-              backPressures={backPressures}
+              channelStats={relationChannelStats}
               relationStats={relationStats}
             />
           )}
