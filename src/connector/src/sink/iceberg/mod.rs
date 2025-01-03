@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod compaction;
 mod prometheus;
 
 use std::collections::{BTreeMap, HashMap};
@@ -64,6 +65,7 @@ use serde_derive::Deserialize;
 use serde_json::from_value;
 use serde_with::{serde_as, DisplayFromStr};
 use thiserror_ext::AsReport;
+use tokio::sync::{mpsc, oneshot};
 use tracing::warn;
 use url::Url;
 use with_options::WithOptions;
@@ -77,6 +79,7 @@ use super::{
 };
 use crate::connector_common::IcebergCommon;
 use crate::sink::coordinate::CoordinatedSinkWriter;
+use crate::sink::iceberg::compaction::spawn_compaction_client;
 use crate::sink::writer::SinkWriter;
 use crate::sink::{Result, SinkCommitCoordinator, SinkParam};
 use crate::{deserialize_bool_from_string, deserialize_optional_string_seq_from_string};
@@ -415,8 +418,20 @@ impl Sink for IcebergSink {
     async fn new_coordinator(&self) -> Result<Self::Coordinator> {
         let catalog = self.config.create_catalog().await?;
         let table = self.create_and_validate_table().await?;
+        // Only iceberg engine table will enable config load and need compaction.
+        let (commit_tx, finish_tx) = if self.config.common.enable_config_load.unwrap_or(false) {
+            let (commit_tx, finish_tx) = spawn_compaction_client(&self.config)?;
+            (Some(commit_tx), Some(finish_tx))
+        } else {
+            (None, None)
+        };
 
-        Ok(IcebergSinkCommitter { catalog, table })
+        Ok(IcebergSinkCommitter {
+            catalog,
+            table,
+            commit_notifier: commit_tx,
+            _compact_task_guard: finish_tx,
+        })
     }
 }
 
@@ -1169,6 +1184,8 @@ impl<'a> TryFrom<&'a IcebergCommitResult> for SinkMetadata {
 pub struct IcebergSinkCommitter {
     catalog: Arc<dyn Catalog>,
     table: Table,
+    commit_notifier: Option<mpsc::UnboundedSender<()>>,
+    _compact_task_guard: Option<oneshot::Sender<()>>,
 }
 
 #[async_trait::async_trait]
@@ -1262,6 +1279,12 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
             .await
             .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
         self.table = table;
+
+        if let Some(commit_notifier) = &mut self.commit_notifier {
+            if commit_notifier.send(()).is_err() {
+                warn!("failed to notify commit");
+            }
+        }
 
         tracing::info!("Succeeded to commit to iceberg table in epoch {epoch}.");
         Ok(())
