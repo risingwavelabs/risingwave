@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::Context;
 use prost::Message as _;
 use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnCatalog, ColumnId};
@@ -132,7 +133,10 @@ pub fn try_purify_table_source_create_sql_ast(
         let mut pk_columns = Vec::new();
 
         for &id in pk_column_ids {
-            let column = columns.iter().find(|c| c.column_id() == id).unwrap();
+            let column = columns
+                .iter()
+                .find(|c| c.column_id() == id)
+                .context("primary key column not found")?;
             if !column.is_user_defined() {
                 bail /* unlikely */ !(
                     "primary key column \"{}\" is not user-defined",
