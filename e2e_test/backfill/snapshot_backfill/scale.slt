@@ -1,0 +1,15 @@
+control substitution on
+
+statement ok
+alter materialized view ${TEST_NAME}_mv set parallelism to 1;
+
+sleep 3s
+
+include ./check_data_equal.slt.part
+
+statement ok
+alter materialized view ${TEST_NAME}_mv set parallelism to 4;
+
+sleep 3s
+
+include ./check_data_equal.slt.part

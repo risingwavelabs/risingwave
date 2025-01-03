@@ -123,7 +123,6 @@ impl<St: ChangeLogRowStream> VnodeStream<St> {
         }
     }
 
-    #[cfg_attr(not(test), expect(dead_code))]
     pub(super) fn consume_builder(&mut self) -> Option<StreamChunk> {
         self.data_chunk_builder.consume_all().map(|chunk| {
             let ops = replace(
@@ -134,7 +133,6 @@ impl<St: ChangeLogRowStream> VnodeStream<St> {
         })
     }
 
-    #[cfg_attr(not(test), expect(dead_code))]
     pub(super) async fn for_vnode_pk_progress(
         &mut self,
         pk_indices: &[usize],
