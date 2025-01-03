@@ -31,7 +31,7 @@ use google_cloud_bigquery::grpc::apiv1::conn_pool::{WriteConnectionManager, DOMA
 use google_cloud_gax::conn::{ConnectionOptions, Environment};
 use google_cloud_gax::grpc::Request;
 use google_cloud_googleapis::cloud::bigquery::storage::v1::append_rows_request::{
-    ProtoData, Rows as AppendRowsRequestRows,
+    MissingValueInterpretation, ProtoData, Rows as AppendRowsRequestRows,
 };
 use google_cloud_googleapis::cloud::bigquery::storage::v1::{
     AppendRowsRequest, AppendRowsResponse, ProtoRows, ProtoSchema,
@@ -814,6 +814,7 @@ impl StorageWriterClient {
             offset: None,
             trace_id: Uuid::new_v4().hyphenated().to_string(),
             missing_value_interpretations: HashMap::default(),
+            default_missing_value_interpretation: MissingValueInterpretation::DefaultValue as i32,
             rows: Some(row),
         };
         self.request_sender
