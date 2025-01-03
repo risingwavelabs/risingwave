@@ -1151,6 +1151,7 @@ pub struct StreamingDeveloperConfig {
     /// will be switched from jdbc postgresql sinks to rust native (connector='postgres') sinks.
     pub switch_jdbc_pg_to_native: bool,
 
+    /// The maximum number of consecutive barriers allowed in a message when sent between actors.
     #[serde(default = "default::developer::stream_max_barrier_batch_size")]
     pub max_barrier_batch_size: u32,
 }

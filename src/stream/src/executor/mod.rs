@@ -1046,19 +1046,18 @@ impl<M> MessageInner<M> {
 
 pub type Message = MessageInner<BarrierMutationType>;
 pub type DispatcherMessage = MessageInner<()>;
+
+/// `MessageBatchInner` is used exclusively by `Dispatcher` and the `Merger`/`Receiver` for exchanging messages between them.
+/// It shares the same message type as the fundamental `MessageInner`, but batches multiple barriers into a single message.
 #[derive(Debug, EnumAsInner, PartialEq, Clone)]
-pub enum MessageBatch {
+pub enum MessageBatchInner<M> {
     Chunk(StreamChunk),
-    BarrierBatch(Vec<BarrierInner<BarrierMutationType>>),
+    BarrierBatch(Vec<BarrierInner<M>>),
     Watermark(Watermark),
 }
+pub type MessageBatch = MessageBatchInner<BarrierMutationType>;
 pub type DispatcherBarriers = Vec<DispatcherBarrier>;
-#[derive(Debug, EnumAsInner, PartialEq, Clone)]
-pub enum DispatcherMessageBatch {
-    Chunk(StreamChunk),
-    BarrierBatch(Vec<BarrierInner<()>>),
-    Watermark(Watermark),
-}
+pub type DispatcherMessageBatch = MessageBatchInner<()>;
 
 impl From<DispatcherMessage> for DispatcherMessageBatch {
     fn from(m: DispatcherMessage) -> Self {

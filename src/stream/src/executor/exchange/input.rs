@@ -16,6 +16,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use anyhow::anyhow;
+use either::Either;
 use local_input::LocalInputStreamInner;
 use pin_project::pin_project;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
@@ -111,6 +112,7 @@ impl LocalInput {
 
 mod local_input {
     use await_tree::InstrumentAwait;
+    use either::Either;
 
     use crate::executor::exchange::error::ExchangeChannelClosed;
     use crate::executor::exchange::permit::Receiver;
@@ -128,8 +130,15 @@ mod local_input {
     async fn run_inner(mut channel: Receiver, upstream_actor_id: ActorId) {
         let span: await_tree::Span = format!("LocalInput (actor {upstream_actor_id})").into();
         while let Some(msg) = channel.recv().verbose_instrument_await(span.clone()).await {
-            for m in msg.into_messages() {
-                yield m;
+            match msg.into_messages() {
+                Either::Left(barriers) => {
+                    for b in barriers {
+                        yield b;
+                    }
+                }
+                Either::Right(m) => {
+                    yield m;
+                }
             }
         }
         // Always emit an error outside the loop. This is because we use barrier as the control
@@ -199,6 +208,7 @@ mod remote_input {
 
     use anyhow::Context;
     use await_tree::InstrumentAwait;
+    use either::Either;
     use risingwave_common::catalog::DatabaseId;
     use risingwave_common::util::addr::HostAddr;
     use risingwave_pb::task_service::{permits, GetStreamResponse};
@@ -297,8 +307,15 @@ mod remote_input {
                     }
 
                     let msg = msg_res.context("RemoteInput decode message error")?;
-                    for m in msg.into_messages() {
-                        yield m;
+                    match msg.into_messages() {
+                        Either::Left(barriers) => {
+                            for b in barriers {
+                                yield b;
+                            }
+                        }
+                        Either::Right(m) => {
+                            yield m;
+                        }
                     }
                 }
 
@@ -364,16 +381,13 @@ pub(crate) fn new_input(
 }
 
 impl DispatcherMessageBatch {
-    fn into_messages(self) -> impl Iterator<Item = DispatcherMessage> {
-        #[auto_enums::auto_enum(Iterator)]
+    fn into_messages(self) -> Either<impl Iterator<Item = DispatcherMessage>, DispatcherMessage> {
         match self {
             DispatcherMessageBatch::BarrierBatch(barriers) => {
-                barriers.into_iter().map(DispatcherMessage::Barrier)
+                Either::Left(barriers.into_iter().map(DispatcherMessage::Barrier))
             }
-            DispatcherMessageBatch::Chunk(c) => std::iter::once(DispatcherMessage::Chunk(c)),
-            DispatcherMessageBatch::Watermark(w) => {
-                std::iter::once(DispatcherMessage::Watermark(w))
-            }
+            DispatcherMessageBatch::Chunk(c) => Either::Right(DispatcherMessage::Chunk(c)),
+            DispatcherMessageBatch::Watermark(w) => Either::Right(DispatcherMessage::Watermark(w)),
         }
     }
 }
