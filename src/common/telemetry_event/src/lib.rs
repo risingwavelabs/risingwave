@@ -17,7 +17,7 @@
 mod util;
 
 use std::env;
-use std::sync::{LazyLock, OnceLock};
+use std::sync::OnceLock;
 
 use prost::Message;
 use risingwave_pb::telemetry::{
@@ -45,19 +45,14 @@ pub fn get_telemetry_risingwave_cloud_uuid() -> Option<String> {
     env::var(TELEMETRY_RISINGWAVE_CLOUD_UUID).ok()
 }
 
-pub static TELEMETRY_EVENT_REPORT_STASH: LazyLock<Mutex<Vec<PbEventMessage>>> =
-    LazyLock::new(|| Mutex::new(Vec::new()));
-
-pub async fn do_telemetry_event_report() {
-    const TELEMETRY_EVENT_REPORT_TYPE: &str = "event";
+pub async fn do_telemetry_event_report(event_stash: &mut Vec<PbEventMessage>) {
+    const TELEMETRY_EVENT_REPORT_TYPE: &str = "events"; // the batch report url
     let url = (TELEMETRY_REPORT_URL.to_owned() + "/" + TELEMETRY_EVENT_REPORT_TYPE).to_owned();
     let mut batch_message = PbBatchEventMessage { events: Vec::new() };
 
-    let mut stash_guard = TELEMETRY_EVENT_REPORT_STASH.lock().await;
-    for event in stash_guard.drain(..) {
+    for event in event_stash.drain(..) {
         batch_message.events.push(event);
     }
-    drop(stash_guard);
 
     post_telemetry_report_pb(&url, batch_message.encode_to_vec())
         .await

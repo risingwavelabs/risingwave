@@ -17,8 +17,7 @@ use std::sync::Arc;
 use risingwave_pb::telemetry::PbEventMessage;
 pub use risingwave_telemetry_event::{
     current_timestamp, do_telemetry_event_report, post_telemetry_report_pb,
-    TELEMETRY_EVENT_REPORT_INTERVAL, TELEMETRY_EVENT_REPORT_STASH, TELEMETRY_REPORT_URL,
-    TELEMETRY_TRACKING_ID,
+    TELEMETRY_EVENT_REPORT_INTERVAL, TELEMETRY_REPORT_URL, TELEMETRY_TRACKING_ID,
 };
 use risingwave_telemetry_event::{
     get_telemetry_risingwave_cloud_uuid, TELEMETRY_EVENT_REPORT_STASH_SIZE,
@@ -107,21 +106,22 @@ where
                 "Telemetry failed to set event reporting tx, event reporting will be disabled"
             );
         });
+        let mut event_stash = Vec::new();
 
         loop {
             tokio::select! {
                 _ = interval.tick() => {},
                 event = event_rx.recv() => {
                     if let Some(event) = event {
-                        TELEMETRY_EVENT_REPORT_STASH.lock().await.push(event);
+                        event_stash.push(event);
                     }
-                    if TELEMETRY_EVENT_REPORT_STASH.lock().await.len() >= TELEMETRY_EVENT_REPORT_STASH_SIZE {
-                        do_telemetry_event_report().await;
+                    if event_stash.len() >= TELEMETRY_EVENT_REPORT_STASH_SIZE {
+                        do_telemetry_event_report(&mut event_stash).await;
                     }
                     continue;
                 }
                 _ = event_interval.tick() => {
-                    do_telemetry_event_report().await;
+                    do_telemetry_event_report(&mut event_stash).await;
                     continue;
                 },
                 _ = &mut shutdown_rx => {
