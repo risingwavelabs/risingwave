@@ -200,7 +200,7 @@ impl NotificationServiceImpl {
             .catalog_controller
             .get_inner_read_guard()
             .await;
-        let mut tables = catalog_guard.list_all_state_tables(None).await?;
+        let mut tables = catalog_guard.list_all_state_tables().await?;
         tables.extend(catalog_guard.dropped_tables.values().cloned());
         let notification_version = self.env.notification_manager().current_version().await;
         Ok((tables, notification_version))

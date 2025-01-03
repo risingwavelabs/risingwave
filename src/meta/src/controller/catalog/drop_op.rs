@@ -222,9 +222,20 @@ impl CatalogController {
             .into_tuple()
             .all(&txn)
             .await?;
-        let dropped_tables = inner
-            .list_all_state_tables(Some(to_drop_state_table_ids.iter().copied().collect()))
-            .await?;
+        let dropped_tables = Table::find()
+            .find_also_related(Object)
+            .filter(
+                table::Column::TableId.is_in(
+                    to_drop_state_table_ids
+                        .iter()
+                        .copied()
+                        .collect::<HashSet<ObjectId>>(),
+                ),
+            )
+            .all(&txn)
+            .await?
+            .into_iter()
+            .map(|(table, obj)| PbTable::from(ObjectModel(table, obj.unwrap())));
         // delete all in to_drop_objects.
         let res = Object::delete_many()
             .filter(object::Column::Oid.is_in(to_drop_objects.iter().map(|obj| obj.oid)))
@@ -241,11 +252,9 @@ impl CatalogController {
 
         // notify about them.
         self.notify_users_update(user_infos).await;
-        inner.dropped_tables.extend(
-            dropped_tables
-                .into_iter()
-                .map(|t| (TableId::try_from(t.id).unwrap(), t)),
-        );
+        inner
+            .dropped_tables
+            .extend(dropped_tables.map(|t| (TableId::try_from(t.id).unwrap(), t)));
         let relation_group = build_relation_group_for_delete(to_drop_objects);
 
         let version = self

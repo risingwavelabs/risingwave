@@ -619,16 +619,11 @@ impl CatalogControllerInner {
     }
 
     /// `list_all_tables` return all tables and internal tables.
-    /// `table_ids_filter` is used for filtering if it's set.
-    pub async fn list_all_state_tables(
-        &self,
-        table_ids_filter: Option<HashSet<TableId>>,
-    ) -> MetaResult<Vec<PbTable>> {
-        let mut table_objs = Table::find().find_also_related(Object);
-        if let Some(table_ids_filter) = table_ids_filter {
-            table_objs = table_objs.filter(table::Column::TableId.is_in(table_ids_filter));
-        }
-        let table_objs = table_objs.all(&self.db).await?;
+    pub async fn list_all_state_tables(&self) -> MetaResult<Vec<PbTable>> {
+        let table_objs = Table::find()
+            .find_also_related(Object)
+            .all(&self.db)
+            .await?;
 
         Ok(table_objs
             .into_iter()

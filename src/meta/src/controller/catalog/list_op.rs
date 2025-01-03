@@ -104,7 +104,7 @@ impl CatalogController {
 
     pub async fn list_all_state_tables(&self) -> MetaResult<Vec<PbTable>> {
         let inner = self.inner.read().await;
-        inner.list_all_state_tables(None).await
+        inner.list_all_state_tables().await
     }
 
     pub async fn list_readonly_table_ids(&self, schema_id: SchemaId) -> MetaResult<Vec<TableId>> {
