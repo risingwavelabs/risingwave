@@ -25,7 +25,6 @@ use risingwave_pb::telemetry::{
     TelemetryEventStage as PbTelemetryEventStage,
 };
 use tokio::sync::mpsc::UnboundedSender;
-use tokio::sync::Mutex;
 pub use util::*;
 
 pub type TelemetryResult<T> = core::result::Result<T, TelemetryError>;
