@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -243,6 +243,7 @@ impl From<ObjectModel<table::Model>> for PbTable {
             webhook_info: value.0.webhook_info.map(|info| info.to_protobuf()),
             job_id: value.0.belongs_to_job_id.map(|id| id as _),
             engine: value.0.engine.map(|engine| PbEngine::from(engine) as i32),
+            clean_watermark_index_in_pk: value.0.clean_watermark_index_in_pk,
         }
     }
 }

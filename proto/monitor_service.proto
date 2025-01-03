@@ -55,9 +55,8 @@ message AnalyzeHeapResponse {
 message GetBackPressureRequest {}
 
 message BackPressureInfo {
-  uint32 fragment_id = 1;
-  uint32 downstream_fragment_id = 2;
   uint32 actor_count = 3;
+  // Sum of output blocking duration of all actors
   double value = 4;
 }
 
@@ -72,7 +71,8 @@ message RelationStats {
 }
 
 message GetBackPressureResponse {
-  repeated BackPressureInfo back_pressure_infos = 1;
+  // Key: "<upstream_fragment_id>_<downstream_fragment_id>"
+  map<string, BackPressureInfo> channel_stats = 1;
   map<uint32, FragmentStats> fragment_stats = 2;
   map<uint32, RelationStats> relation_stats = 3;
 }

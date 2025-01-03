@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -312,7 +312,7 @@ impl MonitorService for MonitorServiceImpl {
         let actor_count: HashMap<_, _> = actor_count
             .iter()
             .map(|m| {
-                let fragment_id = get_label(m, "fragment_id").unwrap();
+                let fragment_id: u32 = get_label(m, "fragment_id").unwrap();
                 let count = m.get_gauge().get_value() as u32;
                 (fragment_id, count)
             })
@@ -337,7 +337,7 @@ impl MonitorService for MonitorServiceImpl {
             .unwrap()
             .take_metric();
         for m in &actor_current_epoch {
-            let fragment_id = get_label(m, "fragment_id").unwrap();
+            let fragment_id: u32 = get_label(m, "fragment_id").unwrap();
             let epoch = m.get_gauge().get_value() as u64;
             if let Some(s) = fragment_stats.get_mut(&fragment_id) {
                 s.current_epoch = if s.current_epoch == 0 {
@@ -362,7 +362,7 @@ impl MonitorService for MonitorServiceImpl {
             .unwrap()
             .take_metric();
         for m in &mview_current_epoch {
-            let table_id = get_label(m, "table_id").unwrap();
+            let table_id: u32 = get_label(m, "table_id").unwrap();
             let epoch = m.get_gauge().get_value() as u64;
             if let Some(s) = relation_stats.get_mut(&table_id) {
                 s.current_epoch = if s.current_epoch == 0 {
@@ -382,44 +382,33 @@ impl MonitorService for MonitorServiceImpl {
             }
         }
 
-        let mut back_pressure_infos: HashMap<_, BackPressureInfo> = HashMap::new();
+        let mut channel_stats: HashMap<_, BackPressureInfo> = HashMap::new();
 
-        for label_pairs in actor_output_buffer_blocking_duration_ns {
-            let mut fragment_id = None;
-            let mut downstream_fragment_id = None;
-            for label_pair in label_pairs.get_label() {
-                if label_pair.get_name() == "fragment_id" {
-                    fragment_id = label_pair.get_value().parse::<u32>().ok();
-                }
-                if label_pair.get_name() == "downstream_fragment_id" {
-                    downstream_fragment_id = label_pair.get_value().parse::<u32>().ok();
-                }
-            }
-            let Some(fragment_id) = fragment_id else {
-                continue;
-            };
-            let Some(downstream_fragment_id) = downstream_fragment_id else {
-                continue;
-            };
+        for metric in actor_output_buffer_blocking_duration_ns {
+            let fragment_id: u32 = get_label(&metric, "fragment_id").unwrap();
+            let downstream_fragment_id: u32 = get_label(&metric, "downstream_fragment_id").unwrap();
 
-            // When metrics level is Debug, we may have multiple metrics with the same label pairs
-            // (fragment_id, downstream_fragment_id). We need to aggregate them locally.
-            //
-            // Metrics from different compute nodes should be aggregated by the caller.
-            let back_pressure_info = back_pressure_infos
-                .entry((fragment_id, downstream_fragment_id))
+            let key = format!("{}_{}", fragment_id, downstream_fragment_id);
+            let channel_stat = channel_stats
+                .entry(key)
                 .or_insert_with(|| BackPressureInfo {
-                    fragment_id,
-                    downstream_fragment_id,
-                    actor_count: actor_count.get(&fragment_id).copied().unwrap_or_default(),
+                    actor_count: 0,
                     value: 0.,
                 });
 
-            back_pressure_info.value += label_pairs.get_counter().get_value();
+            // When metrics level is Debug, `actor_id` will be removed to reduce metrics.
+            // See `src/common/metrics/src/relabeled_metric.rs`
+            channel_stat.actor_count +=
+                if get_label::<String>(&metric, "actor_id").unwrap().is_empty() {
+                    actor_count[&fragment_id]
+                } else {
+                    1
+                };
+            channel_stat.value += metric.get_counter().get_value();
         }
 
         Ok(Response::new(GetBackPressureResponse {
-            back_pressure_infos: back_pressure_infos.into_values().collect(),
+            channel_stats,
             fragment_stats,
             relation_stats,
         }))
@@ -498,13 +487,13 @@ impl MonitorService for MonitorServiceImpl {
     }
 }
 
-fn get_label(metric: &Metric, label: &str) -> Option<u32> {
+fn get_label<T: std::str::FromStr>(metric: &Metric, label: &str) -> Option<T> {
     metric
         .get_label()
         .iter()
         .find(|lp| lp.get_name() == label)?
         .get_value()
-        .parse::<u32>()
+        .parse::<T>()
         .ok()
 }
 

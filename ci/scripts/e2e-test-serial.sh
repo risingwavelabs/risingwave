@@ -22,6 +22,8 @@ while getopts 'p:m:' opt; do
 done
 shift $((OPTIND -1))
 
+source ci/scripts/common.sh
+
 if [[ $mode == "standalone" ]]; then
   source ci/scripts/standalone-utils.sh
 fi
@@ -172,45 +174,6 @@ RUST_BACKTRACE=1 target/debug/risingwave_e2e_extended_mode_test --host 127.0.0.1
 
 echo "--- Kill cluster"
 cluster_stop
-
-if [[ "$RUN_COMPACTION" -eq "1" ]]; then
-    echo "--- e2e, ci-compaction-test, nexmark_q7"
-    RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
-    risedev ci-start ci-compaction-test
-    # Please make sure the regression is expected before increasing the timeout.
-    sqllogictest -p 4566 -d dev './e2e_test/compaction/ingest_rows.slt'
-
-    # We should ingest about 100 version deltas before the test
-    echo "--- Wait for data ingestion"
-
-    export RW_HUMMOCK_URL="hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001"
-    export RW_META_ADDR="http://127.0.0.1:5690"
-
-    # Poll the current version id until we have around 100 version deltas
-    delta_log_cnt=0
-    while [ "$delta_log_cnt" -le 90 ]
-    do
-        delta_log_cnt="$(./target/debug/risingwave risectl hummock list-version --verbose | grep -w '^ *id:' | grep -o '[0-9]\+' | head -n 1)"
-        echo "Current version $delta_log_cnt"
-        sleep 5
-    done
-
-    echo "--- Pause source and disable commit new epochs"
-    ./target/debug/risingwave risectl meta pause
-    ./target/debug/risingwave risectl hummock disable-commit-epoch
-
-    echo "--- Start to run compaction test"
-    download-and-decompress-artifact compaction-test-"$profile" target/debug/
-    mv target/debug/compaction-test-"$profile" target/debug/compaction-test
-    chmod +x ./target/debug/compaction-test
-    # Use the config of ci-compaction-test for replay.
-    config_path=".risingwave/config/risingwave.toml"
-    RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
-    ./target/debug/compaction-test --ci-mode --state-store hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 --config-path "${config_path}"
-
-    echo "--- Kill cluster"
-    cluster_stop
-fi
 
 if [[ "$mode" == "standalone" ]]; then
   run_sql() {

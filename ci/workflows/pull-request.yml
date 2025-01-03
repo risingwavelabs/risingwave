@@ -111,7 +111,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end test"
-    command: "ci/scripts/e2e-test.sh -p ci-dev -m ci-3streaming-2serving-3fe"
+    command: "ci/scripts/e2e-test-serial.sh -p ci-dev -m ci-3streaming-2serving-3fe"
     if: |
       !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-e2e-test"
@@ -532,7 +532,7 @@ steps:
   # It should be as conservative as possible.
   # This ensures our `main-cron` workflow will be stable.
   - label: "unit test"
-    command: "ci/scripts/pr-unit-test.sh"
+    command: "ci/scripts/run-unit-test.sh"
     if: |
       !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-unit-test"
@@ -607,7 +607,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 20
+    timeout_in_minutes: 22
     retry: *auto-retry
 
   - label: "end-to-end test (deterministic simulation)"
@@ -800,7 +800,7 @@ steps:
     timeout_in_minutes: 30
 
   - label: "e2e standalone binary test"
-    command: "ci/scripts/e2e-test.sh -p ci-dev -m standalone"
+    command: "ci/scripts/e2e-test-serial.sh -p ci-dev -m standalone"
     if: build.pull_request.labels includes "ci/run-e2e-standalone-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-standalone-tests?(,|$$)/
     depends_on:
       - "build"
@@ -816,7 +816,7 @@ steps:
     retry: *auto-retry
 
   - label: "e2e single-node binary test"
-    command: "ci/scripts/e2e-test.sh -p ci-dev -m single-node"
+    command: "ci/scripts/e2e-test-serial.sh -p ci-dev -m single-node"
     if: build.pull_request.labels includes "ci/run-e2e-single-node-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-single-node-tests?(,|$$)/
     depends_on:
       - "build"
@@ -833,7 +833,7 @@ steps:
 
   - label: "end-to-end test ({{matrix.label}} backend)"
     <<: *other-sql-backend
-    command: "ci/scripts/e2e-test.sh -p ci-dev -m ci-3streaming-2serving-3fe"
+    command: "ci/scripts/e2e-test-serial.sh -p ci-dev -m ci-3streaming-2serving-3fe"
     if: build.pull_request.labels includes "ci/run-e2e-test-other-backends" || build.env("CI_STEPS") =~ /(^|,)e2e-test-other-backends?(,|$$)/
     depends_on:
       - "build"

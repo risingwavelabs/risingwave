@@ -98,7 +98,7 @@ steps:
     - label: "end-to-end test ({{matrix.backend}} backend)"
       key: "e2e-test-release"
       <<: *sql-backend
-      command: "ci/scripts/cron-e2e-test.sh -p ci-release -m ci-3streaming-2serving-3fe"
+      command: "ci/scripts/e2e-test-serial.sh -p ci-release -m ci-3streaming-2serving-3fe"
       if: |
         !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
         || build.pull_request.labels includes "ci/run-e2e-test"
@@ -256,7 +256,7 @@ steps:
   # This ensures our `main-cron` workflow will be stable.
   - label: "unit test"
     key: "unit-test"
-    command: "ci/scripts/unit-test.sh"
+    command: "ci/scripts/run-unit-test.sh"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-unit-test"
@@ -716,7 +716,7 @@ steps:
 
   - label: "e2e standalone binary test"
     key: "e2e-standalone-binary-tests"
-    command: "ci/scripts/e2e-test.sh -p ci-release -m standalone"
+    command: "ci/scripts/e2e-test-serial.sh -p ci-release -m standalone"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-e2e-standalone-tests"
@@ -736,7 +736,7 @@ steps:
 
   - label: "e2e single-node binary test"
     key: "e2e-single-node-binary-tests"
-    command: "ci/scripts/e2e-test.sh -p ci-release -m single-node"
+    command: "ci/scripts/e2e-test-serial.sh -p ci-release -m single-node"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-e2e-single-node-tests"

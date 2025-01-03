@@ -1,5 +1,5 @@
 /*
- * Copyright 2024 RisingWave Labs
+ * Copyright 2025 RisingWave Labs
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,30 +15,16 @@
  *
  */
 
-import {
-  Box,
-  Button,
-  Flex,
-  FormControl,
-  FormLabel,
-  Select,
-  Text,
-  VStack,
-} from "@chakra-ui/react"
-import _, { reverse, sortBy } from "lodash"
+import { Box, Button, Flex, Text, VStack } from "@chakra-ui/react"
+import { reverse, sortBy } from "lodash"
 import Head from "next/head"
 import { parseAsInteger, useQueryState } from "nuqs"
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react"
 import RelationGraph, { boxHeight, boxWidth } from "../components/RelationGraph"
 import Title from "../components/Title"
 import useErrorToast from "../hook/useErrorToast"
+import api from "../lib/api/api"
 import useFetch from "../lib/api/fetch"
-import {
-  calculateBPRate,
-  calculateCumulativeBp,
-  fetchEmbeddedBackPressure,
-  fetchPrometheusBackPressure,
-} from "../lib/api/metric"
 import {
   Relation,
   getFragmentVertexToRelationMap,
@@ -47,21 +33,11 @@ import {
   relationIsStreamingJob,
 } from "../lib/api/streaming"
 import { RelationPoint } from "../lib/layout"
-import { BackPressureInfo, RelationStats } from "../proto/gen/monitor_service"
+import { RelationStats } from "../proto/gen/monitor_service"
+import { BackPressureSnapshot } from "./fragment_graph"
 
 const SIDEBAR_WIDTH = "200px"
 const INTERVAL_MS = 5000
-
-type BackPressureDataSource = "Embedded" | "Prometheus"
-
-// The state of the embedded back pressure metrics.
-// The metrics from previous fetch are stored here to calculate the rate.
-interface EmbeddedBackPressureInfo {
-  previous: BackPressureInfo[]
-  current: BackPressureInfo[]
-  totalBackpressureNs: BackPressureInfo[]
-  totalDurationNs: number
-}
 
 function buildDependencyAsEdges(
   list: Relation[],
@@ -119,124 +95,70 @@ export default function StreamingGraph() {
 
   const relationDependency = relationDependencyCallback()
 
-  const [backPressureDataSource, setBackPressureDataSource] =
-    useState<BackPressureDataSource>("Embedded")
-
-  // Periodically fetch Prometheus back-pressure from Meta node
-  const { response: prometheusMetrics } = useFetch(
-    fetchPrometheusBackPressure,
-    INTERVAL_MS,
-    backPressureDataSource === "Prometheus"
-  )
-
-  // Periodically fetch embedded back-pressure from Meta node
-  // Didn't call `useFetch()` because the `setState` way is special.
-  const [embeddedBackPressureInfo, setEmbeddedBackPressureInfo] =
-    useState<EmbeddedBackPressureInfo>()
+  // Periodically fetch fragment-level back-pressure from Meta node
+  const [backPressureRate, setBackPressureRate] =
+    useState<Map<string, number>>()
   const [relationStats, setRelationStats] = useState<{
     [key: number]: RelationStats
   }>()
 
   useEffect(() => {
+    // The initial snapshot is used to calculate the rate of back pressure
+    // It's not used to render the page directly, so we don't need to set it in the state
+    let initialSnapshot: BackPressureSnapshot | undefined
+
     if (resetEmbeddedBackPressures) {
-      setEmbeddedBackPressureInfo(undefined)
+      setBackPressureRate(undefined)
       toggleResetEmbeddedBackPressures()
     }
-    if (backPressureDataSource === "Embedded") {
-      function refresh() {
-        fetchEmbeddedBackPressure().then(
-          (response) => {
-            let newBP = response.backPressureInfos
-            setEmbeddedBackPressureInfo((prev) =>
-              prev
-                ? {
-                    previous: prev.current,
-                    current: newBP,
-                    totalBackpressureNs: calculateCumulativeBp(
-                      prev.totalBackpressureNs,
-                      prev.current,
-                      newBP
-                    ),
-                    totalDurationNs:
-                      prev.totalDurationNs + INTERVAL_MS * 1000 * 1000,
-                  }
-                : {
-                    previous: newBP, // Use current value to show zero rate, but it's fine
-                    current: newBP,
-                    totalBackpressureNs: [],
-                    totalDurationNs: 0,
-                  }
-            )
-            setRelationStats(response.relationStats)
-          },
-          (e) => {
-            console.error(e)
-            toast(e, "error")
-          }
-        )
-      }
-      refresh()
-      const interval = setInterval(refresh, INTERVAL_MS)
-      return () => {
-        clearInterval(interval)
-      }
-    }
-  }, [backPressureDataSource, toast, resetEmbeddedBackPressures])
 
-  // Get relationId-relationId -> backpressure rate map
+    function refresh() {
+      api.get("/metrics/fragment/embedded_back_pressures").then(
+        (response) => {
+          let snapshot = BackPressureSnapshot.fromResponse(
+            response.channelStats
+          )
+          if (!initialSnapshot) {
+            initialSnapshot = snapshot
+          } else {
+            setBackPressureRate(snapshot.getRate(initialSnapshot!))
+          }
+          setRelationStats(response.relationStats)
+        },
+        (e) => {
+          console.error(e)
+          toast(e, "error")
+        }
+      )
+    }
+    refresh() // run once immediately
+    const interval = setInterval(refresh, INTERVAL_MS) // and then run every interval
+    return () => {
+      clearInterval(interval)
+    }
+  }, [toast, resetEmbeddedBackPressures])
+
+  // Convert fragment-level backpressure rate map to relation-level backpressure rate
   const backPressures: Map<string, number> | undefined = useMemo(() => {
     if (!fragmentVertexToRelationMap) {
       return new Map<string, number>()
     }
     let inMap = fragmentVertexToRelationMap.inMap
     let outMap = fragmentVertexToRelationMap.outMap
-    if (prometheusMetrics || embeddedBackPressureInfo) {
+    if (backPressureRate) {
       let map = new Map<string, number>()
-
-      if (backPressureDataSource === "Embedded" && embeddedBackPressureInfo) {
-        const metrics = calculateBPRate(
-          embeddedBackPressureInfo.totalBackpressureNs,
-          embeddedBackPressureInfo.totalDurationNs
-        )
-        for (const m of metrics.outputBufferBlockingDuration) {
-          let output = Number(m.metric.fragmentId)
-          let input = Number(m.metric.downstreamFragmentId)
-          if (outMap[output] && inMap[input]) {
-            output = outMap[output]
-            input = inMap[input]
-            let key = `${output}_${input}`
-            map.set(key, m.sample[0].value)
-          }
-        }
-      } else if (backPressureDataSource === "Prometheus" && prometheusMetrics) {
-        for (const m of prometheusMetrics.outputBufferBlockingDuration) {
-          if (m.sample.length > 0) {
-            // Note: We issue an instant query to Prometheus to get the most recent value.
-            // So there should be only one sample here.
-            //
-            // Due to https://github.com/risingwavelabs/risingwave/issues/15280, it's still
-            // possible that an old version of meta service returns a range-query result.
-            // So we take the one with the latest timestamp here.
-            const value = _(m.sample).maxBy((s) => s.timestamp)!.value * 100
-            let output = Number(m.metric.fragment_id)
-            let input = Number(m.metric.downstream_fragment_id)
-            if (outMap[output] && inMap[input]) {
-              output = outMap[output]
-              input = inMap[input]
-              let key = `${output}_${input}`
-              map.set(key, value)
-            }
-          }
+      for (const [key, value] of backPressureRate) {
+        const [outputFragment, inputFragment] = key.split("_").map(Number)
+        if (outMap[outputFragment] && inMap[inputFragment]) {
+          const outputRelation = outMap[outputFragment]
+          const inputRelation = inMap[inputFragment]
+          let key = `${outputRelation}_${inputRelation}`
+          map.set(key, value)
         }
       }
       return map
     }
-  }, [
-    backPressureDataSource,
-    prometheusMetrics,
-    embeddedBackPressureInfo,
-    fragmentVertexToRelationMap,
-  ])
+  }, [backPressureRate, fragmentVertexToRelationMap])
 
   const retVal = (
     <Flex p={3} height="calc(100vh - 20px)" flexDirection="column">
@@ -252,32 +174,9 @@ export default function StreamingGraph() {
         >
           <Box flex={1} overflowY="scroll">
             <VStack width={SIDEBAR_WIDTH} align="start" spacing={1}>
-              {/* NOTE(kwannoel): No need to reset prometheus bp, because it is stateless */}
               <Button onClick={(_) => toggleResetEmbeddedBackPressures()}>
                 Reset Back Pressures
               </Button>
-
-              <FormControl>
-                <FormLabel fontWeight="semibold" mb={3}>
-                  Back Pressure Data Source
-                </FormLabel>
-                <Select
-                  value={backPressureDataSource}
-                  onChange={(event) =>
-                    setBackPressureDataSource(
-                      event.target.value as BackPressureDataSource
-                    )
-                  }
-                  defaultValue="Embedded"
-                >
-                  <option value="Embedded" key="Embedded">
-                    Embedded (5 secs)
-                  </option>
-                  <option value="Prometheus" key="Prometheus">
-                    Prometheus (1 min)
-                  </option>
-                </Select>
-              </FormControl>
 
               <Text fontWeight="semibold" mb={3}>
                 Relations

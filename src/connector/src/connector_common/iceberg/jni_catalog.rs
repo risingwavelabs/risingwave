@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,7 +27,6 @@ use iceberg::{
     Catalog, Namespace, NamespaceIdent, TableCommit, TableCreation, TableIdent, TableRequirement,
     TableUpdate,
 };
-use icelake::catalog::BaseCatalogConfig;
 use itertools::Itertools;
 use jni::objects::{GlobalRef, JObject};
 use jni::JavaVM;
@@ -94,7 +93,7 @@ impl From<&TableCreation> for CreateTableRequest {
 pub struct JniCatalog {
     java_catalog: GlobalRef,
     jvm: &'static JavaVM,
-    config: BaseCatalogConfig,
+    file_io_props: HashMap<String, String>,
 }
 
 #[async_trait]
@@ -183,7 +182,7 @@ impl Catalog for JniCatalog {
             let table_metadata = resp.metadata;
 
             let file_io = FileIO::from_path(&metadata_location)?
-                .with_props(self.config.table_io_configs.iter())
+                .with_props(self.file_io_props.iter())
                 .build()?;
 
             Ok(Table::builder()
@@ -233,7 +232,7 @@ impl Catalog for JniCatalog {
             let table_metadata = resp.metadata;
 
             let file_io = FileIO::from_path(&metadata_location)?
-                .with_props(self.config.table_io_configs.iter())
+                .with_props(self.file_io_props.iter())
                 .build()?;
 
             Ok(Table::builder()
@@ -347,7 +346,7 @@ impl Catalog for JniCatalog {
             let table_metadata = response.metadata;
 
             let file_io = FileIO::from_path(&response.metadata_location)?
-                .with_props(self.config.table_io_configs.iter())
+                .with_props(self.file_io_props.iter())
                 .build()?;
 
             Ok(Table::builder()
@@ -368,7 +367,7 @@ impl Catalog for JniCatalog {
 
 impl JniCatalog {
     fn build(
-        base_config: BaseCatalogConfig,
+        file_io_props: HashMap<String, String>,
         name: impl ToString,
         catalog_impl: impl ToString,
         java_catalog_props: HashMap<String, String>,
@@ -406,19 +405,19 @@ impl JniCatalog {
             Ok(Self {
                 java_catalog: jni_catalog,
                 jvm,
-                config: base_config,
+                file_io_props,
             })
         })
             .map_err(Into::into)
     }
 
     pub fn build_catalog(
-        base_config: BaseCatalogConfig,
+        file_io_props: HashMap<String, String>,
         name: impl ToString,
         catalog_impl: impl ToString,
         java_catalog_props: HashMap<String, String>,
     ) -> ConnectorResult<Arc<dyn Catalog>> {
-        let catalog = Self::build(base_config, name, catalog_impl, java_catalog_props)?;
+        let catalog = Self::build(file_io_props, name, catalog_impl, java_catalog_props)?;
         Ok(Arc::new(catalog) as Arc<dyn Catalog>)
     }
 }

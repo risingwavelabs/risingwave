@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -489,8 +489,6 @@ pub(super) mod handlers {
             let result = result
                 .map_err(|_| anyhow!("Failed to get back pressure"))
                 .map_err(err)?;
-            // TODO(eric): aggregate back_pressure_infos here
-            all.back_pressure_infos.extend(result.back_pressure_infos);
 
             // Aggregate fragment_stats
             for (fragment_id, fragment_stats) in result.fragment_stats {
@@ -509,6 +507,16 @@ pub(super) mod handlers {
                     s.current_epoch = min(s.current_epoch, relation_stats.current_epoch);
                 } else {
                     all.relation_stats.insert(relation_id, relation_stats);
+                }
+            }
+
+            // Aggregate channel_stats
+            for (key, channel_stats) in result.channel_stats {
+                if let Some(s) = all.channel_stats.get_mut(&key) {
+                    s.actor_count += channel_stats.actor_count;
+                    s.value += channel_stats.value;
+                } else {
+                    all.channel_stats.insert(key, channel_stats);
                 }
             }
         }
