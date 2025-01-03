@@ -71,7 +71,7 @@ impl SqlMetaStore {
 
         #[easy_ext::ext]
         impl ConnectOptions {
-            /// Apply common settings for SQLite connections.
+            /// Apply common settings for `SQLite` connections.
             fn sqlite_common(&mut self) -> &mut Self {
                 self
                     // Since Sqlite is prone to the error "(code: 5) database is locked" under concurrent access,
