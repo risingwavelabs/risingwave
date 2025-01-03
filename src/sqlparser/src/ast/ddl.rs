@@ -736,8 +736,13 @@ pub enum ColumnOption {
     NotNull,
     /// `DEFAULT <restricted-expr>`
     DefaultValue(Expr),
+    /// Default value from previous bound `DefaultColumnDesc`. Used internally
+    /// and will not be parsed from SQL.
     DefaultValuePersisted {
+        /// Protobuf encoded `DefaultColumnDesc`.
         persisted: Box<[u8]>,
+        /// Optional AST for unparsing. If `None`, the default value will be
+        /// shown as `DEFAULT ...`, which is for demonstrating and not valid.
         expr: Option<Expr>,
     },
     /// `{ PRIMARY KEY | UNIQUE }`
