@@ -403,7 +403,7 @@ impl CompactorRunner {
             context
                 .storage_opts
                 .compactor_concurrent_uploading_sst_count,
-            compaction_catalog_agent_ref,
+            compaction_catalog_agent_ref.clone(),
         );
         assert_eq!(
             task.input_ssts.len(),
@@ -425,7 +425,10 @@ impl CompactorRunner {
             task_progress.clone(),
             context.storage_opts.compactor_iter_max_io_retry_times,
         ));
-        let state = SkipWatermarkState::from_safe_epoch_watermarks(&task.table_watermarks);
+        let state = SkipWatermarkState::from_safe_epoch_watermarks(
+            &task.table_watermarks,
+            compaction_catalog_agent_ref,
+        );
 
         Self {
             executor: CompactTaskExecutor::new(sst_builder, task_config, task_progress, state),
@@ -619,7 +622,7 @@ pub struct CompactTaskExecutor<F: TableBuilderFactory> {
     builder: CapacitySplitTableBuilder<F>,
     task_config: TaskConfig,
     task_progress: Arc<TaskProgress>,
-    state: SkipWatermarkState,
+    skip_watermark_state: SkipWatermarkState,
     last_key_is_delete: bool,
     progress_key_num: u32,
 }
@@ -629,7 +632,7 @@ impl<F: TableBuilderFactory> CompactTaskExecutor<F> {
         builder: CapacitySplitTableBuilder<F>,
         task_config: TaskConfig,
         task_progress: Arc<TaskProgress>,
-        state: SkipWatermarkState,
+        skip_watermark_state: SkipWatermarkState,
     ) -> Self {
         Self {
             builder,
@@ -640,7 +643,7 @@ impl<F: TableBuilderFactory> CompactTaskExecutor<F> {
             last_table_id: None,
             last_table_stats: TableStats::default(),
             task_progress,
-            state,
+            skip_watermark_state,
             progress_key_num: 0,
         }
     }
@@ -677,7 +680,7 @@ impl<F: TableBuilderFactory> CompactTaskExecutor<F> {
         iter: &mut BlockIterator,
         target_key: FullKey<&[u8]>,
     ) -> HummockResult<()> {
-        self.state.reset_watermark();
+        self.skip_watermark_state.reset_watermark();
         while iter.is_valid() && iter.key().le(&target_key) {
             let is_new_user_key =
                 !self.last_key.is_empty() && iter.key().user_key != self.last_key.user_key.as_ref();
@@ -702,7 +705,9 @@ impl<F: TableBuilderFactory> CompactTaskExecutor<F> {
             } else if !self.task_config.retain_multiple_version && !is_first_or_new_user_key {
                 drop = true;
             }
-            if self.state.has_watermark() && self.state.should_delete(&iter.key()) {
+            if self.skip_watermark_state.has_watermark()
+                && self.skip_watermark_state.should_delete(&iter.key())
+            {
                 drop = true;
                 self.last_key_is_delete = true;
             }
@@ -749,7 +754,9 @@ impl<F: TableBuilderFactory> CompactTaskExecutor<F> {
             // because it would cause a deleted key could be see by user again.
             return false;
         }
-        if self.state.has_watermark() && self.state.should_delete(smallest_key) {
+        if self.skip_watermark_state.has_watermark()
+            && self.skip_watermark_state.should_delete(smallest_key)
+        {
             return false;
         }
         true

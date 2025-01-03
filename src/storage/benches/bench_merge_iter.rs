@@ -14,11 +14,13 @@
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use bytes::Bytes;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use futures::executor::block_on;
 use risingwave_hummock_sdk::key::TableKey;
+use risingwave_storage::compaction_catalog_manager::CompactionCatalogAgent;
 use risingwave_storage::hummock::iterator::{
     Forward, HummockIterator, HummockIteratorUnion, MergeIterator, SkipWatermarkIterator,
 };
@@ -111,6 +113,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     let merge_iter = RefCell::new(SkipWatermarkIterator::new(
         MergeIterator::new(gen_interleave_shared_buffer_batch_iter(10000, 100)),
         BTreeMap::new(),
+        Arc::new(CompactionCatalogAgent::dummy()),
     ));
     c.bench_with_input(
         BenchmarkId::new("bench-merge-iter-skip-empty-watermark", "unordered"),

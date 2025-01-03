@@ -322,27 +322,13 @@ pub fn estimate_task_output_capacity(context: CompactorContext, task: &CompactTa
 pub async fn check_compaction_result(
     compact_task: &CompactTask,
     context: CompactorContext,
+    compaction_catalog_agent_ref: CompactionCatalogAgentRef,
 ) -> HummockResult<bool> {
-    let has_ttl = compact_task
-        .table_options
-        .iter()
-        .any(|(_, table_option)| table_option.retention_seconds.is_some_and(|ttl| ttl > 0));
-
-    let mut compact_table_ids = compact_task
-        .input_ssts
-        .iter()
-        .flat_map(|level| level.table_infos.iter())
-        .flat_map(|sst| sst.table_ids.clone())
-        .collect_vec();
-    compact_table_ids.sort();
-    compact_table_ids.dedup();
-    let existing_table_ids: HashSet<u32> =
-        HashSet::from_iter(compact_task.existing_table_ids.clone());
-    let need_clean_state_table = compact_table_ids
-        .iter()
-        .any(|table_id| !existing_table_ids.contains(table_id));
+    let mut table_ids_from_input_ssts = compact_task.get_table_ids_from_input_ssts();
+    let need_clean_state_table = table_ids_from_input_ssts
+        .any(|table_id| !compact_task.existing_table_ids.contains(&table_id));
     // This check method does not consider dropped keys by compaction filter.
-    if has_ttl || need_clean_state_table {
+    if compact_task.is_contains_ttl() || need_clean_state_table {
         return Ok(true);
     }
 
@@ -380,7 +366,11 @@ pub async fn check_compaction_result(
 
     let iter = MergeIterator::for_compactor(table_iters);
     let left_iter = UserIterator::new(
-        SkipWatermarkIterator::from_safe_epoch_watermarks(iter, &compact_task.table_watermarks),
+        SkipWatermarkIterator::from_safe_epoch_watermarks(
+            iter,
+            &compact_task.table_watermarks,
+            compaction_catalog_agent_ref.clone(),
+        ),
         (Bound::Unbounded, Bound::Unbounded),
         u64::MAX,
         0,
@@ -395,7 +385,11 @@ pub async fn check_compaction_result(
         context.storage_opts.compactor_iter_max_io_retry_times,
     );
     let right_iter = UserIterator::new(
-        SkipWatermarkIterator::from_safe_epoch_watermarks(iter, &compact_task.table_watermarks),
+        SkipWatermarkIterator::from_safe_epoch_watermarks(
+            iter,
+            &compact_task.table_watermarks,
+            compaction_catalog_agent_ref.clone(),
+        ),
         (Bound::Unbounded, Bound::Unbounded),
         u64::MAX,
         0,
@@ -513,36 +507,12 @@ pub fn optimize_by_copy_block(compact_task: &CompactTask, context: &CompactorCon
         .map(|table_info| table_info.total_key_count)
         .sum::<u64>();
 
-    let has_tombstone = compact_task
-        .input_ssts
-        .iter()
-        .flat_map(|level| level.table_infos.iter())
-        .any(|sst| sst.range_tombstone_count > 0);
-    let has_ttl = compact_task
-        .table_options
-        .iter()
-        .any(|(_, table_option)| table_option.retention_seconds.is_some_and(|ttl| ttl > 0));
-
-    let has_split_sst = compact_task
-        .input_ssts
-        .iter()
-        .flat_map(|level| level.table_infos.iter())
-        .any(|sst| sst.sst_id != sst.object_id);
-
-    let compact_table_ids: HashSet<u32> = HashSet::from_iter(
-        compact_task
-            .input_ssts
-            .iter()
-            .flat_map(|level| level.table_infos.iter())
-            .flat_map(|sst| sst.table_ids.clone()),
-    );
-    let single_table = compact_table_ids.len() == 1;
-
+    let single_table = compact_task.build_compact_table_ids().len() == 1;
     context.storage_opts.enable_fast_compaction
         && all_ssts_are_blocked_filter
-        && !has_tombstone
-        && !has_ttl
-        && !has_split_sst
+        && !compact_task.is_contains_range_tombstone()
+        && !compact_task.is_contains_ttl()
+        && !compact_task.is_contains_split_sst()
         && single_table
         && compact_task.target_level > 0
         && compact_task.input_ssts.len() == 2

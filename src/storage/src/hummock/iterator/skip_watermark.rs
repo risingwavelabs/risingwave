@@ -18,6 +18,10 @@ use std::collections::{BTreeMap, VecDeque};
 use bytes::Bytes;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
+use risingwave_common::row::Row;
+use risingwave_common::types::Datum;
+use risingwave_common::util::row_serde::OrderedRowSerde;
+use risingwave_common::util::sort_util::cmp_datum;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::safe_epoch_read_table_watermarks_impl;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::table_stats::{add_table_stats_map, TableStats, TableStatsMap};
@@ -25,6 +29,7 @@ use risingwave_hummock_sdk::table_watermark::{
     ReadTableWatermark, TableWatermarks, WatermarkDirection,
 };
 
+use crate::compaction_catalog_manager::CompactionCatalogAgentRef;
 use crate::hummock::iterator::{Forward, HummockIterator, ValueMeta};
 use crate::hummock::value::HummockValue;
 use crate::hummock::HummockResult;
@@ -42,10 +47,14 @@ pub struct SkipWatermarkIterator<I> {
 }
 
 impl<I: HummockIterator<Direction = Forward>> SkipWatermarkIterator<I> {
-    pub fn new(inner: I, watermarks: BTreeMap<TableId, ReadTableWatermark>) -> Self {
+    pub fn new(
+        inner: I,
+        watermarks: BTreeMap<TableId, ReadTableWatermark>,
+        compaction_catalog_agent_ref: CompactionCatalogAgentRef,
+    ) -> Self {
         Self {
             inner,
-            state: SkipWatermarkState::new(watermarks),
+            state: SkipWatermarkState::new(watermarks, compaction_catalog_agent_ref),
             skipped_entry_table_stats: TableStatsMap::default(),
             last_table_id: None,
             last_table_stats: TableStats::default(),
@@ -55,10 +64,14 @@ impl<I: HummockIterator<Direction = Forward>> SkipWatermarkIterator<I> {
     pub fn from_safe_epoch_watermarks(
         inner: I,
         safe_epoch_watermarks: &BTreeMap<u32, TableWatermarks>,
+        compaction_catalog_agent_ref: CompactionCatalogAgentRef,
     ) -> Self {
         Self {
             inner,
-            state: SkipWatermarkState::from_safe_epoch_watermarks(safe_epoch_watermarks),
+            state: SkipWatermarkState::from_safe_epoch_watermarks(
+                safe_epoch_watermarks,
+                compaction_catalog_agent_ref,
+            ),
             skipped_entry_table_stats: TableStatsMap::default(),
             last_table_id: None,
             last_table_stats: TableStats::default(),
@@ -87,11 +100,14 @@ impl<I: HummockIterator<Direction = Forward>> SkipWatermarkIterator<I> {
                 break;
             }
 
-            if self.last_table_id.map_or(true, |last_table_id| {
-                last_table_id != self.inner.key().user_key.table_id.table_id
-            }) {
+            let table_id = self.inner.key().user_key.table_id.table_id;
+
+            if self
+                .last_table_id
+                .map_or(true, |last_table_id| last_table_id != table_id)
+            {
                 self.add_last_table_stats();
-                self.last_table_id = Some(self.inner.key().user_key.table_id.table_id);
+                self.last_table_id = Some(table_id);
             }
             self.last_table_stats.total_key_count -= 1;
             self.last_table_stats.total_key_size -= self.inner.key().encoded_len() as i64;
@@ -172,24 +188,39 @@ impl<I: HummockIterator<Direction = Forward>> HummockIterator for SkipWatermarkI
         self.inner.value_meta()
     }
 }
+
+enum WatermarkSerdeType {
+    Bytes(Bytes),
+    Serde(Datum),
+}
+
 pub struct SkipWatermarkState {
     watermarks: BTreeMap<TableId, ReadTableWatermark>,
-    remain_watermarks: VecDeque<(TableId, VirtualNode, WatermarkDirection, Bytes)>,
+    remain_watermarks: VecDeque<(TableId, VirtualNode, WatermarkDirection, WatermarkSerdeType)>,
+    compaction_catalog_agent_ref: CompactionCatalogAgentRef,
+
+    last_serde: Option<(OrderedRowSerde, OrderedRowSerde, usize)>,
 }
 
 impl SkipWatermarkState {
-    pub fn new(watermarks: BTreeMap<TableId, ReadTableWatermark>) -> Self {
+    pub fn new(
+        watermarks: BTreeMap<TableId, ReadTableWatermark>,
+        compaction_catalog_agent_ref: CompactionCatalogAgentRef,
+    ) -> Self {
         Self {
             remain_watermarks: VecDeque::new(),
             watermarks,
+            compaction_catalog_agent_ref,
+            last_serde: None,
         }
     }
 
     pub fn from_safe_epoch_watermarks(
         safe_epoch_watermarks: &BTreeMap<u32, TableWatermarks>,
+        compaction_catalog_agent_ref: CompactionCatalogAgentRef,
     ) -> Self {
         let watermarks = safe_epoch_read_table_watermarks_impl(safe_epoch_watermarks);
-        Self::new(watermarks)
+        Self::new(watermarks, compaction_catalog_agent_ref)
     }
 
     #[inline(always)]
@@ -205,9 +236,35 @@ impl SkipWatermarkState {
                 Ordering::Less => {
                     return false;
                 }
-                Ordering::Equal => {
-                    return direction.filter_by_watermark(inner_key, watermark);
-                }
+                Ordering::Equal => match &watermark {
+                    WatermarkSerdeType::Bytes(watermark) => {
+                        return direction.filter_by_watermark_key(inner_key, watermark);
+                    }
+                    WatermarkSerdeType::Serde(watermark) => {
+                        let (pk_prefix_serde, watermark_col_serde, watermark_col_idx_in_pk) =
+                            match self.last_serde.as_ref() {
+                                Some(serde) => serde,
+                                None => {
+                                    self.last_serde = self
+                                        .compaction_catalog_agent_ref
+                                        .watermark_serde(table_id.table_id());
+                                    self.last_serde.as_ref().unwrap()
+                                }
+                            };
+                        let row = pk_prefix_serde
+                        .deserialize(inner_key)
+                        .unwrap_or_else(|_| {
+                            panic!("Failed to deserialize pk_prefix inner_key {:?} serde data_types {:?} order_types {:?}", inner_key, pk_prefix_serde.get_data_types(), pk_prefix_serde.get_order_types());
+                        });
+                        let watermark_col_in_pk = row.datum_at(*watermark_col_idx_in_pk);
+
+                        return direction.filter_by_watermark_datum(
+                            watermark_col_in_pk,
+                            watermark,
+                            watermark_col_serde.get_order_types()[0],
+                        );
+                    }
+                },
                 Ordering::Greater => {
                     // The current key has advanced over the watermark.
                     // We may advance the watermark before advancing the key.
@@ -223,15 +280,26 @@ impl SkipWatermarkState {
             .watermarks
             .iter()
             .flat_map(|(table_id, read_watermarks)| {
+                let watermark_serde = self.compaction_catalog_agent_ref.watermark_serde(table_id.table_id()).map(|(_pk_serde, watermark_serde, _watermark_col_idx_in_pk)| watermark_serde);
+
                 read_watermarks
                     .vnode_watermarks
                     .iter()
-                    .map(|(vnode, watermarks)| {
+                    .map(move |(vnode, watermarks)| {
                         (
                             *table_id,
                             *vnode,
                             read_watermarks.direction,
-                            watermarks.clone(),
+                            match watermark_serde.as_ref() {
+                                Some(watermark_serde) => {
+                                    let row = watermark_serde
+                                        .deserialize(watermarks).unwrap_or_else(|_| {
+                                            panic!("Failed to deserialize watermark {:?} serde data_types {:?} order_types {:?}", watermarks, watermark_serde.get_data_types(), watermark_serde.get_order_types());
+                                        });
+                                    WatermarkSerdeType::Serde(row[0].clone())
+                                }
+                                None => WatermarkSerdeType::Bytes(watermarks.clone()),
+                            },
                         )
                     })
             })
@@ -252,9 +320,38 @@ impl SkipWatermarkState {
                     continue;
                 }
                 Ordering::Equal => {
+                    self.last_serde = self
+                        .compaction_catalog_agent_ref
+                        .watermark_serde(table_id.table_id());
+
                     match direction {
                         WatermarkDirection::Ascending => {
-                            match inner_key.cmp(watermark.as_ref()) {
+                            let cmp = match watermark {
+                                WatermarkSerdeType::Bytes(watermark) => {
+                                    inner_key.cmp(watermark.as_ref())
+                                }
+                                WatermarkSerdeType::Serde(watermark) => {
+                                    let (
+                                        pk_prefix_serde,
+                                        watermark_col_serde,
+                                        watermark_col_idx_in_pk,
+                                    ) = self.last_serde.as_ref().unwrap();
+                                    let row = pk_prefix_serde
+                                            .deserialize(inner_key)
+                                            .unwrap_or_else(|_| {
+                                                panic!("Failed to deserialize pk_prefix inner_key {:?} serde data_types {:?} order_types {:?}", inner_key, pk_prefix_serde.get_data_types(), pk_prefix_serde.get_order_types());
+                                            });
+                                    let watermark_col_in_pk =
+                                        row.datum_at(*watermark_col_idx_in_pk);
+                                    cmp_datum(
+                                        watermark_col_in_pk,
+                                        watermark,
+                                        watermark_col_serde.get_order_types()[0],
+                                    )
+                                }
+                            };
+
+                            match cmp {
                                 Ordering::Less => {
                                     // The current key will be filtered by the watermark.
                                     // Return true to further advance the key.
@@ -277,6 +374,10 @@ impl SkipWatermarkState {
                                                 (next_table_id, next_vnode)
                                                     > (&key_table_id, &key_vnode)
                                             );
+
+                                            self.last_serde = self
+                                                .compaction_catalog_agent_ref
+                                                .watermark_serde(next_table_id.table_id());
                                         }
                                     }
                                     return false;
@@ -284,7 +385,32 @@ impl SkipWatermarkState {
                             }
                         }
                         WatermarkDirection::Descending => {
-                            return match inner_key.cmp(watermark.as_ref()) {
+                            let cmp = match watermark {
+                                WatermarkSerdeType::Bytes(watermark) => {
+                                    inner_key.cmp(watermark.as_ref())
+                                }
+                                WatermarkSerdeType::Serde(watermark) => {
+                                    let (
+                                        pk_prefix_serde,
+                                        watermark_col_serde,
+                                        watermark_col_idx_in_pk,
+                                    ) = self.last_serde.as_ref().unwrap();
+                                    let row = pk_prefix_serde
+                                            .deserialize(inner_key)
+                                            .unwrap_or_else(|_| {
+                                                panic!("Failed to deserialize pk_prefix inner_key {:?} serde data_types {:?} order_types {:?}", inner_key, pk_prefix_serde.get_data_types(), pk_prefix_serde.get_order_types());
+                                            });
+                                    let watermark_col_in_pk =
+                                        row.datum_at(*watermark_col_idx_in_pk);
+                                    cmp_datum(
+                                        watermark_col_in_pk,
+                                        watermark,
+                                        watermark_col_serde.get_order_types()[0],
+                                    )
+                                }
+                            };
+
+                            return match cmp {
                                 // Current key as not reached the watermark. Just return.
                                 Ordering::Less | Ordering::Equal => false,
                                 // Current key will be filtered by the watermark.
@@ -305,22 +431,31 @@ impl SkipWatermarkState {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, HashMap};
     use std::iter::{empty, once};
+    use std::sync::Arc;
 
     use bytes::Bytes;
     use itertools::Itertools;
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
+    use risingwave_common::row::{OwnedRow, RowExt};
+    use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::util::epoch::test_epoch;
+    use risingwave_common::util::row_serde::OrderedRowSerde;
+    use risingwave_common::util::sort_util::OrderType;
     use risingwave_hummock_sdk::key::{gen_key_from_str, FullKey, TableKey, UserKey};
     use risingwave_hummock_sdk::table_watermark::{ReadTableWatermark, WatermarkDirection};
     use risingwave_hummock_sdk::EpochWithGap;
 
+    use crate::compaction_catalog_manager::{
+        CompactionCatalogAgent, FilterKeyExtractorImpl, FullKeyFilterKeyExtractor,
+    };
     use crate::hummock::iterator::{HummockIterator, SkipWatermarkIterator};
     use crate::hummock::shared_buffer::shared_buffer_batch::{
         SharedBufferBatch, SharedBufferValue,
     };
+    use crate::row_serde::row_serde_util::{serialize_pk, serialize_pk_with_vnode};
 
     const EPOCH: u64 = test_epoch(1);
     const TABLE_ID: TableId = TableId::new(233);
@@ -383,7 +518,7 @@ mod tests {
             if let Some(watermark) = table_watermarks.vnode_watermarks.get(&key.vnode_part()) {
                 !table_watermarks
                     .direction
-                    .filter_by_watermark(key.key_part(), watermark)
+                    .filter_by_watermark_key(key.key_part(), watermark)
             } else {
                 true
             }
@@ -398,7 +533,8 @@ mod tests {
         watermarks: impl IntoIterator<Item = (usize, usize)>,
         direction: WatermarkDirection,
     ) {
-        let test_index = [(0, 2), (0, 3), (0, 4), (1, 1), (1, 3), (4, 2), (8, 1)];
+        let test_index: [(usize, usize); 7] =
+            [(0, 2), (0, 3), (0, 4), (1, 1), (1, 3), (4, 2), (8, 1)];
         let items = test_index
             .iter()
             .map(|(vnode, key_index)| gen_key_value(*vnode, *key_index))
@@ -421,11 +557,15 @@ mod tests {
                 items.clone().into_iter(),
                 read_watermark.clone(),
             ));
+
+            let compaction_catalog_agent_ref =
+                CompactionCatalogAgent::for_test(vec![TABLE_ID.into()]);
             let iter = SkipWatermarkIterator::new(
                 build_batch(items.clone().into_iter())
                     .unwrap()
                     .into_forward_iter(),
                 BTreeMap::from_iter(once((TABLE_ID, read_watermark.clone()))),
+                compaction_catalog_agent_ref,
             );
             (batch.map(|batch| batch.into_forward_iter()), iter)
         };
@@ -490,5 +630,130 @@ mod tests {
     #[tokio::test]
     async fn test_advance_multi_vnode() {
         test_watermark(vec![(1, 2), (8, 0)], WatermarkDirection::Ascending).await;
+    }
+
+    #[tokio::test]
+    async fn test_non_pk_prefix_watermark() {
+        let watermark_direction = WatermarkDirection::Ascending;
+
+        let watermark_col_serde =
+            OrderedRowSerde::new(vec![DataType::Int32], vec![OrderType::ascending()]);
+        let pk_serde = OrderedRowSerde::new(
+            vec![DataType::Int32, DataType::Int32, DataType::Int32],
+            vec![
+                OrderType::ascending(),
+                OrderType::ascending(),
+                OrderType::ascending(),
+            ],
+        );
+
+        let pk_indices = vec![0, 2, 3];
+        let watermark_col_idx_in_pk = 1;
+
+        fn gen_key_value(
+            vnode: usize,
+            index: usize,
+            pk_serde: &OrderedRowSerde,
+            pk_indices: &[usize],
+        ) -> (TableKey<Bytes>, SharedBufferValue<Bytes>) {
+            let r = OwnedRow::new(vec![
+                Some(ScalarImpl::Int32(0_i32)),
+                Some(ScalarImpl::Int32(0_i32)),
+                Some(ScalarImpl::Int32(index as i32)), // watermark column
+                Some(ScalarImpl::Int32(0_i32)),
+            ]);
+
+            let pk = r.project(pk_indices);
+
+            let k1 = serialize_pk_with_vnode(pk, pk_serde, VirtualNode::from_index(vnode));
+            let v1 = SharedBufferValue::Insert(Bytes::copy_from_slice(
+                format!("{}-value-{}", vnode, index).as_bytes(),
+            ));
+            (k1, v1)
+        }
+
+        let shared_buffer_batch = {
+            let kv_pairs = (0..10).map(|i| gen_key_value(0, i, &pk_serde, &pk_indices));
+            build_batch(kv_pairs)
+        }
+        .unwrap();
+
+        {
+            // empty read watermark
+            let read_watermark = ReadTableWatermark {
+                direction: watermark_direction,
+                vnode_watermarks: BTreeMap::default(),
+            };
+
+            let compaction_catalog_agent_ref =
+                CompactionCatalogAgent::for_test(vec![TABLE_ID.into()]);
+
+            let mut iter = SkipWatermarkIterator::new(
+                shared_buffer_batch.clone().into_forward_iter(),
+                BTreeMap::from_iter(once((TABLE_ID, read_watermark.clone()))),
+                compaction_catalog_agent_ref,
+            );
+
+            iter.rewind().await.unwrap();
+            assert!(iter.is_valid());
+            for i in 0..10 {
+                let (k, _v) = gen_key_value(0, i, &pk_serde, &pk_indices);
+                assert_eq!(iter.key().user_key.table_key.as_ref(), k.as_ref());
+                iter.next().await.unwrap();
+            }
+            assert!(!iter.is_valid());
+        }
+
+        {
+            // test watermark
+            let watermark = {
+                let r1 = OwnedRow::new(vec![Some(ScalarImpl::Int32(5))]);
+                serialize_pk(r1, &watermark_col_serde)
+            };
+
+            let read_watermark = ReadTableWatermark {
+                direction: watermark_direction,
+                vnode_watermarks: BTreeMap::from_iter(once((
+                    VirtualNode::from_index(0),
+                    watermark.clone(),
+                ))),
+            };
+
+            let full_key_filter_key_extractor =
+                FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor);
+
+            let table_id_to_vnode =
+                HashMap::from_iter(once((TABLE_ID.table_id(), VirtualNode::COUNT_FOR_TEST)));
+
+            let table_id_to_watermark_serde = HashMap::from_iter(once((
+                TABLE_ID.table_id(),
+                Some((
+                    pk_serde.clone(),
+                    watermark_col_serde.clone(),
+                    watermark_col_idx_in_pk,
+                )),
+            )));
+
+            let compaction_catalog_agent_ref = Arc::new(CompactionCatalogAgent::new(
+                full_key_filter_key_extractor,
+                table_id_to_vnode,
+                table_id_to_watermark_serde,
+            ));
+
+            let mut iter = SkipWatermarkIterator::new(
+                shared_buffer_batch.clone().into_forward_iter(),
+                BTreeMap::from_iter(once((TABLE_ID, read_watermark.clone()))),
+                compaction_catalog_agent_ref,
+            );
+
+            iter.rewind().await.unwrap();
+            assert!(iter.is_valid());
+            for i in 5..10 {
+                let (k, _v) = gen_key_value(0, i, &pk_serde, &pk_indices);
+                assert_eq!(iter.key().user_key.table_key.as_ref(), k.as_ref());
+                iter.next().await.unwrap();
+            }
+            assert!(!iter.is_valid());
+        }
     }
 }

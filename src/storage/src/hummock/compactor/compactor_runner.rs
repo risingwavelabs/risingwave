@@ -138,7 +138,8 @@ impl CompactorRunner {
         compaction_catalog_agent_ref: CompactionCatalogAgentRef,
         task_progress: Arc<TaskProgress>,
     ) -> HummockResult<CompactOutput> {
-        let iter = self.build_sst_iter(task_progress.clone())?;
+        let iter =
+            self.build_sst_iter(task_progress.clone(), compaction_catalog_agent_ref.clone())?;
         let (ssts, compaction_stat) = self
             .compactor
             .compact_key_range(
@@ -157,6 +158,7 @@ impl CompactorRunner {
     fn build_sst_iter(
         &self,
         task_progress: Arc<TaskProgress>,
+        compaction_catalog_manager_ref: CompactionCatalogAgentRef,
     ) -> HummockResult<impl HummockIterator<Direction = Forward>> {
         let compactor_iter_max_io_retry_times = self
             .compactor
@@ -245,6 +247,7 @@ impl CompactorRunner {
                 task_progress.clone(),
             ),
             &self.compact_task.table_watermarks,
+            compaction_catalog_manager_ref.clone(),
         ))
     }
 }
@@ -575,19 +578,7 @@ pub async fn compact(
     ),
     Option<MemoryTracker>,
 ) {
-    let existing_table_ids: HashSet<u32> =
-        HashSet::from_iter(compact_task.existing_table_ids.clone());
-    let compact_table_ids = Vec::from_iter(
-        compact_task
-            .input_ssts
-            .iter()
-            .flat_map(|level| level.table_infos.iter())
-            .flat_map(|sst| sst.table_ids.clone())
-            .filter(|table_id| existing_table_ids.contains(table_id))
-            .sorted()
-            .unique(),
-    );
-
+    let compact_table_ids = compact_task.build_compact_table_ids();
     let compaction_catalog_agent_ref = match compaction_catalog_manager_ref
         .acquire(compact_table_ids.clone())
         .await
