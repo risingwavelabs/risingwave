@@ -398,7 +398,7 @@ impl StreamConsumer for DispatchExecutor {
     type BarrierStream = impl Stream<Item = StreamResult<Barrier>> + Send;
 
     fn execute(mut self: Box<Self>) -> Self::BarrierStream {
-        let barrier_batch_size = self
+        let max_additional_barrier_num = self
             .inner
             .context
             .config
@@ -437,7 +437,7 @@ impl StreamConsumer for DispatchExecutor {
                         let peek_more_barrier = b.mutation.is_none();
                         barrier_batch.push(b);
                         if peek_more_barrier {
-                            barrier_batch_size
+                            max_additional_barrier_num
                         } else {
                             0
                         }
