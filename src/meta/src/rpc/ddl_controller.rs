@@ -1120,9 +1120,6 @@ impl DdlController {
             .drop_object(object_type, object_id, drop_mode)
             .await?;
 
-        tracing::debug!("object dropped: {:?}, {}", object_type, object_id);
-        tracing::debug!("release context: {:?}", release_ctx);
-
         if let Some(replace_table_info) = target_replace_info {
             let stream_ctx =
                 StreamContext::from_protobuf(replace_table_info.fragment_graph.get_ctx().unwrap());

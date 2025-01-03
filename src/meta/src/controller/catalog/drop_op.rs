@@ -23,7 +23,6 @@ impl CatalogController {
         object_id: ObjectId,
         drop_mode: DropMode,
     ) -> MetaResult<(ReleaseContext, NotificationVersion)> {
-        tracing::debug!("drop object: {:?} {}", object_type, object_id);
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
         let obj: PartialObject = Object::find_by_id(object_id)
