@@ -140,6 +140,7 @@ impl CustomFragmentInfo {
 
 use educe::Educe;
 
+use super::SourceChange;
 use crate::controller::id::IdCategory;
 
 // The debug implementation is arbitrary. Just used in debug logs.
@@ -1769,13 +1770,10 @@ impl ScaleController {
 
         if !stream_source_actor_splits.is_empty() {
             self.source_manager
-                .apply_source_change(
-                    None,
-                    None,
-                    Some(stream_source_actor_splits),
-                    Some(stream_source_dropped_actors),
-                    None,
-                )
+                .apply_source_change(SourceChange::Reschedule {
+                    split_assignment: stream_source_actor_splits,
+                    dropped_actors: stream_source_dropped_actors,
+                })
                 .await;
         }
 

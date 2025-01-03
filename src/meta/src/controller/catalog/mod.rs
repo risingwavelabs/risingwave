@@ -364,7 +364,9 @@ impl CatalogController {
             })
             .collect_vec();
 
-        let associated_source_ids: Vec<SourceId> = Table::find()
+        // The source ids for dirty tables with connector.
+        // FIXME: we should also clean dirty sources.
+        let dirty_associated_source_ids: Vec<SourceId> = Table::find()
             .select_only()
             .column(table::Column::OptionalAssociatedSourceId)
             .filter(
@@ -402,7 +404,7 @@ impl CatalogController {
             .clone()
             .into_iter()
             .chain(dirty_state_table_ids.into_iter())
-            .chain(associated_source_ids.clone().into_iter())
+            .chain(dirty_associated_source_ids.clone().into_iter())
             .collect();
 
         let res = Object::delete_many()
@@ -424,7 +426,7 @@ impl CatalogController {
             .notify_frontend(NotificationOperation::Delete, relation_group)
             .await;
 
-        Ok(associated_source_ids)
+        Ok(dirty_associated_source_ids)
     }
 
     pub async fn comment_on(&self, comment: PbComment) -> MetaResult<NotificationVersion> {

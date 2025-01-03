@@ -77,7 +77,8 @@ use crate::model::{StreamContext, StreamJobFragments, TableParallelism};
 use crate::stream::{
     create_source_worker_handle, validate_sink, ActorGraphBuildResult, ActorGraphBuilder,
     CompleteStreamFragmentGraph, CreateStreamingJobContext, CreateStreamingJobOption,
-    GlobalStreamManagerRef, ReplaceStreamJobContext, SourceManagerRef, StreamFragmentGraph,
+    GlobalStreamManagerRef, ReplaceStreamJobContext, SourceChange, SourceManagerRef,
+    StreamFragmentGraph,
 };
 use crate::{MetaError, MetaResult};
 
@@ -974,7 +975,9 @@ impl DdlController {
                     tracing::warn!(id = job_id, "aborted streaming job");
                     if let Some(source_id) = source_id {
                         self.source_manager
-                            .unregister_sources(vec![source_id as SourceId])
+                            .apply_source_change(SourceChange::DropSource {
+                                dropped_source_ids: vec![source_id as SourceId],
+                            })
                             .await;
                     }
                 }
@@ -1263,23 +1266,28 @@ impl DdlController {
 
         // unregister sources.
         self.source_manager
-            .unregister_sources(removed_source_ids.into_iter().map(|id| id as _).collect())
+            .apply_source_change(SourceChange::DropSource {
+                dropped_source_ids: removed_source_ids.into_iter().map(|id| id as _).collect(),
+            })
             .await;
 
         // unregister fragments and actors from source manager.
+        // FIXME: need also unregister source backfill fragments.
+        let dropped_source_fragments = removed_source_fragments
+            .into_iter()
+            .map(|(source_id, fragments)| {
+                (
+                    source_id,
+                    fragments.into_iter().map(|id| id as u32).collect(),
+                )
+            })
+            .collect();
+        let dropped_actors = removed_actors.iter().map(|id| *id as _).collect();
         self.source_manager
-            .drop_source_fragments(
-                removed_source_fragments
-                    .into_iter()
-                    .map(|(source_id, fragments)| {
-                        (
-                            source_id,
-                            fragments.into_iter().map(|id| id as u32).collect(),
-                        )
-                    })
-                    .collect(),
-                removed_actors.iter().map(|id| *id as _).collect(),
-            )
+            .apply_source_change(SourceChange::DropMv {
+                dropped_source_fragments,
+                dropped_actors,
+            })
             .await;
 
         // drop streaming jobs.
