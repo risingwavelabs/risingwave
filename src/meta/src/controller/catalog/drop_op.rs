@@ -65,6 +65,8 @@ impl CatalogController {
         };
         to_drop_objects.push(obj);
 
+        let to_drop_object_ids: HashSet<_> = to_drop_objects.iter().map(|obj| obj.oid).collect();
+
         // TODO: record dependency info in object_dependency table for sink into table.
         // Special handling for 'sink into table'.
         if object_type != ObjectType::Sink {
@@ -87,9 +89,6 @@ impl CatalogController {
                     to_drop_objects.extend(objs);
                 }
             }
-
-            let to_drop_object_ids: HashSet<_> =
-                to_drop_objects.iter().map(|obj| obj.oid).collect();
 
             // When there is a table sink in the dependency chain of drop cascade, an error message needs to be returned currently to manually drop the sink.
             for obj in &to_drop_objects {
@@ -116,31 +115,14 @@ impl CatalogController {
             .iter()
             .filter(|obj| obj.obj_type == ObjectType::Table || obj.obj_type == ObjectType::Index)
             .map(|obj| obj.oid);
-        let mut to_drop_streaming_jobs = to_drop_objects
-            .iter()
-            .filter(|obj| {
-                obj.obj_type == ObjectType::Table
-                    || obj.obj_type == ObjectType::Sink
-                    || obj.obj_type == ObjectType::Index
-            })
-            .map(|obj| obj.oid)
-            .collect_vec();
 
-        // source streaming job.
-        if object_type == ObjectType::Source {
-            let source_info: Option<StreamSourceInfo> = Source::find_by_id(object_id)
-                .select_only()
-                .column(source::Column::SourceInfo)
-                .into_tuple()
-                .one(&txn)
-                .await?
-                .ok_or_else(|| MetaError::catalog_id_not_found("source", object_id))?;
-            if let Some(source_info) = source_info
-                && source_info.to_protobuf().is_shared()
-            {
-                to_drop_streaming_jobs.push(object_id);
-            }
-        }
+        let to_drop_streaming_jobs: Vec<ObjectId> = StreamingJob::find()
+            .select_only()
+            .column(streaming_job::Column::JobId)
+            .filter(streaming_job::Column::JobId.is_in(to_drop_object_ids))
+            .into_tuple()
+            .all(&txn)
+            .await?;
 
         // Check if there are any streaming jobs that are creating.
         if !to_drop_streaming_jobs.is_empty() {
