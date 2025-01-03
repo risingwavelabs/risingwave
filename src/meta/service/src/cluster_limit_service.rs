@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -51,7 +51,7 @@ impl ClusterLimitServiceImpl {
             .list_worker_node(Some(WorkerType::ComputeNode), Some(State::Running))
             .await?
             .into_iter()
-            .map(|e| (e.id as _, e.parallelism()))
+            .map(|e| (e.id as _, e.compute_node_parallelism()))
             .collect();
         let worker_actor_count: HashMap<u32, WorkerActorCount> = self
             .metadata_manager

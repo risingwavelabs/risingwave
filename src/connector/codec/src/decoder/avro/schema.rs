@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -35,18 +35,12 @@ use super::get_nullable_union_inner;
 pub struct ResolvedAvroSchema {
     /// Should be used for parsing bytes into Avro value
     pub original_schema: Arc<Schema>,
-    /// Should be used for type mapping from Avro value to RisingWave datum
-    pub resolved_schema: Schema,
 }
 
 impl ResolvedAvroSchema {
     pub fn create(schema: Arc<Schema>) -> AvroResult<Self> {
-        let resolver = ResolvedSchema::try_from(schema.as_ref())?;
-        // todo: to_resolved may cause stackoverflow if there's a loop in the schema
-        let resolved_schema = resolver.to_resolved(schema.as_ref())?;
         Ok(Self {
             original_schema: schema,
-            resolved_schema,
         })
     }
 }
@@ -381,16 +375,16 @@ pub(super) fn avro_schema_to_struct_field_name(schema: &Schema) -> Result<String
         Schema::Null => unreachable!(),
         Schema::Union(_) => unreachable!(),
         // Primitive types
-        Schema::Boolean => "boolean".to_string(),
-        Schema::Int => "int".to_string(),
-        Schema::Long => "long".to_string(),
-        Schema::Float => "float".to_string(),
-        Schema::Double => "double".to_string(),
-        Schema::Bytes => "bytes".to_string(),
-        Schema::String => "string".to_string(),
+        Schema::Boolean => "boolean".to_owned(),
+        Schema::Int => "int".to_owned(),
+        Schema::Long => "long".to_owned(),
+        Schema::Float => "float".to_owned(),
+        Schema::Double => "double".to_owned(),
+        Schema::Bytes => "bytes".to_owned(),
+        Schema::String => "string".to_owned(),
         // Unnamed Complex types
-        Schema::Array(_) => "array".to_string(),
-        Schema::Map(_) => "map".to_string(),
+        Schema::Array(_) => "array".to_owned(),
+        Schema::Map(_) => "map".to_owned(),
         // Named Complex types
         Schema::Enum(_) | Schema::Ref { name: _ } | Schema::Fixed(_) | Schema::Record(_) => {
             // schema.name().unwrap().fullname(None)

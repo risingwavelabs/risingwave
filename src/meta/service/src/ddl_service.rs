@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use rand::seq::SliceRandom;
 use rand::thread_rng;
+use replace_job_plan::{ReplaceSource, ReplaceTable};
 use risingwave_common::catalog::ColumnCatalog;
 use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
@@ -85,25 +86,31 @@ impl DdlServiceImpl {
     }
 
     fn extract_replace_table_info(
-        ReplaceTablePlan {
-            table,
+        ReplaceJobPlan {
             fragment_graph,
             table_col_index_mapping,
-            source,
-            job_type,
-        }: ReplaceTablePlan,
+            replace_job,
+        }: ReplaceJobPlan,
     ) -> ReplaceStreamJobInfo {
-        let table = table.unwrap();
         let col_index_mapping = table_col_index_mapping
             .as_ref()
             .map(ColIndexMapping::from_protobuf);
 
         ReplaceStreamJobInfo {
-            streaming_job: StreamingJob::Table(
-                source,
-                table,
-                TableJobType::try_from(job_type).unwrap(),
-            ),
+            streaming_job: match replace_job.unwrap() {
+                replace_job_plan::ReplaceJob::ReplaceTable(ReplaceTable {
+                    table,
+                    source,
+                    job_type,
+                }) => StreamingJob::Table(
+                    source,
+                    table.unwrap(),
+                    TableJobType::try_from(job_type).unwrap(),
+                ),
+                replace_job_plan::ReplaceJob::ReplaceSource(ReplaceSource { source }) => {
+                    StreamingJob::Source(source.unwrap())
+                }
+            },
             fragment_graph: fragment_graph.unwrap(),
             col_index_mapping,
         }
@@ -247,7 +254,7 @@ impl DdlService for DdlServiceImpl {
             None => {
                 let version = self
                     .ddl_controller
-                    .run_command(DdlCommand::CreateSourceWithoutStreamingJob(source))
+                    .run_command(DdlCommand::CreateNonSharedSource(source))
                     .await?;
                 Ok(Response::new(CreateSourceResponse {
                     status: None,
@@ -303,7 +310,11 @@ impl DdlService for DdlServiceImpl {
 
         let sink = req.get_sink()?.clone();
         let fragment_graph = req.get_fragment_graph()?.clone();
-        let affected_table_change = req.get_affected_table_change().cloned().ok();
+        let affected_table_change = req
+            .get_affected_table_change()
+            .cloned()
+            .ok()
+            .map(Self::extract_replace_table_info);
         let dependencies = req
             .get_dependencies()
             .iter()
@@ -313,8 +324,11 @@ impl DdlService for DdlServiceImpl {
         let stream_job = match &affected_table_change {
             None => StreamingJob::Sink(sink, None),
             Some(change) => {
-                let table = change.table.clone().unwrap();
-                let source = change.source.clone();
+                let (source, table, _) = change
+                    .streaming_job
+                    .clone()
+                    .try_as_table()
+                    .expect("must be replace table");
                 StreamingJob::Sink(sink, Some((table, source)))
             }
         };
@@ -323,7 +337,7 @@ impl DdlService for DdlServiceImpl {
             stream_job,
             fragment_graph,
             CreateType::Foreground,
-            affected_table_change.map(Self::extract_replace_table_info),
+            affected_table_change,
             dependencies,
         );
 
@@ -646,20 +660,20 @@ impl DdlService for DdlServiceImpl {
         Ok(Response::new(RisectlListStateTablesResponse { tables }))
     }
 
-    async fn replace_table_plan(
+    async fn replace_job_plan(
         &self,
-        request: Request<ReplaceTablePlanRequest>,
-    ) -> Result<Response<ReplaceTablePlanResponse>, Status> {
+        request: Request<ReplaceJobPlanRequest>,
+    ) -> Result<Response<ReplaceJobPlanResponse>, Status> {
         let req = request.into_inner().get_plan().cloned()?;
 
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::ReplaceTable(Self::extract_replace_table_info(
-                req,
-            )))
+            .run_command(DdlCommand::ReplaceStreamJob(
+                Self::extract_replace_table_info(req),
+            ))
             .await?;
 
-        Ok(Response::new(ReplaceTablePlanResponse {
+        Ok(Response::new(ReplaceJobPlanResponse {
             status: None,
             version,
         }))
@@ -702,7 +716,7 @@ impl DdlService for DdlServiceImpl {
         let AlterSourceRequest { source } = request.into_inner();
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::AlterSourceColumn(source.unwrap()))
+            .run_command(DdlCommand::AlterNonSharedSource(source.unwrap()))
             .await?;
         Ok(Response::new(AlterSourceResponse {
             status: None,
@@ -920,6 +934,30 @@ impl DdlService for DdlServiceImpl {
         };
 
         for table_change in schema_change.table_changes {
+            for c in &table_change.columns {
+                let c = ColumnCatalog::from(c.clone());
+
+                let invalid_col_type = |column_type: &str, c: &ColumnCatalog| {
+                    tracing::warn!(target: "auto_schema_change",
+                      cdc_table_id = table_change.cdc_table_id,
+                    upstraem_ddl = table_change.upstream_ddl,
+                        "invalid column type from cdc table change");
+                    Err(Status::invalid_argument(format!(
+                        "invalid column type: {} from cdc table change, column: {:?}",
+                        column_type, c
+                    )))
+                };
+                if c.is_generated() {
+                    return invalid_col_type("generated column", &c);
+                }
+                if c.is_rw_sys_column() {
+                    return invalid_col_type("rw system column", &c);
+                }
+                if c.is_hidden {
+                    return invalid_col_type("hidden column", &c);
+                }
+            }
+
             // get the table catalog corresponding to the cdc table
             let tables: Vec<Table> = self
                 .metadata_manager
@@ -930,10 +968,14 @@ impl DdlService for DdlServiceImpl {
                 // Since we only support `ADD` and `DROP` column, we check whether the new columns and the original columns
                 // is a subset of the other.
                 let original_columns: HashSet<(String, DataType)> =
-                    HashSet::from_iter(table.columns.iter().map(|col| {
+                    HashSet::from_iter(table.columns.iter().filter_map(|col| {
                         let col = ColumnCatalog::from(col.clone());
                         let data_type = col.data_type().clone();
-                        (col.column_desc.name, data_type)
+                        if col.is_generated() {
+                            None
+                        } else {
+                            Some((col.column_desc.name, data_type))
+                        }
                     }));
                 let new_columns: HashSet<(String, DataType)> =
                     HashSet::from_iter(table_change.columns.iter().map(|col| {
@@ -973,7 +1015,7 @@ impl DdlService for DdlServiceImpl {
                     .auto_schema_change_latency
                     .with_guarded_label_values(&[&table.id.to_string(), &table.name])
                     .start_timer();
-                // send a request to the frontend to get the ReplaceTablePlan
+                // send a request to the frontend to get the ReplaceJobPlan
                 // will retry with exponential backoff if the request fails
                 let resp = client
                     .get_table_replace_plan(GetTableReplacePlanRequest {
@@ -988,7 +1030,8 @@ impl DdlService for DdlServiceImpl {
                     Ok(resp) => {
                         let resp = resp.into_inner();
                         if let Some(plan) = resp.replace_plan {
-                            plan.table.as_ref().inspect(|t| {
+                            let plan = Self::extract_replace_table_info(plan);
+                            plan.streaming_job.table().inspect(|t| {
                                 tracing::info!(
                                     target: "auto_schema_change",
                                     table_id = t.id,
@@ -999,9 +1042,7 @@ impl DdlService for DdlServiceImpl {
                             // start the schema change procedure
                             let replace_res = self
                                 .ddl_controller
-                                .run_command(DdlCommand::ReplaceTable(
-                                    Self::extract_replace_table_info(plan),
-                                ))
+                                .run_command(DdlCommand::ReplaceStreamJob(plan))
                                 .await;
 
                             match replace_res {

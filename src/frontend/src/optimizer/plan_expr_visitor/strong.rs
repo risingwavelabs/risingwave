@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -363,7 +363,7 @@ mod tests {
         assert!(Strong::is_null(&expr, null_columns.clone()));
 
         let expr = Literal(
-            crate::expr::Literal::new(Some("test".to_string().into()), DataType::Varchar).into(),
+            crate::expr::Literal::new(Some("test".to_owned().into()), DataType::Varchar).into(),
         );
         assert!(!Strong::is_null(&expr, null_columns));
     }

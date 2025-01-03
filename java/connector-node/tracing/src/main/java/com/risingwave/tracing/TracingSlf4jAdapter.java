@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -36,17 +36,23 @@ public class TracingSlf4jAdapter implements Logger {
 
     private void logIfEnabled(int level, String format, Object arg) {
         if (TracingSlf4jImpl.isEnabled(level)) {
-            TracingSlf4jImpl.event(
-                    name, level, new ParameterizedMessage(format, arg).getFormattedMessage());
+            var pm = new ParameterizedMessage(format, arg);
+            if (null != pm.getThrowable()) {
+                logIfEnabled(level, pm.getFormattedMessage(), pm.getThrowable());
+            } else {
+                TracingSlf4jImpl.event(name, level, pm.getFormattedMessage());
+            }
         }
     }
 
     private void logIfEnabled(int level, String format, Object arg1, Object arg2) {
         if (TracingSlf4jImpl.isEnabled(level)) {
-            TracingSlf4jImpl.event(
-                    name,
-                    level,
-                    new ParameterizedMessage(format, arg1, arg2).getFormattedMessage());
+            var pm = new ParameterizedMessage(format, arg1, arg2);
+            if (null != pm.getThrowable()) {
+                logIfEnabled(level, pm.getFormattedMessage(), pm.getThrowable());
+            } else {
+                TracingSlf4jImpl.event(name, level, pm.getFormattedMessage());
+            }
         }
     }
 

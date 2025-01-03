@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,9 +25,10 @@ use risingwave_pb::catalog::{
     PbComment, PbCreateType, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource,
     PbSubscription, PbTable, PbView,
 };
+use risingwave_pb::ddl_service::replace_job_plan::{ReplaceJob, ReplaceSource, ReplaceTable};
 use risingwave_pb::ddl_service::{
     alter_name_request, alter_owner_request, alter_set_schema_request, alter_swap_rename_request,
-    create_connection_request, PbReplaceTablePlan, PbTableJobType, ReplaceTablePlan, TableJobType,
+    create_connection_request, PbReplaceJobPlan, PbTableJobType, ReplaceJobPlan, TableJobType,
     WaitVersion,
 };
 use risingwave_pb::meta::PbTableParallelism;
@@ -99,6 +100,13 @@ pub trait CatalogWriter: Send + Sync {
         job_type: TableJobType,
     ) -> Result<()>;
 
+    async fn replace_source(
+        &self,
+        source: PbSource,
+        graph: StreamFragmentGraph,
+        mapping: ColIndexMapping,
+    ) -> Result<()>;
+
     async fn create_index(
         &self,
         index: PbIndex,
@@ -116,7 +124,7 @@ pub trait CatalogWriter: Send + Sync {
         &self,
         sink: PbSink,
         graph: StreamFragmentGraph,
-        affected_table_change: Option<PbReplaceTablePlan>,
+        affected_table_change: Option<PbReplaceJobPlan>,
         dependencies: HashSet<ObjectId>,
     ) -> Result<()>;
 
@@ -161,7 +169,7 @@ pub trait CatalogWriter: Send + Sync {
         &self,
         sink_id: u32,
         cascade: bool,
-        affected_table_change: Option<PbReplaceTablePlan>,
+        affected_table_change: Option<PbReplaceJobPlan>,
     ) -> Result<()>;
 
     async fn drop_subscription(&self, subscription_id: u32, cascade: bool) -> Result<()>;
@@ -228,7 +236,7 @@ impl CatalogWriter for CatalogWriterImpl {
         let version = self
             .meta_client
             .create_database(PbDatabase {
-                name: db_name.to_string(),
+                name: db_name.to_owned(),
                 id: 0,
                 owner,
             })
@@ -246,7 +254,7 @@ impl CatalogWriter for CatalogWriterImpl {
             .meta_client
             .create_schema(PbSchema {
                 id: 0,
-                name: schema_name.to_string(),
+                name: schema_name.to_owned(),
                 database_id: db_id,
                 owner,
             })
@@ -311,7 +319,34 @@ impl CatalogWriter for CatalogWriterImpl {
     ) -> Result<()> {
         let version = self
             .meta_client
-            .replace_table(source, table, graph, mapping, job_type)
+            .replace_job(
+                graph,
+                mapping,
+                ReplaceJob::ReplaceTable(ReplaceTable {
+                    source,
+                    table: Some(table),
+                    job_type: job_type as _,
+                }),
+            )
+            .await?;
+        self.wait_version(version).await
+    }
+
+    async fn replace_source(
+        &self,
+        source: PbSource,
+        graph: StreamFragmentGraph,
+        mapping: ColIndexMapping,
+    ) -> Result<()> {
+        let version = self
+            .meta_client
+            .replace_job(
+                graph,
+                mapping,
+                ReplaceJob::ReplaceSource(ReplaceSource {
+                    source: Some(source),
+                }),
+            )
             .await?;
         self.wait_version(version).await
     }
@@ -329,7 +364,7 @@ impl CatalogWriter for CatalogWriterImpl {
         &self,
         sink: PbSink,
         graph: StreamFragmentGraph,
-        affected_table_change: Option<ReplaceTablePlan>,
+        affected_table_change: Option<ReplaceJobPlan>,
         dependencies: HashSet<ObjectId>,
     ) -> Result<()> {
         let version = self
@@ -425,7 +460,7 @@ impl CatalogWriter for CatalogWriterImpl {
         &self,
         sink_id: u32,
         cascade: bool,
-        affected_table_change: Option<ReplaceTablePlan>,
+        affected_table_change: Option<ReplaceJobPlan>,
     ) -> Result<()> {
         let version = self
             .meta_client

@@ -196,6 +196,19 @@ script = '''
 watch -n 1 "${TMUX} list-windows -t risedev | grep -v active | cut -d'(' -f1"
 '''
 
+[tasks.diagnose]
+category = "Misc"
+description = "Dump diagnose info"
+dependencies = ["check-and-load-risedev-env-file"]
+script = '''
+#!/usr/bin/env bash
+set -e
+file_name=${PREFIX_LOG}/diagnose-$(date -u +%Y-%m-%dT%H:%M:%SZ).txt
+curl -s ${RISEDEV_RW_META_DASHBOARD_ADDR}/api/monitor/diagnose/ > ${file_name}
+echo "Diagnose info has been dumped to ${file_name}"
+'''
+
+
 [tasks.del]
 alias = "delete"
 
@@ -632,11 +645,21 @@ echo "   $(tput setaf 4)source ${PREFIX_CONFIG}/psql-env$(tput sgr0)"
 
 [tasks.psql]
 category = "RiseDev - Start/Stop"
-description = "Run local psql client with default connection parameters. You can pass extra arguments to psql."
+description = "Run local psql client for RisingWave with default connection parameters. You can pass extra arguments to psql."
 dependencies = ["check-and-load-risedev-env-file"]
 script = '''
 #!/usr/bin/env bash
 psql -h $RISEDEV_RW_FRONTEND_LISTEN_ADDRESS -p $RISEDEV_RW_FRONTEND_PORT -U root -d dev "$@"
+'''
+
+[tasks.pgpsql]
+category = "RiseDev - Start/Stop"
+description = "Run local psql client for postgres with default connection parameters. You can pass extra arguments to psql."
+dependencies = ["check-and-load-risedev-env-file"]
+script = '''
+#!/usr/bin/env bash
+source "${PREFIX_CONFIG}/risedev-env"
+PGHOST=$PGHOST PGPORT=$PGPORT PGUSER=$PGUSER PGDATABASE=$PGDATABASE psql "$@"
 '''
 
 [tasks.ctl]
@@ -1158,7 +1181,7 @@ fi
 private = true
 category = "RiseDev - Check"
 description = "Run cargo typos-cli check"
-install_crate = { min_version = "1.23.2", crate_name = "typos-cli", binary = "typos", test_arg = [
+install_crate = { min_version = "1.28.2", crate_name = "typos-cli", binary = "typos", test_arg = [
     "--help",
 ], install_command = "binstall" }
 script = """
@@ -1181,12 +1204,25 @@ install_crate = { min_version = "0.1.35", crate_name = "cargo-udeps", binary = "
 script = """
 #!/usr/bin/env bash
 
-# TODO: after cargo-machete supports excluding packages, we may use it instead of cargo udeps.
-# It's much faster so we can add it to CI and [tasks.check].
+# cargo-machetet is much faster and is in CI, but udeps is more precise.
 
 echo "Running $(tput setaf 4)cargo udeps$(tput sgr0) checks"
 
-cargo udeps --workspace --all-targets ${RISINGWAVE_FEATURE_FLAGS} --exclude workspace-hack --exclude risingwave_bench --exclude risingwave_udf --exclude risingwave_simulation
+cargo udeps --workspace --all-targets ${RISINGWAVE_FEATURE_FLAGS} --exclude workspace-hack --exclude risingwave_bench --exclude risingwave_simulation
+"""
+
+[tasks.check-machete]
+private = true
+category = "RiseDev - Check"
+description = "Check unused dependencies"
+install_crate = { min_version = "0.7.0", crate_name = "cargo-machete", binary = "cargo", test_arg = [
+    "machete",
+    "--help",
+], install_command = "binstall" }
+script = """
+#!/usr/bin/env bash
+
+cargo machete
 """
 
 [tasks.check-trailing-spaces]
@@ -1210,6 +1246,7 @@ dependencies = [
     "check-fmt",
     "check-trailing-spaces",
     "check-typos",
+    "check-machete",
 ]
 description = "Perform part of the pre-CI checks that are fast to run"
 
@@ -1318,7 +1355,7 @@ echo "All processes has exited."
 
 [tasks.slt]
 category = "RiseDev - Test - SQLLogicTest"
-install_crate = { min_version = "0.21.0", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
+install_crate = { min_version = "0.24.0", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
     "--help",
 ], install_command = "binstall" }
 dependencies = ["check-and-load-risedev-env-file"]

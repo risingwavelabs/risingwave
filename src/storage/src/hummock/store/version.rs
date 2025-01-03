@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,7 +27,6 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::MAX_SPILL_TIMES;
-use risingwave_hummock_sdk::change_log::EpochNewChangeLog;
 use risingwave_hummock_sdk::key::{
     bound_table_key_range, FullKey, TableKey, TableKeyRange, UserKey,
 };
@@ -321,7 +320,7 @@ impl HummockReadVersion {
                     // old data comes first
                     for imm_id in imms.iter().rev() {
                         let check_err = match self.staging.imm.pop_back() {
-                            None => Some("empty".to_string()),
+                            None => Some("empty".to_owned()),
                             Some(prev_imm_id) => {
                                 if prev_imm_id.batch_id() == *imm_id {
                                     None
@@ -877,6 +876,7 @@ impl HummockVersionReader {
                 table_holder,
                 self.sstable_store.clone(),
                 sst_read_options.clone(),
+                sstable_info,
             ));
         }
         local_stats.staging_sst_iter_count = staging_sst_iter_count;
@@ -889,22 +889,20 @@ impl HummockVersionReader {
             }
 
             if level.level_type == LevelType::Nonoverlapping {
-                let table_infos = prune_nonoverlapping_ssts(&level.table_infos, user_key_range_ref);
-                let sstables = table_infos
-                    .filter(|sstable_info| {
-                        sstable_info
-                            .table_ids
-                            .binary_search(&read_options.table_id.table_id)
-                            .is_ok()
-                    })
-                    .cloned()
-                    .collect_vec();
-                if sstables.is_empty() {
+                let mut table_infos = prune_nonoverlapping_ssts(
+                    &level.table_infos,
+                    user_key_range_ref,
+                    read_options.table_id.table_id(),
+                )
+                .peekable();
+
+                if table_infos.peek().is_none() {
                     continue;
                 }
-                if sstables.len() > 1 {
+                let sstable_infos = table_infos.cloned().collect_vec();
+                if sstable_infos.len() > 1 {
                     factory.add_concat_sst_iter(
-                        sstables,
+                        sstable_infos,
                         self.sstable_store.clone(),
                         sst_read_options.clone(),
                     );
@@ -912,7 +910,7 @@ impl HummockVersionReader {
                 } else {
                     let sstable = self
                         .sstable_store
-                        .sstable(&sstables[0], local_stats)
+                        .sstable(&sstable_infos[0], local_stats)
                         .await?;
 
                     if let Some(dist_hash) = bloom_filter_prefix_hash.as_ref() {
@@ -934,6 +932,7 @@ impl HummockVersionReader {
                         sstable,
                         self.sstable_store.clone(),
                         sst_read_options.clone(),
+                        &sstable_infos[0],
                     ));
                     local_stats.non_overlapping_iter_count += 1;
                 }
@@ -968,6 +967,7 @@ impl HummockVersionReader {
                         sstable,
                         self.sstable_store.clone(),
                         sst_read_options.clone(),
+                        sstable_info,
                     ));
                     local_stats.overlapping_iter_count += 1;
                 }
@@ -993,10 +993,9 @@ impl HummockVersionReader {
         options: ReadLogOptions,
     ) -> HummockResult<ChangeLogIterator> {
         let change_log = if let Some(change_log) = version.table_change_log.get(&options.table_id) {
-            change_log.filter_epoch(epoch_range)
+            change_log.filter_epoch(epoch_range).collect_vec()
         } else {
-            static EMPTY_VEC: Vec<EpochNewChangeLog> = Vec::new();
-            &EMPTY_VEC[..]
+            Vec::new()
         };
         if let Some(max_epoch_change_log) = change_log.last() {
             let (_, max_epoch) = epoch_range;
@@ -1017,19 +1016,24 @@ impl HummockVersionReader {
         });
 
         async fn make_iter(
-            ssts: impl Iterator<Item = &SstableInfo>,
+            sstable_infos: impl Iterator<Item = &SstableInfo>,
             sstable_store: &SstableStoreRef,
             read_options: Arc<SstableIteratorReadOptions>,
             local_stat: &mut StoreLocalStatistic,
         ) -> HummockResult<MergeIterator<SstableIterator>> {
-            let iters = try_join_all(ssts.map(|sst| {
+            let iters = try_join_all(sstable_infos.map(|sstable_info| {
                 let sstable_store = sstable_store.clone();
                 let read_options = read_options.clone();
                 async move {
                     let mut local_stat = StoreLocalStatistic::default();
-                    let table_holder = sstable_store.sstable(sst, &mut local_stat).await?;
+                    let table_holder = sstable_store.sstable(sstable_info, &mut local_stat).await?;
                     Ok::<_, HummockError>((
-                        SstableIterator::new(table_holder, sstable_store, read_options),
+                        SstableIterator::new(
+                            table_holder,
+                            sstable_store,
+                            read_options,
+                            sstable_info,
+                        ),
                         local_stat,
                     ))
                 }

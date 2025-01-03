@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -159,7 +159,7 @@ impl TryToStreamPb for StreamDeltaJoin {
         // TODO: add a separate delta join node in proto, or move fragmenter to frontend so that we
         // don't need an intermediate representation.
         let eq_join_predicate = &self.eq_join_predicate;
-        Ok(NodeBody::DeltaIndexJoin(DeltaIndexJoinNode {
+        Ok(NodeBody::DeltaIndexJoin(Box::new(DeltaIndexJoinNode {
             join_type: self.core.join_type as i32,
             left_key: eq_join_predicate
                 .left_eq_indexes()
@@ -210,7 +210,7 @@ impl TryToStreamPb for StreamDeltaJoin {
                     .collect(),
             }),
             output_indices: self.core.output_indices.iter().map(|&x| x as u32).collect(),
-        }))
+        })))
     }
 }
 

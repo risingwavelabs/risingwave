@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -102,7 +102,7 @@ impl Default for Configuration {
 telemetry_enabled = false
 metrics_level = "Disabled"
 "#
-            .to_string();
+            .to_owned();
             file.write_all(config_data.as_bytes())
                 .expect("failed to write config file");
             file.into_temp_path()

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -39,7 +39,7 @@ impl From<ActorSplit> for RwActorSplit {
             fragment_type: FragmentType::try_from(actor_split.fragment_type)
                 .unwrap_or(FragmentType::Unspecified)
                 .as_str_name()
-                .to_string(),
+                .to_owned(),
         }
     }
 }

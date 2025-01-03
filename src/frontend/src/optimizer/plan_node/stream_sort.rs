@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -128,14 +128,14 @@ impl_plan_tree_node_for_unary! { StreamEowcSort }
 impl StreamNode for StreamEowcSort {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> PbNodeBody {
         use risingwave_pb::stream_plan::*;
-        PbNodeBody::Sort(SortNode {
+        PbNodeBody::Sort(Box::new(SortNode {
             state_table: Some(
                 self.infer_state_table()
                     .with_id(state.gen_table_id_wrapped())
                     .to_internal_table_prost(),
             ),
             sort_column_index: self.sort_column_index as _,
-        })
+        }))
     }
 }
 

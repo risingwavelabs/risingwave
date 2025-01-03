@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,7 +30,7 @@ use risingwave_connector::parser::{
     ByteStreamSourceParserImpl, CommonParserConfig, ParserConfig, SpecificParserConfig,
 };
 use risingwave_connector::source::{
-    BoxChunkSourceStream, BoxSourceStream, SourceColumnDesc, SourceMessage, SourceMeta,
+    BoxSourceChunkStream, BoxSourceMessageStream, SourceColumnDesc, SourceMessage, SourceMeta,
 };
 use tracing::Level;
 use tracing_subscriber::prelude::*;
@@ -72,7 +72,7 @@ fn make_batch(use_struct: bool) -> Vec<SourceMessage> {
         .collect_vec()
 }
 
-fn make_data_stream(use_struct: bool) -> BoxSourceStream {
+fn make_data_stream(use_struct: bool) -> BoxSourceMessageStream {
     futures::future::ready(Ok(if use_struct {
         STRUCT_BATCH.clone()
     } else {
@@ -118,8 +118,8 @@ fn make_parser(use_struct: bool) -> ByteStreamSourceParserImpl {
 }
 
 fn make_stream_iter(use_struct: bool) -> impl Iterator<Item = StreamChunk> {
-    let mut stream: BoxChunkSourceStream = make_parser(use_struct)
-        .into_stream(make_data_stream(use_struct))
+    let mut stream: BoxSourceChunkStream = make_parser(use_struct)
+        .parse_stream(make_data_stream(use_struct))
         .boxed();
 
     std::iter::from_fn(move || {

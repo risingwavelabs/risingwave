@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -344,7 +344,7 @@ pub async fn setup_compute_env_with_metric(
     .await;
 
     let fake_host_address = HostAddress {
-        host: "127.0.0.1".to_string(),
+        host: "127.0.0.1".to_owned(),
         port,
     };
     let fake_parallelism = 4;

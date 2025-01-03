@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -631,13 +631,10 @@ impl BatchPlanRef for PlanRef {
 /// other places. We will reset expression display id to 0 and clone the whole plan to reset the
 /// schema.
 pub fn reorganize_elements_id(plan: PlanRef) -> PlanRef {
-    let old_expr_display_id = plan.ctx().get_expr_display_id();
-    let old_plan_node_id = plan.ctx().get_plan_node_id();
-    plan.ctx().set_expr_display_id(0);
-    plan.ctx().set_plan_node_id(0);
+    let backup = plan.ctx().backup_elem_ids();
+    plan.ctx().reset_elem_ids();
     let plan = PlanCloner::clone_whole_plan(plan);
-    plan.ctx().set_expr_display_id(old_expr_display_id);
-    plan.ctx().set_plan_node_id(old_plan_node_id);
+    plan.ctx().restore_elem_ids(backup);
     plan
 }
 

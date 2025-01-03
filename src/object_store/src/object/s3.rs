@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -457,7 +457,7 @@ impl ObjectStore for S3ObjectStore {
         Ok(S3StreamingUploader::new(
             self.client.clone(),
             self.bucket.clone(),
-            path.to_string(),
+            path.to_owned(),
             self.metrics.clone(),
             self.config.clone(),
         ))
@@ -629,7 +629,7 @@ impl ObjectStore for S3ObjectStore {
             S3ObjectIter::new(
                 self.client.clone(),
                 self.bucket.clone(),
-                prefix.to_string(),
+                prefix.to_owned(),
                 self.config.clone(),
                 start_after,
             )
@@ -805,7 +805,7 @@ impl S3ObjectStore {
 
         Self {
             client,
-            bucket: bucket.to_string(),
+            bucket: bucket.to_owned(),
             metrics,
             config: object_store_config,
         }

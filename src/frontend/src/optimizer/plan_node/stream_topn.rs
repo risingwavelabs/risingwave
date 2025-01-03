@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -112,9 +112,9 @@ impl StreamNode for StreamTopN {
             order_by: self.topn_order().to_protobuf(),
         };
         if self.input().append_only() {
-            PbNodeBody::AppendOnlyTopN(topn_node)
+            PbNodeBody::AppendOnlyTopN(Box::new(topn_node))
         } else {
-            PbNodeBody::TopN(topn_node)
+            PbNodeBody::TopN(Box::new(topn_node))
         }
     }
 }

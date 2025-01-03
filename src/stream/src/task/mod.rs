@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -88,10 +88,10 @@ pub struct SharedContext {
     ///
     /// The channel serves as a buffer because `ExchangeServiceImpl`
     /// is on the server-side and we will also introduce backpressure.
-    pub(crate) channel_map: Mutex<HashMap<UpDownActorIds, ConsumableChannelPair>>,
+    channel_map: Mutex<HashMap<UpDownActorIds, ConsumableChannelPair>>,
 
     /// Stores all actor information.
-    pub(crate) actor_infos: RwLock<HashMap<ActorId, ActorInfo>>,
+    actor_infos: RwLock<HashMap<ActorId, ActorInfo>>,
 
     /// Stores the local address.
     ///
@@ -204,6 +204,26 @@ impl SharedContext {
         let mut actor_infos = self.actor_infos.write();
         for actor_id in actors {
             actor_infos.remove(actor_id);
+        }
+    }
+
+    pub(crate) fn add_actors(&self, new_actor_infos: impl Iterator<Item = ActorInfo>) {
+        let mut actor_infos = self.actor_infos.write();
+        for actor in new_actor_infos {
+            if let Some(prev_actor) = actor_infos.get(&actor.get_actor_id()) {
+                if cfg!(debug_assertions) {
+                    panic!("duplicate actor info: {:?} {:?}", actor, actor_infos);
+                }
+                if prev_actor != &actor {
+                    warn!(
+                        ?prev_actor,
+                        ?actor,
+                        "add actor again but have different actor info. ignored"
+                    );
+                }
+            } else {
+                actor_infos.insert(actor.get_actor_id(), actor);
+            }
         }
     }
 }

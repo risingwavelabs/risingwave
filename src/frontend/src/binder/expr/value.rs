@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -399,7 +399,7 @@ mod tests {
         ];
 
         for i in 0..values.len() {
-            let res = binder.bind_value(Number(values[i].to_string())).unwrap();
+            let res = binder.bind_value(Number(values[i].to_owned())).unwrap();
             let ans = Literal::new(data[i].clone(), data_type[i].clone());
             assert_eq!(res, ans);
         }
@@ -484,7 +484,7 @@ mod tests {
 
         for i in 0..values.len() {
             let value = Value::Interval {
-                value: values[i].to_string(),
+                value: values[i].to_owned(),
                 leading_field: None,
                 leading_precision: None,
                 last_field: None,

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -233,7 +233,7 @@ impl TableScan {
         let new_predicate = self.predicate.clone().rewrite_expr(&mut rewriter);
 
         Self::new(
-            index_name.to_string(),
+            index_name.to_owned(),
             new_output_col_idx,
             index_table_catalog,
             vec![],

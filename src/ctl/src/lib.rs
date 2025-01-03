@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -282,6 +282,12 @@ enum HummockCommands {
         #[clap(long, default_value = "100")]
         concurrency: u32,
     },
+    ResizeCache {
+        #[clap(long)]
+        meta_cache_capacity_mb: Option<u64>,
+        #[clap(long)]
+        data_cache_capacity_mb: Option<u64>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -437,6 +443,14 @@ enum MetaCommands {
         /// If privatelink is used, specify `connection.id` instead of `connection.name`
         #[clap(long)]
         props: String,
+    },
+
+    /// Performing graph check for scaling.
+    #[clap(verbatim_doc_comment)]
+    GraphCheck {
+        /// SQL endpoint
+        #[clap(long, required = true)]
+        endpoint: String,
     },
 }
 
@@ -732,6 +746,18 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         }) => {
             migrate_legacy_object(url, source_dir, target_dir, concurrency).await?;
         }
+        Commands::Hummock(HummockCommands::ResizeCache {
+            meta_cache_capacity_mb,
+            data_cache_capacity_mb,
+        }) => {
+            const MIB: u64 = 1024 * 1024;
+            cmd_impl::hummock::resize_cache(
+                context,
+                meta_cache_capacity_mb.map(|v| v * MIB),
+                data_cache_capacity_mb.map(|v| v * MIB),
+            )
+            .await?
+        }
         Commands::Table(TableCommands::Scan {
             mv_name,
             data_dir,
@@ -798,6 +824,9 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         }
         Commands::Meta(MetaCommands::ValidateSource { props }) => {
             cmd_impl::meta::validate_source(context, props).await?
+        }
+        Commands::Meta(MetaCommands::GraphCheck { endpoint }) => {
+            cmd_impl::meta::graph_check(endpoint).await?
         }
         Commands::AwaitTree => cmd_impl::await_tree::dump(context).await?,
         Commands::Profile(ProfileCommands::Cpu { sleep }) => {

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -223,7 +223,7 @@ impl Scheduler {
 
         let slots = workers
             .iter()
-            .map(|(worker_id, worker)| (*worker_id as WorkerId, worker.parallelism()))
+            .map(|(worker_id, worker)| (*worker_id as WorkerId, worker.compute_node_parallelism()))
             .collect();
 
         let parallelism = default_parallelism.get();

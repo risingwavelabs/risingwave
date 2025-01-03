@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
 pub mod parquet_file_handler;
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -23,6 +24,7 @@ use iceberg::expr::Predicate as IcebergPredicate;
 use iceberg::scan::FileScanTask;
 use iceberg::spec::TableMetadata;
 use iceberg::table::Table;
+use iceberg::Catalog;
 use itertools::Itertools;
 pub use parquet_file_handler::*;
 use risingwave_common::bail;
@@ -39,10 +41,9 @@ use crate::connector_common::IcebergCommon;
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::ParserConfig;
 use crate::source::{
-    BoxChunkSourceStream, Column, SourceContextRef, SourceEnumeratorContextRef, SourceProperties,
+    BoxSourceChunkStream, Column, SourceContextRef, SourceEnumeratorContextRef, SourceProperties,
     SplitEnumerator, SplitId, SplitMetaData, SplitReader, UnknownFields,
 };
-
 pub const ICEBERG_CONNECTOR: &str = "iceberg";
 
 #[derive(Clone, Debug, Deserialize, with_options::WithOptions)]
@@ -60,35 +61,45 @@ pub struct IcebergProperties {
     pub unknown_fields: HashMap<String, String>,
 }
 
-use iceberg::table::Table as TableV2;
-
 impl IcebergProperties {
-    pub async fn load_table_v2(&self) -> ConnectorResult<TableV2> {
+    pub async fn create_catalog(&self) -> ConnectorResult<Arc<dyn Catalog>> {
         let mut java_catalog_props = HashMap::new();
         if let Some(jdbc_user) = self.jdbc_user.clone() {
-            java_catalog_props.insert("jdbc.user".to_string(), jdbc_user);
+            java_catalog_props.insert("jdbc.user".to_owned(), jdbc_user);
         }
         if let Some(jdbc_password) = self.jdbc_password.clone() {
-            java_catalog_props.insert("jdbc.password".to_string(), jdbc_password);
+            java_catalog_props.insert("jdbc.password".to_owned(), jdbc_password);
         }
-        // TODO: support java_catalog_props for iceberg source
-        self.common.load_table_v2(&java_catalog_props).await
+        // TODO: support path_style_access and java_catalog_props for iceberg source
+        self.common.create_catalog(&java_catalog_props).await
     }
 
-    pub async fn load_table_v2_with_metadata(
-        &self,
-        table_meta: TableMetadata,
-    ) -> ConnectorResult<TableV2> {
+    pub async fn load_table(&self) -> ConnectorResult<Table> {
         let mut java_catalog_props = HashMap::new();
         if let Some(jdbc_user) = self.jdbc_user.clone() {
-            java_catalog_props.insert("jdbc.user".to_string(), jdbc_user);
+            java_catalog_props.insert("jdbc.user".to_owned(), jdbc_user);
         }
         if let Some(jdbc_password) = self.jdbc_password.clone() {
-            java_catalog_props.insert("jdbc.password".to_string(), jdbc_password);
+            java_catalog_props.insert("jdbc.password".to_owned(), jdbc_password);
+        }
+        // TODO: support java_catalog_props for iceberg source
+        self.common.load_table(&java_catalog_props).await
+    }
+
+    pub async fn load_table_with_metadata(
+        &self,
+        table_meta: TableMetadata,
+    ) -> ConnectorResult<Table> {
+        let mut java_catalog_props = HashMap::new();
+        if let Some(jdbc_user) = self.jdbc_user.clone() {
+            java_catalog_props.insert("jdbc.user".to_owned(), jdbc_user);
+        }
+        if let Some(jdbc_password) = self.jdbc_password.clone() {
+            java_catalog_props.insert("jdbc.password".to_owned(), jdbc_password);
         }
         // TODO: support path_style_access and java_catalog_props for iceberg source
         self.common
-            .load_table_v2_with_metadata(table_meta, &java_catalog_props)
+            .load_table_with_metadata(table_meta, &java_catalog_props)
             .await
     }
 }
@@ -190,7 +201,7 @@ impl IcebergFileScanTaskJsonStrEnum {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct IcebergSplit {
     pub split_id: i64,
     pub snapshot_id: i64,
@@ -286,15 +297,12 @@ impl IcebergSplitEnumerator {
                 let snapshot = table
                     .metadata()
                     .snapshots()
-                    .map(|snapshot| snapshot.timestamp().map(|ts| ts.timestamp_millis()))
-                    .collect::<Result<Vec<_>, _>>()?
-                    .into_iter()
-                    .filter(|&snapshot_millis| snapshot_millis <= timestamp)
-                    .max_by_key(|&snapshot_millis| snapshot_millis);
+                    .filter(|snapshot| snapshot.timestamp_ms() <= timestamp)
+                    .max_by_key(|snapshot| snapshot.timestamp_ms());
                 match snapshot {
-                    Some(snapshot) => snapshot,
+                    Some(snapshot) => snapshot.snapshot_id(),
                     None => {
-                        // convert unix time to human readable time
+                        // convert unix time to human-readable time
                         let time = chrono::DateTime::from_timestamp_millis(timestamp);
                         if time.is_some() {
                             bail!("Cannot find a snapshot older than {}", time.unwrap());
@@ -323,7 +331,7 @@ impl IcebergSplitEnumerator {
         if batch_parallelism == 0 {
             bail!("Batch parallelism is 0. Cannot split the iceberg files.");
         }
-        let table = self.config.load_table_v2().await?;
+        let table = self.config.load_table().await?;
         let snapshot_id = Self::get_snapshot_id(&table, time_traval_info)?;
         let table_meta = TableMetadataJsonStr::serialize(table.metadata());
         if snapshot_id.is_none() {
@@ -446,7 +454,7 @@ impl IcebergSplitEnumerator {
         let delete_columns = equality_ids
             .into_iter()
             .map(|id| match schema.name_by_field_id(id) {
-                Some(name) => Ok::<std::string::String, ConnectorError>(name.to_string()),
+                Some(name) => Ok::<std::string::String, ConnectorError>(name.to_owned()),
                 None => bail!("Delete field id {} not found in schema", id),
             })
             .collect::<ConnectorResult<Vec<_>>>()?;
@@ -455,7 +463,7 @@ impl IcebergSplitEnumerator {
     }
 
     pub async fn get_delete_parameters(&self) -> ConnectorResult<(Vec<String>, bool)> {
-        let table = self.config.load_table_v2().await?;
+        let table = self.config.load_table().await?;
         let snapshot_id = Self::get_snapshot_id(&table, None)?;
         if snapshot_id.is_none() {
             return Ok((vec![], false));
@@ -502,7 +510,7 @@ impl SplitReader for IcebergFileReader {
         unimplemented!()
     }
 
-    fn into_stream(self) -> BoxChunkSourceStream {
+    fn into_stream(self) -> BoxSourceChunkStream {
         unimplemented!()
     }
 }

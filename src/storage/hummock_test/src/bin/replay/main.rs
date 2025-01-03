@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -129,7 +129,7 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalRepl
 
     let sstable_store = Arc::new(SstableStore::new(SstableStoreConfig {
         store: Arc::new(object_store),
-        path: storage_opts.data_directory.to_string(),
+        path: storage_opts.data_directory.clone(),
         prefetch_buffer_capacity: storage_opts.prefetch_buffer_capacity_mb * (1 << 20),
         max_prefetch_block_number: storage_opts.max_prefetch_block_number,
         recent_filter: None,

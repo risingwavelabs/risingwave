@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -113,7 +113,7 @@ impl StreamNode for StreamSimpleAgg {
         let (intermediate_state_table, agg_states, distinct_dedup_tables) =
             self.core.infer_tables(&self.base, None, None);
 
-        PbNodeBody::SimpleAgg(SimpleAggNode {
+        PbNodeBody::SimpleAgg(Box::new(SimpleAggNode {
             agg_calls: self
                 .agg_calls()
                 .iter()
@@ -151,7 +151,7 @@ impl StreamNode for StreamSimpleAgg {
             row_count_index: self.row_count_idx as u32,
             version: PbAggNodeVersion::Issue13465 as _,
             must_output_per_barrier: self.must_output_per_barrier,
-        })
+        }))
     }
 }
 

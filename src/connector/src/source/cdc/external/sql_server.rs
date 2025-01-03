@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -152,7 +152,7 @@ impl SqlServerExternalTable {
                     QueryItem::Metadata(_) => {}
                     QueryItem::Row(row) => {
                         let pk_name: &str = row.try_get(0)?.unwrap();
-                        pk_names.push(pk_name.to_string());
+                        pk_names.push(pk_name.to_owned());
                     }
                 }
             }
@@ -435,11 +435,11 @@ mod tests {
 
     #[test]
     fn test_sql_server_filter_expr() {
-        let cols = vec!["id".to_string()];
+        let cols = vec!["id".to_owned()];
         let expr = SqlServerExternalTableReader::filter_expression(&cols);
         assert_eq!(expr, "(\"id\" > @P1)");
 
-        let cols = vec!["aa".to_string(), "bb".to_string(), "cc".to_string()];
+        let cols = vec!["aa".to_owned(), "bb".to_owned(), "cc".to_owned()];
         let expr = SqlServerExternalTableReader::filter_expression(&cols);
         assert_eq!(
             expr,

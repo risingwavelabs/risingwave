@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -57,13 +57,13 @@ fn format(row: impl Row, formatter: &Formatter, writer: &mut impl Write) -> Resu
                         Some(ScalarRefImpl::Utf8(arg)) => quote_ident(arg, writer),
                         _ => {
                             return Err(ExprError::UnsupportedFunction(
-                                "unsupported data for specifier type 'I'".to_string(),
+                                "unsupported data for specifier type 'I'".to_owned(),
                             ))
                         }
                     },
                     SpecifierType::SqlLiteral => {
                         return Err(ExprError::UnsupportedFunction(
-                            "unsupported specifier type 'L'".to_string(),
+                            "unsupported specifier type 'L'".to_owned(),
                         ))
                     }
                 }

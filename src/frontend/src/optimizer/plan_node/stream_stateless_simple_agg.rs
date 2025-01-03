@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -84,7 +84,7 @@ impl_plan_tree_node_for_unary! { StreamStatelessSimpleAgg }
 impl StreamNode for StreamStatelessSimpleAgg {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
         use risingwave_pb::stream_plan::*;
-        PbNodeBody::StatelessSimpleAgg(SimpleAggNode {
+        PbNodeBody::StatelessSimpleAgg(Box::new(SimpleAggNode {
             agg_calls: self
                 .agg_calls()
                 .iter()
@@ -103,7 +103,7 @@ impl StreamNode for StreamStatelessSimpleAgg {
             distinct_dedup_tables: Default::default(),
             version: AggNodeVersion::Issue13465 as _,
             must_output_per_barrier: false, // this is not used
-        })
+        }))
     }
 }
 

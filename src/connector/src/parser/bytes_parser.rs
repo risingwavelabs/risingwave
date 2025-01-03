@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -54,7 +54,7 @@ mod tests {
         BytesProperties, EncodingProperties, ProtocolProperties, SourceColumnDesc,
         SourceStreamChunkBuilder, SpecificParserConfig,
     };
-    use crate::source::SourceContext;
+    use crate::source::{SourceContext, SourceCtrlOpts};
 
     fn get_payload() -> Vec<Vec<u8>> {
         vec![br#"t"#.to_vec(), br#"random"#.to_vec()]
@@ -70,7 +70,7 @@ mod tests {
             .await
             .unwrap();
 
-        let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 2);
+        let mut builder = SourceStreamChunkBuilder::new(descs, SourceCtrlOpts::for_test());
 
         for payload in get_payload() {
             let writer = builder.row_writer();
@@ -80,7 +80,8 @@ mod tests {
                 .unwrap();
         }
 
-        let chunk = builder.finish();
+        builder.finish_current_chunk();
+        let chunk = builder.consume_ready_chunks().next().unwrap();
         let mut rows = chunk.rows();
         {
             let (op, row) = rows.next().unwrap();

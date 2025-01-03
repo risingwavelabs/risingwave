@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -81,7 +81,7 @@ impl LogScan {
             .iter()
             .map(|&i| self.table_desc.columns[i].name.clone())
             .collect();
-        out_column_names.push(OP_NAME.to_string());
+        out_column_names.push(OP_NAME.to_owned());
         out_column_names
     }
 
@@ -91,7 +91,7 @@ impl LogScan {
             .iter()
             .map(|&i| self.table_desc.columns[i].name.clone())
             .collect();
-        out_column_names.push(OP_NAME.to_string());
+        out_column_names.push(OP_NAME.to_owned());
         out_column_names
     }
 

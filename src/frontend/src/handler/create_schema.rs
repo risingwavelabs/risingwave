@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -32,7 +32,7 @@ pub async fn handle_create_schema(
     owner: Option<ObjectName>,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
-    let database_name = session.database();
+    let database_name = &session.database();
     let schema_name = Binder::resolve_schema_name(schema_name)?;
 
     if schema_name.starts_with(RESERVED_PG_SCHEMA_PREFIX) {
@@ -71,7 +71,7 @@ pub async fn handle_create_schema(
             .read_guard()
             .get_user_by_name(&owner)
             .map(|u| u.id)
-            .ok_or_else(|| CatalogError::NotFound("user", owner.to_string()))?
+            .ok_or_else(|| CatalogError::NotFound("user", owner.clone()))?
     } else {
         session.user_id()
     };

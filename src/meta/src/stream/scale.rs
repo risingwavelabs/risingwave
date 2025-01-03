@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -140,6 +140,7 @@ impl CustomFragmentInfo {
 
 use educe::Educe;
 
+use super::SourceChange;
 use crate::controller::id::IdCategory;
 
 // The debug implementation is arbitrary. Just used in debug logs.
@@ -590,6 +591,9 @@ impl ScaleController {
                     vnode_bitmap,
                 } = actors.first().unwrap().clone();
 
+                let (related_job, job_definition) =
+                    related_jobs.get(&job_id).expect("job not found");
+
                 let fragment = CustomFragmentInfo {
                     fragment_id: fragment_id as _,
                     fragment_type_mask: fragment_type_mask as _,
@@ -603,8 +607,7 @@ impl ScaleController {
                         dispatcher,
                         upstream_actor_id,
                         vnode_bitmap: vnode_bitmap.map(|b| b.to_protobuf()),
-                        // todo, we need to fill this part
-                        mview_definition: "".to_string(),
+                        mview_definition: job_definition.to_owned(),
                         expr_context: expr_contexts
                             .get(&actor_id)
                             .cloned()
@@ -616,8 +619,6 @@ impl ScaleController {
                 fragment_map.insert(fragment_id as _, fragment);
 
                 fragment_to_table.insert(fragment_id as _, TableId::from(job_id as u32));
-
-                let related_job = related_jobs.get(&job_id).expect("job not found");
 
                 fragment_state.insert(
                     fragment_id,
@@ -1758,6 +1759,7 @@ impl ScaleController {
         let mut stream_source_actor_splits = HashMap::new();
         let mut stream_source_dropped_actors = HashSet::new();
 
+        // todo: handle adaptive splits
         for (fragment_id, reschedule) in reschedules {
             if !reschedule.actor_splits.is_empty() {
                 stream_source_actor_splits
@@ -1768,12 +1770,10 @@ impl ScaleController {
 
         if !stream_source_actor_splits.is_empty() {
             self.source_manager
-                .apply_source_change(
-                    None,
-                    None,
-                    Some(stream_source_actor_splits),
-                    Some(stream_source_dropped_actors),
-                )
+                .apply_source_change(SourceChange::Reschedule {
+                    split_assignment: stream_source_actor_splits,
+                    dropped_actors: stream_source_dropped_actors,
+                })
                 .await;
         }
 
@@ -1816,7 +1816,7 @@ impl ScaleController {
 
         let schedulable_worker_slots = workers
             .values()
-            .map(|worker| (worker.id as WorkerId, worker.parallelism()))
+            .map(|worker| (worker.id as WorkerId, worker.compute_node_parallelism()))
             .collect::<BTreeMap<_, _>>();
 
         // index for no shuffle relation
@@ -2577,7 +2577,7 @@ impl GlobalStreamManager {
 
                             match prev_worker {
                                 // todo, add label checking in further changes
-                                Some(prev_worker) if prev_worker.parallelism() != worker.parallelism()  => {
+                                Some(prev_worker) if prev_worker.compute_node_parallelism() != worker.compute_node_parallelism()  => {
                                     tracing::info!(worker = worker.id, "worker parallelism changed");
                                     should_trigger = true;
                                 }

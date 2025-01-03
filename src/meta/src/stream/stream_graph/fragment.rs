@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,7 +27,9 @@ use risingwave_common::catalog::{
 use risingwave_common::hash::VnodeCount;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::stream_graph_visitor;
-use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
+use risingwave_common::util::stream_graph_visitor::{
+    visit_stream_node_cont, visit_stream_node_cont_mut,
+};
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::ddl_service::TableJobType;
@@ -38,11 +40,11 @@ use risingwave_pb::stream_plan::stream_fragment_graph::{
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     DispatchStrategy, DispatcherType, FragmentTypeFlag, StreamActor,
-    StreamFragmentGraph as StreamFragmentGraphProto, StreamScanNode, StreamScanType,
+    StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamScanNode, StreamScanType,
 };
 
 use crate::barrier::SnapshotBackfillInfo;
-use crate::manager::{DdlType, MetaSrvEnv, StreamingJob};
+use crate::manager::{MetaSrvEnv, StreamingJob, StreamingJobType};
 use crate::model::{ActorId, FragmentId};
 use crate::stream::stream_graph::id::{GlobalFragmentId, GlobalFragmentIdGen, GlobalTableIdGen};
 use crate::stream::stream_graph::schedule::Distribution;
@@ -602,8 +604,8 @@ impl StreamFragmentGraph {
                             match (prev_snapshot_backfill_info, is_snapshot_backfill) {
                                 (Some(prev_snapshot_backfill_info), true) => {
                                     prev_snapshot_backfill_info
-                                        .upstream_mv_table_ids
-                                        .insert(TableId::new(stream_scan.table_id));
+                                        .upstream_mv_table_id_to_backfill_epoch
+                                        .insert(TableId::new(stream_scan.table_id), None);
                                     true
                                 }
                                 (None, false) => true,
@@ -617,14 +619,14 @@ impl StreamFragmentGraph {
                             prev_stream_scan = Some((
                                 if is_snapshot_backfill {
                                     Some(SnapshotBackfillInfo {
-                                        upstream_mv_table_ids: HashSet::from_iter([TableId::new(
-                                            stream_scan.table_id,
-                                        )]),
+                                        upstream_mv_table_id_to_backfill_epoch: HashMap::from_iter(
+                                            [(TableId::new(stream_scan.table_id), None)],
+                                        ),
                                     })
                                 } else {
                                     None
                                 },
-                                stream_scan.clone(),
+                                *stream_scan.clone(),
                             ));
                             true
                         }
@@ -640,6 +642,44 @@ impl StreamFragmentGraph {
                 .unwrap_or(None)
         })
     }
+}
+
+/// Fill snapshot epoch for `StreamScanNode` of `SnapshotBackfill`.
+/// Return `true` when has change applied.
+pub fn fill_snapshot_backfill_epoch(
+    node: &mut StreamNode,
+    upstream_mv_table_snapshot_epoch: &HashMap<TableId, Option<u64>>,
+) -> MetaResult<bool> {
+    let mut result = Ok(());
+    let mut applied = false;
+    visit_stream_node_cont_mut(node, |node| {
+        if let Some(NodeBody::StreamScan(stream_scan)) = node.node_body.as_mut()
+            && stream_scan.stream_scan_type == StreamScanType::SnapshotBackfill as i32
+        {
+            result = try {
+                let table_id = TableId::new(stream_scan.table_id);
+                let snapshot_epoch = upstream_mv_table_snapshot_epoch
+                    .get(&table_id)
+                    .ok_or_else(|| anyhow!("upstream table id not covered: {}", table_id))?
+                    .ok_or_else(|| anyhow!("upstream table id not set: {}", table_id))?;
+                if let Some(prev_snapshot_epoch) =
+                    stream_scan.snapshot_backfill_epoch.replace(snapshot_epoch)
+                {
+                    Err(anyhow!(
+                        "snapshot backfill epoch set again: {} {} {}",
+                        table_id,
+                        prev_snapshot_epoch,
+                        snapshot_epoch
+                    ))?;
+                }
+                applied = true;
+            };
+            result.is_ok()
+        } else {
+            true
+        }
+    });
+    result.map(|_| applied)
 }
 
 static EMPTY_HASHMAP: LazyLock<HashMap<GlobalFragmentId, StreamFragmentEdge>> =
@@ -689,7 +729,7 @@ pub struct FragmentGraphUpstreamContext {
 }
 
 pub struct FragmentGraphDownstreamContext {
-    original_table_fragment_id: FragmentId,
+    original_root_fragment_id: FragmentId,
     downstream_fragments: Vec<(DispatchStrategy, Fragment)>,
     downstream_actor_location: HashMap<ActorId, WorkerId>,
 }
@@ -708,13 +748,14 @@ impl CompleteStreamFragmentGraph {
         }
     }
 
-    /// Create a new [`CompleteStreamFragmentGraph`] for MV on MV and CDC/Source Table with the upstream existing
+    /// Create a new [`CompleteStreamFragmentGraph`] for newly created job (which has no downstreams).
+    /// e.g., MV on MV and CDC/Source Table with the upstream existing
     /// `Materialize` or `Source` fragments.
     pub fn with_upstreams(
         graph: StreamFragmentGraph,
         upstream_root_fragments: HashMap<TableId, Fragment>,
         existing_actor_location: HashMap<ActorId, WorkerId>,
-        ddl_type: DdlType,
+        job_type: StreamingJobType,
     ) -> MetaResult<Self> {
         Self::build_helper(
             graph,
@@ -723,40 +764,40 @@ impl CompleteStreamFragmentGraph {
                 upstream_actor_location: existing_actor_location,
             }),
             None,
-            ddl_type,
+            job_type,
         )
     }
 
-    /// Create a new [`CompleteStreamFragmentGraph`] for replacing an existing table, with the
-    /// downstream existing `StreamScan` fragments.
+    /// Create a new [`CompleteStreamFragmentGraph`] for replacing an existing table/source,
+    /// with the downstream existing `StreamScan`/`StreamSourceScan` fragments.
     pub fn with_downstreams(
         graph: StreamFragmentGraph,
-        original_table_fragment_id: FragmentId,
+        original_root_fragment_id: FragmentId,
         downstream_fragments: Vec<(DispatchStrategy, Fragment)>,
         existing_actor_location: HashMap<ActorId, WorkerId>,
-        ddl_type: DdlType,
+        job_type: StreamingJobType,
     ) -> MetaResult<Self> {
         Self::build_helper(
             graph,
             None,
             Some(FragmentGraphDownstreamContext {
-                original_table_fragment_id,
+                original_root_fragment_id,
                 downstream_fragments,
                 downstream_actor_location: existing_actor_location,
             }),
-            ddl_type,
+            job_type,
         )
     }
 
-    /// For replacing an existing table based on shared cdc source
+    /// For replacing an existing table based on shared cdc source, which has both upstreams and downstreams.
     pub fn with_upstreams_and_downstreams(
         graph: StreamFragmentGraph,
         upstream_root_fragments: HashMap<TableId, Fragment>,
         upstream_actor_location: HashMap<ActorId, WorkerId>,
-        original_table_fragment_id: FragmentId,
+        original_root_fragment_id: FragmentId,
         downstream_fragments: Vec<(DispatchStrategy, Fragment)>,
         downstream_actor_location: HashMap<ActorId, WorkerId>,
-        ddl_type: DdlType,
+        job_type: StreamingJobType,
     ) -> MetaResult<Self> {
         Self::build_helper(
             graph,
@@ -765,11 +806,11 @@ impl CompleteStreamFragmentGraph {
                 upstream_actor_location,
             }),
             Some(FragmentGraphDownstreamContext {
-                original_table_fragment_id,
+                original_root_fragment_id,
                 downstream_fragments,
                 downstream_actor_location,
             }),
-            ddl_type,
+            job_type,
         )
     }
 
@@ -778,7 +819,7 @@ impl CompleteStreamFragmentGraph {
         mut graph: StreamFragmentGraph,
         upstream_ctx: Option<FragmentGraphUpstreamContext>,
         downstream_ctx: Option<FragmentGraphDownstreamContext>,
-        ddl_type: DdlType,
+        job_type: StreamingJobType,
     ) -> MetaResult<Self> {
         let mut extra_downstreams = HashMap::new();
         let mut extra_upstreams = HashMap::new();
@@ -794,8 +835,8 @@ impl CompleteStreamFragmentGraph {
             for (&id, fragment) in &mut graph.fragments {
                 let uses_shuffled_backfill = fragment.has_shuffled_backfill();
                 for (&upstream_table_id, output_columns) in &fragment.upstream_table_columns {
-                    let (up_fragment_id, edge) = match ddl_type {
-                        DdlType::Table(TableJobType::SharedCdcSource) => {
+                    let (up_fragment_id, edge) = match job_type {
+                        StreamingJobType::Table(TableJobType::SharedCdcSource) => {
                             let source_fragment = upstream_root_fragments
                                 .get(&upstream_table_id)
                                 .context("upstream source fragment not found")?;
@@ -831,7 +872,9 @@ impl CompleteStreamFragmentGraph {
 
                             (source_job_id, edge)
                         }
-                        DdlType::MaterializedView | DdlType::Sink | DdlType::Index => {
+                        StreamingJobType::MaterializedView
+                        | StreamingJobType::Sink
+                        | StreamingJobType::Index => {
                             // handle MV on MV/Source
 
                             // Build the extra edges between the upstream `Materialize` and the downstream `StreamScan`
@@ -927,8 +970,8 @@ impl CompleteStreamFragmentGraph {
                                 bail!("the upstream fragment should be a MView or Source, got fragment type: {:b}", upstream_fragment.fragment_type_mask)
                             }
                         }
-                        DdlType::Source | DdlType::Table(_) => {
-                            bail!("the streaming job shouldn't have an upstream fragment, ddl_type: {:?}", ddl_type)
+                        StreamingJobType::Source | StreamingJobType::Table(_) => {
+                            bail!("the streaming job shouldn't have an upstream fragment, job_type: {:?}", job_type)
                         }
                     };
 
@@ -956,12 +999,12 @@ impl CompleteStreamFragmentGraph {
         }
 
         if let Some(FragmentGraphDownstreamContext {
-            original_table_fragment_id,
+            original_root_fragment_id,
             downstream_fragments,
             downstream_actor_location,
         }) = downstream_ctx
         {
-            let original_table_fragment_id = GlobalFragmentId::new(original_table_fragment_id);
+            let original_table_fragment_id = GlobalFragmentId::new(original_root_fragment_id);
             let table_fragment_id = GlobalFragmentId::new(graph.table_fragment_id());
 
             // Build the extra edges between the `Materialize` and the downstream `StreamScan` of the

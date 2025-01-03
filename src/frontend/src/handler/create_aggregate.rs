@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -55,7 +55,7 @@ pub async fn handle_create_aggregate(
     let runtime = match params.runtime {
         Some(_) => {
             return Err(ErrorCode::InvalidParameterValue(
-                "runtime selection is currently not supported".to_string(),
+                "runtime selection is currently not supported".to_owned(),
             )
             .into());
         }
@@ -67,13 +67,13 @@ pub async fn handle_create_aggregate(
     let mut arg_names = vec![];
     let mut arg_types = vec![];
     for arg in args {
-        arg_names.push(arg.name.map_or("".to_string(), |n| n.real_value()));
+        arg_names.push(arg.name.map_or("".to_owned(), |n| n.real_value()));
         arg_types.push(bind_data_type(&arg.data_type)?);
     }
 
     // resolve database and schema id
     let session = &handler_args.session;
-    let db_name = session.database();
+    let db_name = &session.database();
     let (schema_name, function_name) = Binder::resolve_schema_qualified_name(db_name, name)?;
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
 
@@ -129,7 +129,7 @@ pub async fn handle_create_aggregate(
         language,
         runtime,
         identifier: Some(output.identifier),
-        link: link.map(|s| s.to_string()),
+        link: link.map(|s| s.to_owned()),
         body: output.body,
         compressed_binary: output.compressed_binary,
         owner: session.user_id(),

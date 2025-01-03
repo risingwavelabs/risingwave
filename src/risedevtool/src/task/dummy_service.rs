@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@ pub struct DummyService {
 
 impl DummyService {
     pub fn new(id: &str) -> Self {
-        Self { id: id.to_string() }
+        Self { id: id.to_owned() }
     }
 }
 

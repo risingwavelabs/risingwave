@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,6 +26,8 @@ use risingwave_frontend_macro::system_catalog;
         SELECT id, name, 'sink' as relation_type FROM rw_sinks
         UNION ALL
         SELECT id, name, 'index' as relation_type FROM rw_indexes
+        UNION ALL
+        SELECT id, name, 'source' as relation_type FROM rw_sources WHERE is_shared = true
     )
     SELECT
         job.id,

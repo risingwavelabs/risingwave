@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,13 +17,17 @@ use std::fmt::Write;
 use anyhow::anyhow;
 use risingwave_expr::{capture_context, function, ExprError, Result};
 use risingwave_sqlparser::ast::Statement;
-use risingwave_sqlparser::parser::Parser;
 
 use super::context::{CATALOG_READER, DB_NAME};
 use crate::catalog::CatalogReader;
 
 #[function("pg_get_viewdef(int4) -> varchar")]
 fn pg_get_viewdef(oid: i32, writer: &mut impl Write) -> Result<()> {
+    pg_get_viewdef_pretty(oid, false, writer)
+}
+
+#[function("pg_get_viewdef(int4, boolean) -> varchar")]
+fn pg_get_viewdef_pretty(oid: i32, _pretty: bool, writer: &mut impl Write) -> Result<()> {
     pg_get_viewdef_impl_captured(oid, writer)
 }
 
@@ -40,9 +44,7 @@ fn pg_get_viewdef_impl(
         write!(writer, "{}", view.sql).unwrap();
         Ok(())
     } else if let Ok(mv) = catalog_reader.get_created_table_by_id_with_db(db_name, oid as u32) {
-        let stmts = Parser::parse_sql(&mv.definition).map_err(|e| anyhow!(e))?;
-        let [stmt]: [_; 1] = stmts.try_into().unwrap();
-
+        let stmt = mv.create_sql_ast().map_err(|e| anyhow!(e))?;
         if let Statement::CreateView {
             query,
             materialized,

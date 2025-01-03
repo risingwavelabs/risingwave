@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -440,7 +440,7 @@ impl SetSlice<Bytes> for Bytes {
     }
 }
 
-pub trait CopyFromSlice {
+pub trait CopyFromSlice: Send + 'static {
     fn copy_from_slice(slice: &[u8]) -> Self;
 }
 
@@ -454,6 +454,10 @@ impl CopyFromSlice for Bytes {
     fn copy_from_slice(slice: &[u8]) -> Self {
         Bytes::copy_from_slice(slice)
     }
+}
+
+impl CopyFromSlice for () {
+    fn copy_from_slice(_: &[u8]) -> Self {}
 }
 
 /// [`TableKey`] is an internal concept in storage. It's a wrapper around the key directly from the

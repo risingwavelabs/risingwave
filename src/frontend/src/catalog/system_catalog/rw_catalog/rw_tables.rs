@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -47,7 +47,7 @@ fn read_rw_table_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwTable>> {
         .flat_map(|schema| {
             schema.iter_user_table().map(|table| RwTable {
                 id: table.id.table_id as i32,
-                name: table.name().to_string(),
+                name: table.name().to_owned(),
                 schema_id: schema.id() as i32,
                 owner: table.owner as i32,
                 definition: table.create_sql(),

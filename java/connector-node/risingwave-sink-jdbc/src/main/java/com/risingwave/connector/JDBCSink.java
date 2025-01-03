@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -53,7 +53,9 @@ public class JDBCSink implements SinkWriter {
         var factory = JdbcUtils.getDialectFactory(jdbcUrl);
         this.config = config;
         try {
-            conn = JdbcUtils.getConnection(config.getJdbcUrl());
+            conn =
+                    JdbcUtils.getConnection(
+                            config.getJdbcUrl(), config.getUser(), config.getPassword());
             // Table schema has been validated before, so we get the PK from it directly
             this.pkColumnNames = tableSchema.getPrimaryKeys();
             // column name -> java.sql.Types
@@ -179,7 +181,11 @@ public class JDBCSink implements SinkWriter {
                         conn.close();
 
                         // create a new connection if the current connection is invalid
-                        conn = JdbcUtils.getConnection(config.getJdbcUrl());
+                        conn =
+                                JdbcUtils.getConnection(
+                                        config.getJdbcUrl(),
+                                        config.getUser(),
+                                        config.getPassword());
                         // reset the flag since we will retry to prepare the batch again
                         updateFlag = false;
                         jdbcStatements = new JdbcStatements(conn, config.getQueryTimeout());

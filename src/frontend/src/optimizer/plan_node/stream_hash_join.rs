@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -359,7 +359,7 @@ impl StreamNode for StreamHashJoin {
 
         let null_safe_prost = self.eq_join_predicate.null_safes().into_iter().collect();
 
-        NodeBody::HashJoin(HashJoinNode {
+        NodeBody::HashJoin(Box::new(HashJoinNode {
             join_type: self.core.join_type as i32,
             left_key: left_jk_indices_prost,
             right_key: right_jk_indices_prost,
@@ -403,7 +403,7 @@ impl StreamNode for StreamHashJoin {
             right_deduped_input_pk_indices,
             output_indices: self.core.output_indices.iter().map(|&x| x as u32).collect(),
             is_append_only: self.is_append_only,
-        })
+        }))
     }
 }
 

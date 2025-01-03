@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -130,13 +130,13 @@ impl StreamNode for StreamOverWindow {
             .config()
             .streaming_over_window_cache_policy();
 
-        PbNodeBody::OverWindow(OverWindowNode {
+        PbNodeBody::OverWindow(Box::new(OverWindowNode {
             calls,
             partition_by,
             order_by,
             state_table: Some(state_table),
             cache_policy: cache_policy.to_protobuf() as _,
-        })
+        }))
     }
 }
 

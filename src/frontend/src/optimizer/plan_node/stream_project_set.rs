@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -111,7 +111,7 @@ impl StreamNode for StreamProjectSet {
             .iter()
             .map(|(i, o)| (*i as u32, *o as u32))
             .unzip();
-        PbNodeBody::ProjectSet(ProjectSetNode {
+        PbNodeBody::ProjectSet(Box::new(ProjectSetNode {
             select_list: self
                 .core
                 .select_list
@@ -121,7 +121,7 @@ impl StreamNode for StreamProjectSet {
             watermark_input_cols,
             watermark_expr_indices,
             nondecreasing_exprs: self.nondecreasing_exprs.iter().map(|i| *i as _).collect(),
-        })
+        }))
     }
 }
 

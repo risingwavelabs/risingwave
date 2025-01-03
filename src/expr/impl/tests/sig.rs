@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -60,7 +60,7 @@ fn test_func_sig_map() {
     let expected = expect_test::expect![[r#"
         [
             "cast(anyarray) -> character varying/anyarray",
-            "cast(bigint) -> rw_int256/integer/smallint/numeric/double precision/real/character varying",
+            "cast(bigint) -> rw_int256/serial/integer/smallint/numeric/double precision/real/character varying",
             "cast(boolean) -> integer/character varying",
             "cast(character varying) -> jsonb/interval/timestamp without time zone/time without time zone/date/rw_int256/real/double precision/numeric/smallint/integer/bigint/character varying/boolean/bytea/anyarray",
             "cast(date) -> timestamp without time zone/character varying",

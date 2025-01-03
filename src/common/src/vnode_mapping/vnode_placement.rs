@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -42,7 +42,7 @@ pub fn place_vnode(
         .iter()
         .filter(|w| w.property.as_ref().map_or(false, |p| p.is_serving))
         .sorted_by_key(|w| w.id)
-        .map(|w| (0..w.parallelism()).map(|idx| WorkerSlotId::new(w.id, idx)))
+        .map(|w| (0..w.compute_node_parallelism()).map(|idx| WorkerSlotId::new(w.id, idx)))
         .collect();
 
     // Set serving parallelism to the minimum of total number of worker slots, specified

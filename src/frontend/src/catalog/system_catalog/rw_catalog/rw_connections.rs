@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -47,9 +47,9 @@ fn read_rw_connections(reader: &SysCatalogReaderImpl) -> Result<Vec<RwConnection
                     schema_id: schema.id() as i32,
                     owner: conn.owner as i32,
                     type_: conn.connection_type().into(),
-                    provider: "".to_string(),
+                    provider: "".to_owned(),
                     acl: vec![],
-                    connection_params: "".to_string(),
+                    connection_params: "".to_owned(),
                 };
                 match &conn.info {
                     risingwave_pb::catalog::connection::Info::PrivateLinkService(_) => {

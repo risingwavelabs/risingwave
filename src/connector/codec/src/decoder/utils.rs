@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,9 +12,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use num_bigint::{BigInt, Sign};
+
 use super::{bail_uncategorized, AccessResult};
 
-pub fn extract_decimal(bytes: Vec<u8>) -> AccessResult<(u32, u32, u32)> {
+pub fn scaled_bigint_to_rust_decimal(
+    value: BigInt,
+    scale: usize,
+) -> AccessResult<rust_decimal::Decimal> {
+    let (sign, bytes) = value.to_bytes_be();
+    let negative = sign == Sign::Minus;
+    let (lo, mid, hi) = extract_decimal(bytes)?;
+
+    Ok(rust_decimal::Decimal::from_parts(
+        lo,
+        mid,
+        hi,
+        negative,
+        scale as u32,
+    ))
+}
+
+fn extract_decimal(bytes: Vec<u8>) -> AccessResult<(u32, u32, u32)> {
     match bytes.len() {
         len @ 0..=4 => {
             let mut pad = vec![0; 4 - len];

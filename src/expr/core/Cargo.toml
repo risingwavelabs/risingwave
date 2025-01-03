@@ -9,18 +9,11 @@ license = { workspace = true }
 repository = { workspace = true }
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-[package.metadata.cargo-machete]
-ignored = ["workspace-hack", "ctor"]
-
-[package.metadata.cargo-udeps.ignore]
-normal = ["workspace-hack", "ctor"]
-
 [dependencies]
 anyhow = "1"
 async-trait = "0.1"
 auto_impl = "1"
 await-tree = { workspace = true }
-cfg-or-panic = "0.2"
 chrono = { version = "0.4", default-features = false, features = [
     "clock",
     "std",
@@ -35,7 +28,7 @@ futures = "0.3"
 futures-async-stream = { workspace = true }
 futures-util = "0.3"
 itertools = { workspace = true }
-linkme = { version = "0.3", features = ["used_linker"] }
+linkme = { workspace = true }
 num-traits = "0.2"
 parse-display = "0.10"
 paste = "1"

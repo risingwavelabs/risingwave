@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,7 +27,7 @@ use anyhow::Context as _;
 use risingwave_connector_codec::JsonSchema;
 use risingwave_pb::plan_common::ColumnDesc;
 
-use super::util::{bytes_from_url, get_kafka_topic};
+use super::utils::{bytes_from_url, get_kafka_topic};
 use super::{JsonProperties, SchemaRegistryAuth};
 use crate::error::ConnectorResult;
 use crate::parser::unified::json::{JsonAccess, JsonParseOptions};

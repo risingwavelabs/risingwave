@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -162,15 +162,15 @@ impl Source {
 
         let key = Field {
             data_type: DataType::Varchar,
-            name: "partition_id".to_string(),
+            name: "partition_id".to_owned(),
             sub_fields: vec![],
-            type_name: "".to_string(),
+            type_name: "".to_owned(),
         };
         let value = Field {
             data_type: DataType::Jsonb,
-            name: "offset_info".to_string(),
+            name: "offset_info".to_owned(),
             sub_fields: vec![],
-            type_name: "".to_string(),
+            type_name: "".to_owned(),
         };
 
         let ordered_col_idx = builder.add_column(&key);

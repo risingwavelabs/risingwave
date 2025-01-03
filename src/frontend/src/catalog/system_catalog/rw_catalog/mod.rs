@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -61,4 +61,5 @@ mod rw_worker_nodes;
 mod rw_actor_id_to_ddl;
 mod rw_actor_splits;
 mod rw_fragment_id_to_ddl;
+mod rw_internal_table_info;
 mod rw_worker_actor_count;

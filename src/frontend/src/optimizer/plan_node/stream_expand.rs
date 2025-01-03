@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -79,13 +79,13 @@ impl_distill_by_unit!(StreamExpand, core, "StreamExpand");
 
 impl StreamNode for StreamExpand {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
-        PbNodeBody::Expand(ExpandNode {
+        PbNodeBody::Expand(Box::new(ExpandNode {
             column_subsets: self
                 .column_subsets()
                 .iter()
                 .map(|subset| subset_to_protobuf(subset))
                 .collect(),
-        })
+        }))
     }
 }
 

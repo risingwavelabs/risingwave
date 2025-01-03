@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -158,7 +158,7 @@ impl FromStr for StructType {
             let mut iter = field.split_whitespace();
             let field_name = iter.next().unwrap();
             let field_type = iter.next().unwrap();
-            field_names.push(field_name.to_string());
+            field_names.push(field_name.to_owned());
             field_types.push(DataType::from_str(field_type)?);
         }
         Ok(Self(Arc::new(StructTypeInner {

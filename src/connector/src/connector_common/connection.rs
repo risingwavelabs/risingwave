@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,8 +25,11 @@ use with_options::WithOptions;
 
 use crate::connector_common::{AwsAuthProps, KafkaConnectionProps, KafkaPrivateLinkCommon};
 use crate::error::ConnectorResult;
+use crate::schema::schema_registry::Client as ConfluentSchemaRegistryClient;
 use crate::source::kafka::{KafkaContextCommon, RwConsumerContext};
 use crate::{dispatch_connection_impl, ConnectionImpl};
+
+pub const SCHEMA_REGISTRY_CONNECTION_TYPE: &str = "schema_registry";
 
 #[async_trait]
 pub trait Connection {
@@ -118,11 +121,22 @@ impl Connection for IcebergConnection {
 #[serde_as]
 #[derive(Debug, Clone, Deserialize, WithOptions, PartialEq, Hash, Eq)]
 #[serde(deny_unknown_fields)]
-pub struct SchemaRegistryConnection {}
+pub struct ConfluentSchemaRegistryConnection {
+    #[serde(rename = "schema.registry")]
+    pub url: String,
+    // ref `SchemaRegistryAuth`
+    #[serde(rename = "schema.registry.username")]
+    pub username: Option<String>,
+    #[serde(rename = "schema.registry.password")]
+    pub password: Option<String>,
+}
 
 #[async_trait]
-impl Connection for SchemaRegistryConnection {
+impl Connection for ConfluentSchemaRegistryConnection {
     async fn test_connection(&self) -> ConnectorResult<()> {
-        todo!()
+        // GET /config to validate the connection
+        let client = ConfluentSchemaRegistryClient::try_from(self)?;
+        client.validate_connection().await?;
+        Ok(())
     }
 }

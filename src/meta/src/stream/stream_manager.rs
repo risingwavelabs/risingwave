@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -34,7 +34,9 @@ use crate::barrier::{
     ReplaceStreamJobPlan, SnapshotBackfillInfo,
 };
 use crate::error::bail_invalid_parameter;
-use crate::manager::{DdlType, MetaSrvEnv, MetadataManager, NotificationVersion, StreamingJob};
+use crate::manager::{
+    MetaSrvEnv, MetadataManager, NotificationVersion, StreamingJob, StreamingJobType,
+};
 use crate::model::{ActorId, FragmentId, StreamJobFragments, TableParallelism};
 use crate::stream::SourceManagerRef;
 use crate::{MetaError, MetaResult};
@@ -74,7 +76,7 @@ pub struct CreateStreamingJobContext {
 
     pub create_type: CreateType,
 
-    pub ddl_type: DdlType,
+    pub job_type: StreamingJobType,
 
     /// Context provided for potential replace table, typically used when sinking into a table.
     pub replace_table_job_info: Option<(StreamingJob, ReplaceStreamJobContext, StreamJobFragments)>,
@@ -334,7 +336,7 @@ impl GlobalStreamManager {
             upstream_root_actors,
             definition,
             create_type,
-            ddl_type,
+            job_type,
             replace_table_job_info,
             internal_tables,
             snapshot_backfill_info,
@@ -391,10 +393,10 @@ impl GlobalStreamManager {
             upstream_root_actors,
             dispatchers,
             init_split_assignment,
-            definition: definition.to_string(),
+            definition: definition.clone(),
             streaming_job: streaming_job.clone(),
             internal_tables: internal_tables.into_values().collect_vec(),
-            ddl_type,
+            job_type,
             create_type,
         };
 
@@ -474,7 +476,13 @@ impl GlobalStreamManager {
         }: ReplaceStreamJobContext,
     ) -> MetaResult<()> {
         let tmp_table_id = new_fragments.stream_job_id();
-        let init_split_assignment = self.source_manager.allocate_splits(&tmp_table_id).await?;
+        let init_split_assignment = if streaming_job.is_source() {
+            self.source_manager
+                .allocate_splits_for_replace_source(&tmp_table_id, &merge_updates)
+                .await?
+        } else {
+            self.source_manager.allocate_splits(&tmp_table_id).await?
+        };
 
         self.barrier_scheduler
             .run_config_change_command_with_pause(
@@ -631,7 +639,10 @@ impl GlobalStreamManager {
             .collect::<BTreeSet<_>>();
 
         // Check if the provided parallelism is valid.
-        let available_parallelism = worker_nodes.iter().map(|w| w.parallelism()).sum::<usize>();
+        let available_parallelism = worker_nodes
+            .iter()
+            .map(|w| w.compute_node_parallelism())
+            .sum::<usize>();
         let max_parallelism = self
             .metadata_manager
             .get_job_max_parallelism(table_id)

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -382,6 +382,7 @@ macro_rules! impl_system_params_for_test {
             ret.backup_storage_url = Some("memory".into());
             ret.backup_storage_directory = Some("backup".into());
             ret.use_new_object_prefix_strategy = Some(false);
+            ret.time_travel_retention_ms = Some(0);
             ret
         }
     };

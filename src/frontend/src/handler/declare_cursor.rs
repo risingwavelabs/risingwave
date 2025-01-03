@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -58,7 +58,7 @@ async fn handle_declare_subscription_cursor(
     rw_timestamp: Since,
 ) -> Result<RwPgResponse> {
     let session = handle_args.session.clone();
-    let db_name = session.database();
+    let db_name = &session.database();
     let (schema_name, cursor_name) =
         Binder::resolve_schema_qualified_name(db_name, cursor_name.clone())?;
 
@@ -110,13 +110,13 @@ fn check_cursor_unix_millis(unix_millis: u64, retention_seconds: u64) -> Result<
     if unix_millis > now {
         return Err(ErrorCode::CatalogError(
             "rw_timestamp is too large, need to be less than the current unix_millis"
-                .to_string()
+                .to_owned()
                 .into(),
         )
         .into());
     }
     if unix_millis < min_unix_millis {
-        return Err(ErrorCode::CatalogError("rw_timestamp is too small, need to be large than the current unix_millis - subscription's retention time".to_string().into()).into());
+        return Err(ErrorCode::CatalogError("rw_timestamp is too small, need to be large than the current unix_millis - subscription's retention time".to_owned().into()).into());
     }
     Ok(())
 }

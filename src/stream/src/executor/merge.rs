@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -45,7 +45,7 @@ pub(crate) struct MergeExecutorInput {
     upstream_fragment_id: UpstreamFragmentId,
     shared_context: Arc<SharedContext>,
     executor_stats: Arc<StreamingMetrics>,
-    info: ExecutorInfo,
+    pub(crate) info: ExecutorInfo,
     chunk_size: usize,
 }
 
@@ -889,13 +889,11 @@ mod tests {
         let metrics = Arc::new(StreamingMetrics::unused());
 
         // 1. Register info in context.
-        {
-            let mut actor_infos = ctx.actor_infos.write();
-
-            for local_actor_id in [actor_id, untouched, old, new] {
-                actor_infos.insert(local_actor_id, helper_make_local_actor(local_actor_id));
-            }
-        }
+        ctx.add_actors(
+            [actor_id, untouched, old, new]
+                .into_iter()
+                .map(helper_make_local_actor),
+        );
         // untouched -> actor_id
         // old -> actor_id
         // new -> actor_id

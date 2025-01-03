@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -137,7 +137,7 @@ impl KafkaContextCommon {
             };
             Ok(OAuthToken {
                 token,
-                principal_name: "".to_string(),
+                principal_name: "".to_owned(),
                 lifetime_ms: expiration_time_ms,
             })
         } else {

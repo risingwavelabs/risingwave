@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -36,7 +36,7 @@ use crate::source::filesystem::opendal_source::{
 };
 use crate::source::filesystem::{FsPageItem, OpendalFsSplit};
 use crate::source::{
-    create_split_reader, BackfillInfo, BoxChunkSourceStream, BoxTryStream, Column,
+    create_split_reader, BackfillInfo, BoxSourceChunkStream, BoxTryStream, Column,
     ConnectorProperties, ConnectorState, SourceColumnDesc, SourceContext, SplitId, SplitImpl,
     SplitReader, WaitCheckpointTask,
 };
@@ -149,7 +149,7 @@ impl SourceReader {
         state: ConnectorState,
         column_ids: Vec<ColumnId>,
         source_ctx: Arc<SourceContext>,
-    ) -> ConnectorResult<(BoxChunkSourceStream, HashMap<SplitId, BackfillInfo>)> {
+    ) -> ConnectorResult<(BoxSourceChunkStream, HashMap<SplitId, BackfillInfo>)> {
         let Some(splits) = state else {
             return Ok((pending().boxed(), HashMap::new()));
         };
@@ -210,7 +210,7 @@ impl SourceReader {
         })
     }
 
-    /// Build `SplitReader`s and then `BoxChunkSourceStream` from the given `ConnectorState` (`SplitImpl`s).
+    /// Build `SplitReader`s and then `BoxSourceChunkStream` from the given `ConnectorState` (`SplitImpl`s).
     ///
     /// If `seek_to_latest` is true, will also return the latest splits after seek.
     pub async fn build_stream(
@@ -219,7 +219,7 @@ impl SourceReader {
         column_ids: Vec<ColumnId>,
         source_ctx: Arc<SourceContext>,
         seek_to_latest: bool,
-    ) -> ConnectorResult<(BoxChunkSourceStream, Option<Vec<SplitImpl>>)> {
+    ) -> ConnectorResult<(BoxSourceChunkStream, Option<Vec<SplitImpl>>)> {
         let Some(splits) = state else {
             return Ok((pending().boxed(), None));
         };

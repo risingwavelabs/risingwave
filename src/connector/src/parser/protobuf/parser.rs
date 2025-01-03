@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,16 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
+
 use anyhow::Context;
 use prost_reflect::{DescriptorPool, DynamicMessage, FileDescriptor, MessageDescriptor};
 use risingwave_common::{bail, try_match_expand};
-pub use risingwave_connector_codec::decoder::protobuf::parser::*;
+pub use risingwave_connector_codec::decoder::protobuf::parser::{PROTOBUF_MESSAGES_AS_JSONB, *};
 use risingwave_connector_codec::decoder::protobuf::ProtobufAccess;
 use risingwave_pb::plan_common::ColumnDesc;
 
 use crate::error::ConnectorResult;
 use crate::parser::unified::AccessImpl;
-use crate::parser::util::bytes_from_url;
+use crate::parser::utils::bytes_from_url;
 use crate::parser::{AccessBuilder, EncodingProperties};
 use crate::schema::schema_registry::{extract_schema_id, handle_sr_list, Client, WireFormatError};
 use crate::schema::SchemaLoader;
@@ -30,6 +32,10 @@ use crate::schema::SchemaLoader;
 pub struct ProtobufAccessBuilder {
     confluent_wire_type: bool,
     message_descriptor: MessageDescriptor,
+
+    // A HashSet containing protobuf message type full names (e.g. "google.protobuf.Any")
+    // that should be mapped to JSONB type when storing in RisingWave
+    messages_as_jsonb: HashSet<String>,
 }
 
 impl AccessBuilder for ProtobufAccessBuilder {
@@ -44,7 +50,10 @@ impl AccessBuilder for ProtobufAccessBuilder {
         let message = DynamicMessage::decode(self.message_descriptor.clone(), payload)
             .context("failed to parse message")?;
 
-        Ok(AccessImpl::Protobuf(ProtobufAccess::new(message)))
+        Ok(AccessImpl::Protobuf(ProtobufAccess::new(
+            message,
+            &self.messages_as_jsonb,
+        )))
     }
 }
 
@@ -53,11 +62,13 @@ impl ProtobufAccessBuilder {
         let ProtobufParserConfig {
             confluent_wire_type,
             message_descriptor,
+            messages_as_jsonb,
         } = config;
 
         Ok(Self {
             confluent_wire_type,
             message_descriptor,
+            messages_as_jsonb,
         })
     }
 }
@@ -66,6 +77,7 @@ impl ProtobufAccessBuilder {
 pub struct ProtobufParserConfig {
     confluent_wire_type: bool,
     pub(crate) message_descriptor: MessageDescriptor,
+    messages_as_jsonb: HashSet<String>,
 }
 
 impl ProtobufParserConfig {
@@ -110,12 +122,14 @@ impl ProtobufParserConfig {
         Ok(Self {
             message_descriptor,
             confluent_wire_type: protobuf_config.use_schema_registry,
+            messages_as_jsonb: protobuf_config.messages_as_jsonb,
         })
     }
 
     /// Maps the protobuf schema to relational schema.
     pub fn map_to_columns(&self) -> ConnectorResult<Vec<ColumnDesc>> {
-        pb_schema_to_column_descs(&self.message_descriptor).map_err(|e| e.into())
+        pb_schema_to_column_descs(&self.message_descriptor, &self.messages_as_jsonb)
+            .map_err(|e| e.into())
     }
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,7 +28,7 @@ use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::types::JsonbVal;
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use risingwave_connector::source::{
-    BackfillInfo, BoxChunkSourceStream, SourceContext, SourceCtrlOpts, SplitId, SplitImpl,
+    BackfillInfo, BoxSourceChunkStream, SourceContext, SourceCtrlOpts, SplitId, SplitImpl,
     SplitMetaData,
 };
 use risingwave_hummock_sdk::HummockReadEpoch;
@@ -204,7 +204,7 @@ impl BackfillStage {
             }
         }
         if matches!(state_inner, BackfillState::Backfilling(_)) {
-            state.target_offset = Some(offset.to_string());
+            state.target_offset = Some(offset.to_owned());
         }
         if vis {
             debug_assert_eq!(*state_inner, BackfillState::Finished);
@@ -231,9 +231,9 @@ impl BackfillStage {
                     //
                     // Note3: if target_offset is None (e.g., when upstream doesn't emit messages at all), we will
                     // keep backfilling.
-                    *state_inner = BackfillState::SourceCachingUp(offset.to_string());
+                    *state_inner = BackfillState::SourceCachingUp(offset.to_owned());
                 } else {
-                    *state_inner = BackfillState::Backfilling(Some(offset.to_string()));
+                    *state_inner = BackfillState::Backfilling(Some(offset.to_owned()));
                 }
                 true
             }
@@ -283,7 +283,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         &self,
         source_desc: &SourceDesc,
         splits: Vec<SplitImpl>,
-    ) -> StreamExecutorResult<(BoxChunkSourceStream, HashMap<SplitId, BackfillInfo>)> {
+    ) -> StreamExecutorResult<(BoxSourceChunkStream, HashMap<SplitId, BackfillInfo>)> {
         let column_ids = source_desc
             .columns
             .iter()
@@ -297,7 +297,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             source_desc.metrics.clone(),
             SourceCtrlOpts {
                 chunk_size: limited_chunk_size(self.rate_limit_rps),
-                rate_limit: self.rate_limit_rps,
+                split_txn: self.rate_limit_rps.is_some(), // when rate limiting, we may split txn
             },
             source_desc.source.config.clone(),
             None,

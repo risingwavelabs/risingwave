@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@ mod recursive;
 #[rustfmt::skip]
 #[allow(clippy::all)]
 mod all_types;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use anyhow::Context;
 use prost::Message;
@@ -39,7 +39,10 @@ fn check(
     expected_risingwave_schema: expect_test::Expect,
     expected_risingwave_data: expect_test::Expect,
 ) {
-    let rw_schema = pb_schema_to_column_descs(&pb_schema);
+    let rw_schema = pb_schema_to_column_descs(
+        &pb_schema,
+        &HashSet::from(["google.protobuf.Any".to_owned()]),
+    );
 
     if let Err(e) = rw_schema {
         expected_risingwave_schema.assert_eq(&e.to_report_string_pretty());
@@ -58,8 +61,12 @@ fn check(
     ));
 
     let mut data_str = vec![];
+    let messages_as_jsonb = HashSet::from(["google.protobuf.Any".to_owned()]);
     for data in pb_data {
-        let access = ProtobufAccess::new(DynamicMessage::decode(pb_schema.clone(), *data).unwrap());
+        let access = ProtobufAccess::new(
+            DynamicMessage::decode(pb_schema.clone(), *data).unwrap(),
+            &messages_as_jsonb,
+        );
         let mut row = vec![];
         for col in &rw_schema {
             let rw_data = access.access(&[&col.name], &col.data_type);
@@ -87,7 +94,7 @@ fn load_message_descriptor(
     file_name: &str,
     message_name: &str,
 ) -> anyhow::Result<MessageDescriptor> {
-    let location = "tests/test_data/".to_string() + file_name;
+    let location = "tests/test_data/".to_owned() + file_name;
     let file_content = fs_err::read_to_string(&location).unwrap();
 
     let pool = if file_name.ends_with(".proto") {
@@ -235,11 +242,11 @@ fn test_any_schema() -> anyhow::Result<()> {
     // }
     static ANY_DATA_3: &[u8] = b"\x08\xb9\x60\x12\x32\x0a\x24\x74\x79\x70\x65\x2e\x67\x6f\x6f\x67\x6c\x65\x61\x70\x69\x73\x2e\x63\x6f\x6d\x2f\x74\x65\x73\x74\x2e\x53\x74\x72\x69\x6e\x67\x56\x61\x6c\x75\x65\x12\x0a\x0a\x08\x4a\x6f\x68\x6e\x20\x44\x6f\x65";
 
-    // // id: 12345
-    // // any_value: {
-    // //    type_url: "type.googleapis.com/test.StringXalue"
-    // //    value: "\n\010John Doe"
-    // // }
+    // id: 12345
+    // any_value: {
+    //    type_url: "type.googleapis.com/test.StringXalue"
+    //    value: "\n\010John Doe"
+    // }
     static ANY_DATA_INVALID: &[u8] = b"\x08\xb9\x60\x12\x32\x0a\x24\x74\x79\x70\x65\x2e\x67\x6f\x6f\x67\x6c\x65\x61\x70\x69\x73\x2e\x63\x6f\x6d\x2f\x74\x65\x73\x74\x2e\x53\x74\x72\x69\x6e\x67\x58\x61\x6c\x75\x65\x12\x0a\x0a\x08\x4a\x6f\x68\x6e\x20\x44\x6f\x65";
 
     // validate the binary data is correct
@@ -449,7 +456,7 @@ fn test_any_schema() -> anyhow::Result<()> {
         expect![[r#"
             [
                 id(#1): Int32,
-                any_value(#4): Jsonb, type_name: google.protobuf.Any, field_descs: [type_url(#2): Varchar, value(#3): Bytea],
+                any_value(#2): Jsonb,
             ]"#]],
         expect![[r#"
             Owned(Int32(12345))
@@ -509,18 +516,18 @@ fn test_all_types() -> anyhow::Result<()> {
             sfixed32_field: -56789,
             sfixed64_field: -123456,
             bool_field: true,
-            string_field: "Hello, Prost!".to_string(),
+            string_field: "Hello, Prost!".to_owned(),
             bytes_field: b"byte data".to_vec(),
             enum_field: EnumType::Option1 as i32,
             nested_message_field: Some(NestedMessage {
                 id: 100,
-                name: "Nested".to_string(),
+                name: "Nested".to_owned(),
             }),
             repeated_int_field: vec![1, 2, 3, 4, 5],
             map_field: HashMap::from_iter([
-                ("key1".to_string(), 1),
-                ("key2".to_string(), 2),
-                ("key3".to_string(), 3),
+                ("key1".to_owned(), 1),
+                ("key2".to_owned(), 2),
+                ("key3".to_owned(), 3),
             ]),
             timestamp_field: Some(::prost_types::Timestamp {
                 seconds: 1630927032,
@@ -531,25 +538,25 @@ fn test_all_types() -> anyhow::Result<()> {
                 nanos: 500000000,
             }),
             any_field: Some(::prost_types::Any {
-                type_url: "type.googleapis.com/my_custom_type".to_string(),
+                type_url: "type.googleapis.com/my_custom_type".to_owned(),
                 value: b"My custom data".to_vec(),
             }),
             int32_value_field: Some(42),
-            string_value_field: Some("Hello, Wrapper!".to_string()),
+            string_value_field: Some("Hello, Wrapper!".to_owned()),
             example_oneof: Some(ExampleOneof::OneofInt32(123)),
             map_struct_field: HashMap::from_iter([
                 (
-                    "key1".to_string(),
+                    "key1".to_owned(),
                     NestedMessage {
                         id: 1,
-                        name: "A".to_string(),
+                        name: "A".to_owned(),
                     },
                 ),
                 (
-                    "key2".to_string(),
+                    "key2".to_owned(),
                     NestedMessage {
                         id: 2,
-                        name: "B".to_string(),
+                        name: "B".to_owned(),
                     },
                 ),
             ]),
@@ -600,14 +607,14 @@ fn test_all_types() -> anyhow::Result<()> {
                     seconds: Int64,
                     nanos: Int32,
                 }, type_name: google.protobuf.Duration, field_descs: [seconds(#30): Int64, nanos(#31): Int32],
-                any_field(#35): Jsonb, type_name: google.protobuf.Any, field_descs: [type_url(#33): Varchar, value(#34): Bytea],
-                int32_value_field(#37): Struct { value: Int32 }, type_name: google.protobuf.Int32Value, field_descs: [value(#36): Int32],
-                string_value_field(#39): Struct { value: Varchar }, type_name: google.protobuf.StringValue, field_descs: [value(#38): Varchar],
-                map_struct_field(#44): Map(Varchar,Struct { id: Int32, name: Varchar }), type_name: all_types.AllTypes.MapStructFieldEntry, field_descs: [key(#40): Varchar, value(#43): Struct {
+                any_field(#33): Jsonb,
+                int32_value_field(#35): Struct { value: Int32 }, type_name: google.protobuf.Int32Value, field_descs: [value(#34): Int32],
+                string_value_field(#37): Struct { value: Varchar }, type_name: google.protobuf.StringValue, field_descs: [value(#36): Varchar],
+                map_struct_field(#42): Map(Varchar,Struct { id: Int32, name: Varchar }), type_name: all_types.AllTypes.MapStructFieldEntry, field_descs: [key(#38): Varchar, value(#41): Struct {
                     id: Int32,
                     name: Varchar,
-                }, type_name: all_types.AllTypes.NestedMessage, field_descs: [id(#41): Int32, name(#42): Varchar]],
-                map_enum_field(#47): Map(Int32,Varchar), type_name: all_types.AllTypes.MapEnumFieldEntry, field_descs: [key(#45): Int32, value(#46): Varchar],
+                }, type_name: all_types.AllTypes.NestedMessage, field_descs: [id(#39): Int32, name(#40): Varchar]],
+                map_enum_field(#45): Map(Int32,Varchar), type_name: all_types.AllTypes.MapEnumFieldEntry, field_descs: [key(#43): Int32, value(#44): Varchar],
             ]"#]],
         expect![[r#"
             Owned(Float64(OrderedFloat(1.2345)))
@@ -710,7 +717,7 @@ fn test_recursive() -> anyhow::Result<()> {
             failed to map protobuf type
 
             Caused by:
-              circular reference detected: parent(recursive.ComplexRecursiveMessage.parent)->siblings(recursive.ComplexRecursiveMessage.Parent.siblings), conflict with parent(recursive.ComplexRecursiveMessage.parent), kind recursive.ComplexRecursiveMessage.Parent
+              circular reference detected: parent(recursive.ComplexRecursiveMessage.parent)->siblings(recursive.ComplexRecursiveMessage.Parent.siblings), conflict with parent(recursive.ComplexRecursiveMessage.parent), kind recursive.ComplexRecursiveMessage.Parent. Adding recursive.ComplexRecursiveMessage.Parent to "messages_as_jsonb" may help.
         "#]],
         expect![""],
     );

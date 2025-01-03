@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -98,7 +98,7 @@ pub(super) fn handle_set_time_zone(
         SetTimeZoneValue::Local => {
             iana_time_zone::get_timezone().context("Failed to get local time zone")
         }
-        SetTimeZoneValue::Default => Ok("UTC".to_string()),
+        SetTimeZoneValue::Default => Ok("UTC".to_owned()),
         SetTimeZoneValue::Ident(ident) => Ok(ident.real_value()),
         SetTimeZoneValue::Literal(Value::DoubleQuotedString(s))
         | SetTimeZoneValue::Literal(Value::SingleQuotedString(s)) => Ok(s),

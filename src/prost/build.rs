@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -100,7 +100,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute(".", "#[derive(prost_helpers::AnyPB)]")
         .type_attribute(
             "node_body",
-            "#[derive(::enum_as_inner::EnumAsInner, ::strum::Display)]",
+            "#[derive(::enum_as_inner::EnumAsInner, ::strum::Display, ::strum::EnumDiscriminants)]",
         )
         .type_attribute("rex_node", "#[derive(::enum_as_inner::EnumAsInner)]")
         .type_attribute(
@@ -112,6 +112,55 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "#[derive(::enum_as_inner::EnumAsInner)]",
         )
         .btree_map(btree_map_paths)
+        // node body is a very large enum, so we box it to avoid stack overflow.
+        // TODO: ideally we should box all enum variants automatically https://github.com/tokio-rs/prost/issues/1209
+        .boxed(".stream_plan.StreamNode.node_body.source")
+        .boxed(".stream_plan.StreamNode.node_body.project")
+        .boxed(".stream_plan.StreamNode.node_body.filter")
+        .boxed(".stream_plan.StreamNode.node_body.materialize")
+        .boxed(".stream_plan.StreamNode.node_body.stateless_simple_agg")
+        .boxed(".stream_plan.StreamNode.node_body.simple_agg")
+        .boxed(".stream_plan.StreamNode.node_body.hash_agg")
+        .boxed(".stream_plan.StreamNode.node_body.append_only_top_n")
+        .boxed(".stream_plan.StreamNode.node_body.hash_join")
+        .boxed(".stream_plan.StreamNode.node_body.top_n")
+        .boxed(".stream_plan.StreamNode.node_body.hop_window")
+        .boxed(".stream_plan.StreamNode.node_body.merge")
+        .boxed(".stream_plan.StreamNode.node_body.exchange")
+        .boxed(".stream_plan.StreamNode.node_body.stream_scan")
+        .boxed(".stream_plan.StreamNode.node_body.batch_plan")
+        .boxed(".stream_plan.StreamNode.node_body.lookup")
+        .boxed(".stream_plan.StreamNode.node_body.arrange")
+        .boxed(".stream_plan.StreamNode.node_body.lookup_union")
+        .boxed(".stream_plan.StreamNode.node_body.delta_index_join")
+        .boxed(".stream_plan.StreamNode.node_body.sink")
+        .boxed(".stream_plan.StreamNode.node_body.expand")
+        .boxed(".stream_plan.StreamNode.node_body.dynamic_filter")
+        .boxed(".stream_plan.StreamNode.node_body.project_set")
+        .boxed(".stream_plan.StreamNode.node_body.group_top_n")
+        .boxed(".stream_plan.StreamNode.node_body.sort")
+        .boxed(".stream_plan.StreamNode.node_body.watermark_filter")
+        .boxed(".stream_plan.StreamNode.node_body.dml")
+        .boxed(".stream_plan.StreamNode.node_body.row_id_gen")
+        .boxed(".stream_plan.StreamNode.node_body.now")
+        .boxed(".stream_plan.StreamNode.node_body.append_only_group_top_n")
+        .boxed(".stream_plan.StreamNode.node_body.temporal_join")
+        .boxed(".stream_plan.StreamNode.node_body.barrier_recv")
+        .boxed(".stream_plan.StreamNode.node_body.values")
+        .boxed(".stream_plan.StreamNode.node_body.append_only_dedup")
+        .boxed(".stream_plan.StreamNode.node_body.eowc_over_window")
+        .boxed(".stream_plan.StreamNode.node_body.over_window")
+        .boxed(".stream_plan.StreamNode.node_body.stream_fs_fetch")
+        .boxed(".stream_plan.StreamNode.node_body.stream_cdc_scan")
+        .boxed(".stream_plan.StreamNode.node_body.cdc_filter")
+        .boxed(".stream_plan.StreamNode.node_body.source_backfill")
+        .boxed(".stream_plan.StreamNode.node_body.changelog")
+        .boxed(".stream_plan.StreamNode.node_body.local_approx_percentile")
+        .boxed(".stream_plan.StreamNode.node_body.global_approx_percentile")
+        .boxed(".stream_plan.StreamNode.node_body.row_merge")
+        .boxed(".stream_plan.StreamNode.node_body.as_of_join")
+        // `Udf` is 248 bytes, while 2nd largest field is 32 bytes.
+        .boxed(".expr.ExprNode.rex_node.udf")
         // Eq + Hash are for plan nodes to do common sub-plan detection.
         // The requirement is from Source node -> SourceCatalog -> WatermarkDesc -> expr
         .type_attribute("catalog.WatermarkDesc", "#[derive(Eq, Hash)]")
@@ -163,6 +212,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute("plan_common.AdditionalDatabaseName", "#[derive(Eq, Hash)]")
         .type_attribute("plan_common.AdditionalSchemaName", "#[derive(Eq, Hash)]")
         .type_attribute("plan_common.AdditionalTableName", "#[derive(Eq, Hash)]")
+        .type_attribute("plan_common.AdditionalSubject", "#[derive(Eq, Hash)]")
         .type_attribute(
             "plan_common.AdditionalCollectionName",
             "#[derive(Eq, Hash)]",
@@ -210,7 +260,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Compile the proto files.
     tonic_config
         .out_dir(out_dir.as_path())
-        .compile_with_config(prost_config, &protos, &[proto_dir.to_string()])
+        .compile_with_config(prost_config, &protos, &[proto_dir.to_owned()])
         .expect("Failed to compile grpc!");
 
     // Implement `serde::Serialize` on those structs.

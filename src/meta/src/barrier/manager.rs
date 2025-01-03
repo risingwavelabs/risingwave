@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -71,6 +71,15 @@ impl GlobalBarrierManager {
         }
 
         Ok(ddl_progress.into_values().collect())
+    }
+
+    pub async fn adhoc_recovery(&self) -> MetaResult<()> {
+        let (tx, rx) = oneshot::channel();
+        self.request_tx
+            .send(BarrierManagerRequest::AdhocRecovery(tx))
+            .context("failed to send adhoc recovery request")?;
+        rx.await.context("failed to wait adhoc recovery")?;
+        Ok(())
     }
 
     pub async fn get_hummock_version_id(&self) -> HummockVersionId {

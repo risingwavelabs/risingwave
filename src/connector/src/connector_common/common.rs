@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -64,18 +64,27 @@ use risingwave_common::util::env_var::env_var_is_true;
 /// A flatten config map for aws auth.
 #[derive(Deserialize, Debug, Clone, WithOptions, PartialEq)]
 pub struct AwsAuthProps {
-    #[serde(rename = "aws.region", alias = "region")]
+    #[serde(rename = "aws.region", alias = "region", alias = "s3.region")]
     pub region: Option<String>,
 
     #[serde(
         rename = "aws.endpoint_url",
         alias = "endpoint_url",
-        alias = "endpoint"
+        alias = "endpoint",
+        alias = "s3.endpoint"
     )]
     pub endpoint: Option<String>,
-    #[serde(rename = "aws.credentials.access_key_id", alias = "access_key")]
+    #[serde(
+        rename = "aws.credentials.access_key_id",
+        alias = "access_key",
+        alias = "s3.access.key"
+    )]
     pub access_key: Option<String>,
-    #[serde(rename = "aws.credentials.secret_access_key", alias = "secret_key")]
+    #[serde(
+        rename = "aws.credentials.secret_access_key",
+        alias = "secret_key",
+        alias = "s3.secret.key"
+    )]
     pub secret_key: Option<String>,
     #[serde(rename = "aws.credentials.session_token", alias = "session_token")]
     pub session_token: Option<String>,
@@ -326,7 +335,7 @@ impl KafkaConnectionProps {
     #[cfg(test)]
     pub fn test_default() -> Self {
         Self {
-            brokers: "localhost:9092".to_string(),
+            brokers: "localhost:9092".to_owned(),
             security_protocol: None,
             ssl_ca_location: None,
             ssl_certificate_location: None,
@@ -516,7 +525,7 @@ impl PulsarCommon {
                         .path()
                         .to_str()
                         .unwrap()
-                        .to_string();
+                        .to_owned();
                     raw_path.insert_str(0, "file://");
                     raw_path
                 },
@@ -528,7 +537,7 @@ impl PulsarCommon {
                 .with_auth_provider(OAuth2Authentication::client_credentials(auth_params));
         } else if let Some(auth_token) = &self.auth_token {
             pulsar_builder = pulsar_builder.with_auth(Authentication {
-                name: "token".to_string(),
+                name: "token".to_owned(),
                 data: Vec::from(auth_token.as_str()),
             });
         }
@@ -721,7 +730,7 @@ impl NatsCommon {
                     config.deliver_policy = deliver_policy;
                     config.durable_name = Some(durable_consumer_name);
                     config.filter_subjects =
-                        self.subject.split(',').map(|s| s.to_string()).collect();
+                        self.subject.split(',').map(|s| s.to_owned()).collect();
                     config
                 })
                 .await?
@@ -734,7 +743,7 @@ impl NatsCommon {
         jetstream: jetstream::Context,
         stream: String,
     ) -> ConnectorResult<jetstream::stream::Stream> {
-        let subjects: Vec<String> = self.subject.split(',').map(|s| s.to_string()).collect();
+        let subjects: Vec<String> = self.subject.split(',').map(|s| s.to_owned()).collect();
         if let Ok(mut stream_instance) = jetstream.get_stream(&stream).await {
             tracing::info!(
                 "load existing nats stream ({:?}) with config {:?}",

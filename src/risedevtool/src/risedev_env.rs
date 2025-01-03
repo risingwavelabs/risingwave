@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -133,6 +133,14 @@ pub fn generate_risedev_env(services: &Vec<ServiceConfig>) -> String {
                 writeln!(
                     env,
                     r#"RISEDEV_SQLSERVER_WITH_OPTIONS_COMMON="connector='sqlserver-cdc',hostname='{host}',port='{port}',username='{user}',password='{password}',database.name='{database}'""#,
+                )
+                .unwrap();
+            }
+            ServiceConfig::MetaNode(meta_node_config) => {
+                writeln!(
+                    env,
+                    r#"RISEDEV_RW_META_DASHBOARD_ADDR="http://{}:{}""#,
+                    meta_node_config.address, meta_node_config.dashboard_port
                 )
                 .unwrap();
             }

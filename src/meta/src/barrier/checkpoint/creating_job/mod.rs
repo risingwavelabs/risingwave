@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -117,7 +117,7 @@ impl CreatingStreamingJobControl {
                 ..
             } => {
                 if create_mview_tracker.has_pending_finished_jobs() {
-                    "Snapshot finished".to_string()
+                    "Snapshot finished".to_owned()
                 } else {
                     let progress = create_mview_tracker
                         .gen_ddl_progress()
