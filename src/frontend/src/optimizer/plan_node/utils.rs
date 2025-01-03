@@ -35,7 +35,7 @@ use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
 use crate::catalog::table_catalog::TableType;
 use crate::catalog::{ColumnId, TableCatalog, TableId};
-use crate::optimizer::property::{Cardinality, Order, RequiredDist};
+use crate::optimizer::property::{Cardinality, Order, RequiredDist, WatermarkColumns};
 use crate::optimizer::StreamScanType;
 use crate::utils::{Condition, IndexSet};
 
@@ -253,24 +253,25 @@ pub(crate) fn column_names_pretty<'a>(schema: &Schema) -> Pretty<'a> {
 }
 
 pub(crate) fn watermark_pretty<'a>(
-    watermark_columns: &FixedBitSet,
+    watermark_columns: &WatermarkColumns,
     schema: &Schema,
 ) -> Option<Pretty<'a>> {
-    iter_fields_pretty(watermark_columns.ones(), schema)
-}
-
-pub(crate) fn iter_fields_pretty<'a>(
-    columns: impl Iterator<Item = usize>,
-    schema: &Schema,
-) -> Option<Pretty<'a>> {
-    let arr = columns
-        .map(|idx| FieldDisplay(schema.fields.get(idx).unwrap()))
-        .map(|d| Pretty::display(&d))
-        .collect::<Vec<_>>();
-    if arr.is_empty() {
+    if watermark_columns.is_empty() {
         None
     } else {
-        Some(Pretty::Array(arr))
+        let groups = watermark_columns.grouped();
+        let pretty_groups = groups
+            .values()
+            .map(|cols| {
+                Pretty::Array(
+                    cols.indices()
+                        .map(|idx| FieldDisplay(schema.fields.get(idx).unwrap()))
+                        .map(|d| Pretty::display(&d))
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .collect();
+        Some(Pretty::Array(pretty_groups))
     }
 }
 
