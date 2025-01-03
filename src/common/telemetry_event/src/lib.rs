@@ -24,6 +24,7 @@ use risingwave_pb::telemetry::{
     EventMessage as PbEventMessage, PbBatchEventMessage, PbTelemetryDatabaseObject,
     TelemetryEventStage as PbTelemetryEventStage,
 };
+use thiserror_ext::AsReport;
 use tokio::sync::mpsc::UnboundedSender;
 pub use util::*;
 
@@ -114,9 +115,9 @@ pub fn request_to_telemetry_event(
     };
 
     if let Some(tx) = TELEMETRY_EVENT_REPORT_TX.get() {
-        let _ = tx
-            .send(event)
-            .inspect_err(|e| tracing::warn!("Failed to send telemetry event queue: {}", e));
+        let _ = tx.send(event).inspect_err(|e| {
+            tracing::warn!("Failed to send telemetry event queue: {}", e.as_report())
+        });
     }
 }
 
