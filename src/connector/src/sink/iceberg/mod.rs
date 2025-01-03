@@ -66,6 +66,7 @@ use serde_with::{serde_as, DisplayFromStr};
 use thiserror_ext::AsReport;
 use tracing::warn;
 use url::Url;
+use uuid::Uuid;
 use with_options::WithOptions;
 
 use super::decouple_checkpoint_log_sink::{
@@ -542,6 +543,9 @@ impl IcebergSinkWriter {
         let schema = table.metadata().current_schema();
         let partition_spec = table.metadata().default_partition_spec();
 
+        // To avoid duplicate file name, each time the sink created will generate a unique uuid as file name suffix.
+        let unique_uuid_suffix = Uuid::now_v7();
+
         let parquet_writer_builder = ParquetWriterBuilder::new(
             WriterProperties::new(),
             schema.clone(),
@@ -550,7 +554,7 @@ impl IcebergSinkWriter {
                 .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
             DefaultFileNameGenerator::new(
                 writer_param.actor_id.to_string(),
-                None,
+                Some(unique_uuid_suffix.to_string()),
                 iceberg::spec::DataFileFormat::Parquet,
             ),
         );
@@ -667,6 +671,9 @@ impl IcebergSinkWriter {
         let schema = table.metadata().current_schema();
         let partition_spec = table.metadata().default_partition_spec();
 
+        // To avoid duplicate file name, each time the sink created will generate a unique uuid as file name suffix.
+        let unique_uuid_suffix = Uuid::now_v7();
+
         let data_file_builder = {
             let parquet_writer_builder = ParquetWriterBuilder::new(
                 WriterProperties::new(),
@@ -676,7 +683,7 @@ impl IcebergSinkWriter {
                     .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
                 DefaultFileNameGenerator::new(
                     writer_param.actor_id.to_string(),
-                    None,
+                    Some(unique_uuid_suffix.to_string()),
                     iceberg::spec::DataFileFormat::Parquet,
                 ),
             );
@@ -691,7 +698,7 @@ impl IcebergSinkWriter {
                     .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
                 DefaultFileNameGenerator::new(
                     writer_param.actor_id.to_string(),
-                    Some("pos-del".to_owned()),
+                    Some(format!("pos-del-{}", unique_uuid_suffix)),
                     iceberg::spec::DataFileFormat::Parquet,
                 ),
             );
@@ -718,7 +725,7 @@ impl IcebergSinkWriter {
                     .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
                 DefaultFileNameGenerator::new(
                     writer_param.actor_id.to_string(),
-                    Some("eq-del".to_owned()),
+                    Some(format!("eq-del-{}", unique_uuid_suffix)),
                     iceberg::spec::DataFileFormat::Parquet,
                 ),
             );
