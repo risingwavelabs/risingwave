@@ -77,7 +77,8 @@ use crate::model::{StreamContext, StreamJobFragments, TableParallelism};
 use crate::stream::{
     create_source_worker_handle, validate_sink, ActorGraphBuildResult, ActorGraphBuilder,
     CompleteStreamFragmentGraph, CreateStreamingJobContext, CreateStreamingJobOption,
-    GlobalStreamManagerRef, ReplaceStreamJobContext, SourceManagerRef, StreamFragmentGraph,
+    GlobalStreamManagerRef, ReplaceStreamJobContext, SourceChange, SourceManagerRef,
+    StreamFragmentGraph,
 };
 use crate::{MetaError, MetaResult};
 
@@ -981,7 +982,9 @@ impl DdlController {
                     tracing::warn!(id = job_id, "aborted streaming job");
                     if let Some(source_id) = source_id {
                         self.source_manager
-                            .unregister_sources(vec![source_id as SourceId])
+                            .apply_source_change(SourceChange::DropSource {
+                                dropped_source_ids: vec![source_id as SourceId],
+                            })
                             .await;
                     }
                 }
@@ -1228,18 +1231,20 @@ impl DdlController {
 
         let ReleaseContext {
             database_id,
-            streaming_job_ids,
-            state_table_ids,
-            source_ids,
-            secret_ids,
-            source_fragments,
+            removed_streaming_job_ids,
+            removed_state_table_ids,
+            removed_source_ids,
+            removed_secret_ids: secret_ids,
+            removed_source_fragments,
             removed_actors,
             removed_fragments,
         } = release_ctx;
 
         // unregister sources.
         self.source_manager
-            .unregister_sources(source_ids.into_iter().map(|id| id as _).collect())
+            .apply_source_change(SourceChange::DropSource {
+                dropped_source_ids: removed_source_ids.into_iter().map(|id| id as _).collect(),
+            })
             .await;
 
         // remove secrets.
@@ -1248,19 +1253,22 @@ impl DdlController {
         }
 
         // unregister fragments and actors from source manager.
+        // FIXME: need also unregister source backfill fragments.
+        let dropped_source_fragments = removed_source_fragments
+            .into_iter()
+            .map(|(source_id, fragments)| {
+                (
+                    source_id,
+                    fragments.into_iter().map(|id| id as u32).collect(),
+                )
+            })
+            .collect();
+        let dropped_actors = removed_actors.iter().map(|id| *id as _).collect();
         self.source_manager
-            .drop_source_fragments(
-                source_fragments
-                    .into_iter()
-                    .map(|(source_id, fragments)| {
-                        (
-                            source_id,
-                            fragments.into_iter().map(|id| id as u32).collect(),
-                        )
-                    })
-                    .collect(),
-                removed_actors.iter().map(|id| *id as _).collect(),
-            )
+            .apply_source_change(SourceChange::DropMv {
+                dropped_source_fragments,
+                dropped_actors,
+            })
             .await;
 
         // drop streaming jobs.
@@ -1268,8 +1276,8 @@ impl DdlController {
             .drop_streaming_jobs(
                 risingwave_common::catalog::DatabaseId::new(database_id as _),
                 removed_actors.into_iter().map(|id| id as _).collect(),
-                streaming_job_ids,
-                state_table_ids,
+                removed_streaming_job_ids,
+                removed_state_table_ids,
                 removed_fragments.iter().map(|id| *id as _).collect(),
             )
             .await;

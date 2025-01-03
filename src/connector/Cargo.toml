@@ -21,6 +21,7 @@ aws-config = { workspace = true }
 aws-credential-types = { workspace = true }
 aws-msk-iam-sasl-signer = "1.0.0"
 aws-sdk-dynamodb = "1"
+aws-sdk-emrserverless = "1.47.0"
 aws-sdk-glue = { workspace = true }
 aws-sdk-kinesis = { workspace = true }
 aws-sdk-s3 = { workspace = true }
@@ -55,7 +56,6 @@ google-cloud-bigquery = { version = "0.13.0", features = ["auth"] }
 google-cloud-gax = "0.19.0"
 google-cloud-googleapis = { version = "0.15", features = ["pubsub", "bigquery"] }
 google-cloud-pubsub = "0.29"
-governor = { workspace = true }
 iceberg = { workspace = true }
 iceberg-catalog-glue = { workspace = true }
 iceberg-catalog-rest = { workspace = true }
@@ -110,6 +110,7 @@ regex = "1.4"
 reqwest = { version = "0.12.2", features = ["json", "stream"] }
 risingwave_common = { workspace = true }
 risingwave_common_estimate_size = { workspace = true }
+risingwave_common_rate_limit = { workspace = true }
 risingwave_connector_codec = { workspace = true }
 risingwave_jni_core = { workspace = true }
 risingwave_pb = { workspace = true }

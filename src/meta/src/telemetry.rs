@@ -282,7 +282,13 @@ mod test {
 
         let pb_bytes = report.to_pb_bytes();
         let url = (TELEMETRY_REPORT_URL.to_owned() + "/" + TELEMETRY_META_REPORT_TYPE).to_owned();
-        let result = post_telemetry_report_pb(&url, pb_bytes).await;
-        assert!(result.is_ok());
+
+        // Retry 3 times to mitigate occasional failures on CI.
+        tokio_retry::Retry::spawn(
+            tokio_retry::strategy::ExponentialBackoff::from_millis(10).take(3),
+            || post_telemetry_report_pb(&url, pb_bytes.clone()),
+        )
+        .await
+        .unwrap();
     }
 }

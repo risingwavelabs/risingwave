@@ -110,12 +110,12 @@ impl CatalogController {
             }
         }
 
-        let to_drop_table_ids = to_drop_objects
+        let removed_table_ids = to_drop_objects
             .iter()
             .filter(|obj| obj.obj_type == ObjectType::Table || obj.obj_type == ObjectType::Index)
             .map(|obj| obj.oid);
 
-        let to_drop_streaming_jobs: Vec<ObjectId> = StreamingJob::find()
+        let removed_streaming_job_ids: Vec<ObjectId> = StreamingJob::find()
             .select_only()
             .column(streaming_job::Column::JobId)
             .filter(streaming_job::Column::JobId.is_in(to_drop_object_ids))
@@ -124,12 +124,12 @@ impl CatalogController {
             .await?;
 
         // Check if there are any streaming jobs that are creating.
-        if !to_drop_streaming_jobs.is_empty() {
+        if !removed_streaming_job_ids.is_empty() {
             let creating = StreamingJob::find()
                 .filter(
                     streaming_job::Column::JobStatus
                         .ne(JobStatus::Created)
-                        .and(streaming_job::Column::JobId.is_in(to_drop_streaming_jobs.clone())),
+                        .and(streaming_job::Column::JobId.is_in(removed_streaming_job_ids.clone())),
                 )
                 .count(&txn)
                 .await?;
@@ -140,37 +140,37 @@ impl CatalogController {
             }
         }
 
-        let mut to_drop_state_table_ids: HashSet<_> = to_drop_table_ids.clone().collect();
+        let mut removed_state_table_ids: HashSet<_> = removed_table_ids.clone().collect();
 
         // Add associated sources.
-        let mut to_drop_source_ids: Vec<SourceId> = Table::find()
+        let mut removed_source_ids: Vec<SourceId> = Table::find()
             .select_only()
             .column(table::Column::OptionalAssociatedSourceId)
             .filter(
                 table::Column::TableId
-                    .is_in(to_drop_table_ids)
+                    .is_in(removed_table_ids)
                     .and(table::Column::OptionalAssociatedSourceId.is_not_null()),
             )
             .into_tuple()
             .all(&txn)
             .await?;
-        let to_drop_source_objs: Vec<PartialObject> = Object::find()
-            .filter(object::Column::Oid.is_in(to_drop_source_ids.clone()))
+        let removed_source_objs: Vec<PartialObject> = Object::find()
+            .filter(object::Column::Oid.is_in(removed_source_ids.clone()))
             .into_partial_model()
             .all(&txn)
             .await?;
-        to_drop_objects.extend(to_drop_source_objs);
+        to_drop_objects.extend(removed_source_objs);
         if object_type == ObjectType::Source {
-            to_drop_source_ids.push(object_id);
+            removed_source_ids.push(object_id);
         }
 
-        let to_drop_secret_ids = to_drop_objects
+        let removed_secret_ids = to_drop_objects
             .iter()
             .filter(|obj| obj.obj_type == ObjectType::Secret)
             .map(|obj| obj.oid)
             .collect_vec();
 
-        if !to_drop_streaming_jobs.is_empty() {
+        if !removed_streaming_job_ids.is_empty() {
             let to_drop_internal_table_objs: Vec<PartialObject> = Object::find()
                 .select_only()
                 .columns([
@@ -180,12 +180,12 @@ impl CatalogController {
                     object::Column::DatabaseId,
                 ])
                 .join(JoinType::InnerJoin, object::Relation::Table.def())
-                .filter(table::Column::BelongsToJobId.is_in(to_drop_streaming_jobs.clone()))
+                .filter(table::Column::BelongsToJobId.is_in(removed_streaming_job_ids.clone()))
                 .into_partial_model()
                 .all(&txn)
                 .await?;
 
-            to_drop_state_table_ids.extend(to_drop_internal_table_objs.iter().map(|obj| obj.oid));
+            removed_state_table_ids.extend(to_drop_internal_table_objs.iter().map(|obj| obj.oid));
             to_drop_objects.extend(to_drop_internal_table_objs);
         }
 
@@ -205,8 +205,8 @@ impl CatalogController {
             }
         });
 
-        let (source_fragments, removed_actors, removed_fragments) =
-            resolve_source_register_info_for_jobs(&txn, to_drop_streaming_jobs.clone()).await?;
+        let (removed_source_fragments, removed_actors, removed_fragments) =
+            get_fragments_for_jobs(&txn, removed_streaming_job_ids.clone()).await?;
 
         // Find affect users with privileges on all this objects.
         let to_update_user_ids: Vec<UserId> = UserPrivilege::find()
@@ -285,11 +285,11 @@ impl CatalogController {
         Ok((
             ReleaseContext {
                 database_id,
-                streaming_job_ids: to_drop_streaming_jobs,
-                state_table_ids: to_drop_state_table_ids.into_iter().collect(),
-                source_ids: to_drop_source_ids,
-                secret_ids: to_drop_secret_ids,
-                source_fragments,
+                removed_streaming_job_ids,
+                removed_state_table_ids: removed_state_table_ids.into_iter().collect(),
+                removed_source_ids,
+                removed_secret_ids,
+                removed_source_fragments,
                 removed_actors,
                 removed_fragments,
             },
