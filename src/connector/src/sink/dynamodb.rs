@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -342,7 +342,7 @@ fn map_data(scalar_ref: Option<ScalarRefImpl<'_>>, data_type: &DataType) -> Resu
                 .zip_eq_debug(st.iter())
             {
                 let attr = map_data(sub_datum_ref, data_type)?;
-                map.insert(name.to_string(), attr);
+                map.insert(name.to_owned(), attr);
             }
             AttributeValue::M(map)
         }

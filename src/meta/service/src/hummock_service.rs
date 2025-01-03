@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -625,7 +625,7 @@ mod tests {
         }
         let s = S {
             foo: 15,
-            bar: "foobar".to_string(),
+            bar: "foobar".to_owned(),
         };
         let kvs: HashMap<String, String> = fields_to_kvs!(s, foo, bar);
         assert_eq!(kvs.len(), 2);

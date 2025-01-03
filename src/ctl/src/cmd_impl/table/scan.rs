@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -145,7 +145,7 @@ async fn do_scan(table: TableCatalog, hummock: MonitoredStateStore<HummockStorag
         .await?;
     pin_mut!(stream);
     while let Some(item) = stream.next().await {
-        println!("{:?}", item?.into_owned_row());
+        println!("{:?}", item?);
     }
     Ok(())
 }

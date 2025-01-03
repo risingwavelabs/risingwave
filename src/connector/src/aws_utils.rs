@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -119,7 +119,7 @@ pub async fn load_file_descriptor_from_s3(
     let s3_client = s3_client(&sdk_config, Some(default_conn_config()));
     let response = s3_client
         .get_object()
-        .bucket(bucket.to_string())
+        .bucket(bucket.to_owned())
         .key(key)
         .send()
         .await

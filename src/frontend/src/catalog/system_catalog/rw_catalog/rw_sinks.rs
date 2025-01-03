@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,10 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::types::{Fields, Timestamptz};
+use risingwave_common::types::{Fields, JsonbVal, Timestamptz};
+use risingwave_connector::WithOptionsSecResolved;
 use risingwave_frontend_macro::system_catalog;
 use risingwave_pb::user::grant_privilege::Object;
 
+use crate::catalog::system_catalog::rw_catalog::rw_sources::serialize_props_with_secret;
 use crate::catalog::system_catalog::{get_acl_items, SysCatalogReaderImpl};
 use crate::error::Result;
 use crate::handler::create_source::UPSTREAM_SOURCE_KEY;
@@ -36,6 +38,11 @@ struct RwSink {
     created_at: Option<Timestamptz>,
     initialized_at_cluster_version: Option<String>,
     created_at_cluster_version: Option<String>,
+
+    // connector properties in json format
+    connector_props: JsonbVal,
+    // format and encode properties in json format
+    format_encode_options: JsonbVal,
 }
 
 #[system_catalog(table, "rw_catalog.rw_sinks")]
@@ -48,30 +55,53 @@ fn read_rw_sinks_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSink>> {
 
     Ok(schemas
         .flat_map(|schema| {
-            schema.iter_sink().map(|sink| RwSink {
-                id: sink.id.sink_id as i32,
-                name: sink.name.clone(),
-                schema_id: schema.id() as i32,
-                owner: sink.owner.user_id as i32,
-                connector: sink
-                    .properties
-                    .get(UPSTREAM_SOURCE_KEY)
-                    .cloned()
-                    .unwrap_or("".to_string())
-                    .to_uppercase(),
-                sink_type: sink.sink_type.to_proto().as_str_name().into(),
-                connection_id: sink.connection_id.map(|id| id.connection_id() as i32),
-                definition: sink.create_sql(),
-                acl: get_acl_items(
-                    &Object::SinkId(sink.id.sink_id),
-                    false,
-                    &users,
-                    username_map,
-                ),
-                initialized_at: sink.initialized_at_epoch.map(|e| e.as_timestamptz()),
-                created_at: sink.created_at_epoch.map(|e| e.as_timestamptz()),
-                initialized_at_cluster_version: sink.initialized_at_cluster_version.clone(),
-                created_at_cluster_version: sink.created_at_cluster_version.clone(),
+            schema.iter_sink().map(|sink| {
+                let connector_props = serialize_props_with_secret(
+                    schema,
+                    WithOptionsSecResolved::new(sink.properties.clone(), sink.secret_refs.clone()),
+                )
+                .into();
+                let format_encode_options = sink
+                    .format_desc
+                    .as_ref()
+                    .map(|desc| {
+                        serialize_props_with_secret(
+                            schema,
+                            WithOptionsSecResolved::new(
+                                desc.options.clone(),
+                                desc.secret_refs.clone(),
+                            ),
+                        )
+                    })
+                    .unwrap_or_else(jsonbb::Value::null)
+                    .into();
+                RwSink {
+                    id: sink.id.sink_id as i32,
+                    name: sink.name.clone(),
+                    schema_id: schema.id() as i32,
+                    owner: sink.owner.user_id as i32,
+                    connector: sink
+                        .properties
+                        .get(UPSTREAM_SOURCE_KEY)
+                        .cloned()
+                        .unwrap_or("".to_owned())
+                        .to_uppercase(),
+                    sink_type: sink.sink_type.to_proto().as_str_name().into(),
+                    connection_id: sink.connection_id.map(|id| id.connection_id() as i32),
+                    definition: sink.create_sql(),
+                    acl: get_acl_items(
+                        &Object::SinkId(sink.id.sink_id),
+                        false,
+                        &users,
+                        username_map,
+                    ),
+                    initialized_at: sink.initialized_at_epoch.map(|e| e.as_timestamptz()),
+                    created_at: sink.created_at_epoch.map(|e| e.as_timestamptz()),
+                    initialized_at_cluster_version: sink.initialized_at_cluster_version.clone(),
+                    created_at_cluster_version: sink.created_at_cluster_version.clone(),
+                    connector_props,
+                    format_encode_options,
+                }
             })
         })
         .collect())

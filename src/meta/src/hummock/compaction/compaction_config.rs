@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -38,13 +38,13 @@ impl CompactionConfigBuilder {
                 // L0/L1 and L2 do not use compression algorithms
                 // L3 - L4 use Lz4, else use Zstd
                 compression_algorithm: vec![
-                    "None".to_string(),
-                    "None".to_string(),
-                    "None".to_string(),
-                    "Lz4".to_string(),
-                    "Lz4".to_string(),
-                    "Zstd".to_string(),
-                    "Zstd".to_string(),
+                    "None".to_owned(),
+                    "None".to_owned(),
+                    "None".to_owned(),
+                    "Lz4".to_owned(),
+                    "Lz4".to_owned(),
+                    "Zstd".to_owned(),
+                    "Zstd".to_owned(),
                 ],
                 compaction_filter_mask: compaction_config::compaction_filter_mask(),
                 max_sub_compaction: compaction_config::max_sub_compaction(),

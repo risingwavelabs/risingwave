@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -50,7 +50,7 @@ impl Executor for ManagedExecutor {
 
     #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn execute(mut self: Box<Self>) {
-        let input_desc = self.child.identity().to_string();
+        let input_desc = self.child.identity().to_owned();
         let span = tracing::info_span!("batch_executor", "otel.name" = input_desc);
 
         let mut child_stream = self.child.execute();

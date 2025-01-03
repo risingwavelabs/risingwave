@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -526,7 +526,7 @@ impl HummockManager {
             for group_id in slowdown_groups.keys() {
                 if let Some(status) = compaction_guard.compaction_statuses.get(group_id) {
                     for (idx, level_handler) in status.level_handlers.iter().enumerate() {
-                        let tasks = level_handler.get_pending_tasks().to_vec();
+                        let tasks = level_handler.pending_tasks().to_vec();
                         if tasks.is_empty() {
                             continue;
                         }

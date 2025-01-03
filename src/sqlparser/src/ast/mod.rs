@@ -157,7 +157,7 @@ impl Ident {
 
         if !(quote == '\'' || quote == '"' || quote == '`' || quote == '[') {
             return Err(ParserError::ParserError(
-                "unexpected quote style".to_string(),
+                "unexpected quote style".to_owned(),
             ));
         }
 
@@ -185,7 +185,7 @@ impl Ident {
 impl From<&str> for Ident {
     fn from(value: &str) -> Self {
         Ident {
-            value: value.to_string(),
+            value: value.to_owned(),
             quote_style: None,
         }
     }
@@ -806,11 +806,11 @@ impl fmt::Display for Expr {
             }
             Expr::ArrayRangeIndex { obj, start, end } => {
                 let start_str = match start {
-                    None => "".to_string(),
+                    None => "".to_owned(),
                     Some(start) => format!("{}", start),
                 };
                 let end_str = match end {
-                    None => "".to_string(),
+                    None => "".to_owned(),
                     Some(end) => format!("{}", end),
                 };
                 write!(f, "{}[{}:{}]", obj, start_str, end_str)?;
@@ -1034,7 +1034,7 @@ impl fmt::Display for ShowObject {
             if let Some(schema) = schema {
                 format!(" FROM {}", schema.value)
             } else {
-                "".to_string()
+                "".to_owned()
             }
         }
 
@@ -1188,10 +1188,10 @@ impl fmt::Display for ExplainOptions {
         } else {
             let mut option_strs = vec![];
             if self.verbose {
-                option_strs.push("VERBOSE".to_string());
+                option_strs.push("VERBOSE".to_owned());
             }
             if self.trace {
-                option_strs.push("TRACE".to_string());
+                option_strs.push("TRACE".to_owned());
             }
             if self.explain_type == default.explain_type {
                 option_strs.push(self.explain_type.to_string());
@@ -1310,6 +1310,8 @@ pub enum Statement {
         include_column_options: IncludeOption,
         /// `VALIDATE SECRET secure_secret_name AS secure_compare ()`
         webhook_info: Option<WebhookSourceInfo>,
+        /// `Engine = [hummock | iceberg]`
+        engine: Engine,
     },
     /// CREATE INDEX
     CreateIndex {
@@ -1619,6 +1621,12 @@ pub enum Statement {
     Wait,
     /// Trigger stream job recover
     Recover,
+    /// `USE <db_name>`
+    ///
+    /// Note: this is a RisingWave specific statement and used to switch the current database.
+    Use {
+        db_name: ObjectName,
+    },
 }
 
 impl fmt::Display for Statement {
@@ -1851,6 +1859,7 @@ impl fmt::Display for Statement {
                 cdc_table_info,
                 include_column_options,
                 webhook_info,
+                engine,
             } => {
                 // We want to allow the following options
                 // Empty column list, allowed by PostgreSQL:
@@ -1904,6 +1913,12 @@ impl fmt::Display for Statement {
                     write!(f, " VALIDATE SECRET {}", info.secret_ref.secret_name)?;
                     write!(f, " AS {}", info.signature_expr)?;
                 }
+                match engine {
+                    Engine::Hummock => {},
+                    Engine::Iceberg => {
+                        write!(f, " ENGINE = {}", engine)?;
+                    },
+                }
                 Ok(())
             }
             Statement::CreateIndex {
@@ -1923,12 +1938,12 @@ impl fmt::Display for Statement {
                 table_name = table_name,
                 columns = display_comma_separated(columns),
                 include = if include.is_empty() {
-                    "".to_string()
+                    "".to_owned()
                 } else {
                     format!(" INCLUDE({})", display_separated(include, ","))
                 },
                 distributed_by = if distributed_by.is_empty() {
-                    "".to_string()
+                    "".to_owned()
                 } else {
                     format!(" DISTRIBUTED BY({})", display_separated(distributed_by, ","))
                 }
@@ -2219,6 +2234,10 @@ impl fmt::Display for Statement {
             }
             Statement::Recover => {
                 write!(f, "RECOVER")?;
+                Ok(())
+            }
+            Statement::Use { db_name } => {
+                write!(f, "USE {}", db_name)?;
                 Ok(())
             }
         }
@@ -2830,7 +2849,7 @@ impl fmt::Display for EmitMode {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum OnConflict {
     UpdateFull,
@@ -2844,6 +2863,22 @@ impl fmt::Display for OnConflict {
             OnConflict::UpdateFull => "DO UPDATE FULL",
             OnConflict::Nothing => "DO NOTHING",
             OnConflict::UpdateIfNotNull => "DO UPDATE IF NOT NULL",
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum Engine {
+    Hummock,
+    Iceberg,
+}
+
+impl fmt::Display for crate::ast::Engine {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            crate::ast::Engine::Hummock => "HUMMOCK",
+            crate::ast::Engine::Iceberg => "ICEBERG",
         })
     }
 }
@@ -3501,7 +3536,7 @@ mod tests {
                 language: Some(Ident::new_unchecked("python")),
                 runtime: None,
                 behavior: Some(FunctionBehavior::Immutable),
-                as_: Some(FunctionDefinition::SingleQuotedDef("SELECT 1".to_string())),
+                as_: Some(FunctionDefinition::SingleQuotedDef("SELECT 1".to_owned())),
                 return_: None,
                 using: None,
             },
@@ -3523,7 +3558,7 @@ mod tests {
                 language: Some(Ident::new_unchecked("python")),
                 runtime: None,
                 behavior: Some(FunctionBehavior::Immutable),
-                as_: Some(FunctionDefinition::SingleQuotedDef("SELECT 1".to_string())),
+                as_: Some(FunctionDefinition::SingleQuotedDef("SELECT 1".to_owned())),
                 return_: None,
                 using: None,
             },

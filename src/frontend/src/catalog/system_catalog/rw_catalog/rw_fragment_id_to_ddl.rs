@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 
-/// Provides a mapping from `actor_id` to its ddl info.
+/// Provides a mapping from `fragment_id` to its ddl info.
 #[system_catalog(
 view,
 "rw_catalog.rw_fragment_id_to_ddl",

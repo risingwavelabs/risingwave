@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -104,7 +104,7 @@ impl_plan_tree_node_for_unary! {StreamHopWindow}
 
 impl StreamNode for StreamHopWindow {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
-        PbNodeBody::HopWindow(HopWindowNode {
+        PbNodeBody::HopWindow(Box::new(HopWindowNode {
             time_col: self.core.time_col.index() as _,
             window_slide: Some(self.core.window_slide.into()),
             window_size: Some(self.core.window_size.into()),
@@ -121,7 +121,7 @@ impl StreamNode for StreamHopWindow {
                 .iter()
                 .map(|x| x.to_expr_proto())
                 .collect(),
-        })
+        }))
     }
 }
 

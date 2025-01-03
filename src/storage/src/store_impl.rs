@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,9 +17,9 @@ use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 use enum_as_inner::EnumAsInner;
+use foyer::prometheus::PrometheusMetricsRegistry;
 use foyer::{
-    DirectFsDeviceOptions, Engine, HybridCacheBuilder, LargeEngineOptions,
-    PrometheusMetricsRegistry, RateLimitPicker,
+    DirectFsDeviceOptions, Engine, HybridCacheBuilder, LargeEngineOptions, RateLimitPicker,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common_service::RpcNotificationClient;
@@ -733,7 +733,7 @@ impl StateStoreImpl {
 
                 let sstable_store = Arc::new(SstableStore::new(SstableStoreConfig {
                     store: Arc::new(object_store),
-                    path: opts.data_directory.to_string(),
+                    path: opts.data_directory.clone(),
                     prefetch_buffer_capacity: opts.prefetch_buffer_capacity_mb * (1 << 20),
                     max_prefetch_block_number: opts.max_prefetch_block_number,
                     recent_filter,

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -117,13 +117,13 @@ impl SourceDescBuilder {
     pub fn build(self) -> ConnectorResult<SourceDesc> {
         let columns = self.column_catalogs_to_source_column_descs();
 
-        let psrser_config = SpecificParserConfig::new(&self.source_info, &self.with_properties)?;
+        let parser_config = SpecificParserConfig::new(&self.source_info, &self.with_properties)?;
 
         let source = SourceReader::new(
             self.with_properties,
             columns.clone(),
             self.connector_message_buffer_size,
-            psrser_config,
+            parser_config,
         )?;
 
         Ok(SourceDesc {

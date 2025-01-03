@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,16 +21,18 @@ use std::time::Duration;
 use foyer::{HybridCache, TracingOptions};
 use itertools::Itertools;
 use prometheus::core::Collector;
+use prometheus::proto::Metric;
 use risingwave_common::config::{MetricLevel, ServerConfig};
 use risingwave_common_heap_profiling::{AUTO_DUMP_SUFFIX, COLLAPSED_SUFFIX, MANUALLY_DUMP_SUFFIX};
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_jni_core::jvm_runtime::dump_jvm_stack_traces;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorService;
 use risingwave_pb::monitor_service::{
-    AnalyzeHeapRequest, AnalyzeHeapResponse, BackPressureInfo, GetBackPressureRequest,
-    GetBackPressureResponse, HeapProfilingRequest, HeapProfilingResponse, ListHeapProfilingRequest,
-    ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse, StackTraceRequest,
-    StackTraceResponse, TieredCacheTracingRequest, TieredCacheTracingResponse,
+    AnalyzeHeapRequest, AnalyzeHeapResponse, BackPressureInfo, FragmentStats,
+    GetBackPressureRequest, GetBackPressureResponse, HeapProfilingRequest, HeapProfilingResponse,
+    ListHeapProfilingRequest, ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse,
+    RelationStats, StackTraceRequest, StackTraceResponse, TieredCacheTracingRequest,
+    TieredCacheTracingResponse,
 };
 use risingwave_rpc_client::error::ToTonicStatus;
 use risingwave_storage::hummock::compactor::await_tree_key::Compaction;
@@ -309,57 +311,106 @@ impl MonitorService for MonitorServiceImpl {
 
         let actor_count: HashMap<_, _> = actor_count
             .iter()
-            .filter_map(|m| {
-                let fragment_id = m
-                    .get_label()
-                    .iter()
-                    .find(|lp| lp.get_name() == "fragment_id")?
-                    .get_value()
-                    .parse::<u32>()
-                    .unwrap();
+            .map(|m| {
+                let fragment_id: u32 = get_label(m, "fragment_id").unwrap();
                 let count = m.get_gauge().get_value() as u32;
-                Some((fragment_id, count))
+                (fragment_id, count)
             })
             .collect();
 
-        let mut back_pressure_infos: HashMap<_, BackPressureInfo> = HashMap::new();
+        let mut fragment_stats: HashMap<u32, FragmentStats> = HashMap::new();
+        for (&fragment_id, &actor_count) in &actor_count {
+            fragment_stats.insert(
+                fragment_id,
+                FragmentStats {
+                    actor_count,
+                    current_epoch: 0,
+                },
+            );
+        }
 
-        for label_pairs in actor_output_buffer_blocking_duration_ns {
-            let mut fragment_id = None;
-            let mut downstream_fragment_id = None;
-            for label_pair in label_pairs.get_label() {
-                if label_pair.get_name() == "fragment_id" {
-                    fragment_id = label_pair.get_value().parse::<u32>().ok();
+        let actor_current_epoch = metrics
+            .actor_current_epoch
+            .collect()
+            .into_iter()
+            .next()
+            .unwrap()
+            .take_metric();
+        for m in &actor_current_epoch {
+            let fragment_id: u32 = get_label(m, "fragment_id").unwrap();
+            let epoch = m.get_gauge().get_value() as u64;
+            if let Some(s) = fragment_stats.get_mut(&fragment_id) {
+                s.current_epoch = if s.current_epoch == 0 {
+                    epoch
+                } else {
+                    u64::min(s.current_epoch, epoch)
                 }
-                if label_pair.get_name() == "downstream_fragment_id" {
-                    downstream_fragment_id = label_pair.get_value().parse::<u32>().ok();
-                }
+            } else {
+                warn!(
+                    fragment_id = fragment_id,
+                    "Miss corresponding actor count metrics"
+                );
             }
-            let Some(fragment_id) = fragment_id else {
-                continue;
-            };
-            let Some(downstream_fragment_id) = downstream_fragment_id else {
-                continue;
-            };
+        }
 
-            // When metrics level is Debug, we may have multiple metrics with the same label pairs
-            // (fragment_id, downstream_fragment_id). We need to aggregate them locally.
-            //
-            // Metrics from different compute nodes should be aggregated by the caller.
-            let back_pressure_info = back_pressure_infos
-                .entry((fragment_id, downstream_fragment_id))
+        let mut relation_stats: HashMap<u32, RelationStats> = HashMap::new();
+        let mview_current_epoch = metrics
+            .materialize_current_epoch
+            .collect()
+            .into_iter()
+            .next()
+            .unwrap()
+            .take_metric();
+        for m in &mview_current_epoch {
+            let table_id: u32 = get_label(m, "table_id").unwrap();
+            let epoch = m.get_gauge().get_value() as u64;
+            if let Some(s) = relation_stats.get_mut(&table_id) {
+                s.current_epoch = if s.current_epoch == 0 {
+                    epoch
+                } else {
+                    u64::min(s.current_epoch, epoch)
+                };
+                s.actor_count += 1;
+            } else {
+                relation_stats.insert(
+                    table_id,
+                    RelationStats {
+                        actor_count: 1,
+                        current_epoch: epoch,
+                    },
+                );
+            }
+        }
+
+        let mut channel_stats: HashMap<_, BackPressureInfo> = HashMap::new();
+
+        for metric in actor_output_buffer_blocking_duration_ns {
+            let fragment_id: u32 = get_label(&metric, "fragment_id").unwrap();
+            let downstream_fragment_id: u32 = get_label(&metric, "downstream_fragment_id").unwrap();
+
+            let key = format!("{}_{}", fragment_id, downstream_fragment_id);
+            let channel_stat = channel_stats
+                .entry(key)
                 .or_insert_with(|| BackPressureInfo {
-                    fragment_id,
-                    downstream_fragment_id,
-                    actor_count: actor_count.get(&fragment_id).copied().unwrap_or_default(),
+                    actor_count: 0,
                     value: 0.,
                 });
 
-            back_pressure_info.value += label_pairs.get_counter().get_value();
+            // When metrics level is Debug, `actor_id` will be removed to reduce metrics.
+            // See `src/common/metrics/src/relabeled_metric.rs`
+            channel_stat.actor_count +=
+                if get_label::<String>(&metric, "actor_id").unwrap().is_empty() {
+                    actor_count[&fragment_id]
+                } else {
+                    1
+                };
+            channel_stat.value += metric.get_counter().get_value();
         }
 
         Ok(Response::new(GetBackPressureResponse {
-            back_pressure_infos: back_pressure_infos.into_values().collect(),
+            channel_stats,
+            fragment_stats,
+            relation_stats,
         }))
     }
 
@@ -434,6 +485,16 @@ impl MonitorService for MonitorServiceImpl {
 
         Ok(Response::new(TieredCacheTracingResponse::default()))
     }
+}
+
+fn get_label<T: std::str::FromStr>(metric: &Metric, label: &str) -> Option<T> {
+    metric
+        .get_label()
+        .iter()
+        .find(|lp| lp.get_name() == label)?
+        .get_value()
+        .parse::<T>()
+        .ok()
 }
 
 pub use grpc_middleware::*;

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -122,7 +122,7 @@ impl SessionParamsController {
         param.value = Set(new_param.clone());
         param.update(&self.db).await?;
 
-        self.notify_workers(name.to_string(), new_param.clone());
+        self.notify_workers(name.clone(), new_param.clone());
 
         Ok(new_param)
     }
@@ -190,7 +190,7 @@ mod tests {
         .await
         .unwrap();
         // check deprecated params are cleaned up.
-        assert!(SessionParameter::find_by_id("deprecated_param".to_string())
+        assert!(SessionParameter::find_by_id("deprecated_param".to_owned())
             .one(&session_param_ctl.db)
             .await
             .unwrap()

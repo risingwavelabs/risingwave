@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,6 +25,17 @@ pub enum RecordType {
     Insert,
     Delete,
     Update,
+}
+
+impl RecordType {
+    /// Get the corresponding `Op`s for this record type.
+    pub fn ops(self) -> &'static [Op] {
+        match self {
+            RecordType::Insert => &[Op::Insert],
+            RecordType::Delete => &[Op::Delete],
+            RecordType::Update => &[Op::UpdateDelete, Op::UpdateInsert],
+        }
+    }
 }
 
 /// Generic type to represent a row change.

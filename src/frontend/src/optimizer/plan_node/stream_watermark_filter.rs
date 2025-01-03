@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -117,15 +117,15 @@ pub fn infer_internal_table_catalog(watermark_type: DataType) -> TableCatalog {
 
     let key = Field {
         data_type: DataType::Int16,
-        name: "vnode".to_string(),
+        name: "vnode".to_owned(),
         sub_fields: vec![],
-        type_name: "".to_string(),
+        type_name: "".to_owned(),
     };
     let value = Field {
         data_type: watermark_type,
-        name: "offset".to_string(),
+        name: "offset".to_owned(),
         sub_fields: vec![],
-        type_name: "".to_string(),
+        type_name: "".to_owned(),
     };
 
     let ordered_col_idx = builder.add_column(&key);
@@ -148,12 +148,12 @@ impl StreamNode for StreamWatermarkFilter {
 
         let table = infer_internal_table_catalog(watermark_type);
 
-        PbNodeBody::WatermarkFilter(WatermarkFilterNode {
+        PbNodeBody::WatermarkFilter(Box::new(WatermarkFilterNode {
             watermark_descs: self.watermark_descs.clone(),
             tables: vec![table
                 .with_id(state.gen_table_id_wrapped())
                 .to_internal_table_prost()],
-        })
+        }))
     }
 }
 

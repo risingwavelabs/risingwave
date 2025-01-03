@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -526,7 +526,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_now_generate_series() -> StreamExecutorResult<()> {
-        TIME_ZONE::scope("UTC".to_string(), test_now_generate_series_inner()).await
+        TIME_ZONE::scope("UTC".to_owned(), test_now_generate_series_inner()).await
     }
 
     async fn test_now_generate_series_inner() -> StreamExecutorResult<()> {

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,8 +16,9 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use anyhow::anyhow;
 use risingwave_common::catalog::TableId;
+use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::time_travel::{
     refill_version, IncompleteHummockVersion, IncompleteHummockVersionDelta,
@@ -380,44 +381,54 @@ impl HummockManager {
         txn: &DatabaseTransaction,
         version: Option<&HummockVersion>,
         delta: HummockVersionDelta,
-        group_parents: &HashMap<CompactionGroupId, CompactionGroupId>,
+        time_travel_table_ids: HashSet<StateTableId>,
         skip_sst_ids: &HashSet<HummockSstableId>,
         tables_to_commit: impl Iterator<Item = (&TableId, &CompactionGroupId, u64)>,
     ) -> Result<Option<HashSet<HummockSstableId>>> {
-        let select_groups = group_parents
-            .iter()
-            .filter_map(|(cg_id, _)| {
-                if should_ignore_group(find_root_group(*cg_id, group_parents)) {
-                    None
-                } else {
-                    Some(*cg_id)
-                }
-            })
-            .collect::<HashSet<_>>();
+        if self
+            .env
+            .system_params_reader()
+            .await
+            .time_travel_retention_ms()
+            == 0
+        {
+            return Ok(None);
+        }
         async fn write_sstable_infos(
-            sst_infos: impl Iterator<Item = &SstableInfo>,
+            mut sst_infos: impl Iterator<Item = &SstableInfo>,
             txn: &DatabaseTransaction,
+            batch_size: usize,
         ) -> Result<usize> {
             let mut count = 0;
-            for sst_info in sst_infos {
-                let m = hummock_sstable_info::ActiveModel {
-                    sst_id: Set(sst_info.sst_id.try_into().unwrap()),
-                    object_id: Set(sst_info.object_id.try_into().unwrap()),
-                    sstable_info: Set(SstableInfoV2Backend::from(&sst_info.to_protobuf())),
-                };
-                hummock_sstable_info::Entity::insert(m)
+            let mut is_finished = false;
+            while !is_finished {
+                let mut remain = batch_size;
+                let mut batch = vec![];
+                while remain > 0 {
+                    let Some(sst_info) = sst_infos.next() else {
+                        is_finished = true;
+                        break;
+                    };
+                    batch.push(hummock_sstable_info::ActiveModel {
+                        sst_id: Set(sst_info.sst_id.try_into().unwrap()),
+                        object_id: Set(sst_info.object_id.try_into().unwrap()),
+                        sstable_info: Set(SstableInfoV2Backend::from(&sst_info.to_protobuf())),
+                    });
+                    remain -= 1;
+                    count += 1;
+                }
+                if batch.is_empty() {
+                    break;
+                }
+                hummock_sstable_info::Entity::insert_many(batch)
                     .on_conflict_do_nothing()
                     .exec(txn)
                     .await?;
-                count += 1;
             }
             Ok(count)
         }
 
-        for (table_id, cg_id, committed_epoch) in tables_to_commit {
-            if !select_groups.contains(cg_id) {
-                continue;
-            }
+        for (table_id, _cg_id, committed_epoch) in tables_to_commit {
             let version_id: u64 = delta.id.to_u64();
             let m = hummock_epoch_to_version::ActiveModel {
                 epoch: Set(committed_epoch.try_into().unwrap()),
@@ -432,17 +443,30 @@ impl HummockManager {
 
         let mut version_sst_ids = None;
         if let Some(version) = version {
+            // `version_sst_ids` is used to update `last_time_travel_snapshot_sst_ids`.
             version_sst_ids = Some(
                 version
-                    .get_sst_infos_from_groups(&select_groups)
-                    .map(|s| s.sst_id)
+                    .get_sst_infos()
+                    .filter_map(|s| {
+                        if s.table_ids
+                            .iter()
+                            .any(|tid| time_travel_table_ids.contains(tid))
+                        {
+                            return Some(s.sst_id);
+                        }
+                        None
+                    })
                     .collect(),
             );
             write_sstable_infos(
-                version
-                    .get_sst_infos_from_groups(&select_groups)
-                    .filter(|s| !skip_sst_ids.contains(&s.sst_id)),
+                version.get_sst_infos().filter(|s| {
+                    !skip_sst_ids.contains(&s.sst_id)
+                        && s.table_ids
+                            .iter()
+                            .any(|tid| time_travel_table_ids.contains(tid))
+                }),
                 txn,
+                self.env.opts.hummock_time_travel_sst_info_insert_batch_size,
             )
             .await?;
             let m = hummock_time_travel_version::ActiveModel {
@@ -450,20 +474,28 @@ impl HummockManager {
                     version.id.to_u64(),
                 )
                 .unwrap()),
-                version: Set((&IncompleteHummockVersion::from((version, &select_groups))
-                    .to_protobuf())
-                    .into()),
+                version: Set(
+                    (&IncompleteHummockVersion::from((version, &time_travel_table_ids))
+                        .to_protobuf())
+                        .into(),
+                ),
             };
             hummock_time_travel_version::Entity::insert(m)
                 .on_conflict_do_nothing()
                 .exec(txn)
                 .await?;
+            // Return early to skip persisting delta.
+            return Ok(version_sst_ids);
         }
         let written = write_sstable_infos(
-            delta
-                .newly_added_sst_infos(Some(&select_groups))
-                .filter(|s| !skip_sst_ids.contains(&s.sst_id)),
+            delta.newly_added_sst_infos().filter(|s| {
+                !skip_sst_ids.contains(&s.sst_id)
+                    && s.table_ids
+                        .iter()
+                        .any(|tid| time_travel_table_ids.contains(tid))
+            }),
             txn,
+            self.env.opts.hummock_time_travel_sst_info_insert_batch_size,
         )
         .await?;
         // Ignore delta which adds no data.
@@ -475,7 +507,7 @@ impl HummockManager {
                 .unwrap()),
                 version_delta: Set((&IncompleteHummockVersionDelta::from((
                     &delta,
-                    &select_groups,
+                    &time_travel_table_ids,
                 ))
                 .to_protobuf())
                     .into()),
@@ -513,26 +545,6 @@ fn replay_archive(
         last_version.apply_version_delta(&d);
     }
     last_version
-}
-
-fn find_root_group(
-    group_id: CompactionGroupId,
-    parents: &HashMap<CompactionGroupId, CompactionGroupId>,
-) -> CompactionGroupId {
-    let mut root = group_id;
-    while let Some(parent) = parents.get(&root)
-        && *parent != 0
-    {
-        root = *parent;
-    }
-    root
-}
-
-fn should_ignore_group(root_group_id: CompactionGroupId) -> bool {
-    // It is possible some intermediate groups has been dropped,
-    // so it's impossible to tell whether the root group is MaterializedView or not.
-    // Just treat them as MaterializedView for correctness.
-    root_group_id == StaticCompactionGroupId::StateDefault as CompactionGroupId
 }
 
 pub fn require_sql_meta_store_err() -> Error {

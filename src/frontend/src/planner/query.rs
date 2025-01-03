@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -51,6 +51,7 @@ impl Planner {
             order = func_dep.minimize_order_key(order, &[]);
 
             let limit = limit.unwrap_or(LIMIT_ALL_COUNT);
+
             let offset = offset.unwrap_or_default();
             plan = if order.column_orders.is_empty() {
                 // Should be rejected by parser.

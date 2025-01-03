@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -868,7 +868,7 @@ impl StageGraph {
                 for &child_id in children {
                     if let Some(&child_index) = node_indices.get(&child_id) {
                         // Add an edge from parent to child
-                        graph.add_edge(parent_index, child_index, "".to_string());
+                        graph.add_edge(parent_index, child_index, "".to_owned());
                     }
                 }
             }

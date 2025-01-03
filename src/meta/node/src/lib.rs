@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -296,7 +296,7 @@ pub fn start(
                 tags.split(',')
                     .map(|s| {
                         let key_val = s.split_once('=').unwrap();
-                        (key_val.0.to_string(), key_val.1.to_string())
+                        (key_val.0.to_owned(), key_val.1.to_owned())
                     })
                     .collect()
             });
@@ -366,6 +366,10 @@ pub fn start(
                     .meta
                     .developer
                     .hummock_time_travel_sst_info_fetch_batch_size,
+                hummock_time_travel_sst_info_insert_batch_size: config
+                    .meta
+                    .developer
+                    .hummock_time_travel_sst_info_insert_batch_size,
                 min_delta_log_num_for_hummock_version_checkpoint: config
                     .meta
                     .min_delta_log_num_for_hummock_version_checkpoint,

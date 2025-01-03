@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -278,7 +278,7 @@ fn configure(chosen: &[Components]) -> Result<Option<Vec<Components>>> {
         .map(|c| {
             let title = c.title();
             let desc = style(
-                ("\n".to_string() + c.description().trim())
+                ("\n".to_owned() + c.description().trim())
                     .split('\n')
                     .join("\n      "),
             )

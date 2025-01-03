@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -436,6 +436,7 @@ impl TestCase {
                     include_column_options,
                     wildcard_idx,
                     webhook_info,
+                    engine,
                     ..
                 } => {
                     let format_encode = format_encode.map(|schema| schema.into_v2_with_warning());
@@ -455,6 +456,7 @@ impl TestCase {
                         cdc_table_info,
                         include_column_options,
                         webhook_info,
+                        engine,
                     )
                     .await?;
                 }
@@ -605,7 +607,7 @@ impl TestCase {
             }
         };
 
-        let mut planner = Planner::new(context.clone());
+        let mut planner = Planner::new_for_stream(context.clone());
 
         let plan_root = match planner.plan(bound) {
             Ok(plan_root) => {
@@ -836,13 +838,13 @@ impl TestCase {
                 let mut plan_root = plan_root.clone();
                 let sink_name = "sink_test";
                 let mut options = BTreeMap::new();
-                options.insert("connector".to_string(), "blackhole".to_string());
-                options.insert("type".to_string(), "append-only".to_string());
+                options.insert("connector".to_owned(), "blackhole".to_owned());
+                options.insert("type".to_owned(), "append-only".to_owned());
                 // let options = WithOptionsSecResolved::without_secrets(options);
                 let options = WithOptionsSecResolved::without_secrets(options);
                 let format_desc = (&options).try_into().unwrap();
                 match plan_root.gen_sink_plan(
-                    sink_name.to_string(),
+                    sink_name.to_owned(),
                     format!("CREATE SINK {sink_name} AS {}", stmt),
                     options,
                     false,
@@ -951,7 +953,7 @@ pub async fn run_test_file(file_path: &Path, file_content: &str) -> Result<()> {
     for (i, c) in cases.into_iter().enumerate() {
         println!(
             "Running test #{i} (id: {}), SQL:\n{}",
-            c.id().clone().unwrap_or_else(|| "<none>".to_string()),
+            c.id().clone().unwrap_or_else(|| "<none>".to_owned()),
             c.sql()
         );
         match c.run(true).await {
@@ -961,7 +963,7 @@ pub async fn run_test_file(file_path: &Path, file_content: &str) -> Result<()> {
             Err(e) => {
                 eprintln!(
                     "Test #{i} (id: {}) failed, SQL:\n{}\nError: {}",
-                    c.id().clone().unwrap_or_else(|| "<none>".to_string()),
+                    c.id().clone().unwrap_or_else(|| "<none>".to_owned()),
                     c.sql(),
                     e.as_report()
                 );

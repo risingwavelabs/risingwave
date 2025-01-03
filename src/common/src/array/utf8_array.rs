@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -332,8 +332,6 @@ mod tests {
     fn test_utf8_array_hash() {
         use std::hash::BuildHasher;
 
-        use twox_hash::RandomXxHashBuilder64;
-
         use super::super::test_util::{hash_finish, test_hash};
 
         const ARR_NUM: usize = 3;
@@ -368,7 +366,7 @@ mod tests {
 
         let arrs = vecs.iter().map(Utf8Array::from_iter).collect_vec();
 
-        let hasher_builder = RandomXxHashBuilder64::default();
+        let hasher_builder = twox_hash::xxhash64::RandomState::default();
         let mut states = vec![hasher_builder.build_hasher(); ARR_LEN];
         vecs.iter().for_each(|v| {
             v.iter()

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -654,7 +654,7 @@ pub trait FromArrow {
                 let array: &arrow_array::StringArray =
                     array.as_any().downcast_ref().ok_or_else(|| {
                         ArrayError::from_arrow(
-                            "expected string array for `arrowudf.decimal`".to_string(),
+                            "expected string array for `arrowudf.decimal`".to_owned(),
                         )
                     })?;
                 Ok(ArrayImpl::Decimal(array.try_into()?))
@@ -663,7 +663,7 @@ pub trait FromArrow {
                 let array: &arrow_array::StringArray =
                     array.as_any().downcast_ref().ok_or_else(|| {
                         ArrayError::from_arrow(
-                            "expected string array for `arrowudf.json`".to_string(),
+                            "expected string array for `arrowudf.json`".to_owned(),
                         )
                     })?;
                 Ok(ArrayImpl::Jsonb(array.try_into()?))

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -135,7 +135,7 @@ impl ColPrunable for LogicalChangeLog {
 
 impl ToBatch for LogicalChangeLog {
     fn to_batch(&self) -> Result<PlanRef> {
-        Err(BindError("With changelog cte only support with create mv/sink".to_string()).into())
+        Err(BindError("With changelog cte only support with create mv/sink".to_owned()).into())
     }
 }
 

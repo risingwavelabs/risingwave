@@ -1,5 +1,5 @@
 /*
- * Copyright 2024 RisingWave Labs
+ * Copyright 2025 RisingWave Labs
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -94,6 +94,17 @@ public class JniCatalogWrapper {
     public boolean tableExists(String tableIdentifier) {
         TableIdentifier id = TableIdentifier.parse(tableIdentifier);
         return catalog.tableExists(id);
+    }
+
+    /**
+     * Drop a table from the catalog.
+     *
+     * @param tableIdentifier The identifier of the table to drop.
+     * @return true if the table was dropped, false otherwise.
+     */
+    public boolean dropTable(String tableIdentifier) {
+        TableIdentifier id = TableIdentifier.parse(tableIdentifier);
+        return catalog.dropTable(id);
     }
 
     /**

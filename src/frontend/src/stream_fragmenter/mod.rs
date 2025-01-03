@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -439,9 +439,9 @@ fn build_fragment(
                                 let node = state.gen_no_op_stream_node(StreamNode {
                                     operator_id: no_shuffle_exchange_operator_id,
                                     identity: "StreamNoShuffleExchange".into(),
-                                    node_body: Some(NodeBody::Exchange(ExchangeNode {
+                                    node_body: Some(NodeBody::Exchange(Box::new(ExchangeNode {
                                         strategy: Some(no_shuffle_strategy.clone()),
-                                    })),
+                                    }))),
                                     input: vec![],
 
                                     // Take reference's properties.

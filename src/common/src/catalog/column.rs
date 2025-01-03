@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,6 +23,7 @@ use risingwave_pb::plan_common::{
     AdditionalColumn, ColumnDescVersion, DefaultColumnDesc, PbColumnCatalog, PbColumnDesc,
 };
 
+use super::schema::FieldLike;
 use super::{
     iceberg_sequence_num_column_desc, row_id_column_desc, rw_timestamp_column_desc,
     USER_COLUMN_ID_OFFSET,
@@ -256,9 +257,9 @@ impl ColumnDesc {
         Self {
             data_type,
             column_id: ColumnId::new(column_id),
-            name: name.to_string(),
+            name: name.to_owned(),
             field_descs: vec![],
-            type_name: "".to_string(),
+            type_name: "".to_owned(),
             generated_or_default_column: None,
             description: None,
             additional_column: AdditionalColumn { column_type: None },
@@ -278,9 +279,9 @@ impl ColumnDesc {
         Self {
             data_type,
             column_id: ColumnId::new(column_id),
-            name: name.to_string(),
+            name: name.to_owned(),
             field_descs: fields,
-            type_name: type_name.to_string(),
+            type_name: type_name.to_owned(),
             generated_or_default_column: None,
             description: None,
             additional_column: AdditionalColumn { column_type: None },
@@ -464,6 +465,10 @@ impl ColumnCatalog {
         }
     }
 
+    pub fn is_rw_sys_column(&self) -> bool {
+        self.column_desc.system_column.is_some()
+    }
+
     pub fn rw_timestamp_column() -> Self {
         Self {
             column_desc: rw_timestamp_column_desc(),
@@ -519,6 +524,26 @@ impl ColumnCatalog {
     }
 }
 
+impl FieldLike for ColumnDesc {
+    fn data_type(&self) -> &DataType {
+        &self.data_type
+    }
+
+    fn name(&self) -> &str {
+        &self.name
+    }
+}
+
+impl FieldLike for ColumnCatalog {
+    fn data_type(&self) -> &DataType {
+        &self.column_desc.data_type
+    }
+
+    fn name(&self) -> &str {
+        &self.column_desc.name
+    }
+}
+
 pub fn columns_extend(preserved_columns: &mut Vec<ColumnCatalog>, columns: Vec<ColumnCatalog>) {
     debug_assert_eq!(ROW_ID_COLUMN_ID.get_id(), 0);
     let mut max_incoming_column_id = ROW_ID_COLUMN_ID.get_id();
@@ -550,7 +575,7 @@ pub fn debug_assert_column_ids_distinct(columns: &[ColumnCatalog]) {
     );
 }
 
-/// FIXME: perhapts we should use sth like `ColumnIdGenerator::new_alter`,
+/// FIXME: Perhaps we should use sth like `ColumnIdGenerator::new_alter`,
 /// However, the `SourceVersion` is problematic: It doesn't contain `next_col_id`.
 /// (But for now this isn't a large problem, since drop column is not allowed for source yet..)
 ///

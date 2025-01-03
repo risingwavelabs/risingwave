@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -45,9 +45,10 @@ use crate::source::cdc::external::sql_server::{
 use crate::source::cdc::CdcSourceType;
 use crate::WithPropertiesExt;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum CdcTableType {
     Undefined,
+    Mock,
     MySql,
     Postgres,
     SqlServer,
@@ -97,6 +98,7 @@ impl CdcTableType {
             Self::SqlServer => Ok(ExternalTableReaderImpl::SqlServer(
                 SqlServerExternalTableReader::new(config, schema, pk_indices).await?,
             )),
+            Self::Mock => Ok(ExternalTableReaderImpl::Mock(MockExternalTableReader::new())),
             _ => bail!("invalid external table type: {:?}", *self),
         }
     }
@@ -214,7 +216,7 @@ pub enum ExternalTableReaderImpl {
     Mock(MockExternalTableReader),
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Default, Clone, Deserialize)]
 pub struct ExternalTableConfig {
     pub connector: String,
 

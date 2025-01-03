@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -74,7 +74,7 @@ async fn test_merger_sum_aggr() {
                 ExecutorInfo {
                     schema: input_schema,
                     pk_indices: PkIndices::new(),
-                    identity: "ReceiverExecutor".to_string(),
+                    identity: "ReceiverExecutor".to_owned(),
                 },
                 ReceiverExecutor::for_test(
                     actor_id,
@@ -145,7 +145,7 @@ async fn test_merger_sum_aggr() {
                     // input schema of local simple agg
                     schema: Schema::new(vec![Field::unnamed(DataType::Int64)]),
                     pk_indices: PkIndices::new(),
-                    identity: "ReceiverExecutor".to_string(),
+                    identity: "ReceiverExecutor".to_owned(),
                 },
                 ReceiverExecutor::for_test(
                     actor_id,
@@ -201,7 +201,7 @@ async fn test_merger_sum_aggr() {
                     // output schema of local simple agg
                     schema: schema.clone(),
                     pk_indices: PkIndices::new(),
-                    identity: "MergeExecutor".to_string(),
+                    identity: "MergeExecutor".to_owned(),
                 },
                 MergeExecutor::for_test(
                     actor_ctx.id,

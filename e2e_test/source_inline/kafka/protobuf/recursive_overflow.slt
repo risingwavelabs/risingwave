@@ -1,0 +1,41 @@
+control substitution on
+
+system ok
+rpk registry schema create "recursive_complex-value" --schema "/dev/stdin" --type protobuf << EOF
+syntax = "proto3";
+// a recursive complex type can cause stack overflow in the frontend when inferring the schema
+package recursive_complex;
+message AnyValue {
+    oneof value {
+        string string_value = 1;
+        int32 int_value = 2;
+        double double_value = 3;
+        bool bool_value = 4;
+        ArrayValue array_value = 5;
+    }
+}
+message ArrayValue {
+    AnyValue value1 = 1;
+    AnyValue value2 = 2;
+    ArrayValue array_value = 3;
+}
+EOF
+
+
+system ok
+echo '{"array_value":{"value1":{"string_value":"This is a string value"},"value2":{"int_value":42},"array_value":{"value1":{"double_value":3.14159},"value2":{"bool_value":true},"array_value":{"value1":{"string_value":"Deeply nested string"},"value2":{"int_value":100}}}}}' | rpk topic produce "recursive_complex" --schema-id=topic --schema-type="recursive_complex.AnyValue" --allow-auto-topic-creation
+
+# the test just make sure the table can finish create process
+statement ok
+create table recursive_complex with ( ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON}, topic = 'recursive_complex' ) format plain encode protobuf ( schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}', message = 'recursive_complex.AnyValue', messages_as_jsonb = 'recursive_complex.AnyValue,recursive_complex.ArrayValue');
+
+# ==== clean up ====
+
+statement ok
+drop table recursive_complex;
+
+system ok
+rpk topic delete recursive_complex;
+
+system ok
+rpk registry subject delete "recursive_complex-value"

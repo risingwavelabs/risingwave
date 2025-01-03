@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -47,10 +47,10 @@ pub(crate) fn resolve_index_schema(
     index_name: ObjectName,
     table_name: ObjectName,
 ) -> Result<(String, Arc<TableCatalog>, String)> {
-    let db_name = session.database();
+    let db_name = &session.database();
     let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
     let search_path = session.config().search_path();
-    let user_name = &session.auth_context().user_name;
+    let user_name = &session.user_name();
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
     let index_table_name = Binder::resolve_index_name(index_name)?;
@@ -59,7 +59,7 @@ pub(crate) fn resolve_index_schema(
     let read_guard = catalog_reader.read_guard();
     let (table, schema_name) =
         read_guard.get_created_table_by_name(db_name, schema_path, &table_name)?;
-    Ok((schema_name.to_string(), table.clone(), index_table_name))
+    Ok((schema_name.to_owned(), table.clone(), index_table_name))
 }
 
 pub(crate) fn gen_create_index_plan(
@@ -185,7 +185,7 @@ pub(crate) fn gen_create_index_plan(
         .starts_with(&distributed_columns_expr)
     {
         return Err(ErrorCode::InvalidInputSyntax(
-            "Distributed by columns should be a prefix of index columns".to_string(),
+            "Distributed by columns should be a prefix of index columns".to_owned(),
         )
         .into());
     }
@@ -363,9 +363,9 @@ fn assemble_materialize(
                 .get(input_ref.index)
                 .unwrap()
                 .name()
-                .to_string(),
+                .to_owned(),
             ExprImpl::FunctionCall(func) => {
-                let func_name = func.func_type().as_str_name().to_string();
+                let func_name = func.func_type().as_str_name().to_owned();
                 let mut name = func_name.clone();
                 while !col_names.insert(name.clone()) {
                     count += 1;
@@ -382,7 +382,7 @@ fn assemble_materialize(
                     .get(input_ref.index)
                     .unwrap()
                     .name()
-                    .to_string(),
+                    .to_owned(),
                 _ => unreachable!(),
             }
         }))

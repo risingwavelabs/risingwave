@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -180,7 +180,7 @@ impl Binder {
                     }
                     _ => {
                         return Err(ErrorCode::InvalidInputSyntax(
-                            "invalid direct args for approx_percentile aggregation".to_string(),
+                            "invalid direct args for approx_percentile aggregation".to_owned(),
                         )
                         .into())
                     }

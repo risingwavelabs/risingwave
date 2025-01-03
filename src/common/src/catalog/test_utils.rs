@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -34,7 +34,7 @@ impl ColumnDescTestExt for ColumnDesc {
         Self {
             column_type: Some(data_type),
             column_id,
-            name: name.to_string(),
+            name: name.to_owned(),
             additional_column: Some(AdditionalColumn { column_type: None }),
             version: ColumnDescVersion::Pr13707 as i32,
             ..Default::default()
@@ -55,8 +55,8 @@ impl ColumnDescTestExt for ColumnDesc {
                 ..Default::default()
             }),
             column_id,
-            name: name.to_string(),
-            type_name: type_name.to_string(),
+            name: name.to_owned(),
+            type_name: type_name.to_owned(),
             field_descs: fields,
             generated_or_default_column: None,
             description: None,

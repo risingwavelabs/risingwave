@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -48,7 +48,7 @@ pub(crate) fn report_event(
         connector_name,
         component,
         attributes,
-        TELEMETRY_META_REPORT_TYPE.to_string(),
+        TELEMETRY_META_REPORT_TYPE.to_owned(),
     );
 }
 
@@ -137,7 +137,7 @@ impl TelemetryToProtobuf for MetaTelemetryReport {
             stream_job_count: self.streaming_job_count as u32,
             stream_jobs: self.job_desc.into_iter().map(|job| job.into()).collect(),
             cluster_type: self.cluster_type as i32,
-            object_store_media_type: self.object_store_media_type.to_string(),
+            object_store_media_type: self.object_store_media_type.to_owned(),
         };
         pb_report.encode_to_vec()
     }
@@ -203,8 +203,8 @@ impl TelemetryReportCreator for MetaReportCreator {
 
         Ok(MetaTelemetryReport {
             rw_version: RwVersion {
-                version: RW_VERSION.to_string(),
-                git_sha: GIT_SHA.to_string(),
+                version: RW_VERSION.to_owned(),
+                git_sha: GIT_SHA.to_owned(),
             },
             base: TelemetryReportBase {
                 tracking_id,
@@ -282,7 +282,13 @@ mod test {
 
         let pb_bytes = report.to_pb_bytes();
         let url = (TELEMETRY_REPORT_URL.to_owned() + "/" + TELEMETRY_META_REPORT_TYPE).to_owned();
-        let result = post_telemetry_report_pb(&url, pb_bytes).await;
-        assert!(result.is_ok());
+
+        // Retry 3 times to mitigate occasional failures on CI.
+        tokio_retry::Retry::spawn(
+            tokio_retry::strategy::ExponentialBackoff::from_millis(10).take(3),
+            || post_telemetry_report_pb(&url, pb_bytes.clone()),
+        )
+        .await
+        .unwrap();
     }
 }

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -48,7 +48,7 @@ use crate::barrier::utils::collect_resp_info;
 use crate::barrier::InflightSubscriptionInfo;
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::hummock::{CommitEpochInfo, NewTableFragmentInfo};
-use crate::manager::{DdlType, StreamingJob};
+use crate::manager::{StreamingJob, StreamingJobType};
 use crate::model::{ActorId, DispatcherId, FragmentId, StreamJobFragments, TableParallelism};
 use crate::stream::{build_actor_connector_splits, SplitAssignment, ThrottleConfig};
 
@@ -85,7 +85,11 @@ pub struct Reschedule {
 }
 
 /// Replacing an old job with a new one. All actors in the job will be rebuilt.
-/// Used for `ALTER TABLE` ([`Command::ReplaceStreamJob`]) and sink into table ([`Command::CreateStreamingJob`]).
+///
+/// Current use cases:
+/// - `ALTER SOURCE` (via [`Command::ReplaceStreamJob`]) will replace a source job's plan.
+/// - `ALTER TABLE` (via [`Command::ReplaceStreamJob`]) and `CREATE SINK INTO table` ([`Command::CreateStreamingJob`])
+///   will replace a table job's plan.
 #[derive(Debug, Clone)]
 pub struct ReplaceStreamJobPlan {
     pub old_fragments: StreamJobFragments,
@@ -102,7 +106,7 @@ pub struct ReplaceStreamJobPlan {
     pub init_split_assignment: SplitAssignment,
     /// The `StreamingJob` info of the table to be replaced. Must be `StreamingJob::Table`
     pub streaming_job: StreamingJob,
-    /// The temporary dummy table fragments id of new table fragment
+    /// The temporary dummy job fragments id of new table fragment
     pub tmp_id: u32,
 }
 
@@ -145,6 +149,31 @@ impl ReplaceStreamJobPlan {
         }
         fragment_changes
     }
+
+    /// `old_fragment_id` -> `new_fragment_id`
+    pub fn fragment_replacements(&self) -> HashMap<FragmentId, FragmentId> {
+        let mut fragment_replacements = HashMap::new();
+        for merge_update in &self.merge_updates {
+            if let Some(new_upstream_fragment_id) = merge_update.new_upstream_fragment_id {
+                let r = fragment_replacements
+                    .insert(merge_update.upstream_fragment_id, new_upstream_fragment_id);
+                if let Some(r) = r {
+                    assert_eq!(
+                        new_upstream_fragment_id, r,
+                        "one fragment is replaced by multiple fragments"
+                    );
+                }
+            }
+        }
+        fragment_replacements
+    }
+
+    pub fn dropped_actors(&self) -> HashSet<ActorId> {
+        self.merge_updates
+            .iter()
+            .flat_map(|merge_update| merge_update.removed_upstream_actor_id.clone())
+            .collect()
+    }
 }
 
 #[derive(educe::Educe, Clone)]
@@ -157,7 +186,7 @@ pub struct CreateStreamingJobCommandInfo {
     pub dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
     pub init_split_assignment: SplitAssignment,
     pub definition: String,
-    pub ddl_type: DdlType,
+    pub job_type: StreamingJobType,
     pub create_type: CreateType,
     pub streaming_job: StreamingJob,
     pub internal_tables: Vec<Table>,
@@ -202,7 +231,10 @@ impl CreateStreamingJobCommandInfo {
 
 #[derive(Debug, Clone)]
 pub struct SnapshotBackfillInfo {
-    pub upstream_mv_table_ids: HashSet<TableId>,
+    /// `table_id` -> `Some(snapshot_backfill_epoch)`
+    /// The `snapshot_backfill_epoch` should be None at the beginning, and be filled
+    /// by global barrier worker when handling the command.
+    pub upstream_mv_table_id_to_backfill_epoch: HashMap<TableId, Option<u64>>,
 }
 
 #[derive(Debug, Clone)]
@@ -213,8 +245,8 @@ pub enum CreateStreamingJobType {
 }
 
 /// [`Command`] is the input of [`crate::barrier::worker::GlobalBarrierWorker`]. For different commands,
-/// it will build different barriers to send, and may do different stuffs after the barrier is
-/// collected.
+/// it will [build different barriers to send](Self::to_mutation),
+/// and may [do different stuffs after the barrier is collected](CommandContext::post_collect).
 #[derive(Debug, strum::Display)]
 pub enum Command {
     /// `Flush` command will generate a checkpoint barrier. After the barrier is collected and committed
@@ -236,7 +268,7 @@ pub enum Command {
     ///
     /// Barriers from the actors to be dropped will STILL be collected.
     /// After the barrier is collected, it notifies the local stream manager of compute nodes to
-    /// drop actors, and then delete the table fragments info from meta store.
+    /// drop actors, and then delete the job fragments info from meta store.
     DropStreamingJobs {
         table_fragments_ids: HashSet<TableId>,
         actors: Vec<ActorId>,
@@ -250,7 +282,7 @@ pub enum Command {
     /// be collected since the barrier should be passthrough.
     ///
     /// After the barrier is collected, these newly created actors will be marked as `Running`. And
-    /// it adds the table fragments info to meta store. However, the creating progress will **last
+    /// it adds the job fragments info to meta store. However, the creating progress will **last
     /// for a while** until the `finish` channel is signaled, then the state of `TableFragments`
     /// will be set to `Created`.
     CreateStreamingJob {
@@ -274,16 +306,16 @@ pub enum Command {
     },
 
     /// `ReplaceStreamJob` command generates a `Update` barrier with the given `merge_updates`. This is
-    /// essentially switching the downstream of the old table fragments to the new ones, and
-    /// dropping the old table fragments. Used for table schema change.
+    /// essentially switching the downstream of the old job fragments to the new ones, and
+    /// dropping the old job fragments. Used for schema change.
     ///
     /// This can be treated as a special case of `RescheduleFragment`, while the upstream fragment
     /// of the Merge executors are changed additionally.
     ReplaceStreamJob(ReplaceStreamJobPlan),
 
-    /// `SourceSplitAssignment` generates a `Splits` barrier for pushing initialized splits or
+    /// `SourceChangeSplit` generates a `Splits` barrier for pushing initialized splits or
     /// changed splits.
-    SourceSplitAssignment(SplitAssignment),
+    SourceChangeSplit(SplitAssignment),
 
     /// `Throttle` command generates a `Throttle` barrier with the given throttle config to change
     /// the `rate_limit` of `FlowControl` Executor after `StreamScan` or Source.
@@ -388,7 +420,7 @@ impl Command {
             ),
             Command::ReplaceStreamJob(plan) => Some(plan.fragment_changes()),
             Command::MergeSnapshotBackfillStreamingJobs(_) => None,
-            Command::SourceSplitAssignment(_) => None,
+            Command::SourceChangeSplit(_) => None,
             Command::Throttle(_) => None,
             Command::CreateSubscription { .. } => None,
             Command::DropSubscription { .. } => None,
@@ -595,6 +627,7 @@ impl Command {
 
                 Command::Pause(_) => {
                     // Only pause when the cluster is not already paused.
+                    // XXX: what if pause(r1) - pause(r2) - resume(r1) - resume(r2)??
                     if current_paused_reason.is_none() {
                         Some(Mutation::Pause(PauseMutation {}))
                     } else {
@@ -611,7 +644,7 @@ impl Command {
                     }
                 }
 
-                Command::SourceSplitAssignment(change) => {
+                Command::SourceChangeSplit(change) => {
                     let mut diff = HashMap::new();
 
                     for actor_splits in change.values() {
@@ -671,8 +704,8 @@ impl Command {
                             job_type
                         {
                             snapshot_backfill_info
-                                .upstream_mv_table_ids
-                                .iter()
+                                .upstream_mv_table_id_to_backfill_epoch
+                                .keys()
                                 .map(|table_id| SubscriptionUpstreamInfo {
                                     subscriber_id: table_fragments.stream_job_id().table_id,
                                     upstream_mv_table_id: table_id.table_id,
@@ -699,7 +732,6 @@ impl Command {
                         ..
                     }) = job_type
                     {
-                        // TODO: support in v2.
                         let update = Self::generate_update_mutation_for_replace_table(
                             old_fragments,
                             merge_updates,
@@ -722,12 +754,13 @@ impl Command {
                         info: jobs_to_merge
                             .iter()
                             .flat_map(|(table_id, (backfill_info, _))| {
-                                backfill_info.upstream_mv_table_ids.iter().map(
-                                    move |upstream_table_id| SubscriptionUpstreamInfo {
+                                backfill_info
+                                    .upstream_mv_table_id_to_backfill_epoch
+                                    .keys()
+                                    .map(move |upstream_table_id| SubscriptionUpstreamInfo {
                                         subscriber_id: table_id.table_id,
                                         upstream_mv_table_id: upstream_table_id.table_id,
-                                    },
-                                )
+                                    })
                             })
                             .collect(),
                     }))

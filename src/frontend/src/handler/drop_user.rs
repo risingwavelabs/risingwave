@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -29,7 +29,7 @@ pub async fn handle_drop_user(
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
     if mode.is_some() {
-        return Err(ErrorCode::BindError("Drop user not support drop mode".to_string()).into());
+        return Err(ErrorCode::BindError("Drop user not support drop mode".to_owned()).into());
     }
 
     let user_name = Binder::resolve_user_name(user_name)?;

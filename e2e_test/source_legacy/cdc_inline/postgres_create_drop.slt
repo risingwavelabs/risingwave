@@ -10,6 +10,7 @@ psql -c "
 statement ok
 create table tt1 (v1 int,
   v2 timestamptz,
+  v3 int as v1 + 1,
   PRIMARY KEY (v1)
 ) with (
   connector = 'postgres-cdc',
@@ -28,7 +29,7 @@ sleep 3s
 query IT
 SELECT * FROM tt1;
 ----
-1 2023-10-23 10:00:00+00:00
+1 2023-10-23 10:00:00+00:00 2
 
 statement ok
 drop table tt1;
@@ -36,6 +37,7 @@ drop table tt1;
 statement ok
 create table tt1 (v1 int,
   v2 timestamptz,
+  v3 int as v1 + 2,
   PRIMARY KEY (v1)
 ) with (
   connector = 'postgres-cdc',
@@ -54,7 +56,7 @@ sleep 3s
 query IT
 SELECT * FROM tt1;
 ----
-1 2023-10-23 10:00:00+00:00
+1 2023-10-23 10:00:00+00:00 3
 
 statement ok
 drop table tt1;

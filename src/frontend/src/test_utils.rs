@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -46,7 +46,7 @@ use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::{
     alter_name_request, alter_set_schema_request, alter_swap_rename_request,
-    create_connection_request, DdlProgress, PbTableJobType, ReplaceTablePlan, TableJobType,
+    create_connection_request, DdlProgress, PbTableJobType, ReplaceJobPlan, TableJobType,
 };
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
@@ -189,8 +189,8 @@ impl LocalFrontend {
     /// Creates a new session
     pub fn session_ref(&self) -> Arc<SessionImpl> {
         self.session_user_ref(
-            DEFAULT_DATABASE_NAME.to_string(),
-            DEFAULT_SUPER_USER.to_string(),
+            DEFAULT_DATABASE_NAME.to_owned(),
+            DEFAULT_SUPER_USER.to_owned(),
             DEFAULT_SUPER_USER_ID,
         )
     }
@@ -203,7 +203,7 @@ impl LocalFrontend {
     ) -> Arc<SessionImpl> {
         Arc::new(SessionImpl::new(
             self.env.clone(),
-            Arc::new(AuthContext::new(database, user_name, user_id)),
+            AuthContext::new(database, user_name, user_id),
             UserAuthenticator::None,
             // Local Frontend use a non-sense id.
             (0, 0),
@@ -247,7 +247,7 @@ impl CatalogWriter for MockCatalogWriter {
     async fn create_database(&self, db_name: &str, owner: UserId) -> Result<()> {
         let database_id = self.gen_id();
         self.catalog.write().create_database(&PbDatabase {
-            name: db_name.to_string(),
+            name: db_name.to_owned(),
             id: database_id,
             owner,
         });
@@ -269,7 +269,7 @@ impl CatalogWriter for MockCatalogWriter {
         let id = self.gen_id();
         self.catalog.write().create_schema(&PbSchema {
             id,
-            name: schema_name.to_string(),
+            name: schema_name.to_owned(),
             database_id: db_id,
             owner,
         });
@@ -331,6 +331,16 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
+    async fn replace_source(
+        &self,
+        source: PbSource,
+        _graph: StreamFragmentGraph,
+        _mapping: ColIndexMapping,
+    ) -> Result<()> {
+        self.catalog.write().update_source(&source);
+        Ok(())
+    }
+
     async fn create_source(
         &self,
         source: PbSource,
@@ -343,7 +353,7 @@ impl CatalogWriter for MockCatalogWriter {
         &self,
         sink: PbSink,
         graph: StreamFragmentGraph,
-        _affected_table_change: Option<ReplaceTablePlan>,
+        _affected_table_change: Option<ReplaceJobPlan>,
         _dependencies: HashSet<ObjectId>,
     ) -> Result<()> {
         self.create_sink_inner(sink, graph)
@@ -413,8 +423,8 @@ impl CatalogWriter for MockCatalogWriter {
     ) -> Result<()> {
         if cascade {
             return Err(ErrorCode::NotSupported(
-                "drop cascade in MockCatalogWriter is unsupported".to_string(),
-                "use drop instead".to_string(),
+                "drop cascade in MockCatalogWriter is unsupported".to_owned(),
+                "use drop instead".to_owned(),
             )
             .into());
         }
@@ -447,8 +457,8 @@ impl CatalogWriter for MockCatalogWriter {
     async fn drop_materialized_view(&self, table_id: TableId, cascade: bool) -> Result<()> {
         if cascade {
             return Err(ErrorCode::NotSupported(
-                "drop cascade in MockCatalogWriter is unsupported".to_string(),
-                "use drop instead".to_string(),
+                "drop cascade in MockCatalogWriter is unsupported".to_owned(),
+                "use drop instead".to_owned(),
             )
             .into());
         }
@@ -469,8 +479,8 @@ impl CatalogWriter for MockCatalogWriter {
     async fn drop_source(&self, source_id: u32, cascade: bool) -> Result<()> {
         if cascade {
             return Err(ErrorCode::NotSupported(
-                "drop cascade in MockCatalogWriter is unsupported".to_string(),
-                "use drop instead".to_string(),
+                "drop cascade in MockCatalogWriter is unsupported".to_owned(),
+                "use drop instead".to_owned(),
             )
             .into());
         }
@@ -485,12 +495,12 @@ impl CatalogWriter for MockCatalogWriter {
         &self,
         sink_id: u32,
         cascade: bool,
-        _target_table_change: Option<ReplaceTablePlan>,
+        _target_table_change: Option<ReplaceJobPlan>,
     ) -> Result<()> {
         if cascade {
             return Err(ErrorCode::NotSupported(
-                "drop cascade in MockCatalogWriter is unsupported".to_string(),
-                "use drop instead".to_string(),
+                "drop cascade in MockCatalogWriter is unsupported".to_owned(),
+                "use drop instead".to_owned(),
             )
             .into());
         }
@@ -504,8 +514,8 @@ impl CatalogWriter for MockCatalogWriter {
     async fn drop_subscription(&self, subscription_id: u32, cascade: bool) -> Result<()> {
         if cascade {
             return Err(ErrorCode::NotSupported(
-                "drop cascade in MockCatalogWriter is unsupported".to_string(),
-                "use drop instead".to_string(),
+                "drop cascade in MockCatalogWriter is unsupported".to_owned(),
+                "use drop instead".to_owned(),
             )
             .into());
         }
@@ -519,8 +529,8 @@ impl CatalogWriter for MockCatalogWriter {
     async fn drop_index(&self, index_id: IndexId, cascade: bool) -> Result<()> {
         if cascade {
             return Err(ErrorCode::NotSupported(
-                "drop cascade in MockCatalogWriter is unsupported".to_string(),
-                "use drop instead".to_string(),
+                "drop cascade in MockCatalogWriter is unsupported".to_owned(),
+                "use drop instead".to_owned(),
             )
             .into());
         }
@@ -675,24 +685,24 @@ impl MockCatalogWriter {
     ) -> Self {
         catalog.write().create_database(&PbDatabase {
             id: 0,
-            name: DEFAULT_DATABASE_NAME.to_string(),
+            name: DEFAULT_DATABASE_NAME.to_owned(),
             owner: DEFAULT_SUPER_USER_ID,
         });
         catalog.write().create_schema(&PbSchema {
             id: 1,
-            name: DEFAULT_SCHEMA_NAME.to_string(),
+            name: DEFAULT_SCHEMA_NAME.to_owned(),
             database_id: 0,
             owner: DEFAULT_SUPER_USER_ID,
         });
         catalog.write().create_schema(&PbSchema {
             id: 2,
-            name: PG_CATALOG_SCHEMA_NAME.to_string(),
+            name: PG_CATALOG_SCHEMA_NAME.to_owned(),
             database_id: 0,
             owner: DEFAULT_SUPER_USER_ID,
         });
         catalog.write().create_schema(&PbSchema {
             id: 3,
-            name: RW_CATALOG_SCHEMA_NAME.to_string(),
+            name: RW_CATALOG_SCHEMA_NAME.to_owned(),
             database_id: 0,
             owner: DEFAULT_SUPER_USER_ID,
         });
@@ -919,7 +929,7 @@ impl MockUserInfoWriter {
     pub fn new(user_info: Arc<RwLock<UserInfoManager>>) -> Self {
         user_info.write().create_user(UserInfo {
             id: DEFAULT_SUPER_USER_ID,
-            name: DEFAULT_SUPER_USER.to_string(),
+            name: DEFAULT_SUPER_USER.to_owned(),
             is_super: true,
             can_create_db: true,
             can_create_user: true,
@@ -1003,7 +1013,7 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     }
 
     async fn set_session_param(&self, _param: String, _value: Option<String>) -> RpcResult<String> {
-        Ok("".to_string())
+        Ok("".to_owned())
     }
 
     async fn get_ddl_progress(&self) -> RpcResult<Vec<DdlProgress>> {
@@ -1085,6 +1095,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
 
     async fn list_rate_limits(&self) -> RpcResult<Vec<RateLimitInfo>> {
         Ok(vec![])
+    }
+
+    async fn get_meta_store_endpoint(&self) -> RpcResult<String> {
+        unimplemented!()
     }
 }
 

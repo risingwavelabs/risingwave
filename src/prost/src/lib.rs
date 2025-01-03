@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,9 +13,17 @@
 // limitations under the License.
 
 // for derived code of `Message`
-#![expect(clippy::all)]
 #![expect(clippy::doc_markdown)]
+#![expect(clippy::upper_case_acronyms)]
+#![expect(clippy::needless_lifetimes)]
+// For tonic::transport::Endpoint::connect
+#![expect(clippy::disallowed_methods)]
+#![expect(clippy::enum_variant_names)]
+#![expect(clippy::module_inception)]
+// FIXME: This should be fixed!!! https://github.com/risingwavelabs/risingwave/issues/19906
+#![expect(clippy::large_enum_variant)]
 
+use std::collections::HashMap;
 use std::str::FromStr;
 
 use plan_common::AdditionalColumn;
@@ -220,12 +228,20 @@ impl stream_plan::MaterializeNode {
 
 // Encapsulating the use of parallelism.
 impl common::WorkerNode {
-    pub fn parallelism(&self) -> usize {
+    pub fn compute_node_parallelism(&self) -> usize {
         assert_eq!(self.r#type(), WorkerType::ComputeNode);
         self.property
             .as_ref()
             .expect("property should be exist")
             .parallelism as usize
+    }
+
+    pub fn parallelism(&self) -> Option<usize> {
+        if WorkerType::ComputeNode == self.r#type() {
+            Some(self.compute_node_parallelism())
+        } else {
+            None
+        }
     }
 }
 
@@ -335,9 +351,44 @@ impl stream_plan::FragmentTypeFlag {
         stream_plan::FragmentTypeFlag::Source as i32 | stream_plan::FragmentTypeFlag::FsFetch as i32
     }
 
+    /// Fragments that may be affected by `BACKFILL_RATE_LIMIT`.
+    pub fn sink_rate_limit_fragments() -> i32 {
+        stream_plan::FragmentTypeFlag::Sink as i32
+    }
+
     /// Note: this doesn't include `FsFetch` created in old versions.
     pub fn rate_limit_fragments() -> i32 {
-        Self::backfill_rate_limit_fragments() | Self::source_rate_limit_fragments()
+        Self::backfill_rate_limit_fragments()
+            | Self::source_rate_limit_fragments()
+            | Self::sink_rate_limit_fragments()
+    }
+
+    pub fn dml_rate_limit_fragments() -> i32 {
+        stream_plan::FragmentTypeFlag::Dml as i32
+    }
+}
+
+impl stream_plan::Dispatcher {
+    pub fn as_strategy(&self) -> stream_plan::DispatchStrategy {
+        stream_plan::DispatchStrategy {
+            r#type: self.r#type,
+            dist_key_indices: self.dist_key_indices.clone(),
+            output_indices: self.output_indices.clone(),
+        }
+    }
+}
+
+impl meta::table_fragments::Fragment {
+    pub fn dispatches(&self) -> HashMap<i32, stream_plan::DispatchStrategy> {
+        self.actors[0]
+            .dispatcher
+            .iter()
+            .map(|d| {
+                let fragment_id = d.dispatcher_id as _;
+                let strategy = d.as_strategy();
+                (fragment_id, strategy)
+            })
+            .collect()
     }
 }
 
@@ -452,11 +503,12 @@ impl std::fmt::Debug for plan_common::ColumnDesc {
             s.field("additional_column_type", additional_column_type);
         }
         s.field("version", version);
-        if let Some(AdditionalColumn { column_type }) = additional_column {
+        if let Some(AdditionalColumn {
+            column_type: Some(column_type),
+        }) = additional_column
+        {
             // AdditionalColumn { None } means a normal column
-            if let Some(column_type) = column_type {
-                s.field("additional_column", &column_type);
-            }
+            s.field("additional_column", &column_type);
         }
         if let Some(generated_or_default_column) = generated_or_default_column {
             s.field("generated_or_default_column", &generated_or_default_column);
@@ -469,14 +521,17 @@ impl std::fmt::Debug for plan_common::ColumnDesc {
 mod tests {
     use crate::data::{data_type, DataType};
     use crate::plan_common::Field;
+    use crate::stream_plan::stream_node::NodeBody;
 
     #[test]
     fn test_getter() {
-        let mut data_type: DataType = DataType::default();
-        data_type.is_nullable = true;
+        let data_type: DataType = DataType {
+            is_nullable: true,
+            ..Default::default()
+        };
         let field = Field {
             data_type: Some(data_type),
-            name: "".to_string(),
+            name: "".to_owned(),
         };
         assert!(field.get_data_type().unwrap().is_nullable);
     }
@@ -506,5 +561,13 @@ mod tests {
             ..Default::default()
         };
         assert!(!new_data_type.is_nullable);
+    }
+
+    #[test]
+    fn test_size() {
+        use static_assertions::const_assert_eq;
+        // box all fields in NodeBody to avoid large_enum_variant
+        // see https://github.com/risingwavelabs/risingwave/issues/19910
+        const_assert_eq!(std::mem::size_of::<NodeBody>(), 16);
     }
 }

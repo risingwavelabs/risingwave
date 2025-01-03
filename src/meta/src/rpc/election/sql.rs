@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -691,7 +691,7 @@ where
 
         let mut election_ticker = time::interval(Duration::from_secs(1));
 
-        let mut prev_leader = "".to_string();
+        let mut prev_leader = "".to_owned();
 
         loop {
             tokio::select! {
@@ -821,7 +821,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_sql_election() {
-        let id = "test_id".to_string();
+        let id = "test_id".to_owned();
         let conn = prepare_sqlite_env().await.unwrap();
 
         let provider = SqliteDriver { conn };

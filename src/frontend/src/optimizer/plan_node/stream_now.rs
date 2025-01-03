@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -81,7 +81,7 @@ impl StreamNode for StreamNow {
         let table_catalog = internal_table_catalog_builder
             .build(dist_keys, 0)
             .with_id(state.gen_table_id_wrapped());
-        NodeBody::Now(PbNowNode {
+        NodeBody::Now(Box::new(PbNowNode {
             state_table: Some(table_catalog.to_internal_table_prost()),
             mode: Some(match &self.core.mode {
                 Mode::UpdateCurrent => PbNowMode::UpdateCurrent(PbNowModeUpdateCurrent {}),
@@ -93,7 +93,7 @@ impl StreamNode for StreamNow {
                     interval: Some(Datum::Some((*interval).into()).to_protobuf()),
                 }),
             }),
-        })
+        }))
     }
 }
 

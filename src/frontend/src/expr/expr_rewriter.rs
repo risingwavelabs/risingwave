@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -155,9 +155,10 @@ pub trait ExprRewriter {
 
     fn rewrite_window_function(&mut self, window_func: WindowFunction) -> ExprImpl {
         let WindowFunction {
-            args,
-            return_type,
             kind,
+            return_type,
+            args,
+            ignore_nulls,
             partition_by,
             order_by,
             frame,
@@ -168,8 +169,9 @@ pub trait ExprRewriter {
             .collect();
         WindowFunction {
             kind,
-            args,
             return_type,
+            args,
+            ignore_nulls,
             partition_by,
             order_by,
             frame,

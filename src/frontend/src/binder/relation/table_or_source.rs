@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -143,7 +143,7 @@ impl Binder {
                     } else {
                         return Err(CatalogError::NotFound(
                             "table or source",
-                            table_name.to_string(),
+                            table_name.to_owned(),
                         )
                         .into());
                     }
@@ -196,12 +196,12 @@ impl Binder {
                         }
                     }
 
-                    Err(CatalogError::NotFound("table or source", table_name.to_string()).into())
+                    Err(CatalogError::NotFound("table or source", table_name.to_owned()).into())
                 })()?,
             }
         };
 
-        self.bind_table_to_context(columns, table_name.to_string(), alias)?;
+        self.bind_table_to_context(columns, table_name.to_owned(), alias)?;
         Ok(ret)
     }
 
@@ -321,10 +321,7 @@ impl Binder {
         alias: Option<TableAlias>,
     ) -> Result<BoundBaseTable> {
         let db_name = &self.db_name;
-        let schema_path = match schema_name {
-            Some(schema_name) => SchemaPath::Name(schema_name),
-            None => SchemaPath::Path(&self.search_path, &self.auth_context.user_name),
-        };
+        let schema_path = self.bind_schema_path(schema_name);
         let (table_catalog, schema_name) =
             self.catalog
                 .get_created_table_by_name(db_name, schema_path, table_name)?;
@@ -339,7 +336,7 @@ impl Binder {
             columns
                 .iter()
                 .map(|c| (c.is_hidden, (&c.column_desc).into())),
-            table_name.to_string(),
+            table_name.to_owned(),
             alias,
         )?;
 
@@ -358,10 +355,7 @@ impl Binder {
         is_insert: bool,
     ) -> Result<&'a TableCatalog> {
         let db_name = &self.db_name;
-        let schema_path = match schema_name {
-            Some(schema_name) => SchemaPath::Name(schema_name),
-            None => SchemaPath::Path(&self.search_path, &self.auth_context.user_name),
-        };
+        let schema_path = self.bind_schema_path(schema_name);
 
         let (table, _schema_name) =
             self.catalog
@@ -391,7 +385,7 @@ impl Binder {
 
         if table.append_only && !is_insert {
             return Err(ErrorCode::BindError(
-                "append-only table does not support update or delete".to_string(),
+                "append-only table does not support update or delete".to_owned(),
             )
             .into());
         }

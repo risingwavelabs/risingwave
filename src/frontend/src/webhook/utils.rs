@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -64,8 +64,8 @@ pub(crate) fn header_map_to_json(headers: &HeaderMap) -> JsonbVal {
     let mut header_map = HashMap::new();
 
     for (key, value) in headers {
-        let key = key.as_str().to_string();
-        let value = value.to_str().unwrap_or("").to_string();
+        let key = key.as_str().to_owned();
+        let value = value.to_str().unwrap_or("").to_owned();
         header_map.insert(key, value);
     }
 

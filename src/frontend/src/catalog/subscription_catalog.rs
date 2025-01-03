@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -81,7 +81,7 @@ impl SubscriptionId {
 impl SubscriptionCatalog {
     pub fn set_retention_seconds(&mut self, properties: &WithOptions) -> Result<()> {
         let retention_seconds_str = properties.get("retention").ok_or_else(|| {
-            ErrorCode::InternalError("Subscription retention time not set.".to_string())
+            ErrorCode::InternalError("Subscription retention time not set.".to_owned())
         })?;
         let retention_seconds = convert_interval_to_u64_seconds(retention_seconds_str)?;
         self.retention_seconds = retention_seconds;

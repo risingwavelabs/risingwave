@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -228,5 +228,11 @@ impl TryFrom<&WithOptionsSecResolved> for Option<SinkFormatDesc> {
             (Some(c), Some(t)) => SinkFormatDesc::from_legacy_type(c, t),
             _ => Ok(None),
         }
+    }
+}
+
+impl Get for WithOptionsSecResolved {
+    fn get(&self, key: &str) -> Option<&String> {
+        self.inner.get(key)
     }
 }

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -127,7 +127,7 @@ impl<Src: OpendalSource> OpendalFsSplit<Src> {
 
     pub fn empty_split() -> Self {
         Self {
-            name: "empty_split".to_string(),
+            name: "empty_split".to_owned(),
             offset: 0,
             size: 0,
             _marker: PhantomData,

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -106,7 +106,7 @@ impl PsqlCommandBuilder {
 
     pub(crate) fn add_cmd<S: AsRef<str>>(mut self, cmd: S) -> Self {
         let cmd = cmd.as_ref();
-        let mut escaped_cmd = "".to_string();
+        let mut escaped_cmd = "".to_owned();
 
         // Escape any shell double-quote metacharacters
         for c in cmd.chars() {

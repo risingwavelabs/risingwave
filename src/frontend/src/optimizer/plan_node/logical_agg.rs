@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -1376,7 +1376,7 @@ impl ToStream for LogicalAgg {
             if eowc {
                 return Err(ErrorCode::InvalidInputSyntax(
                     "`EMIT ON WINDOW CLOSE` cannot be used for aggregation without `GROUP BY`"
-                        .to_string(),
+                        .to_owned(),
                 )
                 .into());
             }
@@ -1394,7 +1394,7 @@ impl ToStream for LogicalAgg {
             if eowc {
                 return Err(ErrorCode::InvalidInputSyntax(
                     "`EMIT ON WINDOW CLOSE` cannot be used for aggregation without `GROUP BY`"
-                        .to_string(),
+                        .to_owned(),
                 )
                 .into());
             }
@@ -1403,7 +1403,7 @@ impl ToStream for LogicalAgg {
             if eowc {
                 return Err(ErrorCode::InvalidInputSyntax(
                     "`EMIT ON WINDOW CLOSE` cannot be used for aggregation without `GROUP BY`"
-                        .to_string(),
+                        .to_owned(),
                 )
                 .into());
             }

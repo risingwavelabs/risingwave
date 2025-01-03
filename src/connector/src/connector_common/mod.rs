@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,7 +25,8 @@ pub use common::{
 };
 mod connection;
 pub use connection::{
-    validate_connection, Connection, IcebergConnection, KafkaConnection, SchemaRegistryConnection,
+    validate_connection, ConfluentSchemaRegistryConnection, Connection, IcebergConnection,
+    KafkaConnection, SCHEMA_REGISTRY_CONNECTION_TYPE,
 };
 
 mod iceberg;

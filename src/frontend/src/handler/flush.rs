@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,7 +30,7 @@ pub(crate) async fn do_flush(session: &SessionImpl) -> Result<()> {
         .env()
         .catalog_reader()
         .read_guard()
-        .get_database_by_name(session.database())?
+        .get_database_by_name(&session.database())?
         .id();
     let version_id = client.flush(database_id).await?;
 

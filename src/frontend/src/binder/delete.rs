@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -75,7 +75,7 @@ impl Binder {
         let table_catalog = self.resolve_dml_table(schema_name, &table_name, false)?;
         if !returning_items.is_empty() && table_catalog.has_generated_column() {
             return Err(RwError::from(ErrorCode::BindError(
-                "`RETURNING` clause is not supported for tables with generated columns".to_string(),
+                "`RETURNING` clause is not supported for tables with generated columns".to_owned(),
             )));
         }
         let table_id = table_catalog.id;

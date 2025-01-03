@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -93,7 +93,7 @@ impl LogicalCdcScan {
 
     pub fn clone_with_output_indices(&self, output_col_idx: Vec<usize>) -> Self {
         generic::CdcScan::new(
-            self.table_name().to_string(),
+            self.table_name().to_owned(),
             output_col_idx,
             self.core.cdc_table_desc.clone(),
             self.base.ctx().clone(),

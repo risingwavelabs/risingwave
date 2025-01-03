@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -1230,8 +1230,8 @@ enum TimeStrToken {
 fn parse_interval(s: &str) -> ParseResult<Vec<TimeStrToken>> {
     let s = s.trim();
     let mut tokens = Vec::new();
-    let mut num_buf = "".to_string();
-    let mut char_buf = "".to_string();
+    let mut num_buf = "".to_owned();
+    let mut char_buf = "".to_owned();
     let mut hour_min_sec = Vec::new();
     for (i, c) in s.chars().enumerate() {
         match c {

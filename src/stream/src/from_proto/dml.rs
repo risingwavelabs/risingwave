@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -38,12 +38,14 @@ impl ExecutorBuilder for DmlExecutorBuilder {
         let column_descs = node.column_descs.iter().map(Into::into).collect_vec();
 
         let exec = DmlExecutor::new(
+            params.actor_context.clone(),
             upstream,
             params.env.dml_manager_ref(),
             table_id,
             node.table_version_id,
             column_descs,
             params.env.config().developer.chunk_size,
+            node.rate_limit,
         );
         Ok((params.info, exec).into())
     }

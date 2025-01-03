@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -241,7 +241,7 @@ fn gen_batch_query_plan(
         ..
     } = bind_result;
 
-    let mut planner = Planner::new(context);
+    let mut planner = Planner::new_for_batch(context);
 
     let mut logical = planner.plan(bound)?;
     let schema = logical.schema();
