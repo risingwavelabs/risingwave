@@ -113,7 +113,7 @@ impl ElasticSearchOpenSearchFormatter {
         })
     }
 
-    pub fn convert_chunk(&self, chunk: StreamChunk) -> Result<Vec<BuildBulkPara>> {
+    pub fn convert_chunk(&self, chunk: StreamChunk,is_append_only: bool) -> Result<Vec<BuildBulkPara>> {
         let mut result_vec = Vec::with_capacity(chunk.capacity());
         for (op, rows) in chunk.rows() {
             let index = if let Some(index_column) = self.index_column {
@@ -144,30 +144,47 @@ impl ElasticSearchOpenSearchFormatter {
                     )
                 })
                 .transpose()?;
-            match op {
-                Op::Insert | Op::UpdateInsert => {
-                    let key = self.key_encoder.encode(rows)?;
-                    let value = self.value_encoder.encode(rows)?;
-                    result_vec.push(BuildBulkPara {
-                        index: index.to_owned(),
-                        key,
-                        value: Some(value),
-                        mem_size_b: rows.value_estimate_size(),
-                        routing_column,
-                    });
+            if is_append_only {
+                match op {
+                    Op::Insert | Op::UpdateInsert => {
+                        let key = self.key_encoder.encode(rows)?;
+                        let value = self.value_encoder.encode(rows)?;
+                        result_vec.push(BuildBulkPara {
+                            index: index.to_owned(),
+                            key,
+                            value: Some(value),
+                            mem_size_b: rows.value_estimate_size(),
+                            routing_column,
+                        });
+                    }
+                    Op::Delete | Op::UpdateDelete => continue,
                 }
-                Op::Delete => {
-                    let key = self.key_encoder.encode(rows)?;
-                    let mem_size_b = std::mem::size_of_val(&key);
-                    result_vec.push(BuildBulkPara {
-                        index: index.to_owned(),
-                        key,
-                        value: None,
-                        mem_size_b,
-                        routing_column,
-                    });
+            } else {
+                match op {
+                    Op::Insert | Op::UpdateInsert => {
+                        let key = self.key_encoder.encode(rows)?;
+                        let value = self.value_encoder.encode(rows)?;
+                        result_vec.push(BuildBulkPara {
+                            index: index.to_owned(),
+                            key,
+                            value: Some(value),
+                            mem_size_b: rows.value_estimate_size(),
+                            routing_column,
+                        });
+                    }
+                    Op::Delete => {
+                        let key = self.key_encoder.encode(rows)?;
+                        let mem_size_b = std::mem::size_of_val(&key);
+                        result_vec.push(BuildBulkPara {
+                            index: index.to_owned(),
+                            key,
+                            value: None,
+                            mem_size_b,
+                            routing_column,
+                        });
+                    }
+                    Op::UpdateDelete => continue,
                 }
-                Op::UpdateDelete => continue,
             }
         }
         Ok(result_vec)

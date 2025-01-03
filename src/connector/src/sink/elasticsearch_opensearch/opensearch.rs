@@ -30,6 +30,7 @@ pub struct OpenSearchSink {
     config: ElasticSearchOpenSearchConfig,
     schema: Schema,
     pk_indices: Vec<usize>,
+    is_append_only: bool,
 }
 
 #[async_trait]
@@ -43,6 +44,7 @@ impl TryFrom<SinkParam> for OpenSearchSink {
             config,
             schema,
             pk_indices: param.downstream_pk,
+            is_append_only: param.sink_type.is_append_only(),
         })
     }
 }
@@ -69,6 +71,7 @@ impl Sink for OpenSearchSink {
             self.schema.clone(),
             self.pk_indices.clone(),
             Self::SINK_NAME,
+            self.is_append_only
         )?
         .into_log_sinker(self.config.concurrent_requests))
     }

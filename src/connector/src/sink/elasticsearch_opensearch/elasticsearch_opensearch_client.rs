@@ -160,6 +160,7 @@ pub struct ElasticSearchOpenSearchSinkWriter {
     client: Arc<ElasticSearchOpenSearchClient>,
     formatter: ElasticSearchOpenSearchFormatter,
     config: ElasticSearchOpenSearchConfig,
+    is_append_only: bool,
 }
 
 impl ElasticSearchOpenSearchSinkWriter {
@@ -168,6 +169,7 @@ impl ElasticSearchOpenSearchSinkWriter {
         schema: Schema,
         pk_indices: Vec<usize>,
         connector: &str,
+        is_append_only: bool,
     ) -> Result<Self> {
         let client = Arc::new(config.build_client(connector)?);
         let formatter = ElasticSearchOpenSearchFormatter::new(
@@ -182,6 +184,7 @@ impl ElasticSearchOpenSearchSinkWriter {
             client,
             formatter,
             config,
+            is_append_only,
         })
     }
 }
@@ -202,7 +205,7 @@ impl AsyncTruncateSinkWriter for ElasticSearchOpenSearchSinkWriter {
         let mut bulks: Vec<ElasticSearchOpenSearchBulk> = Vec::with_capacity(chunk_capacity);
 
         let mut bulks_size = 0;
-        for build_bulk_para in self.formatter.convert_chunk(chunk)? {
+        for build_bulk_para in self.formatter.convert_chunk(chunk,self.is_append_only)? {
             let BuildBulkPara {
                 key,
                 value,
