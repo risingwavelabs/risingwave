@@ -207,10 +207,8 @@ impl CatalogController {
             }
         });
 
-        let (source_fragments, removed_actors, removed_fragments) =
-            resolve_source_register_info_for_jobs(&txn, to_drop_streaming_jobs.clone()).await?;
-
-        let fragment_ids = get_fragment_ids_by_jobs(&txn, to_drop_streaming_jobs.clone()).await?;
+        let (removed_source_fragments, removed_actors, removed_fragments) =
+            get_fragments_for_jobs(&txn, to_drop_streaming_jobs.clone()).await?;
 
         // Find affect users with privileges on all this objects.
         let to_update_user_ids: Vec<UserId> = UserPrivilege::find()
@@ -245,10 +243,10 @@ impl CatalogController {
             .notify_frontend(NotificationOperation::Delete, relation_group)
             .await;
 
-        let fragment_mappings = fragment_ids
-            .into_iter()
+        let fragment_mappings = removed_fragments
+            .iter()
             .map(|fragment_id| PbFragmentWorkerSlotMapping {
-                fragment_id: fragment_id as _,
+                fragment_id: *fragment_id as _,
                 mapping: None,
             })
             .collect();
@@ -259,11 +257,10 @@ impl CatalogController {
         Ok((
             ReleaseContext {
                 database_id,
-                streaming_job_ids: to_drop_streaming_jobs,
-                state_table_ids: to_drop_state_table_ids,
-                source_ids: to_drop_source_ids,
-                connections: vec![],
-                source_fragments,
+                removed_streaming_job_ids: to_drop_streaming_jobs,
+                removed_state_table_ids: to_drop_state_table_ids,
+                removed_source_ids: to_drop_source_ids,
+                removed_source_fragments,
                 removed_actors,
                 removed_fragments,
             },
@@ -418,8 +415,8 @@ impl CatalogController {
             .all(&txn)
             .await?;
 
-        let (source_fragments, removed_actors, removed_fragments) =
-            resolve_source_register_info_for_jobs(&txn, streaming_jobs.clone()).await?;
+        let (removed_source_fragments, removed_actors, removed_fragments) =
+            get_fragments_for_jobs(&txn, streaming_jobs.clone()).await?;
 
         let state_table_ids: Vec<TableId> = Table::find()
             .select_only()
@@ -444,15 +441,6 @@ impl CatalogController {
             .into_tuple()
             .all(&txn)
             .await?;
-
-        let connections = Connection::find()
-            .inner_join(Object)
-            .filter(object::Column::DatabaseId.eq(Some(database_id)))
-            .all(&txn)
-            .await?
-            .into_iter()
-            .map(|conn| conn.connection_id)
-            .collect_vec();
 
         // Find affect users with privileges on the database and the objects in the database.
         let to_update_user_ids: Vec<UserId> = UserPrivilege::find()
@@ -503,11 +491,10 @@ impl CatalogController {
         Ok((
             ReleaseContext {
                 database_id,
-                streaming_job_ids: streaming_jobs,
-                state_table_ids,
-                source_ids,
-                connections,
-                source_fragments,
+                removed_streaming_job_ids: streaming_jobs,
+                removed_state_table_ids: state_table_ids,
+                removed_source_ids: source_ids,
+                removed_source_fragments,
                 removed_actors,
                 removed_fragments,
             },

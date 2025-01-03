@@ -45,3 +45,6 @@ c583e2c6c054764249acf484438c7bf7197765f4
 
 # chore: cleanup v2 naming for sql metastore (#18941)
 9a6a7f9052d5679165ff57cc01417c742c95351c
+
+# refactor: split catalog to smaller files (#19870)
+d6341b74be3f1913cc93993a95c147999df1ff74
