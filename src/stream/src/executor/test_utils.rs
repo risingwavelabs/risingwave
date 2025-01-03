@@ -852,6 +852,12 @@ pub mod hash_join_executor {
             // Push a single record into tx_r, so 100K records to be matched are cached.
             let chunk = build_chunk(amp, 200_000);
             tx_r.push_chunk(chunk);
+
+            // Ensure that the chunk on the rhs is processed, before inserting a chunk
+            // into the lhs. This is to ensure that the rhs chunk is cached,
+            // and we don't get interleaving of chunks between lhs and rhs.
+            tx_l.push_barrier(test_epoch(2), false);
+            tx_r.push_barrier(test_epoch(2), false);
         }
 
         // Push a chunk of records into tx_l, matches 100K records in the build side.
@@ -874,6 +880,17 @@ pub mod hash_join_executor {
             }
             other => {
                 panic!("Expected a barrier, got {:?}", other);
+            }
+        }
+
+        if matches!(hash_join_workload, HashJoinWorkload::InCache) {
+            match stream.next().await {
+                Some(Ok(Message::Barrier(b))) => {
+                    assert_eq!(b.epoch.curr, test_epoch(2));
+                }
+                other => {
+                    panic!("Expected a barrier, got {:?}", other);
+                }
             }
         }
 
