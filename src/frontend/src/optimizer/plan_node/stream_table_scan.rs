@@ -123,6 +123,8 @@ impl StreamTableScan {
 
     /// Build catalog for backfill state
     ///
+    /// When `is_snapshot_backfill` is `false`:
+    ///
     /// Schema: | vnode | pk ... | `backfill_finished` | `row_count` |
     ///
     /// key:    | vnode |
@@ -153,9 +155,18 @@ impl StreamTableScan {
     /// the corresponding `no_shuffle_backfill`.
     /// However this is not high priority, since we are working on supporting arrangement backfill,
     /// which already has this capability.
+    ///
+    ///
+    /// When `is_snapshot_backfill` is true:
+    ///
+    /// Schema: | vnode | `epoch` | `row_count` | `is_epoch_finished` | pk ...
+    ///
+    /// key:    | vnode |
+    /// value:  | `epoch` | `row_count` | `is_epoch_finished` | pk ...
     pub fn build_backfill_state_catalog(
         &self,
         state: &mut BuildFragmentGraphState,
+        is_snapshot_backfill: bool,
     ) -> TableCatalog {
         let mut catalog_builder = TableCatalogBuilder::default();
         let upstream_schema = &self.core.get_table_columns();
@@ -165,17 +176,34 @@ impl StreamTableScan {
         catalog_builder.add_column(&Field::with_name(VirtualNode::RW_TYPE, "vnode"));
         catalog_builder.add_order_column(0, OrderType::ascending());
 
-        // pk columns
-        for col_order in self.core.primary_key() {
-            let col = &upstream_schema[col_order.column_index];
-            catalog_builder.add_column(&Field::from(col));
+        if !is_snapshot_backfill {
+            // pk columns
+            for col_order in self.core.primary_key() {
+                let col = &upstream_schema[col_order.column_index];
+                catalog_builder.add_column(&Field::from(col));
+            }
+
+            // `backfill_finished` column
+            catalog_builder.add_column(&Field::with_name(DataType::Boolean, "backfill_finished"));
+
+            // `row_count` column
+            catalog_builder.add_column(&Field::with_name(DataType::Int64, "row_count"));
+        } else {
+            // `epoch` column
+            catalog_builder.add_column(&Field::with_name(DataType::Int64, "epoch"));
+
+            // `row_count` column
+            catalog_builder.add_column(&Field::with_name(DataType::Int64, "row_count"));
+
+            // `is_finished` column
+            catalog_builder.add_column(&Field::with_name(DataType::Boolean, "is_epoch_finished"));
+
+            // pk columns
+            for col_order in self.core.primary_key() {
+                let col = &upstream_schema[col_order.column_index];
+                catalog_builder.add_column(&Field::from(col));
+            }
         }
-
-        // `backfill_finished` column
-        catalog_builder.add_column(&Field::with_name(DataType::Boolean, "backfill_finished"));
-
-        // `row_count` column
-        catalog_builder.add_column(&Field::with_name(DataType::Int64, "row_count"));
 
         // Reuse the state store pk (vnode) as the vnode as well.
         catalog_builder.set_vnode_col_idx(0);
@@ -284,9 +312,21 @@ impl StreamTableScan {
             column_ids: upstream_column_ids.clone(),
         };
 
-        let catalog = self
-            .build_backfill_state_catalog(state)
-            .to_internal_table_prost();
+        let catalog = match self.stream_scan_type {
+            StreamScanType::SnapshotBackfill => self
+                .build_backfill_state_catalog(state, true)
+                .to_internal_table_prost(),
+            StreamScanType::Chain
+            | StreamScanType::Rearrange
+            | StreamScanType::Backfill
+            | StreamScanType::UpstreamOnly
+            | StreamScanType::ArrangementBackfill => self
+                .build_backfill_state_catalog(state, false)
+                .to_internal_table_prost(),
+            StreamScanType::Unspecified => {
+                unreachable!()
+            }
+        };
 
         // For backfill, we first read pk + output_indices from upstream.
         // On this, we need to further project `output_indices` to the downstream.
