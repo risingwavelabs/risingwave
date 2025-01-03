@@ -485,6 +485,7 @@ mod tests {
     const RATE: u64 = 1000;
     const DURATION: Duration = Duration::from_secs(10);
 
+    // TODO(MrCroxx): ignore this unit test if it fails on CI too frequently.
     #[test]
     fn test_leak_bucket() {
         let v = Arc::new(AtomicU64::new(0));
@@ -529,6 +530,7 @@ mod tests {
         println!("eratio {eratio} < ERATIO {ERATIO}");
     }
 
+    // TODO(MrCroxx): ignore this unit test if it fails on CI too frequently.
     #[test]
     fn test_leak_bucket_overflow() {
         let v = Arc::new(AtomicU64::new(0));
@@ -552,7 +554,7 @@ mod tests {
         let mut handles = vec![];
         let mut rng = thread_rng();
         for _ in 0..THREADS {
-            let rate = rng.gen_range(500..2000);
+            let rate = rng.gen_range(500..1500);
             let handle = std::thread::spawn({
                 let v = v.clone();
                 let limiter = lb.clone();

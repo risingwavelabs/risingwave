@@ -407,7 +407,9 @@ impl<R: LogReader> RateLimitedLogReader<R> {
         split_chunk: SplitChunk,
     ) -> LogStoreResult<(u64, LogStoreReadItem)> {
         let split_chunk = match self.rate_limiter.rate_limit() {
-            RateLimit::Pause => bail!("rate limit policy for log store cannot be paused"),
+            RateLimit::Pause => unreachable!(
+                "apply_rate_limit is not supposed to be called while the stream is paused"
+            ),
             RateLimit::Disabled => split_chunk,
             RateLimit::Fixed(limit) => {
                 let limit = limit.get();
