@@ -194,8 +194,7 @@ impl Rule for PullUpCorrelatedPredicateAggRule {
                 .conjunctions
                 .iter()
                 .any(|expr| Strong::is_null(expr, top_proj_null_bitset.clone()));
-            let can_apply =
-                top_proj_all_null || (!top_filter.predicate().always_true() && top_filter_all_null);
+            let can_apply = top_proj_all_null || top_filter_all_null;
 
             if !can_apply {
                 return None;
