@@ -172,11 +172,11 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
             // 2. all watermark columns belong to the same group, choose the first one as the window column
             return Ok(group_key_with_wtmk[0].0);
         }
-        return Err(ErrorCode::NotSupported(
+        Err(ErrorCode::NotSupported(
             "Emit-On-Window-Close mode requires that watermark columns in GROUP BY are derived from the same upstream column.".to_owned(),
             "Please try to remove undesired columns from GROUP BY".to_owned(),
         )
-        .into());
+        .into())
     }
 
     pub fn new(agg_calls: Vec<PlanAggCall>, group_key: IndexSet, input: PlanRef) -> Self {
