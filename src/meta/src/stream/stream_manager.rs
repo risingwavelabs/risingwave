@@ -344,7 +344,6 @@ impl GlobalStreamManager {
         }: CreateStreamingJobContext,
     ) -> MetaResult<NotificationVersion> {
         let mut replace_table_command = None;
-        let mut replace_table_id = None;
 
         tracing::debug!(
             table_id = %stream_job_fragments.stream_job_id(),
@@ -361,8 +360,6 @@ impl GlobalStreamManager {
 
             let tmp_table_id = stream_job_fragments.stream_job_id();
             let init_split_assignment = self.source_manager.allocate_splits(&tmp_table_id).await?;
-
-            replace_table_id = Some(tmp_table_id);
 
             replace_table_command = Some(ReplaceStreamJobPlan {
                 old_fragments: context.old_fragments,
@@ -436,12 +433,12 @@ impl GlobalStreamManager {
         }
 
         tracing::debug!(?streaming_job, "first barrier collected for stream job");
-        let result = self
+        let version = self
             .metadata_manager
             .wait_streaming_job_finished(streaming_job.id() as _)
             .await?;
         tracing::debug!(?streaming_job, "stream job finish");
-        result
+        Ok(version)
     }
 
     /// Send replace job command to barrier scheduler.
