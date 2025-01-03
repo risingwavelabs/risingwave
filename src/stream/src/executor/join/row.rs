@@ -53,12 +53,38 @@ impl<R: Row> JoinRow<R> {
             degree: self.degree,
         }
     }
+
+    pub fn encode_noop(&self) -> UnencodedJoinRow {
+        UnencodedJoinRow {
+            row: self.row.to_owned_row(),
+            degree: self.degree,
+        }
+    }
 }
 
 pub type DegreeType = u64;
 
 fn build_degree_row(order_key: impl Row, degree: DegreeType) -> impl Row {
     order_key.chain(row::once(Some(ScalarImpl::Int64(degree as i64))))
+}
+
+#[derive(Clone, Debug, EstimateSize)]
+pub struct UnencodedJoinRow {
+    pub row: OwnedRow,
+    pub degree: DegreeType,
+}
+
+impl UnencodedJoinRow {
+    pub fn decode(&self, _data_types: &[DataType]) -> StreamExecutorResult<JoinRow<OwnedRow>> {
+        Ok(JoinRow {
+            row: self.row.to_owned_row(),
+            degree: self.degree,
+        })
+    }
+
+    fn decode_row(&self, _data_types: &[DataType]) -> StreamExecutorResult<OwnedRow> {
+        Ok(self.row.to_owned_row())
+    }
 }
 
 #[derive(Clone, Debug, EstimateSize)]

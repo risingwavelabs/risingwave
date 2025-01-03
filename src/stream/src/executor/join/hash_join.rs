@@ -36,7 +36,7 @@ use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 use thiserror_ext::AsReport;
 
-use super::row::{DegreeType, EncodedJoinRow};
+use super::row::{DegreeType, EncodedJoinRow, UnencodedJoinRow};
 use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTable;
@@ -51,7 +51,9 @@ use crate::task::{ActorId, AtomicU64Ref, FragmentId};
 type PkType = Vec<u8>;
 type InequalKeyType = Vec<u8>;
 
-pub type StateValueType = EncodedJoinRow;
+// pub type StateValueType = EncodedJoinRow;
+pub type StateValueType = UnencodedJoinRow;
+
 pub type HashValueType = Box<JoinEntryState>;
 
 impl EstimateSize for HashValueType {
@@ -666,7 +668,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
                                     .insert(
                                         pk,
                                         JoinRow::new(row.row(), degree_i64.into_int64() as u64)
-                                            .encode(),
+                                            .encode_noop(),
                                         inequality_key,
                                     )
                                     .with_context(|| self.state.error_context(row.row()))?;
@@ -705,7 +707,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
                     entry_state
                         .insert(
                             pk,
-                            JoinRow::new(row.row(), degree_i64.into_int64() as u64).encode(),
+                            JoinRow::new(row.row(), degree_i64.into_int64() as u64).encode_noop(),
                             inequality_key,
                         )
                         .with_context(|| self.state.error_context(row.row()))?;
@@ -732,7 +734,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
                     .as_ref()
                     .map(|desc| desc.serialize_inequal_key_from_row(row.row()));
                 entry_state
-                    .insert(pk, JoinRow::new(row.row(), 0).encode(), inequality_key)
+                    .insert(pk, JoinRow::new(row.row(), 0).encode_noop(), inequality_key)
                     .with_context(|| self.state.error_context(row.row()))?;
             }
         };
@@ -784,14 +786,14 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             // Update cache
             let mut entry = self.inner.get_mut(key).unwrap();
             entry
-                .insert(pk, value.encode(), inequality_key)
+                .insert(pk, value.encode_noop(), inequality_key)
                 .with_context(|| self.state.error_context(&value.row))?;
         } else if self.pk_contained_in_jk {
             // Refill cache when the join key exist in neither cache or storage.
             self.metrics.insert_cache_miss_count += 1;
-            let mut entry = JoinEntryState::default();
-            entry
-                .insert(pk, value.encode(), inequality_key)
+            let mut state = JoinEntryState::default();
+            state
+                .insert(pk, value.encode_noop(), inequality_key)
                 .with_context(|| self.state.error_context(&value.row))?;
             self.update_state(key, entry.into());
         }
@@ -1217,7 +1219,7 @@ mod tests {
             });
             let join_row = JoinRow { row, degree: 0 };
             managed_state
-                .insert(pk, join_row.encode(), inequality_key)
+                .insert(pk, join_row.encode_noop(), inequality_key)
                 .unwrap();
         }
     }
