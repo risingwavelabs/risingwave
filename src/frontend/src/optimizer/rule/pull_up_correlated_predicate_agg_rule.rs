@@ -153,7 +153,9 @@ impl Rule for PullUpCorrelatedPredicateAggRule {
 
         let new_bottom_proj: PlanRef = LogicalProject::new(filter, bottom_proj_exprs).into();
 
-        // If the `group by + proj` doesn't return null for empty input, we can't apply this rule.
+        // We can apply this rule only if:
+        // 1. The `group by + proj` returns null for empty input
+        // 2. OR the top filter is null for empty input
         {
             // When group input is empty, if the agg is not `count`, it would return null.
             let null_agg_pos = agg_calls
@@ -163,21 +165,40 @@ impl Rule for PullUpCorrelatedPredicateAggRule {
                 })
                 .collect_vec();
 
-            // We don't have null args, so the output will nevert be null. Bail out.
+            // We don't have null args, so the output will never be null. Bail out.
             if null_agg_pos.is_empty() {
                 return None;
             }
 
+            // Try to prove that the expression is null-rejected by the top filter when not-count-aggs are null.
             let mut agg_null_bitset = FixedBitSet::with_capacity(agg.base.schema().len());
             for pos in null_agg_pos {
                 agg_null_bitset.insert(pos);
             }
 
-            // Only all expr in top_proj_exprs are null, we can apply this rule, otherwise, bail out.
-            for expr in &top_proj_exprs {
-                if !Strong::is_null(expr, agg_null_bitset.clone()) {
-                    return None;
+            // Shift the top project expressions to the right by apply_left schema len, because it is used to check null-rejected by the top filter.
+            let apply_left_schema = apply_left.schema().len();
+            let mut top_proj_all_null = true;
+            let mut top_proj_null_bitset =
+                FixedBitSet::with_capacity(top_project.base.schema().len() + apply_left_schema);
+            for (i, expr) in top_proj_exprs.iter().enumerate() {
+                if Strong::is_null(expr, agg_null_bitset.clone()) {
+                    top_proj_null_bitset.insert(i + apply_left_schema);
+                } else {
+                    top_proj_all_null = false;
                 }
+            }
+
+            let top_filter_all_null = top_filter
+                .predicate()
+                .conjunctions
+                .iter()
+                .all(|expr| Strong::is_null(expr, top_proj_null_bitset.clone()));
+            let can_apply =
+                top_proj_all_null || (!top_filter.predicate().always_true() && top_filter_all_null);
+
+            if !can_apply {
+                return None;
             }
         }
 
