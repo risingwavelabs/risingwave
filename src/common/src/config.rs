@@ -2640,6 +2640,7 @@ pub struct CompactionConfig {
     pub max_level: u32,
 }
 
+/// Note: only applies to meta store backends other than SQLite.
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct MetaStoreConfig {
     /// Maximum number of connections for the meta store connection pool.
