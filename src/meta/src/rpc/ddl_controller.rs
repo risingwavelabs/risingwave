@@ -1252,10 +1252,10 @@ impl DdlController {
 
         let ReleaseContext {
             database_id,
-            streaming_job_ids,
-            state_table_ids,
-            source_ids,
-            source_fragments,
+            removed_streaming_job_ids,
+            removed_state_table_ids,
+            removed_source_ids,
+            removed_source_fragments,
             removed_actors,
             removed_fragments,
             ..
@@ -1263,13 +1263,13 @@ impl DdlController {
 
         // unregister sources.
         self.source_manager
-            .unregister_sources(source_ids.into_iter().map(|id| id as _).collect())
+            .unregister_sources(removed_source_ids.into_iter().map(|id| id as _).collect())
             .await;
 
         // unregister fragments and actors from source manager.
         self.source_manager
             .drop_source_fragments(
-                source_fragments
+                removed_source_fragments
                     .into_iter()
                     .map(|(source_id, fragments)| {
                         (
@@ -1287,8 +1287,8 @@ impl DdlController {
             .drop_streaming_jobs(
                 risingwave_common::catalog::DatabaseId::new(database_id as _),
                 removed_actors.into_iter().map(|id| id as _).collect(),
-                streaming_job_ids,
-                state_table_ids,
+                removed_streaming_job_ids,
+                removed_state_table_ids,
                 removed_fragments.iter().map(|id| *id as _).collect(),
             )
             .await;

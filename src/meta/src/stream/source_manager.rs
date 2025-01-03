@@ -1276,7 +1276,7 @@ impl SourceManager {
 
         for (database_id, split_assignment) in split_assignment {
             if !split_assignment.is_empty() {
-                let command = Command::SourceSplitAssignment(split_assignment);
+                let command = Command::SourceChangeSplit(split_assignment);
                 tracing::info!(command = ?command, "pushing down split assignment command");
                 self.barrier_scheduler
                     .run_command(database_id, command)
