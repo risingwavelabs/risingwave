@@ -230,10 +230,60 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         chunk_size: usize,
         high_join_amplification_threshold: usize,
     ) -> Self {
-        let entry_state_max_rows = ctx
-            .streaming_config
-            .developer
-            .hash_join_entry_state_max_rows;
+        Self::new_with_cache_size(
+            ctx,
+            info,
+            input_l,
+            input_r,
+            params_l,
+            params_r,
+            null_safe,
+            output_indices,
+            cond,
+            inequality_pairs,
+            state_table_l,
+            degree_state_table_l,
+            state_table_r,
+            degree_state_table_r,
+            watermark_epoch,
+            is_append_only,
+            metrics,
+            chunk_size,
+            high_join_amplification_threshold,
+            None,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_cache_size(
+        ctx: ActorContextRef,
+        info: ExecutorInfo,
+        input_l: Executor,
+        input_r: Executor,
+        params_l: JoinParams,
+        params_r: JoinParams,
+        null_safe: Vec<bool>,
+        output_indices: Vec<usize>,
+        cond: Option<NonStrictExpression>,
+        inequality_pairs: Vec<(usize, usize, bool, Option<NonStrictExpression>)>,
+        state_table_l: StateTable<S>,
+        degree_state_table_l: StateTable<S>,
+        state_table_r: StateTable<S>,
+        degree_state_table_r: StateTable<S>,
+        watermark_epoch: AtomicU64Ref,
+        is_append_only: bool,
+        metrics: Arc<StreamingMetrics>,
+        chunk_size: usize,
+        high_join_amplification_threshold: usize,
+        entry_state_max_rows: Option<usize>,
+    ) -> Self {
+        let entry_state_max_rows = match entry_state_max_rows {
+            None => ctx
+                .streaming_config
+                .developer
+                .hash_join_entry_state_max_rows,
+            Some(entry_state_max_rows) => entry_state_max_rows,
+        };
         let side_l_column_n = input_l.schema().len();
 
         let schema_fields = match T {
