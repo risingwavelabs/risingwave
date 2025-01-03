@@ -502,7 +502,7 @@ async fn make_log_stream(
             )
             .map_ok(move |stream| {
                 let stream = stream.map_err(Into::into);
-                (vnode, stream)
+                (vnode, stream, 0)
             })
     }))
     .await?;
@@ -529,7 +529,7 @@ async fn make_snapshot_stream(
             )
             .map_ok(move |stream| {
                 let stream = stream.map_ok(ChangeLogRow::Insert).map_err(Into::into);
-                (vnode, stream)
+                (vnode, stream, 0)
             })
     }))
     .await?;
