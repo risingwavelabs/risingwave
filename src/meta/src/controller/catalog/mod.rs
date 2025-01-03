@@ -116,7 +116,7 @@ pub struct CatalogController {
     pub(crate) inner: RwLock<CatalogControllerInner>,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 pub struct ReleaseContext {
     pub(crate) database_id: DatabaseId,
     pub(crate) streaming_job_ids: Vec<ObjectId>,
