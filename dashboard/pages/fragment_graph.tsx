@@ -51,7 +51,11 @@ import {
 } from "../lib/api/streaming"
 import { FragmentBox } from "../lib/layout"
 import { TableFragments, TableFragments_Fragment } from "../proto/gen/meta"
-import { ChannelStats, FragmentStats, GetStreamingStatsResponse } from "../proto/gen/monitor_service"
+import {
+  ChannelStats,
+  FragmentStats,
+  GetStreamingStatsResponse,
+} from "../proto/gen/monitor_service"
 import { Dispatcher, MergeNode, StreamNode } from "../proto/gen/stream_plan"
 
 interface DispatcherNode {
@@ -73,13 +77,13 @@ export interface PlanNodeDatum {
 
 // Derived stats from ChannelStats, majorly by dividing the stats by duration.
 export interface ChannelStatsDerived {
-  actorCount: number;
+  actorCount: number
   /** Rate of blocking duration of all actors */
-  backPressure: number;
+  backPressure: number
   /** Rate of received row count of all actors */
-  recvThroughput: number;
+  recvThroughput: number
   /** Rate of sent row count of all actors */
-  sendThroughput: number;
+  sendThroughput: number
 }
 
 function buildPlanNodeDependency(
@@ -215,16 +219,17 @@ export class ChannelStatsSnapshot {
     for (const [key, s] of this.metrics) {
       const init = initial.metrics.get(key)
       if (init) {
-        const delta = this.time - initial.time; // in microseconds
-        result.set(
-          key,
-          {
-            actorCount: s.actorCount,
-            backPressure: (s.outputBlockingDuration - init.outputBlockingDuration) / init.actorCount / delta / 1000000,
-            recvThroughput: (s.recvRowCount - init.recvRowCount) / delta * 1000,
-            sendThroughput: (s.sendRowCount - init.sendRowCount) / delta * 1000,
-          }
-        )
+        const delta = this.time - initial.time // in microseconds
+        result.set(key, {
+          actorCount: s.actorCount,
+          backPressure:
+            (s.outputBlockingDuration - init.outputBlockingDuration) /
+            init.actorCount /
+            delta /
+            1000000,
+          recvThroughput: ((s.recvRowCount - init.recvRowCount) / delta) * 1000,
+          sendThroughput: ((s.sendRowCount - init.sendRowCount) / delta) * 1000,
+        })
       }
     }
     return result

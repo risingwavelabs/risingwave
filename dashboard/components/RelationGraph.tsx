@@ -32,6 +32,7 @@ import {
   RelationPoint,
   RelationPointPosition,
 } from "../lib/layout"
+import { ChannelStatsDerived } from "../pages/fragment_graph"
 import { RelationStats } from "../proto/gen/monitor_service"
 import { CatalogModal, useCatalogModal } from "./CatalogModal"
 import {
@@ -40,7 +41,6 @@ import {
   epochToUnixMillis,
   latencyToColor,
 } from "./utils/backPressure"
-import { ChannelStatsDerived } from "../pages/fragment_graph"
 
 // Size of each relation box in pixels
 export const boxWidth = 150
@@ -366,7 +366,9 @@ export default function RelationGraph({
           : "N/A"
         const epoch = stats?.currentEpoch ?? "N/A"
 
-        return `<b>${relationTypeTitleCase(relation)} ${id}: ${relation.name}</b><br>Epoch: ${epoch}<br>Latency: ${latencySeconds} seconds`
+        return `<b>${relationTypeTitleCase(relation)} ${id}: ${
+          relation.name
+        }</b><br>Epoch: ${epoch}<br>Latency: ${latencySeconds} seconds`
       }
 
       g.on("mouseover", (event, { relation, id }) => {

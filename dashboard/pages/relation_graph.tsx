@@ -33,9 +33,11 @@ import {
   relationIsStreamingJob,
 } from "../lib/api/streaming"
 import { RelationPoint } from "../lib/layout"
-import { RelationStats } from "../proto/gen/monitor_service"
+import {
+  GetStreamingStatsResponse,
+  RelationStats,
+} from "../proto/gen/monitor_service"
 import { ChannelStatsDerived, ChannelStatsSnapshot } from "./fragment_graph"
-import { GetStreamingStatsResponse } from "../proto/gen/monitor_service"
 
 const SIDEBAR_WIDTH = "200px"
 const INTERVAL_MS = 5000
@@ -72,9 +74,7 @@ export default function StreamingGraph() {
   // Since dependentRelations will be deprecated, we need to use getRelationDependencies here to separately obtain the dependency relationship.
   const { response: relationDeps } = useFetch(getRelationDependencies)
   const [selectedId, setSelectedId] = useQueryState("id", parseAsInteger)
-  const { response: fragmentVertexToRelationMap } = useFetch(
-    getFragmentToRelationMap
-  )
+  const { response: fragmentToRelationMap } = useFetch(getFragmentToRelationMap)
   const [resetEmbeddedBackPressures, setResetEmbeddedBackPressures] =
     useState<boolean>(false)
 
@@ -97,7 +97,7 @@ export default function StreamingGraph() {
   const relationDependency = relationDependencyCallback()
 
   // Periodically fetch fragment-level back-pressure from Meta node
-  const [channelStats, setChannelStats] = 
+  const [channelStats, setChannelStats] =
     useState<Map<string, ChannelStatsDerived>>()
   const [relationStats, setRelationStats] = useState<{
     [key: number]: RelationStats
@@ -142,26 +142,27 @@ export default function StreamingGraph() {
   }, [toast, resetEmbeddedBackPressures])
 
   // Convert fragment-level backpressure rate map to relation-level backpressure rate
-  const relationChannelStats: Map<string, ChannelStatsDerived> | undefined = useMemo(() => {
-    if (!fragmentVertexToRelationMap) {
-      return new Map<string, ChannelStatsDerived>()
-    }
-    let inMap = fragmentVertexToRelationMap.inMap
-    let outMap = fragmentVertexToRelationMap.outMap
-    if (channelStats) {
-      let map = new Map<string, ChannelStatsDerived>()
-      for (const [key, stats] of channelStats) {
-        const [outputFragment, inputFragment] = key.split("_").map(Number)
-        if (outMap[outputFragment] && inMap[inputFragment]) {
-          const outputRelation = outMap[outputFragment]
-          const inputRelation = inMap[inputFragment]
-          let key = `${outputRelation}_${inputRelation}`
-          map.set(key, stats)
-        }
+  const relationChannelStats: Map<string, ChannelStatsDerived> | undefined =
+    useMemo(() => {
+      if (!fragmentToRelationMap) {
+        return new Map<string, ChannelStatsDerived>()
       }
-      return map
-    }
-  }, [channelStats, fragmentVertexToRelationMap])
+      let inMap = fragmentToRelationMap.inMap
+      let outMap = fragmentToRelationMap.outMap
+      if (channelStats) {
+        let map = new Map<string, ChannelStatsDerived>()
+        for (const [key, stats] of channelStats) {
+          const [outputFragment, inputFragment] = key.split("_").map(Number)
+          if (outMap[outputFragment] && inMap[inputFragment]) {
+            const outputRelation = outMap[outputFragment]
+            const inputRelation = inMap[inputFragment]
+            let key = `${outputRelation}_${inputRelation}`
+            map.set(key, stats)
+          }
+        }
+        return map
+      }
+    }, [channelStats, fragmentToRelationMap])
 
   const retVal = (
     <Flex p={3} height="calc(100vh - 20px)" flexDirection="column">

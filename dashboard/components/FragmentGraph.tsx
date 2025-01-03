@@ -476,7 +476,9 @@ export default function FragmentGraph({
 
         const color = (d: Edge) => {
           if (channelStats) {
-            let value = channelStats.get(`${d.source}_${d.target}`)?.backPressure
+            let value = channelStats.get(
+              `${d.source}_${d.target}`
+            )?.backPressure
             if (value) {
               return backPressureColor(value)
             }
@@ -489,7 +491,9 @@ export default function FragmentGraph({
 
         const width = (d: Edge) => {
           if (channelStats) {
-            let value = channelStats.get(`${d.source}_${d.target}`)?.backPressure
+            let value = channelStats.get(
+              `${d.source}_${d.target}`
+            )?.backPressure
             if (value) {
               return backPressureWidth(value, 30)
             }
@@ -514,11 +518,17 @@ export default function FragmentGraph({
             const tooltipText = `<b>Fragment ${d.source} → ${
               d.target
             }</b><br>Backpressure: ${
-              stats?.backPressure != null ? `${(stats.backPressure * 100).toFixed(2)}%` : "N/A"
+              stats?.backPressure != null
+                ? `${(stats.backPressure * 100).toFixed(2)}%`
+                : "N/A"
             }<br>Recv Throughput: ${
-              stats?.recvThroughput != null ? `${stats.recvThroughput.toFixed(2)} rows/s` : "N/A"
+              stats?.recvThroughput != null
+                ? `${stats.recvThroughput.toFixed(2)} rows/s`
+                : "N/A"
             }<br>Send Throughput: ${
-              stats?.sendThroughput != null ? `${stats.sendThroughput.toFixed(2)} rows/s` : "N/A"
+              stats?.sendThroughput != null
+                ? `${stats.sendThroughput.toFixed(2)} rows/s`
+                : "N/A"
             }`
             d3.select("body")
               .append("div")
@@ -556,6 +566,7 @@ export default function FragmentGraph({
     fragmentLayout,
     fragmentEdgeLayout,
     channelStats,
+    fragmentStats,
     selectedFragmentId,
     openPlanNodeDetail,
   ])
