@@ -7,7 +7,7 @@ repository = { workspace = true }
 
 [dependencies]
 futures = "0.3"
-pin-project-lite = "0.2"
+pin-project-lite = { workspace = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }

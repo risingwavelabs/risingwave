@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -135,6 +135,8 @@ pub fn rw_timestamp_column_desc() -> ColumnDesc {
 
 pub const OFFSET_COLUMN_NAME: &str = "_rw_offset";
 pub const ICEBERG_SEQUENCE_NUM_COLUMN_NAME: &str = "_iceberg_sequence_number";
+pub const ICEBERG_FILE_PATH_COLUMN_NAME: &str = "_iceberg_file_path";
+pub const ICEBERG_FILE_POS_COLUMN_NAME: &str = "_iceberg_file_pos";
 
 // The number of columns output by the cdc source job
 // see `debezium_cdc_source_schema()` for details
@@ -166,6 +168,22 @@ pub fn cdc_table_name_column_desc() -> ColumnDesc {
 pub fn iceberg_sequence_num_column_desc() -> ColumnDesc {
     ColumnDesc::named(
         ICEBERG_SEQUENCE_NUM_COLUMN_NAME,
+        ColumnId::placeholder(),
+        DataType::Int64,
+    )
+}
+
+pub fn iceberg_file_path_column_desc() -> ColumnDesc {
+    ColumnDesc::named(
+        ICEBERG_FILE_PATH_COLUMN_NAME,
+        ColumnId::placeholder(),
+        DataType::Varchar,
+    )
+}
+
+pub fn iceberg_file_pos_column_desc() -> ColumnDesc {
+    ColumnDesc::named(
+        ICEBERG_FILE_POS_COLUMN_NAME,
         ColumnId::placeholder(),
         DataType::Int64,
     )

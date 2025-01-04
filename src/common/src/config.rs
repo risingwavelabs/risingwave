@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -2640,6 +2640,7 @@ pub struct CompactionConfig {
     pub max_level: u32,
 }
 
+/// Note: only applies to meta store backends other than `SQLite`.
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct MetaStoreConfig {
     /// Maximum number of connections for the meta store connection pool.

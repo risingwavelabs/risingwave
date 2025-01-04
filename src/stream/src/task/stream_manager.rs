@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -403,7 +403,7 @@ impl StreamActorManager {
             actor_context.clone(),
             progress,
             chunk_size,
-            node.rate_limit.map(|x| x as _),
+            node.rate_limit.into(),
             barrier_rx,
             self.streaming_metrics.clone(),
             node.snapshot_backfill_epoch,
