@@ -34,7 +34,7 @@ risingwave_expr_impl::enable!();
 
 fn bench_hash_join(c: &mut Criterion) {
     let mut group = c.benchmark_group("benchmark_hash_join");
-    group.sample_size(10);
+    group.sample_size(100);
 
     let rt = Runtime::new().unwrap();
     for amp in [10_000, 20_000, 30_000, 40_000, 100_000, 200_000, 400_000] {
