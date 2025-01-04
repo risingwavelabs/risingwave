@@ -188,6 +188,8 @@ pub struct ReplaceStreamJobContext {
     pub streaming_job: StreamingJob,
 
     pub tmp_id: u32,
+
+    pub drop_table_associated_source_id: Option<u32>,
 }
 
 /// `GlobalStreamManager` manages all the streams in the system.

@@ -123,6 +123,9 @@ pub struct ReplaceStreamJobInfo {
     pub streaming_job: StreamingJob,
     pub fragment_graph: StreamFragmentGraphProto,
     pub col_index_mapping: Option<ColIndexMapping>,
+
+    /// only used for dropping table associated source
+    pub drop_table_associated_source_id: Option<u32>,
 }
 
 pub enum DdlCommand {
@@ -335,9 +338,15 @@ impl DdlController {
                     streaming_job,
                     fragment_graph,
                     col_index_mapping,
+                    drop_table_associated_source_id,
                 }) => {
-                    ctrl.replace_job(streaming_job, fragment_graph, col_index_mapping)
-                        .await
+                    ctrl.replace_job(
+                        streaming_job,
+                        fragment_graph,
+                        col_index_mapping,
+                        drop_table_associated_source_id,
+                    )
+                    .await
                 }
                 DdlCommand::AlterName(relation, name) => ctrl.alter_name(relation, &name).await,
                 DdlCommand::AlterObjectOwner(object, owner_id) => {
@@ -693,7 +702,14 @@ impl DdlController {
         fragment_graph: StreamFragmentGraph,
     ) -> MetaResult<(ReplaceStreamJobContext, StreamJobFragments)> {
         let (mut replace_table_ctx, mut stream_job_fragments) = self
-            .build_replace_job(stream_ctx, streaming_job, fragment_graph, None, tmp_id as _)
+            .build_replace_job(
+                stream_ctx,
+                streaming_job,
+                fragment_graph,
+                None,
+                tmp_id as _,
+                None,
+            )
             .await?;
 
         let target_table = streaming_job.table().unwrap();
@@ -1310,6 +1326,7 @@ impl DdlController {
         mut streaming_job: StreamingJob,
         fragment_graph: StreamFragmentGraphProto,
         col_index_mapping: Option<ColIndexMapping>,
+        drop_table_associated_source_id: Option<u32>,
     ) -> MetaResult<NotificationVersion> {
         match &mut streaming_job {
             StreamingJob::Table(..) | StreamingJob::Source(..) => {}
@@ -1364,6 +1381,7 @@ impl DdlController {
                     fragment_graph,
                     col_index_mapping.as_ref(),
                     tmp_id as _,
+                    drop_table_associated_source_id,
                 )
                 .await?;
 
@@ -1702,6 +1720,7 @@ impl DdlController {
         mut fragment_graph: StreamFragmentGraph,
         col_index_mapping: Option<&ColIndexMapping>,
         tmp_job_id: TableId,
+        drop_table_associated_source_id: Option<u32>,
     ) -> MetaResult<(ReplaceStreamJobContext, StreamJobFragments)> {
         match &stream_job {
             StreamingJob::Table(..) | StreamingJob::Source(..) => {}
@@ -1720,12 +1739,17 @@ impl DdlController {
             .get_job_fragments_by_id(&id.into())
             .await?;
         let old_internal_table_ids = old_fragments.internal_table_ids();
-        let old_internal_tables = self
-            .metadata_manager
-            .get_table_catalog_by_ids(old_internal_table_ids)
-            .await?;
 
-        fragment_graph.fit_internal_table_ids(old_internal_tables)?;
+        if drop_table_associated_source_id.is_some() {
+            // drop table's associated source means the fragment containing the table has just one internal table (associated source's state table)
+            debug_assert!(old_internal_table_ids.len() == 1);
+        } else {
+            let old_internal_tables = self
+                .metadata_manager
+                .get_table_catalog_by_ids(old_internal_table_ids)
+                .await?;
+            fragment_graph.fit_internal_table_ids(old_internal_tables)?;
+        }
 
         // 1. Resolve the edges to the downstream fragments, extend the fragment graph to a complete
         // graph that contains all information needed for building the actor graph.
@@ -1830,6 +1854,7 @@ impl DdlController {
             existing_locations,
             streaming_job: stream_job.clone(),
             tmp_id: tmp_job_id as _,
+            drop_table_associated_source_id,
         };
 
         Ok((ctx, stream_job_fragments))
