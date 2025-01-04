@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,18 +14,12 @@
 
 use std::cmp::Ordering;
 use std::collections::HashMap;
-use std::num::NonZeroU32;
 use std::ops::Bound;
-use std::time::Instant;
 
 use await_tree::InstrumentAwait;
 use futures::future::try_join_all;
 use futures::Stream;
 use futures_async_stream::try_stream;
-use governor::clock::MonotonicClock;
-use governor::middleware::NoOpMiddleware;
-use governor::state::{InMemoryState, NotKeyed};
-use governor::{Quota, RateLimiter};
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bail;
@@ -38,6 +32,7 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::sort_util::{cmp_datum_iter, OrderType};
 use risingwave_common::util::value_encoding::BasicSerde;
+use risingwave_common_rate_limit::RateLimit;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::source::cdc::external::{CdcOffset, CdcOffsetParseFunc};
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
@@ -792,32 +787,18 @@ pub(crate) async fn persist_state<S: StateStore, const IS_REPLICATED: bool>(
     Ok(())
 }
 
-pub type BackfillRateLimiter =
-    RateLimiter<NotKeyed, InMemoryState, MonotonicClock, NoOpMiddleware<Instant>>;
-
 /// Creates a data chunk builder for snapshot read.
 /// If the `rate_limit` is smaller than `chunk_size`, it will take precedence.
 /// This is so we can partition snapshot read into smaller chunks than chunk size.
 pub fn create_builder(
-    rate_limit: Option<usize>,
+    rate_limit: RateLimit,
     chunk_size: usize,
     data_types: Vec<DataType>,
 ) -> DataChunkBuilder {
-    if let Some(rate_limit) = rate_limit
-        && rate_limit < chunk_size
-        && rate_limit > 0
-    {
-        DataChunkBuilder::new(data_types, rate_limit)
-    } else {
-        DataChunkBuilder::new(data_types, chunk_size)
-    }
-}
-
-pub fn create_limiter(rate_limit: usize) -> Option<BackfillRateLimiter> {
-    if rate_limit == 0 {
-        return None;
-    }
-    let quota = Quota::per_second(NonZeroU32::new(rate_limit as u32).unwrap());
-    let clock = MonotonicClock;
-    Some(RateLimiter::direct_with_clock(quota, &clock))
+    let batch_size = match rate_limit {
+        RateLimit::Disabled | RateLimit::Pause => chunk_size,
+        RateLimit::Fixed(limit) if limit.get() as usize >= chunk_size => chunk_size,
+        RateLimit::Fixed(limit) => limit.get() as usize,
+    };
+    DataChunkBuilder::new(data_types, batch_size)
 }

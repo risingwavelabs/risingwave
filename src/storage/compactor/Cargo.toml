@@ -34,6 +34,9 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 tonic = { workspace = true }
 tracing = "0.1"
 
+[dev-dependencies]
+tokio-retry = "0.3"
+
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../../workspace-hack" }
 

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -87,7 +87,8 @@ pub struct ComputeNodeOpts {
     pub total_memory_bytes: usize,
 
     /// Reserved memory for the compute node in bytes.
-    /// If not set, a portion (default to 30%) for the `total_memory_bytes` will be used as the reserved memory.
+    /// If not set, a portion (default to 30% for the first 16GB and 20% for the rest)
+    /// for the `total_memory_bytes` will be used as the reserved memory.
     ///
     /// The total memory compute and storage can use is `total_memory_bytes` - `reserved_memory_bytes`.
     #[clap(long, env = "RW_RESERVED_MEMORY_BYTES")]
@@ -97,6 +98,13 @@ pub struct ComputeNodeOpts {
     /// If not set, the default value is `total_memory_bytes` - `reserved_memory_bytes`
     ///
     /// It's strongly recommended to set it for standalone deployment.
+    ///
+    /// ## Why need this?
+    ///
+    /// Our [`crate::memory::manager::MemoryManager`] works by reading the memory statistics from
+    /// Jemalloc. This is fine when running the compute node alone; while for standalone mode,
+    /// the memory usage of **all nodes** are counted. Thus, we need to pass a reasonable total
+    /// usage so that the memory is kept around this value.
     #[clap(long, env = "RW_MEMORY_MANAGER_TARGET_BYTES")]
     pub memory_manager_target_bytes: Option<usize>,
 

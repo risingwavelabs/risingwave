@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -39,8 +39,7 @@ use risingwave_pb::meta::subscribe_response::Info as NotificationInfo;
 use risingwave_pb::meta::{
     FragmentWorkerSlotMapping, PbFragmentWorkerSlotMapping, PbRelation, PbRelationGroup,
 };
-use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{PbFragmentTypeFlag, PbStreamNode, StreamSource};
+use risingwave_pb::stream_plan::PbFragmentTypeFlag;
 use risingwave_pb::user::grant_privilege::{PbAction, PbActionWithGrantOption, PbObject};
 use risingwave_pb::user::{PbGrantPrivilege, PbUserInfo};
 use risingwave_sqlparser::ast::Statement as SqlStatement;
@@ -1059,25 +1058,11 @@ where
     Ok(fragment_actors.into_iter().into_group_map())
 }
 
-/// Find the external stream source info inside the stream node, if any.
-pub fn find_stream_source(stream_node: &PbStreamNode) -> Option<&StreamSource> {
-    if let Some(NodeBody::Source(source)) = &stream_node.node_body {
-        if let Some(inner) = &source.source_inner {
-            return Some(inner);
-        }
-    }
-
-    for child in &stream_node.input {
-        if let Some(source) = find_stream_source(child) {
-            return Some(source);
-        }
-    }
-
-    None
-}
-
-/// Resolve fragment list that are subscribing to sources and actor lists.
-pub async fn resolve_source_register_info_for_jobs<C>(
+/// For the given streaming jobs, returns
+/// - All source fragments
+/// - All actors
+/// - All fragments
+pub async fn get_fragments_for_jobs<C>(
     db: &C,
     streaming_jobs: Vec<ObjectId>,
 ) -> MetaResult<(
@@ -1113,20 +1098,20 @@ where
         .all(db)
         .await?;
 
-    let removed_fragments = fragments
+    let fragment_ids = fragments
         .iter()
         .map(|(fragment_id, _, _)| *fragment_id)
         .collect();
 
-    let mut source_fragment_ids = HashMap::new();
+    let mut source_fragment_ids: HashMap<SourceId, BTreeSet<FragmentId>> = HashMap::new();
     for (fragment_id, mask, stream_node) in fragments {
         if mask & PbFragmentTypeFlag::Source as i32 == 0 {
             continue;
         }
-        if let Some(source) = find_stream_source(&stream_node.to_protobuf()) {
+        if let Some(source_id) = stream_node.to_protobuf().find_stream_source() {
             source_fragment_ids
-                .entry(source.source_id as SourceId)
-                .or_insert_with(BTreeSet::new)
+                .entry(source_id as _)
+                .or_default()
                 .insert(fragment_id);
         }
     }
@@ -1134,7 +1119,7 @@ where
     Ok((
         source_fragment_ids,
         actors.into_iter().collect(),
-        removed_fragments,
+        fragment_ids,
     ))
 }
 
