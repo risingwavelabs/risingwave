@@ -169,12 +169,12 @@ pub async fn handle_alter_table_drop_connector(
         .unwrap();
 
     let new_statement = rewrite_table_definition(&table_def, &source_def, original_definition)?;
-    let (source, table, graph, col_index_mapping, job_type) =
+    let (_, table, graph, col_index_mapping, _) =
         get_replace_table_plan(&session, table_name, new_statement, &table_def, None).await?;
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .replace_table(source, table, graph, col_index_mapping, job_type)
+        .replace_table_drop_table_associated_source(table, graph, col_index_mapping, source_def.id)
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::ALTER_TABLE))
