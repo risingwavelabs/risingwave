@@ -307,6 +307,7 @@ pub async fn run_slt_task(
                         connection: connection.clone(),
                         sql,
                         expected: StatementExpect::Ok,
+                        retry: None,
                     };
                     tester.run_async(set_random_vnode_count).await.unwrap();
                     println!("[RANDOM VNODE COUNT] run: {record}");
@@ -355,6 +356,7 @@ pub async fn run_slt_task(
                     connection: connection.clone(),
                     expected: StatementExpect::Ok,
                     sql: format!("SET BACKGROUND_DDL={background_ddl_setting};"),
+                    retry: None,
                 };
                 tester.run_async(set_background_ddl).await.unwrap();
                 background_ddl_enabled = background_ddl_setting;
