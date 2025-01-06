@@ -142,6 +142,8 @@ update t5 set v2 = 200 where v1 = 2;
 statement ok
 FLUSH;
 
+sleep 5s
+
 statement ok
 DROP SINK t1_sink;
 
