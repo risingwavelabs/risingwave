@@ -137,6 +137,9 @@ statement ok
 insert into t5 values(1, 10),(2, 20);
 
 statement ok
+FLUSH;
+
+statement ok
 update t5 set v2 = 200 where v1 = 2;
 
 statement ok
