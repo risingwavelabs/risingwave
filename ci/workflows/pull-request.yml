@@ -668,6 +668,7 @@ steps:
           config: ci/docker-compose.yml
       - shellcheck#v1.4.0:
           files: ./**/*.sh
+          recursive_glob: true
     timeout_in_minutes: 5
     retry: *auto-retry
 
