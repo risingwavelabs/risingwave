@@ -35,7 +35,7 @@ use risingwave_sqlparser::ast;
 use risingwave_sqlparser::parser::Parser;
 use thiserror_ext::AsReport as _;
 
-use super::purify::try_purify_table_create_sql_ast;
+use super::purify::try_purify_table_source_create_sql_ast;
 use super::{ColumnId, DatabaseId, FragmentId, OwnedByUserCatalog, SchemaId, SinkId};
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::ExprImpl;
@@ -300,7 +300,7 @@ impl TableCatalog {
                 self.create_sql_ast()?
             };
 
-            match try_purify_table_create_sql_ast(
+            match try_purify_table_source_create_sql_ast(
                 base,
                 self.columns(),
                 self.row_id_index,
