@@ -83,9 +83,8 @@ impl Rule for TableFunctionToFileScanRule {
                 )
             } else if "gcs".eq_ignore_ascii_case(&eval_args[1]) {
                 let credential = eval_args[2].clone();
-                let service_account = eval_args[3].clone();
                 // The rest of the arguments are file locations
-                let file_location = eval_args[4..].iter().cloned().collect_vec();
+                let file_location = eval_args[3..].iter().cloned().collect_vec();
                 Some(
                     LogicalFileScan::new_gcs_logical_file_scan(
                         logical_table_function.ctx(),
@@ -93,7 +92,6 @@ impl Rule for TableFunctionToFileScanRule {
                         "parquet".to_owned(),
                         "gcs".to_owned(),
                         credential,
-                        service_account,
                         file_location,
                     )
                     .into(),

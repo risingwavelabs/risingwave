@@ -44,7 +44,6 @@ pub struct GcsFileScan {
     pub file_format: FileFormat,
     pub storage_type: StorageType,
     pub credential: String,
-    pub service_account: String,
     pub file_location: Vec<String>,
 
     #[educe(PartialEq(ignore))]

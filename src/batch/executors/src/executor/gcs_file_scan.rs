@@ -35,7 +35,6 @@ pub struct GcsFileScanExecutor {
     file_format: FileFormat,
     file_location: Vec<String>,
     gcs_credential: String,
-    service_account: String,
     batch_size: usize,
     schema: Schema,
     identity: String,
@@ -60,7 +59,6 @@ impl GcsFileScanExecutor {
         file_format: FileFormat,
         file_location: Vec<String>,
         gcs_credential: String,
-        service_account: String,
         batch_size: usize,
         schema: Schema,
         identity: String,
@@ -69,7 +67,6 @@ impl GcsFileScanExecutor {
             file_format,
             file_location,
             gcs_credential,
-            service_account,
             batch_size,
             schema,
             identity,
@@ -81,11 +78,7 @@ impl GcsFileScanExecutor {
         assert_eq!(self.file_format, FileFormat::Parquet);
         for file in self.file_location {
             let (bucket, file_name) = extract_bucket_and_file_name(&file, &FileScanBackend::Gcs)?;
-            let op = new_gcs_operator(
-                self.gcs_credential.clone(),
-                self.service_account.clone(),
-                bucket.clone(),
-            )?;
+            let op = new_gcs_operator(self.gcs_credential.clone(), bucket.clone())?;
             let chunk_stream =
                 read_parquet_file(op, file_name, None, None, self.batch_size, 0).await?;
             #[for_await]
@@ -117,7 +110,6 @@ impl BoxedExecutorBuilder for GcsFileScanExecutorBuilder {
             },
             file_scan_node.file_location.clone(),
             file_scan_node.credential.clone(),
-            file_scan_node.service_account.clone(),
             source.context().get_config().developer.chunk_size,
             Schema::from_iter(file_scan_node.columns.iter().map(Field::from)),
             source.plan_node().get_identity().clone(),

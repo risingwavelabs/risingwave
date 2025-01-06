@@ -74,7 +74,6 @@ impl LogicalFileScan {
         file_format: String,
         storage_type: String,
         credential: String,
-        service_account: String,
         file_location: Vec<String>,
     ) -> Self {
         assert!("parquet".eq_ignore_ascii_case(&file_format));
@@ -85,7 +84,6 @@ impl LogicalFileScan {
             file_format: generic::FileFormat::Parquet,
             storage_type: generic::StorageType::Gcs,
             credential,
-            service_account,
             file_location,
             ctx,
         });

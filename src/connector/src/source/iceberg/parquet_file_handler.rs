@@ -127,16 +127,9 @@ pub fn new_s3_operator(
     Ok(op)
 }
 
-pub fn new_gcs_operator(
-    credential: String,
-    service_account: String,
-    bucket: String,
-) -> ConnectorResult<Operator> {
+pub fn new_gcs_operator(credential: String, bucket: String) -> ConnectorResult<Operator> {
     // Create gcs builder.
-    let builder = Gcs::default()
-        .bucket(&bucket)
-        .credential(&credential)
-        .service_account(&service_account);
+    let builder = Gcs::default().bucket(&bucket).credential(&credential);
 
     let operator: Operator = Operator::new(builder)?
         .layer(LoggingLayer::default())

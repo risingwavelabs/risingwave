@@ -83,7 +83,7 @@ impl TableFunction {
             // storage type e.g. s3, gcs
             // For s3: file_scan(file_format, s3, s3_region, s3_access_key, s3_secret_key, file_location_or_directory)
             // For gcs: file_scan(file_format, gcs, credential, service_account, file_location_or_directory)
-            if args.len() != 6 && args.len() != 5 {
+            if args.len() != 6 && args.len() != 4 {
                 return Err(BindError("file_scan function only accepts: file_scan('parquet', 's3', s3 region, s3 access key, s3 secret key, file location) or file_scan('parquet', 'gcs', credential, service_account, file location)".to_owned()).into());
             }
             let mut eval_args: Vec<String> = vec![];
@@ -153,7 +153,7 @@ impl TableFunction {
                     if "s3".eq_ignore_ascii_case(&eval_args[1]) {
                         (FileScanBackend::S3, eval_args[5].clone())
                     } else if "gcs".eq_ignore_ascii_case(&eval_args[1]) {
-                        (FileScanBackend::Gcs, eval_args[4].clone())
+                        (FileScanBackend::Gcs, eval_args[3].clone())
                     } else {
                         unreachable!();
                     };
@@ -173,11 +173,7 @@ impl TableFunction {
                         let (bucket, _) =
                             extract_bucket_and_file_name(&input_file_location, &file_scan_backend)?;
 
-                        new_gcs_operator(
-                            eval_args[2].clone(),
-                            eval_args[3].clone(),
-                            bucket.clone(),
-                        )?
+                        new_gcs_operator(eval_args[2].clone(), bucket.clone())?
                     }
                 };
                 let files = if input_file_location.ends_with('/') {
@@ -234,7 +230,7 @@ impl TableFunction {
                     // if the file location is a directory, we need to remove the last argument and add all files in the directory as arguments
                     match file_scan_backend {
                         FileScanBackend::S3 => args.remove(5),
-                        FileScanBackend::Gcs => args.remove(4),
+                        FileScanBackend::Gcs => args.remove(3),
                     };
                     for file in files {
                         args.push(ExprImpl::Literal(Box::new(Literal::new(

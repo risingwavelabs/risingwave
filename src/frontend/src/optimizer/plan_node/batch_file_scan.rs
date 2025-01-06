@@ -105,7 +105,6 @@ impl ToBatchPb for BatchFileScan {
                         generic::FileFormat::Parquet => FileFormat::Parquet as i32,
                     },
                     credential: gcs_file_scan.credential.clone(),
-                    service_account: gcs_file_scan.service_account.clone(),
                     file_location: gcs_file_scan.file_location.clone(),
                 })
             }
