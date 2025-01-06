@@ -66,18 +66,12 @@ impl Task for ComputeNodeService {
         ctx.service(self);
         ctx.pb.set_message("starting...");
 
-        let prefix_config = env::var("PREFIX_CONFIG")?;
-
         let mut cmd = risingwave_cmd("compute-node")?;
 
         cmd.env(
             "TOKIO_CONSOLE_BIND",
             format!("127.0.0.1:{}", self.config.port + 1000),
         );
-
-        if crate::util::is_enable_backtrace() {
-            cmd.env("RUST_BACKTRACE", "1");
-        }
 
         if crate::util::is_env_set("RISEDEV_ENABLE_PROFILE") {
             cmd.env(
@@ -93,16 +87,6 @@ impl Task for ComputeNodeService {
             cmd.env("MALLOC_CONF", conf); // unprefixed for linux
         }
 
-        if crate::util::is_env_set("ENABLE_BUILD_RW_CONNECTOR") {
-            let prefix_bin = env::var("PREFIX_BIN")?;
-            cmd.env(
-                "CONNECTOR_LIBS_PATH",
-                Path::new(&prefix_bin).join("connector-node/libs/"),
-            );
-        }
-
-        cmd.arg("--config-path")
-            .arg(Path::new(&prefix_config).join("risingwave.toml"));
         Self::apply_command_args(&mut cmd, &self.config)?;
         if self.config.enable_tiered_cache {
             let prefix_data = env::var("PREFIX_DATA")?;
