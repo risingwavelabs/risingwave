@@ -23,6 +23,11 @@ configure_static_openssl
 echo "--- Run trailing spaces check"
 scripts/check/check-trailing-spaces.sh
 
+echo "--- Check protobuf code format && Lint protobuf"
+cd proto
+buf format -d --exit-code
+buf lint
+
 echo "--- Rust cargo-sort check"
 cargo sort --check --workspace --grouped
 
