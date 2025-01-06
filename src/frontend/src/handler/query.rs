@@ -56,11 +56,14 @@ pub async fn handle_query(
     formats: Vec<Format>,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
-
     let plan_fragmenter_result = {
         let context = OptimizerContext::from_handler_args(handler_args);
         let plan_result = gen_batch_plan_by_statement(&session, context.into(), stmt)?;
-        gen_batch_plan_fragmenter(&session, plan_result)?
+        // Time zone is used by Hummock time travel query.
+        risingwave_expr::expr_context::TIME_ZONE::sync_scope(
+            session.config().timezone().to_owned(),
+            || gen_batch_plan_fragmenter(&session, plan_result),
+        )?
     };
     execute(session, plan_fragmenter_result, formats).await
 }
@@ -99,8 +102,11 @@ pub async fn handle_execute(
             let plan_fragmenter_result = {
                 let context = OptimizerContext::from_handler_args(handler_args);
                 let plan_result = gen_batch_query_plan(&session, context.into(), bound_result)?;
-
-                gen_batch_plan_fragmenter(&session, plan_result)?
+                // Time zone is used by Hummock time travel query.
+                risingwave_expr::expr_context::TIME_ZONE::sync_scope(
+                    session.config().timezone().to_owned(),
+                    || gen_batch_plan_fragmenter(&session, plan_result),
+                )?
             };
             execute(session, plan_fragmenter_result, result_formats).await
         }
