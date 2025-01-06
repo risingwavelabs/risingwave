@@ -117,18 +117,17 @@ pub fn try_purify_table_source_create_sql_ast(
             });
         }
 
-        // Remove primary key constraint from the column options. It will be specified with
-        // table constraints later.
-        column_def
-            .options
-            .retain(|o| !matches!(o.option, ColumnOption::Unique { is_primary: true }));
-
         purified_column_defs.push(column_def);
     }
     *column_defs = purified_column_defs;
 
-    if row_id_index.is_none() {
-        // User-defined primary key.
+    // Specify user-defined primary key in table constraints.
+    let has_pk_column_constraint = column_defs.iter().any(|c| {
+        c.options
+            .iter()
+            .any(|o| matches!(o.option, ColumnOption::Unique { is_primary: true }))
+    });
+    if !has_pk_column_constraint && row_id_index.is_none() {
         let mut pk_columns = Vec::new();
 
         for &id in pk_column_ids {
