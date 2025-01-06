@@ -34,7 +34,6 @@ use super::join::hash_join::*;
 use super::join::row::JoinRow;
 use super::join::*;
 use super::watermark::*;
-use crate::consistency::enable_strict_consistency;
 use crate::executor::join::builder::JoinStreamChunkBuilder;
 use crate::executor::join::hash_join::CacheResult;
 use crate::executor::prelude::*;
@@ -788,19 +787,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         Ok(watermarks_to_emit)
     }
 
-    /// the data the hash table and match the coming
-    /// data chunk with the executor state
-    async fn hash_eq_match(
-        key: &K,
-        ht: &mut JoinHashMap<K, S>,
-    ) -> StreamExecutorResult<CacheResult> {
-        if enable_strict_consistency() {
-            Ok(ht.take_state_opt(key))
-        } else {
-            ht.take_state(key).await.map(CacheResult::Hit)
-        }
-    }
-
     fn row_concat(
         row_update: impl Row,
         update_start_pos: usize,
@@ -898,7 +884,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 let build_non_null_requirement_satisfied =
                     key.null_bitmap().is_subset(side_match.ht.null_matched());
                 if probe_non_null_requirement_satisfied && build_non_null_requirement_satisfied {
-                    Self::hash_eq_match(key, &mut side_match.ht).await?
+                    side_match.ht.take_state_opt(key)
                 } else {
                     CacheResult::NeverMatch
                 }
