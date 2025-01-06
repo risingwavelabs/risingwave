@@ -666,7 +666,7 @@ steps:
       - docker-compose#v5.5.0:
           run: rw-build-env
           config: ci/docker-compose.yml
-      - shellcheck#v1.2.0:
+      - shellcheck#v1.4.0:
           files: ./**/*.sh
     timeout_in_minutes: 5
     retry: *auto-retry
