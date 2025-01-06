@@ -78,11 +78,11 @@ impl StreamTemporalJoin {
         };
 
         // Use left side watermark directly.
-        let watermark_columns = core.i2o_col_mapping().rewrite_bitset(
-            &core
-                .l2i_col_mapping()
-                .rewrite_bitset(core.left.watermark_columns()),
-        );
+        let watermark_columns = core
+            .left
+            .watermark_columns()
+            .map_clone(&core.l2i_col_mapping())
+            .map_clone(&core.i2o_col_mapping());
 
         let columns_monotonicity = core.i2o_col_mapping().rewrite_monotonicity_map(
             &core

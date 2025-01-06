@@ -15,7 +15,6 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::{fmt, vec};
 
-use fixedbitset::FixedBitSet;
 use itertools::{Either, Itertools};
 use pretty_xmlish::{Pretty, StrAssocArr};
 use risingwave_common::catalog::{Field, FieldDisplay, Schema};
@@ -33,7 +32,9 @@ use super::{impl_distill_unit_from_fields, stream, GenericPlanNode, GenericPlanR
 use crate::expr::{Expr, ExprRewriter, ExprVisitor, InputRef, InputRefDisplay, Literal};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::batch::BatchPlanRef;
-use crate::optimizer::property::{Distribution, FunctionalDependencySet, RequiredDist};
+use crate::optimizer::property::{
+    Distribution, FunctionalDependencySet, RequiredDist, WatermarkColumns,
+};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::{
     ColIndexMapping, ColIndexMappingRewriteExt, Condition, ConditionDisplay, IndexRewriter,
@@ -139,7 +140,10 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
         })
     }
 
-    pub(crate) fn watermark_group_key(&self, input_watermark_columns: &FixedBitSet) -> Vec<usize> {
+    pub(crate) fn group_key_with_watermark(
+        &self,
+        input_watermark_columns: &WatermarkColumns,
+    ) -> Vec<usize> {
         self.group_key
             .indices()
             .filter(|&idx| input_watermark_columns.contains(idx))

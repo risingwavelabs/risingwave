@@ -61,7 +61,7 @@ pub struct StreamingMetrics {
 
     // Streaming actor
     pub actor_count: LabelGuardedIntGaugeVec<1>,
-    actor_in_record_cnt: RelabeledGuardedIntCounterVec<3>,
+    pub actor_in_record_cnt: RelabeledGuardedIntCounterVec<3>,
     pub actor_out_record_cnt: RelabeledGuardedIntCounterVec<2>,
     pub actor_current_epoch: RelabeledGuardedIntGaugeVec<2>,
 
