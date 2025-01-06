@@ -27,6 +27,7 @@ echo "--- Check protobuf code format && Lint protobuf"
 cd proto
 buf format -d --exit-code
 buf lint
+cd ..
 
 echo "--- Rust cargo-sort check"
 cargo sort --check --workspace --grouped
