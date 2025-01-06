@@ -12,10 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use fixedbitset::FixedBitSet;
-
 use super::generic::PhysicalPlanRef;
-use crate::optimizer::property::MonotonicityMap;
+use crate::optimizer::property::{MonotonicityMap, WatermarkColumns};
 
 /// A subtrait of [`PhysicalPlanRef`] for stream plans.
 ///
@@ -29,7 +27,7 @@ use crate::optimizer::property::MonotonicityMap;
 pub trait StreamPlanRef: PhysicalPlanRef {
     fn append_only(&self) -> bool;
     fn emit_on_window_close(&self) -> bool;
-    fn watermark_columns(&self) -> &FixedBitSet;
+    fn watermark_columns(&self) -> &WatermarkColumns;
     fn columns_monotonicity(&self) -> &MonotonicityMap;
 }
 

@@ -35,7 +35,6 @@ use std::rc::Rc;
 
 use downcast_rs::{impl_downcast, Downcast};
 use dyn_clone::DynClone;
-use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use paste::paste;
 use petgraph::dot::{Config, Dot};
@@ -52,7 +51,9 @@ use self::batch::BatchPlanRef;
 use self::generic::{GenericPlanRef, PhysicalPlanRef};
 use self::stream::StreamPlanRef;
 use self::utils::Distill;
-use super::property::{Distribution, FunctionalDependencySet, MonotonicityMap, Order};
+use super::property::{
+    Distribution, FunctionalDependencySet, MonotonicityMap, Order, WatermarkColumns,
+};
 use crate::error::{ErrorCode, Result};
 use crate::optimizer::ExpressionSimplifyRewriter;
 use crate::session::current::notice_to_user;
@@ -610,7 +611,7 @@ impl StreamPlanRef for PlanRef {
         self.plan_base().emit_on_window_close()
     }
 
-    fn watermark_columns(&self) -> &FixedBitSet {
+    fn watermark_columns(&self) -> &WatermarkColumns {
         self.plan_base().watermark_columns()
     }
 

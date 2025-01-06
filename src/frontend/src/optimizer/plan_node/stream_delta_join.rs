@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::BitAnd;
-
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::ColumnDesc;
+use risingwave_common::util::functional::SameOrElseExt;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{ArrangementInfo, DeltaIndexJoinNode};
 
+use super::generic::GenericPlanNode;
 use super::stream::prelude::*;
 use super::utils::{childless_record, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary};
@@ -27,10 +27,9 @@ use crate::expr::{Expr, ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{EqJoinPredicate, EqJoinPredicateDisplay, TryToStreamPb};
-use crate::optimizer::property::{Distribution, MonotonicityMap};
+use crate::optimizer::property::{Distribution, MonotonicityMap, WatermarkColumns};
 use crate::scheduler::SchedulerResult;
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::utils::ColIndexMappingRewriteExt;
 
 /// [`StreamDeltaJoin`] implements [`super::LogicalJoin`] with delta join. It requires its two
 /// inputs to be indexes.
@@ -46,6 +45,8 @@ pub struct StreamDeltaJoin {
 
 impl StreamDeltaJoin {
     pub fn new(core: generic::Join<PlanRef>, eq_join_predicate: EqJoinPredicate) -> Self {
+        let ctx = core.ctx();
+
         // Inner join won't change the append-only behavior of the stream. The rest might.
         let append_only = match core.join_type {
             JoinType::Inner => core.left.append_only() && core.right.append_only(),
@@ -60,13 +61,23 @@ impl StreamDeltaJoin {
 
         let watermark_columns = {
             let from_left = core
-                .l2i_col_mapping()
-                .rewrite_bitset(core.left.watermark_columns());
+                .left
+                .watermark_columns()
+                .map_clone(&core.l2i_col_mapping());
             let from_right = core
-                .r2i_col_mapping()
-                .rewrite_bitset(core.right.watermark_columns());
-            let watermark_columns = from_left.bitand(&from_right);
-            core.i2o_col_mapping().rewrite_bitset(&watermark_columns)
+                .right
+                .watermark_columns()
+                .map_clone(&core.r2i_col_mapping());
+            let mut res = WatermarkColumns::new();
+            for (idx, l_wtmk_group) in from_left.iter() {
+                if let Some(r_wtmk_group) = from_right.get_group(idx) {
+                    res.insert(
+                        idx,
+                        l_wtmk_group.same_or_else(r_wtmk_group, || ctx.next_watermark_group_id()),
+                    );
+                }
+            }
+            res.map_clone(&core.i2o_col_mapping())
         };
 
         // TODO: derive from input
