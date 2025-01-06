@@ -48,7 +48,7 @@ cluster_start() {
     risedev pre-start-dev
     start_single_node "$PREFIX_LOG"/single-node.log &
     # Give it a while to make sure the single-node is ready.
-    sleep 15
+    sleep 30
   else
     risedev ci-start "$mode"
   fi
