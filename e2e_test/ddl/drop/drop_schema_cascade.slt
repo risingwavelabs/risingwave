@@ -50,7 +50,7 @@ create sink schema1.s2 into schema2.t4 from schema1.t2;
 statement error
 drop schema schema1;
 
-statement error
+statement error Found sink into table in dependency
 drop schema schema1 cascade;
 
 statement ok
