@@ -5645,9 +5645,9 @@ dependencies = [
 
 [[package]]
 name = "google-cloud-bigquery"
-version = "0.13.0"
+version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "876a94dbf94e306f43f9bb34e7dd65f92d10e846f42596ba594c18a0f3d440b1"
+checksum = "96beb39cc2838b8a097f84448ddbcb749ccb610aa6696a02d14528c462b0dcfc"
 dependencies = [
  "anyhow",
  "arrow 50.0.0",
@@ -5657,7 +5657,7 @@ dependencies = [
  "bigdecimal 0.4.5",
  "google-cloud-auth",
  "google-cloud-gax",
- "google-cloud-googleapis",
+ "google-cloud-googleapis 0.15.0",
  "google-cloud-token",
  "num-bigint",
  "reqwest 0.12.4",
@@ -5672,15 +5672,15 @@ dependencies = [
 
 [[package]]
 name = "google-cloud-gax"
-version = "0.19.0"
+version = "0.19.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c3eaaad103912825594d674a4b1e556ccbb05a13a6cac17dcfd871997fb760a"
+checksum = "de13e62d7e0ffc3eb40a0113ddf753cf6ec741be739164442b08893db4f9bfca"
 dependencies = [
  "google-cloud-token",
  "http 1.2.0",
  "thiserror 1.0.63",
  "tokio",
- "tokio-retry",
+ "tokio-retry2",
  "tonic",
  "tower 0.4.13",
  "tracing",
@@ -5691,6 +5691,17 @@ name = "google-cloud-googleapis"
 version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ae8ab26ef7c7c3f7dfb9cc3982293d031d8e78c85d00ddfb704b5c35aeff7c8"
+dependencies = [
+ "prost 0.13.1",
+ "prost-types 0.13.1",
+ "tonic",
+]
+
+[[package]]
+name = "google-cloud-googleapis"
+version = "0.16.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0edfdfb507593d47605b3bb2fb36628b391e3d397e520b85852dea2412c8e2d1"
 dependencies = [
  "prost 0.13.1",
  "prost-types 0.13.1",
@@ -5710,15 +5721,15 @@ dependencies = [
 
 [[package]]
 name = "google-cloud-pubsub"
-version = "0.29.0"
+version = "0.30.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e3d2d4a82a8699b8ed9e5849410820d91ce51bcb6572386bbd3ac1336325e191"
+checksum = "bebc6e7327e49a66ffb40508c673b7643191bd6b509530193bda97f09272cdcf"
 dependencies = [
  "async-channel 1.9.0",
  "async-stream",
  "google-cloud-auth",
  "google-cloud-gax",
- "google-cloud-googleapis",
+ "google-cloud-googleapis 0.16.0",
  "google-cloud-token",
  "prost-types 0.13.1",
  "thiserror 1.0.63",
@@ -9026,18 +9037,18 @@ dependencies = [
 
 [[package]]
 name = "pin-project"
-version = "1.1.3"
+version = "1.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fda4ed1c6c173e3fc7a83629421152e01d7b1f9b7f65fb301e490e8cfc656422"
+checksum = "1e2ec53ad785f4d35dac0adea7f7dc6f1bb277ad84a680c7afefeae05d1f5916"
 dependencies = [
  "pin-project-internal",
 ]
 
 [[package]]
 name = "pin-project-internal"
-version = "1.1.3"
+version = "1.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4359fd9c9171ec6e8c62926d6faaf553a8dc3f64e1507e76da7911b4f6a04405"
+checksum = "d56a66c0c55993aa927429d0f8a0abfd74f084e4d9c192cffed01e418d83eefb"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -11064,7 +11075,7 @@ dependencies = [
  "glob",
  "google-cloud-bigquery",
  "google-cloud-gax",
- "google-cloud-googleapis",
+ "google-cloud-googleapis 0.16.0",
  "google-cloud-pubsub",
  "iceberg",
  "iceberg-catalog-glue",
@@ -14570,6 +14581,16 @@ dependencies = [
  "madsim-tokio",
  "pin-project",
  "rand",
+]
+
+[[package]]
+name = "tokio-retry2"
+version = "0.5.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "903934dba1c4c2f2e9cb460ef10b5695e0b0ecad3bf9ee7c8675e540c5e8b2d1"
+dependencies = [
+ "pin-project",
+ "tokio",
 ]
 
 [[package]]
