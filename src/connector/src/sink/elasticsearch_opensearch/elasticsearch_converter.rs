@@ -81,7 +81,7 @@ impl StreamChunkConverter {
 
     pub fn convert_chunk(&self, chunk: StreamChunk) -> Result<StreamChunk> {
         match self {
-            StreamChunkConverter::Es(es) => es.convert_chunk(chunk,es.is_append_only),
+            StreamChunkConverter::Es(es) => es.convert_chunk(chunk, es.is_append_only),
             StreamChunkConverter::Other => Ok(chunk),
         }
     }
@@ -108,7 +108,10 @@ impl EsStreamChunkConverter {
             index,
             routing_column,
         )?;
-        Ok(Self { formatter, is_append_only })
+        Ok(Self {
+            formatter,
+            is_append_only,
+        })
     }
 
     fn convert_chunk(&self, chunk: StreamChunk, is_append_only: bool) -> Result<StreamChunk> {
@@ -121,7 +124,7 @@ impl EsStreamChunkConverter {
             <Utf8ArrayBuilder as risingwave_common::array::ArrayBuilder>::new(chunk.capacity());
         let mut routing_builder =
             <Utf8ArrayBuilder as risingwave_common::array::ArrayBuilder>::new(chunk.capacity());
-        for build_bulk_para in self.formatter.convert_chunk(chunk,is_append_only)? {
+        for build_bulk_para in self.formatter.convert_chunk(chunk, is_append_only)? {
             let BuildBulkPara {
                 key,
                 value,

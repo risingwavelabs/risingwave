@@ -205,7 +205,7 @@ impl AsyncTruncateSinkWriter for ElasticSearchOpenSearchSinkWriter {
         let mut bulks: Vec<ElasticSearchOpenSearchBulk> = Vec::with_capacity(chunk_capacity);
 
         let mut bulks_size = 0;
-        for build_bulk_para in self.formatter.convert_chunk(chunk,self.is_append_only)? {
+        for build_bulk_para in self.formatter.convert_chunk(chunk, self.is_append_only)? {
             let BuildBulkPara {
                 key,
                 value,

@@ -71,7 +71,7 @@ impl Sink for OpenSearchSink {
             self.schema.clone(),
             self.pk_indices.clone(),
             Self::SINK_NAME,
-            self.is_append_only
+            self.is_append_only,
         )?
         .into_log_sinker(self.config.concurrent_requests))
     }
