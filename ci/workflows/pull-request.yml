@@ -666,9 +666,6 @@ steps:
       - docker-compose#v5.5.0:
           run: rw-build-env
           config: ci/docker-compose.yml
-      - shellcheck#v1.4.0:
-          files: ./**/*.sh
-          recursive_glob: true
     timeout_in_minutes: 5
     retry: *auto-retry
 
