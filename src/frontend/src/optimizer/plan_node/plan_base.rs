@@ -16,7 +16,7 @@ use educe::Educe;
 
 use super::generic::GenericPlanNode;
 use super::*;
-use crate::optimizer::property::Distribution;
+use crate::optimizer::property::{Distribution, WatermarkColumns};
 
 /// No extra fields for logical plan nodes.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -58,7 +58,7 @@ pub struct StreamExtra {
     emit_on_window_close: bool,
     /// The watermark column indices of the `PlanNode`'s output. There could be watermark output from
     /// this stream operator.
-    watermark_columns: FixedBitSet,
+    watermark_columns: WatermarkColumns,
     /// The monotonicity of columns in the output.
     columns_monotonicity: MonotonicityMap,
 }
@@ -167,7 +167,7 @@ impl stream::StreamPlanRef for PlanBase<Stream> {
         self.extra.emit_on_window_close
     }
 
-    fn watermark_columns(&self) -> &FixedBitSet {
+    fn watermark_columns(&self) -> &WatermarkColumns {
         &self.extra.watermark_columns
     }
 
@@ -227,11 +227,10 @@ impl PlanBase<Stream> {
         dist: Distribution,
         append_only: bool,
         emit_on_window_close: bool,
-        watermark_columns: FixedBitSet,
+        watermark_columns: WatermarkColumns,
         columns_monotonicity: MonotonicityMap,
     ) -> Self {
         let id = ctx.next_plan_node_id();
-        assert_eq!(watermark_columns.len(), schema.len());
         Self {
             id,
             ctx,
@@ -253,7 +252,7 @@ impl PlanBase<Stream> {
         dist: Distribution,
         append_only: bool,
         emit_on_window_close: bool,
-        watermark_columns: FixedBitSet,
+        watermark_columns: WatermarkColumns,
         columns_monotonicity: MonotonicityMap,
     ) -> Self {
         Self::new_stream(
@@ -389,7 +388,7 @@ impl<'a> PlanBaseRef<'a> {
         dispatch_plan_base!(self, [Stream, Batch], PhysicalPlanRef::distribution)
     }
 
-    pub(super) fn watermark_columns(self) -> &'a FixedBitSet {
+    pub(super) fn watermark_columns(self) -> &'a WatermarkColumns {
         dispatch_plan_base!(self, [Stream], StreamPlanRef::watermark_columns)
     }
 
@@ -439,7 +438,7 @@ impl StreamPlanRef for PlanBaseRef<'_> {
         dispatch_plan_base!(self, [Stream], StreamPlanRef::emit_on_window_close)
     }
 
-    fn watermark_columns(&self) -> &FixedBitSet {
+    fn watermark_columns(&self) -> &WatermarkColumns {
         (*self).watermark_columns()
     }
 
