@@ -67,6 +67,7 @@ impl Rule for TableFunctionToFileScanRule {
             let s3_secret_key = eval_args[4].clone();
             // The rest of the arguments are file locations
             let file_location = eval_args[5..].iter().cloned().collect_vec();
+            let is_minio = s3_region.starts_with("http");
             Some(
                 LogicalFileScan::new(
                     logical_table_function.ctx(),
@@ -77,6 +78,7 @@ impl Rule for TableFunctionToFileScanRule {
                     s3_access_key,
                     s3_secret_key,
                     file_location,
+                    is_minio,
                 )
                 .into(),
             )

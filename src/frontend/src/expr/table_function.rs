@@ -150,11 +150,13 @@ impl TableFunction {
             {
                 let (bucket, _) = extract_bucket_and_file_name(&eval_args[5].clone())?;
 
+                let is_minio = eval_args[2].starts_with("http");
                 let op = new_s3_operator(
                     eval_args[2].clone(),
                     eval_args[3].clone(),
                     eval_args[4].clone(),
                     bucket.clone(),
+                    is_minio,
                 )?;
                 let files = if eval_args[5].ends_with('/') {
                     let files = tokio::task::block_in_place(|| {

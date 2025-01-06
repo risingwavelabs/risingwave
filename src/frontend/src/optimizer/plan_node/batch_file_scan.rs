@@ -94,6 +94,7 @@ impl ToBatchPb for BatchFileScan {
             s3_access_key: self.core.s3_access_key.clone(),
             s3_secret_key: self.core.s3_secret_key.clone(),
             file_location: self.core.file_location.clone(),
+            is_minio: self.core.is_minio,
         })
     }
 }

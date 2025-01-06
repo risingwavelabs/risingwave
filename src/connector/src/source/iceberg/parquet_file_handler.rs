@@ -109,9 +109,8 @@ pub fn new_s3_operator(
     s3_access_key: String,
     s3_secret_key: String,
     bucket: String,
+    is_minio: bool,
 ) -> ConnectorResult<Operator> {
-    let is_minio = s3_region.starts_with("http");
-
     let mut builder = S3::default();
     builder = match is_minio {
         true => {

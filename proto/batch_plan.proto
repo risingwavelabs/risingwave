@@ -97,6 +97,7 @@ message FileScanNode {
   string s3_access_key = 5;
   string s3_secret_key = 6;
   repeated string file_location = 7;
+  bool is_minio = 8;
 }
 
 // NOTE(kwannoel): This will only be used in batch mode. We can change the definition as needed.

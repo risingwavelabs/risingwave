@@ -37,6 +37,7 @@ pub struct S3FileScanExecutor {
     s3_region: String,
     s3_access_key: String,
     s3_secret_key: String,
+    is_minio: bool,
     batch_size: usize,
     schema: Schema,
     identity: String,
@@ -66,6 +67,7 @@ impl S3FileScanExecutor {
         batch_size: usize,
         schema: Schema,
         identity: String,
+        is_minio: bool,
     ) -> Self {
         Self {
             file_format,
@@ -73,6 +75,7 @@ impl S3FileScanExecutor {
             s3_region,
             s3_access_key,
             s3_secret_key,
+            is_minio,
             batch_size,
             schema,
             identity,
@@ -89,6 +92,7 @@ impl S3FileScanExecutor {
                 self.s3_access_key.clone(),
                 self.s3_secret_key.clone(),
                 bucket.clone(),
+                self.is_minio,
             )?;
             let chunk_stream =
                 read_parquet_file(op, file_name, None, None, self.batch_size, 0).await?;
@@ -126,6 +130,7 @@ impl BoxedExecutorBuilder for FileScanExecutorBuilder {
             source.context().get_config().developer.chunk_size,
             Schema::from_iter(file_scan_node.columns.iter().map(Field::from)),
             source.plan_node().get_identity().clone(),
+            file_scan_node.is_minio,
         )))
     }
 }
