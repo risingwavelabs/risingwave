@@ -15,6 +15,7 @@
 use risingwave_common::catalog::{
     default_key_column_name_version_mapping, KAFKA_TIMESTAMP_COLUMN_NAME,
 };
+use risingwave_common::rate_limit::RateLimit;
 use risingwave_connector::source::reader::desc::SourceDescBuilder;
 use risingwave_connector::source::should_copy_to_format_encode_options;
 use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt};
@@ -209,7 +210,10 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                         params.executor_stats,
                         barrier_receiver,
                         system_params,
-                        source.rate_limit,
+                        RateLimit::compatible(
+                            source.rate_limit.as_ref(),
+                            source.deprecated_rate_limit,
+                        ),
                     )?
                     .boxed()
                 } else if is_fs_v2_connector {
@@ -219,7 +223,10 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                         params.executor_stats.clone(),
                         barrier_receiver,
                         system_params,
-                        source.rate_limit,
+                        RateLimit::compatible(
+                            source.rate_limit.as_ref(),
+                            source.deprecated_rate_limit,
+                        ),
                     )
                     .boxed()
                 } else {
@@ -230,7 +237,10 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                         params.executor_stats.clone(),
                         barrier_receiver,
                         system_params,
-                        source.rate_limit,
+                        RateLimit::compatible(
+                            source.rate_limit.as_ref(),
+                            source.deprecated_rate_limit,
+                        ),
                         is_shared && !source.with_properties.is_cdc_connector(),
                     )
                     .boxed()
@@ -260,7 +270,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 params.executor_stats,
                 barrier_receiver,
                 system_params,
-                None,
+                RateLimit::default(),
                 false,
             );
             Ok((params.info, exec).into())

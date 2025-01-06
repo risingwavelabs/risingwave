@@ -283,7 +283,8 @@ impl From<ObjectModel<source::Model>> for PbSource {
             initialized_at_cluster_version: value.1.initialized_at_cluster_version,
             created_at_cluster_version: value.1.created_at_cluster_version,
             secret_refs: secret_ref_map,
-            rate_limit: value.0.rate_limit.map(|v| v as _),
+            deprecated_rate_limit: None,
+            rate_limit: Some(value.0.rate_limit.to_protobuf()),
         }
     }
 }

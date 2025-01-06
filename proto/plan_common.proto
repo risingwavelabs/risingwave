@@ -299,3 +299,14 @@ enum AdditionalColumnType {
   ADDITIONAL_COLUMN_TYPE_NORMAL = 7;
   ADDITIONAL_COLUMN_TYPE_PAYLOAD = 8;
 }
+
+message RateLimit {
+  enum RateLimitPolicy {
+    RATE_LIMIT_POLICY_UNLIMITED = 0;
+    RATE_LIMIT_POLICY_FIXED = 1;
+  }
+
+  RateLimitPolicy policy = 1;
+  // Only valid when `policy` is `RATE_LIMIT_POLICY_FIXED`.
+  uint64 rate = 2;
+}

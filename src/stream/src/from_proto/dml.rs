@@ -14,6 +14,7 @@
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
+use risingwave_common::rate_limit::RateLimit;
 use risingwave_pb::stream_plan::DmlNode;
 use risingwave_storage::StateStore;
 
@@ -45,7 +46,7 @@ impl ExecutorBuilder for DmlExecutorBuilder {
             node.table_version_id,
             column_descs,
             params.env.config().developer.chunk_size,
-            node.rate_limit.into(),
+            RateLimit::compatible(node.rate_limit.as_ref(), node.deprecated_rate_limit),
         );
         Ok((params.info, exec).into())
     }

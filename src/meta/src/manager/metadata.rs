@@ -20,6 +20,7 @@ use std::time::Duration;
 use anyhow::anyhow;
 use futures::future::{select, Either};
 use risingwave_common::catalog::{DatabaseId, TableId, TableOption};
+use risingwave_common::rate_limit::RateLimit;
 use risingwave_meta_model::{ObjectId, SinkId, SourceId, WorkerId};
 use risingwave_pb::catalog::{PbSink, PbSource, PbTable};
 use risingwave_pb::common::worker_node::{PbResource, Property as AddNodeProperty, State};
@@ -628,7 +629,7 @@ impl MetadataManager {
     pub async fn update_source_rate_limit_by_source_id(
         &self,
         source_id: SourceId,
-        rate_limit: Option<u32>,
+        rate_limit: RateLimit,
     ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
         let fragment_actors = self
             .catalog_controller
@@ -643,7 +644,7 @@ impl MetadataManager {
     pub async fn update_backfill_rate_limit_by_table_id(
         &self,
         table_id: TableId,
-        rate_limit: Option<u32>,
+        rate_limit: RateLimit,
     ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
         let fragment_actors = self
             .catalog_controller
@@ -658,7 +659,7 @@ impl MetadataManager {
     pub async fn update_sink_rate_limit_by_sink_id(
         &self,
         sink_id: SinkId,
-        rate_limit: Option<u32>,
+        rate_limit: RateLimit,
     ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
         let fragment_actors = self
             .catalog_controller
@@ -673,7 +674,7 @@ impl MetadataManager {
     pub async fn update_dml_rate_limit_by_table_id(
         &self,
         table_id: TableId,
-        rate_limit: Option<u32>,
+        rate_limit: RateLimit,
     ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
         let fragment_actors = self
             .catalog_controller

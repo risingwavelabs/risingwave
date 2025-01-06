@@ -21,8 +21,8 @@ use itertools::Itertools;
 use risingwave_common::array::{DataChunk, Op};
 use risingwave_common::bail;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
-use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::rate_limit::{MonitoredRateLimiter, RateLimit, RateLimiter};
+use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::store::PrefetchOptions;
 
@@ -498,9 +498,8 @@ where
                         Mutation::Throttle(actor_to_apply) => {
                             let new_rate_limit_entry = actor_to_apply.get(&self.actor_id);
                             if let Some(new_rate_limit) = new_rate_limit_entry {
-                                let new_rate_limit = (*new_rate_limit).into();
-                                let old_rate_limit = self.rate_limiter.update(new_rate_limit);
-                                if old_rate_limit != new_rate_limit {
+                                let old_rate_limit = self.rate_limiter.update(*new_rate_limit);
+                                if old_rate_limit != *new_rate_limit {
                                     tracing::info!(
                                         old_rate_limit = ?old_rate_limit,
                                         new_rate_limit = ?new_rate_limit,
@@ -513,7 +512,7 @@ where
                                         .iter_vnodes()
                                         .map(|vnode| {
                                             let builder = create_builder(
-                                                new_rate_limit,
+                                                *new_rate_limit,
                                                 self.chunk_size,
                                                 snapshot_data_types.clone(),
                                             );

@@ -17,9 +17,9 @@ use futures::stream;
 use futures::stream::select_with_strategy;
 use risingwave_common::array::{DataChunk, Op};
 use risingwave_common::hash::VnodeBitmapExt;
+use risingwave_common::rate_limit::{MonitoredRateLimiter, RateLimit, RateLimiter};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::{bail, row};
-use risingwave_common::rate_limit::{MonitoredRateLimiter, RateLimit, RateLimiter};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
@@ -454,9 +454,8 @@ where
                         Mutation::Throttle(actor_to_apply) => {
                             let new_rate_limit_entry = actor_to_apply.get(&self.actor_id);
                             if let Some(new_rate_limit) = new_rate_limit_entry {
-                                let new_rate_limit = (*new_rate_limit).into();
-                                let old_rate_limit = self.rate_limiter.update(new_rate_limit);
-                                if old_rate_limit != new_rate_limit {
+                                let old_rate_limit = self.rate_limiter.update(*new_rate_limit);
+                                if old_rate_limit != *new_rate_limit {
                                     tracing::info!(
                                         old_rate_limit = ?old_rate_limit,
                                         new_rate_limit = ?new_rate_limit,
@@ -470,7 +469,7 @@ where
                                         "builder should already be emptied"
                                     );
                                     builder = create_builder(
-                                        new_rate_limit,
+                                        *new_rate_limit,
                                         self.chunk_size,
                                         self.upstream_table.schema().data_types(),
                                     );

@@ -369,6 +369,7 @@ derive_array_from_blob!(
     PbColumnCatalogArray
 );
 derive_from_blob!(StreamSourceInfo, risingwave_pb::catalog::PbStreamSourceInfo);
+derive_from_blob!(RateLimit, risingwave_pb::plan_common::PbRateLimit);
 derive_from_blob!(
     WebhookSourceInfo,
     risingwave_pb::catalog::PbWebhookSourceInfo

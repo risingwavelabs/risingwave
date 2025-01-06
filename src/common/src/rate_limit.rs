@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt::Display;
 use std::future::Future;
 use std::num::NonZeroU64;
 use std::ops::Deref;
@@ -30,8 +31,8 @@ use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common_metrics::{
     register_guarded_uint_gauge_vec_with_registry, LabelGuardedUintGauge,
 };
-use risingwave_pb::stream_plan::rate_limit::PbRateLimitPolicy;
-use risingwave_pb::stream_plan::PbRateLimit;
+use risingwave_pb::plan_common::rate_limit::PbRateLimitPolicy;
+use risingwave_pb::plan_common::PbRateLimit;
 use tokio::sync::oneshot;
 use tokio::time::Sleep;
 
@@ -88,7 +89,7 @@ impl Future for Delay {
 }
 
 /// Rate limit policy.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RateLimit {
     /// Unlimited.
     Unlimited,
@@ -96,6 +97,22 @@ pub enum RateLimit {
     Fixed(NonZeroU64),
     /// Pause with 0 rate.
     Pause,
+}
+
+impl Default for RateLimit {
+    fn default() -> Self {
+        Self::Unlimited
+    }
+}
+
+impl Display for RateLimit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RateLimit::Unlimited => f.write_str("unlimited"),
+            RateLimit::Fixed(rate) => f.write_fmt(format_args!("fixed({})", rate.get())),
+            RateLimit::Pause => f.write_str("pause"),
+        }
+    }
 }
 
 impl RateLimit {
@@ -136,6 +153,11 @@ impl RateLimit {
             },
         }
     }
+
+    pub fn compatible(pb: Option<&PbRateLimit>, deprecated_pb: Option<u32>) -> Self {
+        pb.map(Self::from)
+            .unwrap_or_else(|| Self::from(deprecated_pb))
+    }
 }
 
 impl From<RateLimit> for u64 {
@@ -148,6 +170,30 @@ impl From<RateLimit> for u64 {
     }
 }
 
+impl From<RateLimit> for PbRateLimit {
+    fn from(value: RateLimit) -> Self {
+        value.to_protobuf()
+    }
+}
+
+impl From<&PbRateLimit> for RateLimit {
+    fn from(value: &PbRateLimit) -> Self {
+        RateLimit::from_protobuf(value)
+    }
+}
+
+impl From<Option<&PbRateLimit>> for RateLimit {
+    fn from(value: Option<&PbRateLimit>) -> Self {
+        value.map(RateLimit::from_protobuf).unwrap_or_default()
+    }
+}
+
+impl From<RateLimit> for Option<PbRateLimit> {
+    fn from(value: RateLimit) -> Self {
+        Some(value.to_protobuf())
+    }
+}
+
 // Adapt to the old rate limit policy.
 impl From<Option<u32>> for RateLimit {
     fn from(value: Option<u32>) -> Self {
@@ -155,6 +201,22 @@ impl From<Option<u32>> for RateLimit {
             None => Self::Unlimited,
             Some(0) => Self::Pause,
             Some(rate) => Self::Fixed(unsafe { NonZeroU64::new_unchecked(rate as _) }),
+        }
+    }
+}
+
+// Adapt to the old rate limit policy.
+impl From<Option<i32>> for RateLimit {
+    fn from(value: Option<i32>) -> Self {
+        match value {
+            None => Self::Unlimited,
+            Some(0) => Self::Pause,
+            Some(-1) => Self::Unlimited,
+            Some(rate) if rate > 0 => Self::Fixed(unsafe { NonZeroU64::new_unchecked(rate as _) }),
+            _ => {
+                tracing::warn!(value, "invalid rate limit value, set to UNLIMITED instead");
+                Self::Unlimited
+            }
         }
     }
 }

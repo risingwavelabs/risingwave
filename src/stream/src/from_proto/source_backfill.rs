@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::catalog::TableId;
+use risingwave_common::rate_limit::RateLimit;
 use risingwave_connector::WithOptionsSecResolved;
 use risingwave_pb::stream_plan::SourceBackfillNode;
 
@@ -83,7 +84,7 @@ impl ExecutorBuilder for SourceBackfillExecutorBuilder {
             params.executor_stats.clone(),
             params.env.system_params_manager_ref().get_params(),
             backfill_state_table,
-            node.rate_limit,
+            RateLimit::compatible(node.rate_limit.as_ref(), node.deprecated_rate_limit),
             progress,
         );
         let [input]: [_; 1] = params.input.try_into().unwrap();

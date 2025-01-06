@@ -29,6 +29,7 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnId, DatabaseId, Field, Schema, TableId};
 use risingwave_common::config::MetricLevel;
 use risingwave_common::must_match;
+use risingwave_common::rate_limit::RateLimit;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_pb::stream_plan;
@@ -403,7 +404,7 @@ impl StreamActorManager {
             actor_context.clone(),
             progress,
             chunk_size,
-            node.rate_limit.into(),
+            RateLimit::compatible(node.rate_limit.as_ref(), node.deprecated_rate_limit),
             barrier_rx,
             self.streaming_metrics.clone(),
             node.snapshot_backfill_epoch,

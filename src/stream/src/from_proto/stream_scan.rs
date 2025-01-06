@@ -15,6 +15,7 @@
 use std::sync::Arc;
 
 use risingwave_common::catalog::ColumnId;
+use risingwave_common::rate_limit::RateLimit;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
 use risingwave_common::util::value_encoding::BasicSerde;
 use risingwave_pb::plan_common::StorageTableDesc;
@@ -90,7 +91,7 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                     progress,
                     params.executor_stats.clone(),
                     params.env.config().developer.chunk_size,
-                    node.rate_limit.into(),
+                    RateLimit::compatible(node.rate_limit.as_ref(), node.deprecated_rate_limit),
                 )
                 .boxed()
             }
@@ -132,7 +133,7 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                             progress,
                             params.executor_stats.clone(),
                             params.env.config().developer.chunk_size,
-                            node.rate_limit.into()
+                            RateLimit::compatible(node.rate_limit.as_ref(), node.deprecated_rate_limit),
                         )
                         .boxed()
                     }};

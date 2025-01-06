@@ -93,7 +93,7 @@ message ThrottleMutation {
   reserved 1;
   reserved "actor_throttle";
 
-  map<uint32, RateLimit> actor_throttles = 2;
+  map<uint32, plan_common.RateLimit> actor_throttles = 2;
 }
 
 message CombinedMutation {
@@ -196,7 +196,7 @@ message StreamSource {
   optional uint32 deprecated_rate_limit = 9;
   map<string, secret.SecretRef> secret_refs = 10;
   // Source rate limit
-  RateLimit rate_limit = 11;
+  plan_common.RateLimit rate_limit = 11;
 }
 
 // copy contents from StreamSource to prevent compatibility issues in the future
@@ -214,7 +214,7 @@ message StreamFsFetch {
   // Keep it here to make it compatible with the old version of the plan.
   optional uint32 deprecated_rate_limit = 9;
   map<string, secret.SecretRef> secret_refs = 10;
-  RateLimit rate_limit = 11;
+  plan_common.RateLimit rate_limit = 11;
 }
 
 // The executor only for receiving barrier from the meta service. It always resides in the leaves
@@ -250,7 +250,7 @@ message SourceBackfillNode {
   // `| partition_id | backfill_progress |`
   catalog.Table state_table = 8;
   map<string, secret.SecretRef> secret_refs = 9;
-  RateLimit rate_limit = 10;
+  plan_common.RateLimit rate_limit = 10;
 }
 
 message SinkDesc {
@@ -290,7 +290,7 @@ message SinkNode {
   // (deprecated)
   // Keep it here to make it compatible with the old version of the plan.
   optional uint32 deprecated_rate_limit = 4;
-  RateLimit rate_limit = 5;
+  plan_common.RateLimit rate_limit = 5;
 }
 
 message ProjectNode {
@@ -643,7 +643,7 @@ message StreamScanNode {
   optional uint64 snapshot_backfill_epoch = 11;
 
   // The backfill rate limit for the stream scan node.
-  RateLimit rate_limit = 12;
+  plan_common.RateLimit rate_limit = 12;
 
 }
 
@@ -684,7 +684,7 @@ message StreamCdcScanNode {
   StreamCdcScanOptions options = 8;
 
   // The backfill rate limit for the stream cdc scan node.
-  RateLimit rate_limit = 9;
+  plan_common.RateLimit rate_limit = 9;
 }
 
 // BatchPlanNode is used for mv on mv snapshot read.
@@ -795,7 +795,7 @@ message DmlNode {
   // (deprecated)
   // Keep it here to make it compatible with the old version of the plan.
   optional uint32 deprecated_rate_limit = 4;
-  RateLimit rate_limit = 5;
+  plan_common.RateLimit rate_limit = 5;
 }
 
 message RowIdGenNode {
@@ -1091,15 +1091,4 @@ message StreamFragmentGraph {
   // upstream fragment graph requires two fragments to be in the same distribution,
   // thus the same vnode count.
   uint32 max_parallelism = 7;
-}
-
-message RateLimit {
-  enum RateLimitPolicy {
-    RATE_LIMIT_POLICY_UNLIMITED = 0;
-    RATE_LIMIT_POLICY_FIXED = 1;
-  }
-
-  RateLimitPolicy policy = 1;
-  // Only valid when `policy` is `RATE_LIMIT_POLICY_FIXED`.
-  uint64 rate = 2;
 }

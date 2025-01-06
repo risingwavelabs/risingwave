@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use risingwave_common::catalog::{Schema, TableId};
+use risingwave_common::rate_limit::RateLimit;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_connector::source::cdc::external::{
     CdcTableType, ExternalTableConfig, SchemaTableName,
@@ -122,7 +123,7 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
             None,
             params.executor_stats,
             state_table,
-            node.rate_limit,
+            RateLimit::compatible(node.rate_limit.as_ref(), node.deprecated_rate_limit),
             scan_options,
         );
         Ok((params.info, exec).into())

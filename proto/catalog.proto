@@ -148,7 +148,10 @@ message Source {
   // Per-source catalog version, used by schema change.
   uint64 version = 100;
 
-  optional uint32 rate_limit = 101;
+  // (deprecated)
+  // Keep it here to make it compatible with the old version of the plan.
+  optional uint32 deprecated_rate_limit = 101;
+  plan_common.RateLimit rate_limit = 102;
 }
 
 enum SinkType {

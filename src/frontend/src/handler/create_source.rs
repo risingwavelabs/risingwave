@@ -33,6 +33,7 @@ use risingwave_common::catalog::{
     ROWID_PREFIX,
 };
 use risingwave_common::license::Feature;
+use risingwave_common::rate_limit::RateLimit;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -625,7 +626,7 @@ pub async fn bind_create_source_or_table_with_connector(
     include_column_options: IncludeOption,
     col_id_gen: &mut ColumnIdGenerator,
     create_source_type: CreateSourceType,
-    source_rate_limit: Option<u32>,
+    source_rate_limit: RateLimit,
 ) -> Result<(SourceCatalog, DatabaseId, SchemaId)> {
     let session = &handler_args.session;
     let db_name: &str = &session.database();

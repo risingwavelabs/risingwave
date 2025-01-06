@@ -19,8 +19,8 @@ use sea_orm::ActiveValue::Set;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    ColumnCatalogArray, ConnectionId, I32Array, Property, SecretRef, SourceId, StreamSourceInfo,
-    TableId, WatermarkDescArray,
+    ColumnCatalogArray, ConnectionId, I32Array, Property, RateLimit, SecretRef, SourceId,
+    StreamSourceInfo, TableId, WatermarkDescArray,
 };
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
@@ -41,7 +41,7 @@ pub struct Model {
     pub version: i64,
     // `secret_ref` stores the mapping info mapping from property name to secret id and type.
     pub secret_ref: Option<SecretRef>,
-    pub rate_limit: Option<i32>,
+    pub rate_limit: RateLimit,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -105,7 +105,10 @@ impl From<PbSource> for ActiveModel {
             connection_id: Set(source.connection_id.map(|id| id as _)),
             version: Set(source.version as _),
             secret_ref: Set(Some(SecretRef::from(source.secret_refs))),
-            rate_limit: Set(source.rate_limit.map(|id| id as _)),
+            rate_limit: Set(source
+                .rate_limit
+                .map(|pb| RateLimit::from_protobuf(&pb))
+                .unwrap_or_default()),
         }
     }
 }

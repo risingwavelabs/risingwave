@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::catalog::{ColumnCatalog, SourceVersionId};
+use risingwave_common::rate_limit::RateLimit;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt};
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
@@ -44,7 +45,7 @@ pub struct SourceCatalog {
     pub version: SourceVersionId,
     pub created_at_cluster_version: Option<String>,
     pub initialized_at_cluster_version: Option<String>,
-    pub rate_limit: Option<u32>,
+    pub rate_limit: RateLimit,
 }
 
 impl SourceCatalog {
@@ -78,6 +79,7 @@ impl SourceCatalog {
             created_at_cluster_version: self.created_at_cluster_version.clone(),
             initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
             secret_refs,
+            deprecated_rate_limit: None,
             rate_limit: self.rate_limit,
         }
     }

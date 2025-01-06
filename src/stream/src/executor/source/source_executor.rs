@@ -1107,7 +1107,7 @@ mod tests {
             Arc::new(StreamingMetrics::unused()),
             barrier_rx,
             system_params_manager.get_params(),
-            None,
+            RateLimit::default(),
             false,
         );
         let mut executor = executor.boxed().execute();
@@ -1197,7 +1197,7 @@ mod tests {
             Arc::new(StreamingMetrics::unused()),
             barrier_rx,
             system_params_manager.get_params(),
-            None,
+            RateLimit::Unlimited,
             false,
         );
         let mut handler = executor.boxed().execute();

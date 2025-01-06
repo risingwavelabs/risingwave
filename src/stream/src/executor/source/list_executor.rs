@@ -17,6 +17,7 @@ use either::Either;
 use futures::TryStreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::Op;
+use risingwave_common::rate_limit::RateLimit;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use thiserror_ext::AsReport;
@@ -42,8 +43,8 @@ pub struct FsListExecutor<S: StateStore> {
     /// System parameter reader to read barrier interval
     system_params: SystemParamsReaderRef,
 
-    /// Rate limit in rows/s.
-    rate_limit_rps: Option<u32>,
+    /// Rate limit.
+    rate_limit: RateLimit,
 }
 
 impl<S: StateStore> FsListExecutor<S> {
@@ -53,7 +54,7 @@ impl<S: StateStore> FsListExecutor<S> {
         metrics: Arc<StreamingMetrics>,
         barrier_receiver: UnboundedReceiver<Barrier>,
         system_params: SystemParamsReaderRef,
-        rate_limit_rps: Option<u32>,
+        rate_limit: RateLimit,
     ) -> Self {
         Self {
             actor_ctx,
@@ -61,7 +62,7 @@ impl<S: StateStore> FsListExecutor<S> {
             metrics,
             barrier_receiver: Some(barrier_receiver),
             system_params,
-            rate_limit_rps,
+            rate_limit,
         }
     }
 

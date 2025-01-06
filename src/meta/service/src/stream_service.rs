@@ -16,6 +16,7 @@ use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_common::rate_limit::RateLimit;
 use risingwave_connector::source::SplitMetaData;
 use risingwave_meta::barrier::BarrierManagerRef;
 use risingwave_meta::controller::fragment::StreamingJobInfo;
@@ -113,27 +114,42 @@ impl StreamManagerService for StreamServiceImpl {
         let actor_to_apply = match request.kind() {
             ThrottleTarget::Source | ThrottleTarget::TableWithSource => {
                 self.metadata_manager
-                    .update_source_rate_limit_by_source_id(request.id as SourceId, request.rate)
+                    .update_source_rate_limit_by_source_id(
+                        request.id as SourceId,
+                        request.rate_limit.as_ref().into(),
+                    )
                     .await?
             }
             ThrottleTarget::Mv => {
                 self.metadata_manager
-                    .update_backfill_rate_limit_by_table_id(TableId::from(request.id), request.rate)
+                    .update_backfill_rate_limit_by_table_id(
+                        TableId::from(request.id),
+                        request.rate_limit.as_ref().into(),
+                    )
                     .await?
             }
             ThrottleTarget::CdcTable => {
                 self.metadata_manager
-                    .update_backfill_rate_limit_by_table_id(TableId::from(request.id), request.rate)
+                    .update_backfill_rate_limit_by_table_id(
+                        TableId::from(request.id),
+                        request.rate_limit.as_ref().into(),
+                    )
                     .await?
             }
             ThrottleTarget::TableDml => {
                 self.metadata_manager
-                    .update_dml_rate_limit_by_table_id(TableId::from(request.id), request.rate)
+                    .update_dml_rate_limit_by_table_id(
+                        TableId::from(request.id),
+                        request.rate_limit.as_ref().into(),
+                    )
                     .await?
             }
             ThrottleTarget::Sink => {
                 self.metadata_manager
-                    .update_sink_rate_limit_by_sink_id(request.id as SinkId, request.rate)
+                    .update_sink_rate_limit_by_sink_id(
+                        request.id as SinkId,
+                        request.rate_limit.as_ref().into(),
+                    )
                     .await?
             }
             ThrottleTarget::Unspecified => {
@@ -155,13 +171,12 @@ impl StreamManagerService for StreamServiceImpl {
                     *fragment_id,
                     actors
                         .iter()
-                        .map(|actor_id| (*actor_id, request.rate))
-                        .collect::<HashMap<ActorId, Option<u32>>>(),
+                        .map(|actor_id| (*actor_id, request.rate_limit.as_ref().into()))
+                        .collect::<HashMap<ActorId, RateLimit>>(),
                 )
             })
             .collect();
-        let _i = self
-            .barrier_scheduler
+        self.barrier_scheduler
             .run_command(database_id, Command::Throttle(mutation))
             .await?;
 

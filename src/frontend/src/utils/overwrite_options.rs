@@ -12,14 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::rate_limit::RateLimit;
+
 use crate::handler::HandlerArgs;
 
 #[derive(Debug, Clone, Default)]
 pub struct OverwriteOptions {
-    pub source_rate_limit: Option<u32>,
-    pub backfill_rate_limit: Option<u32>,
-    pub dml_rate_limit: Option<u32>,
-    pub sink_rate_limit: Option<u32>,
+    pub source_rate_limit: RateLimit,
+    pub backfill_rate_limit: RateLimit,
+    pub dml_rate_limit: RateLimit,
+    pub sink_rate_limit: RateLimit,
 }
 
 impl OverwriteOptions {

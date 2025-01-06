@@ -18,9 +18,9 @@ use std::mem;
 use either::Either;
 use futures::TryStreamExt;
 use risingwave_common::catalog::{ColumnDesc, TableId, TableVersionId};
+use risingwave_common::rate_limit::{MonitoredRateLimiter, RateLimit, RateLimiter};
 use risingwave_common::transaction::transaction_id::TxnId;
 use risingwave_common::transaction::transaction_message::TxnMsg;
-use risingwave_common::rate_limit::{MonitoredRateLimiter, RateLimit, RateLimiter};
 use risingwave_dml::dml_manager::DmlManagerRef;
 use risingwave_expr::codegen::BoxStream;
 
@@ -160,11 +160,10 @@ impl DmlExecutor {
                                     if let Some(new_rate_limit) =
                                         actor_to_apply.get(&self.actor_ctx.id)
                                     {
-                                        let new_rate_limit = (*new_rate_limit).into();
                                         let old_rate_limit =
-                                            self.rate_limiter.update(new_rate_limit);
+                                            self.rate_limiter.update(*new_rate_limit);
 
-                                        if old_rate_limit != new_rate_limit {
+                                        if old_rate_limit != *new_rate_limit {
                                             tracing::info!(
                                                 old_rate_limit = ?old_rate_limit,
                                                 new_rate_limit = ?new_rate_limit,
@@ -405,7 +404,7 @@ mod tests {
             INITIAL_TABLE_VERSION_ID,
             column_descs,
             1024,
-            RateLimit::Unlimited,
+            RateLimit::default(),
         );
         let mut dml_executor = dml_executor.boxed().execute();
 

@@ -11688,10 +11688,13 @@ version = "2.3.0-alpha"
 dependencies = [
  "async-std",
  "easy-ext",
+ "risingwave_common",
+ "risingwave_meta_model",
  "sea-orm",
  "sea-orm-migration",
  "serde",
  "serde_json",
+ "tracing",
  "uuid",
 ]
 

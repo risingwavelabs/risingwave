@@ -32,6 +32,7 @@ use risingwave_common::catalog::{FunctionId, IndexId, ObjectId, SecretId, TableI
 use risingwave_common::config::{MetaConfig, MAX_CONNECTION_WINDOW_SIZE};
 use risingwave_common::hash::WorkerSlotMapping;
 use risingwave_common::monitor::EndpointExt;
+use risingwave_common::rate_limit::RateLimit;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::telemetry::report::TelemetryInfoFetcher;
 use risingwave_common::util::addr::HostAddr;
@@ -1034,12 +1035,12 @@ impl MetaClient {
         &self,
         kind: PbThrottleTarget,
         id: u32,
-        rate: Option<u32>,
+        rate_limit: RateLimit,
     ) -> Result<ApplyThrottleResponse> {
         let request = ApplyThrottleRequest {
             kind: kind as i32,
             id,
-            rate,
+            rate_limit: rate_limit.into(),
         };
         let resp = self.inner.apply_throttle(request).await?;
         Ok(resp)

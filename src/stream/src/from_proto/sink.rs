@@ -17,6 +17,7 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnCatalog, Schema};
+use risingwave_common::rate_limit::RateLimit;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::DataType;
 use risingwave_connector::match_sink_name_str;
@@ -276,7 +277,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                     factory,
                     chunk_size,
                     input_data_types,
-                    node.rate_limit.map(|x| x as _),
+                    RateLimit::compatible(node.rate_limit.as_ref(), node.deprecated_rate_limit),
                 )
                 .await?
                 .boxed()
@@ -314,7 +315,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                     factory,
                     chunk_size,
                     input_data_types,
-                    node.rate_limit.map(|x| x as _),
+                    RateLimit::compatible(node.rate_limit.as_ref(), node.deprecated_rate_limit),
                 )
                 .await?
                 .boxed()

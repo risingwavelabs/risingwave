@@ -15,3 +15,8 @@ sea-orm-migration = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 uuid = { version = "1", features = ["v4"] }
+risingwave_common = { workspace = true }
+# NOTE: Depend on blob serde. Maybe move blob serde into a seprate crate to avoid misuses?
+risingwave_meta_model = { workspace = true }
+tracing = "0.1"
+

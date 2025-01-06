@@ -53,7 +53,7 @@ pub struct SinkExecutor<F: LogStoreFactory> {
     need_advance_delete: bool,
     re_construct_with_sink_pk: bool,
     compact_chunk: bool,
-    rate_limit: Option<u32>,
+    rate_limit: RateLimit,
 }
 
 // Drop all the DELETE messages in this chunk and convert UPDATE INSERT into INSERT.
@@ -95,7 +95,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         log_store_factory: F,
         chunk_size: usize,
         input_data_types: Vec<DataType>,
-        rate_limit: Option<u32>,
+        rate_limit: RateLimit,
     ) -> StreamExecutorResult<Self> {
         let sink = build_sink(sink_param.clone())
             .map_err(|e| StreamExecutorError::from((e, sink_param.sink_id.sink_id)))?;
@@ -247,7 +247,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
 
             let (rate_limit_tx, rate_limit_rx) = unbounded_channel();
             // Init the rate limit
-            rate_limit_tx.send(self.rate_limit.into()).unwrap();
+            rate_limit_tx.send(self.rate_limit).unwrap();
 
             self.log_store_factory
                 .build()
@@ -695,7 +695,7 @@ mod test {
             BoundedInMemLogStoreFactory::new(1),
             1024,
             vec![DataType::Int32, DataType::Int32, DataType::Int32],
-            None,
+            RateLimit::default(),
         )
         .await
         .unwrap();
@@ -825,7 +825,7 @@ mod test {
             BoundedInMemLogStoreFactory::new(1),
             1024,
             vec![DataType::Int64, DataType::Int64, DataType::Int64],
-            None,
+            RateLimit::default(),
         )
         .await
         .unwrap();
@@ -928,7 +928,7 @@ mod test {
             BoundedInMemLogStoreFactory::new(1),
             1024,
             vec![DataType::Int64, DataType::Int64],
-            None,
+            RateLimit::default(),
         )
         .await
         .unwrap();

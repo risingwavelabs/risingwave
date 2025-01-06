@@ -31,6 +31,7 @@ mod m20241120_182555_hummock_add_time_travel_sst_index;
 mod m20241121_101830_table_engine;
 mod m20241125_043732_connection_params;
 mod m20241226_074013_clean_watermark_index_in_pk;
+mod m20250106_041503_source_rate_limit;
 mod utils;
 
 pub struct Migrator;

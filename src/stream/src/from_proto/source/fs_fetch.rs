@@ -15,6 +15,7 @@
 use std::sync::Arc;
 
 use risingwave_common::catalog::TableId;
+use risingwave_common::rate_limit::RateLimit;
 use risingwave_connector::source::filesystem::opendal_source::{
     OpendalAzblob, OpendalGcs, OpendalPosixFs, OpendalS3,
 };
@@ -91,7 +92,7 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
                     params.actor_context.clone(),
                     stream_source_core,
                     upstream,
-                    source.rate_limit,
+                    RateLimit::compatible(source.rate_limit.as_ref(), source.deprecated_rate_limit),
                 )
                 .boxed()
             }
@@ -100,7 +101,7 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
                     params.actor_context.clone(),
                     stream_source_core,
                     upstream,
-                    source.rate_limit,
+                    RateLimit::compatible(source.rate_limit.as_ref(), source.deprecated_rate_limit),
                 )
                 .boxed()
             }
@@ -109,7 +110,7 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
                     params.actor_context.clone(),
                     stream_source_core,
                     upstream,
-                    source.rate_limit,
+                    RateLimit::compatible(source.rate_limit.as_ref(), source.deprecated_rate_limit),
                 )
                 .boxed()
             }
@@ -118,7 +119,7 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
                     params.actor_context.clone(),
                     stream_source_core,
                     upstream,
-                    source.rate_limit,
+                    RateLimit::compatible(source.rate_limit.as_ref(), source.deprecated_rate_limit),
                 )
                 .boxed()
             }

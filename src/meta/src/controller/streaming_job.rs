@@ -18,6 +18,7 @@ use std::num::NonZeroUsize;
 use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::hash::VnodeCountCompat;
+use risingwave_common::rate_limit::RateLimit;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node;
 use risingwave_common::{bail, current_cluster_version};
@@ -1293,7 +1294,7 @@ impl CatalogController {
     pub async fn update_source_rate_limit_by_source_id(
         &self,
         source_id: SourceId,
-        rate_limit: Option<u32>,
+        rate_limit: RateLimit,
     ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
@@ -1301,7 +1302,7 @@ impl CatalogController {
         {
             let active_source = source::ActiveModel {
                 source_id: Set(source_id),
-                rate_limit: Set(rate_limit.map(|v| v as i32)),
+                rate_limit: Set((&rate_limit.to_protobuf()).into()),
                 ..Default::default()
             };
             active_source.update(&txn).await?;
@@ -1363,7 +1364,7 @@ impl CatalogController {
                         if let Some(node_inner) = &mut node.source_inner
                             && node_inner.source_id == source_id as u32
                         {
-                            node_inner.rate_limit = rate_limit;
+                            node_inner.rate_limit = Some(rate_limit.to_protobuf());
                             found = true;
                         }
                     }
@@ -1378,7 +1379,7 @@ impl CatalogController {
                         if let Some(node_inner) = &mut node.node_inner
                             && node_inner.source_id == source_id as u32
                         {
-                            node_inner.rate_limit = rate_limit;
+                            node_inner.rate_limit = Some(rate_limit.to_protobuf());
                             found = true;
                         }
                     }
@@ -1483,7 +1484,7 @@ impl CatalogController {
     pub async fn update_backfill_rate_limit_by_job_id(
         &self,
         job_id: ObjectId,
-        rate_limit: Option<u32>,
+        rate_limit: RateLimit,
     ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
         let update_backfill_rate_limit =
             |fragment_type_mask: &mut i32, stream_node: &mut PbStreamNode| {
@@ -1491,19 +1492,19 @@ impl CatalogController {
                 if *fragment_type_mask & PbFragmentTypeFlag::backfill_rate_limit_fragments() != 0 {
                     visit_stream_node(stream_node, |node| match node {
                         PbNodeBody::StreamCdcScan(node) => {
-                            node.rate_limit = rate_limit;
+                            node.rate_limit = Some(rate_limit.to_protobuf());
                             found = true;
                         }
                         PbNodeBody::StreamScan(node) => {
-                            node.rate_limit = rate_limit;
+                            node.rate_limit = Some(rate_limit.to_protobuf());
                             found = true;
                         }
                         PbNodeBody::SourceBackfill(node) => {
-                            node.rate_limit = rate_limit;
+                            node.rate_limit = Some(rate_limit.to_protobuf());
                             found = true;
                         }
                         PbNodeBody::Sink(node) => {
-                            node.rate_limit = rate_limit;
+                            node.rate_limit = Some(rate_limit.to_protobuf());
                             found = true;
                         }
                         _ => {}
@@ -1525,7 +1526,7 @@ impl CatalogController {
     pub async fn update_sink_rate_limit_by_job_id(
         &self,
         job_id: ObjectId,
-        rate_limit: Option<u32>,
+        rate_limit: RateLimit,
     ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
         let update_sink_rate_limit =
             |fragment_type_mask: &mut i32, stream_node: &mut PbStreamNode| {
@@ -1533,7 +1534,7 @@ impl CatalogController {
                 if *fragment_type_mask & PbFragmentTypeFlag::sink_rate_limit_fragments() != 0 {
                     visit_stream_node(stream_node, |node| {
                         if let PbNodeBody::Sink(node) = node {
-                            node.rate_limit = rate_limit;
+                            node.rate_limit = Some(rate_limit.to_protobuf());
                             found = true;
                         }
                     });
@@ -1548,7 +1549,7 @@ impl CatalogController {
     pub async fn update_dml_rate_limit_by_job_id(
         &self,
         job_id: ObjectId,
-        rate_limit: Option<u32>,
+        rate_limit: RateLimit,
     ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
         let update_dml_rate_limit =
             |fragment_type_mask: &mut i32, stream_node: &mut PbStreamNode| {
@@ -1556,7 +1557,7 @@ impl CatalogController {
                 if *fragment_type_mask & PbFragmentTypeFlag::dml_rate_limit_fragments() != 0 {
                     visit_stream_node(stream_node, |node| {
                         if let PbNodeBody::Dml(node) = node {
-                            node.rate_limit = rate_limit;
+                            node.rate_limit = Some(rate_limit.to_protobuf());
                             found = true;
                         }
                     });
@@ -1918,6 +1919,7 @@ impl CatalogController {
         let mut rate_limits = Vec::new();
         for (fragment_id, job_id, fragment_type_mask, stream_node) in fragments {
             let mut stream_node = stream_node.to_protobuf();
+            let mut deprecated_rate_limit = None;
             let mut rate_limit = None;
             let mut node_name = None;
 
@@ -1927,9 +1929,10 @@ impl CatalogController {
                     PbNodeBody::Source(node) => {
                         if let Some(node_inner) = &mut node.source_inner {
                             debug_assert!(
-                                rate_limit.is_none(),
+                                deprecated_rate_limit.is_none(),
                                 "one fragment should only have 1 rate limit node"
                             );
+                            deprecated_rate_limit = node_inner.deprecated_rate_limit;
                             rate_limit = node_inner.rate_limit;
                             node_name = Some("SOURCE");
                         }
@@ -1937,9 +1940,10 @@ impl CatalogController {
                     PbNodeBody::StreamFsFetch(node) => {
                         if let Some(node_inner) = &mut node.node_inner {
                             debug_assert!(
-                                rate_limit.is_none(),
+                                deprecated_rate_limit.is_none(),
                                 "one fragment should only have 1 rate limit node"
                             );
+                            deprecated_rate_limit = node_inner.deprecated_rate_limit;
                             rate_limit = node_inner.rate_limit;
                             node_name = Some("FS_FETCH");
                         }
@@ -1947,33 +1951,37 @@ impl CatalogController {
                     // backfill rate limit
                     PbNodeBody::SourceBackfill(node) => {
                         debug_assert!(
-                            rate_limit.is_none(),
+                            deprecated_rate_limit.is_none(),
                             "one fragment should only have 1 rate limit node"
                         );
+                        deprecated_rate_limit = node.deprecated_rate_limit;
                         rate_limit = node.rate_limit;
                         node_name = Some("SOURCE_BACKFILL");
                     }
                     PbNodeBody::StreamScan(node) => {
                         debug_assert!(
-                            rate_limit.is_none(),
+                            deprecated_rate_limit.is_none(),
                             "one fragment should only have 1 rate limit node"
                         );
+                        deprecated_rate_limit = node.deprecated_rate_limit;
                         rate_limit = node.rate_limit;
                         node_name = Some("STREAM_SCAN");
                     }
                     PbNodeBody::StreamCdcScan(node) => {
                         debug_assert!(
-                            rate_limit.is_none(),
+                            deprecated_rate_limit.is_none(),
                             "one fragment should only have 1 rate limit node"
                         );
+                        deprecated_rate_limit = node.deprecated_rate_limit;
                         rate_limit = node.rate_limit;
                         node_name = Some("STREAM_CDC_SCAN");
                     }
                     PbNodeBody::Sink(node) => {
                         debug_assert!(
-                            rate_limit.is_none(),
+                            deprecated_rate_limit.is_none(),
                             "one fragment should only have 1 rate limit node"
                         );
+                        deprecated_rate_limit = node.deprecated_rate_limit;
                         rate_limit = node.rate_limit;
                         node_name = Some("SINK");
                     }
@@ -1981,12 +1989,13 @@ impl CatalogController {
                 }
             });
 
-            if let Some(rate_limit) = rate_limit {
+            let rl = RateLimit::compatible(rate_limit.as_ref(), deprecated_rate_limit);
+            if !rl.is_unlimited() {
                 rate_limits.push(RateLimitInfo {
                     fragment_id: fragment_id as u32,
                     job_id: job_id as u32,
                     fragment_type_mask: fragment_type_mask as u32,
-                    rate_limit,
+                    rate_limit: Some(rl.to_protobuf()),
                     node_name: node_name.unwrap().to_owned(),
                 });
             }

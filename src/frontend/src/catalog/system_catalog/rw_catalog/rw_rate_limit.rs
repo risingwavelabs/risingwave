@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::rate_limit::RateLimit;
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 
@@ -26,7 +27,7 @@ struct RwRateLimit {
     fragment_type: Vec<String>,
     node_name: String,
     table_id: i32,
-    rate_limit: i32,
+    rate_limit: String,
 }
 
 #[system_catalog(table, "rw_catalog.rw_rate_limit")]
@@ -43,7 +44,7 @@ async fn read_rw_rate_limit(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRateL
                 .map(|s| s.into())
                 .collect(),
             table_id: info.job_id as i32,
-            rate_limit: info.rate_limit as i32,
+            rate_limit: RateLimit::from_protobuf(&info.rate_limit.unwrap_or_default()).to_string(),
             node_name: info.node_name,
         })
         .collect())

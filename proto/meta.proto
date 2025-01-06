@@ -9,6 +9,7 @@ import "hummock.proto";
 import "source.proto";
 import "stream_plan.proto";
 import "user.proto";
+import "plan_common.proto";
 
 option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
@@ -316,7 +317,8 @@ enum ThrottleTarget {
 message ApplyThrottleRequest {
   ThrottleTarget kind = 1;
   uint32 id = 2;
-  optional uint32 rate = 3;
+  reserved 3;
+  plan_common.RateLimit rate_limit = 4;
 }
 
 message ApplyThrottleResponse {
@@ -875,8 +877,9 @@ message ListRateLimitsResponse {
     uint32 fragment_id = 1;
     uint32 job_id = 2;
     uint32 fragment_type_mask = 3;
-    uint32 rate_limit = 4;
+    reserved 4;
     string node_name = 5;
+    plan_common.RateLimit rate_limit = 6;
   }
   repeated RateLimitInfo rate_limits = 1;
 }

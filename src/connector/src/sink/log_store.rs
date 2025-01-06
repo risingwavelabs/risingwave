@@ -28,9 +28,9 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::metrics::{LabelGuardedIntCounter, LabelGuardedIntGauge};
+use risingwave_common::rate_limit::{RateLimit, RateLimiter};
 use risingwave_common::util::epoch::{EpochPair, INVALID_EPOCH};
 use risingwave_common_estimate_size::EstimateSize;
-use risingwave_common::rate_limit::{RateLimit, RateLimiter};
 use tokio::select;
 use tokio::sync::mpsc::UnboundedReceiver;
 
@@ -395,7 +395,7 @@ impl<R: LogReader> RateLimitedLogReader<R> {
                 unconsumed_chunk_queue: VecDeque::new(),
                 next_chunk_id: 0,
             },
-            rate_limiter: RateLimiter::new(RateLimit::Unlimited),
+            rate_limiter: RateLimiter::new(RateLimit::default()),
             control_rx,
         }
     }
