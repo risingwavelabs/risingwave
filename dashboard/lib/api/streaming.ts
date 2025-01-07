@@ -1,5 +1,5 @@
 /*
- * Copyright 2024 RisingWave Labs
+ * Copyright 2025 RisingWave Labs
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,7 +28,7 @@ import {
   View,
 } from "../../proto/gen/catalog"
 import {
-  FragmentVertexToRelationMap,
+  FragmentToRelationMap,
   ListObjectDependenciesResponse_ObjectDependencies as ObjectDependencies,
   RelationIdInfos,
   TableFragments,
@@ -158,10 +158,10 @@ export async function getRelationDependencies() {
   return await getObjectDependencies()
 }
 
-export async function getFragmentVertexToRelationMap() {
-  let res = await api.get("/fragment_vertex_to_relation_id_map")
-  let fragmentVertexToRelationMap: FragmentVertexToRelationMap =
-    FragmentVertexToRelationMap.fromJSON(res)
+export async function getFragmentToRelationMap() {
+  let res = await api.get("/fragment_to_relation_map")
+  let fragmentVertexToRelationMap: FragmentToRelationMap =
+    FragmentToRelationMap.fromJSON(res)
   return fragmentVertexToRelationMap
 }
 

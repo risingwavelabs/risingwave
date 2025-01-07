@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,6 @@
 
 use std::collections::HashSet;
 
-use fixedbitset::FixedBitSet;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
@@ -23,7 +22,7 @@ use super::stream::prelude::*;
 use super::utils::{impl_distill_by_unit, TableCatalogBuilder};
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::property::MonotonicityMap;
+use crate::optimizer::property::{MonotonicityMap, WatermarkColumns};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::TableCatalog;
 
@@ -38,7 +37,7 @@ impl StreamOverWindow {
         assert!(core.funcs_have_same_partition_and_order());
 
         let input = &core.input;
-        let watermark_columns = FixedBitSet::with_capacity(core.output_len());
+        let watermark_columns = WatermarkColumns::new();
 
         let base = PlanBase::new_stream_with_core(
             &core,

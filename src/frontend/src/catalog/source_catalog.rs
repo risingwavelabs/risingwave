@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,14 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::Context as _;
+use itertools::Itertools as _;
 use risingwave_common::catalog::{ColumnCatalog, SourceVersionId};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt};
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::{PbSource, StreamSourceInfo, WatermarkDesc};
+use risingwave_sqlparser::ast;
+use risingwave_sqlparser::parser::Parser;
+use thiserror_ext::AsReport as _;
 
+use super::purify::try_purify_table_source_create_sql_ast;
 use super::{ColumnId, ConnectionId, DatabaseId, OwnedByUserCatalog, SchemaId, SourceId};
 use crate::catalog::TableId;
+use crate::error::Result;
+use crate::session::current::notice_to_user;
 use crate::user::UserId;
 
 /// This struct `SourceCatalog` is used in frontend.
@@ -48,9 +56,20 @@ pub struct SourceCatalog {
 }
 
 impl SourceCatalog {
-    /// Returns the SQL statement that can be used to create this source.
+    /// Returns the SQL definition when the source was created.
     pub fn create_sql(&self) -> String {
         self.definition.clone()
+    }
+
+    /// Returns the parsed SQL definition when the source was created.
+    ///
+    /// Returns error if it's invalid.
+    pub fn create_sql_ast(&self) -> Result<ast::Statement> {
+        Ok(Parser::parse_sql(&self.definition)
+            .context("unable to parse definition sql")?
+            .into_iter()
+            .exactly_one()
+            .context("expecting exactly one statement in definition")?)
     }
 
     pub fn to_prost(&self, schema_id: SchemaId, database_id: DatabaseId) -> PbSource {
@@ -91,6 +110,37 @@ impl SourceCatalog {
         self.with_properties
             .get_connector()
             .expect("connector name is missing")
+    }
+}
+
+impl SourceCatalog {
+    /// Returns the SQL definition when the source was created, purified with best effort.
+    pub fn create_sql_purified(&self) -> String {
+        self.create_sql_ast_purified()
+            .map(|stmt| stmt.to_string())
+            .unwrap_or_else(|_| self.create_sql())
+    }
+
+    /// Returns the parsed SQL definition when the source was created, purified with best effort.
+    ///
+    /// Returns error if it's invalid.
+    pub fn create_sql_ast_purified(&self) -> Result<ast::Statement> {
+        match try_purify_table_source_create_sql_ast(
+            self.create_sql_ast()?,
+            &self.columns,
+            self.row_id_index,
+            &self.pk_col_ids,
+        ) {
+            Ok(stmt) => return Ok(stmt),
+            Err(e) => notice_to_user(format!(
+                "error occurred while purifying definition for source \"{}\", \
+                     results may be inaccurate: {}",
+                self.name,
+                e.as_report()
+            )),
+        }
+
+        self.create_sql_ast()
     }
 }
 

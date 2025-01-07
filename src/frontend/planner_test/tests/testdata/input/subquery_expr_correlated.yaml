@@ -495,6 +495,7 @@
     CREATE TABLE T (A INT, B INT);
     CREATE TABLE T2 (C INT, D INT);
     SELECT * FROM T
+    -- count is not null-propagating
     WHERE T.A > (SELECT COUNT(*) FROM T2 WHERE B = D);
   expected_outputs:
     - batch_plan
@@ -504,7 +505,28 @@
     CREATE TABLE T (A INT, B INT);
     CREATE TABLE T2 (C INT, D INT);
     SELECT * FROM T
+    -- avg is null-propagating
     WHERE T.A > (SELECT avg(c) FROM T2 WHERE B = D);
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- name: a case can't be optimized by PullUpCorrelatedPredicateAggRule
+  sql: |
+    CREATE TABLE T (A INT, B INT);
+    CREATE TABLE T2 (C INT, D INT);
+    SELECT * FROM T
+    -- Coalesce is not null-propagating
+    WHERE T.A > (SELECT coalesce(avg(c), 114514) FROM T2 WHERE B = D);
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- name: a case can't be optimized by PullUpCorrelatedPredicateAggRule
+  sql: |
+    CREATE TABLE T (A INT, B INT);
+    CREATE TABLE T2 (C INT, D INT);
+    SELECT * FROM T
+    -- Can apply if any of the conjunction is null
+    WHERE null AND T.A > (SELECT coalesce(avg(c), 114514) FROM T2 WHERE B = D);
   expected_outputs:
     - batch_plan
     - stream_plan

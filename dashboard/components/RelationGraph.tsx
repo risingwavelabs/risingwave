@@ -1,5 +1,5 @@
 /*
- * Copyright 2024 RisingWave Labs
+ * Copyright 2025 RisingWave Labs
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -32,6 +32,7 @@ import {
   RelationPoint,
   RelationPointPosition,
 } from "../lib/layout"
+import { ChannelStatsDerived } from "../pages/fragment_graph"
 import { RelationStats } from "../proto/gen/monitor_service"
 import { CatalogModal, useCatalogModal } from "./CatalogModal"
 import {
@@ -74,13 +75,13 @@ export default function RelationGraph({
   nodes,
   selectedId,
   setSelectedId,
-  backPressures,
+  channelStats,
   relationStats,
 }: {
   nodes: RelationPoint[] // rename to RelationNode
   selectedId: string | undefined
   setSelectedId: (id: string) => void
-  backPressures?: Map<string, number> // relationId-relationId->back_pressure_rate})
+  channelStats?: Map<string, ChannelStatsDerived>
   relationStats: { [relationId: number]: RelationStats } | undefined
 }) {
   const [modalData, setModalId] = useCatalogModal(nodes.map((n) => n.relation))
@@ -173,10 +174,10 @@ export default function RelationGraph({
 
     const applyEdge = (sel: EdgeSelection) => {
       const color = (d: Edge) => {
-        if (backPressures) {
-          let value = backPressures.get(`${d.source}_${d.target}`)
+        if (channelStats) {
+          let value = channelStats.get(`${d.source}_${d.target}`)
           if (value) {
-            return backPressureColor(value)
+            return backPressureColor(value.backPressure)
           }
         }
 
@@ -184,10 +185,10 @@ export default function RelationGraph({
       }
 
       const width = (d: Edge) => {
-        if (backPressures) {
-          let value = backPressures.get(`${d.source}_${d.target}`)
+        if (channelStats) {
+          let value = channelStats.get(`${d.source}_${d.target}`)
           if (value) {
-            return backPressureWidth(value, 15)
+            return backPressureWidth(value.backPressure, 15)
           }
         }
         return 2
@@ -208,11 +209,15 @@ export default function RelationGraph({
           d3.selectAll(".tooltip").remove()
 
           // Create new tooltip
-          const bpValue = backPressures?.get(`${d.source}_${d.target}`)
+          const stats = channelStats?.get(`${d.source}_${d.target}`)
           const tooltipText = `<b>Relation ${d.source} → ${
             d.target
           }</b><br>Backpressure: ${
-            bpValue != null ? `${(bpValue * 100).toFixed(2)}%` : "N/A"
+            stats != null ? `${(stats.backPressure * 100).toFixed(2)}%` : "N/A"
+          }<br>Recv Throughput: ${
+            stats != null ? `${stats.recvThroughput.toFixed(2)} rows/s` : "N/A"
+          }<br>Send Throughput: ${
+            stats != null ? `${stats.sendThroughput.toFixed(2)} rows/s` : "N/A"
           }`
           d3.select("body")
             .append("div")
@@ -361,9 +366,9 @@ export default function RelationGraph({
           : "N/A"
         const epoch = stats?.currentEpoch ?? "N/A"
 
-        return `<b>${relation.name} (${relationTypeTitleCase(
-          relation
-        )})</b><br>Epoch: ${epoch}<br>Latency: ${latencySeconds} seconds`
+        return `<b>${relationTypeTitleCase(relation)} ${id}: ${
+          relation.name
+        }</b><br>Epoch: ${epoch}<br>Latency: ${latencySeconds} seconds`
       }
 
       g.on("mouseover", (event, { relation, id }) => {
@@ -421,7 +426,7 @@ export default function RelationGraph({
     selectedId,
     setModalId,
     setSelectedId,
-    backPressures,
+    channelStats,
     relationStats,
   ])
 

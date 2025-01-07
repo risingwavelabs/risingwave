@@ -96,6 +96,9 @@ IcebergProperties:
   - name: s3.secret.key
     field_type: String
     required: false
+  - name: gcs.credential
+    field_type: String
+    required: false
   - name: warehouse.path
     field_type: String
     comments: Path of iceberg warehouse, only applicable in storage catalog.

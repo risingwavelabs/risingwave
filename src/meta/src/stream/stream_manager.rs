@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -347,7 +347,6 @@ impl GlobalStreamManager {
         }: CreateStreamingJobContext,
     ) -> MetaResult<NotificationVersion> {
         let mut replace_table_command = None;
-        let mut replace_table_id = None;
 
         tracing::debug!(
             table_id = %stream_job_fragments.stream_job_id(),
@@ -364,8 +363,6 @@ impl GlobalStreamManager {
 
             let tmp_table_id = stream_job_fragments.stream_job_id();
             let init_split_assignment = self.source_manager.allocate_splits(&tmp_table_id).await?;
-
-            replace_table_id = Some(tmp_table_id);
 
             replace_table_command = Some(ReplaceStreamJobPlan {
                 old_fragments: context.old_fragments,
@@ -426,43 +423,25 @@ impl GlobalStreamManager {
                 }
             }
         };
-        let result: MetaResult<NotificationVersion> = try {
-            if need_pause {
-                // Special handling is required when creating sink into table, we need to pause the stream to avoid data loss.
-                self.barrier_scheduler
-                    .run_config_change_command_with_pause(
-                        streaming_job.database_id().into(),
-                        command,
-                    )
-                    .await?;
-            } else {
-                self.barrier_scheduler
-                    .run_command(streaming_job.database_id().into(), command)
-                    .await?;
-            }
 
-            tracing::debug!(?streaming_job, "first barrier collected for stream job");
-            let result = self
-                .metadata_manager
-                .wait_streaming_job_finished(streaming_job.id() as _)
+        if need_pause {
+            // Special handling is required when creating sink into table, we need to pause the stream to avoid data loss.
+            self.barrier_scheduler
+                .run_config_change_command_with_pause(streaming_job.database_id().into(), command)
                 .await?;
-            tracing::debug!(?streaming_job, "stream job finish");
-            result
-        };
-        match result {
-            Err(err) => {
-                if create_type == CreateType::Foreground || err.is_cancelled() {
-                    let mut table_ids: HashSet<TableId> =
-                        HashSet::from_iter(std::iter::once(table_id));
-                    if let Some(tmp_table_id) = replace_table_id {
-                        table_ids.insert(tmp_table_id);
-                    }
-                }
-
-                Err(err)
-            }
-            Ok(version) => Ok(version),
+        } else {
+            self.barrier_scheduler
+                .run_command(streaming_job.database_id().into(), command)
+                .await?;
         }
+
+        tracing::debug!(?streaming_job, "first barrier collected for stream job");
+        let version = self
+            .metadata_manager
+            .wait_streaming_job_finished(streaming_job.id() as _)
+            .await?;
+        tracing::debug!(?streaming_job, "stream job finish");
+        Ok(version)
     }
 
     /// Send replace job command to barrier scheduler.

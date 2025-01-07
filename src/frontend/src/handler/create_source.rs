@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -29,8 +29,8 @@ use risingwave_common::array::arrow::{arrow_schema_iceberg, IcebergArrowConvert}
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{
     debug_assert_column_ids_distinct, ColumnCatalog, ColumnDesc, ColumnId, Schema, TableId,
-    ICEBERG_SEQUENCE_NUM_COLUMN_NAME, INITIAL_SOURCE_VERSION_ID, KAFKA_TIMESTAMP_COLUMN_NAME,
-    ROWID_PREFIX,
+    ICEBERG_FILE_PATH_COLUMN_NAME, ICEBERG_FILE_POS_COLUMN_NAME, ICEBERG_SEQUENCE_NUM_COLUMN_NAME,
+    INITIAL_SOURCE_VERSION_ID, KAFKA_TIMESTAMP_COLUMN_NAME, ROWID_PREFIX,
 };
 use risingwave_common::license::Feature;
 use risingwave_common::secret::LocalSecretManager;

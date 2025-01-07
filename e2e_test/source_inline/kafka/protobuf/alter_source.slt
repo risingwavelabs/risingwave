@@ -23,6 +23,11 @@ FORMAT PLAIN ENCODE PROTOBUF(
     message = 'test.User'
 );
 
+query T
+SELECT SUBSTRING(definition, 1, POSITION(' WITH' IN definition) - 1) FROM rw_sources WHERE name = 'src_user';
+----
+CREATE SOURCE src_user (id INT, name CHARACTER VARYING, address CHARACTER VARYING, city CHARACTER VARYING, gender CHARACTER VARYING, sc STRUCT<file_name CHARACTER VARYING>) INCLUDE timestamp
+
 statement ok
 CREATE MATERIALIZED VIEW mv_user AS SELECT * FROM src_user;
 
@@ -53,6 +58,11 @@ sleep 5s
 # Refresh source schema
 statement ok
 ALTER SOURCE src_user REFRESH SCHEMA;
+
+query T
+SELECT SUBSTRING(definition, 1, POSITION(' WITH' IN definition) - 1) FROM rw_sources WHERE name = 'src_user';
+----
+CREATE SOURCE src_user (id INT, name CHARACTER VARYING, address CHARACTER VARYING, city CHARACTER VARYING, gender CHARACTER VARYING, sc STRUCT<file_name CHARACTER VARYING>, age INT) INCLUDE timestamp
 
 statement ok
 CREATE MATERIALIZED VIEW mv_user_more AS SELECT * FROM src_user;

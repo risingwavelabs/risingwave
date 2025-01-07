@@ -1425,6 +1425,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "aws-sdk-emrserverless"
+version = "1.50.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d6320a29e4be0f01e3d284d5694950757730fdc746b729684426e83771702ab8"
+dependencies = [
+ "aws-credential-types",
+ "aws-runtime",
+ "aws-smithy-async",
+ "aws-smithy-http",
+ "aws-smithy-json",
+ "aws-smithy-runtime",
+ "aws-smithy-runtime-api",
+ "aws-smithy-types",
+ "aws-types",
+ "bytes",
+ "fastrand",
+ "http 0.2.9",
+ "once_cell",
+ "regex-lite",
+ "tracing",
+]
+
+[[package]]
 name = "aws-sdk-glue"
 version = "1.66.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4348,14 +4371,14 @@ checksum = "56ce8c6da7551ec6c462cbaf3bfbc75131ebbfa1c944aeaa9dab51ca1c5f0c3b"
 
 [[package]]
 name = "duration-str"
-version = "0.11.2"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "709d653e7c92498eb29fb86a2a6f0f3502b97530f33aedb32ef848d4d28b31a3"
+checksum = "64ad6b66883f70e2f38f1ee99e3797b9d7e7b7fb051ed2e23e027c81753056c8"
 dependencies = [
  "chrono",
  "rust_decimal",
  "serde",
- "thiserror 1.0.63",
+ "thiserror 2.0.3",
  "time",
  "winnow 0.6.11",
 ]
@@ -5333,9 +5356,9 @@ dependencies = [
 
 [[package]]
 name = "futures-channel"
-version = "0.3.30"
+version = "0.3.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eac8f7d7865dcb88bd4373ab671c8cf4508703796caa2b1985a9ca867b3fcb78"
+checksum = "2dff15bf788c671c1934e366d07e30c1814a8ef514e1af724a602e8a2fbe1b10"
 dependencies = [
  "futures-core",
  "futures-sink",
@@ -5343,9 +5366,9 @@ dependencies = [
 
 [[package]]
 name = "futures-core"
-version = "0.3.30"
+version = "0.3.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dfc6580bb841c5a68e9ef15c77ccc837b40a7504914d52e47b8b0e9bbda25a1d"
+checksum = "05f29059c0c2090612e8d742178b0580d2dc940c837851ad723096f87af6663e"
 
 [[package]]
 name = "futures-executor"
@@ -5371,9 +5394,9 @@ dependencies = [
 
 [[package]]
 name = "futures-io"
-version = "0.3.30"
+version = "0.3.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a44623e20b9681a318efdd71c299b6b222ed6f231972bfe2f224ebad6311f0c1"
+checksum = "9e5c1b78ca4aae1ac06c48a526a655760685149f0d465d21f37abfe57ce075c6"
 
 [[package]]
 name = "futures-lite"
@@ -5390,9 +5413,9 @@ dependencies = [
 
 [[package]]
 name = "futures-macro"
-version = "0.3.30"
+version = "0.3.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "87750cf4b7a4c0625b1529e4c543c2182106e4dedc60a2a6455e00d212c489ac"
+checksum = "162ee34ebcb7c64a8abebc059ce0fee27c2262618d7b60ed8faf72fef13c3650"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -5401,29 +5424,27 @@ dependencies = [
 
 [[package]]
 name = "futures-sink"
-version = "0.3.30"
+version = "0.3.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9fb8e00e87438d937621c1c6269e53f536c14d3fbd6a042bb24879e57d474fb5"
+checksum = "e575fab7d1e0dcb8d0c7bcf9a63ee213816ab51902e6d244a95819acacf1d4f7"
 
 [[package]]
 name = "futures-task"
-version = "0.3.30"
+version = "0.3.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "38d84fa142264698cdce1a9f9172cf383a0c82de1bddcf3092901442c4097004"
+checksum = "f90f7dce0722e95104fcb095585910c0977252f286e354b5e3bd38902cd99988"
 
 [[package]]
 name = "futures-timer"
-version = "3.0.2"
-source = "git+https://github.com/madsim-rs/futures-timer.git?rev=05b33b4#05b33b4ede22b0517f49da59404d6e6d2848a192"
-dependencies = [
- "madsim",
-]
+version = "3.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f288b0a4f20f9a56b5d1da57e2227c661b7b16168e2f72365f57b63326e29b24"
 
 [[package]]
 name = "futures-util"
-version = "0.3.30"
+version = "0.3.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3d6401deb83407ab3da39eba7e33987a73c3df0c82b4bb5813ee871c19c41d48"
+checksum = "9fa08315bb612088cc391249efdc3bc77536f16c91f6cf495e6fbe85b20a4a81"
 dependencies = [
  "futures-channel",
  "futures-core",
@@ -5717,13 +5738,14 @@ dependencies = [
 
 [[package]]
 name = "governor"
-version = "0.6.3"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "68a7f542ee6b35af73b06abc0dad1c1bae89964e4e253bc4b587b91c9637867b"
+checksum = "842dc78579ce01e6a1576ad896edc92fca002dd60c9c3746b7fc2bec6fb429d0"
 dependencies = [
  "cfg-if",
- "futures",
+ "futures-sink",
  "futures-timer",
+ "futures-util",
  "no-std-compat",
  "nonzero_ext",
  "parking_lot 0.12.1",
@@ -6228,8 +6250,8 @@ dependencies = [
 
 [[package]]
 name = "iceberg"
-version = "0.3.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=2a97e6fe6eb9e29ebd801d011f2a5b23aa7e1d21#2a97e6fe6eb9e29ebd801d011f2a5b23aa7e1d21"
+version = "0.4.0"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=683fb89edeaf8d1baae69e1f376d68b92be1d496#683fb89edeaf8d1baae69e1f376d68b92be1d496"
 dependencies = [
  "anyhow",
  "apache-avro 0.17.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -6256,7 +6278,7 @@ dependencies = [
  "murmur3",
  "num-bigint",
  "once_cell",
- "opendal 0.50.1",
+ "opendal 0.51.0",
  "ordered-float 4.1.1",
  "parquet 53.2.0",
  "paste",
@@ -6273,12 +6295,13 @@ dependencies = [
  "typed-builder 0.20.0",
  "url",
  "uuid",
+ "zstd 0.13.2",
 ]
 
 [[package]]
 name = "iceberg-catalog-glue"
-version = "0.3.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=2a97e6fe6eb9e29ebd801d011f2a5b23aa7e1d21#2a97e6fe6eb9e29ebd801d011f2a5b23aa7e1d21"
+version = "0.4.0"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=683fb89edeaf8d1baae69e1f376d68b92be1d496#683fb89edeaf8d1baae69e1f376d68b92be1d496"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6294,8 +6317,8 @@ dependencies = [
 
 [[package]]
 name = "iceberg-catalog-rest"
-version = "0.3.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=2a97e6fe6eb9e29ebd801d011f2a5b23aa7e1d21#2a97e6fe6eb9e29ebd801d011f2a5b23aa7e1d21"
+version = "0.4.0"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=683fb89edeaf8d1baae69e1f376d68b92be1d496#683fb89edeaf8d1baae69e1f376d68b92be1d496"
 dependencies = [
  "async-trait",
  "chrono",
@@ -8281,9 +8304,9 @@ dependencies = [
 
 [[package]]
 name = "opendal"
-version = "0.50.1"
+version = "0.51.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "213222b6c86949314d8f51acb26d8241e7c8dd0879b016a79471d49f21ee592f"
+checksum = "6c8cd8697b917793c15a7b4a8afcba44e35e2abbc55c363064851776f7c81136"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -8292,7 +8315,6 @@ dependencies = [
  "bytes",
  "chrono",
  "crc32c",
- "flagset",
  "futures",
  "getrandom",
  "http 1.2.0",
@@ -10199,9 +10221,9 @@ dependencies = [
 
 [[package]]
 name = "reqsign"
-version = "0.16.0"
+version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "03dd4ba7c3901dd43e6b8c7446a760d45bc1ea4301002e1a6fa48f97c3a796fa"
+checksum = "eb0075a66c8bfbf4cc8b70dca166e722e1f55a3ea9250ecbb85f4d92a5f64149"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -10847,6 +10869,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "risingwave_common_rate_limit"
+version = "2.3.0-alpha"
+dependencies = [
+ "arc-swap",
+ "madsim-tokio",
+ "parking_lot 0.12.1",
+ "pin-project-lite",
+ "prometheus",
+ "rand",
+ "risingwave_common",
+ "risingwave_common_metrics",
+]
+
+[[package]]
 name = "risingwave_common_secret"
 version = "2.3.0-alpha"
 dependencies = [
@@ -10927,6 +10963,7 @@ dependencies = [
  "risingwave_rpc_client",
  "risingwave_storage",
  "serde",
+ "tokio-retry",
  "tracing",
  "workspace-hack",
 ]
@@ -10957,6 +10994,7 @@ dependencies = [
  "risingwave_batch_executors",
  "risingwave_common",
  "risingwave_common_heap_profiling",
+ "risingwave_common_rate_limit",
  "risingwave_common_service",
  "risingwave_connector",
  "risingwave_dml",
@@ -10971,6 +11009,7 @@ dependencies = [
  "tempfile",
  "thiserror-ext",
  "tikv-jemalloc-ctl",
+ "tokio-retry",
  "tokio-stream 0.1.15",
  "tower 0.5.0",
  "tracing",
@@ -10994,6 +11033,7 @@ dependencies = [
  "aws-credential-types",
  "aws-msk-iam-sasl-signer",
  "aws-sdk-dynamodb",
+ "aws-sdk-emrserverless",
  "aws-sdk-glue",
  "aws-sdk-kinesis",
  "aws-sdk-s3",
@@ -11026,7 +11066,6 @@ dependencies = [
  "google-cloud-gax",
  "google-cloud-googleapis",
  "google-cloud-pubsub",
- "governor",
  "iceberg",
  "iceberg-catalog-glue",
  "iceberg-catalog-rest",
@@ -11066,6 +11105,7 @@ dependencies = [
  "reqwest 0.12.4",
  "risingwave_common",
  "risingwave_common_estimate_size",
+ "risingwave_common_rate_limit",
  "risingwave_connector_codec",
  "risingwave_jni_core",
  "risingwave_pb",
@@ -12094,7 +12134,6 @@ name = "risingwave_stream"
 version = "2.3.0-alpha"
 dependencies = [
  "anyhow",
- "arc-swap",
  "assert_matches",
  "async-recursion",
  "async-stream",
@@ -12114,7 +12153,6 @@ dependencies = [
  "foyer",
  "futures",
  "futures-async-stream",
- "governor",
  "hytra",
  "itertools 0.13.0",
  "jsonbb",
@@ -12133,6 +12171,7 @@ dependencies = [
  "rand",
  "risingwave_common",
  "risingwave_common_estimate_size",
+ "risingwave_common_rate_limit",
  "risingwave_connector",
  "risingwave_dml",
  "risingwave_expr",
@@ -13619,9 +13658,9 @@ dependencies = [
 
 [[package]]
 name = "sqllogictest"
-version = "0.24.0"
+version = "0.26.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "48c03edcabfda1ab894cc63a115b9f014bfc6875916b850ab7498d3cb92daed9"
+checksum = "2220d4662c5915656c173e1dbe88ab0df84a122e7eb6a6cb618585dd25779b34"
 dependencies = [
  "async-trait",
  "educe",
@@ -14436,29 +14475,28 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "tokio"
-version = "1.38.0"
+version = "1.40.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ba4f4a02a7a80d6f274636f0aa95c7e383b912d41fe721a31f29e29698585a4a"
+checksum = "e2b070231665d27ad9ec9b8df639893f46727666c6767db40317fbe920a5d998"
 dependencies = [
  "backtrace",
  "bytes",
  "libc",
- "mio 0.8.11",
- "num_cpus",
+ "mio 1.0.2",
  "parking_lot 0.12.1",
  "pin-project-lite",
  "signal-hook-registry",
  "socket2 0.5.6",
  "tokio-macros",
  "tracing",
- "windows-sys 0.48.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
 name = "tokio-macros"
-version = "2.3.0"
+version = "2.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5f5ae998a069d4b5aba8ee9dad856af7d520c3699e6159b185c2acd48155d39a"
+checksum = "693d596312e88961bc67d7f1f97af8a70227d9f90c31bba5806eec004978d752"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -16607,3 +16645,8 @@ dependencies = [
  "cc",
  "pkg-config",
 ]
+
+[[patch.unused]]
+name = "futures-timer"
+version = "3.0.2"
+source = "git+https://github.com/madsim-rs/futures-timer.git?rev=05b33b4#05b33b4ede22b0517f49da59404d6e6d2848a192"

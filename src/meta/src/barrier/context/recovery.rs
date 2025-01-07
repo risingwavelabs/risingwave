@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -37,7 +37,7 @@ use crate::manager::ActiveStreamingWorkerNodes;
 use crate::model::{ActorId, StreamJobFragments, TableParallelism};
 use crate::stream::{
     JobParallelismTarget, JobReschedulePolicy, JobRescheduleTarget, JobResourceGroupTarget,
-    RescheduleOptions,
+    RescheduleOptions,SourceChange, TableResizePolicy
 };
 use crate::{model, MetaResult};
 
@@ -49,14 +49,18 @@ impl GlobalBarrierWorkerContextImpl {
             .catalog_controller
             .clean_dirty_subscription(database_id)
             .await?;
-        let source_ids = self
+        let dirty_associated_source_ids = self
             .metadata_manager
             .catalog_controller
             .clean_dirty_creating_jobs(database_id)
             .await?;
 
         // unregister cleaned sources.
-        self.source_manager.unregister_sources(source_ids).await;
+        self.source_manager
+            .apply_source_change(SourceChange::DropSource {
+                dropped_source_ids: dirty_associated_source_ids,
+            })
+            .await;
 
         Ok(())
     }

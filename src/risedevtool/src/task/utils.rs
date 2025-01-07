@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::env;
 use std::path::Path;
 use std::process::Command;
 
@@ -23,7 +24,7 @@ use crate::{AwsS3Config, MetaNodeConfig, MinioConfig, OpendalConfig, TempoConfig
 
 /// Get the command for starting the given component of RisingWave.
 pub fn risingwave_cmd(component: &str) -> Result<Command> {
-    let cmd = if is_env_set("USE_SYSTEM_RISINGWAVE") {
+    let mut cmd = if is_env_set("USE_SYSTEM_RISINGWAVE") {
         let mut cmd = Command::new("risingwave");
         cmd.arg(component);
         cmd
@@ -32,6 +33,22 @@ pub fn risingwave_cmd(component: &str) -> Result<Command> {
         let path = Path::new(&prefix_bin).join("risingwave").join(component);
         Command::new(path)
     };
+
+    if crate::util::is_enable_backtrace() {
+        cmd.env("RUST_BACKTRACE", "1");
+    }
+
+    if crate::util::is_env_set("ENABLE_BUILD_RW_CONNECTOR") {
+        let prefix_bin = env::var("PREFIX_BIN")?;
+        cmd.env(
+            "CONNECTOR_LIBS_PATH",
+            Path::new(&prefix_bin).join("connector-node/libs/"),
+        );
+    }
+
+    let prefix_config = env::var("PREFIX_CONFIG")?;
+    cmd.arg("--config-path")
+        .arg(Path::new(&prefix_config).join("risingwave.toml"));
 
     Ok(cmd)
 }

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -49,10 +49,6 @@ impl<PlanRef> ProjectSet<PlanRef> {
 
     pub(crate) fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
         self.select_list.iter().for_each(|e| v.visit_expr(e));
-    }
-
-    pub(crate) fn output_len(&self) -> usize {
-        self.select_list.len() + 1
     }
 
     pub fn decompose(self) -> (Vec<ExprImpl>, PlanRef) {

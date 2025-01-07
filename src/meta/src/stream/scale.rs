@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -140,6 +140,7 @@ impl CustomFragmentInfo {
 
 use educe::Educe;
 
+use super::SourceChange;
 use crate::controller::id::IdCategory;
 use crate::controller::utils::filter_workers_by_resource_group;
 
@@ -1771,13 +1772,10 @@ impl ScaleController {
 
         if !stream_source_actor_splits.is_empty() {
             self.source_manager
-                .apply_source_change(
-                    None,
-                    None,
-                    Some(stream_source_actor_splits),
-                    Some(stream_source_dropped_actors),
-                    None,
-                )
+                .apply_source_change(SourceChange::Reschedule {
+                    split_assignment: stream_source_actor_splits,
+                    dropped_actors: stream_source_dropped_actors,
+                })
                 .await;
         }
 

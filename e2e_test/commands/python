@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+
+set -e
+
+# If `uv` not installed, delegate to the system `python`.
+if ! command -v uv >/dev/null; then
+  # Strip the current directory from the PATH to access the system `python`.
+  REAL_PATH=$(echo "$PATH" | sed "s,$(dirname "$0"):,,g")
+  PYTHON=$(PATH="${REAL_PATH}" which python || PATH="${REAL_PATH}" which python3)
+  exec ${PYTHON} "$@"
+fi
+
+# Use `uv` to run the script within an ephemeral environment.
+exec uv run --with-requirements "e2e_test/requirements.txt" "$@"
