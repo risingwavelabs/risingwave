@@ -241,8 +241,6 @@ pub trait StorageFuture<'a, T> = Future<Output = StorageResult<T>> + Send + 'a;
 pub trait StateStoreReadLog: StaticSendSync {
     type ChangeLogIter: StateStoreReadChangeLogIter;
 
-    // fn next_epoch(&self, epoch: u64) -> impl StorageFuture<'_, u64>;
-
     fn iter_log(
         &self,
         epoch_range: (u64, u64),
