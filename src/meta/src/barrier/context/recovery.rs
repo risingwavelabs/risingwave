@@ -37,7 +37,7 @@ use crate::manager::ActiveStreamingWorkerNodes;
 use crate::model::{ActorId, StreamJobFragments, TableParallelism};
 use crate::stream::{
     JobParallelismTarget, JobReschedulePolicy, JobRescheduleTarget, JobResourceGroupTarget,
-    RescheduleOptions,SourceChange, TableResizePolicy
+    RescheduleOptions, SourceChange, TableResizePolicy,
 };
 use crate::{model, MetaResult};
 
