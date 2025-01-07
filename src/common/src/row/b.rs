@@ -3,7 +3,7 @@ use bytes::Buf;
 use super::Row;
 use crate::array::StructRef;
 use crate::for_all_variants;
-use crate::types::{Date, DatumRef, ScalarRefImpl};
+use crate::types::{Date, DatumRef, Decimal, ScalarRefImpl};
 
 /// Define `ScalarImpl` and `ScalarRefImpl` with macro.
 macro_rules! datum_discriminant {
@@ -82,22 +82,42 @@ impl<'a> BRowRef<'a> {
         data.advance(offset);
 
         let scalar = match dis {
-            DatumDiscriminant::Int64 => todo!(),
-            DatumDiscriminant::Int256 => todo!(),
-            DatumDiscriminant::Float64 => todo!(),
+            // Fixed size, can forward to value encoding.
+            DatumDiscriminant::Int64 => {
+                let scalar = data.get_i64_ne();
+                ScalarRefImpl::Int64(scalar)
+            }
+            DatumDiscriminant::Float64 => {
+                let scalar = data.get_f64_ne().into();
+                ScalarRefImpl::Float64(scalar)
+            }
+            DatumDiscriminant::Decimal => {
+                let mut bytes = [0; 16];
+                data.copy_to_slice(&mut bytes);
+                let scalar = Decimal::unordered_deserialize(bytes);
+                return Some(ScalarRefImpl::Decimal(scalar));
+            }
+            DatumDiscriminant::Interval => todo!(),
+            DatumDiscriminant::Time => todo!(),
+            DatumDiscriminant::Timestamp => todo!(),
+            DatumDiscriminant::Timestamptz => todo!(),
+            DatumDiscriminant::Serial => todo!(),
+
             DatumDiscriminant::Utf8 => {
                 let len = data.get_u32_ne() as usize;
                 let bytes = &data[..len];
                 let str = std::str::from_utf8(bytes).unwrap();
                 return Some(ScalarRefImpl::Utf8(str));
             }
-            DatumDiscriminant::Decimal => todo!(),
-            DatumDiscriminant::Interval => todo!(),
-            DatumDiscriminant::Time => todo!(),
-            DatumDiscriminant::Timestamp => todo!(),
-            DatumDiscriminant::Timestamptz => todo!(),
+            DatumDiscriminant::Bytea => {
+                let len = data.get_u32_ne() as usize;
+                let bytes = &data[..len];
+                return Some(ScalarRefImpl::Bytea(bytes));
+            }
+
             DatumDiscriminant::Jsonb => todo!(),
-            DatumDiscriminant::Serial => todo!(),
+            DatumDiscriminant::Int256 => todo!(),
+
             DatumDiscriminant::Struct => {
                 let len = data.get_u32_ne() as usize;
                 let bytes = &data[..len];
@@ -106,7 +126,7 @@ impl<'a> BRowRef<'a> {
             }
             DatumDiscriminant::List => todo!(),
             DatumDiscriminant::Map => todo!(),
-            DatumDiscriminant::Bytea => todo!(),
+
             _ => unreachable!(),
         };
 
