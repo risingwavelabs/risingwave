@@ -38,24 +38,7 @@ pub struct BatchIcebergPredicatePushDownRule {}
 
 impl Rule for BatchIcebergPredicatePushDownRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
-        let filter: &BatchFilter = plan.as_batch_filter()?;
-        let input = filter.input();
-        let scan: &BatchIcebergScan = input.as_batch_iceberg_scan()?;
-        // NOTE(kwannoel): We only fill iceberg predicate here.
-        assert_eq!(scan.predicate, IcebergPredicate::AlwaysTrue);
-
-        let predicate = filter.predicate().clone();
-        let (iceberg_predicate, rw_predicate) =
-            rw_predicate_to_iceberg_predicate(predicate, scan.schema().fields());
-        let scan = scan.clone_with_predicate(iceberg_predicate);
-        if rw_predicate.always_true() {
-            Some(scan.into())
-        } else {
-            let filter = filter
-                .clone_with_input(scan.into())
-                .clone_with_predicate(rw_predicate);
-            Some(filter.into())
-        }
+        Some(plan)
     }
 }
 
