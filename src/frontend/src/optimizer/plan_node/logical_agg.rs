@@ -653,7 +653,7 @@ impl LogicalAggBuilder {
                 let squared_arg = ExprImpl::from(FunctionCall::new(
                     ExprType::Multiply,
                     vec![arg.clone(), arg.clone()],
-                )?);
+                )?).cast_explicit(DataType::Float64)?;
 
                 let sum_of_sq = ExprImpl::from(push_agg_call(AggCall::new(
                     PbAggKind::Sum.into(),
@@ -663,7 +663,8 @@ impl LogicalAggBuilder {
                     agg_call.filter.clone(),
                     agg_call.direct_args.clone(),
                 )?)?)
-                .cast_explicit(agg_call.return_type())?;
+                //.cast_explicit(agg_call.return_type())?;
+                .cast_explicit(DataType::Float64)?;
 
                 let sum = ExprImpl::from(push_agg_call(AggCall::new(
                     PbAggKind::Sum.into(),
@@ -673,7 +674,8 @@ impl LogicalAggBuilder {
                     agg_call.filter.clone(),
                     agg_call.direct_args.clone(),
                 )?)?)
-                .cast_explicit(agg_call.return_type())?;
+                //.cast_explicit(agg_call.return_type())?;
+                .cast_explicit(DataType::Float64)?;
 
                 let count = ExprImpl::from(push_agg_call(AggCall::new(
                     PbAggKind::Count.into(),
@@ -686,11 +688,12 @@ impl LogicalAggBuilder {
 
                 let zero = ExprImpl::literal_int(0);
                 let one = ExprImpl::literal_int(1);
+                let f64_min_positive = ExprImpl::literal_f64(f64::MIN_POSITIVE);
 
                 let squared_sum = ExprImpl::from(FunctionCall::new(
                     ExprType::Multiply,
                     vec![sum.clone(), sum],
-                )?);
+                )?).cast_explicit(DataType::Float64)?;
 
                 let raw_numerator = ExprImpl::from(FunctionCall::new(
                     ExprType::Subtract,
@@ -699,15 +702,33 @@ impl LogicalAggBuilder {
                         ExprImpl::from(FunctionCall::new(
                             ExprType::Divide,
                             vec![squared_sum, count.clone()],
-                        )?),
+                        )?).cast_explicit(DataType::Float64)?,
                     ],
                 )?);
 
+                let raw_numerator =
+                    ExprImpl::from(FunctionCall::new(ExprType::Abs, vec![raw_numerator])?);
+
                 // We need to check for potential accuracy issues that may occasionally lead to results less than 0.
                 let numerator_type = raw_numerator.return_type();
+                // let numerator = ExprImpl::from(FunctionCall::new(
+                //     ExprType::Greatest,
+                //     vec![raw_numerator, zero.clone().cast_explicit(numerator_type)?],
+                // )?);
+
                 let numerator = ExprImpl::from(FunctionCall::new(
-                    ExprType::Greatest,
-                    vec![raw_numerator, zero.clone().cast_explicit(numerator_type)?],
+                    ExprType::Case,
+                    vec![
+                        ExprImpl::from(FunctionCall::new(
+                            ExprType::LessThan,
+                            vec![
+                                raw_numerator.clone(),
+                                f64_min_positive.cast_explicit(numerator_type.clone())?,
+                            ],
+                        )?),
+                        zero.clone().cast_explicit(numerator_type)?,
+                        raw_numerator,
+                    ],
                 )?);
 
                 let denominator = match kind {
