@@ -624,17 +624,9 @@ impl CatalogController {
         actor_ids: Vec<crate::model::ActorId>,
         new_actor_dispatchers: HashMap<crate::model::ActorId, Vec<PbDispatcher>>,
         split_assignment: &SplitAssignment,
-        release_ctx: Option<&ReleaseContext>,
     ) -> MetaResult<()> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
-
-        let mut notification_objs: Option<(Vec<PbUserInfo>, Vec<PartialObject>)> = None;
-        // apply release ctx: drop the objects after replace job succeeds. For drop table associated source.
-        if let Some(release_ctx) = release_ctx {
-            tracing::info!("apply release ctx: {:?}", release_ctx);
-            notification_objs = Some(self.drop_table_associated_source(&txn, release_ctx).await?);
-        }
 
         Actor::update_many()
             .col_expr(
@@ -688,16 +680,6 @@ impl CatalogController {
         .await?;
 
         txn.commit().await?;
-
-        if let Some((user_infos, to_drop_objects)) = notification_objs {
-            self.notify_users_update(user_infos).await;
-            self.notify_frontend(
-                NotificationOperation::Delete,
-                build_relation_group_for_delete(to_drop_objects),
-            )
-            .await;
-        }
-
         Ok(())
     }
 
@@ -994,6 +976,7 @@ impl CatalogController {
         merge_updates: Vec<PbMergeUpdate>,
         col_index_mapping: Option<ColIndexMapping>,
         sink_into_table_context: SinkIntoTableContext,
+        release_ctx: Option<&ReleaseContext>,
     ) -> MetaResult<NotificationVersion> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
@@ -1008,6 +991,11 @@ impl CatalogController {
         )
         .await?;
 
+        let mut notification_objs: Option<(Vec<PbUserInfo>, Vec<PartialObject>)> = None;
+        if let Some(release_ctx) = release_ctx {
+            notification_objs = Some(self.drop_table_associated_source(&txn, release_ctx).await?);
+        }
+
         txn.commit().await?;
 
         // FIXME: Do not notify frontend currently, because frontend nodes might refer to old table
@@ -1017,12 +1005,22 @@ impl CatalogController {
         //     .await;
         self.notify_fragment_mapping(NotificationOperation::Add, fragment_mapping)
             .await;
-        let version = self
+        let mut version = self
             .notify_frontend(
                 NotificationOperation::Update,
                 NotificationInfo::RelationGroup(PbRelationGroup { relations }),
             )
             .await;
+
+        if let Some((user_infos, to_drop_objects)) = notification_objs {
+            self.notify_users_update(user_infos).await;
+            version = self
+                .notify_frontend(
+                    NotificationOperation::Delete,
+                    build_relation_group_for_delete(to_drop_objects),
+                )
+                .await;
+        }
 
         Ok(version)
     }

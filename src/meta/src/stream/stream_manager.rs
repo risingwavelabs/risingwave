@@ -373,7 +373,6 @@ impl GlobalStreamManager {
                 init_split_assignment,
                 streaming_job,
                 tmp_id: tmp_table_id.table_id,
-                release_ctx: None, /* release_ctx is None because we already drop the objects and not require atomic drop things when replacing table. */
             });
         }
 
@@ -456,7 +455,6 @@ impl GlobalStreamManager {
             dispatchers,
             tmp_id,
             streaming_job,
-            release_ctx,
             ..
         }: ReplaceStreamJobContext,
     ) -> MetaResult<()> {
@@ -468,6 +466,10 @@ impl GlobalStreamManager {
         } else {
             self.source_manager.allocate_splits(&tmp_table_id).await?
         };
+        tracing::info!(
+            "replace_stream_job - allocate split: {:?}",
+            init_split_assignment
+        );
 
         self.barrier_scheduler
             .run_config_change_command_with_pause(
@@ -480,7 +482,6 @@ impl GlobalStreamManager {
                     init_split_assignment,
                     streaming_job,
                     tmp_id,
-                    release_ctx,
                 }),
             )
             .await?;

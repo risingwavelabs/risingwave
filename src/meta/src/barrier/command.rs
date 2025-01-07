@@ -46,7 +46,6 @@ use super::info::{CommandFragmentChanges, InflightStreamingJobInfo};
 use crate::barrier::info::BarrierInfo;
 use crate::barrier::utils::collect_resp_info;
 use crate::barrier::InflightSubscriptionInfo;
-use crate::controller::catalog::ReleaseContext;
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::hummock::{CommitEpochInfo, NewTableFragmentInfo};
 use crate::manager::{StreamingJob, StreamingJobType};
@@ -109,8 +108,6 @@ pub struct ReplaceStreamJobPlan {
     pub streaming_job: StreamingJob,
     /// The temporary dummy job fragments id of new table fragment
     pub tmp_id: u32,
-    // Objects to be dropped after replace job succeeds. Used in drop table associated source.
-    pub release_ctx: Option<ReleaseContext>,
 }
 
 impl ReplaceStreamJobPlan {

@@ -34,10 +34,7 @@ impl CatalogController {
                 object::Column::SchemaId,
                 object::Column::DatabaseId,
             ])
-            .join(JoinType::InnerJoin, object::Relation::Table.def())
-            .filter(
-                table::Column::BelongsToJobId.is_in(release_ctx.removed_state_table_ids.clone()),
-            )
+            .filter(object::Column::Oid.is_in(release_ctx.removed_state_table_ids.clone()))
             .into_partial_model()
             .all(txn)
             .await?;
@@ -54,6 +51,11 @@ impl CatalogController {
             .into_tuple()
             .all(txn)
             .await?;
+
+        tracing::info!(
+            "drop_table_associated_source: to_drop_objects: {:?}",
+            to_drop_objects
+        );
 
         // delete all in to_drop_objects.
         let res = Object::delete_many()

@@ -116,6 +116,12 @@ impl DdlServiceImpl {
                     table,
                 },
             ) => {
+                tracing::info!(
+                    "replace table drop table associated source: {:?}, table id {}",
+                    associated_source_id,
+                    table.as_ref().unwrap().id
+                );
+
                 drop_table_associated_source_id = Some(associated_source_id);
                 StreamingJob::Table(None, table.unwrap(), TableJobType::General)
             }

@@ -1252,6 +1252,7 @@ impl DdlController {
                                 dropping_sink_id: Some(sink_id),
                                 updated_sink_catalogs: vec![],
                             },
+                            None, // release_ctx is None because we already drop the objects and not require atomic drop things when replacing table.
                         )
                         .await?;
                     Ok(version)
@@ -1373,6 +1374,7 @@ impl DdlController {
         tracing::debug!(id = job_id, "building replace streaming job");
         let mut updated_sink_catalogs = vec![];
 
+        let mut release_ctx = None;
         let result: MetaResult<Vec<PbMergeUpdate>> = try {
             let (mut ctx, mut stream_job_fragments) = self
                 .build_replace_job(
@@ -1384,6 +1386,7 @@ impl DdlController {
                     drop_table_associated_source_id,
                 )
                 .await?;
+            release_ctx = ctx.release_ctx.clone();
 
             if let StreamingJob::Table(_, table, ..) = &streaming_job {
                 let catalogs = self
@@ -1446,8 +1449,28 @@ impl DdlController {
                             dropping_sink_id: None,
                             updated_sink_catalogs,
                         },
+                        release_ctx.as_ref(),
                     )
                     .await?;
+                if let Some(release_ctx) = &release_ctx {
+                    // drop table associated source, we have already drop the objects in catalog above and need to run command to clean up the hummock entry.
+                    self.source_manager
+                        .apply_source_change(SourceChange::DropSource {
+                            dropped_source_ids: release_ctx.removed_source_ids.clone(),
+                        })
+                        .await;
+                    self.stream_manager
+                        .drop_streaming_jobs(
+                            risingwave_common::catalog::DatabaseId::from(
+                                release_ctx.database_id as u32,
+                            ),
+                            vec![],
+                            vec![],
+                            release_ctx.removed_state_table_ids.clone(),
+                            HashSet::new(),
+                        )
+                        .await;
+                }
                 Ok(version)
             }
             Err(err) => {

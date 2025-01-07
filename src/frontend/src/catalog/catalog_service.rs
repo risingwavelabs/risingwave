@@ -349,6 +349,11 @@ impl CatalogWriter for CatalogWriterImpl {
         mapping: ColIndexMapping,
         drop_table_associated_source_id: u32,
     ) -> Result<()> {
+        tracing::info!(
+            "replace table drop table associated source: {:?}, table id {}",
+            drop_table_associated_source_id,
+            table.id
+        );
         let version = self
             .meta_client
             .replace_job(
