@@ -22,6 +22,7 @@ use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockReadEpoch;
 
 use crate::error::StorageResult;
+use crate::hummock::NextEpochOptions;
 use crate::store::*;
 
 /// A panic state store. If a workload is fully in-memory, we can use this state store to
@@ -66,6 +67,10 @@ impl StateStoreRead for PanicStateStore {
 
 impl StateStoreReadLog for PanicStateStore {
     type ChangeLogIter = PanicStateStoreIter<StateStoreReadLogItem>;
+
+    async fn next_epoch(&self, _epoch: u64, _options: NextEpochOptions) -> StorageResult<u64> {
+        unimplemented!()
+    }
 
     async fn iter_log(
         &self,

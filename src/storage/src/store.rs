@@ -39,7 +39,7 @@ use risingwave_hummock_trace::{
 use risingwave_pb::hummock::PbVnodeWatermark;
 
 use crate::error::{StorageError, StorageResult};
-use crate::hummock::CachePolicy;
+use crate::hummock::{CachePolicy, NextEpochOptions};
 use crate::monitor::{MonitoredStateStore, MonitoredStorageMetrics};
 
 pub trait StaticSendSync = Send + Sync + 'static;
@@ -238,6 +238,8 @@ pub trait StorageFuture<'a, T> = Future<Output = StorageResult<T>> + Send + 'a;
 
 pub trait StateStoreReadLog: StaticSendSync {
     type ChangeLogIter: StateStoreReadChangeLogIter;
+
+    fn next_epoch(&self, epoch: u64, options: NextEpochOptions) -> impl StorageFuture<'_, u64>;
 
     fn iter_log(
         &self,

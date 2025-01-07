@@ -44,7 +44,7 @@ use risingwave_pb::plan_common::StorageTableDesc;
 use tracing::trace;
 
 use crate::error::{StorageError, StorageResult};
-use crate::hummock::CachePolicy;
+use crate::hummock::{CachePolicy, NextEpochOptions};
 use crate::row_serde::row_serde_util::{serialize_pk, serialize_pk_with_vnode};
 use crate::row_serde::value_serde::{ValueRowSerde, ValueRowSerdeNew};
 use crate::row_serde::{find_columns_by_ids, ColumnMapping};
@@ -921,6 +921,17 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
             )
             .await?
             .map_ok(|(_, row)| row))
+    }
+
+    pub async fn next_epoch(&self, epoch: u64) -> StorageResult<u64> {
+        self.store
+            .next_epoch(
+                epoch,
+                NextEpochOptions {
+                    table_id: self.table_id,
+                },
+            )
+            .await
     }
 
     async fn batch_iter_log_inner<K: CopyFromSlice>(

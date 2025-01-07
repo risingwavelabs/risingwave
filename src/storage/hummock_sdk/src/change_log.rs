@@ -51,6 +51,13 @@ impl<T> TableChangeLogCommon<T> {
         }
         self.0.push_back(new_change_log);
     }
+
+    pub fn epochs(&self) -> impl Iterator<Item = u64> + '_ {
+        self.0
+            .iter()
+            .flat_map(|epoch_change_log| epoch_change_log.epochs.iter())
+            .cloned()
+    }
 }
 
 pub type TableChangeLog = TableChangeLogCommon<SstableInfo>;
@@ -129,6 +136,54 @@ impl<T> TableChangeLogCommon<T> {
             epoch_change_log.epochs.first().expect("non-empty") <= &max_epoch
         });
         self.0.range(start..end)
+    }
+
+    /// Get the `next_epoch` of the given `epoch`
+    /// Return:
+    ///     - Ok(Some(`next_epoch`)): the `next_epoch` of `epoch`
+    ///     - Ok(None): `next_epoch` of `epoch` is not added to change log yet
+    ///     - Err(()): `epoch` is not an existing or to exist one
+    #[expect(clippy::result_unit_err)]
+    pub fn next_epoch(&self, epoch: u64) -> Result<Option<u64>, ()> {
+        let start = self.0.partition_point(|epoch_change_log| {
+            epoch_change_log.epochs.last().expect("non-empty") < &epoch
+        });
+        debug_assert!(self
+            .0
+            .range(start..)
+            .flat_map(|epoch_change_log| epoch_change_log.epochs.iter())
+            .is_sorted());
+        let mut later_epochs = self
+            .0
+            .range(start..)
+            .flat_map(|epoch_change_log| epoch_change_log.epochs.iter())
+            .skip_while(|log_epoch| **log_epoch < epoch);
+        if let Some(first_epoch) = later_epochs.next() {
+            assert!(
+                *first_epoch >= epoch,
+                "first_epoch {} < epoch {}",
+                first_epoch,
+                epoch
+            );
+            if *first_epoch != epoch {
+                return Err(());
+            }
+            if let Some(next_epoch) = later_epochs.next() {
+                assert!(
+                    *next_epoch > epoch,
+                    "next_epoch {} not exceed epoch {}",
+                    next_epoch,
+                    epoch
+                );
+                Ok(Some(*next_epoch))
+            } else {
+                // `epoch` is latest
+                Ok(None)
+            }
+        } else {
+            // all epochs are less than `epoch`
+            Ok(None)
+        }
     }
 
     /// Returns epochs where value is non-null and >= `min_epoch`.
@@ -300,11 +355,16 @@ mod tests {
             EpochNewChangeLog {
                 new_value: vec![],
                 old_value: vec![],
-                epochs: vec![5],
+                epochs: vec![6],
+            },
+            EpochNewChangeLog {
+                new_value: vec![],
+                old_value: vec![],
+                epochs: vec![8, 10],
             },
         ]);
 
-        let epochs = [1, 2, 3, 4, 5, 6];
+        let epochs = (1..=11).collect_vec();
         for i in 0..epochs.len() {
             for j in i..epochs.len() {
                 let min_epoch = epochs[i];
@@ -324,6 +384,36 @@ mod tests {
                     .collect_vec();
                 assert_eq!(expected, actual, "{:?}", (min_epoch, max_epoch));
             }
+        }
+
+        let existing_epochs = table_change_log.epochs().collect_vec();
+        assert!(existing_epochs.is_sorted());
+        for &epoch in &epochs {
+            let expected = match existing_epochs
+                .iter()
+                .position(|existing_epoch| *existing_epoch >= epoch)
+            {
+                None => {
+                    // all existing epochs are less than epoch
+                    Ok(None)
+                }
+                Some(i) => {
+                    let this_epoch = existing_epochs[i];
+                    assert!(this_epoch >= epoch);
+                    if this_epoch == epoch {
+                        if i + 1 == existing_epochs.len() {
+                            // epoch is the latest epoch
+                            Ok(None)
+                        } else {
+                            Ok(Some(existing_epochs[i + 1]))
+                        }
+                    } else {
+                        // epoch not a existing epoch
+                        Err(())
+                    }
+                }
+            };
+            assert_eq!(expected, table_change_log.next_epoch(epoch));
         }
     }
 

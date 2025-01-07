@@ -30,7 +30,7 @@ use thiserror_ext::AsReport;
 
 use crate::error::StorageResult;
 use crate::hummock::sstable_store::SstableStoreRef;
-use crate::hummock::{HummockStorage, SstableObjectIdManagerRef};
+use crate::hummock::{HummockStorage, NextEpochOptions, SstableObjectIdManagerRef};
 use crate::store::*;
 
 #[derive(Clone)]
@@ -339,6 +339,10 @@ impl<S: StateStoreRead> StateStoreRead for TracedStateStore<S> {
 
 impl<S: StateStoreReadLog> StateStoreReadLog for TracedStateStore<S> {
     type ChangeLogIter = impl StateStoreReadChangeLogIter;
+
+    fn next_epoch(&self, epoch: u64, options: NextEpochOptions) -> impl StorageFuture<'_, u64> {
+        self.inner.next_epoch(epoch, options)
+    }
 
     fn iter_log(
         &self,

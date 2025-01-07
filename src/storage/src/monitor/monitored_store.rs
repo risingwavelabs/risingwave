@@ -33,7 +33,7 @@ use super::traced_store::TracedStateStore;
 use super::{MonitoredStateStoreGetStats, MonitoredStateStoreIterStats, MonitoredStorageMetrics};
 use crate::error::StorageResult;
 use crate::hummock::sstable_store::SstableStoreRef;
-use crate::hummock::{HummockStorage, SstableObjectIdManagerRef};
+use crate::hummock::{HummockStorage, NextEpochOptions, SstableObjectIdManagerRef};
 use crate::monitor::monitored_storage_metrics::StateStoreIterStats;
 use crate::monitor::{StateStoreIterLogStats, StateStoreIterStatsTrait};
 use crate::store::*;
@@ -220,6 +220,10 @@ impl<S: StateStoreRead> StateStoreRead for MonitoredStateStore<S> {
 
 impl<S: StateStoreReadLog> StateStoreReadLog for MonitoredStateStore<S> {
     type ChangeLogIter = impl StateStoreReadChangeLogIter;
+
+    fn next_epoch(&self, epoch: u64, options: NextEpochOptions) -> impl StorageFuture<'_, u64> {
+        self.inner.next_epoch(epoch, options)
+    }
 
     fn iter_log(
         &self,
