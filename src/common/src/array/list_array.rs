@@ -383,33 +383,12 @@ impl ListValue {
         Self::new(builder.finish())
     }
 
-    /// Returns the length of the list.
-    pub fn len(&self) -> usize {
-        self.values.len()
-    }
-
-    /// Returns `true` if the list has a length of 0.
-    pub fn is_empty(&self) -> bool {
-        self.values.is_empty()
-    }
-
-    /// Iterates over the elements of the list.
-    pub fn iter(&self) -> impl DoubleEndedIterator + ExactSizeIterator<Item = DatumRef<'_>> {
-        self.values.iter()
-    }
-
-    /// Get the element at the given index. Returns `None` if the index is out of bounds.
-    pub fn get(&self, index: usize) -> Option<DatumRef<'_>> {
-        if index < self.len() {
-            Some(self.values.value_at(index))
-        } else {
-            None
+    /// Returns a mutable slice if the list is of type `int64[]`.
+    pub fn as_i64_mut_slice(&mut self) -> Option<&mut [i64]> {
+        match self.values.as_mut() {
+            ArrayImpl::Int64(array) => Some(array.as_mut_slice()),
+            _ => None,
         }
-    }
-
-    /// Returns the data type of the elements in the list.
-    pub fn data_type(&self) -> DataType {
-        self.values.data_type()
     }
 
     pub fn memcmp_deserialize(
@@ -427,29 +406,38 @@ impl ListValue {
         }
         Ok(Self::new(builder.finish()))
     }
+}
 
-    // Used to display ListValue in explain for better readibilty.
-    pub fn display_for_explain(&self) -> String {
-        // Example of ListValue display: ARRAY[1, 2, null]
-        format!(
-            "ARRAY[{}]",
-            self.iter()
-                .map(|v| {
-                    match v.as_ref() {
-                        None => "null".into(),
-                        Some(scalar) => scalar.to_text(),
-                    }
-                })
-                .format(", ")
-        )
+// Delegate to `ListRef` for these methods.
+impl ListValue {
+    /// Returns the length of the list.
+    pub fn len(&self) -> usize {
+        self.as_scalar_ref().len()
     }
 
-    /// Returns a mutable slice if the list is of type `int64[]`.
-    pub fn as_i64_mut_slice(&mut self) -> Option<&mut [i64]> {
-        match self.values.as_mut() {
-            ArrayImpl::Int64(array) => Some(array.as_mut_slice()),
-            _ => None,
-        }
+    /// Returns `true` if the list has a length of 0.
+    pub fn is_empty(&self) -> bool {
+        self.as_scalar_ref().is_empty()
+    }
+
+    /// Iterates over the elements of the list.
+    pub fn iter(&self) -> impl DoubleEndedIterator + ExactSizeIterator<Item = DatumRef<'_>> {
+        self.as_scalar_ref().iter()
+    }
+
+    /// Get the element at the given index. Returns `None` if the index is out of bounds.
+    pub fn get(&self, index: usize) -> Option<DatumRef<'_>> {
+        self.as_scalar_ref().get(index)
+    }
+
+    /// Returns the data type of the elements in the list.
+    pub fn data_type(&self) -> DataType {
+        self.as_scalar_ref().data_type()
+    }
+
+    /// Used to display `ListValue` in explain for better readibilty.
+    pub fn display_for_explain(&self) -> String {
+        self.as_scalar_ref().display_for_explain()
     }
 }
 
@@ -613,6 +601,22 @@ impl<'a> ListRef<'a> {
                 start: self.start,
                 end: self.end,
             },
+        )
+    }
+
+    /// Used to display `ListRef` in explain for better readibilty.
+    pub fn display_for_explain(self) -> String {
+        // Example: `ARRAY[1, 2, null]`
+        format!(
+            "ARRAY[{}]",
+            self.iter()
+                .map(|v| {
+                    match v.as_ref() {
+                        None => "null".into(),
+                        Some(scalar) => scalar.to_text(),
+                    }
+                })
+                .format(", ")
         )
     }
 }
