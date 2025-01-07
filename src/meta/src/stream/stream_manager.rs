@@ -33,6 +33,7 @@ use crate::barrier::{
     BarrierScheduler, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
     ReplaceStreamJobPlan, SnapshotBackfillInfo,
 };
+use crate::controller::catalog::ReleaseContext;
 use crate::error::bail_invalid_parameter;
 use crate::manager::{
     MetaSrvEnv, MetadataManager, NotificationVersion, StreamingJob, StreamingJobType,
@@ -189,7 +190,8 @@ pub struct ReplaceStreamJobContext {
 
     pub tmp_id: u32,
 
-    pub drop_table_associated_source_id: Option<u32>,
+    /// Used for dropping an associated source. Dropping source and related internal tables.
+    pub release_ctx: Option<ReleaseContext>,
 }
 
 /// `GlobalStreamManager` manages all the streams in the system.

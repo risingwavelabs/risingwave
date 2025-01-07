@@ -511,54 +511,20 @@ pub(crate) async fn reparse_table_for_sink(
     else {
         panic!("unexpected statement: {:?}", definition);
     };
-
     let table_name = name.clone();
-    let format_encode = format_encode
-        .clone()
-        .map(|format_encode| format_encode.into_v2_with_warning());
 
     // Create handler args as if we're creating a new table with the altered definition.
     let handler_args = HandlerArgs::new(session.clone(), &definition, Arc::from(""))?;
     let col_id_gen = ColumnIdGenerator::new_alter(table_catalog);
-    let Statement::CreateTable {
-        columns,
-        wildcard_idx,
-        constraints,
-        source_watermarks,
-        append_only,
-        on_conflict,
-        with_version_column,
-        include_column_options,
-        engine,
-        ..
-    } = definition
-    else {
-        panic!("unexpected statement type: {:?}", definition);
-    };
-
-    let engine = match engine {
-        risingwave_sqlparser::ast::Engine::Hummock => risingwave_common::catalog::Engine::Hummock,
-        risingwave_sqlparser::ast::Engine::Iceberg => risingwave_common::catalog::Engine::Iceberg,
-    };
 
     let (graph, table, source, _) = generate_stream_graph_for_replace_table(
         session,
         table_name,
         table_catalog,
-        format_encode,
         handler_args,
+        definition,
         col_id_gen,
-        columns,
-        wildcard_idx,
-        constraints,
-        source_watermarks,
-        append_only,
-        on_conflict,
-        with_version_column,
         None,
-        None,
-        include_column_options,
-        engine,
     )
     .await?;
 

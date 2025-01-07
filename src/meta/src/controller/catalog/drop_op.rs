@@ -15,6 +15,19 @@
 use super::*;
 
 impl CatalogController {
+    // drop table associated source is a special case of drop relation, which just remove the source object and associated state table, keeping the streaming job and fragments.
+    pub async fn drop_table_associated_source(
+        &self,
+        release_ctx: &ReleaseContext,
+    ) -> MetaResult<ReleaseContext> {
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
+
+        let to_drop_object_ids = vec![];
+
+        Ok(ReleaseContext::default())
+    }
+
     pub async fn drop_relation(
         &self,
         object_type: ObjectType,

@@ -751,6 +751,12 @@ pub async fn handle(
         }
         Statement::AlterTable {
             name,
+            operation: AlterTableOperation::DropConnector,
+        } => {
+            alter_table_drop_connector::handle_alter_table_drop_connector(handler_args, name).await
+        }
+        Statement::AlterTable {
+            name,
             operation: AlterTableOperation::SetDmlRateLimit { rate_limit },
         } => {
             alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
