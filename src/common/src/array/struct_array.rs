@@ -27,6 +27,7 @@ use super::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayResult, DataC
 use crate::array::ArrayRef;
 use crate::bitmap::{Bitmap, BitmapBuilder};
 use crate::error::BoxedError;
+use crate::row::BRowRef;
 use crate::types::{
     hash_datum, DataType, Datum, DatumRef, DefaultOrd, Scalar, ScalarImpl, StructType, ToDatumRef,
     ToText,
@@ -37,18 +38,22 @@ use crate::util::value_encoding::estimate_serialize_datum_size;
 
 macro_rules! iter_fields_ref {
     ($self:expr, $it:ident, { $($body:tt)* }) => {
-        iter_fields_ref!($self, $it, { $($body)* }, { $($body)* })
+        iter_fields_ref!($self, $it, { $($body)* }, { $($body)* }, { $($body)* })
     };
 
-    ($self:expr, $it:ident, { $($l_body:tt)* }, { $($r_body:tt)* }) => {
+    ($self:expr, $it:ident, { $($a_body:tt)* }, { $($b_body:tt)* }, { $($c_body:tt)* }) => {
         match $self {
             StructRef::Indexed { arr, idx } => {
                 let $it = arr.children.iter().map(move |a| a.value_at(idx));
-                $($l_body)*
+                $($a_body)*
             }
             StructRef::ValueRef { val } => {
                 let $it = val.fields.iter().map(ToDatumRef::to_datum_ref);
-                $($r_body)*
+                $($b_body)*
+            }
+            StructRef::BRow { row } => {
+                let $it = row.iter_datums();
+                $($c_body)*
             }
         }
     }
@@ -377,6 +382,7 @@ impl StructValue {
 pub enum StructRef<'a> {
     Indexed { arr: &'a StructArray, idx: usize },
     ValueRef { val: &'a StructValue },
+    BRow { row: BRowRef<'a> },
 }
 
 impl<'a> StructRef<'a> {
@@ -384,7 +390,13 @@ impl<'a> StructRef<'a> {
     ///
     /// Prefer using the macro `iter_fields_ref!` if possible to avoid the cost of enum dispatching.
     pub fn iter_fields_ref(self) -> impl ExactSizeIterator<Item = DatumRef<'a>> + 'a {
-        iter_fields_ref!(self, it, { Either::Left(it) }, { Either::Right(it) })
+        iter_fields_ref!(
+            self,
+            it,
+            { Either::Left(it) },
+            { Either::Right(Either::Left(it)) },
+            { Either::Right(Either::Right(it)) }
+        )
     }
 
     /// # Panics
@@ -393,6 +405,7 @@ impl<'a> StructRef<'a> {
         match self {
             StructRef::Indexed { arr, idx } => arr.field_at(i).value_at(*idx),
             StructRef::ValueRef { val } => val.fields[i].to_datum_ref(),
+            StructRef::BRow { row } => row.read_datum(i),
         }
     }
 

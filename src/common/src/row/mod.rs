@@ -452,6 +452,7 @@ impl<R1: Row, R2: Row> Row for either::Either<R1, R2> {
     }
 }
 
+mod b;
 mod chain;
 mod compacted_row;
 mod empty;
@@ -462,6 +463,7 @@ mod project;
 mod repeat_n;
 mod slice;
 pub use ::tinyvec::ArrayVec;
+pub use b::*;
 pub use chain::Chain;
 pub use compacted_row::CompactedRow;
 pub use empty::{empty, Empty};

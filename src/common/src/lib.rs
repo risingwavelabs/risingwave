@@ -38,6 +38,8 @@
 #![feature(register_tool)]
 #![feature(btree_cursors)]
 #![register_tool(rw)]
+#![feature(stmt_expr_attributes)]
+#![feature(proc_macro_hygiene)]
 
 #[cfg_attr(not(test), allow(unused_extern_crates))]
 extern crate self as risingwave_common;
