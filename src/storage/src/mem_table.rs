@@ -41,6 +41,7 @@ use crate::hummock::utils::{
     do_delete_sanity_check, do_insert_sanity_check, do_update_sanity_check, sanity_check_enabled,
 };
 use crate::hummock::value::HummockValue;
+use crate::memory::{RangeKv, RangeKvStateStore};
 use crate::row_serde::value_serde::ValueRowSerde;
 use crate::storage_value::StorageValue;
 use crate::store::*;
@@ -512,9 +513,9 @@ pub(crate) async fn merge_stream<'a>(
     }
 }
 
-pub struct MemtableLocalStateStore<S: StateStoreWrite + StateStoreRead> {
+pub struct RangeKvLocalStateStore<R: RangeKv> {
     mem_table: MemTable,
-    inner: S,
+    inner: RangeKvStateStore<R>,
 
     epoch: Option<u64>,
 
@@ -524,8 +525,8 @@ pub struct MemtableLocalStateStore<S: StateStoreWrite + StateStoreRead> {
     vnodes: Arc<Bitmap>,
 }
 
-impl<S: StateStoreWrite + StateStoreRead> MemtableLocalStateStore<S> {
-    pub fn new(inner: S, option: NewLocalOptions) -> Self {
+impl<R: RangeKv> RangeKvLocalStateStore<R> {
+    pub fn new(inner: RangeKvStateStore<R>, option: NewLocalOptions) -> Self {
         Self {
             inner,
             mem_table: MemTable::new(option.op_consistency_level.clone()),
@@ -536,13 +537,9 @@ impl<S: StateStoreWrite + StateStoreRead> MemtableLocalStateStore<S> {
             vnodes: option.vnodes,
         }
     }
-
-    pub fn inner(&self) -> &S {
-        &self.inner
-    }
 }
 
-impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalStateStore<S> {
+impl<R: RangeKv> LocalStateStore for RangeKvLocalStateStore<R> {
     type Iter<'a> = impl StateStoreIter + 'a;
     type RevIter<'a> = impl StateStoreIter + 'a;
 

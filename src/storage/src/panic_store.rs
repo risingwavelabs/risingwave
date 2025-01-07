@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::marker::PhantomData;
-use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -23,7 +22,6 @@ use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockReadEpoch;
 
 use crate::error::StorageResult;
-use crate::storage_value::StorageValue;
 use crate::store::*;
 
 /// A panic state store. If a workload is fully in-memory, we can use this state store to
@@ -76,17 +74,6 @@ impl StateStoreReadLog for PanicStateStore {
         _options: ReadLogOptions,
     ) -> StorageResult<Self::ChangeLogIter> {
         unimplemented!()
-    }
-}
-
-impl StateStoreWrite for PanicStateStore {
-    fn ingest_batch(
-        &self,
-        _kv_pairs: Vec<(TableKey<Bytes>, StorageValue)>,
-        _delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
-        _write_options: WriteOptions,
-    ) -> StorageResult<usize> {
-        panic!("should not write to the state store!");
     }
 }
 

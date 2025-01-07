@@ -17,7 +17,6 @@ use std::default::Default;
 use std::fmt::{Debug, Formatter};
 use std::future::Future;
 use std::marker::PhantomData;
-use std::ops::Bound;
 use std::sync::{Arc, LazyLock};
 
 use bytes::Bytes;
@@ -42,7 +41,6 @@ use risingwave_pb::hummock::PbVnodeWatermark;
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::CachePolicy;
 use crate::monitor::{MonitoredStateStore, MonitoredStorageMetrics};
-use crate::storage_value::StorageValue;
 
 pub trait StaticSendSync = Send + Sync + 'static;
 
@@ -333,29 +331,6 @@ impl<S: StateStoreRead> StateStoreReadExt for S {
         }
         Ok(ret)
     }
-}
-
-pub trait StateStoreWrite: StaticSendSync {
-    /// Writes a batch to storage. The batch should be:
-    /// * Ordered. KV pairs will be directly written to the table, so it must be ordered.
-    /// * Locally unique. There should not be two or more operations on the same key in one write
-    ///   batch.
-    ///
-    /// Ingests a batch of data into the state store. One write batch should never contain operation
-    /// on the same key. e.g. Put(233, x) then Delete(233).
-    /// An epoch should be provided to ingest a write batch. It is served as:
-    /// - A handle to represent an atomic write session. All ingested write batches associated with
-    ///   the same `Epoch` have the all-or-nothing semantics, meaning that partial changes are not
-    ///   queryable and will be rolled back if instructed.
-    /// - A version of a kv pair. kv pair associated with larger `Epoch` is guaranteed to be newer
-    ///   then kv pair with smaller `Epoch`. Currently this version is only used to derive the
-    ///   per-key modification history (e.g. in compaction), not across different keys.
-    fn ingest_batch(
-        &self,
-        kv_pairs: Vec<(TableKey<Bytes>, StorageValue)>,
-        delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
-        write_options: WriteOptions,
-    ) -> StorageResult<usize>;
 }
 
 #[derive(Clone)]

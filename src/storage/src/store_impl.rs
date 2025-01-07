@@ -228,7 +228,7 @@ pub mod verify {
     use std::fmt::Debug;
     use std::future::Future;
     use std::marker::PhantomData;
-    use std::ops::{Bound, Deref};
+    use std::ops::Deref;
     use std::sync::Arc;
 
     use bytes::Bytes;
@@ -240,7 +240,6 @@ pub mod verify {
 
     use crate::error::StorageResult;
     use crate::hummock::HummockStorage;
-    use crate::storage_value::StorageValue;
     use crate::store::*;
     use crate::store_impl::AsHummock;
 
@@ -263,6 +262,7 @@ pub mod verify {
         }
     }
 
+    #[derive(Clone)]
     pub struct VerifyStateStore<A, E, T = ()> {
         pub actual: A,
         pub expected: Option<E>,
@@ -392,36 +392,6 @@ pub mod verify {
             actual,
             expected,
             _phantom: PhantomData::<T>,
-        }
-    }
-
-    impl<A: StateStoreWrite, E: StateStoreWrite> StateStoreWrite for VerifyStateStore<A, E> {
-        fn ingest_batch(
-            &self,
-            kv_pairs: Vec<(TableKey<Bytes>, StorageValue)>,
-            delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
-            write_options: WriteOptions,
-        ) -> StorageResult<usize> {
-            let actual = self.actual.ingest_batch(
-                kv_pairs.clone(),
-                delete_ranges.clone(),
-                write_options.clone(),
-            );
-            if let Some(expected) = &self.expected {
-                let expected = expected.ingest_batch(kv_pairs, delete_ranges, write_options);
-                assert_eq!(actual.is_err(), expected.is_err());
-            }
-            actual
-        }
-    }
-
-    impl<A: Clone, E: Clone> Clone for VerifyStateStore<A, E> {
-        fn clone(&self) -> Self {
-            Self {
-                actual: self.actual.clone(),
-                expected: self.expected.clone(),
-                _phantom: PhantomData,
-            }
         }
     }
 

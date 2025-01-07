@@ -79,7 +79,7 @@ impl Drop for HummockStorageShutdownGuard {
 }
 
 /// `HummockStorage` is the entry point of the Hummock state store backend.
-/// It implements the `StateStore` and `StateStoreRead` traits but not the `StateStoreWrite` trait
+/// It implements the `StateStore` and `StateStoreRead` traits but without any write method
 /// since all writes should be done via `LocalHummockStorage` to ensure the single writer property
 /// of hummock. `LocalHummockStorage` instance can be created via `new_local` call.
 /// Hummock is the state store backend.

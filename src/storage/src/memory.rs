@@ -25,7 +25,7 @@ use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange, UserKey};
 use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
 
 use crate::error::StorageResult;
-use crate::mem_table::MemtableLocalStateStore;
+use crate::mem_table::RangeKvLocalStateStore;
 use crate::storage_value::StorageValue;
 use crate::store::*;
 
@@ -695,8 +695,8 @@ impl<R: RangeKv> StateStoreReadLog for RangeKvStateStore<R> {
     }
 }
 
-impl<R: RangeKv> StateStoreWrite for RangeKvStateStore<R> {
-    fn ingest_batch(
+impl<R: RangeKv> RangeKvStateStore<R> {
+    pub(crate) fn ingest_batch(
         &self,
         mut kv_pairs: Vec<(TableKey<Bytes>, StorageValue)>,
         delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
@@ -738,7 +738,7 @@ impl<R: RangeKv> StateStoreWrite for RangeKvStateStore<R> {
 }
 
 impl<R: RangeKv> StateStore for RangeKvStateStore<R> {
-    type Local = MemtableLocalStateStore<Self>;
+    type Local = RangeKvLocalStateStore<R>;
 
     #[allow(clippy::unused_async)]
     async fn try_wait_epoch(
@@ -751,7 +751,7 @@ impl<R: RangeKv> StateStore for RangeKvStateStore<R> {
     }
 
     async fn new_local(&self, option: NewLocalOptions) -> Self::Local {
-        MemtableLocalStateStore::new(self.clone(), option)
+        RangeKvLocalStateStore::new(self.clone(), option)
     }
 }
 
