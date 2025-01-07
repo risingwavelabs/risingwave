@@ -373,6 +373,7 @@ impl GlobalStreamManager {
                 init_split_assignment,
                 streaming_job,
                 tmp_id: tmp_table_id.table_id,
+                release_ctx: None, /* release_ctx is None because we already drop the objects and not require atomic drop things when replacing table. */
             });
         }
 
@@ -455,6 +456,7 @@ impl GlobalStreamManager {
             dispatchers,
             tmp_id,
             streaming_job,
+            release_ctx,
             ..
         }: ReplaceStreamJobContext,
     ) -> MetaResult<()> {
@@ -478,6 +480,7 @@ impl GlobalStreamManager {
                     init_split_assignment,
                     streaming_job,
                     tmp_id,
+                    release_ctx,
                 }),
             )
             .await?;

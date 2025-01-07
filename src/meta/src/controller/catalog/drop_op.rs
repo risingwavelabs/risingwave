@@ -18,15 +18,13 @@ impl CatalogController {
     // drop table associated source is a special case of drop relation, which just remove the source object and associated state table, keeping the streaming job and fragments.
     pub async fn drop_table_associated_source(
         &self,
+        txn: &DatabaseTransaction,
         release_ctx: &ReleaseContext,
-    ) -> MetaResult<NotificationVersion> {
-        let inner = self.inner.write().await;
-        let txn = inner.db.begin().await?;
-
+    ) -> MetaResult<(Vec<PbUserInfo>, Vec<PartialObject>)> {
         let to_drop_source_objects: Vec<PartialObject> = Object::find()
             .filter(object::Column::Oid.is_in(release_ctx.removed_source_ids.clone()))
             .into_partial_model()
-            .all(&txn)
+            .all(txn)
             .await?;
         let to_drop_internal_table_objs: Vec<PartialObject> = Object::find()
             .select_only()
@@ -41,7 +39,7 @@ impl CatalogController {
                 table::Column::BelongsToJobId.is_in(release_ctx.removed_state_table_ids.clone()),
             )
             .into_partial_model()
-            .all(&txn)
+            .all(txn)
             .await?;
         let to_drop_objects = to_drop_source_objects
             .into_iter()
@@ -54,13 +52,13 @@ impl CatalogController {
             .column(user_privilege::Column::UserId)
             .filter(user_privilege::Column::Oid.is_in(to_drop_objects.iter().map(|obj| obj.oid)))
             .into_tuple()
-            .all(&txn)
+            .all(txn)
             .await?;
 
         // delete all in to_drop_objects.
         let res = Object::delete_many()
             .filter(object::Column::Oid.is_in(to_drop_objects.iter().map(|obj| obj.oid)))
-            .exec(&txn)
+            .exec(txn)
             .await?;
         if res.rows_affected == 0 {
             return Err(MetaError::catalog_id_not_found(
@@ -68,19 +66,9 @@ impl CatalogController {
                 release_ctx.removed_source_ids.first().unwrap(),
             ));
         }
-        let user_infos = list_user_info_by_ids(to_update_user_ids, &txn).await?;
+        let user_infos = list_user_info_by_ids(to_update_user_ids, txn).await?;
 
-        txn.commit().await?;
-
-        self.notify_users_update(user_infos).await;
-        let version = self
-            .notify_frontend(
-                NotificationOperation::Delete,
-                build_relation_group_for_delete(to_drop_objects),
-            )
-            .await;
-
-        Ok(version)
+        Ok((user_infos, to_drop_objects))
     }
 
     pub async fn drop_relation(

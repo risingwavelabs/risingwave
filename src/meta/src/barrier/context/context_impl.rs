@@ -201,6 +201,7 @@ impl CommandContext {
                                 new_fragments.actor_ids(),
                                 dispatchers.clone(),
                                 init_split_assignment,
+                                None,
                             )
                             .await?;
                         barrier_manager_context
@@ -253,6 +254,7 @@ impl CommandContext {
                         stream_job_fragments.actor_ids(),
                         dispatchers.clone(),
                         init_split_assignment,
+                        None,
                     )
                     .await?;
 
@@ -285,6 +287,7 @@ impl CommandContext {
                     new_fragments,
                     dispatchers,
                     init_split_assignment,
+                    release_ctx,
                     ..
                 },
             ) => {
@@ -297,6 +300,7 @@ impl CommandContext {
                         new_fragments.actor_ids(),
                         dispatchers.clone(),
                         init_split_assignment,
+                        release_ctx.as_ref(),
                     )
                     .await?;
 
@@ -310,6 +314,20 @@ impl CommandContext {
                         replace_plan.fragment_replacements(),
                     )
                     .await;
+
+                // handle release ctx: drop the objects after replace job succeeds. For drop table associated source.
+                if let Some(release_ctx) = release_ctx {
+                    barrier_manager_context
+                        .source_manager
+                        .apply_source_change(SourceChange::DropSource {
+                            dropped_source_ids: release_ctx
+                                .removed_source_ids
+                                .iter()
+                                .map(|id| *id as _)
+                                .collect(),
+                        })
+                        .await;
+                }
             }
 
             Command::CreateSubscription {

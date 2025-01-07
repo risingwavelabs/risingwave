@@ -1269,12 +1269,7 @@ impl DdlController {
                 }
             }?;
         }
-        self.apply_release_context(release_ctx).await;
 
-        Ok(version)
-    }
-
-    async fn apply_release_context(&self, release_ctx: ReleaseContext) {
         let ReleaseContext {
             database_id,
             removed_streaming_job_ids,
@@ -1322,6 +1317,7 @@ impl DdlController {
                 removed_fragments.iter().map(|id| *id as _).collect(),
             )
             .await;
+        Ok(version)
     }
 
     /// This is used for `ALTER TABLE ADD/DROP COLUMN` / `ALTER SOURCE ADD COLUMN`.
@@ -1377,9 +1373,6 @@ impl DdlController {
         tracing::debug!(id = job_id, "building replace streaming job");
         let mut updated_sink_catalogs = vec![];
 
-        // The release_ctx keep info to drop from catalog. But we do not drop it until the replace job succeeds.
-        // If replace job fails, we still need the old state table info to restore the job.
-        let mut release_ctx = None;
         let result: MetaResult<Vec<PbMergeUpdate>> = try {
             let (mut ctx, mut stream_job_fragments) = self
                 .build_replace_job(
@@ -1391,7 +1384,6 @@ impl DdlController {
                     drop_table_associated_source_id,
                 )
                 .await?;
-            release_ctx = ctx.release_ctx.clone();
 
             if let StreamingJob::Table(_, table, ..) = &streaming_job {
                 let catalogs = self
@@ -1439,9 +1431,10 @@ impl DdlController {
             merge_updates
         };
 
-        let version = match result {
+        match result {
             Ok(merge_updates) => {
-                self.metadata_manager
+                let version = self
+                    .metadata_manager
                     .catalog_controller
                     .finish_replace_streaming_job(
                         tmp_id,
@@ -1454,7 +1447,8 @@ impl DdlController {
                             updated_sink_catalogs,
                         },
                     )
-                    .await?
+                    .await?;
+                Ok(version)
             }
             Err(err) => {
                 tracing::error!(id = job_id, error = ?err.as_report(), "failed to replace job");
@@ -1464,19 +1458,9 @@ impl DdlController {
                     .await.inspect_err(|err| {
                     tracing::error!(id = job_id, error = ?err.as_report(), "failed to abort replacing job");
                 });
-                return Err(err);
+                Err(err)
             }
-        };
-
-        // If replace job fails, we still need the old state table info to restore the job so we wait for the replace job run command to finish.
-        if let Some(release_ctx) = release_ctx {
-            // todo: apply release will do another run command
-            // only delete the catalog after the replace job succeeds
-            self.metadata_manager.catalog_controller.drop_table_associated_source(&release_ctx).await?;
-            self.apply_release_context(release_ctx).await;
         }
-
-        Ok(version)
     }
 
     async fn drop_streaming_job(

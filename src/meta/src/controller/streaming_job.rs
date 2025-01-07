@@ -54,6 +54,7 @@ use risingwave_pb::stream_plan::update_mutation::PbMergeUpdate;
 use risingwave_pb::stream_plan::{
     PbDispatcher, PbDispatcherType, PbFragmentTypeFlag, PbStreamActor, PbStreamNode,
 };
+use risingwave_pb::user::PbUserInfo;
 use sea_orm::sea_query::{BinOper, Expr, Query, SimpleExpr};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
@@ -63,7 +64,7 @@ use sea_orm::{
 };
 
 use crate::barrier::{ReplaceStreamJobPlan, Reschedule};
-use crate::controller::catalog::CatalogController;
+use crate::controller::catalog::{CatalogController, ReleaseContext};
 use crate::controller::rename::ReplaceTableExprRewriter;
 use crate::controller::utils::{
     build_relation_group_for_delete, check_relation_name_duplicate, check_sink_into_table_cycle,
@@ -623,9 +624,17 @@ impl CatalogController {
         actor_ids: Vec<crate::model::ActorId>,
         new_actor_dispatchers: HashMap<crate::model::ActorId, Vec<PbDispatcher>>,
         split_assignment: &SplitAssignment,
+        release_ctx: Option<&ReleaseContext>,
     ) -> MetaResult<()> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
+
+        let mut notification_objs: Option<(Vec<PbUserInfo>, Vec<PartialObject>)> = None;
+        // apply release ctx: drop the objects after replace job succeeds. For drop table associated source.
+        if let Some(release_ctx) = release_ctx {
+            tracing::info!("apply release ctx: {:?}", release_ctx);
+            notification_objs = Some(self.drop_table_associated_source(&txn, release_ctx).await?);
+        }
 
         Actor::update_many()
             .col_expr(
@@ -679,6 +688,15 @@ impl CatalogController {
         .await?;
 
         txn.commit().await?;
+
+        if let Some((user_infos, to_drop_objects)) = notification_objs {
+            self.notify_users_update(user_infos).await;
+            self.notify_frontend(
+                NotificationOperation::Delete,
+                build_relation_group_for_delete(to_drop_objects),
+            )
+            .await;
+        }
 
         Ok(())
     }
