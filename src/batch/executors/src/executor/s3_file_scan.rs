@@ -20,7 +20,6 @@ use risingwave_connector::source::iceberg::{
     extract_bucket_and_file_name, new_s3_operator, read_parquet_file, FileScanBackend,
 };
 use risingwave_pb::batch_plan::file_scan_node;
-use risingwave_pb::batch_plan::file_scan_node::StorageType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::error::BatchError;
@@ -38,6 +37,7 @@ pub struct S3FileScanExecutor {
     s3_region: String,
     s3_access_key: String,
     s3_secret_key: String,
+    s3_endpoint: String,
     batch_size: usize,
     schema: Schema,
     identity: String,
@@ -67,6 +67,7 @@ impl S3FileScanExecutor {
         batch_size: usize,
         schema: Schema,
         identity: String,
+        s3_endpoint: String,
     ) -> Self {
         Self {
             file_format,
@@ -74,6 +75,7 @@ impl S3FileScanExecutor {
             s3_region,
             s3_access_key,
             s3_secret_key,
+            s3_endpoint,
             batch_size,
             schema,
             identity,
@@ -90,6 +92,7 @@ impl S3FileScanExecutor {
                 self.s3_access_key.clone(),
                 self.s3_secret_key.clone(),
                 bucket.clone(),
+                self.s3_endpoint.clone(),
             )?;
             let chunk_stream =
                 read_parquet_file(op, file_name, None, None, self.batch_size, 0).await?;
@@ -115,8 +118,6 @@ impl BoxedExecutorBuilder for FileScanExecutorBuilder {
             NodeBody::FileScan
         )?;
 
-        assert_eq!(file_scan_node.storage_type, StorageType::S3 as i32);
-
         Ok(Box::new(S3FileScanExecutor::new(
             match file_scan_node::FileFormat::try_from(file_scan_node.file_format).unwrap() {
                 file_scan_node::FileFormat::Parquet => FileFormat::Parquet,
@@ -129,6 +130,7 @@ impl BoxedExecutorBuilder for FileScanExecutorBuilder {
             source.context().get_config().developer.chunk_size,
             Schema::from_iter(file_scan_node.columns.iter().map(Field::from)),
             source.plan_node().get_identity().clone(),
+            file_scan_node.s3_endpoint.clone(),
         )))
     }
 }
