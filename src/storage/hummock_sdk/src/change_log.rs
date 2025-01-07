@@ -51,6 +51,10 @@ impl<T> TableChangeLogCommon<T> {
         }
         self.0.push_back(new_change_log);
     }
+
+    pub fn change_log_into_iter(self) -> impl Iterator<Item = EpochNewChangeLogCommon<T>> {
+        self.0.into_iter()
+    }
 }
 
 pub type TableChangeLog = TableChangeLogCommon<SstableInfo>;
