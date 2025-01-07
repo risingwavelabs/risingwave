@@ -19,13 +19,68 @@ impl CatalogController {
     pub async fn drop_table_associated_source(
         &self,
         release_ctx: &ReleaseContext,
-    ) -> MetaResult<ReleaseContext> {
+    ) -> MetaResult<NotificationVersion> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
-        let to_drop_object_ids = vec![];
+        let to_drop_source_objects: Vec<PartialObject> = Object::find()
+            .filter(object::Column::Oid.is_in(release_ctx.removed_source_ids.clone()))
+            .into_partial_model()
+            .all(&txn)
+            .await?;
+        let to_drop_internal_table_objs: Vec<PartialObject> = Object::find()
+            .select_only()
+            .columns([
+                object::Column::Oid,
+                object::Column::ObjType,
+                object::Column::SchemaId,
+                object::Column::DatabaseId,
+            ])
+            .join(JoinType::InnerJoin, object::Relation::Table.def())
+            .filter(
+                table::Column::BelongsToJobId.is_in(release_ctx.removed_state_table_ids.clone()),
+            )
+            .into_partial_model()
+            .all(&txn)
+            .await?;
+        let to_drop_objects = to_drop_source_objects
+            .into_iter()
+            .chain(to_drop_internal_table_objs.into_iter())
+            .collect_vec();
+        // Find affect users with privileges on all this objects.
+        let to_update_user_ids: Vec<UserId> = UserPrivilege::find()
+            .select_only()
+            .distinct()
+            .column(user_privilege::Column::UserId)
+            .filter(user_privilege::Column::Oid.is_in(to_drop_objects.iter().map(|obj| obj.oid)))
+            .into_tuple()
+            .all(&txn)
+            .await?;
 
-        Ok(ReleaseContext::default())
+        // delete all in to_drop_objects.
+        let res = Object::delete_many()
+            .filter(object::Column::Oid.is_in(to_drop_objects.iter().map(|obj| obj.oid)))
+            .exec(&txn)
+            .await?;
+        if res.rows_affected == 0 {
+            return Err(MetaError::catalog_id_not_found(
+                ObjectType::Source.as_str(),
+                release_ctx.removed_source_ids.first().unwrap(),
+            ));
+        }
+        let user_infos = list_user_info_by_ids(to_update_user_ids, &txn).await?;
+
+        txn.commit().await?;
+
+        self.notify_users_update(user_infos).await;
+        let version = self
+            .notify_frontend(
+                NotificationOperation::Delete,
+                build_relation_group_for_delete(to_drop_objects),
+            )
+            .await;
+
+        Ok(version)
     }
 
     pub async fn drop_relation(

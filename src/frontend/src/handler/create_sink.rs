@@ -56,7 +56,7 @@ use crate::handler::create_mv::parse_column_names;
 use crate::handler::create_table::{generate_stream_graph_for_replace_table, ColumnIdGenerator};
 use crate::handler::privilege::resolve_query_privileges;
 use crate::handler::util::{
-    check_connector_match_connection_type, ensure_connection_type_allowed, SourceSchemaCompatExt,
+    check_connector_match_connection_type, ensure_connection_type_allowed,
 };
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::{generic, LogicalSource, PartitionComputeInfo, StreamProject};
@@ -505,7 +505,6 @@ pub(crate) async fn reparse_table_for_sink(
     let definition = table_catalog.create_sql_ast()?;
     let Statement::CreateTable {
         name,
-        format_encode,
         ..
     } = &definition
     else {

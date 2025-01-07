@@ -1472,7 +1472,7 @@ impl DdlController {
         if let Some(release_ctx) = release_ctx {
             // todo: apply release will do another run command
             // only delete the catalog after the replace job succeeds
-            // self.stream_manager
+            self.metadata_manager.catalog_controller.drop_table_associated_source(&release_ctx).await?;
             self.apply_release_context(release_ctx).await;
         }
 
