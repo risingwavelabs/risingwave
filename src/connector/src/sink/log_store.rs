@@ -413,11 +413,9 @@ impl<R: LogReader> RateLimitedLogReader<R> {
             RateLimit::Disabled => split_chunk,
             RateLimit::Fixed(limit) => {
                 let limit = limit.get();
-                let required_permits: usize = split_chunk
-                    .chunk
-                    .compute_rate_limit_chunk_permits(limit as _);
-                if required_permits <= limit as _ {
-                    self.rate_limiter.wait(required_permits as _).await;
+                let required_permits = split_chunk.chunk.compute_rate_limit_chunk_permits();
+                if required_permits <= limit {
+                    self.rate_limiter.wait(required_permits).await;
                     split_chunk
                 } else {
                     // Cut the chunk into smaller chunks
@@ -441,7 +439,7 @@ impl<R: LogReader> RateLimitedLogReader<R> {
 
                     // Trigger rate limit and return the first chunk
                     self.rate_limiter
-                        .wait(first_chunk.compute_rate_limit_chunk_permits(limit as _) as _)
+                        .wait(first_chunk.compute_rate_limit_chunk_permits())
                         .await;
                     SplitChunk {
                         chunk: first_chunk,

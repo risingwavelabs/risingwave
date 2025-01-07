@@ -142,21 +142,21 @@ pub async fn apply_rate_limit(stream: BoxSourceChunkStream, rate_limit_rps: Opti
             continue;
         }
 
-        let limit = rate_limit_rps.unwrap() as usize;
-
-        let required_permits: usize = chunk.compute_rate_limit_chunk_permits(limit);
-        if required_permits <= limit {
-            limiter.wait(required_permits as _).await;
-            yield chunk;
-        } else {
-            // Cut the chunk into smaller chunks
-            for chunk in chunk.split(limit) {
-                limiter
-                    .wait(chunk.compute_rate_limit_chunk_permits(limit) as _)
-                    .await;
-                yield chunk;
-            }
+        let limit = rate_limit_rps.unwrap() as u64;
+        let required_permits = chunk.compute_rate_limit_chunk_permits();
+        if required_permits > limit {
+            // This should not happen after https://github.com/risingwavelabs/risingwave/pull/19698.
+            // But if it does happen, let's don't panic and just log an error.
+            tracing::error!(
+                chunk_size,
+                required_permits,
+                limit,
+                "unexpected large chunk size"
+            );
         }
+
+        limiter.wait(required_permits).await;
+        yield chunk;
     }
 }
 

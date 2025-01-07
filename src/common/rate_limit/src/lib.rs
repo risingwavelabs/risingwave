@@ -485,7 +485,12 @@ mod tests {
     const RATE: u64 = 1000;
     const DURATION: Duration = Duration::from_secs(10);
 
-    // TODO(MrCroxx): ignore this unit test if it fails on CI too frequently.
+    /// To run this test:
+    ///
+    /// ```bash
+    /// cargo test --package risingwave_common_rate_limit --lib -- tests::test_leak_bucket --exact --show-output --ignored
+    /// ```
+    #[ignore]
     #[test]
     fn test_leak_bucket() {
         let v = Arc::new(AtomicU64::new(0));
@@ -530,7 +535,12 @@ mod tests {
         println!("eratio {eratio} < ERATIO {ERATIO}");
     }
 
-    // TODO(MrCroxx): ignore this unit test if it fails on CI too frequently.
+    /// To run this test:
+    ///
+    /// ```bash
+    /// cargo test --package risingwave_common_rate_limit --lib -- tests::test_leak_bucket_overflow --exact --show-output --ignored
+    /// ```
+    #[ignore]
     #[test]
     fn test_leak_bucket_overflow() {
         let v = Arc::new(AtomicU64::new(0));

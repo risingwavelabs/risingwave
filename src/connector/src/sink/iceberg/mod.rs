@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod compaction;
 mod prometheus;
 
 use std::collections::{BTreeMap, HashMap};
@@ -64,8 +65,10 @@ use serde_derive::Deserialize;
 use serde_json::from_value;
 use serde_with::{serde_as, DisplayFromStr};
 use thiserror_ext::AsReport;
+use tokio::sync::{mpsc, oneshot};
 use tracing::warn;
 use url::Url;
+use uuid::Uuid;
 use with_options::WithOptions;
 
 use super::decouple_checkpoint_log_sink::{
@@ -77,6 +80,7 @@ use super::{
 };
 use crate::connector_common::IcebergCommon;
 use crate::sink::coordinate::CoordinatedSinkWriter;
+use crate::sink::iceberg::compaction::spawn_compaction_client;
 use crate::sink::writer::SinkWriter;
 use crate::sink::{Result, SinkCommitCoordinator, SinkParam};
 use crate::{deserialize_bool_from_string, deserialize_optional_string_seq_from_string};
@@ -415,8 +419,20 @@ impl Sink for IcebergSink {
     async fn new_coordinator(&self) -> Result<Self::Coordinator> {
         let catalog = self.config.create_catalog().await?;
         let table = self.create_and_validate_table().await?;
+        // Only iceberg engine table will enable config load and need compaction.
+        let (commit_tx, finish_tx) = if self.config.common.enable_config_load.unwrap_or(false) {
+            let (commit_tx, finish_tx) = spawn_compaction_client(&self.config)?;
+            (Some(commit_tx), Some(finish_tx))
+        } else {
+            (None, None)
+        };
 
-        Ok(IcebergSinkCommitter { catalog, table })
+        Ok(IcebergSinkCommitter {
+            catalog,
+            table,
+            commit_notifier: commit_tx,
+            _compact_task_guard: finish_tx,
+        })
     }
 }
 
@@ -542,6 +558,9 @@ impl IcebergSinkWriter {
         let schema = table.metadata().current_schema();
         let partition_spec = table.metadata().default_partition_spec();
 
+        // To avoid duplicate file name, each time the sink created will generate a unique uuid as file name suffix.
+        let unique_uuid_suffix = Uuid::now_v7();
+
         let parquet_writer_builder = ParquetWriterBuilder::new(
             WriterProperties::new(),
             schema.clone(),
@@ -550,7 +569,7 @@ impl IcebergSinkWriter {
                 .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
             DefaultFileNameGenerator::new(
                 writer_param.actor_id.to_string(),
-                None,
+                Some(unique_uuid_suffix.to_string()),
                 iceberg::spec::DataFileFormat::Parquet,
             ),
         );
@@ -667,6 +686,9 @@ impl IcebergSinkWriter {
         let schema = table.metadata().current_schema();
         let partition_spec = table.metadata().default_partition_spec();
 
+        // To avoid duplicate file name, each time the sink created will generate a unique uuid as file name suffix.
+        let unique_uuid_suffix = Uuid::now_v7();
+
         let data_file_builder = {
             let parquet_writer_builder = ParquetWriterBuilder::new(
                 WriterProperties::new(),
@@ -676,7 +698,7 @@ impl IcebergSinkWriter {
                     .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
                 DefaultFileNameGenerator::new(
                     writer_param.actor_id.to_string(),
-                    None,
+                    Some(unique_uuid_suffix.to_string()),
                     iceberg::spec::DataFileFormat::Parquet,
                 ),
             );
@@ -691,7 +713,7 @@ impl IcebergSinkWriter {
                     .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
                 DefaultFileNameGenerator::new(
                     writer_param.actor_id.to_string(),
-                    Some("pos-del".to_owned()),
+                    Some(format!("pos-del-{}", unique_uuid_suffix)),
                     iceberg::spec::DataFileFormat::Parquet,
                 ),
             );
@@ -718,7 +740,7 @@ impl IcebergSinkWriter {
                     .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
                 DefaultFileNameGenerator::new(
                     writer_param.actor_id.to_string(),
-                    Some("eq-del".to_owned()),
+                    Some(format!("eq-del-{}", unique_uuid_suffix)),
                     iceberg::spec::DataFileFormat::Parquet,
                 ),
             );
@@ -1169,6 +1191,8 @@ impl<'a> TryFrom<&'a IcebergCommitResult> for SinkMetadata {
 pub struct IcebergSinkCommitter {
     catalog: Arc<dyn Catalog>,
     table: Table,
+    commit_notifier: Option<mpsc::UnboundedSender<()>>,
+    _compact_task_guard: Option<oneshot::Sender<()>>,
 }
 
 #[async_trait::async_trait]
@@ -1262,6 +1286,12 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
             .await
             .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
         self.table = table;
+
+        if let Some(commit_notifier) = &mut self.commit_notifier {
+            if commit_notifier.send(()).is_err() {
+                warn!("failed to notify commit");
+            }
+        }
 
         tracing::info!("Succeeded to commit to iceberg table in epoch {epoch}.");
         Ok(())
@@ -1400,6 +1430,7 @@ mod test {
                 endpoint: Some("http://127.0.0.1:9301".to_owned()),
                 access_key: Some("hummockadmin".to_owned()),
                 secret_key: Some("hummockadmin".to_owned()),
+                gcs_credential: None,
                 catalog_type: Some("jdbc".to_owned()),
                 catalog_name: Some("demo".to_owned()),
                 database_name: Some("demo_db".to_owned()),
