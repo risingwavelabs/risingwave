@@ -80,11 +80,15 @@ impl TableFunction {
         let return_type = {
             // arguments:
             // file format e.g. parquet
-            // storage type e.g. s3, gcs
-            // For s3: file_scan(file_format, s3, s3_region, s3_access_key, s3_secret_key, file_location_or_directory)
-            // For gcs: file_scan(file_format, gcs, credential, file_location_or_directory)
+            // storage type e.g. s3, gcs, azblob
+            // For s3: file_scan('parquet', 's3', s3_region, s3_access_key, s3_secret_key, file_location_or_directory)
+            // For gcs: file_scan('parquet', 'gcs', credential, file_location_or_directory)
+            // For azblob: file_scan('parquet', 'azblob', account_name, account_key, endpoint, file_location)
             if args.len() != 6 && args.len() != 4 {
-                return Err(BindError("file_scan function only accepts: file_scan('parquet', 's3', s3 region, s3 access key, s3 secret key, file location) or file_scan('parquet', 'gcs', credential, service_account, file location)".to_owned()).into());
+                return Err(BindError("file_scan function only accepts: \
+                    file_scan('parquet', 's3', s3_region, s3_access_key, s3_secret_key, file_location) or \
+                    file_scan('parquet', 'gcs', credential, service_account, file_location) or \
+                    file_scan('parquet', 'azblob', account_name, account_key, endpoint, file_location)".to_owned()).into());
             }
             let mut eval_args: Vec<String> = vec![];
             for arg in &args {
