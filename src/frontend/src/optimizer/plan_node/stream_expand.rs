@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use fixedbitset::FixedBitSet;
 use risingwave_pb::stream_plan::expand_node::Subset;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::ExpandNode;
@@ -43,15 +42,12 @@ impl StreamExpand {
             Distribution::Broadcast => unreachable!(),
         };
 
-        let mut watermark_columns = FixedBitSet::with_capacity(core.output_len());
-        watermark_columns.extend(input.watermark_columns().ones().map(|idx| idx + input_len));
-
         let base = PlanBase::new_stream_with_core(
             &core,
             dist,
             input.append_only(),
             input.emit_on_window_close(),
-            watermark_columns,
+            input.watermark_columns().right_shift_clone(input_len),
             MonotonicityMap::new(),
         );
         StreamExpand { base, core }

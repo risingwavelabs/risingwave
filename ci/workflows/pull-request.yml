@@ -532,7 +532,7 @@ steps:
   # It should be as conservative as possible.
   # This ensures our `main-cron` workflow will be stable.
   - label: "unit test"
-    command: "ci/scripts/pr-unit-test.sh"
+    command: "ci/scripts/run-unit-test.sh"
     if: |
       !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-unit-test"
@@ -607,7 +607,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 20
+    timeout_in_minutes: 22
     retry: *auto-retry
 
   - label: "end-to-end test (deterministic simulation)"

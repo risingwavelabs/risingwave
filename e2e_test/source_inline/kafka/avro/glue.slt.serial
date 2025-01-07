@@ -17,9 +17,7 @@ EOF
 statement ok
 ALTER SYSTEM SET license_key TO '';
 
-sleep 1s
-
-statement error
+statement error retry 3 backoff 5s
 create source t with (
   connector = 'kafka',
   properties.bootstrap.server='${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',

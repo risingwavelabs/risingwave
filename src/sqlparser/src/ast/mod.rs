@@ -1621,6 +1621,12 @@ pub enum Statement {
     Wait,
     /// Trigger stream job recover
     Recover,
+    /// `USE <db_name>`
+    ///
+    /// Note: this is a RisingWave specific statement and used to switch the current database.
+    Use {
+        db_name: ObjectName,
+    },
 }
 
 impl fmt::Display for Statement {
@@ -2228,6 +2234,10 @@ impl fmt::Display for Statement {
             }
             Statement::Recover => {
                 write!(f, "RECOVER")?;
+                Ok(())
+            }
+            Statement::Use { db_name } => {
+                write!(f, "USE {}", db_name)?;
                 Ok(())
             }
         }
@@ -3382,6 +3392,30 @@ impl fmt::Display for DiscardType {
 impl Statement {
     pub fn to_redacted_string(&self, keywords: RedactSqlOptionKeywordsRef) -> String {
         REDACT_SQL_OPTION_KEYWORDS.sync_scope(keywords, || self.to_string())
+    }
+
+    /// Create a new `CREATE TABLE` statement with the given `name` and empty fields.
+    pub fn default_create_table(name: ObjectName) -> Self {
+        Self::CreateTable {
+            name,
+            or_replace: false,
+            temporary: false,
+            if_not_exists: false,
+            columns: Vec::new(),
+            wildcard_idx: None,
+            constraints: Vec::new(),
+            with_options: Vec::new(),
+            format_encode: None,
+            source_watermarks: Vec::new(),
+            append_only: false,
+            on_conflict: None,
+            with_version_column: None,
+            query: None,
+            cdc_table_info: None,
+            include_column_options: Vec::new(),
+            webhook_info: None,
+            engine: Engine::Hummock,
+        }
     }
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,6 +24,7 @@ use risingwave_common::catalog::{ColumnCatalog, Field};
 use risingwave_common::metrics::{LabelGuardedIntGauge, GLOBAL_ERROR_METRICS};
 use risingwave_common_estimate_size::collections::EstimatedVec;
 use risingwave_common_estimate_size::EstimateSize;
+use risingwave_common_rate_limit::RateLimit;
 use risingwave_connector::dispatch_sink;
 use risingwave_connector::sink::catalog::SinkType;
 use risingwave_connector::sink::log_store::{
@@ -246,7 +247,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
 
             let (rate_limit_tx, rate_limit_rx) = unbounded_channel();
             // Init the rate limit
-            rate_limit_tx.send(self.rate_limit).unwrap();
+            rate_limit_tx.send(self.rate_limit.into()).unwrap();
 
             self.log_store_factory
                 .build()
@@ -286,7 +287,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         input: impl MessageStream,
         mut log_writer: impl LogWriter,
         actor_id: ActorId,
-        rate_limit_tx: UnboundedSender<Option<u32>>,
+        rate_limit_tx: UnboundedSender<RateLimit>,
     ) {
         pin_mut!(input);
         let barrier = expect_first_barrier(&mut input).await?;
@@ -332,7 +333,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                         rate_limit = new_rate_limit,
                                         "received sink rate limit on actor {actor_id}"
                                     );
-                                    if let Err(e) = rate_limit_tx.send(*new_rate_limit) {
+                                    if let Err(e) = rate_limit_tx.send((*new_rate_limit).into()) {
                                         error!(
                                             error = %e.as_report(),
                                             "fail to send sink ate limit update"
@@ -492,7 +493,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         sink_param: SinkParam,
         mut sink_writer_param: SinkWriterParam,
         actor_context: ActorContextRef,
-        rate_limit_rx: UnboundedReceiver<Option<u32>>,
+        rate_limit_rx: UnboundedReceiver<RateLimit>,
     ) -> StreamExecutorResult<!> {
         let visible_columns = columns
             .iter()

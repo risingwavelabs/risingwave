@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -57,14 +57,14 @@ fn make_prost_privilege(
         GrantObjects::Schemas(schemas) => {
             for schema in schemas {
                 let schema_name = Binder::resolve_schema_name(schema)?;
-                let schema = reader.get_schema_by_name(session.database(), &schema_name)?;
+                let schema = reader.get_schema_by_name(&session.database(), &schema_name)?;
                 grant_objs.push(PbObject::SchemaId(schema.id()));
             }
         }
         GrantObjects::Mviews(tables) => {
-            let db_name = session.database();
+            let db_name = &session.database();
             let search_path = session.config().search_path();
-            let user_name = &session.auth_context().user_name;
+            let user_name = &session.user_name();
 
             for name in tables {
                 let (schema_name, table_name) =
@@ -86,9 +86,9 @@ fn make_prost_privilege(
             }
         }
         GrantObjects::Tables(tables) => {
-            let db_name = session.database();
+            let db_name = &session.database();
             let search_path = session.config().search_path();
-            let user_name = &session.auth_context().user_name;
+            let user_name = &session.user_name();
 
             for name in tables {
                 let (schema_name, table_name) =
@@ -123,9 +123,9 @@ fn make_prost_privilege(
             }
         }
         GrantObjects::Sources(sources) => {
-            let db_name = session.database();
+            let db_name = &session.database();
             let search_path = session.config().search_path();
-            let user_name = &session.auth_context().user_name;
+            let user_name = &session.user_name();
 
             for name in sources {
                 let (schema_name, source_name) =
@@ -137,9 +137,9 @@ fn make_prost_privilege(
             }
         }
         GrantObjects::Sinks(sinks) => {
-            let db_name = session.database();
+            let db_name = &session.database();
             let search_path = session.config().search_path();
-            let user_name = &session.auth_context().user_name;
+            let user_name = &session.user_name();
 
             for name in sinks {
                 let (schema_name, sink_name) =
@@ -153,21 +153,21 @@ fn make_prost_privilege(
         GrantObjects::AllSourcesInSchema { schemas } => {
             for schema in schemas {
                 let schema_name = Binder::resolve_schema_name(schema)?;
-                let schema = reader.get_schema_by_name(session.database(), &schema_name)?;
+                let schema = reader.get_schema_by_name(&session.database(), &schema_name)?;
                 grant_objs.push(PbObject::AllSourcesSchemaId(schema.id()));
             }
         }
         GrantObjects::AllMviewsInSchema { schemas } => {
             for schema in schemas {
                 let schema_name = Binder::resolve_schema_name(schema)?;
-                let schema = reader.get_schema_by_name(session.database(), &schema_name)?;
+                let schema = reader.get_schema_by_name(&session.database(), &schema_name)?;
                 grant_objs.push(PbObject::AllTablesSchemaId(schema.id()));
             }
         }
         GrantObjects::AllTablesInSchema { schemas } => {
             for schema in schemas {
                 let schema_name = Binder::resolve_schema_name(schema)?;
-                let schema = reader.get_schema_by_name(session.database(), &schema_name)?;
+                let schema = reader.get_schema_by_name(&session.database(), &schema_name)?;
                 grant_objs.push(PbObject::AllDmlRelationsSchemaId(schema.id()));
             }
         }
@@ -323,7 +323,7 @@ mod tests {
             let reader = catalog_reader.read_guard();
             (
                 reader
-                    .get_database_by_name(session.database())
+                    .get_database_by_name(&session.database())
                     .unwrap()
                     .id(),
                 reader.get_database_by_name("db1").unwrap().id(),

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,7 +30,7 @@ use risingwave_pb::compute::{
 };
 use risingwave_pb::monitor_service::monitor_service_client::MonitorServiceClient;
 use risingwave_pb::monitor_service::{
-    AnalyzeHeapRequest, AnalyzeHeapResponse, GetBackPressureRequest, GetBackPressureResponse,
+    AnalyzeHeapRequest, AnalyzeHeapResponse, GetStreamingStatsRequest, GetStreamingStatsResponse,
     HeapProfilingRequest, HeapProfilingResponse, ListHeapProfilingRequest,
     ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse, StackTraceRequest,
     StackTraceResponse,
@@ -220,11 +220,11 @@ impl ComputeClient {
             .into_inner())
     }
 
-    pub async fn get_back_pressure(&self) -> Result<GetBackPressureResponse> {
+    pub async fn get_streaming_stats(&self) -> Result<GetStreamingStatsResponse> {
         Ok(self
             .monitor_client
             .to_owned()
-            .get_back_pressure(GetBackPressureRequest::default())
+            .get_streaming_stats(GetStreamingStatsRequest::default())
             .await
             .map_err(RpcError::from_compute_status)?
             .into_inner())

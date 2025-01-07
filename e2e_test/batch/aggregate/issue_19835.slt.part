@@ -1,0 +1,60 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+CREATE TABLE foo (
+       id int
+);
+
+statement ok
+CREATE TABLE bar (
+       id int,
+       foo_id int
+);
+
+statement ok
+insert into foo values (1),(2);
+
+query I rowsort
+select
+    foo.id, array(
+        select
+             1
+        from bar
+        where bar.foo_id = foo.id
+    )
+from foo;
+----
+1	{}
+2	{}
+
+
+query I rowsort
+select foo.id, (select count(id) from bar where bar.foo_id = foo.id) from foo;
+----
+1 0
+2 0
+
+query I rowsort
+select foo.id, (select avg(id) from bar where bar.foo_id = foo.id) from foo;
+----
+1	NULL
+2	NULL
+
+query I rowsort
+select foo.id, (select max(id) from bar where bar.foo_id = foo.id) from foo;
+----
+1	NULL
+2	NULL
+
+query I rowsort
+select foo.id, (select coalesce( max(id), 114514) from bar where bar.foo_id = foo.id) from foo;
+----
+1	114514
+2	114514
+
+statement ok
+drop table foo;
+
+statement ok
+drop table bar;
