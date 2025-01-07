@@ -48,7 +48,7 @@ impl LogicalFileScan {
         s3_access_key: String,
         s3_secret_key: String,
         file_location: Vec<String>,
-        is_minio: bool,
+        s3_endpoint: String,
     ) -> Self {
         assert!("parquet".eq_ignore_ascii_case(&file_format));
         assert!("s3".eq_ignore_ascii_case(&storage_type));
@@ -62,7 +62,7 @@ impl LogicalFileScan {
             s3_secret_key,
             file_location,
             ctx,
-            is_minio,
+            s3_endpoint,
         };
 
         let base = PlanBase::new_logical_with_core(&core);

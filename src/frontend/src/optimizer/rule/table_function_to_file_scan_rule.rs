@@ -16,6 +16,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqDebug;
+use risingwave_connector::source::iceberg::extract_bucket_and_file_name;
 
 use super::{BoxedRule, Rule};
 use crate::expr::{Expr, TableFunctionType};
@@ -62,12 +63,19 @@ impl Rule for TableFunctionToFileScanRule {
                 ("s3".eq_ignore_ascii_case(&eval_args[1])
                     || "minio".eq_ignore_ascii_case(&eval_args[1]))
             );
-            let s3_region = eval_args[2].clone();
+            let file_location = eval_args[5..].iter().cloned().collect_vec();
+            let (bucket, _) = extract_bucket_and_file_name(&file_location[0]).ok()?;
+            let (s3_region, s3_endpoint) = match eval_args[2].starts_with("http") {
+                true => ("us-east-1".to_owned(), eval_args[2].clone()), /* for minio, hard code region as not used but needed. */
+                false => (
+                    eval_args[2].clone(),
+                    format!("https://{}.s3.{}.amazonaws.com", bucket, eval_args[2],),
+                ),
+            };
             let s3_access_key = eval_args[3].clone();
             let s3_secret_key = eval_args[4].clone();
             // The rest of the arguments are file locations
-            let file_location = eval_args[5..].iter().cloned().collect_vec();
-            let is_minio = s3_region.starts_with("http");
+
             Some(
                 LogicalFileScan::new(
                     logical_table_function.ctx(),
@@ -78,7 +86,7 @@ impl Rule for TableFunctionToFileScanRule {
                     s3_access_key,
                     s3_secret_key,
                     file_location,
-                    is_minio,
+                    s3_endpoint,
                 )
                 .into(),
             )

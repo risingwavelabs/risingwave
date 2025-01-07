@@ -150,13 +150,19 @@ impl TableFunction {
             {
                 let (bucket, _) = extract_bucket_and_file_name(&eval_args[5].clone())?;
 
-                let is_minio = eval_args[2].starts_with("http");
+                let (s3_region, s3_endpoint) = match eval_args[2].starts_with("http") {
+                    true => ("us-east-1".to_owned(), eval_args[2].clone()), /* for minio, hard code region as not used but needed. */
+                    false => (
+                        eval_args[2].clone(),
+                        format!("https://{}.s3.{}.amazonaws.com", bucket, eval_args[2],),
+                    ),
+                };
                 let op = new_s3_operator(
-                    eval_args[2].clone(),
+                    s3_region.clone(),
                     eval_args[3].clone(),
                     eval_args[4].clone(),
                     bucket.clone(),
-                    is_minio,
+                    s3_endpoint.clone(),
                 )?;
                 let files = if eval_args[5].ends_with('/') {
                     let files = tokio::task::block_in_place(|| {
