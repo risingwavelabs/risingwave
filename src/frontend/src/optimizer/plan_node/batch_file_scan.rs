@@ -108,6 +108,7 @@ impl ToBatchPb for BatchFileScan {
                     file_location: gcs_file_scan.file_location.clone(),
                 })
             }
+
             generic::FileScanBackend::AzblobFileScan(azblob_file_scan) => {
                 NodeBody::AzblobFileScan(AzblobFileScanNode {
                     columns: azblob_file_scan

@@ -23,7 +23,7 @@ hyper-util = { version = "0.1", features = ["client-legacy"] }
 hytra = { workspace = true }
 itertools = { workspace = true }
 parking_lot = { workspace = true }
-pin-project-lite = "0.2"
+pin-project-lite = { workspace = true }
 prometheus = { version = "0.13" }
 rw_iter_util = { workspace = true }
 rw_resource_util = { workspace = true }

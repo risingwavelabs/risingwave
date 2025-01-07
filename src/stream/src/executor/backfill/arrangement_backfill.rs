@@ -22,6 +22,7 @@ use risingwave_common::array::{DataChunk, Op};
 use risingwave_common::bail;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+use risingwave_common_rate_limit::{MonitoredRateLimiter, RateLimit, RateLimiter};
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::store::PrefetchOptions;
 
@@ -29,9 +30,9 @@ use crate::common::table::state_table::ReplicatedStateTable;
 #[cfg(debug_assertions)]
 use crate::executor::backfill::utils::METADATA_STATE_LEN;
 use crate::executor::backfill::utils::{
-    compute_bounds, create_builder, create_limiter, get_progress_per_vnode, mapping_chunk,
-    mapping_message, mark_chunk_ref_by_vnode, persist_state_per_vnode, update_pos_by_vnode,
-    BackfillProgressPerVnode, BackfillRateLimiter, BackfillState,
+    compute_bounds, create_builder, get_progress_per_vnode, mapping_chunk, mapping_message,
+    mark_chunk_ref_by_vnode, persist_state_per_vnode, update_pos_by_vnode,
+    BackfillProgressPerVnode, BackfillState,
 };
 use crate::executor::prelude::*;
 use crate::task::CreateMviewProgressReporter;
@@ -64,7 +65,7 @@ pub struct ArrangementBackfillExecutor<S: StateStore, SD: ValueRowSerde> {
 
     chunk_size: usize,
 
-    rate_limit: Option<usize>,
+    rate_limiter: MonitoredRateLimiter,
 }
 
 impl<S, SD> ArrangementBackfillExecutor<S, SD>
@@ -82,8 +83,9 @@ where
         progress: CreateMviewProgressReporter,
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
-        rate_limit: Option<usize>,
+        rate_limit: RateLimit,
     ) -> Self {
+        let rate_limiter = RateLimiter::new(rate_limit).monitored(upstream_table.table_id());
         Self {
             upstream_table,
             upstream,
@@ -93,7 +95,7 @@ where
             progress,
             metrics,
             chunk_size,
-            rate_limit,
+            rate_limiter,
         }
     }
 
@@ -109,7 +111,6 @@ where
         let upstream_table_id = self.upstream_table.table_id();
         let mut upstream_table = self.upstream_table;
         let vnodes = upstream_table.vnodes().clone();
-        let mut rate_limit = self.rate_limit;
 
         // These builders will build data chunks.
         // We must supply them with the full datatypes which correspond to
@@ -125,8 +126,11 @@ where
             .vnodes()
             .iter_vnodes()
             .map(|vnode| {
-                let builder =
-                    create_builder(rate_limit, self.chunk_size, snapshot_data_types.clone());
+                let builder = create_builder(
+                    self.rate_limiter.rate_limit(),
+                    self.chunk_size,
+                    snapshot_data_types.clone(),
+                );
                 (vnode, builder)
             })
             .collect();
@@ -207,8 +211,6 @@ where
             let mut upstream_chunk_buffer: Vec<StreamChunk> = vec![];
             let mut pending_barrier: Option<Barrier> = None;
 
-            let mut rate_limiter = rate_limit.and_then(create_limiter);
-
             let metrics = self
                 .metrics
                 .new_backfill_metrics(upstream_table_id, self.actor_id);
@@ -226,13 +228,14 @@ where
                     let left_upstream = upstream.by_ref().map(Either::Left);
 
                     // Check if stream paused
-                    let paused = paused || matches!(rate_limit, Some(0));
+                    let paused =
+                        paused || matches!(self.rate_limiter.rate_limit(), RateLimit::Pause);
                     // Create the snapshot stream
                     let right_snapshot = pin!(Self::make_snapshot_stream(
                         &upstream_table,
                         backfill_state.clone(), // FIXME: Use mutable reference instead.
                         paused,
-                        &rate_limiter,
+                        &self.rate_limiter,
                     )
                     .map(Either::Right));
 
@@ -339,10 +342,7 @@ where
                     //
                     // If rate limit is set, respect the rate limit, check if we can read,
                     // If we can't, skip it. If no rate limit set, we can read.
-                    let rate_limit_ready = rate_limiter
-                        .as_ref()
-                        .map(|r| r.check().is_ok())
-                        .unwrap_or(true);
+                    let rate_limit_ready = self.rate_limiter.check(1).is_ok();
                     if !has_snapshot_read && !paused && rate_limit_ready {
                         debug_assert!(builders.values().all(|b| b.is_empty()));
                         let (_, snapshot) = backfill_stream.into_inner();
@@ -498,33 +498,28 @@ where
                         Mutation::Throttle(actor_to_apply) => {
                             let new_rate_limit_entry = actor_to_apply.get(&self.actor_id);
                             if let Some(new_rate_limit) = new_rate_limit_entry {
-                                let new_rate_limit = new_rate_limit.as_ref().map(|x| *x as _);
-                                if new_rate_limit != rate_limit {
-                                    rate_limit = new_rate_limit;
+                                let new_rate_limit = (*new_rate_limit).into();
+                                let old_rate_limit = self.rate_limiter.update(new_rate_limit);
+                                if old_rate_limit != new_rate_limit {
                                     tracing::info!(
-                                        new_rate_limit = ?rate_limit,
-                                        "rate limit changed",
+                                        old_rate_limit = ?old_rate_limit,
+                                        new_rate_limit = ?new_rate_limit,
+                                        upstream_table_id = upstream_table_id,
+                                        actor_id = self.actor_id,
+                                        "backfill rate limit changed",
                                     );
-                                    // The builder is emptied above via `DataChunkBuilder::consume_all`.
-                                    for (_, builder) in builders {
-                                        assert!(
-                                            builder.is_empty(),
-                                            "builder should already be emptied"
-                                        );
-                                    }
                                     builders = upstream_table
                                         .vnodes()
                                         .iter_vnodes()
                                         .map(|vnode| {
                                             let builder = create_builder(
-                                                rate_limit,
+                                                new_rate_limit,
                                                 self.chunk_size,
                                                 snapshot_data_types.clone(),
                                             );
                                             (vnode, builder)
                                         })
                                         .collect();
-                                    rate_limiter = new_rate_limit.and_then(create_limiter);
                                 }
                             }
                         }
@@ -612,7 +607,7 @@ where
         upstream_table: &'a ReplicatedStateTable<S, SD>,
         backfill_state: BackfillState,
         paused: bool,
-        rate_limiter: &'a Option<BackfillRateLimiter>,
+        rate_limiter: &'a MonitoredRateLimiter,
     ) {
         if paused {
             #[for_await]
@@ -624,9 +619,7 @@ where
             #[for_await]
             for r in Self::snapshot_read_per_vnode(upstream_table, backfill_state) {
                 let r = r?;
-                if let Some(rate_limit) = rate_limiter {
-                    rate_limit.until_ready().await;
-                }
+                rate_limiter.wait(1).await;
                 yield r;
             }
         }

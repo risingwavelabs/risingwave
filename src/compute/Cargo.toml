@@ -60,8 +60,10 @@ workspace-hack = { path = "../workspace-hack" }
 [dev-dependencies]
 futures-async-stream = { workspace = true }
 rand = { workspace = true }
+risingwave_common_rate_limit = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
 tempfile = "3"
+tokio-retry = "0.3"
 
 [lints]
 workspace = true

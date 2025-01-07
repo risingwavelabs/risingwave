@@ -118,7 +118,6 @@ impl FileScan {
             .collect()
     }
 }
-
 #[derive(Debug, Clone, Educe)]
 #[educe(PartialEq, Eq, Hash)]
 pub struct FileScan {
@@ -184,6 +183,7 @@ impl GenericPlanNode for FileScanBackend {
         match self {
             FileScanBackend::FileScan(file_scan) => file_scan.schema(),
             FileScanBackend::GcsFileScan(gcs_file_scan) => gcs_file_scan.schema(),
+
             FileScanBackend::AzblobFileScan(azblob_file_scan) => azblob_file_scan.schema(),
         }
     }
@@ -192,6 +192,7 @@ impl GenericPlanNode for FileScanBackend {
         match self {
             FileScanBackend::FileScan(file_scan) => file_scan.stream_key(),
             FileScanBackend::GcsFileScan(gcs_file_scan) => gcs_file_scan.stream_key(),
+
             FileScanBackend::AzblobFileScan(azblob_file_scan) => azblob_file_scan.stream_key(),
         }
     }
@@ -200,6 +201,7 @@ impl GenericPlanNode for FileScanBackend {
         match self {
             FileScanBackend::FileScan(file_scan) => file_scan.ctx(),
             FileScanBackend::GcsFileScan(gcs_file_scan) => gcs_file_scan.ctx(),
+
             FileScanBackend::AzblobFileScan(azblob_file_scan) => azblob_file_scan.ctx(),
         }
     }
@@ -208,6 +210,7 @@ impl GenericPlanNode for FileScanBackend {
         match self {
             FileScanBackend::FileScan(file_scan) => file_scan.functional_dependency(),
             FileScanBackend::GcsFileScan(gcs_file_scan) => gcs_file_scan.functional_dependency(),
+
             FileScanBackend::AzblobFileScan(azblob_file_scan) => {
                 azblob_file_scan.functional_dependency()
             }
@@ -220,6 +223,7 @@ impl FileScanBackend {
         match self {
             FileScanBackend::FileScan(file_scan) => file_scan.file_location.clone(),
             FileScanBackend::GcsFileScan(gcs_file_scan) => gcs_file_scan.file_location.clone(),
+
             FileScanBackend::AzblobFileScan(azblob_file_scan) => {
                 azblob_file_scan.file_location.clone()
             }

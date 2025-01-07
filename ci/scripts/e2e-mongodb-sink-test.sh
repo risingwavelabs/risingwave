@@ -66,6 +66,20 @@ if [ "$compound_pk_result" != "1" ]; then
     exit 1
 fi
 
+update_id1_result=$(mongo mongodb://mongodb:27017 --eval 'db.getSiblingDB("demo").t4.find({ "_id": 1 }).toArray()' | tail -n 1)
+if [ "$update_id1_result" != "[ { \"_id\" : 1, \"v1\" : 1, \"v2\" : 10, \"v3\" : 1, \"v4\" : 1 } ]" ]; then
+    echo "The upsert output is not as expected."
+    echo $update_id1_result
+    exit 1
+fi
+
+update_id2_result=$(mongo mongodb://mongodb:27017 --eval 'db.getSiblingDB("demo").t4.find({ "_id": 2 }).toArray()' | tail -n 1)
+if [ "$update_id2_result" != "[ { \"_id\" : 2, \"v1\" : 2, \"v2\" : 200, \"v3\" : 2, \"v4\" : 2 } ]" ]; then
+    echo "The upsert output is not as expected."
+    echo $update_id2_result
+    exit 1
+fi
+
 echo "Mongodb sink check passed"
 
 echo "--- Kill cluster"
