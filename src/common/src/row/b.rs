@@ -23,6 +23,12 @@ pub struct BRow {
     data: Box<[u8]>,
 }
 
+impl BRow {
+    pub fn as_ref(&self) -> BRowRef<'_> {
+        BRowRef { data: &self.data }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BRowRef<'a> {
     data: &'a [u8],
