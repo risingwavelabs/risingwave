@@ -144,7 +144,7 @@ pub fn new_azblob_operator(
     endpoint: String,
     container_name: String,
 ) -> ConnectorResult<Operator> {
-    // Create gcs builder.
+    // Create azblob builder.
     let mut builder = Azblob::default();
     builder = builder
         .container(&container_name)
