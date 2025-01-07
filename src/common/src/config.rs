@@ -273,8 +273,10 @@ pub struct MetaConfig {
     pub dangerous_max_idle_secs: Option<u64>,
 
     /// The default global parallelism for all streaming jobs, if user doesn't specify the
-    /// parallelism, this value will be used. `FULL` means use all available parallelism units,
-    /// otherwise it's a number.
+    /// parallelism, this value will be used. Possible values:
+    /// - `FULL`, means to use all available parallelism units in adaptive parallelism mode. e.g. "FULL".
+    /// - `FULL(N)`, means to use at max N available parallelism units in adaptive parallelism mode. e.g. "FULL(32)".
+    /// - N, which means to use N parallelism units in fixed parallelism mode. e.g. 32.
     #[serde(default = "default::meta::default_parallelism")]
     pub default_parallelism: DefaultParallelism,
 
@@ -428,11 +430,16 @@ pub struct MetaConfig {
     pub meta_store_config: MetaStoreConfig,
 }
 
-#[derive(Copy, Clone, Debug, Default)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub enum DefaultParallelism {
-    #[default]
-    Full,
+    Full(Option<NonZeroUsize>),
     Default(NonZeroUsize),
+}
+
+impl Default for DefaultParallelism {
+    fn default() -> Self {
+        Self::Full(None)
+    }
 }
 
 impl Serialize for DefaultParallelism {
@@ -447,7 +454,13 @@ impl Serialize for DefaultParallelism {
             Int(usize),
         }
         match self {
-            DefaultParallelism::Full => Parallelism::Str("Full".to_owned()).serialize(serializer),
+            DefaultParallelism::Full(n) => match n {
+                None => Parallelism::Str("Full".to_owned()).serialize(serializer),
+                Some(max_parallelism) => {
+                    Parallelism::Str(format!("Full({max_parallelism})").to_owned())
+                        .serialize(serializer)
+                }
+            },
             DefaultParallelism::Default(val) => {
                 Parallelism::Int(val.get() as _).serialize(serializer)
             }
@@ -469,8 +482,21 @@ impl<'de> Deserialize<'de> for DefaultParallelism {
         let p = Parallelism::deserialize(deserializer)?;
         match p {
             Parallelism::Str(s) => {
-                if s.trim().eq_ignore_ascii_case("full") {
-                    Ok(DefaultParallelism::Full)
+                let Ok(re) = regex::Regex::new(r"(?i)^full(?:\((\d+)\))?$") else {
+                    return Err(serde::de::Error::custom("invalid regex"));
+                };
+                if let Some(captures) = re.captures(&s) {
+                    if let Some(n) = captures.get(1) {
+                        let Ok(max_parallelism) = n.as_str().parse::<usize>() else {
+                            return Err(serde::de::Error::custom(format!(
+                                "invalid max_parallelism: {}",
+                                n.as_str()
+                            )));
+                        };
+                        Ok(DefaultParallelism::Full(NonZeroUsize::new(max_parallelism)))
+                    } else {
+                        Ok(DefaultParallelism::Full(None))
+                    }
                 } else {
                     Err(serde::de::Error::custom(format!(
                         "invalid default parallelism: {}",
@@ -1498,7 +1524,7 @@ pub mod default {
         }
 
         pub fn default_parallelism() -> DefaultParallelism {
-            DefaultParallelism::Full
+            DefaultParallelism::Full(None)
         }
 
         pub fn node_num_monitor_interval_sec() -> u64 {
@@ -2889,6 +2915,38 @@ mod tests {
             );
             assert_eq!(config.meta.table_high_write_throughput_threshold, 10);
             assert_eq!(config.meta.table_low_write_throughput_threshold, 5);
+        }
+    }
+
+    #[test]
+    fn test_max_adaptive_parallelism() {
+        let should_succeed = vec![
+            ("full", None),
+            ("Full(0)", None),
+            ("Full(00)", None),
+            ("fUlL(123)", Some(NonZeroUsize::new(123).unwrap())),
+            ("full(001)", Some(NonZeroUsize::new(1).unwrap())),
+        ];
+        let should_fail = vec!["Full(", "Full()", "Full(-1)", "Full(1.0)"];
+        for (i, o) in should_succeed {
+            let config: RwConfig = toml::from_str(&format!(
+                r#"
+            [meta]
+            default_parallelism = "{i}"
+            "#
+            ))
+            .unwrap();
+            assert_eq!(config.meta.default_parallelism, DefaultParallelism::Full(o));
+        }
+
+        for i in should_fail {
+            toml::from_str::<RwConfig>(&format!(
+                r#"
+            [meta]
+            default_parallelism = "{i}"
+            "#
+            ))
+            .unwrap_err();
         }
     }
 }

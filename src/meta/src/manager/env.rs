@@ -266,7 +266,7 @@ impl MetaOpts {
             in_flight_barrier_nums: 40,
             max_idle_ms: 0,
             compaction_deterministic_test: false,
-            default_parallelism: DefaultParallelism::Full,
+            default_parallelism: DefaultParallelism::Full(None),
             vacuum_interval_sec: 30,
             vacuum_spin_interval_ms: 0,
             hummock_version_checkpoint_interval_sec: 30,

@@ -744,7 +744,7 @@ mod tests {
                 10,
                 TableParallelism::Custom,
                 Some(5),
-                DefaultParallelism::Full,
+                DefaultParallelism::Full(None),
             )
         );
 
@@ -755,7 +755,7 @@ mod tests {
                 10,
                 TableParallelism::Custom,
                 Some(10),
-                DefaultParallelism::Full,
+                DefaultParallelism::Full(None),
             )
         );
 
@@ -766,7 +766,7 @@ mod tests {
                 10,
                 TableParallelism::Custom,
                 Some(11),
-                DefaultParallelism::Full,
+                DefaultParallelism::Full(None),
             )
         );
 
@@ -777,7 +777,7 @@ mod tests {
                 10,
                 TableParallelism::Custom,
                 None,
-                DefaultParallelism::Full,
+                DefaultParallelism::Full(None),
             )
         );
 
@@ -788,7 +788,7 @@ mod tests {
                 10,
                 TableParallelism::Adaptive,
                 None,
-                DefaultParallelism::Full,
+                DefaultParallelism::Full(None),
             )
         );
 

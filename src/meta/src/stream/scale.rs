@@ -139,6 +139,7 @@ impl CustomFragmentInfo {
 }
 
 use educe::Educe;
+use risingwave_common::config::DefaultParallelism;
 
 use super::SourceChange;
 use crate::controller::id::IdCategory;
@@ -1950,7 +1951,14 @@ impl ScaleController {
                 }
 
                 let (dist, vnode_count) = fragment_distribution_map[&fragment_id];
-                let max_parallelism = vnode_count;
+                let max_parallelism =
+                    if let DefaultParallelism::Full(Some(max_adaptive_parallelism)) =
+                        self.env.opts.default_parallelism
+                    {
+                        min(max_adaptive_parallelism.get(), vnode_count)
+                    } else {
+                        vnode_count
+                    };
 
                 match dist {
                     FragmentDistributionType::Unspecified => unreachable!(),

@@ -1498,7 +1498,13 @@ impl DdlController {
         } else {
             // Use configured parallelism if no default parallelism is specified.
             let default_parallelism = match self.env.opts.default_parallelism {
-                DefaultParallelism::Full => available,
+                DefaultParallelism::Full(max_adaptive_parallelism) => {
+                    if let Some(max_adaptive_parallelism) = max_adaptive_parallelism {
+                        std::cmp::min(max_adaptive_parallelism, available)
+                    } else {
+                        available
+                    }
+                }
                 DefaultParallelism::Default(num) => {
                     if num > available {
                         bail_unavailable!(
@@ -1604,7 +1610,7 @@ impl DdlController {
         // If the frontend does not specify the degree of parallelism and the default_parallelism is set to full, then set it to ADAPTIVE.
         // Otherwise, it defaults to FIXED based on deduction.
         let table_parallelism = match (specified_parallelism, &self.env.opts.default_parallelism) {
-            (None, DefaultParallelism::Full) => TableParallelism::Adaptive,
+            (None, DefaultParallelism::Full(_)) => TableParallelism::Adaptive,
             _ => TableParallelism::Fixed(parallelism.get()),
         };
 
