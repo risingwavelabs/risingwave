@@ -48,7 +48,7 @@ pub struct Planner {
 pub enum PlanFor {
     Stream,
     Batch,
-    /// BatchDql is a special mode for batch.
+    /// `BatchDql` is a special mode for batch.
     /// Iceberg engine table will be converted to iceberg source based on this mode.
     BatchDql,
 }
