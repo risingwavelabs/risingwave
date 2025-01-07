@@ -25,7 +25,7 @@ use super::{generic, ExprRewritable, PlanRef};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanNode;
 use crate::optimizer::plan_node::{PlanBase, PlanTreeNode, StreamNode};
-use crate::optimizer::property::{Distribution, MonotonicityMap};
+use crate::optimizer::property::{Distribution, MonotonicityMap, WatermarkColumns};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// `StreamUnion` implements [`super::LogicalUnion`]
@@ -45,15 +45,24 @@ impl StreamUnion {
 
     pub fn new_with_dist(core: generic::Union<PlanRef>, dist: Distribution) -> Self {
         let inputs = &core.inputs;
+        let ctx = core.ctx();
 
-        let watermark_columns = inputs.iter().fold(
-            {
-                let mut bitset = FixedBitSet::with_capacity(core.schema().len());
-                bitset.toggle_range(..);
-                bitset
-            },
-            |acc_watermark_columns, input| acc_watermark_columns.bitand(input.watermark_columns()),
-        );
+        let watermark_indices = inputs
+            .iter()
+            .map(|x| x.watermark_columns().index_set().to_bitset())
+            .fold(
+                {
+                    let mut bitset = FixedBitSet::with_capacity(core.schema().len());
+                    bitset.toggle_range(..);
+                    bitset
+                },
+                |acc, x| acc.bitand(&x),
+            );
+        let mut watermark_columns = WatermarkColumns::new();
+        for idx in watermark_indices.ones() {
+            // XXX(rc): for the sake of simplicity, we assign each watermark column a new group
+            watermark_columns.insert(idx, ctx.next_watermark_group_id());
+        }
 
         let base = PlanBase::new_stream_with_core(
             &core,

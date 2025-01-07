@@ -34,3 +34,5 @@ mod cardinality;
 pub use cardinality::*;
 mod monotonicity;
 pub use monotonicity::*;
+mod watermark_columns;
+pub use watermark_columns::*;

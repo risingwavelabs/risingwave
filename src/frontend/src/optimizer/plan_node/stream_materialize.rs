@@ -241,7 +241,9 @@ impl StreamMaterialize {
         let value_indices = (0..columns.len()).collect_vec();
         let distribution_key = input.distribution().dist_column_indices().to_vec();
         let append_only = input.append_only();
-        let watermark_columns = input.watermark_columns().clone();
+        // TODO(rc): In `TableCatalog` we still use `FixedBitSet` for watermark columns, ignoring the watermark group information.
+        // We will record the watermark group information in `TableCatalog` in the future. For now, let's flatten the watermark columns.
+        let watermark_columns = input.watermark_columns().indices().collect();
 
         let (table_pk, stream_key) = if let Some(pk_column_indices) = pk_column_indices {
             let table_pk = pk_column_indices
@@ -344,9 +346,10 @@ impl Distill for StreamMaterialize {
         vec.push(("pk_conflict", Pretty::from(pk_conflict_behavior)));
 
         let watermark_columns = &self.base.watermark_columns();
-        if self.base.watermark_columns().count_ones(..) > 0 {
+        if self.base.watermark_columns().n_indices() > 0 {
+            // TODO(rc): we ignore the watermark group info here, will be fixed it later
             let watermark_column_names = watermark_columns
-                .ones()
+                .indices()
                 .map(|i| table.columns()[i].name_with_hidden().to_string())
                 .map(Pretty::from)
                 .collect();
