@@ -716,7 +716,7 @@ impl<'a> From<&'a ListValue> for ListRef<'a> {
         ListRef {
             array: &value.values,
             start: 0,
-            end: value.len() as u32,
+            end: value.values.len() as u32,
         }
     }
 }
