@@ -28,7 +28,7 @@ use iceberg::io::{
 use iceberg::{Error, ErrorKind};
 use itertools::Itertools;
 use opendal::layers::{LoggingLayer, RetryLayer};
-use opendal::services::S3;
+use opendal::services::{Gcs, S3};
 use opendal::Operator;
 use parquet::arrow::async_reader::AsyncFileReader;
 use parquet::arrow::{parquet_to_arrow_schema, ParquetRecordBatchStreamBuilder, ProjectionMask};
@@ -127,25 +127,55 @@ pub fn new_s3_operator(
     Ok(op)
 }
 
-pub fn extract_bucket_and_file_name(location: &str) -> ConnectorResult<(String, String)> {
+pub fn new_gcs_operator(credential: String, bucket: String) -> ConnectorResult<Operator> {
+    // Create gcs builder.
+    let builder = Gcs::default().bucket(&bucket).credential(&credential);
+
+    let operator: Operator = Operator::new(builder)?
+        .layer(LoggingLayer::default())
+        .layer(RetryLayer::default())
+        .finish();
+    Ok(operator)
+}
+
+#[derive(Debug, Clone)]
+pub enum FileScanBackend {
+    S3,
+    Gcs,
+}
+
+pub fn extract_bucket_and_file_name(
+    location: &str,
+    file_scan_backend: &FileScanBackend,
+) -> ConnectorResult<(String, String)> {
     let url = Url::parse(location)?;
     let bucket = url
         .host_str()
         .ok_or_else(|| {
             Error::new(
                 ErrorKind::DataInvalid,
-                format!("Invalid s3 url: {}, missing bucket", location),
+                format!("Invalid url: {}, missing bucket", location),
             )
         })?
         .to_owned();
-    let prefix = format!("s3://{}/", bucket);
+    let prefix = match file_scan_backend {
+        FileScanBackend::S3 => format!("s3://{}/", bucket),
+        FileScanBackend::Gcs => format!("gcs://{}/", bucket),
+    };
     let file_name = location[prefix.len()..].to_string();
     Ok((bucket, file_name))
 }
 
-pub async fn list_s3_directory(op: Operator, dir: String) -> Result<Vec<String>, anyhow::Error> {
-    let (bucket, file_name) = extract_bucket_and_file_name(&dir)?;
-    let prefix = format!("s3://{}/", bucket);
+pub async fn list_data_directory(
+    op: Operator,
+    dir: String,
+    file_scan_backend: &FileScanBackend,
+) -> Result<Vec<String>, anyhow::Error> {
+    let (bucket, file_name) = extract_bucket_and_file_name(&dir, file_scan_backend)?;
+    let prefix = match file_scan_backend {
+        FileScanBackend::S3 => format!("s3://{}/", bucket),
+        FileScanBackend::Gcs => format!("gcs://{}/", bucket),
+    };
     if dir.starts_with(&prefix) {
         op.list(&file_name)
             .await
@@ -158,7 +188,7 @@ pub async fn list_s3_directory(op: Operator, dir: String) -> Result<Vec<String>,
     } else {
         Err(Error::new(
             ErrorKind::DataInvalid,
-            format!("Invalid s3 url: {}, should start with {}", dir, prefix),
+            format!("Invalid url: {}, should start with {}", dir, prefix),
         ))?
     }
 }

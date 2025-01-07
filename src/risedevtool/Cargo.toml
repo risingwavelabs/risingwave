@@ -17,7 +17,7 @@ clap = { workspace = true }
 console = "0.15"
 fs-err = "3.0.0"
 glob = "0.3"
-google-cloud-pubsub = "0.29"
+google-cloud-pubsub = "0.30"
 indicatif = "0.17"
 itertools = { workspace = true }
 log = "0.4"
