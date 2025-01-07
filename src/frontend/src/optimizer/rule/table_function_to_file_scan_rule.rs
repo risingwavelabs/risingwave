@@ -43,7 +43,6 @@ impl Rule for TableFunctionToFileScanRule {
 
             let schema = Schema::new(fields);
 
-            assert!(logical_table_function.table_function().args.len() >= 6);
             let mut eval_args = vec![];
             for arg in &logical_table_function.table_function().args {
                 assert_eq!(arg.return_type(), DataType::Varchar);
@@ -58,25 +57,48 @@ impl Rule for TableFunctionToFileScanRule {
                 }
             }
             assert!("parquet".eq_ignore_ascii_case(&eval_args[0]));
-            assert!("s3".eq_ignore_ascii_case(&eval_args[1]));
-            let s3_region = eval_args[2].clone();
-            let s3_access_key = eval_args[3].clone();
-            let s3_secret_key = eval_args[4].clone();
-            // The rest of the arguments are file locations
-            let file_location = eval_args[5..].iter().cloned().collect_vec();
-            Some(
-                LogicalFileScan::new(
-                    logical_table_function.ctx(),
-                    schema,
-                    "parquet".to_owned(),
-                    "s3".to_owned(),
-                    s3_region,
-                    s3_access_key,
-                    s3_secret_key,
-                    file_location,
+            assert!(
+                ("s3".eq_ignore_ascii_case(&eval_args[1]))
+                    || "gcs".eq_ignore_ascii_case(&eval_args[1])
+            );
+
+            if "s3".eq_ignore_ascii_case(&eval_args[1]) {
+                let s3_region = eval_args[2].clone();
+                let s3_access_key = eval_args[3].clone();
+                let s3_secret_key = eval_args[4].clone();
+                // The rest of the arguments are file locations
+                let file_location = eval_args[5..].iter().cloned().collect_vec();
+                Some(
+                    LogicalFileScan::new_s3_logical_file_scan(
+                        logical_table_function.ctx(),
+                        schema,
+                        "parquet".to_owned(),
+                        "s3".to_owned(),
+                        s3_region,
+                        s3_access_key,
+                        s3_secret_key,
+                        file_location,
+                    )
+                    .into(),
                 )
-                .into(),
-            )
+            } else if "gcs".eq_ignore_ascii_case(&eval_args[1]) {
+                let credential = eval_args[2].clone();
+                // The rest of the arguments are file locations
+                let file_location = eval_args[3..].iter().cloned().collect_vec();
+                Some(
+                    LogicalFileScan::new_gcs_logical_file_scan(
+                        logical_table_function.ctx(),
+                        schema,
+                        "parquet".to_owned(),
+                        "gcs".to_owned(),
+                        credential,
+                        file_location,
+                    )
+                    .into(),
+                )
+            } else {
+                unreachable!()
+            }
         } else {
             unreachable!("TableFunction return type should be struct")
         }
