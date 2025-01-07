@@ -520,44 +520,48 @@ impl HummockEventHandler {
     }
 
     fn resolve_version_update_info(
-        pinned_version: PinnedVersion,
+        mut pinned_version: PinnedVersion,
         version_payload: HummockVersionUpdate,
         mut sst_delta_infos: Option<&mut Vec<SstDeltaInfo>>,
     ) -> Option<PinnedVersion> {
         match version_payload {
             HummockVersionUpdate::VersionDeltas(version_deltas) => {
                 let mut version_to_apply = pinned_version.version().clone();
-                let mut table_change_log_to_apply =
-                    pinned_version.table_change_log().read().clone();
-                for version_delta in &version_deltas {
-                    assert_eq!(version_to_apply.id, version_delta.prev_id);
+                let table_change_log_to_apply = pinned_version.take_change_log();
+                {
+                    let mut table_change_log_to_apply_guard = table_change_log_to_apply.write();
+                    for version_delta in &version_deltas {
+                        assert_eq!(version_to_apply.id, version_delta.prev_id);
 
-                    // apply change_log
-                    {
-                        let mut state_table_info = version_to_apply.state_table_info.clone();
-                        let (changed_table_info, _is_commit_epoch) = state_table_info.apply_delta(
-                            &version_delta.state_table_info_delta,
-                            &version_delta.removed_table_ids,
-                        );
+                        // apply change-log-delta
+                        {
+                            let mut state_table_info = version_to_apply.state_table_info.clone();
+                            let (changed_table_info, _is_commit_epoch) = state_table_info
+                                .apply_delta(
+                                    &version_delta.state_table_info_delta,
+                                    &version_delta.removed_table_ids,
+                                );
 
-                        HummockVersionCommon::<SstableInfo, SstableInfo>::apply_change_log_delta(
-                            &mut table_change_log_to_apply,
+                            HummockVersionCommon::<SstableInfo, SstableInfo>::apply_change_log_delta(
+                            &mut *table_change_log_to_apply_guard,
                             &version_delta.change_log_delta,
                             &version_delta.removed_table_ids,
                             &version_delta.state_table_info_delta,
                             &changed_table_info,
                         );
-                    }
+                        }
 
-                    let local_hummock_version_delta = LocalHummockVersionDelta::from(version_delta);
-                    if let Some(sst_delta_infos) = &mut sst_delta_infos {
-                        sst_delta_infos.extend(
-                            version_to_apply
-                                .build_sst_delta_infos(&local_hummock_version_delta)
-                                .into_iter(),
-                        );
+                        let local_hummock_version_delta =
+                            LocalHummockVersionDelta::from(version_delta);
+                        if let Some(sst_delta_infos) = &mut sst_delta_infos {
+                            sst_delta_infos.extend(
+                                version_to_apply
+                                    .build_sst_delta_infos(&local_hummock_version_delta)
+                                    .into_iter(),
+                            );
+                        }
+                        version_to_apply.apply_version_delta(&local_hummock_version_delta);
                     }
-                    version_to_apply.apply_version_delta(&local_hummock_version_delta);
                 }
 
                 pinned_version.new_pin_version_with_table_change_log(

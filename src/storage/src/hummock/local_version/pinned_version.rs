@@ -133,7 +133,7 @@ impl PinnedVersion {
     pub fn new_pin_version_with_table_change_log(
         &self,
         version: LocalHummockVersion,
-        table_change_log: HashMap<TableId, TableChangeLogCommon<SstableInfo>>,
+        table_change_log: Arc<RwLock<HashMap<TableId, TableChangeLogCommon<SstableInfo>>>>,
     ) -> Option<Self> {
         assert!(
             version.id >= self.version.id,
@@ -151,7 +151,7 @@ impl PinnedVersion {
                 version_id,
                 self.guard.pinned_version_manager_tx.clone(),
             )),
-            table_change_log: Arc::new(RwLock::new(table_change_log)),
+            table_change_log,
             version: Arc::new(version),
         })
     }
@@ -202,6 +202,12 @@ impl PinnedVersion {
         &self,
     ) -> &Arc<RwLock<HashMap<TableId, TableChangeLogCommon<SstableInfo>>>> {
         &self.table_change_log
+    }
+
+    pub fn take_change_log(
+        &mut self,
+    ) -> Arc<RwLock<HashMap<TableId, TableChangeLogCommon<SstableInfo>>>> {
+        std::mem::take(&mut self.table_change_log)
     }
 }
 
