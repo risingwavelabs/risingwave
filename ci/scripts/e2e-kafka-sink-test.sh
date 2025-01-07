@@ -148,7 +148,7 @@ rpk topic delete test-rw-sink-debezium
 
 # test different encoding
 echo "preparing confluent schema registry"
-python3 -m pip install --break-system-packages -r e2e_test/requirments.txt
+python3 -m pip install --break-system-packages -r e2e_test/requirements.txt
 
 echo "testing protobuf"
 sqllogictest -p 4566 -d dev 'e2e_test/sink/kafka/protobuf.slt'
