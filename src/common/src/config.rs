@@ -1150,6 +1150,11 @@ pub struct StreamingDeveloperConfig {
     /// When true, all jdbc sinks with connector='jdbc' and jdbc.url="jdbc:postgresql://..."
     /// will be switched from jdbc postgresql sinks to rust native (connector='postgres') sinks.
     pub switch_jdbc_pg_to_native: bool,
+
+    /// Configure the system-wide cache row cardinality of hash join.
+    /// For example, if this is set to 1000, it means we can have at most 1000 rows in cache.
+    #[serde(default = "default::developer::streaming_hash_join_entry_state_max_rows")]
+    pub hash_join_entry_state_max_rows: usize,
 }
 
 /// The subsections `[batch.developer]`.
@@ -2112,6 +2117,11 @@ pub mod default {
 
         pub fn switch_jdbc_pg_to_native() -> bool {
             false
+        }
+
+        pub fn streaming_hash_join_entry_state_max_rows() -> usize {
+            // NOTE(kwannoel): This is just an arbitrary number.
+            30000
         }
     }
 
