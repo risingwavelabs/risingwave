@@ -247,7 +247,11 @@ fn gen_batch_query_plan(
         ..
     } = bind_result;
 
-    let mut planner = Planner::new_for_batch(context);
+    let mut planner = if matches!(bound, BoundStatement::Query(_)) {
+        Planner::new_for_batch_dql(context)
+    } else {
+        Planner::new_for_batch(context)
+    };
 
     let mut logical = planner.plan(bound)?;
     let schema = logical.schema();
