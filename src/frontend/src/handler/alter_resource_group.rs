@@ -32,7 +32,7 @@ pub async fn handle_alter_resource_group(
     let session = handler_args.session;
     let db_name = session.database();
     let (schema_name, real_table_name) =
-        Binder::resolve_schema_qualified_name(db_name, obj_name.clone())?;
+        Binder::resolve_schema_qualified_name(&db_name, obj_name.clone())?;
     let search_path = session.config().search_path();
     let user_name = &session.auth_context().user_name;
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
@@ -43,7 +43,7 @@ pub async fn handle_alter_resource_group(
         match stmt_type {
             StatementType::ALTER_MATERIALIZED_VIEW => {
                 let (table, schema_name) =
-                    reader.get_created_table_by_name(db_name, schema_path, &real_table_name)?;
+                    reader.get_created_table_by_name(&db_name, schema_path, &real_table_name)?;
 
                 match (table.table_type(), stmt_type) {
                     (TableType::MaterializedView, StatementType::ALTER_MATERIALIZED_VIEW) => {}
