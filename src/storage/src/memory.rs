@@ -603,7 +603,6 @@ impl<R: RangeKv> RangeKvStateStore<R> {
 }
 
 impl<R: RangeKv> StateStoreRead for RangeKvStateStore<R> {
-    type ChangeLogIter = RangeKvStateStoreChangeLogIter<R>;
     type Iter = RangeKvStateStoreIter<R>;
     type RevIter = RangeKvStateStoreRevIter<R>;
 
@@ -663,6 +662,10 @@ impl<R: RangeKv> StateStoreRead for RangeKvStateStore<R> {
             true,
         ))
     }
+}
+
+impl<R: RangeKv> StateStoreReadLog for RangeKvStateStore<R> {
+    type ChangeLogIter = RangeKvStateStoreChangeLogIter<R>;
 
     async fn iter_log(
         &self,

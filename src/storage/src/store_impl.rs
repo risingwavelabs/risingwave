@@ -276,7 +276,6 @@ pub mod verify {
     }
 
     impl<A: StateStoreRead, E: StateStoreRead> StateStoreRead for VerifyStateStore<A, E> {
-        type ChangeLogIter = impl StateStoreReadChangeLogIter;
         type Iter = impl StateStoreReadIter;
         type RevIter = impl StateStoreReadIter;
 
@@ -342,6 +341,10 @@ pub mod verify {
                 Ok(verify_iter::<StateStoreKeyedRow>(actual, expected))
             }
         }
+    }
+
+    impl<A: StateStoreReadLog, E: StateStoreReadLog> StateStoreReadLog for VerifyStateStore<A, E> {
+        type ChangeLogIter = impl StateStoreReadChangeLogIter;
 
         async fn iter_log(
             &self,
@@ -806,7 +809,7 @@ impl AsHummock for SledStateStore {
 }
 
 #[cfg(debug_assertions)]
-pub mod boxed_state_store {
+mod boxed_state_store {
     use std::future::Future;
     use std::ops::{Deref, DerefMut};
     use std::sync::Arc;
@@ -873,7 +876,10 @@ pub mod boxed_state_store {
             epoch: u64,
             read_options: ReadOptions,
         ) -> StorageResult<BoxStateStoreReadIter>;
+    }
 
+    #[async_trait::async_trait]
+    pub trait DynamicDispatchedStateStoreReadLog: StaticSendSync {
         async fn iter_log(
             &self,
             epoch_range: (u64, u64),
@@ -912,7 +918,10 @@ pub mod boxed_state_store {
                 self.rev_iter(key_range, epoch, read_options).await?,
             ))
         }
+    }
 
+    #[async_trait::async_trait]
+    impl<S: StateStoreReadLog> DynamicDispatchedStateStoreReadLog for S {
         async fn iter_log(
             &self,
             epoch_range: (u64, u64),
@@ -1159,7 +1168,6 @@ pub mod boxed_state_store {
     pub type BoxDynamicDispatchedStateStore = Box<dyn DynamicDispatchedStateStore>;
 
     impl StateStoreRead for BoxDynamicDispatchedStateStore {
-        type ChangeLogIter = BoxStateStoreReadChangeLogIter;
         type Iter = BoxStateStoreReadIter;
         type RevIter = BoxStateStoreReadIter;
 
@@ -1189,6 +1197,10 @@ pub mod boxed_state_store {
         ) -> impl Future<Output = StorageResult<Self::RevIter>> + '_ {
             self.deref().rev_iter(key_range, epoch, read_options)
         }
+    }
+
+    impl StateStoreReadLog for BoxDynamicDispatchedStateStore {
+        type ChangeLogIter = BoxStateStoreReadChangeLogIter;
 
         fn iter_log(
             &self,
@@ -1201,7 +1213,11 @@ pub mod boxed_state_store {
     }
 
     pub trait DynamicDispatchedStateStore:
-        DynClone + DynamicDispatchedStateStoreRead + DynamicDispatchedStateStoreExt + AsHummock
+        DynClone
+        + DynamicDispatchedStateStoreRead
+        + DynamicDispatchedStateStoreReadLog
+        + DynamicDispatchedStateStoreExt
+        + AsHummock
     {
     }
 
@@ -1214,7 +1230,11 @@ pub mod boxed_state_store {
     }
 
     impl<
-            S: DynClone + DynamicDispatchedStateStoreRead + DynamicDispatchedStateStoreExt + AsHummock,
+            S: DynClone
+                + DynamicDispatchedStateStoreRead
+                + DynamicDispatchedStateStoreReadLog
+                + DynamicDispatchedStateStoreExt
+                + AsHummock,
         > DynamicDispatchedStateStore for S
     {
     }

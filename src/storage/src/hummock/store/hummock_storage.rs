@@ -589,7 +589,6 @@ impl HummockStorage {
 }
 
 impl StateStoreRead for HummockStorage {
-    type ChangeLogIter = ChangeLogIterator;
     type Iter = HummockStorageIterator;
     type RevIter = HummockStorageRevIterator;
 
@@ -635,6 +634,10 @@ impl StateStoreRead for HummockStorage {
         );
         self.rev_iter_inner(key_range, epoch, read_options)
     }
+}
+
+impl StateStoreReadLog for HummockStorage {
+    type ChangeLogIter = ChangeLogIterator;
 
     async fn iter_log(
         &self,

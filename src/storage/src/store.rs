@@ -239,10 +239,20 @@ pub struct ReadLogOptions {
 
 pub trait StateStoreReadChangeLogIter = StateStoreIter<StateStoreReadLogItem> + Send + 'static;
 
+pub trait StateStoreReadLog: StaticSendSync {
+    type ChangeLogIter: StateStoreReadChangeLogIter;
+
+    fn iter_log(
+        &self,
+        epoch_range: (u64, u64),
+        key_range: TableKeyRange,
+        options: ReadLogOptions,
+    ) -> impl Future<Output = StorageResult<Self::ChangeLogIter>> + Send + '_;
+}
+
 pub trait StateStoreRead: StaticSendSync {
     type Iter: StateStoreReadIter;
     type RevIter: StateStoreReadIter;
-    type ChangeLogIter: StateStoreReadChangeLogIter;
 
     /// Point gets a value from the state store.
     /// The result is based on a snapshot corresponding to the given `epoch`.
@@ -285,13 +295,6 @@ pub trait StateStoreRead: StaticSendSync {
         epoch: u64,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Self::RevIter>> + Send + '_;
-
-    fn iter_log(
-        &self,
-        epoch_range: (u64, u64),
-        key_range: TableKeyRange,
-        options: ReadLogOptions,
-    ) -> impl Future<Output = StorageResult<Self::ChangeLogIter>> + Send + '_;
 }
 
 pub trait StateStoreReadExt: StaticSendSync {
@@ -384,7 +387,7 @@ impl From<TryWaitEpochOptions> for TracedTryWaitEpochOptions {
     }
 }
 
-pub trait StateStore: StateStoreRead + StaticSendSync + Clone {
+pub trait StateStore: StateStoreRead + StateStoreReadLog + StaticSendSync + Clone {
     type Local: LocalStateStore;
 
     /// If epoch is `Committed`, we will wait until the epoch is committed and its data is ready to

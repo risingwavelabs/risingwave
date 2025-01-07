@@ -32,7 +32,6 @@ use crate::store::*;
 pub struct PanicStateStore;
 
 impl StateStoreRead for PanicStateStore {
-    type ChangeLogIter = PanicStateStoreIter<StateStoreReadLogItem>;
     type Iter = PanicStateStoreIter<StateStoreKeyedRow>;
     type RevIter = PanicStateStoreIter<StateStoreKeyedRow>;
 
@@ -65,6 +64,10 @@ impl StateStoreRead for PanicStateStore {
     ) -> StorageResult<Self::RevIter> {
         panic!("should not read from the state store!");
     }
+}
+
+impl StateStoreReadLog for PanicStateStore {
+    type ChangeLogIter = PanicStateStoreIter<StateStoreReadLogItem>;
 
     async fn iter_log(
         &self,
