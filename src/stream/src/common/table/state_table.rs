@@ -30,7 +30,7 @@ use risingwave_common::catalog::{
     get_dist_key_in_pk_indices, ColumnDesc, ColumnId, TableId, TableOption,
 };
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt, VnodeCountCompat};
-use risingwave_common::row::{self, once, CompactedRow, Once, OwnedRow, Row, RowExt};
+use risingwave_common::row::{self, once, Once, OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, Datum, DefaultOrd, DefaultOrdered, ScalarImpl};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::EpochPair;
@@ -671,25 +671,6 @@ where
             .get(serialized_pk, read_options)
             .await
             .map_err(Into::into)
-    }
-
-    /// Get a row in value-encoding format from state table.
-    pub async fn get_compacted_row(
-        &self,
-        pk: impl Row,
-    ) -> StreamExecutorResult<Option<CompactedRow>> {
-        if self.row_serde.kind().is_basic() {
-            // Basic serde is in value-encoding format, which is compatible with the compacted row.
-            self.get_encoded_row(pk)
-                .await
-                .map(|bytes| bytes.map(CompactedRow::new))
-        } else {
-            // For other encodings, we must first deserialize it into a `Row` first, then serialize
-            // it back into value-encoding format.
-            self.get_row(pk)
-                .await
-                .map(|row| row.map(CompactedRow::from))
-        }
     }
 
     /// Update the vnode bitmap of the state table, returns the previous vnode bitmap.
