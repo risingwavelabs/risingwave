@@ -908,26 +908,18 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 };
             }
 
-            match op {
-                Op::Insert | Op::UpdateInsert =>
-                {
-                    #[for_await]
-                    for chunk in match_rows!(Insert) {
-                        let chunk = chunk?;
-                        total_matches += chunk.cardinality();
-                        yield chunk;
-                    }
+            {
+                let stream = match op {
+                    Op::Insert | Op::UpdateInsert => match_rows!(Insert).boxed(),
+                    Op::Delete | Op::UpdateDelete => match_rows!(Delete).boxed(),
+                };
+                #[for_await]
+                for chunk in stream {
+                    let chunk = chunk?;
+                    total_matches += chunk.cardinality();
+                    yield chunk;
                 }
-                Op::Delete | Op::UpdateDelete =>
-                {
-                    #[for_await]
-                    for chunk in match_rows!(Delete) {
-                        let chunk = chunk?;
-                        total_matches += chunk.cardinality();
-                        yield chunk;
-                    }
-                }
-            };
+            }
 
             join_matched_join_keys.observe(total_matches as _);
             if total_matches > high_join_amplification_threshold {
@@ -1249,7 +1241,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
     // without concat two rows.
     // if there are non-equi expressions
     // NOTE(kwannoel): We can probably let `eval` use `impl Row` instead of `OwnedRow`.
-    #[inline]
     async fn check_join_condition(
         row: impl Row,
         side_update_start_pos: usize,
