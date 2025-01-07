@@ -17,7 +17,6 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use educe::Educe;
-use fixedbitset::FixedBitSet;
 use pretty_xmlish::Pretty;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableDesc};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
@@ -29,7 +28,7 @@ use crate::catalog::table_catalog::TableType;
 use crate::catalog::{ColumnId, IndexCatalog};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor, FunctionCall, InputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
-use crate::optimizer::property::{Cardinality, FunctionalDependencySet, Order};
+use crate::optimizer::property::{Cardinality, FunctionalDependencySet, Order, WatermarkColumns};
 use crate::utils::{ColIndexMappingRewriteExt, Condition};
 use crate::TableCatalog;
 
@@ -107,9 +106,16 @@ impl TableScan {
         &self.table_desc.pk
     }
 
-    pub fn watermark_columns(&self) -> FixedBitSet {
-        let watermark_columns = &self.table_desc.watermark_columns;
-        self.i2o_col_mapping().rewrite_bitset(watermark_columns)
+    pub fn watermark_columns(&self) -> WatermarkColumns {
+        // TODO(rc): For now, we still use `FixedBitSet` for watermark columns in `TableDesc`.
+        // So when we scan from a table, we have to conservatively assign each watermark column
+        // a separate watermark group. We should record the watermark group information in
+        // `TableDesc` later.
+        let mut watermark_columns = WatermarkColumns::new();
+        for idx in self.table_desc.watermark_columns.ones() {
+            watermark_columns.insert(idx, self.ctx.next_watermark_group_id());
+        }
+        watermark_columns.map_clone(&self.i2o_col_mapping())
     }
 
     pub(crate) fn column_names_with_table_prefix(&self) -> Vec<String> {

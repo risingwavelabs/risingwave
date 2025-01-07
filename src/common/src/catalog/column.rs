@@ -25,8 +25,8 @@ use risingwave_pb::plan_common::{
 
 use super::schema::FieldLike;
 use super::{
-    iceberg_sequence_num_column_desc, row_id_column_desc, rw_timestamp_column_desc,
-    USER_COLUMN_ID_OFFSET,
+    iceberg_file_path_column_desc, iceberg_file_pos_column_desc, iceberg_sequence_num_column_desc,
+    row_id_column_desc, rw_timestamp_column_desc, USER_COLUMN_ID_OFFSET,
 };
 use crate::catalog::{cdc_table_name_column_desc, offset_column_desc, Field, ROW_ID_COLUMN_ID};
 use crate::types::{DataType, StructType};
@@ -413,6 +413,12 @@ impl ColumnCatalog {
         !self.is_generated() && !self.is_rw_timestamp_column()
     }
 
+    /// Returns whether the column is defined by user within the column definition clause
+    /// in the `CREATE TABLE` statement.
+    pub fn is_user_defined(&self) -> bool {
+        !self.is_hidden() && !self.is_rw_sys_column() && !self.is_connector_additional_column()
+    }
+
     /// If the column is a generated column
     pub fn generated_expr(&self) -> Option<&ExprNode> {
         if let Some(GeneratedOrDefaultColumn::GeneratedColumn(desc)) =
@@ -493,6 +499,20 @@ impl ColumnCatalog {
     pub fn iceberg_sequence_num_column() -> Self {
         Self {
             column_desc: iceberg_sequence_num_column_desc(),
+            is_hidden: true,
+        }
+    }
+
+    pub fn iceberg_file_path_column() -> Self {
+        Self {
+            column_desc: iceberg_file_path_column_desc(),
+            is_hidden: true,
+        }
+    }
+
+    pub fn iceberg_file_pos_column() -> Self {
+        Self {
+            column_desc: iceberg_file_pos_column_desc(),
             is_hidden: true,
         }
     }

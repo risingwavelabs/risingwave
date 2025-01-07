@@ -24,12 +24,12 @@ use risingwave_sqlparser::parser::Parser;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::error::{ErrorCode, Result};
-use crate::handler::alter_table_column::to_ast_data_type;
 use crate::handler::{
     get_replace_table_plan, HandlerArgs, ObjectName, PgResponse, RwPgResponse, Statement,
     StatementType,
 };
 use crate::session::SessionImpl;
+use crate::utils::data_type::DataTypeToAst;
 use crate::utils::options::RETENTION_SECONDS;
 use crate::{bind_data_type, Binder, TableCatalog};
 
@@ -123,7 +123,7 @@ fn rewrite_table_definition(
         {
             columns.push(ColumnDef {
                 name: Ident::from(col_name.as_str()),
-                data_type: Some(to_ast_data_type(col_def.data_type())?),
+                data_type: Some(col_def.data_type().to_ast()),
                 collation: None,
                 options: vec![],
             });

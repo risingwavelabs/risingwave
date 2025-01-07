@@ -15,12 +15,10 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use anyhow::anyhow;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::ColumnCatalog;
 use risingwave_common::hash::VnodeCount;
-use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::{bail, bail_not_implemented};
 use risingwave_connector::sink::catalog::SinkCatalog;
@@ -29,8 +27,7 @@ use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{ProjectNode, StreamFragmentGraph};
 use risingwave_sqlparser::ast::{
-    AlterTableOperation, ColumnDef, ColumnOption, DataType as AstDataType, Ident, ObjectName,
-    Statement, StructField, TableConstraint,
+    AlterTableOperation, ColumnDef, ColumnOption, Ident, ObjectName, Statement, TableConstraint,
 };
 
 use super::create_source::schema_has_schema_registry;
@@ -44,6 +41,7 @@ use crate::expr::{Expr, ExprImpl, InputRef, Literal};
 use crate::handler::create_sink::{fetch_incoming_sinks, insert_merger_to_union_with_project};
 use crate::handler::create_table::bind_table_constraints;
 use crate::session::SessionImpl;
+use crate::utils::data_type::DataTypeToAst;
 use crate::{Binder, TableCatalog};
 
 /// Used in auto schema change process
@@ -101,53 +99,16 @@ pub async fn get_new_table_definition_for_cdc_table(
         // if the column exists in the original catalog, use it to construct the column definition.
         // since we don't support altering the column type right now
         if let Some(original_col) = orig_column_catalog.get(new_col.name()) {
-            let ty = to_ast_data_type(original_col.data_type())?;
+            let ty = original_col.data_type().to_ast();
             new_column_defs.push(ColumnDef::new(original_col.name().into(), ty, None, vec![]));
         } else {
-            let ty = to_ast_data_type(new_col.data_type())?;
+            let ty = new_col.data_type().to_ast();
             new_column_defs.push(ColumnDef::new(new_col.name().into(), ty, None, vec![]));
         }
     }
     *original_columns = new_column_defs;
 
     Ok((definition, original_catalog))
-}
-
-pub(crate) fn to_ast_data_type(ty: &DataType) -> Result<AstDataType> {
-    match ty {
-        DataType::Boolean => Ok(AstDataType::Boolean),
-        DataType::Int16 => Ok(AstDataType::SmallInt),
-        DataType::Int32 => Ok(AstDataType::Int),
-        DataType::Int64 => Ok(AstDataType::BigInt),
-        DataType::Float32 => Ok(AstDataType::Real),
-        DataType::Float64 => Ok(AstDataType::Double),
-        // TODO: handle precision and scale for decimal
-        DataType::Decimal => Ok(AstDataType::Decimal(None, None)),
-        DataType::Date => Ok(AstDataType::Date),
-        DataType::Varchar => Ok(AstDataType::Varchar),
-        DataType::Time => Ok(AstDataType::Time(false)),
-        DataType::Timestamp => Ok(AstDataType::Timestamp(false)),
-        DataType::Timestamptz => Ok(AstDataType::Timestamp(true)),
-        DataType::Interval => Ok(AstDataType::Interval),
-        DataType::Jsonb => Ok(AstDataType::Jsonb),
-        DataType::Bytea => Ok(AstDataType::Bytea),
-        DataType::List(item_ty) => Ok(AstDataType::Array(Box::new(to_ast_data_type(item_ty)?))),
-        DataType::Struct(fields) => {
-            let fields = fields
-                .iter()
-                .map(|(name, ty)| {
-                    Ok::<StructField, RwError>(StructField {
-                        name: name.into(),
-                        data_type: to_ast_data_type(ty)?,
-                    })
-                })
-                .try_collect()?;
-            Ok(AstDataType::Struct(fields))
-        }
-        DataType::Serial | DataType::Int256 | DataType::Map(_) => {
-            Err(anyhow!("unsupported data type: {:?}", ty).context("to_ast_data_type"))?
-        }
-    }
 }
 
 pub async fn get_replace_table_plan(
