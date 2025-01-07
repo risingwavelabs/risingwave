@@ -275,7 +275,7 @@ pub struct MetaConfig {
     /// The default global parallelism for all streaming jobs, if user doesn't specify the
     /// parallelism, this value will be used. Possible values:
     /// - `FULL`, means to use all available parallelism units in adaptive parallelism mode. e.g. "FULL".
-    /// - `FULL(N)`, means to use at max N available parallelism units in adaptive parallelism mode. e.g. "FULL(32)".
+    /// - `FULL(N)`, means to use a maximum of N parallelism units in adaptive parallelism mode. e.g. "FULL(32)".
     /// - N, which means to use N parallelism units in fixed parallelism mode. e.g. 32.
     #[serde(default = "default::meta::default_parallelism")]
     pub default_parallelism: DefaultParallelism,
