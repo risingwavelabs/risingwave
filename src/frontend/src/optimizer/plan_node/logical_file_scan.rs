@@ -35,11 +35,11 @@ use crate::OptimizerContextRef;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalFileScan {
     pub base: PlanBase<Logical>,
-    pub core: generic::FileScan,
+    pub core: generic::FileScanBackend,
 }
 
 impl LogicalFileScan {
-    pub fn new(
+    pub fn new_s3_logical_file_scan(
         ctx: OptimizerContextRef,
         schema: Schema,
         file_format: String,
@@ -52,7 +52,7 @@ impl LogicalFileScan {
         assert!("parquet".eq_ignore_ascii_case(&file_format));
         assert!("s3".eq_ignore_ascii_case(&storage_type));
 
-        let core = generic::FileScan {
+        let core = generic::FileScanBackend::FileScan(generic::FileScan {
             schema,
             file_format: generic::FileFormat::Parquet,
             storage_type: generic::StorageType::S3,
@@ -61,7 +61,32 @@ impl LogicalFileScan {
             s3_secret_key,
             file_location,
             ctx,
-        };
+        });
+
+        let base = PlanBase::new_logical_with_core(&core);
+
+        LogicalFileScan { base, core }
+    }
+
+    pub fn new_gcs_logical_file_scan(
+        ctx: OptimizerContextRef,
+        schema: Schema,
+        file_format: String,
+        storage_type: String,
+        credential: String,
+        file_location: Vec<String>,
+    ) -> Self {
+        assert!("parquet".eq_ignore_ascii_case(&file_format));
+        assert!("gcs".eq_ignore_ascii_case(&storage_type));
+
+        let core = generic::FileScanBackend::GcsFileScan(generic::GcsFileScan {
+            schema,
+            file_format: generic::FileFormat::Parquet,
+            storage_type: generic::StorageType::Gcs,
+            credential,
+            file_location,
+            ctx,
+        });
 
         let base = PlanBase::new_logical_with_core(&core);
 
