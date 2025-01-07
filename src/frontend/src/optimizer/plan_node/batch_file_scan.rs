@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,9 +13,9 @@
 // limitations under the License.
 
 use pretty_xmlish::XmlNode;
-use risingwave_pb::batch_plan::{file_scan_node::{FileFormat, StorageType}, AzblobFileScanNode};
+use risingwave_pb::batch_plan::file_scan_node::{FileFormat, StorageType};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::batch_plan::{FileScanNode, GcsFileScanNode};
+use risingwave_pb::batch_plan::{AzblobFileScanNode, FileScanNode, GcsFileScanNode};
 
 use super::batch::prelude::*;
 use super::utils::{childless_record, column_names_pretty, Distill};
@@ -104,8 +104,7 @@ impl ToBatchPb for BatchFileScan {
                     file_format: match gcs_file_scan.file_format {
                         generic::FileFormat::Parquet => FileFormat::Parquet as i32,
                     },
-                    credential: gcs_file_scan.creditial.clone(),
-                    service_account: gcs_file_scan.service_account.clone(),
+                    credential: gcs_file_scan.credential.clone(),
                     file_location: gcs_file_scan.file_location.clone(),
                 })
             }

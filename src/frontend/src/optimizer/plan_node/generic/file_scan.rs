@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -46,8 +46,7 @@ pub struct GcsFileScan {
     pub schema: Schema,
     pub file_format: FileFormat,
     pub storage_type: StorageType,
-    pub creditial: String,
-    pub service_account: String,
+    pub credential: String,
     pub file_location: Vec<String>,
 
     #[educe(PartialEq(ignore))]
@@ -209,7 +208,9 @@ impl GenericPlanNode for FileScanBackend {
         match self {
             FileScanBackend::FileScan(file_scan) => file_scan.functional_dependency(),
             FileScanBackend::GcsFileScan(gcs_file_scan) => gcs_file_scan.functional_dependency(),
-            FileScanBackend::AzblobFileScan(azblob_file_scan) => azblob_file_scan.functional_dependency(),
+            FileScanBackend::AzblobFileScan(azblob_file_scan) => {
+                azblob_file_scan.functional_dependency()
+            }
         }
     }
 }
@@ -219,7 +220,9 @@ impl FileScanBackend {
         match self {
             FileScanBackend::FileScan(file_scan) => file_scan.file_location.clone(),
             FileScanBackend::GcsFileScan(gcs_file_scan) => gcs_file_scan.file_location.clone(),
-            FileScanBackend::AzblobFileScan(azblob_file_scan) => azblob_file_scan.file_location.clone(),
+            FileScanBackend::AzblobFileScan(azblob_file_scan) => {
+                azblob_file_scan.file_location.clone()
+            }
         }
     }
 }

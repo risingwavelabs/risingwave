@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -728,7 +728,7 @@ mod test {
             "properties.bootstrap.server".to_owned() => "localhost:9092".to_owned(),
             "topic".to_owned() => "test".to_owned(),
             "type".to_owned() => "upsert".to_owned(),
-            "properties.retry.interval".to_owned() => "500minutes".to_owned(),  // error!
+            "properties.retry.interval".to_owned() => "500miiinutes".to_owned(),  // invalid duration
         };
         assert!(KafkaConfig::from_btreemap(properties).is_err());
     }

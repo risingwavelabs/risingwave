@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -73,8 +73,7 @@ impl LogicalFileScan {
         schema: Schema,
         file_format: String,
         storage_type: String,
-        creditial: String,
-        service_account: String,
+        credential: String,
         file_location: Vec<String>,
     ) -> Self {
         assert!("parquet".eq_ignore_ascii_case(&file_format));
@@ -84,8 +83,7 @@ impl LogicalFileScan {
             schema,
             file_format: generic::FileFormat::Parquet,
             storage_type: generic::StorageType::Gcs,
-            creditial,
-            service_account,
+            credential,
             file_location,
             ctx,
         });
@@ -94,6 +92,7 @@ impl LogicalFileScan {
 
         LogicalFileScan { base, core }
     }
+
     pub fn new_azblob_logical_file_scan(
         ctx: OptimizerContextRef,
         schema: Schema,
@@ -122,7 +121,6 @@ impl LogicalFileScan {
 
         LogicalFileScan { base, core }
     }
-
 }
 
 impl_plan_tree_node_for_leaf! {LogicalFileScan}

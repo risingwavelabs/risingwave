@@ -110,8 +110,7 @@ message GcsFileScanNode {
   repeated plan_common.ColumnDesc columns = 1;
   FileFormat file_format = 2;
   string credential = 3;
-  string service_account = 4;
-  repeated string file_location = 5;
+  repeated string file_location = 4;
 }
 
 message AzblobFileScanNode {

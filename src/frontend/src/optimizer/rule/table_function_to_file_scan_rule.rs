@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -82,8 +82,22 @@ impl Rule for TableFunctionToFileScanRule {
                     )
                     .into(),
                 )
-            }
-            else if "azblob".eq_ignore_ascii_case(&eval_args[1]) {
+            } else if "gcs".eq_ignore_ascii_case(&eval_args[1]) {
+                let credential = eval_args[2].clone();
+                // The rest of the arguments are file locations
+                let file_location = eval_args[3..].iter().cloned().collect_vec();
+                Some(
+                    LogicalFileScan::new_gcs_logical_file_scan(
+                        logical_table_function.ctx(),
+                        schema,
+                        "parquet".to_owned(),
+                        "gcs".to_owned(),
+                        credential,
+                        file_location,
+                    )
+                    .into(),
+                )
+            } else if "azblob".eq_ignore_ascii_case(&eval_args[1]) {
                 let account_name = eval_args[2].clone();
                 let account_key = eval_args[3].clone();
                 let endpoint = eval_args[4].clone();

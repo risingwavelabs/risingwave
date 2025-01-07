@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,8 +27,8 @@ use iceberg::io::{
 };
 use iceberg::{Error, ErrorKind};
 use itertools::Itertools;
-use opendal::{layers::{LoggingLayer, RetryLayer}, services::Azblob};
-use opendal::services::{Gcs, S3};
+use opendal::layers::{LoggingLayer, RetryLayer};
+use opendal::services::{Azblob, Gcs, S3};
 use opendal::Operator;
 use parquet::arrow::async_reader::AsyncFileReader;
 use parquet::arrow::{parquet_to_arrow_schema, ParquetRecordBatchStreamBuilder, ProjectionMask};
@@ -127,16 +127,9 @@ pub fn new_s3_operator(
     Ok(op)
 }
 
-pub fn new_gcs_operator(
-    credential: String,
-    service_account: String,
-    bucket: String,
-) -> ConnectorResult<Operator> {
+pub fn new_gcs_operator(credential: String, bucket: String) -> ConnectorResult<Operator> {
     // Create gcs builder.
-    let builder = Gcs::default()
-        .bucket(&bucket)
-        .credential(&credential)
-        .service_account(&service_account);
+    let builder = Gcs::default().bucket(&bucket).credential(&credential);
 
     let operator: Operator = Operator::new(builder)?
         .layer(LoggingLayer::default())
