@@ -203,12 +203,12 @@ impl<T> TableChangeLogCommon<T> {
 
     pub fn truncate(&mut self, truncate_epoch: u64) {
         while let Some(change_log) = self.0.front()
-            && *change_log.epochs.last().expect("non-empty") <= truncate_epoch
+            && *change_log.epochs.last().expect("non-empty") < truncate_epoch
         {
             let _change_log = self.0.pop_front().expect("non-empty");
         }
         if let Some(first_log) = self.0.front_mut() {
-            first_log.epochs.retain(|epoch| *epoch > truncate_epoch);
+            first_log.epochs.retain(|epoch| *epoch >= truncate_epoch);
         }
     }
 }
@@ -441,44 +441,27 @@ mod tests {
                 epochs: vec![5],
             },
         ]);
-
-        table_change_log.truncate(1);
-        assert_eq!(
-            table_change_log,
-            TableChangeLogCommon::<SstableInfo>::new([
-                EpochNewChangeLog {
-                    new_value: vec![],
-                    old_value: vec![],
-                    epochs: vec![2],
-                },
-                EpochNewChangeLog {
-                    new_value: vec![],
-                    old_value: vec![],
-                    epochs: vec![3, 4],
-                },
-                EpochNewChangeLog {
-                    new_value: vec![],
-                    old_value: vec![],
-                    epochs: vec![5],
-                },
-            ])
-        );
-
-        table_change_log.truncate(3);
-        assert_eq!(
-            table_change_log,
-            TableChangeLogCommon::<SstableInfo>::new([
-                EpochNewChangeLog {
-                    new_value: vec![],
-                    old_value: vec![],
-                    epochs: vec![4],
-                },
-                EpochNewChangeLog {
-                    new_value: vec![],
-                    old_value: vec![],
-                    epochs: vec![5],
-                },
-            ])
-        )
+        let origin_table_change_log = table_change_log.clone();
+        for truncate_epoch in 0..6 {
+            table_change_log.truncate(truncate_epoch);
+            let expected_table_change_log = TableChangeLogCommon(
+                origin_table_change_log
+                    .0
+                    .iter()
+                    .filter_map(|epoch_change_log| {
+                        let mut epoch_change_log = epoch_change_log.clone();
+                        epoch_change_log
+                            .epochs
+                            .retain(|epoch| *epoch >= truncate_epoch);
+                        if epoch_change_log.epochs.is_empty() {
+                            None
+                        } else {
+                            Some(epoch_change_log)
+                        }
+                    })
+                    .collect(),
+            );
+            assert_eq!(expected_table_change_log, table_change_log);
+        }
     }
 }
