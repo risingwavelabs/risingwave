@@ -54,7 +54,7 @@ poetry run python main.py -t ./test_case/iceberg_source_explain_for_delete.toml
 poetry run python main.py -t ./test_case/iceberg_predicate_pushdown.toml
 
 echo "--- Running benchmarks"
-poetry run python main.py -t ./test_case/bench_predicate_pushdown.toml
+poetry run python main.py -t ./benches/*.toml
 
 echo "--- Kill cluster"
 cd ../../

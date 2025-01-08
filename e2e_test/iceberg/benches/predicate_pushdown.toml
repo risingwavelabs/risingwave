@@ -3,7 +3,7 @@ init_sqls = [
     'DROP TABLE IF EXISTS demo_db.t1',
 ]
 
-slt = 'test_case/bench_predicate_pushdown.slt'
+slt = 'test_case/predicate_pushdown.slt'
 
 drop_sqls = [
     'DROP TABLE IF EXISTS demo_db.t1',
