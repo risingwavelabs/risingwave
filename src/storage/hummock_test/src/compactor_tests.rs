@@ -196,7 +196,7 @@ pub(crate) mod tests {
                 .await
                 .unwrap();
             hummock_meta_client
-                .commit_epoch(epoch, res, false)
+                .commit_epoch(epoch, res, None)
                 .await
                 .unwrap();
         }
@@ -360,7 +360,7 @@ pub(crate) mod tests {
             .await
             .unwrap();
         hummock_meta_client
-            .commit_epoch(epoch, res, false)
+            .commit_epoch(epoch, res, None)
             .await
             .unwrap();
     }
@@ -569,7 +569,7 @@ pub(crate) mod tests {
                 .await
                 .unwrap();
             hummock_meta_client
-                .commit_epoch(epoch, res, false)
+                .commit_epoch(epoch, res, None)
                 .await
                 .unwrap();
             epoch.inc_epoch();
@@ -767,7 +767,7 @@ pub(crate) mod tests {
                 .await
                 .unwrap();
             hummock_meta_client
-                .commit_epoch(epoch, res, false)
+                .commit_epoch(epoch, res, None)
                 .await
                 .unwrap();
             epoch += millisec_interval_epoch;
@@ -980,7 +980,7 @@ pub(crate) mod tests {
                 .await
                 .unwrap();
             hummock_meta_client
-                .commit_epoch(epoch, res, false)
+                .commit_epoch(epoch, res, None)
                 .await
                 .unwrap();
             epoch += millisec_interval_epoch;
@@ -1980,7 +1980,7 @@ pub(crate) mod tests {
                     .await
                     .unwrap();
                 hummock_meta_client
-                    .commit_epoch(*epoch, res, false)
+                    .commit_epoch(*epoch, res, None)
                     .await
                     .unwrap();
                 *epoch += millisec_interval_epoch;

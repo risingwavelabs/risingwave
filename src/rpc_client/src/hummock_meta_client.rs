@@ -25,6 +25,8 @@ pub type CompactionEventItem = std::result::Result<SubscribeCompactionEventRespo
 
 use crate::error::Result;
 
+pub type HummockMetaClientChangeLogInfo = Vec<u64>;
+
 #[async_trait]
 pub trait HummockMetaClient: Send + Sync + 'static {
     async fn unpin_version_before(&self, unpin_version_before: HummockVersionId) -> Result<()>;
@@ -35,7 +37,7 @@ pub trait HummockMetaClient: Send + Sync + 'static {
         &self,
         epoch: HummockEpoch,
         sync_result: SyncResult,
-        is_log_store: bool,
+        change_log_info: Option<HummockMetaClientChangeLogInfo>,
     ) -> Result<()>;
     async fn trigger_manual_compaction(
         &self,

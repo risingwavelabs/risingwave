@@ -83,7 +83,7 @@ pub async fn add_test_tables(
                 uncommitted_ssts: test_local_tables,
                 ..Default::default()
             },
-            false,
+            None,
         )
         .await
         .unwrap();
@@ -138,7 +138,7 @@ pub async fn add_test_tables(
                 uncommitted_ssts: test_local_tables_3,
                 ..Default::default()
             },
-            false,
+            None,
         )
         .await
         .unwrap();
@@ -406,7 +406,7 @@ pub async fn add_ssts(
                 uncommitted_ssts: ssts,
                 ..Default::default()
             },
-            false,
+            None,
         )
         .await
         .unwrap();

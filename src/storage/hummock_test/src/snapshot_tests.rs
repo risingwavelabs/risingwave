@@ -153,7 +153,7 @@ async fn test_snapshot_inner(
             .unwrap();
         if enable_commit {
             mock_hummock_meta_client
-                .commit_epoch(epoch1, res, false)
+                .commit_epoch(epoch1, res, None)
                 .await
                 .unwrap();
             hummock_storage
@@ -200,7 +200,7 @@ async fn test_snapshot_inner(
             .unwrap();
         if enable_commit {
             mock_hummock_meta_client
-                .commit_epoch(epoch2, res, false)
+                .commit_epoch(epoch2, res, None)
                 .await
                 .unwrap();
             hummock_storage
@@ -253,7 +253,7 @@ async fn test_snapshot_inner(
             .unwrap();
         if enable_commit {
             mock_hummock_meta_client
-                .commit_epoch(epoch3, res, false)
+                .commit_epoch(epoch3, res, None)
                 .await
                 .unwrap();
             hummock_storage
@@ -339,7 +339,7 @@ async fn test_snapshot_range_scan_inner(
             .unwrap();
         if enable_commit {
             mock_hummock_meta_client
-                .commit_epoch(epoch, res, false)
+                .commit_epoch(epoch, res, None)
                 .await
                 .unwrap();
             hummock_storage

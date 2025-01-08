@@ -42,7 +42,9 @@ use risingwave_pb::hummock::{
     SubscribeCompactionEventResponse,
 };
 use risingwave_rpc_client::error::{Result, RpcError};
-use risingwave_rpc_client::{CompactionEventItem, HummockMetaClient};
+use risingwave_rpc_client::{
+    CompactionEventItem, HummockMetaClient, HummockMetaClientChangeLogInfo,
+};
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio::task::JoinHandle;
@@ -138,7 +140,7 @@ impl HummockMetaClient for MockHummockMetaClient {
         &self,
         epoch: HummockEpoch,
         sync_result: SyncResult,
-        is_log_store: bool,
+        change_log_info: Option<HummockMetaClientChangeLogInfo>,
     ) -> Result<()> {
         let version: HummockVersion = self.hummock_manager.get_current_version().await;
         let table_ids = version
@@ -148,17 +150,13 @@ impl HummockMetaClient for MockHummockMetaClient {
             .map(|table_id| table_id.table_id)
             .collect::<BTreeSet<_>>();
 
-        let old_value_ssts_vec = if is_log_store {
-            sync_result.old_value_ssts.clone()
-        } else {
-            vec![]
-        };
         let commit_table_ids = sync_result
             .uncommitted_ssts
             .iter()
             .flat_map(|sstable| sstable.sst_info.table_ids.clone())
             .chain({
-                old_value_ssts_vec
+                sync_result
+                    .old_value_ssts
                     .iter()
                     .flat_map(|sstable| sstable.sst_info.table_ids.clone())
             })
@@ -192,22 +190,21 @@ impl HummockMetaClient for MockHummockMetaClient {
             .map(|LocalSstableInfo { sst_info, .. }| (sst_info.object_id, self.context_id))
             .collect();
         let new_table_watermark = sync_result.table_watermarks;
-        let table_change_log_table_ids = if is_log_store {
-            commit_table_ids.clone()
-        } else {
-            BTreeSet::new()
+        let table_change_log = match change_log_info {
+            Some(epochs) => {
+                assert_eq!(*epochs.last().expect("non-empty"), epoch);
+                build_table_change_log_delta(
+                    sync_result
+                        .old_value_ssts
+                        .into_iter()
+                        .map(|sst| sst.sst_info),
+                    sync_result.uncommitted_ssts.iter().map(|sst| &sst.sst_info),
+                    &epochs,
+                    commit_table_ids.iter().map(|&table_id| (table_id, 0)),
+                )
+            }
+            None => Default::default(),
         };
-        let table_change_log = build_table_change_log_delta(
-            sync_result
-                .old_value_ssts
-                .into_iter()
-                .map(|sst| sst.sst_info),
-            sync_result.uncommitted_ssts.iter().map(|sst| &sst.sst_info),
-            &vec![epoch],
-            table_change_log_table_ids
-                .into_iter()
-                .map(|table_id| (table_id, 0)),
-        );
 
         self.hummock_manager
             .commit_epoch(CommitEpochInfo {

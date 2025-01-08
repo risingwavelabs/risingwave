@@ -107,7 +107,9 @@ use tonic::{Code, Request, Streaming};
 
 use crate::channel::{Channel, WrappedChannelExt};
 use crate::error::{Result, RpcError};
-use crate::hummock_meta_client::{CompactionEventItem, HummockMetaClient};
+use crate::hummock_meta_client::{
+    CompactionEventItem, HummockMetaClient, HummockMetaClientChangeLogInfo,
+};
 use crate::meta_rpc_client_method_impl;
 
 type ConnectionId = u32;
@@ -1569,7 +1571,7 @@ impl HummockMetaClient for MetaClient {
         &self,
         _epoch: HummockEpoch,
         _sync_result: SyncResult,
-        _is_log_store: bool,
+        _change_log_info: Option<HummockMetaClientChangeLogInfo>,
     ) -> Result<()> {
         panic!("Only meta service can commit_epoch in production.")
     }

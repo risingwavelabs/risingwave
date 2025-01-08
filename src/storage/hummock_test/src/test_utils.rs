@@ -257,7 +257,7 @@ impl HummockTestEnv {
             .await
             .unwrap();
         self.meta_client
-            .commit_epoch(epoch, res, false)
+            .commit_epoch(epoch, res, None)
             .await
             .unwrap();
 
