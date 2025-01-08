@@ -25,16 +25,21 @@ use crate::sink::utils::{
 };
 use crate::{assert_eq_with_err_returned as assert_eq, assert_with_err_returned as assert};
 
-pub const CREATE_SOURCE: &str = "
-    CREATE SOURCE s1 (v INT) WITH (
+pub const CREATE_TABLE: &str = "
+    CREATE TABLE datagen_table (i1 int, i2 int) WITH (
     connector = 'datagen',
-    fields.v.kind = 'sequence',
-    fields.v.start = '1',
-    fields.v.end = '5',
+    fields.i1.kind = 'sequence',
+    fields.i1.start = '1',
+    fields.i1.end  = '1000',
+    fields.i2.kind = 'sequence',
+    fields.i2.start = '1',
+    fields.i2.end  = '1000',
     datagen.rows.per.second='10',
     datagen.split.num = '1'
 ) FORMAT PLAIN ENCODE JSON;
 ";
+
+pub const CREATE_MV: &str = "CREATE MATERIALIZED VIEW mv1 AS SELECT * FROM datagen_table;";
 pub const DROP_SINK: &str = "drop sink test_sink";
 pub const DROP_SOURCE: &str = "drop source iceberg_sink";
 pub const CREATE_ICEBERG_SINK_WITHOUT_RECOVERY: &str = "
@@ -55,8 +60,8 @@ pub const CREATE_ICEBERG_SINK_WITHOUT_RECOVERY: &str = "
     primary_key = 'i1,i2',
     force_append_only='true',
     is_exactly_once = 'true',
-);
-";
+);";
+
 pub const CREATE_ICEBERG_SINK_WITH_RECOVERY: &str = "
     CREATE SINK iceberg_sink AS select * from mv1 WITH (
     connector = 'iceberg',
@@ -78,81 +83,66 @@ pub const CREATE_ICEBERG_SINK_WITH_RECOVERY: &str = "
 );
 ";
 
+pub const CREATE_ICEBERG_SOURCE_WITHOUT_RECOVERY: &str = "
+   CREATE SOURCE iceberg_source
+WITH (
+    connector = 'iceberg',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    s3.path.style.access = 'true',
+    catalog.type = 'storage',
+    warehouse.path = 's3a://hummock001/iceberg-data',
+    database.name = 'demo_db',
+    table.name = 'test_sink_without_recovery',
+);";
+
+pub const CREATE_ICEBERG_SOURCE_WITH_RECOVERY: &str = "
+   CREATE SOURCE iceberg_source
+    WITH (
+        connector = 'iceberg',
+        s3.endpoint = 'http://127.0.0.1:9301',
+        s3.region = 'us-east-1',
+        s3.access.key = 'hummockadmin',
+        s3.secret.key = 'hummockadmin',
+        s3.path.style.access = 'true',
+        catalog.type = 'storage',
+        warehouse.path = 's3a://hummock001/iceberg-data',
+        database.name = 'demo_db',
+        table.name = 'test_sink_with_recovery',
+);";
+
 #[tokio::test]
 async fn test_exactly_once_iceberg_sink() -> Result<()> {
     let mut cluster = start_sink_test_cluster().await?;
 
     let source_parallelism = 6;
 
-    let test_sink = SimulationTestSink::register_new();
-    let test_source = SimulationTestSource::register_new(source_parallelism, 0..100000, 0.2, 20);
+    let test_sink_with_error = SimulationTestSink::register_new();
+    let test_sink_without_error = SimulationTestSink::register_new();
+    let test_source = SimulationTestSource::register_new(source_parallelism, 0..100000, 0.2, 0);
 
     let mut session = cluster.start_session();
 
     session.run("set streaming_parallelism = 6").await?;
-    session.run("set sink_decouple = true").await?;
-    session.run(CREATE_SOURCE).await?;
-    session.run(CREATE_SINK).await?;
+    session.run("set sink_decouple = false").await?;
+    session.run(CREATE_TABLE).await?;
+    session
+        .run("CREATE MATERIALIZED VIEW mv1 AS SELECT * FROM datagen_table;")
+        .await?;
+    session.run(CREATE_ICEBERG_SINK_WITH_RECOVERY).await?;
     test_sink.wait_initial_parallelism(6).await?;
 
-    test_sink.set_err_rate(0.002);
+    test_sink.set_err_rate(0.02);
 
     test_sink
         .store
         .wait_for_count(test_source.id_list.len())
         .await?;
-
-    session.run(DROP_SINK).await?;
-    session.run(DROP_SOURCE).await?;
-
-    // Due to sink failure isolation, source stream should not be recreated
-    assert_eq!(
-        source_parallelism,
-        test_source.create_stream_count.load(Relaxed)
-    );
-
-    assert_eq!(0, test_sink.parallelism_counter.load(Relaxed));
-    test_sink.store.check_simple_result(&test_source.id_list)?;
-    assert!(test_sink.store.inner().checkpoint_count > 0);
-
-    Ok(())
-}
-
-#[tokio::test]
-async fn test_sink_error_event_logs() -> Result<()> {
-    let mut cluster = start_sink_test_cluster().await?;
-
-    let source_parallelism = 6;
-
-    let test_sink = SimulationTestSink::register_new();
-    test_sink.set_err_rate(1.0);
-    let test_source = SimulationTestSource::register_new(source_parallelism, 0..100000, 0.2, 20);
-
-    let mut session = cluster.start_session();
-
-    session.run("set streaming_parallelism = 6").await?;
-    session.run("set sink_decouple = true").await?;
-    session.run(CREATE_SOURCE).await?;
-    session.run(CREATE_SINK).await?;
-    test_sink.wait_initial_parallelism(6).await?;
-
-    test_sink.store.wait_for_err(1).await?;
-
-    session.run(DROP_SINK).await?;
-    session.run(DROP_SOURCE).await?;
-
-    // Due to sink failure isolation, source stream should not be recreated
-    assert_eq!(
-        source_parallelism,
-        test_source.create_stream_count.load(Relaxed)
-    );
-
-    // Sink error should be recorded in rw_event_logs
-    let result = session
-        .run("select * from rw_event_logs where event_type = 'SINK_FAIL'")
-        .await?;
-    assert!(!result.is_empty());
-    println!("Sink fail event logs: {:?}", result);
+    session.run(CREATE_ICEBERG_SOURCE_WITH_RECOVERY).await?;
+    let total_count = session.run("select count(*) from iceberg_source").await?;
+    assert_eq!(total_count, 1000);
 
     Ok(())
 }
