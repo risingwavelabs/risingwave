@@ -46,14 +46,14 @@ select count(*) from iceberg_t1_source;
 1000000
 
 # warmup
-include ./bench_predicate_pushdown/point_get.slt.part
+include ./predicate_pushdown/point_get.slt.part
 # bench
-include ./bench_predicate_pushdown/point_get.slt.part
+include ./predicate_pushdown/point_get.slt.part
 
 # warmup
-include ./bench_predicate_pushdown/filter.slt.part
+include ./predicate_pushdown/filter.slt.part
 # bench
-include ./bench_predicate_pushdown/filter.slt.part
+include ./predicate_pushdown/filter.slt.part
 
 statement ok
 DROP SINK sink1;
