@@ -16,7 +16,7 @@ use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::mem::swap;
 
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::hash::{VnodeCount, VnodeCountCompat, WorkerSlotId};
@@ -1043,8 +1043,18 @@ impl CatalogController {
                         .collect();
 
                     for (worker_slot, actor) in worker_slot_to_actor {
-                        actor_migration_plan
-                            .insert(actor, plan[&worker_slot].worker_id() as WorkerId);
+                        actor_migration_plan.insert(
+                            actor,
+                            plan.get(&worker_slot)
+                                .ok_or_else(|| {
+                                    anyhow!(
+                                        "worker slot {:?} not exist in plan {:?}",
+                                        worker_slot,
+                                        plan
+                                    )
+                                })?
+                                .worker_id() as WorkerId,
+                        );
                     }
                 }
             }
