@@ -387,7 +387,7 @@ impl IcebergCommon {
                 let catalog = iceberg_catalog_rest::RestCatalog::new(config);
                 Ok(Arc::new(catalog))
             }
-            "glue" => {
+            "glue_rest" => {
                 let mut iceberg_configs = HashMap::new();
                 // glue
                 if let Some(region) = &self.region {
@@ -427,7 +427,10 @@ impl IcebergCommon {
                 Ok(Arc::new(catalog))
             }
             catalog_type
-                if catalog_type == "hive" || catalog_type == "jdbc" || catalog_type == "rest" =>
+                if catalog_type == "hive"
+                    || catalog_type == "jdbc"
+                    || catalog_type == "rest"
+                    || catalog_type == "glue" =>
             {
                 // Create java catalog
                 let (file_io_props, java_catalog_props) =
@@ -436,6 +439,7 @@ impl IcebergCommon {
                     "hive" => "org.apache.iceberg.hive.HiveCatalog",
                     "jdbc" => "org.apache.iceberg.jdbc.JdbcCatalog",
                     "rest" => "org.apache.iceberg.rest.RESTCatalog",
+                    "glue" => "org.apache.iceberg.aws.glue.GlueCatalog",
                     _ => unreachable!(),
                 };
 
