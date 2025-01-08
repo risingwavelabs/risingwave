@@ -69,7 +69,7 @@ impl<'a> BRowRef<'a> {
         todo!()
     }
 
-    pub fn iter(self) -> impl ExactSizeIterator<Item = DatumRef<'a>> {
+    pub fn iter(self) -> impl DoubleEndedIterator + ExactSizeIterator<Item = DatumRef<'a>> {
         (0..self.len()).map(move |i| self.datum_at(i))
     }
 }
@@ -87,7 +87,7 @@ impl<'a> Row for BRowRef<'a> {
         (*self).len()
     }
 
-    fn iter(&self) -> impl ExactSizeIterator<Item = DatumRef<'_>> {
+    fn iter(&self) -> impl DoubleEndedIterator + ExactSizeIterator<Item = DatumRef<'_>> {
         (*self).iter()
     }
 }

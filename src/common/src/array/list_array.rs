@@ -19,6 +19,7 @@ use std::future::Future;
 use std::mem::size_of;
 
 use bytes::{Buf, BufMut};
+use either::Either;
 use itertools::Itertools;
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::data::{ListArrayData, PbArray, PbArrayType};
@@ -30,7 +31,7 @@ use super::{
     PrimitiveArrayItemType, RowRef, Utf8Array,
 };
 use crate::bitmap::{Bitmap, BitmapBuilder};
-use crate::row::Row;
+use crate::row::{BRowRef, Row};
 use crate::types::{
     hash_datum, DataType, Datum, DatumRef, DefaultOrd, Scalar, ScalarImpl, ScalarRefImpl,
     ToDatumRef, ToText,
@@ -515,6 +516,9 @@ pub enum ListRef<'a> {
         start: u32,
         end: u32,
     },
+    BRow {
+        row: BRowRef<'a>,
+    },
 }
 
 impl<'a> ListRef<'a> {
@@ -522,6 +526,7 @@ impl<'a> ListRef<'a> {
     pub fn len(&self) -> usize {
         match *self {
             ListRef::Columnar { start, end, .. } => (end - start) as usize,
+            ListRef::BRow { row } => row.len(),
         }
     }
 
@@ -531,13 +536,16 @@ impl<'a> ListRef<'a> {
     }
 
     /// Returns the data type of the elements in the list.
+    #[deprecated]
     pub fn data_type(&self) -> DataType {
         match self {
             ListRef::Columnar { array, .. } => array.data_type(),
+            _ => unimplemented!(),
         }
     }
 
     /// Returns the elements in the flattened list.
+    #[deprecated]
     pub fn flatten(self) -> ListRef<'a> {
         match self {
             ListRef::Columnar { array, start, end } => match array {
@@ -549,6 +557,7 @@ impl<'a> ListRef<'a> {
                 .flatten(),
                 _ => self,
             },
+            _ => unimplemented!(),
         }
     }
 
@@ -556,8 +565,9 @@ impl<'a> ListRef<'a> {
     pub fn iter(self) -> impl DoubleEndedIterator + ExactSizeIterator<Item = DatumRef<'a>> + 'a {
         match self {
             ListRef::Columnar { array, start, end } => {
-                (start..end).map(move |i| array.value_at(i as usize))
+                Either::Left((start..end).map(move |i| array.value_at(i as usize)))
             }
+            ListRef::BRow { row } => Either::Right(row.iter()),
         }
     }
 
@@ -568,6 +578,7 @@ impl<'a> ListRef<'a> {
                 ListRef::Columnar { array, start, .. } => {
                     Some(array.value_at(start as usize + index))
                 }
+                ListRef::BRow { row } => Some(row.datum_at(index)),
             }
         } else {
             None
@@ -605,21 +616,25 @@ impl<'a> ListRef<'a> {
                 }
                 ListValue::new(builder.finish())
             }
+            _ => todo!(),
         }
     }
 
     /// Returns a slice if the list is of type `int64[]`.
+    #[deprecated]
     pub fn as_i64_slice(&self) -> Option<&[i64]> {
         match *self {
             ListRef::Columnar { array, start, end } => match array {
                 ArrayImpl::Int64(array) => Some(&array.as_slice()[start as usize..end as usize]),
                 _ => None,
             },
+            _ => unimplemented!(),
         }
     }
 
     /// # Panics
     /// Panics if the list is not a map's internal representation (See [`super::MapArray`]).
+    #[deprecated]
     pub(super) fn as_map_kv(self) -> (ListRef<'a>, ListRef<'a>) {
         match self {
             ListRef::Columnar { array, start, end } => {
@@ -637,6 +652,7 @@ impl<'a> ListRef<'a> {
                     },
                 )
             }
+            _ => unimplemented!(),
         }
     }
 
@@ -687,6 +703,7 @@ impl Row for ListRef<'_> {
     fn datum_at(&self, index: usize) -> DatumRef<'_> {
         match *self {
             ListRef::Columnar { array, start, .. } => array.value_at(start as usize + index),
+            ListRef::BRow { row } => row.datum_at(index),
         }
     }
 
@@ -695,6 +712,7 @@ impl Row for ListRef<'_> {
             ListRef::Columnar { array, start, .. } => {
                 array.value_at_unchecked(start as usize + index)
             }
+            ListRef::BRow { row } => row.datum_at_unchecked(index),
         }
     }
 
