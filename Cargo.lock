@@ -7254,7 +7254,7 @@ checksum = "f271a476bbaa9d2139e1e1a5beb869c6119e805a0b67ad2b2857e4a8785b111a"
 dependencies = [
  "prettyplease 0.2.15",
  "proc-macro2",
- "prost-build 0.13.4",
+ "prost-build 0.13.1",
  "quote",
  "syn 2.0.87",
  "tonic-build",
@@ -9406,15 +9406,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "prost"
-version = "0.13.4"
-source = "git+https://github.com/xxchan/prost.git?rev=0eb1c7b09976cf6b5231e4b8d87bb5908ae6a163#0eb1c7b09976cf6b5231e4b8d87bb5908ae6a163"
-dependencies = [
- "bytes",
- "prost-derive 0.13.4",
-]
-
-[[package]]
 name = "prost-build"
 version = "0.11.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9438,18 +9429,20 @@ dependencies = [
 
 [[package]]
 name = "prost-build"
-version = "0.13.4"
-source = "git+https://github.com/xxchan/prost.git?rev=0eb1c7b09976cf6b5231e4b8d87bb5908ae6a163#0eb1c7b09976cf6b5231e4b8d87bb5908ae6a163"
+version = "0.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5bb182580f71dd070f88d01ce3de9f4da5021db7115d2e1c3605a754153b77c1"
 dependencies = [
- "heck 0.5.0",
- "itertools 0.13.0",
+ "bytes",
+ "heck 0.4.1",
+ "itertools 0.10.5",
  "log",
- "multimap 0.10.0",
+ "multimap 0.8.3",
  "once_cell",
  "petgraph",
  "prettyplease 0.2.15",
- "prost 0.13.4",
- "prost-types 0.13.4",
+ "prost 0.13.1",
+ "prost-types 0.13.1",
  "regex",
  "syn 2.0.87",
  "tempfile",
@@ -9486,18 +9479,6 @@ name = "prost-derive"
 version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "18bec9b0adc4eba778b33684b7ba3e7137789434769ee3ce3930463ef904cfca"
-dependencies = [
- "anyhow",
- "itertools 0.13.0",
- "proc-macro2",
- "quote",
- "syn 2.0.87",
-]
-
-[[package]]
-name = "prost-derive"
-version = "0.13.4"
-source = "git+https://github.com/xxchan/prost.git?rev=0eb1c7b09976cf6b5231e4b8d87bb5908ae6a163#0eb1c7b09976cf6b5231e4b8d87bb5908ae6a163"
 dependencies = [
  "anyhow",
  "itertools 0.13.0",
@@ -9547,14 +9528,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cee5168b05f49d4b0ca581206eb14a7b22fafd963efe729ac48eb03266e25cc2"
 dependencies = [
  "prost 0.13.1",
-]
-
-[[package]]
-name = "prost-types"
-version = "0.13.4"
-source = "git+https://github.com/xxchan/prost.git?rev=0eb1c7b09976cf6b5231e4b8d87bb5908ae6a163#0eb1c7b09976cf6b5231e4b8d87bb5908ae6a163"
-dependencies = [
- "prost 0.13.4",
 ]
 
 [[package]]
@@ -11005,7 +10978,7 @@ dependencies = [
  "madsim-tokio",
  "num-bigint",
  "prost 0.13.1",
- "prost-build 0.13.4",
+ "prost-build 0.13.1",
  "prost-reflect",
  "prost-types 0.13.1",
  "protox",
@@ -11671,7 +11644,7 @@ dependencies = [
  "pbjson",
  "pbjson-build",
  "prost 0.13.1",
- "prost-build 0.13.4",
+ "prost-build 0.13.1",
  "prost-helpers",
  "risingwave_error",
  "serde",
@@ -14622,7 +14595,7 @@ checksum = "fe4ee8877250136bd7e3d2331632810a4df4ea5e004656990d8d66d2f5ee8a67"
 dependencies = [
  "prettyplease 0.2.15",
  "proc-macro2",
- "prost-build 0.13.4",
+ "prost-build 0.13.1",
  "quote",
  "syn 2.0.87",
 ]
