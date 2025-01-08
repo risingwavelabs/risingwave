@@ -236,11 +236,7 @@ where
     fn from(val: &ChangeLogDeltaCommon<T>) -> Self {
         Self {
             truncate_epoch: val.truncate_epoch,
-            new_log: Some(PbEpochNewChangeLog {
-                new_value: val.new_log.new_value.iter().map(|a| a.into()).collect(),
-                old_value: val.new_log.old_value.iter().map(|a| a.into()).collect(),
-                epochs: val.new_log.epochs.clone(),
-            }),
+            new_log: Some((&val.new_log).into()),
         }
     }
 }
