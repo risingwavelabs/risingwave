@@ -1741,7 +1741,14 @@ async fn test_read_log_next_epoch() {
             assert!(!res.old_value_ssts.is_empty());
         }
         assert!(!res.uncommitted_ssts.is_empty());
-        meta_client.commit_epoch(*epoch, res).await.unwrap();
+        meta_client
+            .commit_epoch_with_change_log(
+                *epoch,
+                res,
+                Some(std::mem::take(&mut pending_non_checkpoint_epochs)),
+            )
+            .await
+            .unwrap();
     }
     assert!(pending_non_checkpoint_epochs.is_empty());
     for i in 0..(first_commit_log_data.len() - 1) {
@@ -1771,7 +1778,19 @@ async fn test_read_log_next_epoch() {
         .unwrap();
     assert!(!res.old_value_ssts.is_empty());
     assert!(!res.uncommitted_ssts.is_empty());
-    meta_client.commit_epoch(commit_epoch, res).await.unwrap();
+    meta_client
+        .commit_epoch_with_change_log(
+            commit_epoch,
+            res,
+            Some(
+                second_commit_log_data
+                    .iter()
+                    .map(|(epoch, _)| *epoch)
+                    .collect(),
+            ),
+        )
+        .await
+        .unwrap();
     assert_eq!(
         first_commit_epoch_next_epoch_future.await.unwrap(),
         second_commit_log_data.first().unwrap().0
