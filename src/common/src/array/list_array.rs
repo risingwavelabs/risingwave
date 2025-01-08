@@ -338,9 +338,17 @@ impl FromIterator<ListValue> for ListArray {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, EstimateSize)]
-pub struct ListValue {
-    values: Box<ArrayImpl>,
+#[derive(Clone, PartialEq, Eq)]
+pub enum ListValue {
+    Columnar(Box<ArrayImpl>),
+}
+
+impl EstimateSize for ListValue {
+    fn estimated_heap_size(&self) -> usize {
+        match self {
+            ListValue::Columnar(array) => array.estimated_heap_size(),
+        }
+    }
 }
 
 impl Debug for ListValue {
@@ -357,13 +365,13 @@ impl Display for ListValue {
 
 impl ListValue {
     pub fn new(values: ArrayImpl) -> Self {
-        Self {
-            values: Box::new(values),
-        }
+        Self::Columnar(Box::new(values))
     }
 
     pub fn into_array(self) -> ArrayImpl {
-        *self.values
+        match self {
+            ListValue::Columnar(values) => *values,
+        }
     }
 
     pub fn empty(datatype: &DataType) -> Self {
@@ -385,9 +393,11 @@ impl ListValue {
 
     /// Returns a mutable slice if the list is of type `int64[]`.
     pub fn as_i64_mut_slice(&mut self) -> Option<&mut [i64]> {
-        match self.values.as_mut() {
-            ArrayImpl::Int64(array) => Some(array.as_mut_slice()),
-            _ => None,
+        match self {
+            ListValue::Columnar(values) => match values.as_mut() {
+                ArrayImpl::Int64(array) => Some(array.as_mut_slice()),
+                _ => None,
+            },
         }
     }
 
@@ -491,7 +501,9 @@ impl FromIterator<ListValue> for ListValue {
 
 impl From<ListValue> for ArrayImpl {
     fn from(value: ListValue) -> Self {
-        *value.values
+        match value {
+            ListValue::Columnar(values) => *values,
+        }
     }
 }
 
@@ -713,10 +725,12 @@ impl ToText for ListRef<'_> {
 
 impl<'a> From<&'a ListValue> for ListRef<'a> {
     fn from(value: &'a ListValue) -> Self {
-        ListRef {
-            array: &value.values,
-            start: 0,
-            end: value.values.len() as u32,
+        match value {
+            ListValue::Columnar(values) => ListRef {
+                array: values,
+                start: 0,
+                end: values.len() as u32,
+            },
         }
     }
 }
