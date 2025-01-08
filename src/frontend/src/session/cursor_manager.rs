@@ -256,6 +256,75 @@ impl Display for State {
     }
 }
 
+struct FieldsManager2 {
+    // Table scan output column indicies based on all columns of the table.
+    table_output_col_indices: Vec<usize>,
+    // Row output fields
+    row_output_fields: Vec<Fields>,
+    // Row output column indicies based on the scan output columns.
+    row_output_col_indices: Vec<usize>,
+    // Row pk indicies based on the scan output columns.
+    row_pk_indices: Vec<usize>,
+}
+
+impl FieldsManager2 {
+    pub const EXTRA_FIELDS: [Field; 2] = [
+        Field::with_name(DataType::Varchar, "op"),
+        Field::with_name(DataType::Int64, "rw_timestamp"),
+    ];
+
+    pub fn new(catalog: &TableCatalog) -> Self {
+        let mut row_output_fields = Vec::new();
+        let mut row_output_col_indices = Vec::new();
+        let mut row_pk_indices = Vec::new();
+        let mut output_idx = 0_usize;
+
+        let pk_set: HashSet<usize> = catalog
+            .pk
+            .iter()
+            .map(|col_order| col_order.column_index as usize)
+            .collect();
+        
+        let table_output_col_indices = catalog
+            .columns
+            .iter()
+            .enumerate()
+            .filter_map(|(index, v)| {
+                if pk_set.contains(&index) {
+                    row_pk_indices.push(output_idx);
+                    row_output_col_indices.push(output_idx);
+                    row_output_fields.push(Field::with_name(v.data_type().clone(), v.name()));
+                    output_idx += 1;
+                    Some(index)
+                } else if !v.is_hidden {
+                    row_output_col_indices.push(output_idx);
+                    row_output_fields.push(Field::with_name(v.data_type().clone(), v.name()));
+                    output_idx += 1;
+                    Some(index)
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        
+        assert_eq!(row_output_col_indices.len(), row_output_fields.len());
+        assert_eq!(row_output_col_indices.len(), output_idx);
+
+        for extra in Self::EXTRA_FIELDS.iter() {
+            row_output_col_indices.push(output_idx);
+            row_output_fields.push(extra.clone());
+            output_idx += 1;
+        }
+        
+        Self {
+            table_output_col_indices,
+            row_output_fields,
+            row_output_col_indices,
+            row_pk_indices
+        }
+    }
+}
+
 struct FieldsManager {
     all_fields: Vec<Field>,
     output_fields: Vec<Field>,
@@ -780,7 +849,7 @@ impl SubscriptionCursor {
         let init_query_timer = Instant::now();
         let session = handler_args.clone().session;
         let table_catalog = session.get_table_by_id(dependent_table_id)?;
-        let pks = table_catalog.pk();
+        let pks: &[ColumnOrder] = table_catalog.pk();
         let pk_column_names = get_pk_names(pks, &table_catalog);
         let plan_result = Self::init_batch_plan_for_subscription_cursor(
             rw_timestamp,
