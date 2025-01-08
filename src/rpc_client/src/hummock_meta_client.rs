@@ -33,12 +33,16 @@ pub trait HummockMetaClient: Send + Sync + 'static {
     async fn get_current_version(&self) -> Result<HummockVersion>;
     async fn get_new_sst_ids(&self, number: u32) -> Result<SstObjectIdRange>;
     // We keep `commit_epoch` only for test/benchmark.
-    async fn commit_epoch(
+    async fn commit_epoch_with_change_log(
         &self,
         epoch: HummockEpoch,
         sync_result: SyncResult,
         change_log_info: Option<HummockMetaClientChangeLogInfo>,
     ) -> Result<()>;
+    async fn commit_epoch(&self, epoch: HummockEpoch, sync_result: SyncResult) -> Result<()> {
+        self.commit_epoch_with_change_log(epoch, sync_result, None)
+            .await
+    }
     async fn trigger_manual_compaction(
         &self,
         compaction_group_id: u64,

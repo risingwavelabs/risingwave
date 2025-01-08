@@ -570,7 +570,7 @@ async fn test_state_store_sync() {
         .unwrap();
     test_env
         .meta_client
-        .commit_epoch(epoch1, res, None)
+        .commit_epoch(epoch1, res)
         .await
         .unwrap();
     test_env.wait_sync_committed_version().await;
@@ -616,7 +616,7 @@ async fn test_state_store_sync() {
         .unwrap();
     test_env
         .meta_client
-        .commit_epoch(epoch2, res, None)
+        .commit_epoch(epoch2, res)
         .await
         .unwrap();
     test_env.wait_sync_committed_version().await;
@@ -889,7 +889,7 @@ async fn test_delete_get() {
         .unwrap();
     test_env
         .meta_client
-        .commit_epoch(epoch1, res, None)
+        .commit_epoch(epoch1, res)
         .await
         .unwrap();
 
@@ -915,7 +915,7 @@ async fn test_delete_get() {
         .unwrap();
     test_env
         .meta_client
-        .commit_epoch(epoch2, res, None)
+        .commit_epoch(epoch2, res)
         .await
         .unwrap();
     test_env.wait_sync_committed_version().await;
@@ -1104,19 +1104,19 @@ async fn test_multiple_epoch_sync() {
 
     test_env
         .meta_client
-        .commit_epoch(epoch1, sync_result1, None)
+        .commit_epoch(epoch1, sync_result1)
         .await
         .unwrap();
 
     test_env
         .meta_client
-        .commit_epoch(epoch2, sync_result2, None)
+        .commit_epoch(epoch2, sync_result2)
         .await
         .unwrap();
 
     test_env
         .meta_client
-        .commit_epoch(epoch3, sync_result3, None)
+        .commit_epoch(epoch3, sync_result3)
         .await
         .unwrap();
     test_env.wait_sync_committed_version().await;
@@ -1295,12 +1295,12 @@ async fn test_iter_with_min_epoch() {
             .unwrap();
         test_env
             .meta_client
-            .commit_epoch(epoch1, sync_result1, None)
+            .commit_epoch(epoch1, sync_result1)
             .await
             .unwrap();
         test_env
             .meta_client
-            .commit_epoch(epoch2, sync_result2, None)
+            .commit_epoch(epoch2, sync_result2)
             .await
             .unwrap();
         test_env.wait_sync_committed_version().await;
@@ -1601,7 +1601,7 @@ async fn test_hummock_version_reader() {
                 .unwrap();
             test_env
                 .meta_client
-                .commit_epoch(epoch1, sync_result1, None)
+                .commit_epoch(epoch1, sync_result1)
                 .await
                 .unwrap();
             test_env.wait_sync_committed_version().await;
@@ -1613,7 +1613,7 @@ async fn test_hummock_version_reader() {
                 .unwrap();
             test_env
                 .meta_client
-                .commit_epoch(epoch2, sync_result2, None)
+                .commit_epoch(epoch2, sync_result2)
                 .await
                 .unwrap();
             test_env.wait_sync_committed_version().await;
@@ -1625,7 +1625,7 @@ async fn test_hummock_version_reader() {
                 .unwrap();
             test_env
                 .meta_client
-                .commit_epoch(epoch3, sync_result3, None)
+                .commit_epoch(epoch3, sync_result3)
                 .await
                 .unwrap();
             test_env.wait_sync_committed_version().await;
@@ -2026,12 +2026,12 @@ async fn test_get_with_min_epoch() {
         .unwrap();
     test_env
         .meta_client
-        .commit_epoch(epoch1, sync_result1, None)
+        .commit_epoch(epoch1, sync_result1)
         .await
         .unwrap();
     test_env
         .meta_client
-        .commit_epoch(epoch2, sync_result2, None)
+        .commit_epoch(epoch2, sync_result2)
         .await
         .unwrap();
 

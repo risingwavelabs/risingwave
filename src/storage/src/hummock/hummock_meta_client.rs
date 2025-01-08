@@ -64,7 +64,7 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         res
     }
 
-    async fn commit_epoch(
+    async fn commit_epoch_with_change_log(
         &self,
         _epoch: HummockEpoch,
         _sync_result: SyncResult,

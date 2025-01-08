@@ -136,7 +136,7 @@ impl HummockMetaClient for MockHummockMetaClient {
             })
     }
 
-    async fn commit_epoch(
+    async fn commit_epoch_with_change_log(
         &self,
         epoch: HummockEpoch,
         sync_result: SyncResult,

@@ -176,7 +176,6 @@ async fn test_hummock_compaction_task() {
                 uncommitted_ssts: to_local_sstable_info(&original_tables),
                 ..Default::default()
             },
-            None,
         )
         .await
         .unwrap();
@@ -242,7 +241,6 @@ async fn test_hummock_table() {
                 uncommitted_ssts: to_local_sstable_info(&original_tables),
                 ..Default::default()
             },
-            None,
         )
         .await
         .unwrap();
@@ -305,7 +303,6 @@ async fn test_hummock_transaction() {
                     uncommitted_ssts: to_local_sstable_info(&tables_in_epoch1),
                     ..Default::default()
                 },
-                None,
             )
             .await
             .unwrap();
@@ -352,7 +349,6 @@ async fn test_hummock_transaction() {
                     uncommitted_ssts: to_local_sstable_info(&tables_in_epoch2),
                     ..Default::default()
                 },
-                None,
             )
             .await
             .unwrap();
@@ -508,7 +504,6 @@ async fn test_hummock_manager_basic() {
                     uncommitted_ssts: to_local_sstable_info(&original_tables),
                     ..Default::default()
                 },
-                None,
             )
             .await
             .unwrap();
@@ -631,7 +626,6 @@ async fn test_pin_snapshot_response_lost() {
                 uncommitted_ssts: to_local_sstable_info(&test_tables),
                 ..Default::default()
             },
-            None,
         )
         .await
         .unwrap();
@@ -660,7 +654,6 @@ async fn test_pin_snapshot_response_lost() {
                 uncommitted_ssts: to_local_sstable_info(&test_tables),
                 ..Default::default()
             },
-            None,
         )
         .await
         .unwrap();
@@ -696,7 +689,6 @@ async fn test_pin_snapshot_response_lost() {
                 uncommitted_ssts: to_local_sstable_info(&test_tables),
                 ..Default::default()
             },
-            None,
         )
         .await
         .unwrap();
@@ -724,7 +716,6 @@ async fn test_pin_snapshot_response_lost() {
                 uncommitted_ssts: to_local_sstable_info(&test_tables),
                 ..Default::default()
             },
-            None,
         )
         .await
         .unwrap();
@@ -763,7 +754,6 @@ async fn test_print_compact_task() {
                 uncommitted_ssts: to_local_sstable_info(&original_tables),
                 ..Default::default()
             },
-            None,
         )
         .await
         .unwrap();
@@ -803,7 +793,6 @@ async fn test_invalid_sst_id() {
                     uncommitted_ssts: ssts.clone(),
                     ..Default::default()
                 },
-                None,
             )
             .await
             .unwrap_err();
@@ -829,7 +818,6 @@ async fn test_invalid_sst_id() {
                 uncommitted_ssts: ssts_below_watermerk,
                 ..Default::default()
             },
-            None,
         )
         .await
         .unwrap_err();
@@ -845,7 +833,6 @@ async fn test_invalid_sst_id() {
                 uncommitted_ssts: ssts.clone(),
                 ..Default::default()
             },
-            None,
         )
         .await
         .unwrap();
@@ -987,7 +974,6 @@ async fn test_hummock_compaction_task_heartbeat() {
                 uncommitted_ssts: to_local_sstable_info(&original_tables),
                 ..Default::default()
             },
-            None,
         )
         .await
         .unwrap();
@@ -1117,7 +1103,6 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
                 uncommitted_ssts: to_local_sstable_info(&original_tables),
                 ..Default::default()
             },
-            None,
         )
         .await
         .unwrap();
@@ -1237,7 +1222,6 @@ async fn test_extend_objects_to_delete() {
                 uncommitted_ssts: vec![],
                 ..Default::default()
             },
-            None,
         )
         .await
         .unwrap();
@@ -1319,7 +1303,6 @@ async fn test_version_stats() {
                 uncommitted_ssts: ssts,
                 ..Default::default()
             },
-            None,
         )
         .await
         .unwrap();
@@ -1429,7 +1412,6 @@ async fn test_move_state_tables_to_dedicated_compaction_group_on_commit() {
                 uncommitted_ssts: vec![sst_1],
                 ..Default::default()
             },
-            None,
         )
         .await
         .unwrap();
@@ -1516,7 +1498,6 @@ async fn test_move_state_tables_to_dedicated_compaction_group_on_demand_basic() 
                 uncommitted_ssts: vec![sst_1, sst_2],
                 ..Default::default()
             },
-            None,
         )
         .await
         .unwrap();
@@ -1601,7 +1582,6 @@ async fn test_move_state_tables_to_dedicated_compaction_group_on_demand_non_triv
                 uncommitted_ssts: vec![sst_1],
                 ..Default::default()
             },
-            None,
         )
         .await
         .unwrap();
@@ -1703,7 +1683,6 @@ async fn test_move_state_tables_to_dedicated_compaction_group_trivial_expired() 
                 uncommitted_ssts: vec![sst_1, sst_2, sst_3, sst_4],
                 ..Default::default()
             },
-            None,
         )
         .await
         .unwrap();
@@ -1850,7 +1829,6 @@ async fn test_move_state_tables_to_dedicated_compaction_group_on_demand_bottom_l
                 uncommitted_ssts: vec![sst_1, sst_2, sst_3],
                 ..Default::default()
             },
-            None,
         )
         .await
         .unwrap();
@@ -1986,7 +1964,6 @@ async fn test_compaction_task_expiration_due_to_split_group() {
                 uncommitted_ssts: vec![sst_1, sst_2],
                 ..Default::default()
             },
-            None,
         )
         .await
         .unwrap();
@@ -2061,7 +2038,6 @@ async fn test_move_tables_between_compaction_group() {
                 uncommitted_ssts: vec![sst_1.clone()],
                 ..Default::default()
             },
-            None,
         )
         .await
         .unwrap();
@@ -2075,7 +2051,6 @@ async fn test_move_tables_between_compaction_group() {
                 uncommitted_ssts: vec![sst_2.clone()],
                 ..Default::default()
             },
-            None,
         )
         .await
         .unwrap();
@@ -2220,7 +2195,6 @@ async fn test_partition_level() {
                 uncommitted_ssts: vec![sst_1],
                 ..Default::default()
             },
-            None,
         )
         .await
         .unwrap();
@@ -2257,7 +2231,6 @@ async fn test_partition_level() {
                     uncommitted_ssts: vec![sst],
                     ..Default::default()
                 },
-                None,
             )
             .await
             .unwrap();
@@ -2349,7 +2322,6 @@ async fn test_unregister_moved_table() {
                 uncommitted_ssts: vec![sst_1, sst_2],
                 ..Default::default()
             },
-            None,
         )
         .await
         .unwrap();
@@ -2474,7 +2446,6 @@ async fn test_merge_compaction_group_task_expired() {
                 uncommitted_ssts: vec![sst_1, sst_2, sst_3, sst_4],
                 ..Default::default()
             },
-            None,
         )
         .await
         .unwrap();

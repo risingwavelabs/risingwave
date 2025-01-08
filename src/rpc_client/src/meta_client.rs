@@ -1567,7 +1567,7 @@ impl HummockMetaClient for MetaClient {
         Ok(SstObjectIdRange::new(resp.start_id, resp.end_id))
     }
 
-    async fn commit_epoch(
+    async fn commit_epoch_with_change_log(
         &self,
         _epoch: HummockEpoch,
         _sync_result: SyncResult,

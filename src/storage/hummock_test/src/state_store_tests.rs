@@ -378,7 +378,7 @@ async fn test_basic() {
         .seal_and_sync_epoch(epoch1, HashSet::from_iter([local.table_id()]))
         .await
         .unwrap();
-    meta_client.commit_epoch(epoch1, res, None).await.unwrap();
+    meta_client.commit_epoch(epoch1, res).await.unwrap();
     hummock_storage
         .try_wait_epoch(
             HummockReadEpoch::Committed(epoch1),
@@ -1067,7 +1067,7 @@ async fn test_delete_get() {
         .seal_and_sync_epoch(epoch1, table_id_set.clone())
         .await
         .unwrap();
-    meta_client.commit_epoch(epoch1, res, None).await.unwrap();
+    meta_client.commit_epoch(epoch1, res).await.unwrap();
 
     let batch2 = vec![(
         gen_key_from_str(VirtualNode::ZERO, "bb"),
@@ -1088,7 +1088,7 @@ async fn test_delete_get() {
         .seal_and_sync_epoch(epoch2, table_id_set)
         .await
         .unwrap();
-    meta_client.commit_epoch(epoch2, res, None).await.unwrap();
+    meta_client.commit_epoch(epoch2, res).await.unwrap();
     hummock_storage
         .try_wait_epoch(
             HummockReadEpoch::Committed(epoch2),
@@ -1253,15 +1253,15 @@ async fn test_multiple_epoch_sync() {
     test_get(false).await;
 
     meta_client
-        .commit_epoch(epoch1, sync_result1, None)
+        .commit_epoch(epoch1, sync_result1)
         .await
         .unwrap();
     meta_client
-        .commit_epoch(epoch2, sync_result2, None)
+        .commit_epoch(epoch2, sync_result2)
         .await
         .unwrap();
     meta_client
-        .commit_epoch(epoch3, sync_result3, None)
+        .commit_epoch(epoch3, sync_result3)
         .await
         .unwrap();
     hummock_storage
@@ -1333,7 +1333,7 @@ async fn test_clear_shared_buffer() {
         .unwrap();
 
     meta_client
-        .commit_epoch(epoch1, sync_result1, None)
+        .commit_epoch(epoch1, sync_result1)
         .await
         .unwrap();
     hummock_storage
@@ -1615,7 +1615,7 @@ async fn test_iter_log() {
         }
         assert!(!res.uncommitted_ssts.is_empty());
         meta_client
-            .commit_epoch(
+            .commit_epoch_with_change_log(
                 *epoch,
                 res,
                 Some(std::mem::take(&mut pending_non_checkpoint_epochs)),
@@ -1741,14 +1741,7 @@ async fn test_read_log_next_epoch() {
             assert!(!res.old_value_ssts.is_empty());
         }
         assert!(!res.uncommitted_ssts.is_empty());
-        meta_client
-            .commit_epoch(
-                *epoch,
-                res,
-                Some(std::mem::take(&mut pending_non_checkpoint_epochs)),
-            )
-            .await
-            .unwrap();
+        meta_client.commit_epoch(*epoch, res).await.unwrap();
     }
     assert!(pending_non_checkpoint_epochs.is_empty());
     for i in 0..(first_commit_log_data.len() - 1) {
@@ -1778,19 +1771,7 @@ async fn test_read_log_next_epoch() {
         .unwrap();
     assert!(!res.old_value_ssts.is_empty());
     assert!(!res.uncommitted_ssts.is_empty());
-    meta_client
-        .commit_epoch(
-            commit_epoch,
-            res,
-            Some(
-                second_commit_log_data
-                    .iter()
-                    .map(|(epoch, _)| *epoch)
-                    .collect(),
-            ),
-        )
-        .await
-        .unwrap();
+    meta_client.commit_epoch(commit_epoch, res).await.unwrap();
     assert_eq!(
         first_commit_epoch_next_epoch_future.await.unwrap(),
         second_commit_log_data.first().unwrap().0
@@ -2033,7 +2014,7 @@ async fn test_get_keyed_row() {
         .seal_and_sync_epoch(epoch1, HashSet::from_iter([local.table_id()]))
         .await
         .unwrap();
-    meta_client.commit_epoch(epoch1, res, None).await.unwrap();
+    meta_client.commit_epoch(epoch1, res).await.unwrap();
     hummock_storage
         .try_wait_epoch(
             HummockReadEpoch::Committed(epoch1),
