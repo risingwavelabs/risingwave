@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -116,7 +116,7 @@ pub async fn handle_create_user(
     let database_id = {
         let catalog_reader = session.env().catalog_reader().read_guard();
         catalog_reader
-            .get_database_by_name(session.database())
+            .get_database_by_name(&session.database())
             .expect("session database should exist")
             .id()
     };
@@ -128,8 +128,8 @@ pub async fn handle_create_user(
         }
 
         let session_user = user_reader
-            .get_user_by_name(session.user_name())
-            .ok_or_else(|| CatalogError::NotFound("user", session.user_name().to_owned()))?;
+            .get_user_by_name(&session.user_name())
+            .ok_or_else(|| CatalogError::NotFound("user", session.user_name()))?;
 
         make_prost_user_info(user_name, &stmt.with_options, session_user, database_id)?
     };

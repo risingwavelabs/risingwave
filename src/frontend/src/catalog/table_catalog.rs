@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -33,11 +33,14 @@ use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::DefaultColumnDesc;
 use risingwave_sqlparser::ast;
 use risingwave_sqlparser::parser::Parser;
+use thiserror_ext::AsReport as _;
 
+use super::purify::try_purify_table_source_create_sql_ast;
 use super::{ColumnId, DatabaseId, FragmentId, OwnedByUserCatalog, SchemaId, SinkId};
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::ExprImpl;
 use crate::optimizer::property::Cardinality;
+use crate::session::current::notice_to_user;
 use crate::user::UserId;
 
 /// `TableCatalog` Includes full information about a table.
@@ -270,6 +273,50 @@ impl TableVersion {
             version: self.version_id,
             next_column_id: self.next_column_id.into(),
         }
+    }
+}
+
+impl TableCatalog {
+    /// Returns the SQL definition when the table was created, purified with best effort
+    /// if it's a table.
+    pub fn create_sql_purified(&self) -> String {
+        self.create_sql_ast_purified()
+            .map(|stmt| stmt.to_string())
+            .unwrap_or_else(|_| self.create_sql())
+    }
+
+    /// Returns the parsed SQL definition when the table was created, purified with best effort
+    /// if it's a table.
+    ///
+    /// Returns error if it's invalid.
+    pub fn create_sql_ast_purified(&self) -> Result<ast::Statement> {
+        // Purification is only applicable to tables.
+        if let TableType::Table = self.table_type() {
+            let base = if self.definition.is_empty() {
+                // Created by `CREATE TABLE AS`, create a skeleton `CREATE TABLE` statement.
+                let name = ast::ObjectName(vec![self.name.as_str().into()]);
+                ast::Statement::default_create_table(name)
+            } else {
+                self.create_sql_ast()?
+            };
+
+            match try_purify_table_source_create_sql_ast(
+                base,
+                self.columns(),
+                self.row_id_index,
+                &self.pk_column_ids(),
+            ) {
+                Ok(stmt) => return Ok(stmt),
+                Err(e) => notice_to_user(format!(
+                    "error occurred while purifying definition for table \"{}\", \
+                     results may be inaccurate: {}",
+                    self.name,
+                    e.as_report()
+                )),
+            }
+        }
+
+        self.create_sql_ast()
     }
 }
 

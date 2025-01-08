@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,7 +30,7 @@ use risingwave_common::catalog::{
     get_dist_key_in_pk_indices, ColumnDesc, ColumnId, TableId, TableOption,
 };
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt, VnodeCountCompat};
-use risingwave_common::row::{self, once, CompactedRow, Once, OwnedRow, Row, RowExt};
+use risingwave_common::row::{self, once, Once, OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, Datum, DefaultOrd, DefaultOrdered, ScalarImpl};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::EpochPair;
@@ -45,8 +45,9 @@ use risingwave_hummock_sdk::key::{
 use risingwave_hummock_sdk::table_watermark::{
     VnodeWatermark, WatermarkDirection, WatermarkSerdeType,
 };
+use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::catalog::Table;
-use risingwave_storage::error::{ErrorKind, StorageError};
+use risingwave_storage::error::{ErrorKind, StorageError, StorageResult};
 use risingwave_storage::hummock::CachePolicy;
 use risingwave_storage::mem_table::MemTableError;
 use risingwave_storage::row_serde::find_columns_by_ids;
@@ -57,6 +58,7 @@ use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::store::{
     InitOptions, LocalStateStore, NewLocalOptions, OpConsistencyLevel, PrefetchOptions,
     ReadLogOptions, ReadOptions, SealCurrentEpochOptions, StateStoreIter, StateStoreIterExt,
+    TryWaitEpochOptions,
 };
 use risingwave_storage::table::merge_sort::merge_sort;
 use risingwave_storage::table::{
@@ -185,6 +187,17 @@ where
     pub async fn init_epoch(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         self.local_store.init(InitOptions::new(epoch)).await?;
         Ok(())
+    }
+
+    pub async fn try_wait_committed_epoch(&self, prev_epoch: u64) -> StorageResult<()> {
+        self.store
+            .try_wait_epoch(
+                HummockReadEpoch::Committed(prev_epoch),
+                TryWaitEpochOptions {
+                    table_id: self.table_id,
+                },
+            )
+            .await
     }
 
     pub fn state_store(&self) -> &S {
@@ -668,25 +681,6 @@ where
             .get(serialized_pk, read_options)
             .await
             .map_err(Into::into)
-    }
-
-    /// Get a row in value-encoding format from state table.
-    pub async fn get_compacted_row(
-        &self,
-        pk: impl Row,
-    ) -> StreamExecutorResult<Option<CompactedRow>> {
-        if self.row_serde.kind().is_basic() {
-            // Basic serde is in value-encoding format, which is compatible with the compacted row.
-            self.get_encoded_row(pk)
-                .await
-                .map(|bytes| bytes.map(CompactedRow::new))
-        } else {
-            // For other encodings, we must first deserialize it into a `Row` first, then serialize
-            // it back into value-encoding format.
-            self.get_row(pk)
-                .await
-                .map(|row| row.map(CompactedRow::from))
-        }
     }
 
     /// Update the vnode bitmap of the state table, returns the previous vnode bitmap.

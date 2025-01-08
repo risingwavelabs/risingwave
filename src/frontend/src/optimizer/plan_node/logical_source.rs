@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,6 @@
 
 use std::rc::Rc;
 
-use fixedbitset::FixedBitSet;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, Field};
@@ -44,7 +43,9 @@ use crate::optimizer::plan_node::{
     ToStreamContext,
 };
 use crate::optimizer::property::Distribution::HashShard;
-use crate::optimizer::property::{Distribution, MonotonicityMap, Order, RequiredDist};
+use crate::optimizer::property::{
+    Distribution, MonotonicityMap, Order, RequiredDist, WatermarkColumns,
+};
 use crate::utils::{ColIndexMapping, Condition, IndexRewriter};
 
 /// `LogicalSource` returns contents of a table or other equivalent object
@@ -228,7 +229,7 @@ impl LogicalSource {
                 Distribution::Single,
                 true, // `list` will keep listing all objects, it must be append-only
                 false,
-                FixedBitSet::with_capacity(logical_source.column_catalog.len()),
+                WatermarkColumns::new(),
                 MonotonicityMap::new(),
             ),
             core: logical_source,

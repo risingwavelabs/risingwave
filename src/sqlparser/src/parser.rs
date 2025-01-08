@@ -331,6 +331,7 @@ impl Parser<'_> {
                 Keyword::FLUSH => Ok(Statement::Flush),
                 Keyword::WAIT => Ok(Statement::Wait),
                 Keyword::RECOVER => Ok(Statement::Recover),
+                Keyword::USE => Ok(self.parse_use()?),
                 _ => self.expected_at(checkpoint, "statement"),
             },
             Token::LParen => {
@@ -4247,17 +4248,17 @@ impl Parser<'_> {
             vec![]
         };
 
-        let limit = if self.parse_keyword(Keyword::LIMIT) {
-            self.parse_limit()?
-        } else {
-            None
-        };
+        let mut limit = None;
+        let mut offset = None;
+        for _x in 0..2 {
+            if limit.is_none() && self.parse_keyword(Keyword::LIMIT) {
+                limit = self.parse_limit()?
+            }
 
-        let offset = if self.parse_keyword(Keyword::OFFSET) {
-            Some(self.parse_offset()?)
-        } else {
-            None
-        };
+            if offset.is_none() && self.parse_keyword(Keyword::OFFSET) {
+                offset = Some(self.parse_offset()?)
+            }
+        }
 
         let fetch = if self.parse_keyword(Keyword::FETCH) {
             if limit.is_some() {
@@ -5550,6 +5551,11 @@ impl Parser<'_> {
             object_name,
             comment,
         })
+    }
+
+    fn parse_use(&mut self) -> PResult<Statement> {
+        let db_name = self.parse_object_name()?;
+        Ok(Statement::Use { db_name })
     }
 }
 

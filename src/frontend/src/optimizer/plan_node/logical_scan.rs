@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,6 @@ use std::collections::{BTreeMap, HashSet};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnDesc, TableDesc};
@@ -38,7 +37,7 @@ use crate::optimizer::plan_node::{
     BatchSeqScan, ColumnPruningContext, LogicalFilter, LogicalProject, LogicalValues,
     PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
-use crate::optimizer::property::{Cardinality, Order};
+use crate::optimizer::property::{Cardinality, Order, WatermarkColumns};
 use crate::optimizer::rule::IndexSelectionRule;
 use crate::optimizer::ApplyResult;
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
@@ -141,7 +140,7 @@ impl LogicalScan {
         self.core.distribution_key()
     }
 
-    pub fn watermark_columns(&self) -> FixedBitSet {
+    pub fn watermark_columns(&self) -> WatermarkColumns {
         self.core.watermark_columns()
     }
 

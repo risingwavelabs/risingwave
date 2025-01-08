@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -203,7 +203,7 @@ impl LocalFrontend {
     ) -> Arc<SessionImpl> {
         Arc::new(SessionImpl::new(
             self.env.clone(),
-            Arc::new(AuthContext::new(database, user_name, user_id)),
+            AuthContext::new(database, user_name, user_id),
             UserAuthenticator::None,
             // Local Frontend use a non-sense id.
             (0, 0),

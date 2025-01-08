@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -33,7 +33,6 @@ use super::version::{StagingData, VersionUpdate};
 use crate::error::StorageResult;
 use crate::hummock::event_handler::hummock_event_handler::HummockEventSender;
 use crate::hummock::event_handler::{HummockEvent, HummockReadVersionRef, LocalInstanceGuard};
-use crate::hummock::iterator::change_log::ChangeLogIterator;
 use crate::hummock::iterator::{
     Backward, BackwardUserIterator, ConcatIteratorInner, Forward, HummockIteratorUnion,
     IteratorFactory, MergeIterator, UserIterator,
@@ -245,7 +244,6 @@ impl LocalHummockStorage {
 }
 
 impl StateStoreRead for LocalHummockStorage {
-    type ChangeLogIter = ChangeLogIterator;
     type Iter = HummockStorageIterator;
     type RevIter = HummockStorageRevIterator;
 
@@ -279,20 +277,6 @@ impl StateStoreRead for LocalHummockStorage {
         assert!(epoch <= self.epoch());
         self.rev_iter_flushed(key_range, epoch, read_options)
             .instrument(tracing::trace_span!("hummock_rev_iter"))
-    }
-
-    async fn iter_log(
-        &self,
-        epoch_range: (u64, u64),
-        key_range: TableKeyRange,
-        options: ReadLogOptions,
-    ) -> StorageResult<Self::ChangeLogIter> {
-        let version = self.read_version.read().committed().clone();
-        let iter = self
-            .hummock_version_reader
-            .iter_log(version, epoch_range, key_range, options)
-            .await?;
-        Ok(iter)
     }
 }
 

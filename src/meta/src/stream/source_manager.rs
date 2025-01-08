@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -458,79 +458,104 @@ impl SourceManagerCore {
             .await
     }
 
-    fn apply_source_change(
-        &mut self,
-        added_source_fragments: Option<HashMap<SourceId, BTreeSet<FragmentId>>>,
-        added_backfill_fragments: Option<HashMap<SourceId, BTreeSet<(FragmentId, FragmentId)>>>,
-        split_assignment: Option<SplitAssignment>,
-        dropped_actors: Option<HashSet<ActorId>>,
-        fragment_replacements: Option<HashMap<FragmentId, FragmentId>>,
-    ) {
-        if let Some(source_fragments) = added_source_fragments {
-            for (source_id, mut fragment_ids) in source_fragments {
-                self.source_fragments
-                    .entry(source_id)
-                    .or_default()
-                    .append(&mut fragment_ids);
+    /// Updates states after all kinds of source change.
+    pub fn apply_source_change(&mut self, source_change: SourceChange) {
+        let mut added_source_fragments = Default::default();
+        let mut added_backfill_fragments = Default::default();
+        let mut split_assignment = Default::default();
+        let mut dropped_actors = Default::default();
+        let mut fragment_replacements = Default::default();
+        let mut dropped_source_fragments = Default::default();
+        let mut dropped_source_ids = Default::default();
+
+        match source_change {
+            SourceChange::CreateJob {
+                added_source_fragments: added_source_fragments_,
+                added_backfill_fragments: added_backfill_fragments_,
+                split_assignment: split_assignment_,
+            } => {
+                added_source_fragments = added_source_fragments_;
+                added_backfill_fragments = added_backfill_fragments_;
+                split_assignment = split_assignment_;
             }
-        }
-        if let Some(backfill_fragments) = added_backfill_fragments {
-            for (source_id, mut fragment_ids) in backfill_fragments {
-                self.backfill_fragments
-                    .entry(source_id)
-                    .or_default()
-                    .append(&mut fragment_ids);
+            SourceChange::SplitChange(split_assignment_) => {
+                split_assignment = split_assignment_;
+            }
+            SourceChange::DropMv {
+                dropped_source_fragments: dropped_source_fragments_,
+                dropped_actors: dropped_actors_,
+            } => {
+                dropped_source_fragments = dropped_source_fragments_;
+                dropped_actors = dropped_actors_;
+            }
+            SourceChange::ReplaceJob {
+                dropped_source_fragments: dropped_source_fragments_,
+                dropped_actors: dropped_actors_,
+                added_source_fragments: added_source_fragments_,
+                split_assignment: split_assignment_,
+                fragment_replacements: fragment_replacements_,
+            } => {
+                dropped_source_fragments = dropped_source_fragments_;
+                dropped_actors = dropped_actors_;
+                added_source_fragments = added_source_fragments_;
+                split_assignment = split_assignment_;
+                fragment_replacements = fragment_replacements_;
+            }
+            SourceChange::DropSource {
+                dropped_source_ids: dropped_source_ids_,
+            } => {
+                dropped_source_ids = dropped_source_ids_;
+            }
+            SourceChange::Reschedule {
+                split_assignment: split_assignment_,
+                dropped_actors: dropped_actors_,
+            } => {
+                split_assignment = split_assignment_;
+                dropped_actors = dropped_actors_;
             }
         }
 
-        if let Some(assignment) = split_assignment {
-            for (_, actor_splits) in assignment {
-                for (actor_id, splits) in actor_splits {
-                    // override previous splits info
-                    self.actor_splits.insert(actor_id, splits);
-                }
+        for source_id in dropped_source_ids {
+            if let Some(handle) = self.managed_sources.remove(&source_id) {
+                handle.handle.abort();
+            }
+            self.source_fragments.remove(&source_id);
+            if let Some(_fragments) = self.backfill_fragments.remove(&source_id) {
+                // TODO: enable this assertion after we implemented cleanup for backfill fragments
+                // debug_assert!(
+                //     fragments.is_empty(),
+                //     "when dropping source, there should be no backfill fragments, got: {:?}",
+                //     fragments
+                // );
             }
         }
 
-        if let Some(dropped_actors) = dropped_actors {
-            for actor_id in &dropped_actors {
-                self.actor_splits.remove(actor_id);
+        for (source_id, fragments) in added_source_fragments {
+            self.source_fragments
+                .entry(source_id)
+                .or_default()
+                .extend(fragments);
+        }
+
+        for (source_id, fragments) in added_backfill_fragments {
+            self.backfill_fragments
+                .entry(source_id)
+                .or_default()
+                .extend(fragments);
+        }
+
+        for (_, actor_splits) in split_assignment {
+            for (actor_id, splits) in actor_splits {
+                // override previous splits info
+                self.actor_splits.insert(actor_id, splits);
             }
         }
 
-        if let Some(fragment_replacements) = fragment_replacements {
-            for (old_fragment_id, new_fragment_id) in fragment_replacements {
-                for fragment_ids in self.source_fragments.values_mut() {
-                    if fragment_ids.remove(&old_fragment_id) {
-                        fragment_ids.insert(new_fragment_id);
-                    }
-                }
-
-                for fragment_ids in self.backfill_fragments.values_mut() {
-                    let mut new_backfill_fragment_ids = fragment_ids.clone();
-                    for (fragment_id, upstream_fragment_id) in fragment_ids.iter() {
-                        assert_ne!(
-                            fragment_id, upstream_fragment_id,
-                            "backfill fragment should not be replaced"
-                        );
-                        if *upstream_fragment_id == old_fragment_id {
-                            new_backfill_fragment_ids
-                                .remove(&(*fragment_id, *upstream_fragment_id));
-                            new_backfill_fragment_ids.insert((*fragment_id, new_fragment_id));
-                        }
-                    }
-                    *fragment_ids = new_backfill_fragment_ids;
-                }
-            }
+        for actor_id in dropped_actors {
+            self.actor_splits.remove(&actor_id);
         }
-    }
 
-    fn drop_source_fragments(
-        &mut self,
-        source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
-        removed_actors: &HashSet<ActorId>,
-    ) {
-        for (source_id, fragment_ids) in source_fragments {
+        for (source_id, fragment_ids) in dropped_source_fragments {
             if let Entry::Occupied(mut entry) = self.source_fragments.entry(source_id) {
                 let managed_fragment_ids = entry.get_mut();
                 for fragment_id in &fragment_ids {
@@ -543,8 +568,27 @@ impl SourceManagerCore {
             }
         }
 
-        for actor_id in removed_actors {
-            self.actor_splits.remove(actor_id);
+        for (old_fragment_id, new_fragment_id) in fragment_replacements {
+            for fragment_ids in self.source_fragments.values_mut() {
+                if fragment_ids.remove(&old_fragment_id) {
+                    fragment_ids.insert(new_fragment_id);
+                }
+            }
+
+            for fragment_ids in self.backfill_fragments.values_mut() {
+                let mut new_backfill_fragment_ids = fragment_ids.clone();
+                for (fragment_id, upstream_fragment_id) in fragment_ids.iter() {
+                    assert_ne!(
+                        fragment_id, upstream_fragment_id,
+                        "backfill fragment should not be replaced"
+                    );
+                    if *upstream_fragment_id == old_fragment_id {
+                        new_backfill_fragment_ids.remove(&(*fragment_id, *upstream_fragment_id));
+                        new_backfill_fragment_ids.insert((*fragment_id, new_fragment_id));
+                    }
+                }
+                *fragment_ids = new_backfill_fragment_ids;
+            }
         }
     }
 }
@@ -823,57 +867,41 @@ impl SourceManager {
         })
     }
 
-    pub async fn drop_source_fragments(
+    /// For replacing job (alter table/source, create sink into table).
+    pub async fn handle_replace_job(
         &self,
-        source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
-        removed_actors: HashSet<ActorId>,
+        dropped_job_fragments: &StreamJobFragments,
+        added_source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
+        split_assignment: SplitAssignment,
+        fragment_replacements: HashMap<FragmentId, FragmentId>,
     ) {
-        let mut core = self.core.lock().await;
-        core.drop_source_fragments(source_fragments, &removed_actors);
-    }
-
-    /// For dropping MV.
-    pub async fn drop_source_fragments_vec(&self, table_fragments: &[StreamJobFragments]) {
-        let mut core = self.core.lock().await;
-
         // Extract the fragments that include source operators.
-        let source_fragments = table_fragments
-            .iter()
-            .flat_map(|table_fragments| table_fragments.stream_source_fragments())
-            .collect::<HashMap<_, _>>();
+        let dropped_source_fragments = dropped_job_fragments.stream_source_fragments().clone();
 
-        let fragments = table_fragments
-            .iter()
-            .flat_map(|table_fragments| &table_fragments.fragments)
-            .collect::<BTreeMap<_, _>>();
+        let fragments = &dropped_job_fragments.fragments;
 
-        let dropped_actors = source_fragments
+        let dropped_actors = dropped_source_fragments
             .values()
             .flatten()
             .flat_map(|fragment_id| fragments.get(fragment_id).unwrap().get_actors())
             .map(|actor| actor.get_actor_id())
             .collect::<HashSet<_>>();
 
-        core.drop_source_fragments(source_fragments, &dropped_actors);
+        self.apply_source_change(SourceChange::ReplaceJob {
+            dropped_source_fragments,
+            dropped_actors,
+            added_source_fragments,
+            split_assignment,
+            fragment_replacements,
+        })
+        .await;
     }
 
-    /// Updates states after split change (`post_collect` barrier) or scaling (`post_apply_reschedule`).
-    pub async fn apply_source_change(
-        &self,
-        added_source_fragments: Option<HashMap<SourceId, BTreeSet<FragmentId>>>,
-        added_backfill_fragments: Option<HashMap<SourceId, BTreeSet<(FragmentId, FragmentId)>>>,
-        split_assignment: Option<SplitAssignment>,
-        dropped_actors: Option<HashSet<ActorId>>,
-        fragment_replacements: Option<HashMap<FragmentId, FragmentId>>,
-    ) {
+    /// Updates states after all kinds of source change.
+    /// e.g., split change (`post_collect` barrier) or scaling (`post_apply_reschedule`).
+    pub async fn apply_source_change(&self, source_change: SourceChange) {
         let mut core = self.core.lock().await;
-        core.apply_source_change(
-            added_source_fragments,
-            added_backfill_fragments,
-            split_assignment,
-            dropped_actors,
-            fragment_replacements,
-        );
+        core.apply_source_change(source_change);
     }
 
     /// Migrates splits from previous actors to the new actors for a rescheduled fragment.
@@ -1176,16 +1204,6 @@ impl SourceManager {
         }
     }
 
-    /// Unregister connector worker for source.
-    pub async fn unregister_sources(&self, source_ids: Vec<SourceId>) {
-        let mut core = self.core.lock().await;
-        for source_id in source_ids {
-            if let Some(handle) = core.managed_sources.remove(&source_id) {
-                handle.handle.abort();
-            }
-        }
-    }
-
     /// Used on startup ([`Self::new`]). Failed sources will not block meta startup.
     fn create_source_worker_async(
         source: Source,
@@ -1276,7 +1294,7 @@ impl SourceManager {
 
         for (database_id, split_assignment) in split_assignment {
             if !split_assignment.is_empty() {
-                let command = Command::SourceSplitAssignment(split_assignment);
+                let command = Command::SourceChangeSplit(split_assignment);
                 tracing::info!(command = ?command, "pushing down split assignment command");
                 self.barrier_scheduler
                     .run_command(database_id, command)
@@ -1301,6 +1319,37 @@ impl SourceManager {
             }
         }
     }
+}
+
+pub enum SourceChange {
+    /// `CREATE SOURCE` (shared), or `CREATE MV`
+    CreateJob {
+        added_source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
+        added_backfill_fragments: HashMap<SourceId, BTreeSet<(FragmentId, FragmentId)>>,
+        split_assignment: SplitAssignment,
+    },
+    SplitChange(SplitAssignment),
+    /// `DROP SOURCE` or `DROP MV`
+    DropSource {
+        dropped_source_ids: Vec<SourceId>,
+    },
+    DropMv {
+        // FIXME: we should consider source backfill fragments here for MV on shared source.
+        dropped_source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
+        dropped_actors: HashSet<ActorId>,
+    },
+    ReplaceJob {
+        dropped_source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
+        dropped_actors: HashSet<ActorId>,
+
+        added_source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
+        split_assignment: SplitAssignment,
+        fragment_replacements: HashMap<FragmentId, FragmentId>,
+    },
+    Reschedule {
+        split_assignment: SplitAssignment,
+        dropped_actors: HashSet<ActorId>,
+    },
 }
 
 pub fn build_actor_connector_splits(

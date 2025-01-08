@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,7 +26,7 @@ pub async fn handle_close_cursor(
 ) -> Result<RwPgResponse> {
     let session = handle_args.session.clone();
     let cursor_manager = session.get_cursor_manager();
-    let db_name = session.database();
+    let db_name = &session.database();
     if let Some(cursor_name) = stmt.cursor_name {
         let (_, cursor_name) = Binder::resolve_schema_qualified_name(db_name, cursor_name.clone())?;
         cursor_manager.remove_cursor(cursor_name).await?;
