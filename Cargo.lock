@@ -4195,9 +4195,15 @@ checksum = "1435fa1053d8b2fbbe9be7e97eca7f33d37b28409959813daefc1446a14247f1"
 
 [[package]]
 name = "downcast-rs"
-version = "1.2.0"
+version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9ea835d29036a4087793836fa931b08837ad5e957da9e23886b29586fb9b6650"
+checksum = "75b325c5dbd37f80359721ad39aca5a29fb04c89279657cffdda8736d0c0b9d2"
+
+[[package]]
+name = "downcast-rs"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ea8a8b81cacc08888170eef4d13b775126db426d0b348bee9d18c2c1eaf123cf"
 
 [[package]]
 name = "duct"
@@ -7146,7 +7152,7 @@ dependencies = [
  "async-task",
  "bincode 1.3.3",
  "bytes",
- "downcast-rs",
+ "downcast-rs 1.2.1",
  "futures-util",
  "lazy_static",
  "libc",
@@ -11118,7 +11124,7 @@ dependencies = [
  "await-tree",
  "chrono",
  "const-currying",
- "downcast-rs",
+ "downcast-rs 2.0.1",
  "easy-ext",
  "educe",
  "either",
@@ -11230,7 +11236,7 @@ dependencies = [
  "bytes",
  "chrono",
  "clap",
- "downcast-rs",
+ "downcast-rs 2.0.1",
  "dyn-clone",
  "easy-ext",
  "educe",
