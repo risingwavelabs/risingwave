@@ -109,16 +109,16 @@ pub fn new_s3_operator(
     s3_access_key: String,
     s3_secret_key: String,
     bucket: String,
+    s3_endpoint: String,
 ) -> ConnectorResult<Operator> {
-    // Create s3 builder.
-    let mut builder = S3::default().bucket(&bucket).region(&s3_region);
-    builder = builder.secret_access_key(&s3_access_key);
-    builder = builder.secret_access_key(&s3_secret_key);
-    builder = builder.endpoint(&format!(
-        "https://{}.s3.{}.amazonaws.com",
-        bucket, s3_region
-    ));
-
+    let mut builder = S3::default();
+    builder = builder
+        .region(&s3_region)
+        .endpoint(&s3_endpoint)
+        .access_key_id(&s3_access_key)
+        .secret_access_key(&s3_secret_key)
+        .bucket(&bucket)
+        .disable_config_load();
     let op: Operator = Operator::new(builder)?
         .layer(LoggingLayer::default())
         .layer(RetryLayer::default())
