@@ -181,7 +181,7 @@ impl Array for ListArray {
     type RefItem<'a> = ListRef<'a>;
 
     unsafe fn raw_value_at_unchecked(&self, idx: usize) -> Self::RefItem<'_> {
-        ListRef {
+        ListRef::Columnar {
             array: &self.value,
             start: *self.offsets.get_unchecked(idx),
             end: *self.offsets.get_unchecked(idx + 1),
@@ -509,50 +509,66 @@ impl From<ListValue> for ArrayImpl {
 
 /// A slice of an array
 #[derive(Copy, Clone)]
-pub struct ListRef<'a> {
-    array: &'a ArrayImpl,
-    start: u32,
-    end: u32,
+pub enum ListRef<'a> {
+    Columnar {
+        array: &'a ArrayImpl,
+        start: u32,
+        end: u32,
+    },
 }
 
 impl<'a> ListRef<'a> {
     /// Returns the length of the list.
     pub fn len(&self) -> usize {
-        (self.end - self.start) as usize
+        match *self {
+            ListRef::Columnar { start, end, .. } => (end - start) as usize,
+        }
     }
 
     /// Returns `true` if the list has a length of 0.
     pub fn is_empty(&self) -> bool {
-        self.start == self.end
+        self.len() == 0
     }
 
     /// Returns the data type of the elements in the list.
     pub fn data_type(&self) -> DataType {
-        self.array.data_type()
+        match self {
+            ListRef::Columnar { array, .. } => array.data_type(),
+        }
     }
 
     /// Returns the elements in the flattened list.
     pub fn flatten(self) -> ListRef<'a> {
-        match self.array {
-            ArrayImpl::List(inner) => ListRef {
-                array: &inner.value,
-                start: inner.offsets[self.start as usize],
-                end: inner.offsets[self.end as usize],
-            }
-            .flatten(),
-            _ => self,
+        match self {
+            ListRef::Columnar { array, start, end } => match array {
+                ArrayImpl::List(inner) => ListRef::Columnar {
+                    array: &inner.value,
+                    start: inner.offsets[start as usize],
+                    end: inner.offsets[end as usize],
+                }
+                .flatten(),
+                _ => self,
+            },
         }
     }
 
     /// Iterates over the elements of the list.
     pub fn iter(self) -> impl DoubleEndedIterator + ExactSizeIterator<Item = DatumRef<'a>> + 'a {
-        (self.start..self.end).map(|i| self.array.value_at(i as usize))
+        match self {
+            ListRef::Columnar { array, start, end } => {
+                (start..end).map(move |i| array.value_at(i as usize))
+            }
+        }
     }
 
     /// Get the element at the given index. Returns `None` if the index is out of bounds.
     pub fn get(self, index: usize) -> Option<DatumRef<'a>> {
         if index < self.len() {
-            Some(self.array.value_at(self.start as usize + index))
+            match self {
+                ListRef::Columnar { array, start, .. } => {
+                    Some(array.value_at(start as usize + index))
+                }
+            }
         } else {
             None
         }
@@ -581,39 +597,47 @@ impl<'a> ListRef<'a> {
     }
 
     pub fn to_owned(self) -> ListValue {
-        let mut builder = self.array.create_builder(self.len());
-        for datum_ref in self.iter() {
-            builder.append(datum_ref);
+        match self {
+            ListRef::Columnar { array, .. } => {
+                let mut builder = array.create_builder(self.len());
+                for datum_ref in self.iter() {
+                    builder.append(datum_ref);
+                }
+                ListValue::new(builder.finish())
+            }
         }
-        ListValue::new(builder.finish())
     }
 
     /// Returns a slice if the list is of type `int64[]`.
     pub fn as_i64_slice(&self) -> Option<&[i64]> {
-        match &self.array {
-            ArrayImpl::Int64(array) => {
-                Some(&array.as_slice()[self.start as usize..self.end as usize])
-            }
-            _ => None,
+        match *self {
+            ListRef::Columnar { array, start, end } => match array {
+                ArrayImpl::Int64(array) => Some(&array.as_slice()[start as usize..end as usize]),
+                _ => None,
+            },
         }
     }
 
     /// # Panics
     /// Panics if the list is not a map's internal representation (See [`super::MapArray`]).
     pub(super) fn as_map_kv(self) -> (ListRef<'a>, ListRef<'a>) {
-        let (k, v) = self.array.as_struct().fields().collect_tuple().unwrap();
-        (
-            ListRef {
-                array: k,
-                start: self.start,
-                end: self.end,
-            },
-            ListRef {
-                array: v,
-                start: self.start,
-                end: self.end,
-            },
-        )
+        match self {
+            ListRef::Columnar { array, start, end } => {
+                let (k, v) = array.as_struct().fields().collect_tuple().unwrap();
+                (
+                    ListRef::Columnar {
+                        array: k,
+                        start,
+                        end,
+                    },
+                    ListRef::Columnar {
+                        array: v,
+                        start,
+                        end,
+                    },
+                )
+            }
+        }
     }
 
     /// Used to display `ListRef` in explain for better readibilty.
@@ -661,11 +685,17 @@ impl Debug for ListRef<'_> {
 
 impl Row for ListRef<'_> {
     fn datum_at(&self, index: usize) -> DatumRef<'_> {
-        self.array.value_at(self.start as usize + index)
+        match *self {
+            ListRef::Columnar { array, start, .. } => array.value_at(start as usize + index),
+        }
     }
 
     unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
-        self.array.value_at_unchecked(self.start as usize + index)
+        match *self {
+            ListRef::Columnar { array, start, .. } => {
+                array.value_at_unchecked(start as usize + index)
+            }
+        }
     }
 
     fn len(&self) -> usize {
@@ -726,7 +756,7 @@ impl ToText for ListRef<'_> {
 impl<'a> From<&'a ListValue> for ListRef<'a> {
     fn from(value: &'a ListValue) -> Self {
         match value {
-            ListValue::Columnar(values) => ListRef {
+            ListValue::Columnar(values) => ListRef::Columnar {
                 array: values,
                 start: 0,
                 end: values.len() as u32,
