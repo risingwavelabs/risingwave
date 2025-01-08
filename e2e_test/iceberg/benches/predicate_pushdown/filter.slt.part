@@ -1,0 +1,4 @@
+query I
+select count(*) from iceberg_t1_source where i1 > 1001 and i1 < 1110;
+----
+108
