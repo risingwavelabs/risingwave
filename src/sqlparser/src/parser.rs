@@ -4248,17 +4248,17 @@ impl Parser<'_> {
             vec![]
         };
 
-        let limit = if self.parse_keyword(Keyword::LIMIT) {
-            self.parse_limit()?
-        } else {
-            None
-        };
+        let mut limit = None;
+        let mut offset = None;
+        for _x in 0..2 {
+            if limit.is_none() && self.parse_keyword(Keyword::LIMIT) {
+                limit = self.parse_limit()?
+            }
 
-        let offset = if self.parse_keyword(Keyword::OFFSET) {
-            Some(self.parse_offset()?)
-        } else {
-            None
-        };
+            if offset.is_none() && self.parse_keyword(Keyword::OFFSET) {
+                offset = Some(self.parse_offset()?)
+            }
+        }
 
         let fetch = if self.parse_keyword(Keyword::FETCH) {
             if limit.is_some() {
