@@ -387,7 +387,7 @@ impl IcebergCommon {
                 let catalog = iceberg_catalog_rest::RestCatalog::new(config);
                 Ok(Arc::new(catalog))
             }
-            "glue_rest" => {
+            "glue_rust" => {
                 let mut iceberg_configs = HashMap::new();
                 // glue
                 if let Some(region) = &self.region {
