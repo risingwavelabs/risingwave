@@ -39,7 +39,6 @@ use itertools::Itertools;
 use parking_lot::Mutex;
 use rand::seq::SliceRandom;
 use rand::thread_rng;
-use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::compact_task::{CompactTask, ReportTask};
 use risingwave_hummock_sdk::compaction_group::StateTableId;
@@ -49,6 +48,7 @@ use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::{
     add_prost_table_stats_map, purge_prost_table_stats, PbTableStatsMap,
 };
+use risingwave_hummock_sdk::table_watermark::WatermarkSerdeType;
 use risingwave_hummock_sdk::version::{GroupDelta, IntraLevelDelta};
 use risingwave_hummock_sdk::{
     compact_task_to_string, statistics_compact_task, CompactionGroupId, HummockCompactionTaskId,
@@ -729,39 +729,15 @@ impl HummockManager {
                 }
             }
 
-            // Filter out the table that has a primary key prefix watermark.
-            let table_id_with_pk_prefix_watermark: HashSet<_> = self
-                .metadata_manager
-                .catalog_controller
-                .get_table_by_ids(
-                    version
-                        .latest_version()
-                        .table_watermarks
-                        .keys()
-                        .map(|id| id.table_id() as _)
-                        .collect(),
-                )
-                .await
-                .map_err(|e| Error::Internal(e.into()))?
-                .into_iter()
-                .filter_map(|table| {
-                    // pk prefix watermark.
-                    if table.clean_watermark_index_in_pk.is_none()
-                        || table.clean_watermark_index_in_pk.unwrap() == 0
-                    {
-                        Some(TableId::from(table.get_id()))
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-
             let table_watermarks = version
                 .latest_version()
                 .table_watermarks
                 .iter()
                 .filter_map(|(table_id, table_watermarks)| {
-                    if table_id_with_pk_prefix_watermark.contains(table_id) {
+                    if matches!(
+                        table_watermarks.watermark_type,
+                        WatermarkSerdeType::PkPrefix,
+                    ) {
                         Some((*table_id, table_watermarks.clone()))
                     } else {
                         None

@@ -142,6 +142,7 @@ pub enum VersionUpdate {
         direction: WatermarkDirection,
         epoch: HummockEpoch,
         vnode_watermarks: Vec<VnodeWatermark>,
+        watermark_type: WatermarkSerdeType,
     },
 }
 
@@ -412,7 +413,9 @@ impl HummockReadVersion {
                 direction,
                 epoch,
                 vnode_watermarks,
+                watermark_type,
             } => {
+                assert_eq!(WatermarkSerdeType::PkPrefix, watermark_type);
                 if let Some(watermark_index) = &mut self.table_watermarks {
                     watermark_index.add_epoch_watermark(
                         epoch,

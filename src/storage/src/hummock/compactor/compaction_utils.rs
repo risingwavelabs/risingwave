@@ -328,7 +328,7 @@ pub async fn check_compaction_result(
     let need_clean_state_table = table_ids_from_input_ssts
         .any(|table_id| !compact_task.existing_table_ids.contains(&table_id));
     // This check method does not consider dropped keys by compaction filter.
-    if compact_task.is_contains_ttl() || need_clean_state_table {
+    if compact_task.contains_ttl() || need_clean_state_table {
         return Ok(true);
     }
 
@@ -510,9 +510,9 @@ pub fn optimize_by_copy_block(compact_task: &CompactTask, context: &CompactorCon
     let single_table = compact_task.build_compact_table_ids().len() == 1;
     context.storage_opts.enable_fast_compaction
         && all_ssts_are_blocked_filter
-        && !compact_task.is_contains_range_tombstone()
-        && !compact_task.is_contains_ttl()
-        && !compact_task.is_contains_split_sst()
+        && !compact_task.contains_range_tombstone()
+        && !compact_task.contains_ttl()
+        && !compact_task.contains_split_sst()
         && single_table
         && compact_task.target_level > 0
         && compact_task.input_ssts.len() == 2

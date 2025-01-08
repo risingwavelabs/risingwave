@@ -533,6 +533,7 @@ impl LocalStateStore for LocalHummockStorage {
                     direction: *direction,
                     epoch: prev_epoch,
                     vnode_watermarks: watermarks.clone(),
+                    watermark_type: WatermarkSerdeType::PkPrefix,
                 });
             }
         }

@@ -19,7 +19,6 @@ use std::mem::size_of;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::sync::Arc;
 
-use bincode::{Decode, Encode};
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
@@ -295,7 +294,7 @@ impl Display for WatermarkDirection {
 }
 
 impl WatermarkDirection {
-    pub fn filter_by_watermark_key(
+    pub fn key_filter_by_watermark(
         &self,
         key: impl AsRef<[u8]>,
         watermark: impl AsRef<[u8]>,
@@ -308,7 +307,7 @@ impl WatermarkDirection {
         }
     }
 
-    pub fn filter_by_watermark_datum(
+    pub fn datum_filter_by_watermark(
         &self,
         watermark_col_in_pk: impl ToDatumRef,
         watermark: impl ToDatumRef,
@@ -783,7 +782,7 @@ impl From<TableWatermarks> for PbTableWatermarks {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Decode, Encode)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WatermarkSerdeType {
     PkPrefix,
     NonPkPrefix,

@@ -11411,7 +11411,6 @@ dependencies = [
 name = "risingwave_hummock_sdk"
 version = "2.3.0-alpha"
 dependencies = [
- "bincode 2.0.0-rc.3",
  "bytes",
  "hex",
  "itertools 0.13.0",

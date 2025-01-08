@@ -817,7 +817,10 @@ impl From<SealCurrentEpochOptions> for TracedSealCurrentEpochOptions {
                                 Message::encode_to_vec(&pb_watermark)
                             })
                             .collect(),
-                        watermark_type,
+                        match watermark_type {
+                            WatermarkSerdeType::NonPkPrefix => true,
+                            WatermarkSerdeType::PkPrefix => false,
+                        },
                     )
                 },
             ),
@@ -847,7 +850,11 @@ impl From<TracedSealCurrentEpochOptions> for SealCurrentEpochOptions {
                                     .expect("should not failed")
                             })
                             .collect(),
-                        is_non_pk_prefix,
+                        if is_non_pk_prefix {
+                            WatermarkSerdeType::NonPkPrefix
+                        } else {
+                            WatermarkSerdeType::PkPrefix
+                        },
                     )
                 },
             ),

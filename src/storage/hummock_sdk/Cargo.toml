@@ -8,7 +8,6 @@ license = { workspace = true }
 repository = { workspace = true }
 
 [dependencies]
-bincode = { version = "=2.0.0-rc.3", features = ["serde"] }
 bytes = "1"
 hex = "0.4"
 itertools = { workspace = true }

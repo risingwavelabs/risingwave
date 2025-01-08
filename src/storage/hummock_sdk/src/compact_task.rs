@@ -117,14 +117,14 @@ impl CompactTask {
 
 impl CompactTask {
     // The compact task may need to reclaim key with TTL
-    pub fn is_contains_ttl(&self) -> bool {
+    pub fn contains_ttl(&self) -> bool {
         self.table_options
             .iter()
             .any(|(_, table_option)| table_option.retention_seconds.is_some_and(|ttl| ttl > 0))
     }
 
     // The compact task may need to reclaim key with range tombstone
-    pub fn is_contains_range_tombstone(&self) -> bool {
+    pub fn contains_range_tombstone(&self) -> bool {
         self.input_ssts
             .iter()
             .flat_map(|level| level.table_infos.iter())
@@ -132,7 +132,7 @@ impl CompactTask {
     }
 
     // The compact task may need to reclaim key with split sst
-    pub fn is_contains_split_sst(&self) -> bool {
+    pub fn contains_split_sst(&self) -> bool {
         self.input_ssts
             .iter()
             .flat_map(|level| level.table_infos.iter())
