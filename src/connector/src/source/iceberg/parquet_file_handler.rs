@@ -162,6 +162,7 @@ pub async fn list_s3_directory(
             "https://{}.s3.{}.amazonaws.com",
             bucket, s3_region
         ));
+        builder = builder.disable_config_load();
         let op = Operator::new(builder)?
             .layer(RetryLayer::default())
             .finish();
