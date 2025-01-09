@@ -131,7 +131,7 @@ impl TableFunction {
                     && !"azblob".eq_ignore_ascii_case(&eval_args[1]))
             {
                 return Err(BindError(
-                "file_scan function supports three backends: s3, gcs, and azblob. Their formats are as follows:: \n
+                "file_scan function supports three backends: s3, gcs, and azblob. Their formats are as follows: \n
                     file_scan('parquet', 's3', s3_region, s3_access_key, s3_secret_key, file_location) \n
                     file_scan('parquet', 'gcs', credential, service_account, file_location) \n
                     file_scan('parquet', 'azblob', account_name, account_key, endpoint, file_location)"
