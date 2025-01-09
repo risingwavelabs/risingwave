@@ -86,18 +86,14 @@ impl JoinStreamChunkBuilder {
         row_update: impl Row,
         row_matched: impl Row,
     ) -> Option<StreamChunk> {
-        self.builder.append_iter(
+        self.builder.append_iter2(
             op,
             self.update_to_output
                 .iter()
-                .map(|&(update_idx, output_idx)| (output_idx, row_update.datum_at(update_idx)))
-                .chain(
-                    self.matched_to_output
-                        .iter()
-                        .map(|&(matched_idx, output_idx)| {
-                            (output_idx, row_matched.datum_at(matched_idx))
-                        }),
-                ),
+                .map(|&(update_idx, output_idx)| (output_idx, row_update.datum_at(update_idx))),
+            self.matched_to_output
+                .iter()
+                .map(|&(matched_idx, output_idx)| (output_idx, row_matched.datum_at(matched_idx))),
         )
     }
 
