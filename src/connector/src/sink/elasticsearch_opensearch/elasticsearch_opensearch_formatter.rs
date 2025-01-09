@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-
 use anyhow::anyhow;
 use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::catalog::Schema;
@@ -117,7 +115,7 @@ impl ElasticSearchOpenSearchFormatter {
     }
 
     pub fn convert_chunk(&self, chunk: StreamChunk) -> Result<Vec<BuildBulkPara>> {
-        let mut update_map: HashMap<String, RowRef<'_>> = HashMap::new();
+        let mut update_delete_row: Option<RowRef<'_>> = None;
         let mut result_vec = Vec::with_capacity(chunk.capacity());
         for (op, rows) in chunk.rows() {
             let index = if let Some(index_column) = self.index_column {
@@ -151,11 +149,8 @@ impl ElasticSearchOpenSearchFormatter {
             match op {
                 Op::Insert | Op::UpdateInsert => {
                     let key = self.key_encoder.encode(rows)?;
-                    let mut col_indices = match self.value_encoder.col_indices() {
-                        Some(col_indices) => col_indices.to_vec(),
-                        None => (0..self.value_encoder.schema().len()).collect(),
-                    };
-                    if let Some(delete_row) = update_map.remove(&key) {
+                    let mut modified_col_indices = Vec::new();
+                    if let Some(delete_row) = update_delete_row.take() {
                         delete_row
                             .iter()
                             .enumerate()
@@ -165,13 +160,17 @@ impl ElasticSearchOpenSearchFormatter {
                                     && let Some(delete_column) = delete_column
                                     && insert_column == delete_column
                                 {
-                                    col_indices.retain(|&x| x != index);
+                                    // do nothing
+                                } else {
+                                    modified_col_indices.push(index);
                                 }
                             });
+                    } else {
+                        modified_col_indices = (0..rows.len()).collect();
                     }
                     let value = self
                         .value_encoder
-                        .encode_cols(rows, col_indices.into_iter())?;
+                        .encode_cols(rows, modified_col_indices.into_iter())?;
                     result_vec.push(BuildBulkPara {
                         index: index.to_owned(),
                         key,
@@ -192,8 +191,7 @@ impl ElasticSearchOpenSearchFormatter {
                     });
                 }
                 Op::UpdateDelete => {
-                    let key = self.key_encoder.encode(rows)?;
-                    update_map.insert(key, rows);
+                    update_delete_row = Some(rows);
                 }
             }
         }
