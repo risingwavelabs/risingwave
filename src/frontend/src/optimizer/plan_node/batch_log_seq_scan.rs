@@ -40,7 +40,7 @@ impl BatchLogSeqScan {
         let order = if scan_ranges.len() > 1 {
             Order::any()
         } else {
-            Order::new(core.table_desc.pk.clone())
+            core.get_out_column_index_order()
         };
         let base = PlanBase::new_batch(core.ctx(), core.schema(), dist, order);
 

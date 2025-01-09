@@ -109,7 +109,6 @@ def test_cursor_since_begin():
     execute_insert("insert into t1 values(6,6)",conn)
     execute_insert("flush",conn)
     row = execute_query("fetch next from cur",conn)
-    row = execute_query("fetch next from cur",conn)
     check_rows_data([4,4],row[0],"Insert")
     row = execute_query("fetch next from cur",conn)
     check_rows_data([5,5],row[0],"Insert")
@@ -139,7 +138,6 @@ def test_cursor_since_now():
     execute_insert("insert into t1 values(6,6)",conn)
     execute_insert("flush",conn)
     row = execute_query("fetch next from cur",conn)
-    row = execute_query("fetch next from cur",conn)
     check_rows_data([6,6],row[0],"Insert")
     row = execute_query("fetch next from cur",conn)
     assert row == []
@@ -165,7 +163,6 @@ def test_cursor_without_since():
     execute_insert("insert into t1 values(6,6)",conn)
     execute_insert("flush",conn)
     row = execute_query("fetch next from cur",conn)
-    row = execute_query("fetch next from cur",conn)
     check_rows_data([6,6],row[0],"Insert")
     row = execute_query("fetch next from cur",conn)
     assert row == []
@@ -190,7 +187,6 @@ def test_cursor_since_rw_timestamp():
     execute_insert("insert into t1 values(6,6)",conn)
     execute_insert("flush",conn)
     row = execute_query("fetch next from cur",conn)
-    row = execute_query("fetch next from cur",conn)
     valuelen = len(row[0])
     rw_timestamp_1 = row[0][valuelen - 1]
     check_rows_data([4,4],row[0],"Insert")
@@ -208,18 +204,15 @@ def test_cursor_since_rw_timestamp():
 
     execute_insert(f"declare cur subscription cursor for sub since {rw_timestamp_1}",conn)
     row = execute_query("fetch next from cur",conn)
-    row = execute_query("fetch next from cur",conn)
     check_rows_data([4,4],row[0],"Insert")
     execute_insert("close cur",conn)
 
     execute_insert(f"declare cur subscription cursor for sub since {rw_timestamp_2}",conn)
     row = execute_query("fetch next from cur",conn)
-    row = execute_query("fetch next from cur",conn)
     check_rows_data([5,5],row[0],"Insert")
     execute_insert("close cur",conn)
 
     execute_insert(f"declare cur subscription cursor for sub since {rw_timestamp_3}",conn)
-    row = execute_query("fetch next from cur",conn)
     row = execute_query("fetch next from cur",conn)
     assert row == []
     execute_insert("close cur",conn)
