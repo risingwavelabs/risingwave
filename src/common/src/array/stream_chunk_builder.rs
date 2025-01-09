@@ -122,6 +122,15 @@ impl StreamChunkBuilder {
         self.append_iter_inner::<true>(op, iter)
     }
 
+    pub fn append_iter2<'a>(
+        &mut self,
+        op: Op,
+        iter1: impl IntoIterator<Item = (usize, DatumRef<'a>)>,
+        iter2: impl IntoIterator<Item = (usize, DatumRef<'a>)>,
+    ) -> Option<StreamChunk> {
+        self.append_iter_inner2::<true>(op, iter1, iter2)
+    }
+
     /// Append a row to the builder, return a chunk if the builder is full.
     #[must_use]
     pub fn append_row(&mut self, op: Op, row: impl Row) -> Option<StreamChunk> {
@@ -180,6 +189,41 @@ impl StreamChunkBuilder {
         let vis = std::mem::take(&mut self.vis_builder).finish();
 
         Some(StreamChunk::with_visibility(ops, columns, vis))
+    }
+
+    fn append_iter_inner2<'a, const VIS: bool>(
+        &mut self,
+        op: Op,
+        iter1: impl IntoIterator<Item = (usize, DatumRef<'a>)>,
+        iter2: impl IntoIterator<Item = (usize, DatumRef<'a>)>,
+    ) -> Option<StreamChunk> {
+        self.ops.push(op);
+        for (i, datum) in iter1 {
+            self.column_builders[i].append(datum);
+        }
+        for (i, datum) in iter2 {
+            self.column_builders[i].append(datum);
+        }
+        self.vis_builder.append(VIS);
+        self.size += 1;
+
+        if let Some(max_chunk_size) = self.max_chunk_size {
+            if self.size == max_chunk_size && !op.is_update_delete() || self.size > max_chunk_size {
+                // Two situations here:
+                // 1. `self.size == max_chunk_size && op == Op::UpdateDelete`
+                //    We should wait for next `UpdateInsert` to join the chunk.
+                // 2. `self.size > max_chunk_size`
+                //    Here we assert that `self.size == max_chunk_size + 1`. It's possible that
+                //    the `Op` after `UpdateDelete` is not `UpdateInsert`, if something inconsistent
+                //    happens, we should still take the existing data.
+                self.take()
+            } else {
+                None
+            }
+        } else {
+            // unlimited
+            None
+        }
     }
 
     #[must_use]
