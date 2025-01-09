@@ -84,12 +84,6 @@ impl TableFunction {
             // For s3: file_scan('parquet', 's3', s3_region, s3_access_key, s3_secret_key, file_location_or_directory)
             // For gcs: file_scan('parquet', 'gcs', credential, file_location_or_directory)
             // For azblob: file_scan('parquet', 'azblob', account_name, account_key, endpoint, file_location)
-            if args.len() != 6 && args.len() != 4 {
-                return Err(BindError("file_scan function only accepts: \
-                    file_scan('parquet', 's3', s3_region, s3_access_key, s3_secret_key, file_location) or \
-                    file_scan('parquet', 'gcs', credential, service_account, file_location) or \
-                    file_scan('parquet', 'azblob', account_name, account_key, endpoint, file_location)".to_owned()).into());
-            }
             let mut eval_args: Vec<String> = vec![];
             for arg in &args {
                 if arg.return_type() != DataType::Varchar {
@@ -128,6 +122,22 @@ impl TableFunction {
                         .into());
                     }
                 }
+            }
+
+            if (eval_args.len() != 4 && eval_args.len() != 6)
+                || (eval_args.len() == 4 && !"gcs".eq_ignore_ascii_case(&eval_args[1]))
+                || (eval_args.len() == 6
+                    && !"s3".eq_ignore_ascii_case(&eval_args[1])
+                    && !"azblob".eq_ignore_ascii_case(&eval_args[1]))
+            {
+                return Err(BindError(
+                "file_scan function supports three backends: s3, gcs, and azblob. Their formats are as follows:: \n
+                    file_scan('parquet', 's3', s3_region, s3_access_key, s3_secret_key, file_location) \n
+                    file_scan('parquet', 'gcs', credential, service_account, file_location) \n
+                    file_scan('parquet', 'azblob', account_name, account_key, endpoint, file_location)"
+                        .to_owned(),
+                )
+                .into());
             }
             if !"parquet".eq_ignore_ascii_case(&eval_args[0]) {
                 return Err(BindError(
