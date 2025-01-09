@@ -753,6 +753,7 @@ fn parse_create_function() {
         Statement::CreateFunction {
             or_replace: false,
             temporary: false,
+            if_not_exists: false,
             name: ObjectName(vec![Ident::new_unchecked("add")]),
             args: Some(vec![
                 OperateFunctionArg::unnamed(DataType::Int),
@@ -777,6 +778,7 @@ fn parse_create_function() {
         Statement::CreateFunction {
             or_replace: false,
             temporary: false,
+            if_not_exists: false,
             name: ObjectName(vec![Ident::new_unchecked("sub")]),
             args: Some(vec![
                 OperateFunctionArg::unnamed(DataType::Int),
@@ -801,6 +803,7 @@ fn parse_create_function() {
         Statement::CreateFunction {
             or_replace: false,
             temporary: false,
+            if_not_exists: false,
             name: ObjectName(vec![Ident::new_unchecked("return_test")]),
             args: Some(vec![
                 OperateFunctionArg::unnamed(DataType::Int),
@@ -826,6 +829,7 @@ fn parse_create_function() {
         Statement::CreateFunction {
             or_replace: true,
             temporary: false,
+            if_not_exists: false,
             name: ObjectName(vec![Ident::new_unchecked("add")]),
             args: Some(vec![
                 OperateFunctionArg::with_name("a", DataType::Int),
@@ -851,12 +855,14 @@ fn parse_create_function() {
         }
     );
 
-    let sql = "CREATE FUNCTION unnest(a INT[]) RETURNS TABLE (x INT) LANGUAGE SQL RETURN a";
+    let sql =
+        "CREATE TEMPORARY FUNCTION unnest(a INT[]) RETURNS TABLE (x INT) LANGUAGE SQL RETURN a";
     assert_eq!(
         verified_stmt(sql),
         Statement::CreateFunction {
             or_replace: false,
-            temporary: false,
+            temporary: true,
+            if_not_exists: false,
             name: ObjectName(vec![Ident::new_unchecked("unnest")]),
             args: Some(vec![OperateFunctionArg::with_name(
                 "a",
@@ -869,6 +875,32 @@ fn parse_create_function() {
             params: CreateFunctionBody {
                 language: Some("SQL".into()),
                 return_: Some(Expr::Identifier("a".into())),
+                ..Default::default()
+            },
+            with_options: Default::default(),
+        }
+    );
+
+    let sql =
+        "CREATE FUNCTION IF NOT EXISTS add(INT, INT) RETURNS INT LANGUAGE SQL IMMUTABLE AS 'select $1 + $2;'";
+    assert_eq!(
+        verified_stmt(sql),
+        Statement::CreateFunction {
+            or_replace: false,
+            temporary: false,
+            if_not_exists: true,
+            name: ObjectName(vec![Ident::new_unchecked("add")]),
+            args: Some(vec![
+                OperateFunctionArg::unnamed(DataType::Int),
+                OperateFunctionArg::unnamed(DataType::Int),
+            ]),
+            returns: Some(CreateFunctionReturns::Value(DataType::Int)),
+            params: CreateFunctionBody {
+                language: Some("SQL".into()),
+                behavior: Some(FunctionBehavior::Immutable),
+                as_: Some(FunctionDefinition::SingleQuotedDef(
+                    "select $1 + $2;".into()
+                )),
                 ..Default::default()
             },
             with_options: Default::default(),

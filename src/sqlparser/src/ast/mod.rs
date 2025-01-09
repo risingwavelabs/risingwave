@@ -1349,6 +1349,7 @@ pub enum Statement {
     CreateFunction {
         or_replace: bool,
         temporary: bool,
+        if_not_exists: bool,
         name: ObjectName,
         args: Option<Vec<OperateFunctionArg>>,
         returns: Option<CreateFunctionReturns>,
@@ -1768,6 +1769,7 @@ impl fmt::Display for Statement {
             Statement::CreateFunction {
                 or_replace,
                 temporary,
+                if_not_exists,
                 name,
                 args,
                 returns,
@@ -1776,9 +1778,10 @@ impl fmt::Display for Statement {
             } => {
                 write!(
                     f,
-                    "CREATE {or_replace}{temp}FUNCTION {name}",
+                    "CREATE {or_replace}{temp}FUNCTION {if_not_exists}{name}",
                     temp = if *temporary { "TEMPORARY " } else { "" },
                     or_replace = if *or_replace { "OR REPLACE " } else { "" },
+                    if_not_exists = if *if_not_exists { "IF NOT EXISTS " } else { "" },
                 )?;
                 if let Some(args) = args {
                     write!(f, "({})", display_comma_separated(args))?;
@@ -3551,8 +3554,9 @@ mod tests {
     #[test]
     fn test_create_function_display() {
         let create_function = Statement::CreateFunction {
-            temporary: false,
             or_replace: false,
+            temporary: false,
+            if_not_exists: false,
             name: ObjectName(vec![Ident::new_unchecked("foo")]),
             args: Some(vec![OperateFunctionArg::unnamed(DataType::Int)]),
             returns: Some(CreateFunctionReturns::Value(DataType::Int)),
@@ -3573,8 +3577,9 @@ mod tests {
             format!("{}", create_function)
         );
         let create_function = Statement::CreateFunction {
-            temporary: false,
             or_replace: false,
+            temporary: false,
+            if_not_exists: false,
             name: ObjectName(vec![Ident::new_unchecked("foo")]),
             args: Some(vec![OperateFunctionArg::unnamed(DataType::Int)]),
             returns: Some(CreateFunctionReturns::Value(DataType::Int)),

@@ -278,6 +278,7 @@ pub async fn handle(
         Statement::CreateFunction {
             or_replace,
             temporary,
+            if_not_exists,
             name,
             args,
             returns,
@@ -298,6 +299,7 @@ pub async fn handle(
                     handler_args,
                     or_replace,
                     temporary,
+                    if_not_exists,
                     name,
                     args,
                     returns,
@@ -310,6 +312,7 @@ pub async fn handle(
                     handler_args,
                     or_replace,
                     temporary,
+                    if_not_exists,
                     name,
                     args,
                     returns,
