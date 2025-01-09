@@ -1362,6 +1362,7 @@ pub enum Statement {
     /// Postgres: <https://www.postgresql.org/docs/15/sql-createaggregate.html>
     CreateAggregate {
         or_replace: bool,
+        if_not_exists: bool,
         name: ObjectName,
         args: Vec<OperateFunctionArg>,
         returns: DataType,
@@ -1795,6 +1796,7 @@ impl fmt::Display for Statement {
             }
             Statement::CreateAggregate {
                 or_replace,
+                if_not_exists,
                 name,
                 args,
                 returns,
@@ -1803,8 +1805,9 @@ impl fmt::Display for Statement {
             } => {
                 write!(
                     f,
-                    "CREATE {or_replace}AGGREGATE {name}",
+                    "CREATE {or_replace}AGGREGATE {if_not_exists}{name}",
                     or_replace = if *or_replace { "OR REPLACE " } else { "" },
+                    if_not_exists = if *if_not_exists { "IF NOT EXISTS " } else { "" },
                 )?;
                 write!(f, "({})", display_comma_separated(args))?;
                 write!(f, " RETURNS {}", returns)?;

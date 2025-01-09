@@ -323,6 +323,7 @@ pub async fn handle(
         }
         Statement::CreateAggregate {
             or_replace,
+            if_not_exists,
             name,
             args,
             returns,
@@ -332,6 +333,7 @@ pub async fn handle(
             create_aggregate::handle_create_aggregate(
                 handler_args,
                 or_replace,
+                if_not_exists,
                 name,
                 args,
                 returns,

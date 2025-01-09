@@ -916,6 +916,27 @@ fn parse_create_aggregate() {
         verified_stmt(sql),
         Statement::CreateAggregate {
             or_replace: true,
+            if_not_exists: false,
+            name: ObjectName(vec![Ident::new_unchecked("sum")]),
+            args: vec![OperateFunctionArg::unnamed(DataType::Int)],
+            returns: DataType::BigInt,
+            append_only: true,
+            params: CreateFunctionBody {
+                language: Some("python".into()),
+                as_: Some(FunctionDefinition::SingleQuotedDef("sum".into())),
+                using: Some(CreateFunctionUsing::Link("xxx".into())),
+                ..Default::default()
+            },
+        }
+    );
+
+    let sql =
+        "CREATE AGGREGATE IF NOT EXISTS sum(INT) RETURNS BIGINT APPEND ONLY LANGUAGE python AS 'sum' USING LINK 'xxx'";
+    assert_eq!(
+        verified_stmt(sql),
+        Statement::CreateAggregate {
+            or_replace: false,
+            if_not_exists: true,
             name: ObjectName(vec![Ident::new_unchecked("sum")]),
             args: vec![OperateFunctionArg::unnamed(DataType::Int)],
             returns: DataType::BigInt,
