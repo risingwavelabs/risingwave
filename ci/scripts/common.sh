@@ -20,6 +20,12 @@ export RW_SECRET_STORE_PRIVATE_KEY_HEX="0123456789abcdef0123456789abcdef"
 unset LANG
 
 function dump_diagnose_info() {
+  ret=$?
+  if [ $ret -eq 0 ]; then
+    exit 0
+  fi
+
+  echo "^^^ +++"
   echo "--- Failed to run command! Dumping diagnose info..."
   if [ -f .risingwave/config/risedev-env ]; then
     ./risedev diagnose || true

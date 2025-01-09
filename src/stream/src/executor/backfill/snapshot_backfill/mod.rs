@@ -13,6 +13,7 @@
 // limitations under the License.
 
 mod executor;
+mod state;
 mod vnode_stream;
 
 pub use executor::SnapshotBackfillExecutor;

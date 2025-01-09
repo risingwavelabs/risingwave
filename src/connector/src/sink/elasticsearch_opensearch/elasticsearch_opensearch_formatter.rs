@@ -114,7 +114,11 @@ impl ElasticSearchOpenSearchFormatter {
         })
     }
 
-    pub fn convert_chunk(&self, chunk: StreamChunk) -> Result<Vec<BuildBulkPara>> {
+    pub fn convert_chunk(
+        &self,
+        chunk: StreamChunk,
+        is_append_only: bool,
+    ) -> Result<Vec<BuildBulkPara>> {
         let mut update_delete_row: Option<RowRef<'_>> = None;
         let mut result_vec = Vec::with_capacity(chunk.capacity());
         for (op, rows) in chunk.rows() {
@@ -180,6 +184,11 @@ impl ElasticSearchOpenSearchFormatter {
                     });
                 }
                 Op::Delete => {
+                    if is_append_only {
+                        return Err(SinkError::ElasticSearchOpenSearch(anyhow!(
+                            "`Delete` operation is not supported in `append_only` mode"
+                        )));
+                    }
                     let key = self.key_encoder.encode(rows)?;
                     let mem_size_b = std::mem::size_of_val(&key);
                     result_vec.push(BuildBulkPara {
@@ -191,7 +200,13 @@ impl ElasticSearchOpenSearchFormatter {
                     });
                 }
                 Op::UpdateDelete => {
-                    update_delete_row = Some(rows);
+                    if is_append_only {
+                        return Err(SinkError::ElasticSearchOpenSearch(anyhow!(
+                            "`UpdateDelete` operation is not supported in `append_only` mode"
+                        )));
+                    } else {
+                        update_delete_row = Some(rows);
+                    }
                 }
             }
         }

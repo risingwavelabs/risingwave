@@ -23,6 +23,7 @@ use ::iceberg::spec::TableMetadata;
 use ::iceberg::table::Table;
 use ::iceberg::{Catalog, TableIdent};
 use anyhow::{anyhow, Context};
+use iceberg::io::{GCS_CREDENTIALS_JSON, GCS_DISABLE_CONFIG_LOAD, S3_DISABLE_CONFIG_LOAD};
 use iceberg_catalog_glue::{AWS_ACCESS_KEY_ID, AWS_REGION_NAME, AWS_SECRET_ACCESS_KEY};
 use risingwave_common::bail;
 use serde_derive::Deserialize;
@@ -30,6 +31,7 @@ use serde_with::serde_as;
 use url::Url;
 use with_options::WithOptions;
 
+use crate::connector_common::iceberg::storage_catalog::StorageCatalogConfig;
 use crate::deserialize_optional_bool_from_string;
 use crate::error::ConnectorResult;
 
@@ -48,6 +50,10 @@ pub struct IcebergCommon {
     pub access_key: Option<String>,
     #[serde(rename = "s3.secret.key")]
     pub secret_key: Option<String>,
+
+    #[serde(rename = "gcs.credential")]
+    pub gcs_credential: Option<String>,
+
     /// Path of iceberg warehouse, only applicable in storage catalog.
     #[serde(rename = "warehouse.path")]
     pub warehouse_path: Option<String>,
@@ -130,6 +136,9 @@ impl IcebergCommon {
             if let Some(secret_key) = &self.secret_key {
                 iceberg_configs.insert(S3_SECRET_ACCESS_KEY.to_owned(), secret_key.clone());
             }
+            if let Some(gcs_credential) = &self.gcs_credential {
+                iceberg_configs.insert(GCS_CREDENTIALS_JSON.to_owned(), gcs_credential.clone());
+            }
 
             match &self.warehouse_path {
                 Some(warehouse_path) => {
@@ -169,8 +178,12 @@ impl IcebergCommon {
             }
             let enable_config_load = self.enable_config_load.unwrap_or(false);
             iceberg_configs.insert(
-                // TODO: `disable_config_load` is outdated.
-                "disable_config_load".to_owned(),
+                S3_DISABLE_CONFIG_LOAD.to_owned(),
+                (!enable_config_load).to_string(),
+            );
+
+            iceberg_configs.insert(
+                GCS_DISABLE_CONFIG_LOAD.to_owned(),
                 (!enable_config_load).to_string(),
             );
 
@@ -288,37 +301,62 @@ impl IcebergCommon {
     ) -> ConnectorResult<Arc<dyn Catalog>> {
         match self.catalog_type() {
             "storage" => {
-                let config =
-                    storage_catalog::StorageCatalogConfig::builder()
-                        .warehouse(self.warehouse_path.clone().ok_or_else(|| {
-                            anyhow!("`warehouse.path` must be set in storage catalog")
-                        })?)
-                        .access_key(self.access_key.clone().ok_or_else(|| {
-                            anyhow!("`s3.access.key` must be set in storage catalog")
-                        })?)
-                        .secret_key(self.secret_key.clone().ok_or_else(|| {
-                            anyhow!("`s3.secret.key` must be set in storage catalog")
-                        })?)
-                        .region(self.region.clone())
-                        .endpoint(self.endpoint.clone())
-                        .build();
+                let warehouse = self
+                    .warehouse_path
+                    .clone()
+                    .ok_or_else(|| anyhow!("`warehouse.path` must be set in storage catalog"))?;
+                let url = Url::parse(warehouse.as_ref())
+                    .map_err(|_| anyhow!("Invalid warehouse path: {}", warehouse))?;
+
+                let config = match url.scheme() {
+                    "s3" | "s3a" => StorageCatalogConfig::S3(
+                        storage_catalog::StorageCatalogS3Config::builder()
+                            .warehouse(warehouse)
+                            .access_key(self.access_key.clone().ok_or_else(|| {
+                                anyhow!("`s3.access.key` must be set in storage catalog")
+                            })?)
+                            .secret_key(self.secret_key.clone().ok_or_else(|| {
+                                anyhow!("`s3.secret.key` must be set in storage catalog")
+                            })?)
+                            .region(self.region.clone())
+                            .endpoint(self.endpoint.clone())
+                            .build(),
+                    ),
+                    "gs" | "gcs" => StorageCatalogConfig::Gcs(
+                        storage_catalog::StorageCatalogGcsConfig::builder()
+                            .warehouse(warehouse)
+                            .credential(self.gcs_credential.clone().ok_or_else(|| {
+                                anyhow!("`gcs.credential` must be set in storage catalog")
+                            })?)
+                            .build(),
+                    ),
+                    scheme => bail!("Unsupported warehouse scheme: {}", scheme),
+                };
+
                 let catalog = storage_catalog::StorageCatalog::new(config)?;
                 Ok(Arc::new(catalog))
             }
             "rest_rust" => {
                 let mut iceberg_configs = HashMap::new();
-                if let Some(region) = &self.region {
-                    iceberg_configs.insert(S3_REGION.to_owned(), region.clone());
-                }
-                if let Some(endpoint) = &self.endpoint {
-                    iceberg_configs.insert(S3_ENDPOINT.to_owned(), endpoint.clone());
-                }
-                if let Some(access_key) = &self.access_key {
-                    iceberg_configs.insert(S3_ACCESS_KEY_ID.to_owned(), access_key.clone());
-                }
-                if let Some(secret_key) = &self.secret_key {
-                    iceberg_configs.insert(S3_SECRET_ACCESS_KEY.to_owned(), secret_key.clone());
-                }
+
+                // check gcs credential or s3 access key and secret key
+                if let Some(gcs_credential) = &self.gcs_credential {
+                    iceberg_configs.insert(GCS_CREDENTIALS_JSON.to_owned(), gcs_credential.clone());
+                } else {
+                    if let Some(region) = &self.region {
+                        iceberg_configs.insert(S3_REGION.to_owned(), region.clone());
+                    }
+                    if let Some(endpoint) = &self.endpoint {
+                        iceberg_configs.insert(S3_ENDPOINT.to_owned(), endpoint.clone());
+                    }
+                    if let Some(access_key) = &self.access_key {
+                        iceberg_configs.insert(S3_ACCESS_KEY_ID.to_owned(), access_key.clone());
+                    }
+                    if let Some(secret_key) = &self.secret_key {
+                        iceberg_configs.insert(S3_SECRET_ACCESS_KEY.to_owned(), secret_key.clone());
+                    }
+                };
+
                 if let Some(credential) = &self.credential {
                     iceberg_configs.insert("credential".to_owned(), credential.clone());
                 }
@@ -349,7 +387,7 @@ impl IcebergCommon {
                 let catalog = iceberg_catalog_rest::RestCatalog::new(config);
                 Ok(Arc::new(catalog))
             }
-            "glue" => {
+            "glue_rust" => {
                 let mut iceberg_configs = HashMap::new();
                 // glue
                 if let Some(region) = &self.region {
@@ -389,7 +427,10 @@ impl IcebergCommon {
                 Ok(Arc::new(catalog))
             }
             catalog_type
-                if catalog_type == "hive" || catalog_type == "jdbc" || catalog_type == "rest" =>
+                if catalog_type == "hive"
+                    || catalog_type == "jdbc"
+                    || catalog_type == "rest"
+                    || catalog_type == "glue" =>
             {
                 // Create java catalog
                 let (file_io_props, java_catalog_props) =
@@ -398,6 +439,7 @@ impl IcebergCommon {
                     "hive" => "org.apache.iceberg.hive.HiveCatalog",
                     "jdbc" => "org.apache.iceberg.jdbc.JdbcCatalog",
                     "rest" => "org.apache.iceberg.rest.RESTCatalog",
+                    "glue" => "org.apache.iceberg.aws.glue.GlueCatalog",
                     _ => unreachable!(),
                 };
 
@@ -442,20 +484,38 @@ impl IcebergCommon {
     ) -> ConnectorResult<Table> {
         match self.catalog_type() {
             "storage" => {
-                let config =
-                    storage_catalog::StorageCatalogConfig::builder()
-                        .warehouse(self.warehouse_path.clone().ok_or_else(|| {
-                            anyhow!("`warehouse.path` must be set in storage catalog")
-                        })?)
-                        .access_key(self.access_key.clone().ok_or_else(|| {
-                            anyhow!("`s3.access.key` must be set in storage catalog")
-                        })?)
-                        .secret_key(self.secret_key.clone().ok_or_else(|| {
-                            anyhow!("`s3.secret.key` must be set in storage catalog")
-                        })?)
-                        .region(self.region.clone())
-                        .endpoint(self.endpoint.clone())
-                        .build();
+                let warehouse = self
+                    .warehouse_path
+                    .clone()
+                    .ok_or_else(|| anyhow!("`warehouse.path` must be set in storage catalog"))?;
+                let url = Url::parse(warehouse.as_ref())
+                    .map_err(|_| anyhow!("Invalid warehouse path: {}", warehouse))?;
+
+                let config = match url.scheme() {
+                    "s3" | "s3a" => StorageCatalogConfig::S3(
+                        storage_catalog::StorageCatalogS3Config::builder()
+                            .warehouse(warehouse)
+                            .access_key(self.access_key.clone().ok_or_else(|| {
+                                anyhow!("`s3.access.key` must be set in storage catalog")
+                            })?)
+                            .secret_key(self.secret_key.clone().ok_or_else(|| {
+                                anyhow!("`s3.secret.key` must be set in storage catalog")
+                            })?)
+                            .region(self.region.clone())
+                            .endpoint(self.endpoint.clone())
+                            .build(),
+                    ),
+                    "gs" | "gcs" => StorageCatalogConfig::Gcs(
+                        storage_catalog::StorageCatalogGcsConfig::builder()
+                            .warehouse(warehouse)
+                            .credential(self.gcs_credential.clone().ok_or_else(|| {
+                                anyhow!("`gcs.credential` must be set in storage catalog")
+                            })?)
+                            .build(),
+                    ),
+                    scheme => bail!("Unsupported warehouse scheme: {}", scheme),
+                };
+
                 let storage_catalog = storage_catalog::StorageCatalog::new(config)?;
 
                 let table_id = self
