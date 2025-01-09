@@ -16,7 +16,7 @@ use crate::array::stream_record::Record;
 use crate::array::{ArrayBuilderImpl, Op, StreamChunk};
 use crate::bitmap::BitmapBuilder;
 use crate::row::Row;
-use crate::types::{DataType, DatumRef};
+use crate::types::{DataType, Datum, DatumRef, ToOwnedDatum};
 use crate::util::iter_util::ZipEqFast;
 
 /// Build stream chunks with fixed chunk size from rows or records.
@@ -43,6 +43,8 @@ pub struct StreamChunkBuilder {
 
     /// Number of currently pending rows.
     size: usize,
+
+    buffer: Vec<Vec<Datum>>,
 }
 
 impl Drop for StreamChunkBuilder {
@@ -70,11 +72,13 @@ impl StreamChunkBuilder {
         let initial_capacity = max_chunk_size.min(MAX_INITIAL_CAPACITY);
 
         let ops = Vec::with_capacity(initial_capacity);
-        let column_builders = data_types
+        let column_builders: Vec<_> = data_types
             .iter()
             .map(|datatype| datatype.create_array_builder(initial_capacity))
             .collect();
         let vis_builder = BitmapBuilder::with_capacity(initial_capacity);
+        let buffer = vec![Vec::<Datum>::new(); column_builders.len()];
+
         Self {
             ops,
             column_builders,
@@ -83,6 +87,7 @@ impl StreamChunkBuilder {
             max_chunk_size: Some(max_chunk_size),
             initial_capacity,
             size: 0,
+            buffer,
         }
     }
 
@@ -90,17 +95,20 @@ impl StreamChunkBuilder {
     /// The builder will only yield chunks when `take` is called.
     pub fn unlimited(data_types: Vec<DataType>, initial_capacity: Option<usize>) -> Self {
         let initial_capacity = initial_capacity.unwrap_or(DEFAULT_INITIAL_CAPACITY);
+        let column_builders: Vec<_> = data_types
+            .iter()
+            .map(|datatype| datatype.create_array_builder(initial_capacity))
+            .collect();
+        let buffer = vec![Vec::<Datum>::new(); column_builders.len()];
         Self {
             ops: Vec::with_capacity(initial_capacity),
-            column_builders: data_types
-                .iter()
-                .map(|datatype| datatype.create_array_builder(initial_capacity))
-                .collect(),
+            column_builders,
             data_types,
             vis_builder: BitmapBuilder::default(),
             max_chunk_size: None,
             initial_capacity,
             size: 0,
+            buffer,
         }
     }
 
@@ -173,6 +181,13 @@ impl StreamChunkBuilder {
         self.size = 0;
 
         let ops = std::mem::replace(&mut self.ops, Vec::with_capacity(self.initial_capacity));
+        for (i, datum) in self.buffer.iter_mut().enumerate() {
+            self.column_builders[i].append_iter(std::mem::replace(
+                datum,
+                Vec::with_capacity(self.initial_capacity),
+            ));
+        }
+
         let columns = self
             .column_builders
             .iter_mut()
@@ -234,7 +249,7 @@ impl StreamChunkBuilder {
     ) -> Option<StreamChunk> {
         self.ops.push(op);
         for (i, datum) in iter {
-            self.column_builders[i].append(datum);
+            self.buffer[i].push(datum.to_owned_datum());
         }
         self.vis_builder.append(VIS);
         self.size += 1;

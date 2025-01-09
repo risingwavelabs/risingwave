@@ -78,6 +78,28 @@ impl ArrayBuilder for ListArrayBuilder {
         }
     }
 
+    fn append_iter(&mut self, values: impl IntoIterator<Item = Option<ListValue>>) {
+        for value in values {
+            match value {
+                None => {
+                    self.bitmap.append(false);
+                    let last = *self.offsets.last().unwrap();
+                    self.offsets.push(last);
+                }
+                Some(v) => {
+                    self.bitmap.append(true);
+                    let last = *self.offsets.last().unwrap();
+                    let elems = v.iter_value();
+                    self.offsets.push(
+                        last.checked_add(elems.len() as u32)
+                            .expect("offset overflow"),
+                    );
+                    self.value.append_iter(elems);
+                }
+            }
+        }
+    }
+
     fn append_n(&mut self, n: usize, value: Option<ListRef<'_>>) {
         match value {
             None => {
@@ -396,6 +418,10 @@ impl ListValue {
     /// Iterates over the elements of the list.
     pub fn iter(&self) -> impl DoubleEndedIterator + ExactSizeIterator<Item = DatumRef<'_>> {
         self.values.iter()
+    }
+
+    pub fn iter_value(&self) -> Vec<Datum> {
+        self.values.iter_datum()
     }
 
     /// Get the element at the given index. Returns `None` if the index is out of bounds.
