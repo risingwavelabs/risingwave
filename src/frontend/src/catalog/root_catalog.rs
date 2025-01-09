@@ -675,6 +675,29 @@ impl Catalog {
         Err(CatalogError::NotFound("table id", table_id.to_string()))
     }
 
+    pub fn iter_table_names_with_filter(
+        &self,
+        filter: impl Fn(&TableCatalog) -> bool,
+    ) -> impl Iterator<Item = &str> {
+        self.table_by_id
+            .values()
+            .filter(|table| filter(table))
+            .map(|table| table.name.as_str())
+            .collect::<Vec<_>>()
+            .into_iter()
+    }
+
+    pub fn get_schema_by_table_id(
+        &self,
+        db_name: &str,
+        table_id: &TableId,
+    ) -> CatalogResult<&SchemaCatalog> {
+        self.database_by_name
+            .get(db_name)
+            .and_then(|db| db.find_schema_containing_table_id(table_id))
+            .ok_or_else(|| CatalogError::NotFound("schema with table", table_id.to_string()))
+    }
+
     // Used by test_utils only.
     pub fn alter_table_name_by_id(&mut self, table_id: &TableId, table_name: &str) {
         let (mut database_id, mut schema_id) = (0, 0);
