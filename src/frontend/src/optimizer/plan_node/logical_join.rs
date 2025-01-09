@@ -1413,71 +1413,12 @@ impl LogicalJoin {
             JoinType::AsofLeftOuter => JoinType::LeftOuter,
             _ => unreachable!(),
         };
+
         let left_schema_len = logical_join.left.schema().len();
         let asof_desc =
             Self::get_inequality_desc_from_predicate(predicate.non_eq_cond(), left_schema_len)?;
 
-        let (left_asof_idx, right_asof_idx) = (
-            asof_desc.left_idx as usize,
-            asof_desc.right_idx as usize + left_schema_len,
-        );
-
-        // Add the AsOf columns to the output indices
-        let original_output_indices = logical_join.output_indices.clone();
-        if !logical_join.output_indices.contains(&left_asof_idx) {
-            logical_join.output_indices.push(left_asof_idx);
-        }
-        if !logical_join.output_indices.contains(&right_asof_idx) {
-            logical_join.output_indices.push(right_asof_idx);
-        }
-
-        let mapping = logical_join.i2o_col_mapping();
-
-        let batch_join = BatchHashJoin::new(logical_join, predicate.clone());
-
-        let right_output_asof_idx = mapping.map(right_asof_idx);
-
-        // Add a Group Top1 operator that group by LHS's join key and sort by RHS's asof column.
-        let order = match asof_desc.inequality_type() {
-            PbAsOfJoinInequalityType::AsOfInequalityTypeLt
-            | PbAsOfJoinInequalityType::AsOfInequalityTypeLe => Order::new(vec![ColumnOrder::new(
-                right_output_asof_idx,
-                OrderType::ascending(),
-            )]),
-            PbAsOfJoinInequalityType::AsOfInequalityTypeGt
-            | PbAsOfJoinInequalityType::AsOfInequalityTypeGe => Order::new(vec![ColumnOrder::new(
-                right_output_asof_idx,
-                OrderType::descending(),
-            )]),
-            PbAsOfJoinInequalityType::AsOfInequalityTypeUnspecified => {
-                bail!("unspecified AsOf join inequality type")
-            }
-        };
-        let group_key = [
-            predicate.left_eq_indexes(),
-            vec![asof_desc.left_idx as usize],
-        ]
-        .concat();
-        let logical_group_top1 = generic::TopN::with_group(
-            batch_join.into(),
-            generic::TopNLimit::new(1, false),
-            0,
-            order,
-            group_key,
-        );
-        let batch_group_top1 = BatchGroupTopN::new(logical_group_top1);
-
-        let group_top_1_schema_len = batch_group_top1.schema().len();
-        if original_output_indices.len() != group_top_1_schema_len {
-            assert!(original_output_indices.len() < group_top_1_schema_len);
-            let logical_project = generic::Project::with_out_col_idx(
-                batch_group_top1.into(),
-                0..original_output_indices.len(),
-            );
-            Ok(BatchProject::new(logical_project).into())
-        } else {
-            Ok(batch_group_top1.into())
-        }
+        let batch_join = BatchHashJoin::new(logical_join, predicate, Some(asof_desc));
     }
 
     pub fn get_inequality_desc_from_predicate(
@@ -1552,7 +1493,7 @@ impl ToBatch for LogicalJoin {
                 }
             }
 
-            Ok(BatchHashJoin::new(logical_join, predicate).into())
+            Ok(BatchHashJoin::new(logical_join, predicate, None).into())
         } else {
             // Convert to Nested-loop Join for non-equal joins
             Ok(BatchNestedLoopJoin::new(logical_join).into())

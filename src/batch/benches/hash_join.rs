@@ -76,6 +76,7 @@ fn create_hash_join_executor(
         "HashJoinExecutor".into(),
         CHUNK_SIZE,
         None,
+        None,
         BatchSpillMetrics::for_test(),
         ShutdownToken::empty(),
         MemoryContext::none(),

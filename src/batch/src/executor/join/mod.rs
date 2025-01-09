@@ -30,7 +30,7 @@ use risingwave_common::array::{DataChunk, RowRef};
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, DatumRef};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_pb::plan_common::JoinType as PbJoinType;
+use risingwave_pb::plan_common::{AsOfJoinDesc, AsOfJoinInequalityType, JoinType as PbJoinType};
 
 use crate::error::Result;
 
@@ -73,28 +73,6 @@ impl JoinType {
 impl JoinType {
     #![allow(dead_code)]
 
-    #[inline(always)]
-    pub(super) fn need_join_remaining(self) -> bool {
-        matches!(
-            self,
-            JoinType::RightOuter | JoinType::RightAnti | JoinType::FullOuter
-        )
-    }
-
-    fn need_build(self) -> bool {
-        match self {
-            JoinType::RightSemi => true,
-            other => other.need_join_remaining(),
-        }
-    }
-
-    fn need_probe(self) -> bool {
-        matches!(
-            self,
-            JoinType::FullOuter | JoinType::LeftOuter | JoinType::LeftAnti | JoinType::LeftSemi
-        )
-    }
-
     fn keep_all(self) -> bool {
         matches!(
             self,
@@ -108,6 +86,40 @@ impl JoinType {
 
     fn keep_right(self) -> bool {
         matches!(self, JoinType::RightAnti | JoinType::RightSemi)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum AsOfInequalityType {
+    Le,
+    Lt,
+    Ge,
+    Gt,
+}
+
+#[derive(Clone, Debug)]
+pub struct AsOfDesc {
+    pub left_idx: usize,
+    pub right_idx: usize,
+    pub inequality_type: AsOfInequalityType,
+}
+
+impl AsOfDesc {
+    pub fn from_protobuf(desc_proto: &AsOfJoinDesc) -> crate::error::Result<Self> {
+        let typ = match desc_proto.inequality_type() {
+            AsOfJoinInequalityType::AsOfInequalityTypeLt => AsOfInequalityType::Lt,
+            AsOfJoinInequalityType::AsOfInequalityTypeLe => AsOfInequalityType::Le,
+            AsOfJoinInequalityType::AsOfInequalityTypeGt => AsOfInequalityType::Gt,
+            AsOfJoinInequalityType::AsOfInequalityTypeGe => AsOfInequalityType::Ge,
+            AsOfJoinInequalityType::AsOfInequalityTypeUnspecified => {
+                bail!("unspecified AsOf join inequality type")
+            }
+        };
+        Ok(Self {
+            left_idx: desc_proto.left_idx as usize,
+            right_idx: desc_proto.right_idx as usize,
+            inequality_type: typ,
+        })
     }
 }
 

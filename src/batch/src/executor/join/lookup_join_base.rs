@@ -178,6 +178,7 @@ impl<K: HashKey> LookupJoinBase<K> {
                 next_build_row_with_same_key,
                 self.chunk_size,
                 self.shutdown_rx.clone(),
+                None,
             );
 
             if let Some(cond) = self.condition.as_ref() {

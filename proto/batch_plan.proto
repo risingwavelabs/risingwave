@@ -258,6 +258,7 @@ message HashJoinNode {
   // Null safe means it treats `null = null` as true.
   // Each key pair can be null safe independently. (left_key, right_key, null_safe)
   repeated bool null_safe = 6;
+  optional plan_common.AsOfJoinDesc asof_desc = 7;
 }
 
 message SortMergeJoinNode {
@@ -405,6 +406,7 @@ message PlanNode {
     IcebergScanNode iceberg_scan = 39;
     PostgresQueryNode postgres_query = 40;
     MySqlQueryNode mysql_query = 41;
+    RowIdGenNode row_id_gen = 42;
     // The following nodes are used for testing.
     bool block_executor = 100;
     bool busy_loop_executor = 101;
