@@ -285,6 +285,9 @@ ElasticSearchOpenSearchConfig:
   - name: concurrent_requests
     field_type: usize
     required: true
+  - name: r#type
+    field_type: String
+    required: true
 FsConfig:
   fields:
   - name: fs.path
