@@ -30,7 +30,7 @@ use thiserror_ext::AsReport;
 
 use crate::error::StorageResult;
 use crate::hummock::sstable_store::SstableStoreRef;
-use crate::hummock::{HummockStorage, NextEpochOptions, SstableObjectIdManagerRef};
+use crate::hummock::{HummockStorage, SstableObjectIdManagerRef};
 use crate::store::*;
 
 #[derive(Clone)]

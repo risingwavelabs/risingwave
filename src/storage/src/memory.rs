@@ -39,7 +39,7 @@ use crate::hummock::utils::{
     do_delete_sanity_check, do_insert_sanity_check, do_update_sanity_check, merge_stream,
     sanity_check_enabled,
 };
-use crate::hummock::{HummockError, NextEpochOptions};
+use crate::hummock::HummockError;
 use crate::mem_table::{KeyOp, MemTable};
 use crate::storage_value::StorageValue;
 use crate::store::*;

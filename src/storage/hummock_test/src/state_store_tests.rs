@@ -36,7 +36,7 @@ use risingwave_storage::hummock::iterator::change_log::test_utils::{
 };
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
 use risingwave_storage::hummock::test_utils::{count_stream, default_opts_for_test};
-use risingwave_storage::hummock::{CachePolicy, HummockStorage, NextEpochOptions};
+use risingwave_storage::hummock::{CachePolicy, HummockStorage};
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::*;

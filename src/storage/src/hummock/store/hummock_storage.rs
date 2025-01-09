@@ -636,11 +636,6 @@ impl StateStoreRead for HummockStorage {
     }
 }
 
-#[derive(Clone)]
-pub struct NextEpochOptions {
-    pub table_id: TableId,
-}
-
 impl StateStoreReadLog for HummockStorage {
     type ChangeLogIter = ChangeLogIterator;
 

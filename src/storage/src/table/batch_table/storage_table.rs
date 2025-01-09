@@ -44,13 +44,13 @@ use risingwave_pb::plan_common::StorageTableDesc;
 use tracing::trace;
 
 use crate::error::{StorageError, StorageResult};
-use crate::hummock::{CachePolicy, NextEpochOptions};
+use crate::hummock::CachePolicy;
 use crate::row_serde::row_serde_util::{serialize_pk, serialize_pk_with_vnode};
 use crate::row_serde::value_serde::{ValueRowSerde, ValueRowSerdeNew};
 use crate::row_serde::{find_columns_by_ids, ColumnMapping};
 use crate::store::{
-    PrefetchOptions, ReadLogOptions, ReadOptions, StateStoreIter, StateStoreIterExt,
-    TryWaitEpochOptions,
+    NextEpochOptions, PrefetchOptions, ReadLogOptions, ReadOptions, StateStoreIter,
+    StateStoreIterExt, TryWaitEpochOptions,
 };
 use crate::table::merge_sort::NodePeek;
 use crate::table::{ChangeLogRow, KeyedRow, TableDistribution, TableIter};

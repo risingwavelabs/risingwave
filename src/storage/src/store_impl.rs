@@ -239,7 +239,7 @@ pub mod verify {
     use tracing::log::warn;
 
     use crate::error::StorageResult;
-    use crate::hummock::{HummockStorage, NextEpochOptions};
+    use crate::hummock::HummockStorage;
     use crate::store::*;
     use crate::store_impl::AsHummock;
 
@@ -800,7 +800,7 @@ mod boxed_state_store {
     use risingwave_hummock_sdk::HummockReadEpoch;
 
     use crate::error::StorageResult;
-    use crate::hummock::{HummockStorage, NextEpochOptions};
+    use crate::hummock::HummockStorage;
     use crate::store::*;
     use crate::store_impl::AsHummock;
 

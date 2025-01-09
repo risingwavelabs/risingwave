@@ -39,7 +39,7 @@ use risingwave_hummock_trace::{
 use risingwave_pb::hummock::PbVnodeWatermark;
 
 use crate::error::{StorageError, StorageResult};
-use crate::hummock::{CachePolicy, NextEpochOptions};
+use crate::hummock::CachePolicy;
 use crate::monitor::{MonitoredStateStore, MonitoredStorageMetrics};
 
 pub trait StaticSendSync = Send + Sync + 'static;
@@ -228,6 +228,12 @@ impl<T: AsRef<[u8]>> ChangeLogValue<T> {
 
 pub type StateStoreReadLogItem = (TableKey<Bytes>, ChangeLogValue<Bytes>);
 pub type StateStoreReadLogItemRef<'a> = (TableKey<&'a [u8]>, ChangeLogValue<&'a [u8]>);
+
+#[derive(Clone)]
+pub struct NextEpochOptions {
+    pub table_id: TableId,
+}
+
 #[derive(Clone)]
 pub struct ReadLogOptions {
     pub table_id: TableId,
