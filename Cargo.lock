@@ -4930,9 +4930,8 @@ dependencies = [
 
 [[package]]
 name = "foyer"
-version = "0.13.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "19c63beb108769d28b042829164139a5245359ccfdb4a8face928ac154e2c9ed"
+version = "0.14.0-dev"
+source = "git+https://github.com/foyer-rs/foyer?rev=0ae7820bfc626d67a62d19a36e6c1b46dcbb0e96#0ae7820bfc626d67a62d19a36e6c1b46dcbb0e96"
 dependencies = [
  "ahash 0.8.11",
  "anyhow",
@@ -4943,22 +4942,19 @@ dependencies = [
  "foyer-storage",
  "futures",
  "madsim-tokio",
- "pin-project",
  "tracing",
 ]
 
 [[package]]
 name = "foyer-common"
-version = "0.13.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "68be583b3f51bcbc6b72f40a5aea6fa6aaff10692649c08b20458bb6703f79f0"
+version = "0.14.0-dev"
+source = "git+https://github.com/foyer-rs/foyer?rev=0ae7820bfc626d67a62d19a36e6c1b46dcbb0e96#0ae7820bfc626d67a62d19a36e6c1b46dcbb0e96"
 dependencies = [
  "ahash 0.8.11",
  "bytes",
  "cfg-if",
  "fastrace",
  "futures",
- "hashbrown 0.15.0",
  "itertools 0.13.0",
  "madsim-tokio",
  "parking_lot 0.12.1",
@@ -4978,9 +4974,8 @@ dependencies = [
 
 [[package]]
 name = "foyer-memory"
-version = "0.13.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0a01e64de1452409977219fe014caa427874677aacd647bec9207d98d018bcd8"
+version = "0.14.0-dev"
+source = "git+https://github.com/foyer-rs/foyer?rev=0ae7820bfc626d67a62d19a36e6c1b46dcbb0e96#0ae7820bfc626d67a62d19a36e6c1b46dcbb0e96"
 dependencies = [
  "ahash 0.8.11",
  "bitflags 2.6.0",
@@ -4994,7 +4989,6 @@ dependencies = [
  "itertools 0.13.0",
  "madsim-tokio",
  "parking_lot 0.12.1",
- "paste",
  "pin-project",
  "serde",
  "thiserror 2.0.3",
@@ -5003,9 +4997,8 @@ dependencies = [
 
 [[package]]
 name = "foyer-storage"
-version = "0.13.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9fb89bdcdf355e8cb2b29eaa0158839f4f7c6974c6cc86f6e54e4a48a2afa5b8"
+version = "0.14.0-dev"
+source = "git+https://github.com/foyer-rs/foyer?rev=0ae7820bfc626d67a62d19a36e6c1b46dcbb0e96#0ae7820bfc626d67a62d19a36e6c1b46dcbb0e96"
 dependencies = [
  "ahash 0.8.11",
  "allocator-api2",
@@ -5014,7 +5007,6 @@ dependencies = [
  "async-channel 2.2.1",
  "auto_enums",
  "bincode 1.3.3",
- "bitflags 2.6.0",
  "bytes",
  "clap",
  "either",
@@ -5025,7 +5017,6 @@ dependencies = [
  "foyer-memory",
  "fs4",
  "futures",
- "hashbrown 0.15.0",
  "itertools 0.13.0",
  "libc",
  "lz4",
