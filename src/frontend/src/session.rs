@@ -22,6 +22,7 @@ use std::time::{Duration, Instant};
 use anyhow::anyhow;
 use bytes::Bytes;
 use either::Either;
+use itertools::Itertools;
 use parking_lot::{Mutex, RwLock, RwLockReadGuard};
 use pgwire::error::{PsqlError, PsqlResult};
 use pgwire::net::{Address, AddressRef};
@@ -954,6 +955,44 @@ impl SessionImpl {
         catalog_reader
             .check_connection_name_duplicated(db_name, &schema_name, &connection_name)
             .map_err(RwError::from)
+    }
+
+    pub fn check_function_name_duplicated(
+        &self,
+        stmt_type: StatementType,
+        name: ObjectName,
+        arg_types: &[DataType],
+        if_not_exists: bool,
+    ) -> Result<Either<(), RwPgResponse>> {
+        let db_name = &self.database();
+        let (schema_name, function_name) = Binder::resolve_schema_qualified_name(db_name, name)?;
+        let (database_id, schema_id) = self.get_database_and_schema_id_for_create(schema_name)?;
+
+        let catalog_reader = self.env().catalog_reader().read_guard();
+        if catalog_reader
+            .get_schema_by_id(&database_id, &schema_id)?
+            .get_function_by_name_args(&function_name, arg_types)
+            .is_some()
+        {
+            let full_name = format!(
+                "{function_name}({})",
+                arg_types.iter().map(|t| t.to_string()).join(",")
+            );
+            if if_not_exists {
+                Ok(Either::Right(
+                    PgResponse::builder(stmt_type)
+                        .notice(format!(
+                            "function \"{}\" already exists, skipping",
+                            full_name
+                        ))
+                        .into(),
+                ))
+            } else {
+                Err(CatalogError::Duplicated("function", full_name).into())
+            }
+        } else {
+            Ok(Either::Left(()))
+        }
     }
 
     /// Also check if the user has the privilege to create in the schema.

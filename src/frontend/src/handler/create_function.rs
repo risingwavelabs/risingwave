@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use anyhow::Context;
+use either::Either;
 use risingwave_common::catalog::FunctionId;
 use risingwave_common::types::StructType;
 use risingwave_expr::sig::{CreateFunctionOptions, UdfKind};
@@ -20,13 +21,13 @@ use risingwave_pb::catalog::function::{Kind, ScalarFunction, TableFunction};
 use risingwave_pb::catalog::Function;
 
 use super::*;
-use crate::catalog::CatalogError;
 use crate::{bind_data_type, Binder};
 
 pub async fn handle_create_function(
     handler_args: HandlerArgs,
     or_replace: bool,
     temporary: bool,
+    if_not_exists: bool,
     name: ObjectName,
     args: Option<Vec<OperateFunctionArg>>,
     returns: Option<CreateFunctionReturns>,
@@ -119,21 +120,19 @@ pub async fn handle_create_function(
 
     // resolve database and schema id
     let session = &handler_args.session;
-    let db_name = session.database();
-    let (schema_name, function_name) = Binder::resolve_schema_qualified_name(db_name, name)?;
+    let db_name = &session.database();
+    let (schema_name, function_name) =
+        Binder::resolve_schema_qualified_name(db_name, name.clone())?;
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
 
     // check if the function exists in the catalog
-    if (session.env().catalog_reader().read_guard())
-        .get_schema_by_id(&database_id, &schema_id)?
-        .get_function_by_name_args(&function_name, &arg_types)
-        .is_some()
-    {
-        let name = format!(
-            "{function_name}({})",
-            arg_types.iter().map(|t| t.to_string()).join(",")
-        );
-        return Err(CatalogError::Duplicated("function", name).into());
+    if let Either::Right(resp) = session.check_function_name_duplicated(
+        StatementType::CREATE_FUNCTION,
+        name,
+        &arg_types,
+        if_not_exists,
+    )? {
+        return Ok(resp);
     }
 
     let link = match &params.using {
