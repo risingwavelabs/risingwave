@@ -177,14 +177,24 @@ impl TableFunction {
                     };
                 let op = match file_scan_backend {
                     FileScanBackend::S3 => {
-                        let (bucket, _) =
-                            extract_bucket_and_file_name(&input_file_location, &file_scan_backend)?;
+                        let (bucket, _) = extract_bucket_and_file_name(
+                            &eval_args[5].clone(),
+                            &file_scan_backend,
+                        )?;
 
+                        let (s3_region, s3_endpoint) = match eval_args[2].starts_with("http") {
+                            true => ("us-east-1".to_owned(), eval_args[2].clone()), /* for minio, hard code region as not used but needed. */
+                            false => (
+                                eval_args[2].clone(),
+                                format!("https://{}.s3.{}.amazonaws.com", bucket, eval_args[2],),
+                            ),
+                        };
                         new_s3_operator(
-                            eval_args[2].clone(),
+                            s3_region.clone(),
                             eval_args[3].clone(),
                             eval_args[4].clone(),
                             bucket.clone(),
+                            s3_endpoint.clone(),
                         )?
                     }
                     FileScanBackend::Gcs => {
@@ -218,7 +228,6 @@ impl TableFunction {
                             Ok::<Vec<String>, anyhow::Error>(files)
                         })
                     })?;
-
                     if files.is_empty() {
                         return Err(BindError(
                             "file_scan function only accepts non-empty directory".to_owned(),

@@ -93,6 +93,7 @@ impl ToBatchPb for BatchFileScan {
                 s3_access_key: file_scan.s3_access_key.clone(),
                 s3_secret_key: file_scan.s3_secret_key.clone(),
                 file_location: file_scan.file_location.clone(),
+                s3_endpoint: file_scan.s3_endpoint.clone(),
             }),
             generic::FileScanBackend::GcsFileScan(gcs_file_scan) => {
                 NodeBody::GcsFileScan(GcsFileScanNode {

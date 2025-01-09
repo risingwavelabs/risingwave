@@ -100,6 +100,7 @@ message FileScanNode {
   string s3_access_key = 5;
   string s3_secret_key = 6;
   repeated string file_location = 7;
+  string s3_endpoint = 8;
 }
 
 message GcsFileScanNode {

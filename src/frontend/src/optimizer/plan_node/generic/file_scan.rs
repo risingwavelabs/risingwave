@@ -128,6 +128,7 @@ pub struct FileScan {
     pub s3_access_key: String,
     pub s3_secret_key: String,
     pub file_location: Vec<String>,
+    pub s3_endpoint: String,
 
     #[educe(PartialEq(ignore))]
     #[educe(Hash(ignore))]

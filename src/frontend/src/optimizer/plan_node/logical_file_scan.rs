@@ -48,19 +48,22 @@ impl LogicalFileScan {
         s3_access_key: String,
         s3_secret_key: String,
         file_location: Vec<String>,
+        s3_endpoint: String,
     ) -> Self {
         assert!("parquet".eq_ignore_ascii_case(&file_format));
         assert!("s3".eq_ignore_ascii_case(&storage_type));
+        let storage_type = generic::StorageType::S3;
 
         let core = generic::FileScanBackend::FileScan(generic::FileScan {
             schema,
             file_format: generic::FileFormat::Parquet,
-            storage_type: generic::StorageType::S3,
+            storage_type,
             s3_region,
             s3_access_key,
             s3_secret_key,
             file_location,
             ctx,
+            s3_endpoint,
         });
 
         let base = PlanBase::new_logical_with_core(&core);
@@ -89,7 +92,6 @@ impl LogicalFileScan {
         });
 
         let base = PlanBase::new_logical_with_core(&core);
-
         LogicalFileScan { base, core }
     }
 
