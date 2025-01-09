@@ -30,6 +30,7 @@ pub struct ElasticSearchOpenSearchFormatter {
     index_column: Option<usize>,
     index: Option<String>,
     routing_column: Option<usize>,
+    pk_indices: Vec<usize>,
 }
 
 pub struct BuildBulkPara {
@@ -111,6 +112,7 @@ impl ElasticSearchOpenSearchFormatter {
             index_column,
             index,
             routing_column,
+            pk_indices,
         })
     }
 
@@ -159,7 +161,7 @@ impl ElasticSearchOpenSearchFormatter {
                             .iter()
                             .enumerate()
                             .zip_eq_debug(rows.iter())
-                            .for_each(|((index, insert_column), delete_column)| {
+                            .for_each(|((index, delete_column), insert_column)| {
                                 if let Some(insert_column) = insert_column
                                     && let Some(delete_column) = delete_column
                                     && insert_column == delete_column
@@ -169,6 +171,13 @@ impl ElasticSearchOpenSearchFormatter {
                                     modified_col_indices.push(index);
                                 }
                             });
+                        if self
+                            .pk_indices
+                            .iter()
+                            .any(|&index| modified_col_indices.contains(&index))
+                        {
+                            modified_col_indices = (0..self.value_encoder.schema().len()).collect();
+                        }
                     } else {
                         modified_col_indices = (0..self.value_encoder.schema().len()).collect();
                     }
