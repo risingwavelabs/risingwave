@@ -257,13 +257,15 @@ impl Display for State {
 
 struct FieldsManager {
     columns_catalog: Vec<ColumnCatalog>,
-    // All row fields
+    // All row fields, including hidden pk, op, rw_timestamp and all non-hidden columns in the upstream table.
     row_fields: Vec<Field>,
-    // Row output column indices based on the scan output columns.
+    // Row output column indices based on `row_fields`.
     row_output_col_indices: Vec<usize>,
-    // Row pk indices based on the scan output columns.
+    // Row pk indices based on `row_fields`.
     row_pk_indices: Vec<usize>,
+    // Stream chunk row indices based on `row_fields`.
     stream_chunk_row_indices: Vec<usize>,
+    // The op index based on `row_fields`.
     op_index: usize,
 }
 
