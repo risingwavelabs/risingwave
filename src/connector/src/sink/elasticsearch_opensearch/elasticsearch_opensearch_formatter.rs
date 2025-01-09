@@ -170,7 +170,7 @@ impl ElasticSearchOpenSearchFormatter {
                                 }
                             });
                     } else {
-                        modified_col_indices = (0..rows.len()).collect();
+                        modified_col_indices = (0..self.value_encoder.schema().len()).collect();
                     }
                     let value = self
                         .value_encoder
