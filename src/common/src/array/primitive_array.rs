@@ -288,6 +288,7 @@ impl<T: PrimitiveArrayItemType> ArrayBuilder for PrimitiveArrayBuilder<T> {
         Self::new(capacity)
     }
 
+    #[inline]
     fn append_n(&mut self, n: usize, value: Option<T>) {
         match value {
             Some(x) => {
@@ -298,6 +299,12 @@ impl<T: PrimitiveArrayItemType> ArrayBuilder for PrimitiveArrayBuilder<T> {
                 self.bitmap.append_n(n, false);
                 self.data.extend(std::iter::repeat(T::default()).take(n));
             }
+        }
+    }
+
+    fn append_iter(&mut self, values: impl IntoIterator<Item = Option<T>>) {
+        for value in values {
+            self.append(value);
         }
     }
 

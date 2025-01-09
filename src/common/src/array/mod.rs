@@ -52,6 +52,7 @@ pub use data_chunk_iter::RowRef;
 pub use decimal_array::{DecimalArray, DecimalArrayBuilder};
 pub use interval_array::{IntervalArray, IntervalArrayBuilder};
 pub use iterator::ArrayIterator;
+use itertools::Itertools;
 pub use jsonb_array::{JsonbArray, JsonbArrayBuilder};
 pub use list_array::{ListArray, ListArrayBuilder, ListRef, ListValue};
 pub use map_array::{MapArray, MapArrayBuilder, MapRef, MapValue};
@@ -121,6 +122,14 @@ pub trait ArrayBuilder: Send + Sync + Sized + 'static {
     /// Append a value to builder.
     fn append(&mut self, value: Option<<Self::ArrayType as Array>::RefItem<'_>>) {
         self.append_n(1, value);
+    }
+
+    /// Append a iterator value to the builder
+    fn append_iter(
+        &mut self,
+        _values: impl IntoIterator<Item = Option<<Self::ArrayType as Array>::OwnedItem>>,
+    ) {
+        unimplemented!()
     }
 
     /// Append an owned value to builder.
@@ -488,6 +497,40 @@ impl ArrayBuilderImpl {
         dispatch_array_builder_variants!(self, inner, { inner.append_n(n, None) })
     }
 
+    pub fn append_iter(&mut self, data: Vec<Datum>) {
+        dispatch_array_builder_variants!(self, inner, [I = VARIANT_NAME], {
+            let mapped_data = data.into_iter().map(|datum| match datum {
+                None => None,
+                Some(scalar) => {
+                    let scalar_type = scalar.get_ident();
+                    Some(scalar.try_into().unwrap_or_else(|_| {
+                        panic!(
+                            "type mismatch, array builder type: {}, scalar type: {}",
+                            I, scalar_type
+                        )
+                    }))
+                }
+            });
+            inner.append_iter(mapped_data);
+        })
+        // match self {
+        //     ArrayBuilderImpl::List(list_builder) => {
+        //         let mapped_data = data.into_iter().map(|datum| match datum {
+        //             None => None,
+        //             Some(scalar) => match scalar {
+        //                 ScalarImpl::List(list_value) => {
+        //                     let mapped_datum = Some(list_value);
+        //                     mapped_datum
+        //                 }
+        //                 _ => unreachable!(),
+        //             },
+        //         });
+        //         list_builder.append_iter(mapped_data);
+        //     }
+        //     _ => unimplemented!(),
+        // }
+    }
+
     /// Append a [`Datum`] or [`DatumRef`] multiple times,
     /// panicking if the datum's type does not match the array builder's type.
     pub fn append_n(&mut self, n: usize, datum: impl ToDatumRef) {
@@ -634,6 +677,10 @@ impl ArrayImpl {
 
     pub fn iter(&self) -> impl DoubleEndedIterator<Item = DatumRef<'_>> + ExactSizeIterator {
         (0..self.len()).map(|i| self.value_at(i))
+    }
+
+    pub fn iter_datum(&self) -> Vec<Datum> {
+        (0..self.len()).map(|i| self.datum_at(i)).collect_vec()
     }
 }
 
