@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -35,7 +35,7 @@ use crate::barrier::{DatabaseRuntimeInfoSnapshot, InflightSubscriptionInfo};
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::manager::ActiveStreamingWorkerNodes;
 use crate::model::{ActorId, StreamJobFragments, TableParallelism};
-use crate::stream::{RescheduleOptions, TableResizePolicy};
+use crate::stream::{RescheduleOptions, SourceChange, TableResizePolicy};
 use crate::{model, MetaResult};
 
 impl GlobalBarrierWorkerContextImpl {
@@ -46,14 +46,18 @@ impl GlobalBarrierWorkerContextImpl {
             .catalog_controller
             .clean_dirty_subscription(database_id)
             .await?;
-        let source_ids = self
+        let dirty_associated_source_ids = self
             .metadata_manager
             .catalog_controller
             .clean_dirty_creating_jobs(database_id)
             .await?;
 
         // unregister cleaned sources.
-        self.source_manager.unregister_sources(source_ids).await;
+        self.source_manager
+            .apply_source_change(SourceChange::DropSource {
+                dropped_source_ids: dirty_associated_source_ids,
+            })
+            .await;
 
         Ok(())
     }
@@ -410,7 +414,9 @@ impl GlobalBarrierWorkerContextImpl {
         let active_worker_slots: HashSet<_> = active_nodes
             .current()
             .values()
-            .flat_map(|node| (0..node.parallelism()).map(|idx| WorkerSlotId::new(node.id, idx)))
+            .flat_map(|node| {
+                (0..node.compute_node_parallelism()).map(|idx| WorkerSlotId::new(node.id, idx))
+            })
             .collect();
 
         let expired_worker_slots: BTreeSet<_> = all_inuse_worker_slots
@@ -439,7 +445,8 @@ impl GlobalBarrierWorkerContextImpl {
                 .current()
                 .values()
                 .flat_map(|worker| {
-                    (0..worker.parallelism()).map(move |i| WorkerSlotId::new(worker.id, i as _))
+                    (0..worker.compute_node_parallelism())
+                        .map(move |i| WorkerSlotId::new(worker.id, i as _))
                 })
                 .collect_vec();
 
@@ -457,7 +464,7 @@ impl GlobalBarrierWorkerContextImpl {
                         .current()
                         .values()
                         .flat_map(|worker| {
-                            (0..worker.parallelism() * factor)
+                            (0..worker.compute_node_parallelism() * factor)
                                 .map(move |i| WorkerSlotId::new(worker.id, i as _))
                         })
                         .collect_vec();
@@ -513,7 +520,7 @@ impl GlobalBarrierWorkerContextImpl {
                         let current_nodes = active_nodes
                             .current()
                             .values()
-                            .map(|node| (node.id, &node.host, node.parallelism()))
+                            .map(|node| (node.id, &node.host, node.compute_node_parallelism()))
                             .collect_vec();
                         warn!(
                             current_nodes = ?current_nodes,
@@ -554,7 +561,7 @@ impl GlobalBarrierWorkerContextImpl {
         let available_parallelism = active_nodes
             .current()
             .values()
-            .map(|worker_node| worker_node.parallelism())
+            .map(|worker_node| worker_node.compute_node_parallelism())
             .sum();
 
         let table_parallelisms: HashMap<_, _> = {

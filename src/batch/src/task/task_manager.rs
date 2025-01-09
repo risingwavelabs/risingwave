@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -293,7 +293,7 @@ mod tests {
     use risingwave_pb::batch_plan::exchange_info::DistributionMode;
     use risingwave_pb::batch_plan::plan_node::NodeBody;
     use risingwave_pb::batch_plan::{
-        ExchangeInfo, PbTaskId, PbTaskOutputId, PlanFragment, PlanNode, ValuesNode,
+        ExchangeInfo, PbTaskId, PbTaskOutputId, PlanFragment, PlanNode,
     };
 
     use crate::monitor::BatchManagerMetrics;
@@ -325,45 +325,6 @@ mod tests {
         };
         let error = manager.take_output(&output_id).unwrap_err();
         assert!(error.to_string().contains("not found"), "{:?}", error);
-    }
-
-    #[tokio::test]
-    async fn test_task_id_conflict() {
-        let manager = Arc::new(BatchManager::new(
-            BatchConfig::default(),
-            BatchManagerMetrics::for_test(),
-            u64::MAX,
-        ));
-        let plan = PlanFragment {
-            root: Some(PlanNode {
-                children: vec![],
-                identity: "".to_owned(),
-                node_body: Some(NodeBody::Values(ValuesNode {
-                    tuples: vec![],
-                    fields: vec![],
-                })),
-            }),
-            exchange_info: Some(ExchangeInfo {
-                mode: DistributionMode::Single as i32,
-                distribution: None,
-            }),
-        };
-        let task_id = PbTaskId {
-            query_id: "".to_owned(),
-            stage_id: 0,
-            task_id: 0,
-        };
-        manager
-            .fire_task_for_test(&task_id, plan.clone())
-            .await
-            .unwrap();
-        let err = manager
-            .fire_task_for_test(&task_id, plan)
-            .await
-            .unwrap_err();
-        assert!(err
-            .to_string()
-            .contains("can not create duplicate task with the same id"));
     }
 
     #[tokio::test]

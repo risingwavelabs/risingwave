@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,8 +25,8 @@ use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tonic::transport::Endpoint;
 use tonic::Response;
 
+use crate::channel::{Channel, WrappedChannelExt};
 use crate::error::Result;
-use crate::tracing::{Channel, TracingInjectedChannelExt};
 use crate::{RpcClient, RpcClientPool};
 
 const DEFAULT_RETRY_INTERVAL: u64 = 50;
@@ -49,7 +49,7 @@ impl FrontendClient {
                 },
             )
             .await?
-            .tracing_injected();
+            .wrapped();
 
         Ok(Self(
             FrontendServiceClient::new(channel).max_decoding_message_size(usize::MAX),

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -93,7 +93,7 @@ pub(crate) async fn into_chunk_stream(
     let parser =
         crate::parser::ByteStreamSourceParserImpl::create(parser_config, source_ctx).await?;
     #[for_await]
-    for chunk in parser.into_stream(data_stream) {
+    for chunk in parser.parse_stream(data_stream) {
         yield chunk?;
     }
 }

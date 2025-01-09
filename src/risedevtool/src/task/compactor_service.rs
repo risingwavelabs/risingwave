@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -65,13 +65,7 @@ impl Task for CompactorService {
         ctx.service(self);
         ctx.pb.set_message("starting...");
 
-        let prefix_config = env::var("PREFIX_CONFIG")?;
-
         let mut cmd = risingwave_cmd("compactor")?;
-
-        if crate::util::is_enable_backtrace() {
-            cmd.env("RUST_BACKTRACE", "1");
-        }
 
         if crate::util::is_env_set("RISEDEV_ENABLE_PROFILE") {
             cmd.env(
@@ -87,8 +81,6 @@ impl Task for CompactorService {
             cmd.env("MALLOC_CONF", conf); // unprefixed for linux
         }
 
-        cmd.arg("--config-path")
-            .arg(Path::new(&prefix_config).join("risingwave.toml"));
         Self::apply_command_args(&mut cmd, &self.config)?;
 
         if !self.config.user_managed {

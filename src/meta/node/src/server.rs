@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -626,7 +626,7 @@ pub async fn start_service_as_election_leader(
     } else {
         tracing::info!("Telemetry didn't start due to meta backend or config");
     }
-    if report_scarf_enabled() {
+    if !cfg!(madsim) && report_scarf_enabled() {
         tokio::spawn(report_to_scarf());
     } else {
         tracing::info!("Scarf reporting is disabled");

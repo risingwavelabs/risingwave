@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -181,6 +181,8 @@ mod tests {
 
     use super::*;
     use crate::parser::SourceStreamChunkBuilder;
+    use crate::source::SourceCtrlOpts;
+
     #[tokio::test]
     async fn test_csv_without_headers() {
         let data = vec![
@@ -204,14 +206,15 @@ mod tests {
             SourceContext::dummy().into(),
         )
         .unwrap();
-        let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 4);
+        let mut builder = SourceStreamChunkBuilder::new(descs, SourceCtrlOpts::for_test());
         for item in data {
             parser
                 .parse_inner(item.as_bytes().to_vec(), builder.row_writer())
                 .await
                 .unwrap();
         }
-        let chunk = builder.finish();
+        builder.finish_current_chunk();
+        let chunk = builder.consume_ready_chunks().next().unwrap();
         let mut rows = chunk.rows();
         {
             let (op, row) = rows.next().unwrap();
@@ -311,13 +314,14 @@ mod tests {
             SourceContext::dummy().into(),
         )
         .unwrap();
-        let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 4);
+        let mut builder = SourceStreamChunkBuilder::new(descs, SourceCtrlOpts::for_test());
         for item in data {
             let _ = parser
                 .parse_inner(item.as_bytes().to_vec(), builder.row_writer())
                 .await;
         }
-        let chunk = builder.finish();
+        builder.finish_current_chunk();
+        let chunk = builder.consume_ready_chunks().next().unwrap();
         let mut rows = chunk.rows();
         {
             let (op, row) = rows.next().unwrap();

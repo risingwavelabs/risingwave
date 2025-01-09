@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 use std::mem::replace;
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::anyhow;
@@ -41,7 +41,7 @@ use crate::barrier::rpc::{merge_node_rpc_errors, ControlStreamManager};
 use crate::barrier::schedule::PeriodicBarriers;
 use crate::barrier::{
     schedule, BarrierManagerRequest, BarrierManagerStatus, BarrierWorkerRuntimeInfoSnapshot,
-    InflightSubscriptionInfo, RecoveryReason,
+    RecoveryReason,
 };
 use crate::error::MetaErrorInner;
 use crate::hummock::HummockManagerRef;
@@ -281,7 +281,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     info!(?changed_worker, "worker changed");
 
                     if let ActiveStreamingWorkerChange::Add(node) | ActiveStreamingWorkerChange::Update(node) = changed_worker {
-                        self.control_stream_manager.add_worker(node, self.checkpoint_control.subscriptions(), &*self.context).await;
+                        self.control_stream_manager.add_worker(node, self.checkpoint_control.inflight_infos(), &*self.context).await;
                     }
                 }
 
@@ -644,10 +644,8 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
 
             let mut control_stream_manager = ControlStreamManager::new(self.env.clone());
             let reset_start_time = Instant::now();
-            let empty_subscriptions = LazyLock::new(InflightSubscriptionInfo::default);
             control_stream_manager
                 .reset(
-                    database_fragment_infos.keys().map(|database_id| (*database_id, subscription_infos.get(database_id).unwrap_or_else(|| &*empty_subscriptions))),
                     active_streaming_nodes.current(),
                     &*self.context,
                 )
@@ -661,6 +659,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 let mut collected_databases = HashMap::new();
                 let mut collecting_databases = HashMap::new();
                 for (database_id, info) in database_fragment_infos {
+                    control_stream_manager.add_partial_graph(database_id, None)?;
                     let (node_to_collect, database, prev_epoch) = control_stream_manager.inject_database_initial_barrier(
                         database_id,
                         info,

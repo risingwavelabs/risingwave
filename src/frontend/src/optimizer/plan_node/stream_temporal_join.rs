@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -78,11 +78,11 @@ impl StreamTemporalJoin {
         };
 
         // Use left side watermark directly.
-        let watermark_columns = core.i2o_col_mapping().rewrite_bitset(
-            &core
-                .l2i_col_mapping()
-                .rewrite_bitset(core.left.watermark_columns()),
-        );
+        let watermark_columns = core
+            .left
+            .watermark_columns()
+            .map_clone(&core.l2i_col_mapping())
+            .map_clone(&core.i2o_col_mapping());
 
         let columns_monotonicity = core.i2o_col_mapping().rewrite_monotonicity_map(
             &core
@@ -246,7 +246,7 @@ impl TryToStreamPb for StreamTemporalJoin {
             .as_stream_table_scan()
             .expect("should be a stream table scan");
 
-        Ok(NodeBody::TemporalJoin(TemporalJoinNode {
+        Ok(NodeBody::TemporalJoin(Box::new(TemporalJoinNode {
             join_type: self.core.join_type as i32,
             left_key: left_jk_indices_prost,
             right_key: right_jk_indices_prost,
@@ -267,7 +267,7 @@ impl TryToStreamPb for StreamTemporalJoin {
                 Some(memo_table.to_internal_table_prost())
             },
             is_nested_loop: self.is_nested_loop,
-        }))
+        })))
     }
 }
 

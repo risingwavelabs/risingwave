@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -105,10 +105,10 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use tonic::transport::Endpoint;
 use tonic::{Code, Request, Streaming};
 
+use crate::channel::{Channel, WrappedChannelExt};
 use crate::error::{Result, RpcError};
 use crate::hummock_meta_client::{CompactionEventItem, HummockMetaClient};
 use crate::meta_rpc_client_method_impl;
-use crate::tracing::{Channel, TracingInjectedChannelExt};
 
 type ConnectionId = u32;
 type DatabaseId = u32;
@@ -2033,7 +2033,7 @@ impl GrpcMetaClient {
             .connect_timeout(Duration::from_secs(5))
             .monitored_connect("grpc-meta-client", Default::default())
             .await?
-            .tracing_injected();
+            .wrapped();
 
         Ok(channel)
     }

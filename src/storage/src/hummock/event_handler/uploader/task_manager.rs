@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -134,24 +134,6 @@ impl TaskManager {
             size,
             must_match!(status, UploadingTaskStatus::Spilling(table_ids) => table_ids),
         )
-    }
-
-    pub(super) fn remove_table_spill_tasks(
-        &mut self,
-        table_id: TableId,
-        task_ids: impl Iterator<Item = UploadingTaskId>,
-    ) {
-        for task_id in task_ids {
-            let entry = self.tasks.get_mut(&task_id).expect("should exist");
-            let empty = must_match!(&mut entry.status, UploadingTaskStatus::Spilling(table_ids) => {
-                assert!(table_ids.remove(&table_id));
-                table_ids.is_empty()
-            });
-            if empty {
-                let task = self.tasks.remove(&task_id).expect("should exist").task;
-                task.join_handle.abort();
-            }
-        }
     }
 
     pub(super) fn sync(

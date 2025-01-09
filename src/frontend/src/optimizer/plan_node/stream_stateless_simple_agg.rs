@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
@@ -22,7 +21,7 @@ use super::utils::impl_distill_by_unit;
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::property::{MonotonicityMap, RequiredDist};
+use crate::optimizer::property::{MonotonicityMap, RequiredDist, WatermarkColumns};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// Streaming stateless simple agg.
@@ -43,11 +42,11 @@ impl StreamStatelessSimpleAgg {
         let input_dist = input.distribution();
         debug_assert!(input_dist.satisfies(&RequiredDist::AnyShard));
 
-        let mut watermark_columns = FixedBitSet::with_capacity(core.output_len());
+        let mut watermark_columns = WatermarkColumns::new();
         // Watermark column(s) must be in group key.
         for (idx, input_idx) in core.group_key.indices().enumerate() {
-            if input.watermark_columns().contains(input_idx) {
-                watermark_columns.insert(idx);
+            if let Some(wtmk_group) = input.watermark_columns().get_group(input_idx) {
+                watermark_columns.insert(idx, wtmk_group);
             }
         }
 
@@ -84,7 +83,7 @@ impl_plan_tree_node_for_unary! { StreamStatelessSimpleAgg }
 impl StreamNode for StreamStatelessSimpleAgg {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
         use risingwave_pb::stream_plan::*;
-        PbNodeBody::StatelessSimpleAgg(SimpleAggNode {
+        PbNodeBody::StatelessSimpleAgg(Box::new(SimpleAggNode {
             agg_calls: self
                 .agg_calls()
                 .iter()
@@ -103,7 +102,7 @@ impl StreamNode for StreamStatelessSimpleAgg {
             distinct_dedup_tables: Default::default(),
             version: AggNodeVersion::Issue13465 as _,
             must_output_per_barrier: false, // this is not used
-        })
+        }))
     }
 }
 

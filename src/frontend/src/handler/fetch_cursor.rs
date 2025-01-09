@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -58,7 +58,7 @@ pub async fn handle_fetch_cursor(
     formats: &Vec<Format>,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
-    let db_name = session.database();
+    let db_name = &session.database();
     let (_, cursor_name) =
         Binder::resolve_schema_qualified_name(db_name, stmt.cursor_name.clone())?;
 
@@ -105,7 +105,7 @@ pub async fn handle_parse(
 ) -> Result<PrepareStatement> {
     if let Statement::FetchCursor { stmt } = &statement {
         let session = handler_args.session.clone();
-        let db_name = session.database();
+        let db_name = &session.database();
         let (_, cursor_name) =
             Binder::resolve_schema_qualified_name(db_name, stmt.cursor_name.clone())?;
         let fields = session

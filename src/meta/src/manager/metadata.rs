@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@ use std::time::Duration;
 use anyhow::anyhow;
 use futures::future::{select, Either};
 use risingwave_common::catalog::{DatabaseId, TableId, TableOption};
-use risingwave_meta_model::{ObjectId, SourceId, WorkerId};
+use risingwave_meta_model::{ObjectId, SinkId, SourceId, WorkerId};
 use risingwave_pb::catalog::{PbSink, PbSource, PbTable};
 use risingwave_pb::common::worker_node::{PbResource, Property as AddNodeProperty, State};
 use risingwave_pb::common::{HostAddress, PbWorkerNode, PbWorkerType, WorkerNode, WorkerType};
@@ -648,6 +648,21 @@ impl MetadataManager {
         let fragment_actors = self
             .catalog_controller
             .update_backfill_rate_limit_by_job_id(table_id.table_id as _, rate_limit)
+            .await?;
+        Ok(fragment_actors
+            .into_iter()
+            .map(|(id, actors)| (id as _, actors.into_iter().map(|id| id as _).collect()))
+            .collect())
+    }
+
+    pub async fn update_sink_rate_limit_by_sink_id(
+        &self,
+        sink_id: SinkId,
+        rate_limit: Option<u32>,
+    ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
+        let fragment_actors = self
+            .catalog_controller
+            .update_sink_rate_limit_by_job_id(sink_id as _, rate_limit)
             .await?;
         Ok(fragment_actors
             .into_iter()

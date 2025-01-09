@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,5 +18,7 @@ mod id;
 mod schedule;
 
 pub use actor::{ActorGraphBuildResult, ActorGraphBuilder};
-pub use fragment::{CompleteStreamFragmentGraph, StreamFragmentGraph};
+pub use fragment::{
+    fill_snapshot_backfill_epoch, CompleteStreamFragmentGraph, StreamFragmentGraph,
+};
 pub use schedule::Locations;

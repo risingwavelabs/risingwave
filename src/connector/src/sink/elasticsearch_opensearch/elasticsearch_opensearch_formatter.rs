@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -113,7 +113,11 @@ impl ElasticSearchOpenSearchFormatter {
         })
     }
 
-    pub fn convert_chunk(&self, chunk: StreamChunk) -> Result<Vec<BuildBulkPara>> {
+    pub fn convert_chunk(
+        &self,
+        chunk: StreamChunk,
+        is_append_only: bool,
+    ) -> Result<Vec<BuildBulkPara>> {
         let mut result_vec = Vec::with_capacity(chunk.capacity());
         for (op, rows) in chunk.rows() {
             let index = if let Some(index_column) = self.index_column {
@@ -157,6 +161,11 @@ impl ElasticSearchOpenSearchFormatter {
                     });
                 }
                 Op::Delete => {
+                    if is_append_only {
+                        return Err(SinkError::ElasticSearchOpenSearch(anyhow!(
+                            "`Delete` operation is not supported in `append_only` mode"
+                        )));
+                    }
                     let key = self.key_encoder.encode(rows)?;
                     let mem_size_b = std::mem::size_of_val(&key);
                     result_vec.push(BuildBulkPara {
@@ -167,7 +176,15 @@ impl ElasticSearchOpenSearchFormatter {
                         routing_column,
                     });
                 }
-                Op::UpdateDelete => continue,
+                Op::UpdateDelete => {
+                    if is_append_only {
+                        return Err(SinkError::ElasticSearchOpenSearch(anyhow!(
+                            "`UpdateDelete` operation is not supported in `append_only` mode"
+                        )));
+                    } else {
+                        continue;
+                    }
+                }
             }
         }
         Ok(result_vec)

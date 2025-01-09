@@ -1,5 +1,9 @@
 version: 2
 updates:
+- package-ecosystem: github-actions
+  directory: "/"
+  schedule:
+    interval: "weekly"
 - package-ecosystem: cargo
   directory: /
   schedule:
@@ -17,6 +21,9 @@ updates:
     - dependency-name: "arrow*"
       update-types: ["version-update:semver-minor", "version-update:semver-major"]
     - dependency-name: "parquet"
+      update-types: ["version-update:semver-minor", "version-update:semver-major"]
+    # bump sqllogictest manually together with sqllogictest-bin in CI docker image
+    - dependency-name: "sqllogictest"
       update-types: ["version-update:semver-minor", "version-update:semver-major"]
   # Create a group of dependencies to be updated together in one pull request
   groups:
@@ -69,7 +76,7 @@ updates:
       update-types:
         ["version-update:semver-major"]
   groups:
-    # Group all dependenies together because Java libraries are quite stable
+    # Group all dependencies together because Java libraries are quite stable
     all:
       patterns:
         - "*"

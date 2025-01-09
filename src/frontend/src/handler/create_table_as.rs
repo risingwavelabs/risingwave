@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,7 +21,9 @@ use risingwave_sqlparser::ast::{ColumnDef, ObjectName, OnConflict, Query, Statem
 use super::{HandlerArgs, RwPgResponse};
 use crate::binder::BoundStatement;
 use crate::error::{ErrorCode, Result};
-use crate::handler::create_table::{gen_create_table_plan_without_source, ColumnIdGenerator};
+use crate::handler::create_table::{
+    gen_create_table_plan_without_source, ColumnIdGenerator, CreateTableProps,
+};
 use crate::handler::query::handle_query;
 use crate::{build_graph, Binder, OptimizerContext};
 pub async fn handle_create_as(
@@ -69,13 +71,12 @@ pub async fn handle_create_as(
                 .fields()
                 .iter()
                 .map(|field| {
-                    let id = col_id_gen.generate(&field.name);
-                    ColumnCatalog {
+                    col_id_gen.generate(field).map(|id| ColumnCatalog {
                         column_desc: ColumnDesc::from_field_with_column_id(field, id.get_id()),
                         is_hidden: false,
-                    }
+                    })
                 })
-                .collect()
+                .try_collect()?
         } else {
             unreachable!()
         }
@@ -108,14 +109,18 @@ pub async fn handle_create_as(
             columns,
             vec![],
             vec![],
-            "".to_owned(), // TODO: support `SHOW CREATE TABLE` for `CREATE TABLE AS`
-            vec![],        // No watermark should be defined in for `CREATE TABLE AS`
-            append_only,
-            on_conflict,
-            with_version_column,
-            Some(col_id_gen.into_version()),
-            None,
-            engine,
+            vec![], // No watermark should be defined in for `CREATE TABLE AS`
+            col_id_gen.into_version(),
+            CreateTableProps {
+                // Note: by providing and persisting an empty definition, querying the definition of the table
+                // will hit the purification logic, which will construct it based on the catalog.
+                definition: "".to_owned(),
+                append_only,
+                on_conflict: on_conflict.into(),
+                with_version_column,
+                webhook_info: None,
+                engine,
+            },
         )?;
         let graph = build_graph(plan)?;
 

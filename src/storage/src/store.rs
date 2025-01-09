@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,7 +17,6 @@ use std::default::Default;
 use std::fmt::{Debug, Formatter};
 use std::future::Future;
 use std::marker::PhantomData;
-use std::ops::Bound;
 use std::sync::{Arc, LazyLock};
 
 use bytes::Bytes;
@@ -42,7 +41,6 @@ use risingwave_pb::hummock::PbVnodeWatermark;
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::CachePolicy;
 use crate::monitor::{MonitoredStateStore, MonitoredStorageMetrics};
-use crate::storage_value::StorageValue;
 
 pub trait StaticSendSync = Send + Sync + 'static;
 
@@ -59,9 +57,7 @@ impl IterItem for StateStoreReadLogItem {
 }
 
 pub trait StateStoreIter<T: IterItem = StateStoreKeyedRow>: Send {
-    fn try_next(
-        &mut self,
-    ) -> impl Future<Output = StorageResult<Option<T::ItemRef<'_>>>> + Send + '_;
+    fn try_next(&mut self) -> impl StorageFuture<'_, Option<T::ItemRef<'_>>>;
 }
 
 pub fn to_owned_item((key, value): StateStoreKeyedRowRef<'_>) -> StorageResult<StateStoreKeyedRow> {
@@ -238,11 +234,22 @@ pub struct ReadLogOptions {
 }
 
 pub trait StateStoreReadChangeLogIter = StateStoreIter<StateStoreReadLogItem> + Send + 'static;
+pub trait StorageFuture<'a, T> = Future<Output = StorageResult<T>> + Send + 'a;
+
+pub trait StateStoreReadLog: StaticSendSync {
+    type ChangeLogIter: StateStoreReadChangeLogIter;
+
+    fn iter_log(
+        &self,
+        epoch_range: (u64, u64),
+        key_range: TableKeyRange,
+        options: ReadLogOptions,
+    ) -> impl StorageFuture<'_, Self::ChangeLogIter>;
+}
 
 pub trait StateStoreRead: StaticSendSync {
     type Iter: StateStoreReadIter;
     type RevIter: StateStoreReadIter;
-    type ChangeLogIter: StateStoreReadChangeLogIter;
 
     /// Point gets a value from the state store.
     /// The result is based on a snapshot corresponding to the given `epoch`.
@@ -252,7 +259,7 @@ pub trait StateStoreRead: StaticSendSync {
         key: TableKey<Bytes>,
         epoch: u64,
         read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<Option<StateStoreKeyedRow>>> + Send + '_;
+    ) -> impl StorageFuture<'_, Option<StateStoreKeyedRow>>;
 
     /// Point gets a value from the state store.
     /// The result is based on a snapshot corresponding to the given `epoch`.
@@ -262,7 +269,7 @@ pub trait StateStoreRead: StaticSendSync {
         key: TableKey<Bytes>,
         epoch: u64,
         read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<Option<Bytes>>> + Send + '_ {
+    ) -> impl StorageFuture<'_, Option<Bytes>> {
         self.get_keyed_row(key, epoch, read_options)
             .map_ok(|v| v.map(|(_, v)| v))
     }
@@ -277,21 +284,14 @@ pub trait StateStoreRead: StaticSendSync {
         key_range: TableKeyRange,
         epoch: u64,
         read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<Self::Iter>> + Send + '_;
+    ) -> impl StorageFuture<'_, Self::Iter>;
 
     fn rev_iter(
         &self,
         key_range: TableKeyRange,
         epoch: u64,
         read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<Self::RevIter>> + Send + '_;
-
-    fn iter_log(
-        &self,
-        epoch_range: (u64, u64),
-        key_range: TableKeyRange,
-        options: ReadLogOptions,
-    ) -> impl Future<Output = StorageResult<Self::ChangeLogIter>> + Send + '_;
+    ) -> impl StorageFuture<'_, Self::RevIter>;
 }
 
 pub trait StateStoreReadExt: StaticSendSync {
@@ -308,7 +308,7 @@ pub trait StateStoreReadExt: StaticSendSync {
         epoch: u64,
         limit: Option<usize>,
         read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<Vec<StateStoreKeyedRow>>> + Send + '_;
+    ) -> impl StorageFuture<'_, Vec<StateStoreKeyedRow>>;
 }
 
 impl<S: StateStoreRead> StateStoreReadExt for S {
@@ -331,29 +331,6 @@ impl<S: StateStoreRead> StateStoreReadExt for S {
         }
         Ok(ret)
     }
-}
-
-pub trait StateStoreWrite: StaticSendSync {
-    /// Writes a batch to storage. The batch should be:
-    /// * Ordered. KV pairs will be directly written to the table, so it must be ordered.
-    /// * Locally unique. There should not be two or more operations on the same key in one write
-    ///   batch.
-    ///
-    /// Ingests a batch of data into the state store. One write batch should never contain operation
-    /// on the same key. e.g. Put(233, x) then Delete(233).
-    /// An epoch should be provided to ingest a write batch. It is served as:
-    /// - A handle to represent an atomic write session. All ingested write batches associated with
-    ///   the same `Epoch` have the all-or-nothing semantics, meaning that partial changes are not
-    ///   queryable and will be rolled back if instructed.
-    /// - A version of a kv pair. kv pair associated with larger `Epoch` is guaranteed to be newer
-    ///   then kv pair with smaller `Epoch`. Currently this version is only used to derive the
-    ///   per-key modification history (e.g. in compaction), not across different keys.
-    fn ingest_batch(
-        &self,
-        kv_pairs: Vec<(TableKey<Bytes>, StorageValue)>,
-        delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
-        write_options: WriteOptions,
-    ) -> StorageResult<usize>;
 }
 
 #[derive(Clone)]
@@ -384,7 +361,7 @@ impl From<TryWaitEpochOptions> for TracedTryWaitEpochOptions {
     }
 }
 
-pub trait StateStore: StateStoreRead + StaticSendSync + Clone {
+pub trait StateStore: StateStoreRead + StateStoreReadLog + StaticSendSync + Clone {
     type Local: LocalStateStore;
 
     /// If epoch is `Committed`, we will wait until the epoch is committed and its data is ready to
@@ -393,7 +370,7 @@ pub trait StateStore: StateStoreRead + StaticSendSync + Clone {
         &self,
         epoch: HummockReadEpoch,
         options: TryWaitEpochOptions,
-    ) -> impl Future<Output = StorageResult<()>> + Send + '_;
+    ) -> impl StorageFuture<'_, ()>;
 
     /// Creates a [`MonitoredStateStore`] from this state store, with given `stats`.
     fn monitored(self, storage_metrics: Arc<MonitoredStorageMetrics>) -> MonitoredStateStore<Self> {
@@ -416,7 +393,7 @@ pub trait LocalStateStore: StaticSendSync {
         &self,
         key: TableKey<Bytes>,
         read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<Option<Bytes>>> + Send + '_;
+    ) -> impl StorageFuture<'_, Option<Bytes>>;
 
     /// Opens and returns an iterator for given `prefix_hint` and `full_key_range`
     /// Internally, `prefix_hint` will be used to for checking `bloom_filter` and
@@ -427,13 +404,13 @@ pub trait LocalStateStore: StaticSendSync {
         &self,
         key_range: TableKeyRange,
         read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<Self::Iter<'_>>> + Send + '_;
+    ) -> impl StorageFuture<'_, Self::Iter<'_>>;
 
     fn rev_iter(
         &self,
         key_range: TableKeyRange,
         read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<Self::RevIter<'_>>> + Send + '_;
+    ) -> impl StorageFuture<'_, Self::RevIter<'_>>;
 
     /// Get last persisted watermark for a given vnode.
     fn get_table_watermark(&self, vnode: VirtualNode) -> Option<Bytes>;
@@ -450,9 +427,9 @@ pub trait LocalStateStore: StaticSendSync {
     /// than the given `epoch` will be deleted.
     fn delete(&mut self, key: TableKey<Bytes>, old_val: Bytes) -> StorageResult<()>;
 
-    fn flush(&mut self) -> impl Future<Output = StorageResult<usize>> + Send + '_;
+    fn flush(&mut self) -> impl StorageFuture<'_, usize>;
 
-    fn try_flush(&mut self) -> impl Future<Output = StorageResult<()>> + Send + '_;
+    fn try_flush(&mut self) -> impl StorageFuture<'_, ()>;
     fn epoch(&self) -> u64;
 
     fn is_dirty(&self) -> bool;
@@ -463,7 +440,7 @@ pub trait LocalStateStore: StaticSendSync {
     /// In some cases like replicated state table, state table may not be empty initially,
     /// as such we need to wait for `epoch.prev` checkpoint to complete,
     /// hence this interface is made async.
-    fn init(&mut self, opts: InitOptions) -> impl Future<Output = StorageResult<()>> + Send + '_;
+    fn init(&mut self, opts: InitOptions) -> impl StorageFuture<'_, ()>;
 
     /// Updates the monotonically increasing write epoch to `new_epoch`.
     /// All writes after this function is called will be tagged with `new_epoch`. In other words,

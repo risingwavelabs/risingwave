@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,12 +15,10 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use anyhow::{anyhow, Context};
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{ColumnCatalog, Engine};
 use risingwave_common::hash::VnodeCount;
-use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::{bail, bail_not_implemented};
 use risingwave_connector::sink::catalog::SinkCatalog;
@@ -29,12 +27,10 @@ use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{ProjectNode, StreamFragmentGraph};
 use risingwave_sqlparser::ast::{
-    AlterTableOperation, ColumnDef, ColumnOption, DataType as AstDataType, Encode,
-    FormatEncodeOptions, Ident, ObjectName, Statement, StructField, TableConstraint,
+    AlterTableOperation, ColumnDef, ColumnOption, Ident, ObjectName, Statement, TableConstraint,
 };
-use risingwave_sqlparser::parser::Parser;
 
-use super::create_source::get_json_schema_location;
+use super::create_source::schema_has_schema_registry;
 use super::create_table::{generate_stream_graph_for_replace_table, ColumnIdGenerator};
 use super::util::SourceSchemaCompatExt;
 use super::{HandlerArgs, RwPgResponse};
@@ -45,7 +41,8 @@ use crate::expr::{Expr, ExprImpl, InputRef, Literal};
 use crate::handler::create_sink::{fetch_incoming_sinks, insert_merger_to_union_with_project};
 use crate::handler::create_table::bind_table_constraints;
 use crate::session::SessionImpl;
-use crate::{Binder, TableCatalog, WithOptions};
+use crate::utils::data_type::DataTypeToAst;
+use crate::{Binder, TableCatalog};
 
 /// Used in auto schema change process
 pub async fn get_new_table_definition_for_cdc_table(
@@ -56,10 +53,7 @@ pub async fn get_new_table_definition_for_cdc_table(
     let original_catalog = fetch_table_catalog_for_alter(session.as_ref(), &table_name)?;
 
     // Retrieve the original table definition and parse it to AST.
-    let [mut definition]: [_; 1] = Parser::parse_sql(&original_catalog.definition)
-        .context("unable to parse original table definition")?
-        .try_into()
-        .unwrap();
+    let mut definition = original_catalog.create_sql_ast()?;
 
     let Statement::CreateTable {
         columns: original_columns,
@@ -105,53 +99,16 @@ pub async fn get_new_table_definition_for_cdc_table(
         // if the column exists in the original catalog, use it to construct the column definition.
         // since we don't support altering the column type right now
         if let Some(original_col) = orig_column_catalog.get(new_col.name()) {
-            let ty = to_ast_data_type(original_col.data_type())?;
+            let ty = original_col.data_type().to_ast();
             new_column_defs.push(ColumnDef::new(original_col.name().into(), ty, None, vec![]));
         } else {
-            let ty = to_ast_data_type(new_col.data_type())?;
+            let ty = new_col.data_type().to_ast();
             new_column_defs.push(ColumnDef::new(new_col.name().into(), ty, None, vec![]));
         }
     }
     *original_columns = new_column_defs;
 
     Ok((definition, original_catalog))
-}
-
-fn to_ast_data_type(ty: &DataType) -> Result<AstDataType> {
-    match ty {
-        DataType::Boolean => Ok(AstDataType::Boolean),
-        DataType::Int16 => Ok(AstDataType::SmallInt),
-        DataType::Int32 => Ok(AstDataType::Int),
-        DataType::Int64 => Ok(AstDataType::BigInt),
-        DataType::Float32 => Ok(AstDataType::Real),
-        DataType::Float64 => Ok(AstDataType::Double),
-        // TODO: handle precision and scale for decimal
-        DataType::Decimal => Ok(AstDataType::Decimal(None, None)),
-        DataType::Date => Ok(AstDataType::Date),
-        DataType::Varchar => Ok(AstDataType::Varchar),
-        DataType::Time => Ok(AstDataType::Time(false)),
-        DataType::Timestamp => Ok(AstDataType::Timestamp(false)),
-        DataType::Timestamptz => Ok(AstDataType::Timestamp(true)),
-        DataType::Interval => Ok(AstDataType::Interval),
-        DataType::Jsonb => Ok(AstDataType::Jsonb),
-        DataType::Bytea => Ok(AstDataType::Bytea),
-        DataType::List(item_ty) => Ok(AstDataType::Array(Box::new(to_ast_data_type(item_ty)?))),
-        DataType::Struct(fields) => {
-            let fields = fields
-                .iter()
-                .map(|(name, ty)| {
-                    Ok::<StructField, RwError>(StructField {
-                        name: name.into(),
-                        data_type: to_ast_data_type(ty)?,
-                    })
-                })
-                .try_collect()?;
-            Ok(AstDataType::Struct(fields))
-        }
-        DataType::Serial | DataType::Int256 | DataType::Map(_) => {
-            Err(anyhow!("unsupported data type: {:?}", ty).context("to_ast_data_type"))?
-        }
-    }
 }
 
 pub async fn get_replace_table_plan(
@@ -296,10 +253,10 @@ pub(crate) fn hijack_merger_for_target_table(
         }
     }
 
-    let pb_project = PbNodeBody::Project(ProjectNode {
+    let pb_project = PbNodeBody::Project(Box::new(ProjectNode {
         select_list: exprs.iter().map(|expr| expr.to_expr_proto()).collect(),
         ..Default::default()
-    });
+    }));
 
     for fragment in graph.fragments.values_mut() {
         if let Some(node) = &mut fragment.node {
@@ -328,10 +285,7 @@ pub async fn handle_alter_table_column(
     }
 
     // Retrieve the original table definition and parse it to AST.
-    let [mut definition]: [_; 1] = Parser::parse_sql(&original_catalog.definition)
-        .context("unable to parse original table definition")?
-        .try_into()
-        .unwrap();
+    let mut definition = original_catalog.create_sql_ast()?;
     let Statement::CreateTable {
         columns,
         format_encode,
@@ -475,26 +429,15 @@ pub async fn handle_alter_table_column(
     Ok(PgResponse::empty_result(StatementType::ALTER_TABLE))
 }
 
-pub fn schema_has_schema_registry(schema: &FormatEncodeOptions) -> bool {
-    match schema.row_encode {
-        Encode::Avro | Encode::Protobuf => true,
-        Encode::Json => {
-            let mut options = WithOptions::try_from(schema.row_options()).unwrap();
-            matches!(get_json_schema_location(options.inner_mut()), Ok(Some(_)))
-        }
-        _ => false,
-    }
-}
-
 pub fn fetch_table_catalog_for_alter(
     session: &SessionImpl,
     table_name: &ObjectName,
 ) -> Result<Arc<TableCatalog>> {
-    let db_name = session.database();
+    let db_name = &session.database();
     let (schema_name, real_table_name) =
         Binder::resolve_schema_qualified_name(db_name, table_name.clone())?;
     let search_path = session.config().search_path();
-    let user_name = &session.auth_context().user_name;
+    let user_name = &session.user_name();
 
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 

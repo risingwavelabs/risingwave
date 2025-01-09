@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -33,7 +33,7 @@ use crate::source::filesystem::nd_streaming::need_nd_streaming;
 use crate::source::filesystem::OpendalFsSplit;
 use crate::source::iceberg::read_parquet_file;
 use crate::source::{
-    BoxChunkSourceStream, Column, SourceContextRef, SourceMessage, SourceMeta, SplitMetaData,
+    BoxSourceChunkStream, Column, SourceContextRef, SourceMessage, SourceMeta, SplitMetaData,
     SplitReader,
 };
 
@@ -69,7 +69,7 @@ impl<Src: OpendalSource> SplitReader for OpendalReader<Src> {
         Ok(opendal_reader)
     }
 
-    fn into_stream(self) -> BoxChunkSourceStream {
+    fn into_stream(self) -> BoxSourceChunkStream {
         self.into_stream_inner()
     }
 }
@@ -109,7 +109,7 @@ impl<Src: OpendalSource> OpendalReader<Src> {
                 let parser =
                     ByteStreamSourceParserImpl::create(self.parser_config.clone(), source_ctx)
                         .await?;
-                chunk_stream = Box::pin(parser.into_stream(line_stream));
+                chunk_stream = Box::pin(parser.parse_stream(line_stream));
             }
 
             #[for_await]

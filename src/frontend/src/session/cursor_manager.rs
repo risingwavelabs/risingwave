@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -1031,7 +1031,7 @@ impl CursorManager {
         handler_args: HandlerArgs,
     ) -> Result<BatchQueryPlanResult> {
         let session = handler_args.session.clone();
-        let db_name = session.database();
+        let db_name = &session.database();
         let (_, cursor_name) = Binder::resolve_schema_qualified_name(db_name, cursor_name.clone())?;
         match self.cursor_map.lock().await.get(&cursor_name).ok_or_else(|| {
             ErrorCode::InternalError(format!("Cannot find cursor `{}`", cursor_name))

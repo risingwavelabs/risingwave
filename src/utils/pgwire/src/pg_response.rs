@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -113,6 +113,7 @@ pub enum StatementType {
     WAIT,
     KILL,
     RECOVER,
+    USE,
 }
 
 impl std::fmt::Display for StatementType {
@@ -322,6 +323,7 @@ impl StatementType {
             Statement::CloseCursor { .. } => Ok(StatementType::CLOSE_CURSOR),
             Statement::Flush => Ok(StatementType::FLUSH),
             Statement::Wait => Ok(StatementType::WAIT),
+            Statement::Use { .. } => Ok(StatementType::USE),
             _ => Err("unsupported statement type".to_owned()),
         }
     }

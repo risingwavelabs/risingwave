@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -92,7 +92,9 @@ impl Planner {
         );
 
         match (base_table.table_catalog.engine, self.plan_for()) {
-            (Engine::Hummock, PlanFor::Stream) | (Engine::Hummock, PlanFor::Batch) => {
+            (Engine::Hummock, PlanFor::Stream)
+            | (Engine::Hummock, PlanFor::Batch)
+            | (Engine::Hummock, PlanFor::BatchDql) => {
                 match as_of {
                     None
                     | Some(AsOf::ProcessTime)
@@ -105,7 +107,7 @@ impl Planner {
                 };
                 Ok(scan.into())
             }
-            (Engine::Iceberg, PlanFor::Stream) => {
+            (Engine::Iceberg, PlanFor::Stream) | (Engine::Iceberg, PlanFor::Batch) => {
                 match as_of {
                     None
                     | Some(AsOf::VersionNum(_))
@@ -120,7 +122,7 @@ impl Planner {
                 }
                 Ok(scan.into())
             }
-            (Engine::Iceberg, PlanFor::Batch) => {
+            (Engine::Iceberg, PlanFor::BatchDql) => {
                 match as_of {
                     None
                     | Some(AsOf::VersionNum(_))
@@ -135,7 +137,7 @@ impl Planner {
                 }
                 let opt_ctx = self.ctx();
                 let session = opt_ctx.session_ctx();
-                let db_name = session.database();
+                let db_name = &session.database();
                 let catalog_reader = session.env().catalog_reader().read_guard();
                 let mut source_catalog = None;
                 for schema in catalog_reader.iter_schemas(db_name).unwrap() {

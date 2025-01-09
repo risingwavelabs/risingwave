@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -83,9 +83,9 @@ impl StreamNode for StreamRowIdGen {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
         use risingwave_pb::stream_plan::*;
 
-        PbNodeBody::RowIdGen(RowIdGenNode {
+        PbNodeBody::RowIdGen(Box::new(RowIdGenNode {
             row_id_index: self.row_id_index as _,
-        })
+        }))
     }
 }
 

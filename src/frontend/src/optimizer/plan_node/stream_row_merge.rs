@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use anyhow::anyhow;
-use fixedbitset::FixedBitSet;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::bail;
 use risingwave_common::catalog::Schema;
@@ -29,7 +28,7 @@ use crate::optimizer::plan_node::utils::{childless_record, Distill};
 use crate::optimizer::plan_node::{
     ExprRewritable, PlanBase, PlanTreeNodeBinary, Stream, StreamNode,
 };
-use crate::optimizer::property::FunctionalDependencySet;
+use crate::optimizer::property::{FunctionalDependencySet, WatermarkColumns};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::PlanRef;
 
@@ -81,7 +80,7 @@ impl StreamRowMerge {
         }
         let schema = Schema::new(schema_fields);
         assert!(!schema.is_empty());
-        let watermark_columns = FixedBitSet::with_capacity(schema.fields.len());
+        let watermark_columns = WatermarkColumns::new();
 
         let base = PlanBase::new_stream(
             lhs_input.ctx(),
@@ -141,10 +140,10 @@ impl_plan_tree_node_for_binary! { StreamRowMerge }
 
 impl StreamNode for StreamRowMerge {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
-        PbNodeBody::RowMerge(risingwave_pb::stream_plan::RowMergeNode {
+        PbNodeBody::RowMerge(Box::new(risingwave_pb::stream_plan::RowMergeNode {
             lhs_mapping: Some(self.lhs_mapping.to_protobuf()),
             rhs_mapping: Some(self.rhs_mapping.to_protobuf()),
-        })
+        }))
     }
 }
 

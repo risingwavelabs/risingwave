@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -91,15 +91,17 @@ async fn test_over_window() {
         // lag(x, 1)
         WindowFuncCall {
             kind: WindowFuncKind::Aggregate(PbAggKind::FirstValue.into()),
-            args: AggArgs::from_iter([(DataType::Int32, 3)]),
             return_type: DataType::Int32,
+            args: AggArgs::from_iter([(DataType::Int32, 3)]),
+            ignore_nulls: false,
             frame: Frame::rows(FrameBound::Preceding(1), FrameBound::Preceding(1)),
         },
         // lead(x, 1)
         WindowFuncCall {
             kind: WindowFuncKind::Aggregate(PbAggKind::FirstValue.into()),
-            args: AggArgs::from_iter([(DataType::Int32, 3)]),
             return_type: DataType::Int32,
+            args: AggArgs::from_iter([(DataType::Int32, 3)]),
+            ignore_nulls: false,
             frame: Frame::rows(FrameBound::Following(1), FrameBound::Following(1)),
         },
     ];
@@ -191,8 +193,9 @@ async fn test_over_window_aggregate() {
     let store = MemoryStateStore::new();
     let calls = vec![WindowFuncCall {
         kind: WindowFuncKind::Aggregate(PbAggKind::Sum.into()),
-        args: AggArgs::from_iter([(DataType::Int32, 3)]),
         return_type: DataType::Int64,
+        args: AggArgs::from_iter([(DataType::Int32, 3)]),
+        ignore_nulls: false,
         frame: Frame::rows(FrameBound::Preceding(1), FrameBound::Following(1)),
     }];
 

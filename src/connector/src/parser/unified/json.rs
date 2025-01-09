@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@ use std::sync::LazyLock;
 
 use base64::Engine;
 use itertools::Itertools;
-use num_bigint::{BigInt, Sign};
+use num_bigint::BigInt;
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::cast::{i64_to_timestamp, i64_to_timestamptz, str_to_bytea};
 use risingwave_common::log::LogSuppresser;
@@ -26,7 +26,7 @@ use risingwave_common::types::{
     ToOwnedDatum,
 };
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_connector_codec::decoder::utils::extract_decimal;
+use risingwave_connector_codec::decoder::utils::scaled_bigint_to_rust_decimal;
 use simd_json::base::ValueAsObject;
 use simd_json::prelude::{
     TypedValue, ValueAsArray, ValueAsScalar, ValueObjectAccess, ValueTryAsScalar,
@@ -410,11 +410,8 @@ impl JsonParseOptions {
                     .as_str()
                     .unwrap()
                     .as_bytes();
-                let decimal = BigInt::from_signed_bytes_be(value);
-                let negative = decimal.sign() == Sign::Minus;
-                let (lo, mid, hi) = extract_decimal(decimal.to_bytes_be().1)?;
-                let decimal =
-                    rust_decimal::Decimal::from_parts(lo, mid, hi, negative, scale as u32);
+                let unscaled = BigInt::from_signed_bytes_be(value);
+                let decimal = scaled_bigint_to_rust_decimal(unscaled, scale as _)?;
                 ScalarImpl::Decimal(Decimal::Normalized(decimal))
             }
             // ---- Date -----

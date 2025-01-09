@@ -8,18 +8,11 @@ license = { workspace = true }
 repository = { workspace = true }
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-[package.metadata.cargo-machete]
-ignored = ["workspace-hack"]
-
-[package.metadata.cargo-udeps.ignore]
-normal = ["workspace-hack"]
-
 [dependencies]
 async-trait = "0.1"
 await-tree = { workspace = true }
 clap = { workspace = true }
 jsonbb = { workspace = true }
-parking_lot = { workspace = true }
 prost = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_common_heap_profiling = { workspace = true }
@@ -40,6 +33,9 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 ] }
 tonic = { workspace = true }
 tracing = "0.1"
+
+[dev-dependencies]
+tokio-retry = "0.3"
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../../workspace-hack" }

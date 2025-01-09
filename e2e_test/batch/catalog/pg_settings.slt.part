@@ -52,6 +52,7 @@ user server_encoding
 user server_version
 user server_version_num
 user sink_decouple
+user sink_rate_limit
 user source_rate_limit
 user standard_conforming_strings
 user statement_timeout

@@ -24,7 +24,7 @@ WITH
 db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
-  1: gRPC request to meta service failed: Internal error
+  1: gRPC request to meta service (call `/ddl_service.DdlService/CreateSink`) failed: Internal error
   2: failed to validate sink
   3: Internal error
   4: feature DynamoDbSink is only available for tier Paid and above, while the current tier is Free
@@ -49,7 +49,7 @@ WITH (
 db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
-  1: gRPC request to meta service failed: Internal error
+  1: gRPC request to meta service (call `/ddl_service.DdlService/CreateSink`) failed: Internal error
   2: failed to validate sink
   3: Internal error
   4: feature SnowflakeSink is only available for tier Paid and above, while the current tier is Free
@@ -70,7 +70,7 @@ WITH (
 db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
-  1: gRPC request to meta service failed: Internal error
+  1: gRPC request to meta service (call `/ddl_service.DdlService/CreateSink`) failed: Internal error
   2: failed to validate sink
   3: feature OpenSearchSink is only available for tier Paid and above, while the current tier is Free
 
@@ -95,7 +95,7 @@ WITH
 db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
-  1: gRPC request to meta service failed: Internal error
+  1: gRPC request to meta service (call `/ddl_service.DdlService/CreateSink`) failed: Internal error
   2: failed to validate sink
   3: Internal error
   4: feature BigQuerySink is only available for tier Paid and above, while the current tier is Free
@@ -174,7 +174,7 @@ WITH (
 db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
-  1: gRPC request to meta service failed: Internal error
+  1: gRPC request to meta service (call `/ddl_service.DdlService/CreateSink`) failed: Internal error
   2: failed to validate sink
   3: sink cannot pass validation: INTERNAL: Connection is closed
 
@@ -197,7 +197,7 @@ WITH
 db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
-  1: gRPC request to meta service failed: Internal error
+  1: gRPC request to meta service (call `/ddl_service.DdlService/CreateSink`) failed: Internal error
   2: failed to validate sink
   3: BigQuery error
   4: No such file or directory (os error 2)

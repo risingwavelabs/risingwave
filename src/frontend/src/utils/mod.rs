@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ use std::sync::LazyLock;
 
 pub use column_index_mapping::*;
 mod condition;
+pub mod data_type;
 pub use condition::*;
 mod connected_components;
 pub(crate) use connected_components::*;

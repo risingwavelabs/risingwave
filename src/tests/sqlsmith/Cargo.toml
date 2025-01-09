@@ -7,12 +7,6 @@ keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
 
-[package.metadata.cargo-machete]
-ignored = ["workspace-hack"]
-
-[package.metadata.cargo-udeps.ignore]
-normal = ["workspace-hack"]
-
 [dependencies]
 anyhow = "1"
 chrono = "0.4"
@@ -25,7 +19,6 @@ risingwave_common = { workspace = true }
 risingwave_expr = { workspace = true }
 risingwave_expr_impl = { workspace = true }
 risingwave_frontend = { workspace = true }
-risingwave_pb = { workspace = true }
 risingwave_sqlparser = { workspace = true }
 similar = "2.6.0"
 thiserror-ext = { workspace = true }

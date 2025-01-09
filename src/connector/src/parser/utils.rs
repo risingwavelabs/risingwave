@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -154,6 +154,13 @@ pub fn extract_header_inner_from_meta<'a>(
 ) -> Option<DatumCow<'a>> {
     match meta {
         SourceMeta::Kafka(kafka_meta) => kafka_meta.extract_header_inner(inner_field, data_type), /* expect output of type `bytea` or `varchar` */
+        _ => None,
+    }
+}
+
+pub fn extract_subject_from_meta(meta: &SourceMeta) -> Option<DatumRef<'_>> {
+    match meta {
+        SourceMeta::Nats(nats_meta) => Some(nats_meta.extract_subject()),
         _ => None,
     }
 }

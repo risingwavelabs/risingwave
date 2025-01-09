@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,7 +23,7 @@ use risingwave_pb::plan_common::{
     AdditionalCollectionName, AdditionalColumn, AdditionalColumnFilename, AdditionalColumnHeader,
     AdditionalColumnHeaders, AdditionalColumnKey, AdditionalColumnOffset,
     AdditionalColumnPartition, AdditionalColumnPayload, AdditionalColumnTimestamp,
-    AdditionalDatabaseName, AdditionalSchemaName, AdditionalTableName,
+    AdditionalDatabaseName, AdditionalSchemaName, AdditionalSubject, AdditionalTableName,
 };
 
 use crate::error::ConnectorResult;
@@ -61,7 +61,7 @@ pub static COMPATIBLE_ADDITIONAL_COLUMNS: LazyLock<HashMap<&'static str, HashSet
             ),
             (
                 NATS_CONNECTOR,
-                HashSet::from(["partition", "offset", "payload"]),
+                HashSet::from(["partition", "offset", "payload", "subject"]),
             ),
             (
                 OPENDAL_S3_CONNECTOR,
@@ -265,6 +265,14 @@ pub fn build_additional_column_desc(
                 column_type: Some(AdditionalColumnType::CollectionName(
                     AdditionalCollectionName {},
                 )),
+            },
+        ),
+        "subject" => ColumnDesc::named_with_additional_column(
+            column_name,
+            column_id,
+            DataType::Varchar, // Assuming subject is a string
+            AdditionalColumn {
+                column_type: Some(AdditionalColumnType::Subject(AdditionalSubject {})),
             },
         ),
         _ => unreachable!(),

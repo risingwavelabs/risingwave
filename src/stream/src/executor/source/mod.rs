@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,18 +13,16 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::num::NonZeroU32;
 use std::time::Duration;
 
 use await_tree::InstrumentAwait;
-use governor::clock::MonotonicClock;
-use governor::{Quota, RateLimiter};
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
 use risingwave_common::row::Row;
+use risingwave_common_rate_limit::RateLimiter;
 use risingwave_connector::error::ConnectorError;
-use risingwave_connector::source::{BoxChunkSourceStream, SourceColumnDesc, SplitId};
+use risingwave_connector::source::{BoxSourceChunkStream, SourceColumnDesc, SplitId};
 use risingwave_pb::plan_common::additional_column::ColumnType;
 use risingwave_pb::plan_common::AdditionalColumn;
 pub use state_table_handler::*;
@@ -53,7 +51,6 @@ use tokio::sync::mpsc::UnboundedReceiver;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 
 use crate::executor::error::StreamExecutorError;
-use crate::executor::utils::compute_rate_limit_chunk_permits;
 use crate::executor::{Barrier, Message};
 
 /// Receive barriers from barrier manager with the channel, error on channel close.
@@ -120,7 +117,7 @@ pub fn prune_additional_cols(
 }
 
 #[try_stream(ok = StreamChunk, error = ConnectorError)]
-pub async fn apply_rate_limit(stream: BoxChunkSourceStream, rate_limit_rps: Option<u32>) {
+pub async fn apply_rate_limit(stream: BoxSourceChunkStream, rate_limit_rps: Option<u32>) {
     if rate_limit_rps == Some(0) {
         // block the stream until the rate limit is reset
         let future = futures::future::pending::<()>();
@@ -128,13 +125,11 @@ pub async fn apply_rate_limit(stream: BoxChunkSourceStream, rate_limit_rps: Opti
         unreachable!();
     }
 
-    let limiter = rate_limit_rps.map(|limit| {
-        tracing::info!(rate_limit = limit, "rate limit applied");
-        RateLimiter::direct_with_clock(
-            Quota::per_second(NonZeroU32::new(limit).unwrap()),
-            &MonotonicClock,
-        )
-    });
+    let limiter = RateLimiter::new(
+        rate_limit_rps
+            .inspect(|limit| tracing::info!(rate_limit = limit, "rate limit applied"))
+            .into(),
+    );
 
     #[for_await]
     for chunk in stream {
@@ -147,25 +142,21 @@ pub async fn apply_rate_limit(stream: BoxChunkSourceStream, rate_limit_rps: Opti
             continue;
         }
 
-        let limiter = limiter.as_ref().unwrap();
-        let limit = rate_limit_rps.unwrap() as usize;
-
-        let required_permits = compute_rate_limit_chunk_permits(&chunk, limit);
-        if required_permits <= limit {
-            let n = NonZeroU32::new(required_permits as u32).unwrap();
-            // `InsufficientCapacity` should never happen because we have check the cardinality
-            limiter.until_n_ready(n).await.unwrap();
-            yield chunk;
-        } else {
-            // Cut the chunk into smaller chunks
-            for chunk in chunk.split(limit) {
-                let n = NonZeroU32::new(compute_rate_limit_chunk_permits(&chunk, limit) as u32)
-                    .unwrap();
-                // chunks split should have effective chunk size <= limit
-                limiter.until_n_ready(n).await.unwrap();
-                yield chunk;
-            }
+        let limit = rate_limit_rps.unwrap() as u64;
+        let required_permits = chunk.compute_rate_limit_chunk_permits();
+        if required_permits > limit {
+            // This should not happen after https://github.com/risingwavelabs/risingwave/pull/19698.
+            // But if it does happen, let's don't panic and just log an error.
+            tracing::error!(
+                chunk_size,
+                required_permits,
+                limit,
+                "unexpected large chunk size"
+            );
         }
+
+        limiter.wait(required_permits).await;
+        yield chunk;
     }
 }
 

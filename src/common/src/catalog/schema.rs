@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -94,6 +94,23 @@ impl From<&PbColumnDesc> for Field {
             sub_fields: pb_column_desc.field_descs.iter().map(Into::into).collect(),
             type_name: pb_column_desc.type_name.clone(),
         }
+    }
+}
+
+/// Something that has a data type and a name.
+#[auto_impl::auto_impl(&)]
+pub trait FieldLike {
+    fn data_type(&self) -> &DataType;
+    fn name(&self) -> &str;
+}
+
+impl FieldLike for Field {
+    fn data_type(&self) -> &DataType {
+        &self.data_type
+    }
+
+    fn name(&self) -> &str {
+        &self.name
     }
 }
 

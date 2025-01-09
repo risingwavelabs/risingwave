@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -99,6 +99,7 @@ pub mod query;
 mod recover;
 pub mod show;
 mod transaction;
+mod use_db;
 pub mod util;
 pub mod variable;
 mod wait;
@@ -197,8 +198,13 @@ impl HandlerArgs {
     fn normalize_sql(stmt: &Statement) -> String {
         let mut stmt = stmt.clone();
         match &mut stmt {
-            Statement::CreateView { or_replace, .. } => {
+            Statement::CreateView {
+                or_replace,
+                if_not_exists,
+                ..
+            } => {
                 *or_replace = false;
+                *if_not_exists = false;
             }
             Statement::CreateTable {
                 or_replace,
@@ -586,7 +592,24 @@ pub async fn handle(
             local: _,
             variable,
             value,
-        } => variable::handle_set(handler_args, variable, value),
+        } => {
+            // special handle for `use database`
+            if variable.real_value().eq_ignore_ascii_case("database") {
+                let x = variable::set_var_to_param_str(&value);
+                let res = use_db::handle_use_db(
+                    handler_args,
+                    ObjectName::from(vec![Ident::new_unchecked(
+                        x.unwrap_or("default".to_owned()),
+                    )]),
+                )?;
+                let mut builder = RwPgResponse::builder(StatementType::SET_VARIABLE);
+                for notice in res.notices() {
+                    builder = builder.notice(notice);
+                }
+                return Ok(builder.into());
+            }
+            variable::handle_set(handler_args, variable, value)
+        }
         Statement::SetTimeZone { local: _, value } => {
             variable::handle_set_time_zone(handler_args, value)
         }
@@ -955,6 +978,18 @@ pub async fn handle(
             )
             .await
         }
+        Statement::AlterSink {
+            name,
+            operation: AlterSinkOperation::SetSinkRateLimit { rate_limit },
+        } => {
+            alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
+                handler_args,
+                PbThrottleTarget::Sink,
+                name,
+                rate_limit,
+            )
+            .await
+        }
         Statement::AlterSubscription {
             name,
             operation: AlterSubscriptionOperation::RenameSubscription { subscription_name },
@@ -1125,6 +1160,7 @@ pub async fn handle(
             object_name,
             comment,
         } => comment::handle_comment(handler_args, object_type, object_name, comment).await,
+        Statement::Use { db_name } => use_db::handle_use_db(handler_args, db_name),
         _ => bail_not_implemented!("Unhandled statement: {}", stmt),
     }
 }

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use fixedbitset::FixedBitSet;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnDesc, INITIAL_TABLE_VERSION_ID};
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
@@ -21,7 +20,7 @@ use super::stream::prelude::*;
 use super::utils::{childless_record, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::property::MonotonicityMap;
+use crate::optimizer::property::{MonotonicityMap, WatermarkColumns};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -40,9 +39,9 @@ impl StreamDml {
             input.functional_dependency().clone(),
             input.distribution().clone(),
             append_only,
-            false,                                            // TODO(rc): decide EOWC property
-            FixedBitSet::with_capacity(input.schema().len()), // no watermark if dml is allowed
-            MonotonicityMap::new(),                           // TODO: derive monotonicity
+            false,                   // TODO(rc): decide EOWC property
+            WatermarkColumns::new(), // no watermark if dml is allowed
+            MonotonicityMap::new(),  // TODO: derive monotonicity
         );
 
         Self {
@@ -88,12 +87,12 @@ impl StreamNode for StreamDml {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
         use risingwave_pb::stream_plan::*;
 
-        PbNodeBody::Dml(DmlNode {
+        PbNodeBody::Dml(Box::new(DmlNode {
             table_id: 0,                                // Meta will fill this table id.
             table_version_id: INITIAL_TABLE_VERSION_ID, // Meta will fill this version id.
             column_descs: self.column_descs.iter().map(Into::into).collect(),
             rate_limit: self.base.ctx().overwrite_options().dml_rate_limit,
-        })
+        }))
     }
 }
 

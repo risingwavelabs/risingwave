@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -120,7 +120,7 @@ impl_plan_tree_node_for_unary! {StreamExchange}
 
 impl StreamNode for StreamExchange {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> NodeBody {
-        NodeBody::Exchange(ExchangeNode {
+        NodeBody::Exchange(Box::new(ExchangeNode {
             strategy: if self.no_shuffle {
                 Some(DispatchStrategy {
                     r#type: DispatcherType::NoShuffle as i32,
@@ -144,7 +144,7 @@ impl StreamNode for StreamExchange {
                     output_indices: (0..self.schema().len() as u32).collect(),
                 })
             },
-        })
+        }))
     }
 }
 

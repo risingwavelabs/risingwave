@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -165,6 +165,7 @@ pub struct Model {
     pub vnode_count: i32,
     pub webhook_info: Option<WebhookSourceInfo>,
     pub engine: Option<Engine>,
+    pub clean_watermark_index_in_pk: Option<i32>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -300,6 +301,7 @@ impl From<PbTable> for ActiveModel {
             engine: Set(pb_table
                 .engine
                 .map(|engine| Engine::from(PbEngine::try_from(engine).expect("Invalid engine")))),
+            clean_watermark_index_in_pk: Set(pb_table.clean_watermark_index_in_pk),
         }
     }
 }

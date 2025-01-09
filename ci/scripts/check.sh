@@ -23,6 +23,12 @@ configure_static_openssl
 echo "--- Run trailing spaces check"
 scripts/check/check-trailing-spaces.sh
 
+echo "--- Check protobuf code format && Lint protobuf"
+cd proto
+buf format -d --exit-code
+buf lint
+cd ..
+
 echo "--- Rust cargo-sort check"
 cargo sort --check --workspace --grouped
 
@@ -65,3 +71,6 @@ RUSTDOCFLAGS="-Clink-arg=-fuse-ld=lld" cargo test --doc
 echo "--- Show sccache stats"
 sccache --show-stats
 sccache --zero-stats
+
+echo "--- Check unused dependencies"
+cargo machete

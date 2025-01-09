@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -32,11 +32,11 @@ pub async fn handle_alter_streaming_rate_limit(
     rate_limit: i32,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
-    let db_name = session.database();
+    let db_name = &session.database();
     let (schema_name, real_table_name) =
         Binder::resolve_schema_qualified_name(db_name, table_name.clone())?;
     let search_path = session.config().search_path();
-    let user_name = &session.auth_context().user_name;
+    let user_name = &session.user_name();
 
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
@@ -90,10 +90,7 @@ pub async fn handle_alter_streaming_rate_limit(
             let (table, schema_name) =
                 reader.get_any_table_by_name(db_name, schema_path, &real_table_name)?;
             if table.table_type != TableType::Table {
-                return Err(ErrorCode::InvalidInputSyntax(format!(
-                    "\"{table_name}\" is not a table",
-                ))
-                .into());
+                return Err(ErrorCode::InvalidInputSyntax(format!("\"{table_name}\" ",)).into());
             }
             session.check_privilege_for_drop_alter(schema_name, &**table)?;
             (StatementType::ALTER_TABLE, table.id.table_id)
@@ -107,6 +104,16 @@ pub async fn handle_alter_streaming_rate_limit(
             }
             session.check_privilege_for_drop_alter(schema_name, &**table)?;
             (StatementType::ALTER_TABLE, table.id.table_id)
+        }
+        PbThrottleTarget::Sink => {
+            let reader = session.env().catalog_reader().read_guard();
+            let (table, schema_name) =
+                reader.get_sink_by_name(db_name, schema_path, &real_table_name)?;
+            if table.target_table.is_some() {
+                bail!("ALTER SINK_RATE_LIMIT is not for sink into table")
+            }
+            session.check_privilege_for_drop_alter(schema_name, &**table)?;
+            (StatementType::ALTER_SINK, table.id.sink_id)
         }
         _ => bail!("Unsupported throttle target: {:?}", kind),
     };

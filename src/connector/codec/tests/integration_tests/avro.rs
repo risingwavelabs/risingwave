@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -94,7 +94,7 @@ fn check(
     // manually implement some logic in AvroAccessBuilder, and some in PlainParser::parse_inner
     let mut data_str = vec![];
     for data in avro_data {
-        let parser = AvroParseOptions::create(&resolved_schema.resolved_schema);
+        let parser = AvroParseOptions::create(&resolved_schema.original_schema);
 
         match config.data_encoding {
             TestDataEncoding::Json => todo!(),

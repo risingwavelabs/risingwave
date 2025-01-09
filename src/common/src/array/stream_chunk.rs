@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -100,8 +100,6 @@ impl Op {
         .to_owned()
     }
 }
-
-pub type Ops<'a> = &'a [Op];
 
 /// `StreamChunk` is used to pass data over the streaming pathway.
 #[derive(Clone, PartialEq)]
@@ -360,6 +358,11 @@ impl StreamChunk {
             ops: self.ops.clone(),
             data: self.data.with_visibility(vis),
         }
+    }
+
+    // Compute the required permits of this chunk for rate limiting.
+    pub fn compute_rate_limit_chunk_permits(&self) -> u64 {
+        self.capacity() as _
     }
 }
 

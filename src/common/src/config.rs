@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -1145,6 +1145,16 @@ pub struct StreamingDeveloperConfig {
     /// even if session variable set.
     /// If true, it's decided by session variable `streaming_use_shared_source` (default true)
     pub enable_shared_source: bool,
+
+    #[serde(default = "default::developer::switch_jdbc_pg_to_native")]
+    /// When true, all jdbc sinks with connector='jdbc' and jdbc.url="jdbc:postgresql://..."
+    /// will be switched from jdbc postgresql sinks to rust native (connector='postgres') sinks.
+    pub switch_jdbc_pg_to_native: bool,
+
+    /// Configure the system-wide cache row cardinality of hash join.
+    /// For example, if this is set to 1000, it means we can have at most 1000 rows in cache.
+    #[serde(default = "default::developer::streaming_hash_join_entry_state_max_rows")]
+    pub hash_join_entry_state_max_rows: usize,
 }
 
 /// The subsections `[batch.developer]`.
@@ -2104,6 +2114,15 @@ pub mod default {
         pub fn stream_enable_auto_schema_change() -> bool {
             true
         }
+
+        pub fn switch_jdbc_pg_to_native() -> bool {
+            false
+        }
+
+        pub fn streaming_hash_join_entry_state_max_rows() -> usize {
+            // NOTE(kwannoel): This is just an arbitrary number.
+            30000
+        }
     }
 
     pub use crate::system_param::default as system;
@@ -2631,6 +2650,7 @@ pub struct CompactionConfig {
     pub max_level: u32,
 }
 
+/// Note: only applies to meta store backends other than `SQLite`.
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct MetaStoreConfig {
     /// Maximum number of connections for the meta store connection pool.

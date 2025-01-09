@@ -3327,9 +3327,9 @@ def section_hummock_manager(outer_panels):
                             f"{metric('storage_max_committed_epoch')}",
                             "max committed epoch",
                         ),
-                        panels.target(f"{metric('storage_safe_epoch')}", "safe epoch"),
                         panels.target(
-                            f"{metric('storage_min_pinned_epoch')}", "min pinned epoch"
+                            f"{metric('storage_min_committed_epoch')}",
+                            "min committed epoch",
                         ),
                     ],
                 ),
@@ -3675,182 +3675,6 @@ def section_grpc_meta_stream_manager(outer_panels):
             ],
         ),
     ]
-
-
-def section_grpc_meta_hummock_manager(outer_panels):
-    panels = outer_panels.sub_panel()
-    return [
-        outer_panels.row_collapsed(
-            "gRPC Meta: Hummock Manager",
-            [
-                grpc_metrics_target(
-                    panels,
-                    "UnpinVersionBefore",
-                    "path='/meta.HummockManagerService/UnpinVersionBefore'",
-                ),
-                grpc_metrics_target(
-                    panels,
-                    "ReportCompactionTasks",
-                    "path='/meta.HummockManagerService/ReportCompactionTasks'",
-                ),
-                grpc_metrics_target(
-                    panels,
-                    "GetNewSstIds",
-                    "path='/meta.HummockManagerService/GetNewSstIds'",
-                ),
-            ],
-        ),
-    ]
-
-
-def section_grpc_hummock_meta_client(outer_panels):
-    panels = outer_panels.sub_panel()
-    return [
-        outer_panels.row_collapsed(
-            "gRPC: Hummock Meta Client",
-            [
-                panels.timeseries_count(
-                    "compaction_count",
-                    "",
-                    [
-                        panels.target(
-                            f"sum(irate({metric('state_store_report_compaction_task_counts')}[$__rate_interval])) by({COMPONENT_LABEL}, {NODE_LABEL})",
-                            "report_compaction_task_counts - {{%s}}" % NODE_LABEL,
-                        ),
-                    ],
-                ),
-                panels.timeseries_latency(
-                    "version_latency",
-                    "",
-                    [
-                        panels.target(
-                            f"histogram_quantile(0.5, sum(irate({metric('state_store_unpin_version_before_latency_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
-                            "unpin_version_before_latency_p50 - {{%s}}" % NODE_LABEL,
-                        ),
-                        panels.target(
-                            f"histogram_quantile(0.99, sum(irate({metric('state_store_unpin_version_before_latency_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
-                            "unpin_version_before_latency_p99 - {{%s}}" % NODE_LABEL,
-                        ),
-                        panels.target(
-                            f"sum(irate({metric('state_store_unpin_version_before_latency_sum')}[$__rate_interval])) / sum(irate({metric('state_store_unpin_version_before_latency_count')}[$__rate_interval])) > 0",
-                            "unpin_version_before_latency_avg",
-                        ),
-                        panels.target(
-                            f"histogram_quantile(0.90, sum(irate({metric('state_store_unpin_version_before_latency_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
-                            "unpin_version_before_latency_p90 - {{%s}}" % NODE_LABEL,
-                        ),
-                    ],
-                ),
-                panels.timeseries_latency(
-                    "snapshot_latency",
-                    "",
-                    [
-                        panels.target(
-                            f"histogram_quantile(0.5, sum(irate({metric('state_store_pin_snapshot_latency_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
-                            "pin_snapshot_latency_p50 - {{%s}}" % NODE_LABEL,
-                        ),
-                        panels.target(
-                            f"histogram_quantile(0.99, sum(irate({metric('state_store_pin_snapshot_latency_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
-                            "pin_snapshot_latency_p99 - {{%s}}" % NODE_LABEL,
-                        ),
-                        panels.target(
-                            f"histogram_quantile(0.9, sum(irate({metric('state_store_pin_snapshot_latency_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
-                            "pin_snapshot_latencyp90 - {{%s}}" % NODE_LABEL,
-                        ),
-                        panels.target(
-                            f"sum(irate({metric('state_store_pin_snapshot_latency_sum')}[$__rate_interval])) / sum(irate(state_store_pin_snapshot_latency_count[$__rate_interval])) > 0",
-                            "pin_snapshot_latency_avg",
-                        ),
-                        panels.target(
-                            f"histogram_quantile(0.5, sum(irate({metric('state_store_unpin_version_snapshot_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
-                            "unpin_snapshot_latency_p50 - {{%s}}" % NODE_LABEL,
-                        ),
-                        panels.target(
-                            f"histogram_quantile(0.99, sum(irate({metric('state_store_unpin_version_snapshot_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
-                            "unpin_snapshot_latency_p99 - {{%s}}" % NODE_LABEL,
-                        ),
-                        panels.target(
-                            f"sum(irate({metric('state_store_unpin_snapshot_latency_sum')}[$__rate_interval])) / sum(irate(state_store_unpin_snapshot_latency_count[$__rate_interval])) > 0",
-                            "unpin_snapshot_latency_avg",
-                        ),
-                        panels.target(
-                            f"histogram_quantile(0.90, sum(irate({metric('state_store_unpin_snapshot_latency_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
-                            "unpin_snapshot_latency_p90 - {{%s}}" % NODE_LABEL,
-                        ),
-                    ],
-                ),
-                panels.timeseries_count(
-                    "snapshot_count",
-                    "",
-                    [
-                        panels.target(
-                            f"sum(irate({metric('state_store_pin_snapshot_counts')}[$__rate_interval])) by({COMPONENT_LABEL}, {NODE_LABEL})",
-                            "pin_snapshot_counts - {{%s}}" % NODE_LABEL,
-                        ),
-                        panels.target(
-                            f"sum(irate({metric('state_store_unpin_snapshot_counts')}[$__rate_interval])) by({COMPONENT_LABEL}, {NODE_LABEL})",
-                            "unpin_snapshot_counts - {{%s}}" % NODE_LABEL,
-                        ),
-                    ],
-                ),
-                panels.timeseries_latency(
-                    "table_latency",
-                    "",
-                    [
-                        panels.target(
-                            f"histogram_quantile(0.5, sum(irate({metric('state_store_get_new_sst_ids_latency_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
-                            "get_new_sst_ids_latency_latency_p50 - {{%s}}" % NODE_LABEL,
-                        ),
-                        panels.target(
-                            f"histogram_quantile(0.99, sum(irate({metric('state_store_get_new_sst_ids_latency_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
-                            "get_new_sst_ids_latency_latency_p99 - {{%s}}" % NODE_LABEL,
-                        ),
-                        panels.target(
-                            f"sum(irate({metric('state_store_get_new_sst_ids_latency_sum')}[$__rate_interval])) / sum(irate({metric('state_store_get_new_sst_ids_latency_count')}[$__rate_interval])) > 0",
-                            "get_new_sst_ids_latency_latency_avg",
-                        ),
-                        panels.target(
-                            f"histogram_quantile(0.90, sum(irate({metric('state_store_get_new_sst_ids_latency_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
-                            "get_new_sst_ids_latency_latency_p90 - {{%s}}" % NODE_LABEL,
-                        ),
-                    ],
-                ),
-                panels.timeseries_count(
-                    "table_count",
-                    "",
-                    [
-                        panels.target(
-                            f"sum(irate({metric('state_store_get_new_sst_ids_latency_counts')}[$__rate_interval]))by({COMPONENT_LABEL}, {NODE_LABEL})",
-                            "get_new_sst_ids_latency_counts - {{%s}}" % NODE_LABEL,
-                        ),
-                    ],
-                ),
-                panels.timeseries_latency(
-                    "compaction_latency",
-                    "",
-                    [
-                        panels.target(
-                            f"histogram_quantile(0.5, sum(irate({metric('state_store_report_compaction_task_latency_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
-                            "report_compaction_task_latency_p50 - {{%s}}" % NODE_LABEL,
-                        ),
-                        panels.target(
-                            f"histogram_quantile(0.99, sum(irate({metric('state_store_report_compaction_task_latency_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
-                            "report_compaction_task_latency_p99 - {{%s}}" % NODE_LABEL,
-                        ),
-                        panels.target(
-                            f"sum(irate({metric('state_store_report_compaction_task_latency_sum')}[$__rate_interval])) / sum(irate(state_store_report_compaction_task_latency_count[$__rate_interval])) > 0",
-                            "report_compaction_task_latency_avg",
-                        ),
-                        panels.target(
-                            f"histogram_quantile(0.90, sum(irate({metric('state_store_report_compaction_task_latency_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
-                            "report_compaction_task_latency_p90 - {{%s}}" % NODE_LABEL,
-                        ),
-                    ],
-                ),
-            ],
-        ),
-    ]
-
 
 def section_kafka_metrics(outer_panels):
     panels = outer_panels.sub_panel()
@@ -4837,6 +4661,113 @@ def section_udf(outer_panels):
         )
     ]
 
+def section_alert_overview(panels):
+    return [
+        panels.row("Alert Overview"),
+        panels.timeseries_count(
+            "Alerts",
+            """Alerts in the system group by type:
+            - Too Many Barriers: there are too many uncommitted barriers generated. This means the streaming graph is stuck or under heavy load. Check 'Barrier Latency' panel.
+            - Recovery Triggered: cluster recovery is triggered. Check 'Errors by Type' / 'Node Count' panels.
+            - Lagging Version: the checkpointed or pinned version id is lagging behind the current version id. Check 'Hummock Manager' section in dev dashboard.
+            - Lagging Compaction: there are too many ssts in L0. This can be caused by compactor failure or lag of compactor resource. Check 'Compaction' section in dev dashboard, and take care of the type of 'Commit Flush Bytes' and 'Compaction Throughput', whether the throughput is too low.
+            - Lagging Vacuum: there are too many stale files waiting to be cleaned. This can be caused by compactor failure or lag of compactor resource. Check 'Compaction' section in dev dashboard.
+            - Abnormal Meta Cache Memory: the meta cache memory usage is too large, exceeding the expected 10 percent.
+            - Abnormal Block Cache Memory: the block cache memory usage is too large, exceeding the expected 10 percent.
+            - Abnormal Uploading Memory Usage: uploading memory is more than 70 percent of the expected, and is about to spill.
+            - Write Stall: Compaction cannot keep up. Stall foreground write, Check 'Compaction' section in dev dashboard.
+            - Abnormal Version Size: the size of the version is too large, exceeding the expected 300MB. Check 'Hummock Manager' section in dev dashboard.
+            - Abnormal Delta Log Number: the number of delta logs is too large, exceeding the expected 5000. Check 'Hummock Manager' and `Compaction` section in dev dashboard and take care of the type of 'Compaction Success Count', whether the number of trivial-move tasks spiking.
+            - Abnormal Pending Event Number: the number of pending events is too large, exceeding the expected 10000000. Check 'Hummock Write' section in dev dashboard and take care of the 'Event handle latency', whether the time consumed exceeds the barrier latency.
+            - Abnormal Object Storage Failure: the number of object storage failures is too large, exceeding the expected 50. Check 'Object Storage' section in dev dashboard and take care of the 'Object Storage Failure Rate', whether the rate is too high.
+            """,
+            [
+                panels.target(
+                    f"{metric('all_barrier_nums')} >= bool 200",
+                    "Too Many Barriers {{database_id}}",
+                ),
+                panels.target(
+                    f"sum(rate({metric('recovery_latency_count')}[$__rate_interval])) > bool 0 + sum({metric('recovery_failure_cnt')}) > bool 0",
+                    "Recovery Triggered",
+                ),
+                panels.target(
+                    f"(({metric('storage_current_version_id')} - {metric('storage_checkpoint_version_id')}) >= bool 100) + "
+                    + f"(({metric('storage_current_version_id')} - {metric('storage_min_pinned_version_id')}) >= bool 100)",
+                    "Lagging Version",
+                ),
+                panels.target(
+                    f"sum(label_replace({metric('storage_level_total_file_size')}, 'L0', 'L0', 'level_index', '.*_L0') unless "
+                    + f"{metric('storage_level_total_file_size')}) by (L0) >= bool 52428800",
+                    "Lagging Compaction",
+                ),
+                panels.target(
+                    f"{metric('storage_stale_object_count')} >= bool 200",
+                    "Lagging Vacuum",
+                ),
+                panels.target(
+                    f"{metric('state_store_meta_cache_usage_ratio')} >= bool 1.1",
+                    "Abnormal Meta Cache Memory",
+                ),
+                panels.target(
+                    f"{metric('state_store_block_cache_usage_ratio')} >= bool 1.1",
+                    "Abnormal Block Cache Memory",
+                ),
+                panels.target(
+                    f"{metric('state_store_uploading_memory_usage_ratio')} >= bool 0.7",
+                    "Abnormal Uploading Memory Usage",
+                ),
+                panels.target(
+                    f"{metric('storage_write_stop_compaction_groups')} > bool 0",
+                    "Write Stall",
+                ),
+                panels.target(
+                    f"{metric('storage_version_size')} >= bool 314572800",
+                    "Abnormal Version Size",
+                ),
+                panels.target(
+                    f"{metric('storage_delta_log_count')} >= bool 5000",
+                    "Abnormal Delta Log Number",
+                ),
+                panels.target(
+                    f"{metric('state_store_event_handler_pending_event')} >= bool 10000000",
+                    "Abnormal Pending Event Number",
+                ),
+                panels.target(
+                    f"{metric('object_store_failure_count')} >= bool 50",
+                    "Abnormal Object Storage Failure",
+                ),
+            ],
+            ["last"],
+        ),
+        panels.timeseries_count(
+            "Errors",
+            "Errors in the system group by type",
+            [
+                panels.target(
+                    f"sum({metric('user_compute_error')}) by (error_type, executor_name, fragment_id)",
+                    "{{error_type}} @ {{executor_name}} (fragment_id={{fragment_id}})",
+                ),
+                panels.target(
+                    f"sum({metric('user_source_error')}) by (error_type, source_id, source_name, fragment_id)",
+                    "{{error_type}} @ {{source_name}} (source_id={{source_id}} fragment_id={{fragment_id}})",
+                ),
+                panels.target(
+                    f"sum({metric('user_sink_error')}) by (error_type, sink_id, sink_name, fragment_id)",
+                    "{{error_type}} @ {{sink_name}} (sink_id={{sink_id}} fragment_id={{fragment_id}})",
+                ),
+                panels.target(
+                    f"{metric('source_status_is_up')} == 0",
+                    "source error: source_id={{source_id}}, source_name={{source_name}} @ {{%s}}"
+                    % NODE_LABEL,
+                ),
+                panels.target(
+                    f"sum(rate({metric('object_store_failure_count')}[$__rate_interval])) by ({NODE_LABEL}, {COMPONENT_LABEL}, type)",
+                    "remote storage error {{type}}: {{%s}} @ {{%s}}"
+                    % (COMPONENT_LABEL, NODE_LABEL),
+                ),
+            ],
+        ),
+    ]
 
 templating_list = []
 if dynamic_source_enabled:
@@ -5009,8 +4940,6 @@ dashboard = Dashboard(
         *section_grpc_meta_catalog_service(panels),
         *section_grpc_meta_cluster_service(panels),
         *section_grpc_meta_stream_manager(panels),
-        *section_grpc_meta_hummock_manager(panels),
-        *section_grpc_hummock_meta_client(panels),
         *section_frontend(panels),
         *section_memory_manager(panels),
         *section_sink_metrics(panels),
@@ -5018,5 +4947,6 @@ dashboard = Dashboard(
         *section_network_connection(panels),
         *section_iceberg_metrics(panels),
         *section_udf(panels),
+        *section_alert_overview(panels),
     ],
 ).auto_panel_ids()

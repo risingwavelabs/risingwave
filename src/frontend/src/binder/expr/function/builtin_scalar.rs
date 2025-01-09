@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -533,6 +533,13 @@ impl Binder {
                         .into())
                     }
                 })),
+                ("pg_my_temp_schema", guard_by_len(0, raw(|_binder, _inputs| {
+                    // Returns the OID of the current session's temporary schema, or zero if it has none (because it has not created any temporary tables).
+                    Ok(ExprImpl::literal_int(
+                        // always return 0, as we haven't supported temporary tables nor temporary schema yet
+                        0,
+                    ))
+                }))),
                 ("current_setting", guard_by_len(1, raw(|binder, inputs| {
                     let input = &inputs[0];
                     let input = if let ExprImpl::Literal(literal) = input &&

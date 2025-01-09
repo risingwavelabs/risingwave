@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,6 +28,7 @@ pub struct ElasticSearchSink {
     config: ElasticSearchOpenSearchConfig,
     schema: Schema,
     pk_indices: Vec<usize>,
+    is_append_only: bool,
 }
 
 #[async_trait]
@@ -41,6 +42,7 @@ impl TryFrom<SinkParam> for ElasticSearchSink {
             config,
             schema,
             pk_indices: param.downstream_pk,
+            is_append_only: param.sink_type.is_append_only(),
         })
     }
 }
@@ -64,6 +66,7 @@ impl Sink for ElasticSearchSink {
             self.schema.clone(),
             self.pk_indices.clone(),
             Self::SINK_NAME,
+            self.is_append_only,
         )?
         .into_log_sinker(self.config.concurrent_requests))
     }

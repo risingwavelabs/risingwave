@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -29,7 +29,7 @@ use super::statement::RewriteExprsRecursive;
 use super::BoundValues;
 use crate::binder::bind_context::{BindingCte, RecursiveUnion};
 use crate::binder::{Binder, BoundSetExpr};
-use crate::error::{ErrorCode, Result};
+use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{CorrelatedId, Depth, ExprImpl, ExprRewriter};
 
 /// A validated sql query, including order and union.
@@ -174,13 +174,55 @@ impl Binder {
             ) => {
                 with_ties = fetch_with_ties;
                 match quantity {
-                    Some(v) => Some(parse_non_negative_i64("LIMIT", &v)? as u64),
-                    None => Some(1),
+                    Some(v) => Some(Expr::Value(Value::Number(v))),
+                    None => Some(Expr::Value(Value::Number("1".to_owned()))),
                 }
             }
-            (Some(limit), None) => Some(parse_non_negative_i64("LIMIT", &limit)? as u64),
+            (Some(limit), None) => Some(limit),
             (Some(_), Some(_)) => unreachable!(), // parse error
         };
+        let limit_expr = limit.map(|expr| self.bind_expr(expr)).transpose()?;
+        let limit = if let Some(limit_expr) = limit_expr {
+            // wrong type error is handled here
+            let limit_cast_to_bigint = limit_expr.cast_assign(DataType::Int64).map_err(|_| {
+                RwError::from(ErrorCode::ExprError(
+                    "expects an integer or expression that can be evaluated to an integer after LIMIT"
+                        .into(),
+                ))
+            })?;
+            let limit = match limit_cast_to_bigint.try_fold_const() {
+                Some(Ok(Some(datum))) => {
+                    let value = datum.as_int64();
+                    if *value < 0 {
+                        return Err(ErrorCode::ExprError(
+                            format!("LIMIT must not be negative, but found: {}", *value).into(),
+                        )
+                            .into());
+                    }
+                    *value as u64
+                }
+                // If evaluated to NULL, we follow PG to treat NULL as no limit
+                Some(Ok(None)) => {
+                    u64::MAX
+                }
+                // not const error
+                None => return Err(ErrorCode::ExprError(
+                    "expects an integer or expression that can be evaluated to an integer after LIMIT, but found non-const expression"
+                        .into(),
+                ).into()),
+                // eval error
+                Some(Err(e)) => {
+                    return Err(ErrorCode::ExprError(
+                        format!("expects an integer or expression that can be evaluated to an integer after LIMIT,\nbut the evaluation of the expression returns error:{}", e.as_report()
+                        ).into(),
+                    ).into())
+                }
+            };
+            Some(limit)
+        } else {
+            None
+        };
+
         let offset = offset
             .map(|s| parse_non_negative_i64("OFFSET", &s))
             .transpose()?

@@ -7,12 +7,6 @@ keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
 
-[package.metadata.cargo-machete]
-ignored = ["workspace-hack"]
-
-[package.metadata.cargo-udeps.ignore]
-normal = ["workspace-hack"]
-
 [dependencies]
 anyhow = { version = "1", features = ["backtrace"] }
 chrono = { version = "0.4", default-features = false, features = [
@@ -23,7 +17,7 @@ clap = { workspace = true }
 console = "0.15"
 fs-err = "3.0.0"
 glob = "0.3"
-google-cloud-pubsub = "0.29"
+google-cloud-pubsub = "0.30"
 indicatif = "0.17"
 itertools = { workspace = true }
 log = "0.4"
@@ -32,7 +26,6 @@ redis = "0.25"
 regex = "1"
 reqwest = { version = "0.12.2", features = ["blocking"] }
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
 serde_with = "3"
 serde_yaml = "0.9"
 sqlx = { workspace = true, features = ["any"] }

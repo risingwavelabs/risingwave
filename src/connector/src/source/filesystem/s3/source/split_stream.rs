@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@ use futures::io::Cursor;
 use futures::AsyncBufReadExt;
 use futures_async_stream::try_stream;
 
-use crate::source::{BoxSourceStream, SourceMessage};
+use crate::source::{BoxSourceMessageStream, SourceMessage};
 
 #[try_stream(boxed, ok = Vec<SourceMessage>, error = crate::error::ConnectorError)]
 /// This function splits a byte stream by the newline separator "(\r)\n" into a message stream.
@@ -27,7 +27,7 @@ use crate::source::{BoxSourceStream, SourceMessage};
 /// - When a bytes chunk does not end with "(\r)\n", we should not treat the last segment as a new line
 ///   message, but keep it for the next chunk, and prepend it to the first line of the next chunk.
 /// - When a bytes chunk ends with "(\r)\n", there is no additional action required.
-pub(super) async fn split_stream(data_stream: BoxSourceStream) {
+pub(super) async fn split_stream(data_stream: BoxSourceMessageStream) {
     let mut last_message = None;
 
     #[for_await]

@@ -96,6 +96,9 @@ IcebergProperties:
   - name: s3.secret.key
     field_type: String
     required: false
+  - name: gcs.credential
+    field_type: String
+    required: false
   - name: warehouse.path
     field_type: String
     comments: Path of iceberg warehouse, only applicable in storage catalog.
@@ -378,22 +381,26 @@ KafkaProperties:
     required: false
     alias:
     - region
+    - s3.region
   - name: aws.endpoint_url
     field_type: String
     required: false
     alias:
     - endpoint_url
     - endpoint
+    - s3.endpoint
   - name: aws.credentials.access_key_id
     field_type: String
     required: false
     alias:
     - access_key
+    - s3.access.key
   - name: aws.credentials.secret_access_key
     field_type: String
     required: false
     alias:
     - secret_key
+    - s3.secret.key
   - name: aws.credentials.session_token
     field_type: String
     required: false
@@ -998,22 +1005,26 @@ PulsarProperties:
     required: false
     alias:
     - region
+    - s3.region
   - name: aws.endpoint_url
     field_type: String
     required: false
     alias:
     - endpoint_url
     - endpoint
+    - s3.endpoint
   - name: aws.credentials.access_key_id
     field_type: String
     required: false
     alias:
     - access_key
+    - s3.access.key
   - name: aws.credentials.secret_access_key
     field_type: String
     required: false
     alias:
     - secret_key
+    - s3.secret.key
   - name: aws.credentials.session_token
     field_type: String
     required: false

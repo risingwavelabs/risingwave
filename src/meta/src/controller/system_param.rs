@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@ use anyhow::anyhow;
 use risingwave_common::system_param::common::CommonHandler;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::system_param::{
-    check_missing_params, default, derive_missing_fields, set_system_param,
+    check_missing_params, derive_missing_fields, set_system_param,
 };
 use risingwave_common::{for_all_params, key_of};
 use risingwave_meta_model::prelude::SystemParameter;
@@ -132,18 +132,6 @@ for_all_params!(impl_system_params_from_db);
 for_all_params!(impl_merge_params);
 for_all_params!(impl_system_params_to_models);
 
-fn apply_hard_code_override(params: &mut PbSystemParams) {
-    if params
-        .time_travel_retention_ms
-        .map(|v| v == 0)
-        .unwrap_or(true)
-    {
-        let default_v = default::time_travel_retention_ms();
-        tracing::info!("time_travel_retention_ms has been overridden to {default_v}");
-        params.time_travel_retention_ms = Some(default_v);
-    }
-}
-
 impl SystemParamsController {
     pub async fn new(
         sql_meta_store: SqlMetaStore,
@@ -152,8 +140,7 @@ impl SystemParamsController {
     ) -> MetaResult<Self> {
         let db = sql_meta_store.conn;
         let params = SystemParameter::find().all(&db).await?;
-        let mut params = merge_params(system_params_from_db(params)?, init_params);
-        apply_hard_code_override(&mut params);
+        let params = merge_params(system_params_from_db(params)?, init_params);
         tracing::info!(initial_params = ?SystemParamsReader::new(&params), "initialize system parameters");
         check_missing_params(&params).map_err(|e| anyhow!(e))?;
         let ctl = Self {

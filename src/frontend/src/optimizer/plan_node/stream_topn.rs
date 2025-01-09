@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use fixedbitset::FixedBitSet;
 use pretty_xmlish::XmlNode;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
@@ -21,7 +20,7 @@ use super::stream::prelude::*;
 use super::utils::{plan_node_name, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::property::{Distribution, MonotonicityMap, Order};
+use crate::optimizer::property::{Distribution, MonotonicityMap, Order, WatermarkColumns};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// `StreamTopN` implements [`super::LogicalTopN`] to find the top N elements with a heap
@@ -40,7 +39,7 @@ impl StreamTopN {
             Distribution::Single => Distribution::Single,
             _ => panic!(),
         };
-        let watermark_columns = FixedBitSet::with_capacity(input.schema().len());
+        let watermark_columns = WatermarkColumns::new();
 
         let base = PlanBase::new_stream_with_core(
             &core,
@@ -112,9 +111,9 @@ impl StreamNode for StreamTopN {
             order_by: self.topn_order().to_protobuf(),
         };
         if self.input().append_only() {
-            PbNodeBody::AppendOnlyTopN(topn_node)
+            PbNodeBody::AppendOnlyTopN(Box::new(topn_node))
         } else {
-            PbNodeBody::TopN(topn_node)
+            PbNodeBody::TopN(Box::new(topn_node))
         }
     }
 }
