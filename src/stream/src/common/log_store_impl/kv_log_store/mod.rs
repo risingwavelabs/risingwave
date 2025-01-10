@@ -35,6 +35,7 @@ use crate::executor::monitor::StreamingMetrics;
 mod buffer;
 mod reader;
 pub(crate) mod serde;
+pub mod synced;
 #[cfg(test)]
 mod test_utils;
 mod writer;
