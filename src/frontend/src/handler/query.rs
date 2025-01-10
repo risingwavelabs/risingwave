@@ -373,6 +373,7 @@ pub fn gen_batch_plan_fragmenter(
         worker_node_manager_reader,
         session.env().catalog_reader().clone(),
         session.config().batch_parallelism().0,
+        session.config().timezone().to_owned(),
         plan,
     )?;
 
