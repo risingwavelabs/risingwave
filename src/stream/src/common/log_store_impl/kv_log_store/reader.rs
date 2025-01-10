@@ -197,7 +197,7 @@ impl<S: StateStoreRead> KvLogStoreReader<S> {
     }
 }
 
-struct AutoRebuildStateStoreReadIter<S: StateStoreRead, F> {
+pub struct AutoRebuildStateStoreReadIter<S: StateStoreRead, F> {
     state_store: S,
     iter: S::Iter,
     // call to get whether to rebuild the iter. Once return true, the closure should reset itself.
@@ -230,7 +230,7 @@ impl<S: StateStoreRead, F: FnMut() -> bool> AutoRebuildStateStoreReadIter<S, F> 
     }
 }
 
-mod timeout_auto_rebuild {
+pub mod timeout_auto_rebuild {
     use std::time::{Duration, Instant};
 
     use risingwave_hummock_sdk::key::TableKeyRange;
@@ -240,7 +240,7 @@ mod timeout_auto_rebuild {
 
     use crate::common::log_store_impl::kv_log_store::reader::AutoRebuildStateStoreReadIter;
 
-    pub(super) type TimeoutAutoRebuildIter<S: StateStoreRead> =
+    pub type TimeoutAutoRebuildIter<S: StateStoreRead> =
         AutoRebuildStateStoreReadIter<S, impl FnMut() -> bool + Send>;
 
     pub(super) async fn iter_with_timeout_rebuild<S: StateStoreRead>(
