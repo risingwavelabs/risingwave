@@ -51,9 +51,8 @@ use risingwave_expr::function;
 /// ```
 #[function("array_contains(anyarray, anyarray) -> boolean")]
 fn array_contains(left: ListRef<'_>, right: ListRef<'_>) -> bool {
-    let flatten = left.flatten();
-    let set: HashSet<_> = flatten.iter().collect();
-    right.flatten().iter().all(|item| set.contains(&item))
+    let set: HashSet<_> = left.flatten_iter().collect();
+    right.flatten_iter().all(|item| set.contains(&item))
 }
 
 #[function("array_contained(anyarray, anyarray) -> boolean")]

@@ -546,23 +546,6 @@ impl<'a> ListRef<'a> {
         }
     }
 
-    /// Returns the elements in the flattened list.
-    #[deprecated]
-    pub fn flatten(self) -> ListRef<'a> {
-        match self {
-            ListRef::Columnar { array, start, end } => match array {
-                ArrayImpl::List(inner) => ListRef::Columnar {
-                    array: &inner.value,
-                    start: inner.offsets[start as usize],
-                    end: inner.offsets[end as usize],
-                }
-                .flatten(),
-                _ => self,
-            },
-            _ => unimplemented!(),
-        }
-    }
-
     /// Iterates over the elements of the list.
     pub fn iter(self) -> impl DoubleEndedIterator + ExactSizeIterator<Item = DatumRef<'a>> + 'a {
         match self {
@@ -617,6 +600,13 @@ impl<'a> ListRef<'a> {
         match self {
             ListRef::Columnar { .. } => Either::Left(self.columnar_flatten().iter()),
             ListRef::BRow { .. } => Either::Right(self.brow_flatten_iter()),
+        }
+    }
+
+    pub fn flatten_len(self) -> usize {
+        match self {
+            ListRef::Columnar { .. } => self.columnar_flatten().len(),
+            ListRef::BRow { .. } => self.brow_flatten_iter().count(), // TODO: can improve
         }
     }
 

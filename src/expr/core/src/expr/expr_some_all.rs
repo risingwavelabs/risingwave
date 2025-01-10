@@ -119,13 +119,15 @@ impl Expression for SomeAllExpression {
                 }
 
                 let array = right.unwrap().into_list();
-                let flattened = array.flatten();
-                let len = flattened.len();
-                num_array.push(Some(len));
-                unfolded_arr_left_builder.append_n(len, left);
-                for item in flattened.iter() {
+                let flattened_iter = array.flatten_iter();
+
+                let mut len = 0;
+                for item in flattened_iter {
+                    len += 1;
                     unfolded_arr_right_builder.append(item);
                 }
+                num_array.push(Some(len));
+                unfolded_arr_left_builder.append_n(len, left);
             };
 
         if data_chunk.is_compacted() {

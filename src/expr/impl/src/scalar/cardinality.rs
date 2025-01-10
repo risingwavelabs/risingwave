@@ -61,8 +61,7 @@ use risingwave_expr::{function, ExprError, Result};
 #[function("cardinality(anyarray) -> int8", deprecated)]
 fn cardinality<T: TryFrom<usize>>(array: ListRef<'_>) -> Result<T> {
     array
-        .flatten()
-        .len()
+        .flatten_len()
         .try_into()
         .map_err(|_| ExprError::NumericOverflow)
 }
