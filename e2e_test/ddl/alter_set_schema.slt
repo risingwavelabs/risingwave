@@ -24,10 +24,19 @@ statement ok
 CREATE INDEX test_index2 ON test_table(v);
 
 statement ok
+CREATE MATERIALIZED VIEW test_mv AS SELECT u FROM test_table;
+
+statement ok
+CREATE INDEX test_mv_index ON test_mv(u);
+
+statement ok
 ALTER TABLE test_table SET SCHEMA public;
 
 statement ok
 ALTER TABLE test_table SET SCHEMA test_schema;
+
+statement ok
+ALTER MATERIALIZED VIEW test_mv SET SCHEMA test_schema;
 
 query TT
 SELECT tablename, schemaname FROM pg_tables WHERE schemaname = 'test_schema';
@@ -39,6 +48,7 @@ SELECT indexname, schemaname FROM pg_indexes WHERE schemaname = 'test_schema';
 ----
 test_index1 test_schema
 test_index2 test_schema
+test_mv_index test_schema
 
 statement ok
 CREATE SOURCE test_source (v INT) WITH (
@@ -104,7 +114,7 @@ statement ok
 DROP SOURCE test_schema.test_source;
 
 statement ok
-DROP TABLE test_schema.test_table;
+DROP TABLE test_schema.test_table cascade;
 
 statement ok
 DROP SCHEMA test_schema;
