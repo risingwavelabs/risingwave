@@ -29,4 +29,5 @@ mod storage;
 mod throttle;
 
 mod compaction;
+mod default_parallelism;
 mod utils;

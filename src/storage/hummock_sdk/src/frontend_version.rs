@@ -151,14 +151,12 @@ impl FrontendHummockVersionDelta {
                         *table_id,
                         ChangeLogDeltaCommon {
                             truncate_epoch: change_log_delta.truncate_epoch,
-                            new_log: change_log_delta.new_log.as_ref().map(|new_log| {
-                                EpochNewChangeLogCommon {
-                                    // Here we need to determine if value is null but don't care what the value is, so we fill him in using `()`
-                                    new_value: vec![(); new_log.new_value.len()],
-                                    old_value: vec![(); new_log.old_value.len()],
-                                    epochs: new_log.epochs.clone(),
-                                }
-                            }),
+                            new_log: EpochNewChangeLogCommon {
+                                // Here we need to determine if value is null but don't care what the value is, so we fill him in using `()`
+                                new_value: vec![(); change_log_delta.new_log.new_value.len()],
+                                old_value: vec![(); change_log_delta.new_log.old_value.len()],
+                                epochs: change_log_delta.new_log.epochs.clone(),
+                            },
                         },
                     )
                 })
@@ -187,11 +185,17 @@ impl FrontendHummockVersionDelta {
                     (
                         table_id.table_id,
                         PbChangeLogDelta {
-                            new_log: delta.new_log.as_ref().map(|new_log| PbEpochNewChangeLog {
+                            new_log: Some(PbEpochNewChangeLog {
                                 // Here we need to determine if value is null but don't care what the value is, so we fill him in using `PbSstableInfo::default()`
-                                old_value: vec![PbSstableInfo::default(); new_log.old_value.len()],
-                                new_value: vec![PbSstableInfo::default(); new_log.new_value.len()],
-                                epochs: new_log.epochs.clone(),
+                                old_value: vec![
+                                    PbSstableInfo::default();
+                                    delta.new_log.old_value.len()
+                                ],
+                                new_value: vec![
+                                    PbSstableInfo::default();
+                                    delta.new_log.new_value.len()
+                                ],
+                                epochs: delta.new_log.epochs.clone(),
                             }),
                             truncate_epoch: delta.truncate_epoch,
                         },
@@ -228,14 +232,18 @@ impl FrontendHummockVersionDelta {
                         TableId::new(*table_id),
                         ChangeLogDeltaCommon {
                             truncate_epoch: change_log_delta.truncate_epoch,
-                            new_log: change_log_delta.new_log.as_ref().map(|new_log| {
-                                EpochNewChangeLogCommon {
-                                    // Here we need to determine if value is null but don't care what the value is, so we fill him in using `()`
-                                    new_value: vec![(); new_log.new_value.len()],
-                                    old_value: vec![(); new_log.old_value.len()],
-                                    epochs: new_log.epochs.clone(),
-                                }
-                            }),
+                            new_log: change_log_delta
+                                .new_log
+                                .as_ref()
+                                .map(|new_log| {
+                                    EpochNewChangeLogCommon {
+                                        // Here we need to determine if value is null but don't care what the value is, so we fill him in using `()`
+                                        new_value: vec![(); new_log.new_value.len()],
+                                        old_value: vec![(); new_log.old_value.len()],
+                                        epochs: new_log.epochs.clone(),
+                                    }
+                                })
+                                .unwrap(),
                         },
                     )
                 })

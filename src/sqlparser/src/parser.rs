@@ -2210,6 +2210,8 @@ impl Parser<'_> {
         or_replace: bool,
         temporary: bool,
     ) -> PResult<Statement> {
+        impl_parse_to!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], self);
+
         let name = self.parse_object_name()?;
         self.expect_token(&Token::LParen)?;
         let args = if self.peek_token().token == Token::RParen {
@@ -2248,6 +2250,7 @@ impl Parser<'_> {
         Ok(Statement::CreateFunction {
             or_replace,
             temporary,
+            if_not_exists,
             name,
             args,
             returns: return_type,
@@ -2257,6 +2260,8 @@ impl Parser<'_> {
     }
 
     fn parse_create_aggregate(&mut self, or_replace: bool) -> PResult<Statement> {
+        impl_parse_to!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], self);
+
         let name = self.parse_object_name()?;
         self.expect_token(&Token::LParen)?;
         let args = self.parse_comma_separated(Parser::parse_function_arg)?;
@@ -2270,6 +2275,7 @@ impl Parser<'_> {
 
         Ok(Statement::CreateAggregate {
             or_replace,
+            if_not_exists,
             name,
             args,
             returns,
