@@ -204,6 +204,8 @@ impl HummockManager {
             next_version_sst_ids = sst_ids;
         }
         if !object_ids_to_delete.is_empty() {
+            // IMPORTANT: object_ids_to_delete may include objects that are still being used by SSTs not included in time travel metadata.
+            // So it's crucial to filter out those objects before actually deleting them, i.e. when using `try_take_may_delete_object_ids`.
             self.gc_manager
                 .add_may_delete_object_ids(object_ids_to_delete.into_iter());
         }
