@@ -97,7 +97,7 @@ development = ["expect-test", "pretty_assertions"]
 
 [workspace.dependencies]
 # foyer = { version = "0.13.1", features = ["tracing", "nightly", "prometheus"] }
-foyer = { git = "https://github.com/foyer-rs/foyer", rev = "0ae7820bfc626d67a62d19a36e6c1b46dcbb0e96", features = [
+foyer = { git = "https://github.com/foyer-rs/foyer", rev = "719ab39", features = [
     "tracing",
     "nightly",
     "prometheus",
