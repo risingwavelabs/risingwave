@@ -18,7 +18,6 @@ use std::borrow::BorrowMut;
 use std::cmp::Ordering;
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap, HashMap, HashSet};
-use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -28,9 +27,9 @@ use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_connector::error::ConnectorResult;
 use risingwave_connector::source::{
     fill_adaptive_split, ConnectorProperties, SourceEnumeratorContext, SourceEnumeratorInfo,
-    SourceProperties, SplitEnumerator, SplitId, SplitImpl, SplitMetaData,
+    SplitId, SplitImpl, SplitMetaData,
 };
-use risingwave_connector::{dispatch_source_prop, WithOptionsSecResolved};
+use risingwave_connector::WithOptionsSecResolved;
 use risingwave_meta_model::SourceId;
 use risingwave_pb::catalog::Source;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};

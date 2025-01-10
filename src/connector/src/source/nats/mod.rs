@@ -13,6 +13,7 @@
 // limitations under the License.
 
 pub mod enumerator;
+pub use enumerator::NatsSplitEnumerator;
 pub mod source;
 pub mod split;
 
@@ -29,7 +30,6 @@ use with_options::WithOptions;
 
 use crate::connector_common::NatsCommon;
 use crate::error::{ConnectorError, ConnectorResult};
-use crate::source::nats::enumerator::NatsSplitEnumerator;
 use crate::source::nats::source::{NatsSplit, NatsSplitReader};
 use crate::source::SourceProperties;
 use crate::{
