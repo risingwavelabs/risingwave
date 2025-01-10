@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -59,7 +59,7 @@ where
             ka.access(path, type_expected)
         } else {
             Err(AccessError::Undefined {
-                name: "key".to_string(),
+                name: "key".to_owned(),
                 path: String::new(),
             })
         }
@@ -70,7 +70,7 @@ where
             va.access(path, type_expected)
         } else {
             Err(AccessError::Undefined {
-                name: "value".to_string(),
+                name: "value".to_owned(),
                 path: String::new(),
             })
         }

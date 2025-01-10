@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -1069,7 +1069,7 @@ async fn test_state_table_write_chunk() {
         .collect::<Vec<_>>()
         .await
         .into_iter()
-        .map(|row| row.unwrap().into_owned_row())
+        .map(|row| row.unwrap())
         .collect();
 
     assert_eq!(rows.len(), 2);
@@ -1186,7 +1186,7 @@ async fn test_state_table_write_chunk_visibility() {
         .collect::<Vec<_>>()
         .await
         .into_iter()
-        .map(|row| row.unwrap().into_owned_row())
+        .map(|row| row.unwrap())
         .collect();
 
     assert_eq!(rows.len(), 3);
@@ -1301,7 +1301,7 @@ async fn test_state_table_write_chunk_value_indices() {
         .collect::<Vec<_>>()
         .await
         .into_iter()
-        .map(|row| row.unwrap().into_owned_row())
+        .map(|row| row.unwrap())
         .collect();
 
     assert_eq!(rows.len(), 3);
@@ -1386,7 +1386,7 @@ async fn test_state_table_watermark_cache_ignore_null() {
         .collect::<Vec<_>>()
         .await
         .into_iter()
-        .map(|row| row.unwrap().into_owned_row())
+        .map(|row| row.unwrap())
         .collect();
 
     assert_eq!(inserted_rows.len(), 4);
@@ -1688,7 +1688,7 @@ async fn test_state_table_watermark_cache_refill() {
         .collect::<Vec<_>>()
         .await
         .into_iter()
-        .map(|row| row.unwrap().into_owned_row())
+        .map(|row| row.unwrap())
         .collect();
 
     assert_eq!(inserted_rows.len(), 4);

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -62,7 +62,7 @@ pub struct ObjectStoreMetaSnapshotStorage {
 impl ObjectStoreMetaSnapshotStorage {
     pub async fn new(path: &str, store: ObjectStoreRef) -> BackupResult<Self> {
         let instance = Self {
-            path: path.to_string(),
+            path: path.to_owned(),
             store,
             manifest: Default::default(),
         };

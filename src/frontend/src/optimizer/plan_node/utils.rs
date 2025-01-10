@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,27 +14,43 @@
 
 use std::collections::HashMap;
 use std::default::Default;
+use std::ops::Bound;
 use std::vec;
 
 use anyhow::anyhow;
+use chrono::{MappedLocalTime, TimeZone};
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, Str, StrAssocArr, XmlNode};
 use risingwave_common::catalog::{
-    ColumnCatalog, ColumnDesc, ConflictBehavior, CreateType, Field, FieldDisplay, Schema,
+    ColumnCatalog, ColumnDesc, ConflictBehavior, CreateType, Engine, Field, FieldDisplay, Schema,
     StreamJobStatus, OBJECT_ID_PLACEHOLDER,
 };
 use risingwave_common::constants::log_store::v2::{
     KV_LOG_STORE_PREDEFINED_COLUMNS, PK_ORDERING, VNODE_COLUMN_INDEX,
 };
 use risingwave_common::hash::VnodeCount;
+use risingwave_common::license::Feature;
+use risingwave_common::types::{DataType, Interval, ScalarImpl, Timestamptz};
+use risingwave_common::util::scan_range::{is_full_range, ScanRange};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
+use risingwave_expr::aggregate::PbAggKind;
+use risingwave_pb::plan_common::as_of::AsOfType;
+use risingwave_pb::plan_common::{as_of, PbAsOf};
+use risingwave_sqlparser::ast::AsOf;
 
+use super::generic::{self, GenericPlanRef, PhysicalPlanRef};
+use super::pretty_config;
 use crate::catalog::table_catalog::TableType;
 use crate::catalog::{ColumnId, TableCatalog, TableId};
-use crate::optimizer::property::{Cardinality, Order, RequiredDist};
+use crate::error::{ErrorCode, Result};
+use crate::expr::InputRef;
+use crate::optimizer::plan_node::generic::Agg;
+use crate::optimizer::plan_node::{BatchSimpleAgg, PlanAggCall};
+use crate::optimizer::property::{Cardinality, Order, RequiredDist, WatermarkColumns};
 use crate::optimizer::StreamScanType;
 use crate::utils::{Condition, IndexSet};
+use crate::PlanRef;
 
 #[derive(Default)]
 pub struct TableCatalogBuilder {
@@ -78,7 +94,7 @@ impl TableCatalogBuilder {
         let base_idx = self.columns.len();
         columns.iter().enumerate().for_each(|(i, col)| {
             assert!(!self.column_names.contains_key(col.name()));
-            self.column_names.insert(col.name().to_string(), 0);
+            self.column_names.insert(col.name().to_owned(), 0);
 
             // Reset the column id for the columns.
             let mut new_col = col.clone();
@@ -198,6 +214,8 @@ impl TableCatalogBuilder {
             vnode_count: VnodeCount::Placeholder, // will be filled in by the meta service later
             webhook_info: None,
             job_id: None,
+            engine: Engine::Hummock,
+            clean_watermark_index_in_pk: None, // TODO: fill this field
         }
     }
 
@@ -248,24 +266,25 @@ pub(crate) fn column_names_pretty<'a>(schema: &Schema) -> Pretty<'a> {
 }
 
 pub(crate) fn watermark_pretty<'a>(
-    watermark_columns: &FixedBitSet,
+    watermark_columns: &WatermarkColumns,
     schema: &Schema,
 ) -> Option<Pretty<'a>> {
-    iter_fields_pretty(watermark_columns.ones(), schema)
-}
-
-pub(crate) fn iter_fields_pretty<'a>(
-    columns: impl Iterator<Item = usize>,
-    schema: &Schema,
-) -> Option<Pretty<'a>> {
-    let arr = columns
-        .map(|idx| FieldDisplay(schema.fields.get(idx).unwrap()))
-        .map(|d| Pretty::display(&d))
-        .collect::<Vec<_>>();
-    if arr.is_empty() {
+    if watermark_columns.is_empty() {
         None
     } else {
-        Some(Pretty::Array(arr))
+        let groups = watermark_columns.grouped();
+        let pretty_groups = groups
+            .values()
+            .map(|cols| {
+                Pretty::Array(
+                    cols.indices()
+                        .map(|idx| FieldDisplay(schema.fields.get(idx).unwrap()))
+                        .map(|d| Pretty::display(&d))
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .collect();
+        Some(Pretty::Array(pretty_groups))
     }
 }
 
@@ -340,20 +359,6 @@ macro_rules! plan_node_name {
     };
 }
 pub(crate) use plan_node_name;
-use risingwave_common::license::Feature;
-use risingwave_common::types::{DataType, Interval};
-use risingwave_expr::aggregate::PbAggKind;
-use risingwave_pb::plan_common::as_of::AsOfType;
-use risingwave_pb::plan_common::{as_of, PbAsOf};
-use risingwave_sqlparser::ast::AsOf;
-
-use super::generic::{self, GenericPlanRef, PhysicalPlanRef};
-use super::pretty_config;
-use crate::error::{ErrorCode, Result};
-use crate::expr::InputRef;
-use crate::optimizer::plan_node::generic::Agg;
-use crate::optimizer::plan_node::{BatchSimpleAgg, PlanAggCall};
-use crate::PlanRef;
 
 pub fn infer_kv_log_store_table_catalog_inner(
     input: &PlanRef,
@@ -426,8 +431,8 @@ pub fn to_pb_time_travel_as_of(a: &Option<AsOf>) -> Result<Option<PbAsOf>> {
     let as_of_type = match a {
         AsOf::ProcessTime => {
             return Err(ErrorCode::NotSupported(
-                "do not support as of proctime".to_string(),
-                "please use as of timestamp".to_string(),
+                "do not support as of proctime".to_owned(),
+                "please use as of timestamp".to_owned(),
             )
             .into());
         }
@@ -435,14 +440,36 @@ pub fn to_pb_time_travel_as_of(a: &Option<AsOf>) -> Result<Option<PbAsOf>> {
         AsOf::TimestampString(ts) => {
             let date_time = speedate::DateTime::parse_str_rfc3339(ts)
                 .map_err(|_e| anyhow!("fail to parse timestamp"))?;
-            AsOfType::Timestamp(as_of::Timestamp {
-                timestamp: date_time.timestamp_tz(),
-            })
+            let timestamp = if date_time.time.tz_offset.is_none() {
+                // If the input does not specify a time zone, use the time zone set by the "SET TIME ZONE" command.
+                risingwave_expr::expr_context::TIME_ZONE::try_with(|set_time_zone| {
+                    let tz =
+                        Timestamptz::lookup_time_zone(set_time_zone).map_err(|e| anyhow!(e))?;
+                    match tz.with_ymd_and_hms(
+                        date_time.date.year.into(),
+                        date_time.date.month.into(),
+                        date_time.date.day.into(),
+                        date_time.time.hour.into(),
+                        date_time.time.minute.into(),
+                        date_time.time.second.into(),
+                    ) {
+                        MappedLocalTime::Single(d) => Ok(d.timestamp()),
+                        MappedLocalTime::Ambiguous(_, _) | MappedLocalTime::None => {
+                            Err(anyhow!(format!(
+                                        "failed to parse the timestamp {ts} with the specified time zone {tz}"
+                                    )))
+                        }
+                    }
+                })??
+            } else {
+                date_time.timestamp_tz()
+            };
+            AsOfType::Timestamp(as_of::Timestamp { timestamp })
         }
         AsOf::VersionNum(_) | AsOf::VersionString(_) => {
             return Err(ErrorCode::NotSupported(
-                "do not support as of version".to_string(),
-                "please use as of timestamp".to_string(),
+                "do not support as of version".to_owned(),
+                "please use as of timestamp".to_owned(),
             )
             .into());
         }
@@ -463,4 +490,94 @@ pub fn to_pb_time_travel_as_of(a: &Option<AsOf>) -> Result<Option<PbAsOf>> {
     Ok(Some(PbAsOf {
         as_of_type: Some(as_of_type),
     }))
+}
+
+pub fn scan_ranges_as_strs(order_names: Vec<String>, scan_ranges: &Vec<ScanRange>) -> Vec<String> {
+    let mut range_strs = vec![];
+
+    let explain_max_range = 20;
+    for scan_range in scan_ranges.iter().take(explain_max_range) {
+        #[expect(clippy::disallowed_methods)]
+        let mut range_str = scan_range
+            .eq_conds
+            .iter()
+            .zip(order_names.iter())
+            .map(|(v, name)| match v {
+                Some(v) => format!("{} = {:?}", name, v),
+                None => format!("{} IS NULL", name),
+            })
+            .collect_vec();
+
+        let len = scan_range.eq_conds.len();
+        if !is_full_range(&scan_range.range) {
+            let bound_range_str = match (&scan_range.range.0, &scan_range.range.1) {
+                (Bound::Unbounded, Bound::Unbounded) => unreachable!(),
+                (Bound::Unbounded, ub) => ub_to_string(&order_names[len..], ub),
+                (lb, Bound::Unbounded) => lb_to_string(&order_names[len..], lb),
+                (lb, ub) => format!(
+                    "{} AND {}",
+                    lb_to_string(&order_names[len..], lb),
+                    ub_to_string(&order_names[len..], ub)
+                ),
+            };
+            range_str.push(bound_range_str);
+        }
+        range_strs.push(range_str.join(" AND "));
+    }
+    if scan_ranges.len() > explain_max_range {
+        range_strs.push("...".to_owned());
+    }
+    range_strs
+}
+
+pub fn ub_to_string(order_names: &[String], ub: &Bound<Vec<Option<ScalarImpl>>>) -> String {
+    match ub {
+        Bound::Included(v) => {
+            let (name, value) = row_to_string(order_names, v);
+            format!("{} <= {}", name, value)
+        }
+        Bound::Excluded(v) => {
+            let (name, value) = row_to_string(order_names, v);
+            format!("{} < {}", name, value)
+        }
+        Bound::Unbounded => unreachable!(),
+    }
+}
+
+pub fn lb_to_string(order_names: &[String], lb: &Bound<Vec<Option<ScalarImpl>>>) -> String {
+    match lb {
+        Bound::Included(v) => {
+            let (name, value) = row_to_string(order_names, v);
+            format!("{} >= {}", name, value)
+        }
+        Bound::Excluded(v) => {
+            let (name, value) = row_to_string(order_names, v);
+            format!("{} > {}", name, value)
+        }
+        Bound::Unbounded => unreachable!(),
+    }
+}
+
+pub fn row_to_string(
+    order_names: &[String],
+    struct_values: &Vec<Option<ScalarImpl>>,
+) -> (String, String) {
+    let mut names = vec![];
+    let mut values = vec![];
+    #[expect(clippy::disallowed_methods)]
+    for (name, value) in order_names.iter().zip(struct_values.iter()) {
+        names.push(name);
+        match value {
+            Some(v) => values.push(format!("{:?}", v)),
+            None => values.push("null".to_owned()),
+        }
+    }
+    if names.len() == 1 {
+        (names[0].clone(), values[0].clone())
+    } else {
+        (
+            format!("({})", names.iter().join(", ")),
+            format!("({})", values.iter().join(", ")),
+        )
+    }
 }

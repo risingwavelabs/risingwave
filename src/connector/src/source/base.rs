@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -41,6 +41,7 @@ use super::google_pubsub::GooglePubsubMeta;
 use super::kafka::KafkaMeta;
 use super::kinesis::KinesisMeta;
 use super::monitor::SourceMetrics;
+use super::nats::source::NatsMeta;
 use super::nexmark::source::message::NexmarkMeta;
 use super::{AZBLOB_CONNECTOR, GCS_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR};
 use crate::error::ConnectorResult as Result;
@@ -141,17 +142,27 @@ pub type SourceEnumeratorContextRef = Arc<SourceEnumeratorContext>;
 /// The max size of a chunk yielded by source stream.
 pub const MAX_CHUNK_SIZE: usize = 1024;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct SourceCtrlOpts {
     /// The max size of a chunk yielded by source stream.
     pub chunk_size: usize,
-    /// Rate limit of source
-    pub rate_limit: Option<u32>,
+    /// Whether to allow splitting a transaction into multiple chunks to meet the `max_chunk_size`.
+    pub split_txn: bool,
 }
 
 // The options in `SourceCtrlOpts` are so important that we don't want to impl `Default` for it,
 // so that we can prevent any unintentional use of the default value.
 impl !Default for SourceCtrlOpts {}
+
+impl SourceCtrlOpts {
+    #[cfg(test)]
+    pub fn for_test() -> Self {
+        SourceCtrlOpts {
+            chunk_size: 256,
+            split_txn: false,
+        }
+    }
+}
 
 #[derive(Debug)]
 pub struct SourceEnumeratorContext {
@@ -221,11 +232,11 @@ impl SourceContext {
             0,
             TableId::new(0),
             0,
-            "dummy".to_string(),
+            "dummy".to_owned(),
             Arc::new(SourceMetrics::default()),
             SourceCtrlOpts {
                 chunk_size: MAX_CHUNK_SIZE,
-                rate_limit: None,
+                split_txn: false,
             },
             ConnectorProperties::default(),
             None,
@@ -342,20 +353,22 @@ pub fn extract_source_struct(info: &PbStreamSourceInfo) -> Result<SourceStruct> 
     Ok(SourceStruct::new(format, encode))
 }
 
-/// Stream of [`SourceMessage`].
-pub type BoxSourceStream = BoxStream<'static, crate::error::ConnectorResult<Vec<SourceMessage>>>;
+/// Stream of [`SourceMessage`]. Messages flow through the stream in the unit of a batch.
+pub type BoxSourceMessageStream =
+    BoxStream<'static, crate::error::ConnectorResult<Vec<SourceMessage>>>;
+/// Stream of [`StreamChunk`]s parsed from the messages from the external source.
+pub type BoxSourceChunkStream = BoxStream<'static, crate::error::ConnectorResult<StreamChunk>>;
 
 // Manually expand the trait alias to improve IDE experience.
-pub trait ChunkSourceStream:
+pub trait SourceChunkStream:
     Stream<Item = crate::error::ConnectorResult<StreamChunk>> + Send + 'static
 {
 }
-impl<T> ChunkSourceStream for T where
+impl<T> SourceChunkStream for T where
     T: Stream<Item = crate::error::ConnectorResult<StreamChunk>> + Send + 'static
 {
 }
 
-pub type BoxChunkSourceStream = BoxStream<'static, crate::error::ConnectorResult<StreamChunk>>;
 pub type BoxTryStream<M> = BoxStream<'static, crate::error::ConnectorResult<M>>;
 
 /// [`SplitReader`] is a new abstraction of the external connector read interface which is
@@ -374,7 +387,7 @@ pub trait SplitReader: Sized + Send {
         columns: Option<Vec<Column>>,
     ) -> crate::error::ConnectorResult<Self>;
 
-    fn into_stream(self) -> BoxChunkSourceStream;
+    fn into_stream(self) -> BoxSourceChunkStream;
 
     fn backfill_info(&self) -> HashMap<SplitId, BackfillInfo> {
         HashMap::new()
@@ -456,9 +469,17 @@ impl ConnectorProperties {
         )
     }
 
-    pub fn enable_split_scale_in(&self) -> bool {
+    pub fn enable_drop_split(&self) -> bool {
         // enable split scale in just for Kinesis
-        matches!(self, ConnectorProperties::Kinesis(_))
+        matches!(
+            self,
+            ConnectorProperties::Kinesis(_) | ConnectorProperties::Nats(_)
+        )
+    }
+
+    /// For most connectors, this should be false. When enabled, RisingWave should not track any progress.
+    pub fn enable_adaptive_splits(&self) -> bool {
+        matches!(self, ConnectorProperties::Nats(_))
     }
 
     /// Load additional info from `PbSource`. Currently only used by CDC.
@@ -560,7 +581,7 @@ impl SplitMetaData for SplitImpl {
             .unwrap()
             .as_str()
             .unwrap()
-            .to_string();
+            .to_owned();
         let inner_value = json_obj.remove(SPLIT_INFO_FIELD).unwrap();
         Self::restore_from_json_inner(&split_type, inner_value.into())
     }
@@ -578,7 +599,7 @@ impl SplitMetaData for SplitImpl {
 impl SplitImpl {
     pub fn get_type(&self) -> String {
         dispatch_split_impl!(self, _ignored, PropType, {
-            PropType::SOURCE_NAME.to_string()
+            PropType::SOURCE_NAME.to_owned()
         })
     }
 
@@ -624,10 +645,15 @@ impl SourceMessage {
         Self {
             key: None,
             payload: None,
-            offset: "".to_string(),
+            offset: "".to_owned(),
             split_id: "".into(),
             meta: SourceMeta::Empty,
         }
+    }
+
+    /// Check whether the source message is a CDC heartbeat message.
+    pub fn is_cdc_heartbeat(&self) -> bool {
+        self.key.is_none() && self.payload.is_none()
     }
 }
 
@@ -639,6 +665,7 @@ pub enum SourceMeta {
     GooglePubsub(GooglePubsubMeta),
     Datagen(DatagenMeta),
     DebeziumCdc(DebeziumCdcMeta),
+    Nats(NatsMeta),
     // For the source that doesn't have meta data.
     Empty,
 }
@@ -700,7 +727,7 @@ mod tests {
 
     #[test]
     fn test_split_impl_get_fn() -> Result<()> {
-        let split = KafkaSplit::new(0, Some(0), Some(0), "demo".to_string());
+        let split = KafkaSplit::new(0, Some(0), Some(0), "demo".to_owned());
         let split_impl = SplitImpl::Kafka(split.clone());
         let get_value = split_impl.into_kafka().unwrap();
         println!("{:?}", get_value);
@@ -713,7 +740,7 @@ mod tests {
     #[test]
     fn test_cdc_split_state() -> Result<()> {
         let offset_str = "{\"sourcePartition\":{\"server\":\"RW_CDC_mydb.products\"},\"sourceOffset\":{\"transaction_id\":null,\"ts_sec\":1670407377,\"file\":\"binlog.000001\",\"pos\":98587,\"row\":2,\"server_id\":1,\"event\":2}}";
-        let split = DebeziumCdcSplit::<Mysql>::new(1001, Some(offset_str.to_string()), None);
+        let split = DebeziumCdcSplit::<Mysql>::new(1001, Some(offset_str.to_owned()), None);
         let split_impl = SplitImpl::MysqlCdc(split);
         let encoded_split = split_impl.encode_to_bytes();
         let restored_split_impl = SplitImpl::restore_from_bytes(encoded_split.as_ref())?;
@@ -774,8 +801,8 @@ mod tests {
                 .unwrap();
         if let ConnectorProperties::Kafka(k) = props {
             let btreemap = btreemap! {
-                "b-1:9092".to_string() => "dns-1".to_string(),
-                "b-2:9092".to_string() => "dns-2".to_string(),
+                "b-1:9092".to_owned() => "dns-1".to_owned(),
+                "b-2:9092".to_owned() => "dns-2".to_owned(),
             };
             assert_eq!(k.privatelink_common.broker_rewrite_map, Some(btreemap));
         } else {

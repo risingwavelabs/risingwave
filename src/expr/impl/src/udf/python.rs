@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,8 +24,8 @@ static PYTHON: UdfImplDescriptor = UdfImplDescriptor {
     match_fn: |language, _runtime, link| language == "python" && link.is_none(),
     create_fn: |opts| {
         Ok(CreateFunctionOutput {
-            identifier: opts.name.to_string(),
-            body: Some(opts.as_.context("AS must be specified")?.to_string()),
+            identifier: opts.name.to_owned(),
+            body: Some(opts.as_.context("AS must be specified")?.to_owned()),
             compressed_binary: None,
         })
     },
@@ -51,7 +51,7 @@ static PYTHON: UdfImplDescriptor = UdfImplDescriptor {
         }
         Ok(Box::new(PythonFunction {
             runtime,
-            identifier: opts.identifier.to_string(),
+            identifier: opts.identifier.to_owned(),
         }))
     },
 };

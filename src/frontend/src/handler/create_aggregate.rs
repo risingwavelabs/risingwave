@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use anyhow::Context;
+use either::Either;
 use risingwave_common::catalog::FunctionId;
 use risingwave_expr::sig::{CreateFunctionOptions, UdfKind};
 use risingwave_pb::catalog::function::{AggregateFunction, Kind};
@@ -20,12 +21,12 @@ use risingwave_pb::catalog::Function;
 use risingwave_sqlparser::ast::DataType as AstDataType;
 
 use super::*;
-use crate::catalog::CatalogError;
 use crate::{bind_data_type, Binder};
 
 pub async fn handle_create_aggregate(
     handler_args: HandlerArgs,
     or_replace: bool,
+    if_not_exists: bool,
     name: ObjectName,
     args: Vec<OperateFunctionArg>,
     returns: AstDataType,
@@ -55,7 +56,7 @@ pub async fn handle_create_aggregate(
     let runtime = match params.runtime {
         Some(_) => {
             return Err(ErrorCode::InvalidParameterValue(
-                "runtime selection is currently not supported".to_string(),
+                "runtime selection is currently not supported".to_owned(),
             )
             .into());
         }
@@ -67,27 +68,25 @@ pub async fn handle_create_aggregate(
     let mut arg_names = vec![];
     let mut arg_types = vec![];
     for arg in args {
-        arg_names.push(arg.name.map_or("".to_string(), |n| n.real_value()));
+        arg_names.push(arg.name.map_or("".to_owned(), |n| n.real_value()));
         arg_types.push(bind_data_type(&arg.data_type)?);
     }
 
     // resolve database and schema id
     let session = &handler_args.session;
-    let db_name = session.database();
-    let (schema_name, function_name) = Binder::resolve_schema_qualified_name(db_name, name)?;
+    let db_name = &session.database();
+    let (schema_name, function_name) =
+        Binder::resolve_schema_qualified_name(db_name, name.clone())?;
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
 
     // check if the function exists in the catalog
-    if (session.env().catalog_reader().read_guard())
-        .get_schema_by_id(&database_id, &schema_id)?
-        .get_function_by_name_args(&function_name, &arg_types)
-        .is_some()
-    {
-        let name = format!(
-            "{function_name}({})",
-            arg_types.iter().map(|t| t.to_string()).join(",")
-        );
-        return Err(CatalogError::Duplicated("function", name).into());
+    if let Either::Right(resp) = session.check_function_name_duplicated(
+        StatementType::CREATE_FUNCTION,
+        name,
+        &arg_types,
+        if_not_exists,
+    )? {
+        return Ok(resp);
     }
 
     let link = match &params.using {
@@ -129,7 +128,7 @@ pub async fn handle_create_aggregate(
         language,
         runtime,
         identifier: Some(output.identifier),
-        link: link.map(|s| s.to_string()),
+        link: link.map(|s| s.to_owned()),
         body: output.body,
         compressed_binary: output.compressed_binary,
         owner: session.user_id(),

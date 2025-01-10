@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,10 +23,13 @@ use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use foyer::CacheHint;
+use futures::{pin_mut, Stream, StreamExt};
 use parking_lot::Mutex;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::config::StorageMemoryConfig;
+use risingwave_expr::codegen::try_stream;
 use risingwave_hummock_sdk::can_concat;
+use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::key::{
     bound_table_key_range, EmptySliceRef, FullKey, TableKey, UserKey,
 };
@@ -34,12 +37,12 @@ use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use tokio::sync::oneshot::{channel, Receiver, Sender};
 
 use super::{HummockError, HummockResult, SstableStoreRef};
-use crate::error::StorageResult;
+use crate::error::{StorageError, StorageResult};
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::CachePolicy;
 use crate::mem_table::{KeyOp, MemTableError};
 use crate::monitor::MemoryCollector;
-use crate::store::{OpConsistencyLevel, ReadOptions, StateStoreRead};
+use crate::store::{OpConsistencyLevel, ReadOptions, StateStoreKeyedRow, StateStoreRead};
 
 pub fn range_overlap<R, B>(
     search_key_range: &R,
@@ -123,6 +126,7 @@ where
 pub fn prune_nonoverlapping_ssts<'a>(
     ssts: &'a [SstableInfo],
     user_key_range: (Bound<UserKey<&'a [u8]>>, Bound<UserKey<&'a [u8]>>),
+    table_id: StateTableId,
 ) -> impl DoubleEndedIterator<Item = &'a SstableInfo> {
     debug_assert!(can_concat(ssts));
     let start_table_idx = match user_key_range.0 {
@@ -133,7 +137,9 @@ pub fn prune_nonoverlapping_ssts<'a>(
         Included(key) | Excluded(key) => search_sst_idx(ssts, key).saturating_sub(1),
         _ => ssts.len().saturating_sub(1),
     };
-    ssts[start_table_idx..=end_table_idx].iter()
+    ssts[start_table_idx..=end_table_idx]
+        .iter()
+        .filter(move |sst| sst.table_ids.binary_search(&table_id).is_ok())
 }
 
 type RequestQueue = VecDeque<(Sender<MemoryTracker>, u64)>;
@@ -681,7 +687,7 @@ impl HummockMemoryCollector {
 
 impl MemoryCollector for HummockMemoryCollector {
     fn get_meta_memory_usage(&self) -> u64 {
-        self.sstable_store.get_meta_memory_usage()
+        self.sstable_store.meta_cache().memory().usage() as _
     }
 
     fn get_data_memory_usage(&self) -> u64 {
@@ -697,18 +703,103 @@ impl MemoryCollector for HummockMemoryCollector {
     }
 
     fn get_meta_cache_memory_usage_ratio(&self) -> f64 {
-        self.sstable_store.get_meta_memory_usage() as f64
-            / (self.storage_memory_config.meta_cache_capacity_mb * 1024 * 1024) as f64
+        self.sstable_store.meta_cache().memory().usage() as f64
+            / self.sstable_store.meta_cache().memory().capacity() as f64
     }
 
     fn get_block_cache_memory_usage_ratio(&self) -> f64 {
-        self.get_data_memory_usage() as f64
-            / (self.storage_memory_config.block_cache_capacity_mb * 1024 * 1024) as f64
+        self.sstable_store.block_cache().memory().usage() as f64
+            / self.sstable_store.block_cache().memory().capacity() as f64
     }
 
     fn get_shared_buffer_usage_ratio(&self) -> f64 {
         self.limiter.get_memory_usage() as f64
             / (self.storage_memory_config.shared_buffer_capacity_mb * 1024 * 1024) as f64
+    }
+}
+
+#[try_stream(ok = StateStoreKeyedRow, error = StorageError)]
+pub(crate) async fn merge_stream<'a>(
+    mem_table_iter: impl Iterator<Item = (&'a TableKey<Bytes>, &'a KeyOp)> + 'a,
+    inner_stream: impl Stream<Item = StorageResult<StateStoreKeyedRow>> + 'static,
+    table_id: TableId,
+    epoch: u64,
+    rev: bool,
+) {
+    let inner_stream = inner_stream.peekable();
+    pin_mut!(inner_stream);
+
+    let mut mem_table_iter = mem_table_iter.fuse().peekable();
+
+    loop {
+        match (inner_stream.as_mut().peek().await, mem_table_iter.peek()) {
+            (None, None) => break,
+            // The mem table side has come to an end, return data from the shared storage.
+            (Some(_), None) => {
+                let (key, value) = inner_stream.next().await.unwrap()?;
+                yield (key, value)
+            }
+            // The stream side has come to an end, return data from the mem table.
+            (None, Some(_)) => {
+                let (key, key_op) = mem_table_iter.next().unwrap();
+                match key_op {
+                    KeyOp::Insert(value) | KeyOp::Update((_, value)) => {
+                        yield (FullKey::new(table_id, key.clone(), epoch), value.clone())
+                    }
+                    _ => {}
+                }
+            }
+            (Some(Ok((inner_key, _))), Some((mem_table_key, _))) => {
+                debug_assert_eq!(inner_key.user_key.table_id, table_id);
+                let mut ret = inner_key.user_key.table_key.cmp(mem_table_key);
+                if rev {
+                    ret = ret.reverse();
+                }
+                match ret {
+                    Ordering::Less => {
+                        // yield data from storage
+                        let (key, value) = inner_stream.next().await.unwrap()?;
+                        yield (key, value);
+                    }
+                    Ordering::Equal => {
+                        // both memtable and storage contain the key, so we advance both
+                        // iterators and return the data in memory.
+
+                        let (_, key_op) = mem_table_iter.next().unwrap();
+                        let (key, old_value_in_inner) = inner_stream.next().await.unwrap()?;
+                        match key_op {
+                            KeyOp::Insert(value) => {
+                                yield (key.clone(), value.clone());
+                            }
+                            KeyOp::Delete(_) => {}
+                            KeyOp::Update((old_value, new_value)) => {
+                                debug_assert!(old_value == &old_value_in_inner);
+
+                                yield (key, new_value.clone());
+                            }
+                        }
+                    }
+                    Ordering::Greater => {
+                        // yield data from mem table
+                        let (key, key_op) = mem_table_iter.next().unwrap();
+
+                        match key_op {
+                            KeyOp::Insert(value) => {
+                                yield (FullKey::new(table_id, key.clone(), epoch), value.clone());
+                            }
+                            KeyOp::Delete(_) => {}
+                            KeyOp::Update(_) => unreachable!(
+                                "memtable update should always be paired with a storage key"
+                            ),
+                        }
+                    }
+                }
+            }
+            (Some(Err(_)), Some(_)) => {
+                // Throw the error.
+                return Err(inner_stream.next().await.unwrap().unwrap_err());
+            }
+        }
     }
 }
 

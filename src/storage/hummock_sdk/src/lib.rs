@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -349,7 +349,7 @@ pub fn version_archive_dir(root_dir: &str) -> String {
 }
 
 pub fn version_checkpoint_dir(checkpoint_path: &str) -> String {
-    checkpoint_path.trim_end_matches(|c| c != '/').to_string()
+    checkpoint_path.trim_end_matches(|c| c != '/').to_owned()
 }
 
 /// Represents an epoch with a gap.

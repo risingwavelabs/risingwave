@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -123,6 +123,8 @@ impl StreamTableScan {
 
     /// Build catalog for backfill state
     ///
+    /// When `stream_scan_type` is not `StreamScanType::SnapshotBackfill`:
+    ///
     /// Schema: | vnode | pk ... | `backfill_finished` | `row_count` |
     ///
     /// key:    | vnode |
@@ -153,9 +155,18 @@ impl StreamTableScan {
     /// the corresponding `no_shuffle_backfill`.
     /// However this is not high priority, since we are working on supporting arrangement backfill,
     /// which already has this capability.
+    ///
+    ///
+    /// When `stream_scan_type` is `StreamScanType::SnapshotBackfill`:
+    ///
+    /// Schema: | vnode | `epoch` | `row_count` | `is_epoch_finished` | pk ...
+    ///
+    /// key:    | vnode |
+    /// value:  | `epoch` | `row_count` | `is_epoch_finished` | pk ...
     pub fn build_backfill_state_catalog(
         &self,
         state: &mut BuildFragmentGraphState,
+        stream_scan_type: StreamScanType,
     ) -> TableCatalog {
         let mut catalog_builder = TableCatalogBuilder::default();
         let upstream_schema = &self.core.get_table_columns();
@@ -165,17 +176,46 @@ impl StreamTableScan {
         catalog_builder.add_column(&Field::with_name(VirtualNode::RW_TYPE, "vnode"));
         catalog_builder.add_order_column(0, OrderType::ascending());
 
-        // pk columns
-        for col_order in self.core.primary_key() {
-            let col = &upstream_schema[col_order.column_index];
-            catalog_builder.add_column(&Field::from(col));
+        match stream_scan_type {
+            StreamScanType::Chain
+            | StreamScanType::Rearrange
+            | StreamScanType::Backfill
+            | StreamScanType::UpstreamOnly
+            | StreamScanType::ArrangementBackfill => {
+                // pk columns
+                for col_order in self.core.primary_key() {
+                    let col = &upstream_schema[col_order.column_index];
+                    catalog_builder.add_column(&Field::from(col));
+                }
+
+                // `backfill_finished` column
+                catalog_builder
+                    .add_column(&Field::with_name(DataType::Boolean, "backfill_finished"));
+
+                // `row_count` column
+                catalog_builder.add_column(&Field::with_name(DataType::Int64, "row_count"));
+            }
+            StreamScanType::SnapshotBackfill => {
+                // `epoch` column
+                catalog_builder.add_column(&Field::with_name(DataType::Int64, "epoch"));
+
+                // `row_count` column
+                catalog_builder.add_column(&Field::with_name(DataType::Int64, "row_count"));
+
+                // `is_finished` column
+                catalog_builder
+                    .add_column(&Field::with_name(DataType::Boolean, "is_epoch_finished"));
+
+                // pk columns
+                for col_order in self.core.primary_key() {
+                    let col = &upstream_schema[col_order.column_index];
+                    catalog_builder.add_column(&Field::from(col));
+                }
+            }
+            StreamScanType::Unspecified => {
+                unreachable!()
+            }
         }
-
-        // `backfill_finished` column
-        catalog_builder.add_column(&Field::with_name(DataType::Boolean, "backfill_finished"));
-
-        // `row_count` column
-        catalog_builder.add_column(&Field::with_name(DataType::Int64, "row_count"));
 
         // Reuse the state store pk (vnode) as the vnode as well.
         catalog_builder.set_vnode_col_idx(0);
@@ -285,7 +325,7 @@ impl StreamTableScan {
         };
 
         let catalog = self
-            .build_backfill_state_catalog(state)
+            .build_backfill_state_catalog(state, self.stream_scan_type)
             .to_internal_table_prost();
 
         // For backfill, we first read pk + output_indices from upstream.
@@ -310,7 +350,7 @@ impl StreamTableScan {
             None
         };
 
-        let node_body = PbNodeBody::StreamScan(StreamScanNode {
+        let node_body = PbNodeBody::StreamScan(Box::new(StreamScanNode {
             table_id: self.core.table_desc.table_id.table_id,
             stream_scan_type: self.stream_scan_type as i32,
             // The column indices need to be forwarded to the downstream
@@ -322,7 +362,7 @@ impl StreamTableScan {
             arrangement_table,
             rate_limit: self.base.ctx().overwrite_options().backfill_rate_limit,
             ..Default::default()
-        });
+        }));
 
         Ok(PbStreamNode {
             fields: self.schema().to_prost(),
@@ -338,7 +378,7 @@ impl StreamTableScan {
                 },
                 // Snapshot read
                 PbStreamNode {
-                    node_body: Some(PbNodeBody::BatchPlan(batch_plan_node)),
+                    node_body: Some(PbNodeBody::BatchPlan(Box::new(batch_plan_node))),
                     operator_id: self.batch_plan_id.0 as u64,
                     identity: "BatchPlanNode".into(),
                     fields: snapshot_schema,

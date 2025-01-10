@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -91,6 +91,10 @@ impl Literal {
 
     pub fn get_data(&self) -> &Datum {
         &self.data
+    }
+
+    pub fn get_data_type(&self) -> &Option<DataType> {
+        &self.data_type
     }
 
     pub fn is_untyped(&self) -> bool {

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -34,7 +34,9 @@ use crate::barrier::{
     ReplaceStreamJobPlan, SnapshotBackfillInfo,
 };
 use crate::error::bail_invalid_parameter;
-use crate::manager::{DdlType, MetaSrvEnv, MetadataManager, NotificationVersion, StreamingJob};
+use crate::manager::{
+    MetaSrvEnv, MetadataManager, NotificationVersion, StreamingJob, StreamingJobType,
+};
 use crate::model::{ActorId, FragmentId, StreamJobFragments, TableParallelism};
 use crate::stream::SourceManagerRef;
 use crate::{MetaError, MetaResult};
@@ -74,7 +76,7 @@ pub struct CreateStreamingJobContext {
 
     pub create_type: CreateType,
 
-    pub ddl_type: DdlType,
+    pub job_type: StreamingJobType,
 
     /// Context provided for potential replace table, typically used when sinking into a table.
     pub replace_table_job_info: Option<(StreamingJob, ReplaceStreamJobContext, StreamJobFragments)>,
@@ -334,7 +336,7 @@ impl GlobalStreamManager {
             upstream_root_actors,
             definition,
             create_type,
-            ddl_type,
+            job_type,
             replace_table_job_info,
             internal_tables,
             snapshot_backfill_info,
@@ -342,7 +344,6 @@ impl GlobalStreamManager {
         }: CreateStreamingJobContext,
     ) -> MetaResult<NotificationVersion> {
         let mut replace_table_command = None;
-        let mut replace_table_id = None;
 
         tracing::debug!(
             table_id = %stream_job_fragments.stream_job_id(),
@@ -359,8 +360,6 @@ impl GlobalStreamManager {
 
             let tmp_table_id = stream_job_fragments.stream_job_id();
             let init_split_assignment = self.source_manager.allocate_splits(&tmp_table_id).await?;
-
-            replace_table_id = Some(tmp_table_id);
 
             replace_table_command = Some(ReplaceStreamJobPlan {
                 old_fragments: context.old_fragments,
@@ -391,10 +390,10 @@ impl GlobalStreamManager {
             upstream_root_actors,
             dispatchers,
             init_split_assignment,
-            definition: definition.to_string(),
+            definition: definition.clone(),
             streaming_job: streaming_job.clone(),
             internal_tables: internal_tables.into_values().collect_vec(),
-            ddl_type,
+            job_type,
             create_type,
         };
 
@@ -421,43 +420,25 @@ impl GlobalStreamManager {
                 }
             }
         };
-        let result: MetaResult<NotificationVersion> = try {
-            if need_pause {
-                // Special handling is required when creating sink into table, we need to pause the stream to avoid data loss.
-                self.barrier_scheduler
-                    .run_config_change_command_with_pause(
-                        streaming_job.database_id().into(),
-                        command,
-                    )
-                    .await?;
-            } else {
-                self.barrier_scheduler
-                    .run_command(streaming_job.database_id().into(), command)
-                    .await?;
-            }
 
-            tracing::debug!(?streaming_job, "first barrier collected for stream job");
-            let result = self
-                .metadata_manager
-                .wait_streaming_job_finished(streaming_job.id() as _)
+        if need_pause {
+            // Special handling is required when creating sink into table, we need to pause the stream to avoid data loss.
+            self.barrier_scheduler
+                .run_config_change_command_with_pause(streaming_job.database_id().into(), command)
                 .await?;
-            tracing::debug!(?streaming_job, "stream job finish");
-            result
-        };
-        match result {
-            Err(err) => {
-                if create_type == CreateType::Foreground || err.is_cancelled() {
-                    let mut table_ids: HashSet<TableId> =
-                        HashSet::from_iter(std::iter::once(table_id));
-                    if let Some(tmp_table_id) = replace_table_id {
-                        table_ids.insert(tmp_table_id);
-                    }
-                }
-
-                Err(err)
-            }
-            Ok(version) => Ok(version),
+        } else {
+            self.barrier_scheduler
+                .run_command(streaming_job.database_id().into(), command)
+                .await?;
         }
+
+        tracing::debug!(?streaming_job, "first barrier collected for stream job");
+        let version = self
+            .metadata_manager
+            .wait_streaming_job_finished(streaming_job.id() as _)
+            .await?;
+        tracing::debug!(?streaming_job, "stream job finish");
+        Ok(version)
     }
 
     /// Send replace job command to barrier scheduler.
@@ -474,7 +455,13 @@ impl GlobalStreamManager {
         }: ReplaceStreamJobContext,
     ) -> MetaResult<()> {
         let tmp_table_id = new_fragments.stream_job_id();
-        let init_split_assignment = self.source_manager.allocate_splits(&tmp_table_id).await?;
+        let init_split_assignment = if streaming_job.is_source() {
+            self.source_manager
+                .allocate_splits_for_replace_source(&tmp_table_id, &merge_updates)
+                .await?
+        } else {
+            self.source_manager.allocate_splits(&tmp_table_id).await?
+        };
 
         self.barrier_scheduler
             .run_config_change_command_with_pause(
@@ -631,7 +618,10 @@ impl GlobalStreamManager {
             .collect::<BTreeSet<_>>();
 
         // Check if the provided parallelism is valid.
-        let available_parallelism = worker_nodes.iter().map(|w| w.parallelism()).sum::<usize>();
+        let available_parallelism = worker_nodes
+            .iter()
+            .map(|w| w.compute_node_parallelism())
+            .sum::<usize>();
         let max_parallelism = self
             .metadata_manager
             .get_job_max_parallelism(table_id)

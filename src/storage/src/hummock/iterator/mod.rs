@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -544,7 +544,7 @@ pub trait IteratorFactory {
     fn add_overlapping_sst_iter(&mut self, iter: Self::SstableIteratorType);
     fn add_concat_sst_iter(
         &mut self,
-        tables: Vec<SstableInfo>,
+        sstable_table_infos: Vec<SstableInfo>,
         sstable_store: SstableStoreRef,
         read_options: Arc<SstableIteratorReadOptions>,
     );

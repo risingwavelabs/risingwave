@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -166,7 +166,7 @@ impl<S: OpendalSinkBackend> TryFrom<SinkParam> for FileSink<S> {
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
         let schema = param.schema();
         let config = S::from_btreemap(param.properties)?;
-        let path = S::get_path(config.clone()).to_string();
+        let path = S::get_path(config.clone()).clone();
         let op = S::new_operator(config.clone())?;
         let batching_strategy = S::get_batching_strategy(config.clone());
         let engine_type = S::get_engine_type();
@@ -292,7 +292,7 @@ impl OpenDalSinkWriter {
             .as_ref()
             .unwrap_or(&PathPartitionPrefix::None);
         match path_partition_prefix {
-            PathPartitionPrefix::None => "".to_string(),
+            PathPartitionPrefix::None => "".to_owned(),
             PathPartitionPrefix::Day => datetime.format("%Y-%m-%d/").to_string(),
             PathPartitionPrefix::Month => datetime.format("/%Y-%m/").to_string(),
             PathPartitionPrefix::Hour => datetime.format("/%Y-%m-%d %H:00/").to_string(),
@@ -311,7 +311,7 @@ impl OpenDalSinkWriter {
         match self
             .sink_writer
             .as_mut()
-            .ok_or_else(|| SinkError::File("Sink writer is not created.".to_string()))?
+            .ok_or_else(|| SinkError::File("Sink writer is not created.".to_owned()))?
         {
             FileWriterEnum::ParquetFileWriter(w) => {
                 let batch =
@@ -366,7 +366,7 @@ impl OpenDalSinkWriter {
         );
         Ok(Self {
             schema: Arc::new(arrow_schema),
-            write_path: write_path.to_string(),
+            write_path: write_path.to_owned(),
             operator,
             sink_writer: None,
             executor_id,
@@ -402,8 +402,8 @@ impl OpenDalSinkWriter {
         // When the `write_path` is not specified, the data will be written to the root of the specified bucket.
         let object_name = {
             let base_path = match self.engine_type {
-                EngineType::Fs => "".to_string(),
-                EngineType::Snowflake if self.write_path.is_empty() => "".to_string(),
+                EngineType::Fs => "".to_owned(),
+                EngineType::Snowflake if self.write_path.is_empty() => "".to_owned(),
                 _ => format!("{}/", self.write_path),
             };
 

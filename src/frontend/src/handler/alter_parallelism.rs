@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -37,11 +37,11 @@ pub async fn handle_alter_parallelism(
     deferred: bool,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
-    let db_name = session.database();
+    let db_name = &session.database();
     let (schema_name, real_table_name) =
         Binder::resolve_schema_qualified_name(db_name, obj_name.clone())?;
     let search_path = session.config().search_path();
-    let user_name = &session.auth_context().user_name;
+    let user_name = &session.user_name();
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
     let table_id = {
@@ -57,9 +57,7 @@ pub async fn handle_alter_parallelism(
                 match (table.table_type(), stmt_type) {
                     (TableType::Internal, _) => {
                         // we treat internal table as NOT FOUND
-                        return Err(
-                            CatalogError::NotFound("table", table.name().to_string()).into()
-                        );
+                        return Err(CatalogError::NotFound("table", table.name().to_owned()).into());
                     }
                     (TableType::Table, StatementType::ALTER_TABLE)
                     | (TableType::MaterializedView, StatementType::ALTER_MATERIALIZED_VIEW)
@@ -103,7 +101,7 @@ pub async fn handle_alter_parallelism(
         .await?;
 
     if deferred {
-        builder = builder.notice("DEFERRED is used, please ensure that automatic parallelism control is enabled on the meta, otherwise, the alter will not take effect.".to_string());
+        builder = builder.notice("DEFERRED is used, please ensure that automatic parallelism control is enabled on the meta, otherwise, the alter will not take effect.".to_owned());
     }
 
     Ok(builder.into())
@@ -146,7 +144,7 @@ fn extract_table_parallelism(parallelism: SetVariableValue) -> Result<TableParal
 
         _ => {
             return Err(ErrorCode::InvalidInputSyntax(
-                "target parallelism must be a valid number or adaptive".to_string(),
+                "target parallelism must be a valid number or adaptive".to_owned(),
             )
             .into());
         }

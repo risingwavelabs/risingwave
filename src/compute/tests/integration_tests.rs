@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,7 +23,7 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use maplit::{btreemap, convert_args};
 use risingwave_batch::error::BatchError;
-use risingwave_batch::executor::{
+use risingwave_batch_executors::{
     BoxedDataChunkStream, BoxedExecutor, DeleteExecutor, Executor as BatchExecutor, InsertExecutor,
     RowSeqScanExecutor, ScanRange,
 };
@@ -39,6 +39,7 @@ use risingwave_common::types::{DataType, IntoOrdered};
 use risingwave_common::util::epoch::{test_epoch, EpochExt, EpochPair};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
+use risingwave_common_rate_limit::RateLimit;
 use risingwave_connector::source::reader::desc::test_utils::create_source_desc_builder;
 use risingwave_dml::dml_manager::DmlManager;
 use risingwave_hummock_sdk::test_batch_query_epoch;
@@ -70,7 +71,7 @@ impl SingleChunkExecutor {
         Self {
             chunk: Some(chunk),
             schema,
-            identity: "SingleChunkExecutor".to_string(),
+            identity: "SingleChunkExecutor".to_owned(),
         }
     }
 }
@@ -187,12 +188,14 @@ async fn test_table_materialize() -> StreamResult<()> {
             identity: format!("DmlExecutor {:X}", 2),
         },
         DmlExecutor::new(
+            ActorContext::for_test(0),
             source_executor,
             dml_manager.clone(),
             table_id,
             INITIAL_TABLE_VERSION_ID,
             column_descs.clone(),
             1024,
+            RateLimit::Disabled,
         )
         .boxed(),
     );
@@ -240,7 +243,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         dml_manager.clone(),
         insert_inner,
         1024,
-        "InsertExecutor".to_string(),
+        "InsertExecutor".to_owned(),
         vec![0], // ignore insertion order
         vec![],
         Some(row_id_index),
@@ -265,7 +268,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         true,
         test_batch_query_epoch(),
         1024,
-        "RowSeqExecutor2".to_string(),
+        "RowSeqExecutor2".to_owned(),
         None,
         None,
         None,
@@ -336,7 +339,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         true,
         test_batch_query_epoch(),
         1024,
-        "RowSeqScanExecutor2".to_string(),
+        "RowSeqScanExecutor2".to_owned(),
         None,
         None,
         None,
@@ -367,7 +370,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         dml_manager.clone(),
         delete_inner,
         1024,
-        "DeleteExecutor".to_string(),
+        "DeleteExecutor".to_owned(),
         false,
         0,
     ));
@@ -416,7 +419,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         true,
         test_batch_query_epoch(),
         1024,
-        "RowSeqScanExecutor2".to_string(),
+        "RowSeqScanExecutor2".to_owned(),
         None,
         None,
         None,
@@ -492,7 +495,7 @@ async fn test_row_seq_scan() -> StreamResult<()> {
         true,
         test_batch_query_epoch(),
         1,
-        "RowSeqScanExecutor2".to_string(),
+        "RowSeqScanExecutor2".to_owned(),
         None,
         None,
         None,

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -36,7 +36,7 @@ impl UseExpander {
             let v = v
                 .as_hash()
                 .ok_or_else(|| anyhow!("expect value to be a hashmap"))?;
-            template.insert(k.to_string(), v.clone());
+            template.insert(k.to_owned(), v.clone());
         }
         Ok(Self { template })
     }

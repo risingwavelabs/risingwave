@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -105,7 +105,7 @@ pub fn get_indexes_from_table(
 fn schema_or_default(schema: &Option<Ident>) -> String {
     schema
         .as_ref()
-        .map_or_else(|| DEFAULT_SCHEMA_NAME.to_string(), |s| s.real_value())
+        .map_or_else(|| DEFAULT_SCHEMA_NAME.to_owned(), |s| s.real_value())
 }
 
 fn schema_or_search_path(
@@ -121,7 +121,7 @@ fn schema_or_search_path(
             .iter()
             .map(|s| {
                 if s.eq(USER_NAME_WILD_CARD) {
-                    session.auth_context().user_name.clone()
+                    session.user_name()
                 } else {
                     s.to_string()
                 }
@@ -216,7 +216,7 @@ struct ShowClusterRow {
     addr: String,
     r#type: String,
     state: String,
-    parallelism: i32,
+    parallelism: Option<i32>,
     is_streaming: Option<bool>,
     is_serving: Option<bool>,
     is_unschedulable: Option<bool>,
@@ -315,7 +315,7 @@ pub async fn handle_show_object(
                 // If the schema is not found, skip it
                 if let Ok(schema_catalog) = catalog_reader
                     .read_guard()
-                    .get_schema_by_name(session.database(), schema.as_ref())
+                    .get_schema_by_name(&session.database(), schema.as_ref())
                 {
                     table_names_in_schema
                         .extend(schema_catalog.iter_user_table().map(|t| t.name.clone()));
@@ -326,43 +326,43 @@ pub async fn handle_show_object(
         }
         ShowObject::InternalTable { schema } => catalog_reader
             .read_guard()
-            .get_schema_by_name(session.database(), &schema_or_default(&schema))?
+            .get_schema_by_name(&session.database(), &schema_or_default(&schema))?
             .iter_internal_table()
             .map(|t| t.name.clone())
             .collect(),
         ShowObject::Database => catalog_reader.read_guard().get_all_database_names(),
         ShowObject::Schema => catalog_reader
             .read_guard()
-            .get_all_schema_names(session.database())?,
+            .get_all_schema_names(&session.database())?,
         ShowObject::View { schema } => catalog_reader
             .read_guard()
-            .get_schema_by_name(session.database(), &schema_or_default(&schema))?
+            .get_schema_by_name(&session.database(), &schema_or_default(&schema))?
             .iter_view()
             .map(|t| t.name.clone())
             .collect(),
         ShowObject::MaterializedView { schema } => catalog_reader
             .read_guard()
-            .get_schema_by_name(session.database(), &schema_or_default(&schema))?
+            .get_schema_by_name(&session.database(), &schema_or_default(&schema))?
             .iter_created_mvs()
             .map(|t| t.name.clone())
             .collect(),
         ShowObject::Source { schema } => catalog_reader
             .read_guard()
-            .get_schema_by_name(session.database(), &schema_or_default(&schema))?
+            .get_schema_by_name(&session.database(), &schema_or_default(&schema))?
             .iter_source()
             .map(|t| t.name.clone())
             .chain(session.temporary_source_manager().keys())
             .collect(),
         ShowObject::Sink { schema } => catalog_reader
             .read_guard()
-            .get_schema_by_name(session.database(), &schema_or_default(&schema))?
+            .get_schema_by_name(&session.database(), &schema_or_default(&schema))?
             .iter_sink()
             .map(|t| t.name.clone())
             .collect(),
         ShowObject::Subscription { schema } => {
             let rows = catalog_reader
                 .read_guard()
-                .get_schema_by_name(session.database(), &schema_or_default(&schema))?
+                .get_schema_by_name(&session.database(), &schema_or_default(&schema))?
                 .iter_subscription()
                 .map(|t| ShowSubscriptionRow {
                     name: t.name.clone(),
@@ -375,7 +375,7 @@ pub async fn handle_show_object(
         }
         ShowObject::Secret { schema } => catalog_reader
             .read_guard()
-            .get_schema_by_name(session.database(), &schema_or_default(&schema))?
+            .get_schema_by_name(&session.database(), &schema_or_default(&schema))?
             .iter_secret()
             .map(|t| t.name.clone())
             .collect(),
@@ -405,17 +405,17 @@ pub async fn handle_show_object(
         ShowObject::Connection { schema } => {
             let reader = catalog_reader.read_guard();
             let schema =
-                reader.get_schema_by_name(session.database(), &schema_or_default(&schema))?;
+                reader.get_schema_by_name(&session.database(), &schema_or_default(&schema))?;
             let rows = schema
                 .iter_connections()
                 .map(|c| {
                     let name = c.name.clone();
                     let r#type = match &c.info {
                         connection::Info::PrivateLinkService(_) => {
-                            PRIVATELINK_CONNECTION.to_string()
+                            PRIVATELINK_CONNECTION.to_owned()
                         },
                         connection::Info::ConnectionParams(params) => {
-                            params.get_connection_type().unwrap().as_str_name().to_string()
+                            params.get_connection_type().unwrap().as_str_name().to_owned()
                         }
                     };
                     let source_names = schema
@@ -460,7 +460,7 @@ pub async fn handle_show_object(
         ShowObject::Function { schema } => {
             let reader = catalog_reader.read_guard();
             let rows = reader
-                .get_schema_by_name(session.database(), &schema_or_default(&schema))?
+                .get_schema_by_name(&session.database(), &schema_or_default(&schema))?
                 .iter_function()
                 .map(|t| ShowFunctionRow {
                     name: t.name.clone(),
@@ -482,8 +482,8 @@ pub async fn handle_show_object(
                     id: worker.id as _,
                     addr: addr.to_string(),
                     r#type: worker.get_type().unwrap().as_str_name().into(),
-                    state: worker.get_state().unwrap().as_str_name().to_string(),
-                    parallelism: worker.parallelism() as _,
+                    state: worker.get_state().unwrap().as_str_name().to_owned(),
+                    parallelism: worker.parallelism().map(|parallelism| parallelism as i32),
                     is_streaming: property.map(|p| p.is_streaming),
                     is_serving: property.map(|p| p.is_serving),
                     is_unschedulable: property.map(|p| p.is_unschedulable),
@@ -513,9 +513,9 @@ pub async fn handle_show_object(
                 ShowProcessListRow {
                     // Since process id and the secret id in the session id are the same in RisingWave, just display the process id.
                     id: format!("{}", s.id().0),
-                    user: s.user_name().to_owned(),
+                    user: s.user_name(),
                     host: format!("{}", s.peer_addr()),
-                    database: s.database().to_owned(),
+                    database: s.database(),
                     time: s
                         .elapse_since_running_sql()
                         .map(|mills| format!("{}ms", mills)),
@@ -540,9 +540,9 @@ pub async fn handle_show_object(
             let mut rows = vec![];
             for s in sessions {
                 let session_id = format!("{}", s.id().0);
-                let user = s.user_name().to_owned();
+                let user = s.user_name();
                 let host = format!("{}", s.peer_addr());
-                let database = s.database().to_owned();
+                let database = s.database();
 
                 s.get_cursor_manager()
                     .iter_query_cursors(|cursor_name: &String, _| {
@@ -570,8 +570,8 @@ pub async fn handle_show_object(
                 .collect_vec();
             let mut rows = vec![];
             for s in sessions {
-                let ssession_id = format!("{}", s.id().0);
-                let user = s.user_name().to_owned();
+                let session_id = format!("{}", s.id().0);
+                let user = s.user_name();
                 let host = format!("{}", s.peer_addr());
                 let database = s.database().to_owned();
 
@@ -579,7 +579,7 @@ pub async fn handle_show_object(
                     .iter_subscription_cursors(
                         |cursor_name: &String, cursor: &SubscriptionCursor| {
                             rows.push(ShowSubscriptionCursorRow {
-                                session_id: ssession_id.clone(),
+                                session_id: session_id.clone(),
                                 user: user.clone(),
                                 host: host.clone(),
                                 database: database.clone(),
@@ -625,10 +625,11 @@ pub fn handle_show_create_object(
 ) -> Result<RwPgResponse> {
     let session = handle_args.session;
     let catalog_reader = session.env().catalog_reader().read_guard();
+    let database = session.database();
     let (schema_name, object_name) =
-        Binder::resolve_schema_qualified_name(session.database(), name.clone())?;
-    let schema_name = schema_name.unwrap_or(DEFAULT_SCHEMA_NAME.to_string());
-    let schema = catalog_reader.get_schema_by_name(session.database(), &schema_name)?;
+        Binder::resolve_schema_qualified_name(&database, name.clone())?;
+    let schema_name = schema_name.unwrap_or(DEFAULT_SCHEMA_NAME.to_owned());
+    let schema = catalog_reader.get_schema_by_name(&database, &schema_name)?;
     let sql = match show_create_type {
         ShowCreateType::MaterializedView => {
             let mv = schema
@@ -648,7 +649,7 @@ pub fn handle_show_create_object(
                 .get_created_table_by_name(&object_name)
                 .filter(|t| t.is_user_table())
                 .ok_or_else(|| CatalogError::NotFound("table", name.to_string()))?;
-            table.create_sql()
+            table.create_sql_purified()
         }
         ShowCreateType::Sink => {
             let sink = schema
@@ -661,7 +662,7 @@ pub fn handle_show_create_object(
                 .get_source_by_name(&object_name)
                 .filter(|s| s.associated_table_id.is_none())
                 .ok_or_else(|| CatalogError::NotFound("source", name.to_string()))?;
-            source.create_sql()
+            source.create_sql_purified()
         }
         ShowCreateType::Index => {
             let index = schema
@@ -709,7 +710,7 @@ mod tests {
 
         let mut rows = frontend.query_formatted_result("SHOW SOURCES").await;
         rows.sort();
-        assert_eq!(rows, vec!["Row([Some(b\"t1\")])".to_string(),]);
+        assert_eq!(rows, vec!["Row([Some(b\"t1\")])".to_owned(),]);
     }
 
     #[tokio::test]
@@ -735,10 +736,10 @@ mod tests {
                 columns.push((
                     std::str::from_utf8(row.index(0).as_ref().unwrap())
                         .unwrap()
-                        .to_string(),
+                        .to_owned(),
                     std::str::from_utf8(row.index(1).as_ref().unwrap())
                         .unwrap()
-                        .to_string(),
+                        .to_owned(),
                 ));
             }
         }

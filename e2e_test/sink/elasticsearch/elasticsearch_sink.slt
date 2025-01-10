@@ -22,6 +22,7 @@ CREATE TABLE test_route (
 
 statement ok
 CREATE SINK test_route_sink from test_route WITH (
+    type = 'upsert',
     connector = 'elasticsearch',
     index = 'test_route',
     url = 'http://elasticsearch:9200',
@@ -32,6 +33,7 @@ CREATE SINK test_route_sink from test_route WITH (
 
 statement ok
 CREATE SINK s7 from t7 WITH (
+    type = 'upsert',
     connector = 'elasticsearch',
     index = 'test',
     url = 'http://elasticsearch:9200',
@@ -41,6 +43,7 @@ CREATE SINK s7 from t7 WITH (
 
 statement ok
 CREATE SINK s8 from t7 WITH (
+    type = 'upsert',
     connector = 'elasticsearch',
     index = 'test1',
     primary_key = 'v1,v3',

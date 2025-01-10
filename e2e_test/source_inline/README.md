@@ -13,7 +13,7 @@ Other tests can be run in parallel.
 
 ```bash
 # run all parallel tests
-risedev slt './e2e_test/source_inline/**/*.slt' -j16
+risedev slt './e2e_test/source_inline/**/*.slt' --keep-db-on-failure -j16
 # run all serial tests
 risedev slt './e2e_test/source_inline/**/*.slt.serial'
 ```
@@ -24,3 +24,13 @@ Some additional tools are needed to run the `system` commands in tests.
 
 - `rpk`: Redpanda (Kafka) CLI toolbox. https://docs.redpanda.com/current/get-started/rpk-install/
 - `zx`: A tool for writing better scripts. `npm install -g zx`
+
+### Python Dependencies
+
+There are also some `system` commands calling scripts written in Python.
+
+You have two options:
+
+1. **Recommended**: Install the package manager `uv`, which will automatically manage the dependencies for you, requiring no further action.
+
+2. Manually install the dependencies listed in `e2e_test/requirements.txt` in your system Python environment or a virtual environment.

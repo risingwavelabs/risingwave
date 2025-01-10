@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,7 +22,7 @@ use itertools::Itertools;
 pub fn get_program_name(cmd: &Command) -> String {
     let program_path = cmd.get_program().to_string_lossy();
     match program_path.rsplit_once('/') {
-        Some((_, rest)) => rest.to_string(),
+        Some((_, rest)) => rest.to_owned(),
         None => program_path.to_string(),
     }
 }

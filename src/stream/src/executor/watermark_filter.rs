@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -488,7 +488,7 @@ mod tests {
         let info = ExecutorInfo {
             schema: source.schema().clone(),
             pk_indices: source.pk_indices().to_vec(),
-            identity: "WatermarkFilterExecutor".to_string(),
+            identity: "WatermarkFilterExecutor".to_owned(),
         };
         let eval_error_report = ActorEvalErrorReport {
             actor_context: ctx.clone(),

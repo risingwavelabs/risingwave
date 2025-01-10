@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -309,7 +309,7 @@ pub static CAST_TABLE: LazyLock<CastTable> = LazyLock::new(|| {
         (". e            a ", Boolean),     // 0
         (" .iiiiii       a ", Int16),       // 1
         ("ea.iiiii       a ", Int32),       // 2
-        (" aa.iiii       a ", Int64),       // 3
+        (" aa.iiii       ae", Int64),       // 3
         (" aaa.ii        a ", Decimal),     // 4
         (" aaaa.i        a ", Float32),     // 5
         (" aaaaa.        a ", Float64),     // 6

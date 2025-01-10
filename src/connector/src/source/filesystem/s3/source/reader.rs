@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,17 +30,17 @@ use tokio::io::BufReader;
 use tokio_util::io;
 use tokio_util::io::ReaderStream;
 
+use super::split_stream::split_stream;
 use crate::aws_utils::{default_conn_config, s3_client};
 use crate::connector_common::AwsAuthProps;
 use crate::error::ConnectorResult;
 use crate::parser::ParserConfig;
 use crate::source::base::{SplitMetaData, SplitReader};
 use crate::source::filesystem::file_common::FsSplit;
-use crate::source::filesystem::nd_streaming;
 use crate::source::filesystem::nd_streaming::need_nd_streaming;
 use crate::source::filesystem::s3::S3Properties;
 use crate::source::{
-    into_chunk_stream, BoxChunkSourceStream, Column, SourceContextRef, SourceMessage, SourceMeta,
+    into_chunk_stream, BoxSourceChunkStream, Column, SourceContextRef, SourceMessage, SourceMeta,
 };
 
 const STREAM_READER_CAPACITY: usize = 4096;
@@ -67,7 +67,7 @@ impl S3FileReader {
         let actor_id = source_ctx.actor_id.to_string();
         let fragment_id = source_ctx.fragment_id.to_string();
         let source_id = source_ctx.source_id.to_string();
-        let source_name = source_ctx.source_name.to_string();
+        let source_name = source_ctx.source_name.clone();
         let max_chunk_size = source_ctx.source_ctrl_opts.chunk_size;
         let split_id = split.id();
 
@@ -201,7 +201,7 @@ impl SplitReader for S3FileReader {
         Ok(s3_file_reader)
     }
 
-    fn into_stream(self) -> BoxChunkSourceStream {
+    fn into_stream(self) -> BoxSourceChunkStream {
         self.into_stream_inner()
     }
 }
@@ -217,7 +217,7 @@ impl S3FileReader {
                 self.source_ctx.clone(),
             );
             let data_stream = if need_nd_streaming(&self.parser_config.specific.encoding_config) {
-                nd_streaming::split_stream(data_stream)
+                split_stream(data_stream)
             } else {
                 data_stream
             };

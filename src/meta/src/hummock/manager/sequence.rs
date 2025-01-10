@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -56,7 +56,7 @@ impl SequenceGenerator {
         let guard = self.db.lock().await;
         let txn = guard.begin().await?;
         let model: Option<hummock_sequence::Model> =
-            hummock_sequence::Entity::find_by_id(ident.to_string())
+            hummock_sequence::Entity::find_by_id(ident.to_owned())
                 .one(&txn)
                 .await?;
         let start_seq = match model {

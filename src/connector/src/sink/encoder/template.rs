@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -47,7 +47,7 @@ impl TemplateEncoder {
         let re = Regex::new(r"\{([^}]*)\}").unwrap();
         if !re.is_match(format) {
             return Err(SinkError::Redis(
-                "Can't find {} in key_format or value_format".to_string(),
+                "Can't find {} in key_format or value_format".to_owned(),
             ));
         }
         for capture in re.captures_iter(format) {
@@ -80,7 +80,7 @@ impl RowEncoder for TemplateEncoder {
         row: impl Row,
         col_indices: impl Iterator<Item = usize>,
     ) -> Result<Self::Output> {
-        let mut s = self.template.to_string();
+        let mut s = self.template.clone();
 
         for idx in col_indices {
             let field = &self.schema[idx];

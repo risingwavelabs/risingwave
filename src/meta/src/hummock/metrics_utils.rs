@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -169,13 +169,13 @@ pub fn trigger_sst_stat(
             .with_label_values(&[&level_label])
             .set(level_sst_size(idx) as i64);
         if let Some(compact_status) = compact_status {
-            let compact_cnt = compact_status.level_handlers[idx].get_pending_file_count();
+            let compact_cnt = compact_status.level_handlers[idx].pending_file_count();
             metrics
                 .level_compact_cnt
                 .with_label_values(&[&level_label])
                 .set(compact_cnt as i64);
 
-            let compacting_task = compact_status.level_handlers[idx].get_pending_tasks();
+            let compacting_task = compact_status.level_handlers[idx].pending_tasks();
             let mut pending_task_ids: HashSet<u64> = HashSet::default();
             for task in compacting_task {
                 if pending_task_ids.contains(&task.task_id) {
@@ -298,7 +298,7 @@ pub fn trigger_sst_stat(
             for (idx, level_handler) in enumerate(compact_status.level_handlers.iter()) {
                 let sst_num = level_sst_cnt(idx);
                 let sst_size = level_sst_size(idx);
-                let compact_cnt = level_handler.get_pending_file_count();
+                let compact_cnt = level_handler.pending_file_count();
                 tracing::info!(
                     "Level {} has {} SSTs, the total size of which is {}KB, while {} of those are being compacted to bottom levels",
                     idx,
@@ -309,6 +309,27 @@ pub fn trigger_sst_stat(
             }
         }
     }
+}
+
+pub fn trigger_epoch_stat(metrics: &MetaMetrics, version: &HummockVersion) {
+    metrics.max_committed_epoch.set(
+        version
+            .state_table_info
+            .info()
+            .values()
+            .map(|i| i.committed_epoch)
+            .max()
+            .unwrap_or(0) as _,
+    );
+    metrics.min_committed_epoch.set(
+        version
+            .state_table_info
+            .info()
+            .values()
+            .map(|i| i.committed_epoch)
+            .min()
+            .unwrap_or(0) as _,
+    );
 }
 
 pub fn remove_compaction_group_in_sst_stat(

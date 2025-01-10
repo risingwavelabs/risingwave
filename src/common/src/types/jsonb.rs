@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ use bytes::{Buf, BufMut, BytesMut};
 use jsonbb::{Value, ValueRef};
 use postgres_types::{accepts, to_sql_checked, FromSql, IsNull, ToSql, Type};
 use risingwave_common_estimate_size::EstimateSize;
+use thiserror_ext::AsReport;
 
 use super::{
     Datum, IntoOrdered, ListValue, MapType, MapValue, ScalarImpl, StructRef, ToOwnedDatum, F64,
@@ -408,37 +409,19 @@ impl<'a> JsonbRef<'a> {
 
     /// Convert the jsonb value to a datum.
     pub fn to_datum(self, ty: &DataType) -> Result<Datum, String> {
-        if !matches!(
-            ty,
-            DataType::Jsonb
-                | DataType::Boolean
-                | DataType::Int16
-                | DataType::Int32
-                | DataType::Int64
-                | DataType::Float32
-                | DataType::Float64
-                | DataType::Varchar
-                | DataType::List(_)
-                | DataType::Struct(_)
-        ) {
-            return Err(format!("cannot cast jsonb to {ty}"));
-        }
         if self.0.as_null().is_some() {
             return Ok(None);
         }
-        Ok(Some(match ty {
+        let datum = match ty {
             DataType::Jsonb => ScalarImpl::Jsonb(self.into()),
-            DataType::Boolean => ScalarImpl::Bool(self.as_bool()?),
-            DataType::Int16 => ScalarImpl::Int16(self.as_number()?.try_into()?),
-            DataType::Int32 => ScalarImpl::Int32(self.as_number()?.try_into()?),
-            DataType::Int64 => ScalarImpl::Int64(self.as_number()?.try_into()?),
-            DataType::Float32 => ScalarImpl::Float32(self.as_number()?.try_into()?),
-            DataType::Float64 => ScalarImpl::Float64(self.as_number()?),
-            DataType::Varchar => ScalarImpl::Utf8(self.force_string().into()),
             DataType::List(t) => ScalarImpl::List(self.to_list(t)?),
             DataType::Struct(s) => ScalarImpl::Struct(self.to_struct(s)?),
-            _ => unreachable!(),
-        }))
+            _ => {
+                let s = self.force_string();
+                ScalarImpl::from_text(&s, ty).map_err(|e| format!("{}", e.as_report()))?
+            }
+        };
+        Ok(Some(datum))
     }
 
     /// Convert the jsonb value to a list value.
@@ -479,7 +462,7 @@ impl<'a> JsonbRef<'a> {
             .as_object()
             .ok_or_else(|| format!("cannot convert to map from a jsonb {}", self.type_name()))?;
         if !matches!(ty.key(), DataType::Varchar) {
-            return Err("cannot convert jsonb to a map with non-string keys".to_string());
+            return Err("cannot convert jsonb to a map with non-string keys".to_owned());
         }
 
         let mut keys: Vec<Datum> = Vec::with_capacity(object.len());

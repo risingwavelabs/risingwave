@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -41,7 +41,7 @@ use crate::hummock::manager::transaction::{
 };
 use crate::hummock::manager::versioning::Versioning;
 use crate::hummock::metrics_utils::{
-    get_or_create_local_table_stat, trigger_local_table_stat, trigger_sst_stat,
+    get_or_create_local_table_stat, trigger_epoch_stat, trigger_local_table_stat, trigger_sst_stat,
 };
 use crate::hummock::model::CompactionGroup;
 use crate::hummock::sequence::{next_compaction_group_id, next_sstable_object_id};
@@ -247,12 +247,6 @@ impl HummockManager {
                 .time_travel_snapshot_interval_counter
                 .saturating_add(1);
         }
-        let group_parents = version
-            .latest_version()
-            .levels
-            .values()
-            .map(|g| (g.group_id, g.parent_group_id))
-            .collect();
         let time_travel_tables_to_commit =
             table_compaction_group_mapping
                 .iter()
@@ -261,13 +255,22 @@ impl HummockManager {
                         .get(table_id)
                         .map(|committed_epoch| (table_id, cg_id, *committed_epoch))
                 });
+        let time_travel_table_ids: HashSet<_> = self
+            .metadata_manager
+            .catalog_controller
+            .list_time_travel_table_ids()
+            .await
+            .map_err(|e| Error::Internal(e.into()))?
+            .into_iter()
+            .map(|id| id.try_into().unwrap())
+            .collect();
         let mut txn = self.env.meta_store_ref().conn.begin().await?;
         let version_snapshot_sst_ids = self
             .write_time_travel_metadata(
                 &txn,
                 time_travel_version,
                 time_travel_delta,
-                &group_parents,
+                time_travel_table_ids,
                 &versioning.last_time_travel_snapshot_sst_ids,
                 time_travel_tables_to_commit,
             )
@@ -290,6 +293,7 @@ impl HummockManager {
                 *compaction_group_id,
             );
         }
+        trigger_epoch_stat(&self.metrics, &versioning.current_version);
 
         drop(versioning_guard);
 
@@ -378,7 +382,13 @@ impl HummockManager {
             for (index, (group_id, match_ids)) in group_table_ids.into_iter().enumerate() {
                 if sst.sst_info.table_ids == match_ids {
                     // The SST contains all the tables in the group should be last key
-                    assert!(index == len - 1);
+                    assert!(
+                        index == len - 1,
+                        "SST should be the last key in the group {} index {} len {}",
+                        group_id,
+                        index,
+                        len
+                    );
                     commit_sstables
                         .entry(group_id)
                         .or_default()
@@ -395,7 +405,6 @@ impl HummockManager {
                     })
                     .sum();
 
-                // TODO(li0k): replace with `split_sst`
                 let (modified_sst_info, branch_sst) = split_sst_with_table_ids(
                     &sst.sst_info,
                     &mut new_sst_id,

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -857,7 +857,7 @@ mod tests {
         let mut min_value = i32::MAX;
 
         {
-            let mut pretty_lines = vec!["i I".to_string()];
+            let mut pretty_lines = vec!["i I".to_owned()];
             for (row_id, value) in insert_values
                 .iter()
                 .enumerate()
@@ -886,7 +886,7 @@ mod tests {
         }
 
         {
-            let mut pretty_lines = vec!["i I".to_string()];
+            let mut pretty_lines = vec!["i I".to_owned()];
             for (row_id, value) in insert_values
                 .iter()
                 .enumerate()

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,6 +25,7 @@ pub mod mqtt;
 pub mod nats;
 pub mod nexmark;
 pub mod pulsar;
+mod util;
 
 use std::future::IntoFuture;
 
@@ -47,6 +48,7 @@ use async_nats::jetstream::context::Context as JetStreamContext;
 pub use manager::{SourceColumnDesc, SourceColumnType};
 use risingwave_common::array::{Array, ArrayRef};
 use thiserror_ext::AsReport;
+pub use util::fill_adaptive_split;
 
 pub use crate::source::filesystem::opendal_source::{
     AZBLOB_CONNECTOR, GCS_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR,
@@ -120,7 +122,7 @@ impl WaitCheckpointTask {
                 let mut ack_ids: Vec<String> = vec![];
                 for arr in ack_id_arrs {
                     for ack_id in arr.as_utf8().iter().flatten() {
-                        ack_ids.push(ack_id.to_string());
+                        ack_ids.push(ack_id.to_owned());
                         if ack_ids.len() >= MAX_ACK_BATCH_SIZE {
                             ack(&subscription, std::mem::take(&mut ack_ids)).await;
                         }
@@ -152,7 +154,7 @@ impl WaitCheckpointTask {
                         arr.as_utf8()
                             .iter()
                             .flatten()
-                            .map(|s| s.to_string())
+                            .map(|s| s.to_owned())
                             .collect::<Vec<String>>()
                     })
                     .collect::<Vec<String>>();

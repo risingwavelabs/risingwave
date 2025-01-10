@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -317,7 +317,7 @@ impl Decode for TracedSubResp {
     ) -> Result<Self, bincode::error::DecodeError> {
         let buf: Vec<u8> = Decode::decode(decoder)?;
         let resp = Message::decode(&buf[..]).map_err(|_| {
-            DecodeError::OtherString("failed to decode subscribeResponse".to_string())
+            DecodeError::OtherString("failed to decode subscribeResponse".to_owned())
         })?;
         Ok(Self(resp))
     }
@@ -329,7 +329,7 @@ impl<'de> bincode::BorrowDecode<'de> for TracedSubResp {
     ) -> core::result::Result<Self, bincode::error::DecodeError> {
         let buf: Vec<u8> = Decode::decode(decoder)?;
         let resp = Message::decode(&buf[..]).map_err(|_| {
-            DecodeError::OtherString("failed to decode subscribeResponse".to_string())
+            DecodeError::OtherString("failed to decode subscribeResponse".to_owned())
         })?;
         Ok(Self(resp))
     }

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -71,7 +71,6 @@ pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
 
     async fn reload_runtime_info(&self) -> MetaResult<BarrierWorkerRuntimeInfoSnapshot>;
 
-    #[expect(dead_code)]
     async fn reload_database_runtime_info(
         &self,
         database_id: DatabaseId,

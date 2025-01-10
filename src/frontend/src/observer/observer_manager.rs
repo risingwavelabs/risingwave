@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -101,7 +101,7 @@ impl ObserverState for FrontendObserverNode {
             Info::SessionParam(p) => {
                 self.session_params
                     .write()
-                    .set(&p.param, p.value().to_string(), &mut ())
+                    .set(&p.param, p.value().to_owned(), &mut ())
                     .unwrap();
             }
             Info::HummockStats(stats) => {

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 
+use either::Either;
 use fancy_regex::Regex;
 use risingwave_common::catalog::FunctionId;
 use risingwave_common::types::{DataType, StructType};
@@ -23,7 +24,6 @@ use risingwave_sqlparser::parser::{Parser, ParserError};
 
 use super::*;
 use crate::binder::UdfContext;
-use crate::catalog::CatalogError;
 use crate::expr::{Expr, ExprImpl, Literal};
 use crate::{bind_data_type, Binder};
 
@@ -122,6 +122,7 @@ pub async fn handle_create_sql_function(
     handler_args: HandlerArgs,
     or_replace: bool,
     temporary: bool,
+    if_not_exists: bool,
     name: ObjectName,
     args: Option<Vec<OperateFunctionArg>>,
     returns: Option<CreateFunctionReturns>,
@@ -135,12 +136,12 @@ pub async fn handle_create_sql_function(
         bail_not_implemented!("CREATE TEMPORARY FUNCTION");
     }
 
-    let language = "sql".to_string();
+    let language = "sql".to_owned();
 
     // Just a basic sanity check for `language`
     if !matches!(params.language, Some(lang) if lang.real_value().to_lowercase() == "sql") {
         return Err(ErrorCode::InvalidParameterValue(
-            "`language` for sql udf must be `sql`".to_string(),
+            "`language` for sql udf must be `sql`".to_owned(),
         )
         .into());
     }
@@ -151,12 +152,12 @@ pub async fn handle_create_sql_function(
         Some(FunctionDefinition::SingleQuotedDef(s)) => s.clone(),
         Some(FunctionDefinition::DoubleDollarDef(s)) => s.clone(),
         Some(FunctionDefinition::Identifier(_)) => {
-            return Err(ErrorCode::InvalidParameterValue("expect quoted string".to_string()).into())
+            return Err(ErrorCode::InvalidParameterValue("expect quoted string".to_owned()).into())
         }
         None => {
             if params.return_.is_none() {
                 return Err(ErrorCode::InvalidParameterValue(
-                    "AS or RETURN must be specified".to_string(),
+                    "AS or RETURN must be specified".to_owned(),
                 )
                 .into());
             }
@@ -170,7 +171,7 @@ pub async fn handle_create_sql_function(
     // Sanity check for link, this must be none with sql udf function
     if let Some(CreateFunctionUsing::Link(_)) = params.using {
         return Err(ErrorCode::InvalidParameterValue(
-            "USING must NOT be specified with sql udf function".to_string(),
+            "USING must NOT be specified with sql udf function".to_owned(),
         )
         .into());
     };
@@ -198,7 +199,7 @@ pub async fn handle_create_sql_function(
         }
         None => {
             return Err(ErrorCode::InvalidParameterValue(
-                "return type must be specified".to_string(),
+                "return type must be specified".to_owned(),
             )
             .into())
         }
@@ -207,27 +208,25 @@ pub async fn handle_create_sql_function(
     let mut arg_names = vec![];
     let mut arg_types = vec![];
     for arg in args.unwrap_or_default() {
-        arg_names.push(arg.name.map_or("".to_string(), |n| n.real_value()));
+        arg_names.push(arg.name.map_or("".to_owned(), |n| n.real_value()));
         arg_types.push(bind_data_type(&arg.data_type)?);
     }
 
     // resolve database and schema id
     let session = &handler_args.session;
-    let db_name = session.database();
-    let (schema_name, function_name) = Binder::resolve_schema_qualified_name(db_name, name)?;
+    let db_name = &session.database();
+    let (schema_name, function_name) =
+        Binder::resolve_schema_qualified_name(db_name, name.clone())?;
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
 
     // check if function exists
-    if (session.env().catalog_reader().read_guard())
-        .get_schema_by_id(&database_id, &schema_id)?
-        .get_function_by_name_args(&function_name, &arg_types)
-        .is_some()
-    {
-        let name = format!(
-            "{function_name}({})",
-            arg_types.iter().map(|t| t.to_string()).join(",")
-        );
-        return Err(CatalogError::Duplicated("function", name).into());
+    if let Either::Right(resp) = session.check_function_name_duplicated(
+        StatementType::CREATE_FUNCTION,
+        name,
+        &arg_types,
+        if_not_exists,
+    )? {
+        return Ok(resp);
     }
 
     // Parse function body here
@@ -315,7 +314,7 @@ pub async fn handle_create_sql_function(
             return Err(ErrorCode::InvalidInputSyntax(
                 "failed to parse the input query and extract the udf expression,
                 please recheck the syntax"
-                    .to_string(),
+                    .to_owned(),
             )
             .into());
         }

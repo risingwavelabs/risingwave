@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -37,7 +37,7 @@ static EXTERNAL: UdfImplDescriptor = UdfImplDescriptor {
     },
     create_fn: |opts| {
         let link = opts.using_link.context("USING LINK must be specified")?;
-        let identifier = opts.as_.context("AS must be specified")?.to_string();
+        let identifier = opts.as_.context("AS must be specified")?.to_owned();
 
         // check UDF server
         let client = get_or_create_flight_client(link)?;
@@ -88,7 +88,7 @@ static EXTERNAL: UdfImplDescriptor = UdfImplDescriptor {
         let link = opts.link.context("link is required")?;
         let client = get_or_create_flight_client(link)?;
         Ok(Box::new(ExternalFunction {
-            identifier: opts.identifier.to_string(),
+            identifier: opts.identifier.to_owned(),
             client,
             disable_retry_count: AtomicU8::new(INITIAL_RETRY_COUNT),
             always_retry_on_network_error: opts.always_retry_on_network_error,

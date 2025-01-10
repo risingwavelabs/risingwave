@@ -8,5 +8,4 @@ set -euo pipefail
 
 # Example
 # remove-micro-bench-results.sh
-
-./qa ctl -I 52.207.243.214:8081 execution delete -i "$1"
+./qa ctl -I qa-infra.risingwave-cloud.xyz:8081 execution delete -i "$1"

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -79,7 +79,7 @@ impl Drop for HummockStorageShutdownGuard {
 }
 
 /// `HummockStorage` is the entry point of the Hummock state store backend.
-/// It implements the `StateStore` and `StateStoreRead` traits but not the `StateStoreWrite` trait
+/// It implements the `StateStore` and `StateStoreRead` traits but without any write method
 /// since all writes should be done via `LocalHummockStorage` to ensure the single writer property
 /// of hummock. `LocalHummockStorage` instance can be created via `new_local` call.
 /// Hummock is the state store backend.
@@ -589,7 +589,6 @@ impl HummockStorage {
 }
 
 impl StateStoreRead for HummockStorage {
-    type ChangeLogIter = ChangeLogIterator;
     type Iter = HummockStorageIterator;
     type RevIter = HummockStorageRevIterator;
 
@@ -635,6 +634,10 @@ impl StateStoreRead for HummockStorage {
         );
         self.rev_iter_inner(key_range, epoch, read_options)
     }
+}
+
+impl StateStoreReadLog for HummockStorage {
+    type ChangeLogIter = ChangeLogIterator;
 
     async fn iter_log(
         &self,

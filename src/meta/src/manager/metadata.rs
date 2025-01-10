@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@ use std::time::Duration;
 use anyhow::anyhow;
 use futures::future::{select, Either};
 use risingwave_common::catalog::{DatabaseId, TableId, TableOption};
-use risingwave_meta_model::{ObjectId, SourceId, WorkerId};
+use risingwave_meta_model::{ObjectId, SinkId, SourceId, WorkerId};
 use risingwave_pb::catalog::{PbSink, PbSource, PbTable};
 use risingwave_pb::common::worker_node::{PbResource, Property as AddNodeProperty, State};
 use risingwave_pb::common::{HostAddress, PbWorkerNode, PbWorkerType, WorkerNode, WorkerType};
@@ -409,24 +409,14 @@ impl MetadataManager {
     /// Get and filter the "**root**" fragments of the specified relations.
     /// The root fragment is the bottom-most fragment of its fragment graph, and can be a `MView` or a `Source`.
     ///
-    /// ## What can be the root fragment
-    /// - For MV, it should have one `MView` fragment.
-    /// - For table, it should have one `MView` fragment and one or two `Source` fragments. `MView` should be the root.
-    /// - For source, it should have one `Source` fragment.
-    ///
-    /// In other words, it's the `MView` fragment if it exists, otherwise it's the `Source` fragment.
-    ///
-    /// ## What do we expect to get for different creating streaming job
-    /// - MV/Sink/Index should have MV upstream fragments for upstream MV/Tables, and Source upstream fragments for upstream shared sources.
-    /// - CDC Table has a Source upstream fragment.
-    /// - Sources and other Tables shouldn't have an upstream fragment.
+    /// See also [`crate::controller::catalog::CatalogController::get_root_fragments`].
     pub async fn get_upstream_root_fragments(
         &self,
         upstream_table_ids: &HashSet<TableId>,
     ) -> MetaResult<(HashMap<TableId, Fragment>, HashMap<ActorId, WorkerId>)> {
         let (upstream_root_fragments, actors) = self
             .catalog_controller
-            .get_upstream_root_fragments(
+            .get_root_fragments(
                 upstream_table_ids
                     .iter()
                     .map(|id| id.table_id as _)
@@ -496,7 +486,7 @@ impl MetadataManager {
             .await
     }
 
-    pub async fn get_downstream_chain_fragments(
+    pub async fn get_downstream_fragments(
         &self,
         job_id: u32,
     ) -> MetaResult<(
@@ -505,7 +495,7 @@ impl MetadataManager {
     )> {
         let (fragments, actors) = self
             .catalog_controller
-            .get_downstream_chain_fragments(job_id as _)
+            .get_downstream_fragments(job_id as _)
             .await?;
 
         let actors = actors
@@ -658,6 +648,36 @@ impl MetadataManager {
         let fragment_actors = self
             .catalog_controller
             .update_backfill_rate_limit_by_job_id(table_id.table_id as _, rate_limit)
+            .await?;
+        Ok(fragment_actors
+            .into_iter()
+            .map(|(id, actors)| (id as _, actors.into_iter().map(|id| id as _).collect()))
+            .collect())
+    }
+
+    pub async fn update_sink_rate_limit_by_sink_id(
+        &self,
+        sink_id: SinkId,
+        rate_limit: Option<u32>,
+    ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
+        let fragment_actors = self
+            .catalog_controller
+            .update_sink_rate_limit_by_job_id(sink_id as _, rate_limit)
+            .await?;
+        Ok(fragment_actors
+            .into_iter()
+            .map(|(id, actors)| (id as _, actors.into_iter().map(|id| id as _).collect()))
+            .collect())
+    }
+
+    pub async fn update_dml_rate_limit_by_table_id(
+        &self,
+        table_id: TableId,
+        rate_limit: Option<u32>,
+    ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
+        let fragment_actors = self
+            .catalog_controller
+            .update_dml_rate_limit_by_job_id(table_id.table_id as _, rate_limit)
             .await?;
         Ok(fragment_actors
             .into_iter()

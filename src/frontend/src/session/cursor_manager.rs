@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -99,7 +99,7 @@ impl CursorDataChunkStream {
         match self {
             CursorDataChunkStream::PgResponse(row_stream) => Ok(row_stream.next().await),
             _ => Err(ErrorCode::InternalError(
-                "Only 'CursorDataChunkStream' can call next and return rows".to_string(),
+                "Only 'CursorDataChunkStream' can call next and return rows".to_owned(),
             )
             .into()),
         }
@@ -462,7 +462,7 @@ impl SubscriptionCursor {
                     // TODO: auto close invalid cursor?
                     return Err(ErrorCode::InternalError(
                         "Cursor is in invalid state. Please close and re-create the cursor."
-                            .to_string(),
+                            .to_owned(),
                     )
                     .into());
                 }
@@ -480,7 +480,7 @@ impl SubscriptionCursor {
         let timeout_instant = timeout_seconds.map(|s| Instant::now() + Duration::from_secs(s));
         if Instant::now() > self.cursor_need_drop_time {
             return Err(ErrorCode::InternalError(
-                "The cursor has exceeded its maximum lifetime, please recreate it (close then declare cursor).".to_string(),
+                "The cursor has exceeded its maximum lifetime, please recreate it (close then declare cursor).".to_owned(),
             )
             .into());
         }
@@ -610,7 +610,7 @@ impl SubscriptionCursor {
                 }
             }
             State::Invalid => Err(ErrorCode::InternalError(
-                "Cursor is in invalid state. Please close and re-create the cursor.".to_string(),
+                "Cursor is in invalid state. Please close and re-create the cursor.".to_owned(),
             )
             .into()),
         }
@@ -664,7 +664,7 @@ impl SubscriptionCursor {
                                 )
                             })?
                             .name()
-                            .to_string(),
+                            .to_owned(),
                     )
                 })
                 .collect::<Result<Vec<_>>>()?;
@@ -1031,7 +1031,7 @@ impl CursorManager {
         handler_args: HandlerArgs,
     ) -> Result<BatchQueryPlanResult> {
         let session = handler_args.session.clone();
-        let db_name = session.database();
+        let db_name = &session.database();
         let (_, cursor_name) = Binder::resolve_schema_qualified_name(db_name, cursor_name.clone())?;
         match self.cursor_map.lock().await.get(&cursor_name).ok_or_else(|| {
             ErrorCode::InternalError(format!("Cannot find cursor `{}`", cursor_name))
@@ -1039,7 +1039,7 @@ impl CursorManager {
             Cursor::Subscription(cursor) => {
                 cursor.gen_batch_plan_result(handler_args.clone())
             },
-            Cursor::Query(_) => Err(ErrorCode::InternalError("The plan of the cursor is the same as the query statement of the as when it was created.".to_string()).into()),
+            Cursor::Query(_) => Err(ErrorCode::InternalError("The plan of the cursor is the same as the query statement of the as when it was created.".to_owned()).into()),
         }
     }
 }

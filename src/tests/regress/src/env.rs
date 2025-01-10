@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -39,7 +39,7 @@ pub(crate) fn init_env() {
     // more painful because we must use PGOPTIONS, and we want to preserve the
     // user's ability to set other variables through that.
     {
-        let mut pg_opts = var(VAR_PG_OPTS).unwrap_or_else(|_| "".to_string());
+        let mut pg_opts = var(VAR_PG_OPTS).unwrap_or_else(|_| "".to_owned());
         pg_opts.push_str(" -c intervalstyle=postgres_verbose");
         set_var(VAR_PG_OPTS, pg_opts);
     }

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashSet};
 use std::fmt::{self, Debug};
 use std::ops::Bound;
@@ -22,7 +23,9 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{Schema, TableDesc};
 use risingwave_common::types::{DataType, DefaultOrd, ScalarImpl};
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::scan_range::{is_full_range, ScanRange};
+use risingwave_common::util::sort_util::{cmp_rows, OrderType};
 
 use crate::error::Result;
 use crate::expr::{
@@ -298,7 +301,7 @@ impl Condition {
         table_desc: Rc<TableDesc>,
         max_split_range_gap: u64,
         disjunctions: Vec<ExprImpl>,
-    ) -> Result<Option<(Vec<ScanRange>, Self)>> {
+    ) -> Result<Option<(Vec<ScanRange>, bool)>> {
         let disjunctions_result: Result<Vec<(Vec<ScanRange>, Self)>> = disjunctions
             .into_iter()
             .map(|x| {
@@ -351,10 +354,281 @@ impl Condition {
                 }
             }
 
-            Ok(Some((non_overlap_scan_ranges, Condition::true_cond())))
+            Ok(Some((non_overlap_scan_ranges, false)))
         } else {
-            Ok(None)
+            let mut scan_ranges = vec![];
+            for (scan_ranges_chunk, _) in disjunctions_result {
+                if scan_ranges_chunk.is_empty() {
+                    // full scan range
+                    return Ok(None);
+                }
+
+                scan_ranges.extend(scan_ranges_chunk);
+            }
+
+            let order_types = table_desc
+                .pk
+                .iter()
+                .cloned()
+                .map(|x| {
+                    if x.order_type.is_descending() {
+                        x.order_type.reverse()
+                    } else {
+                        x.order_type
+                    }
+                })
+                .collect_vec();
+            scan_ranges.sort_by(|left, right| {
+                let (left_start, _left_end) = &left.convert_to_range();
+                let (right_start, _right_end) = &right.convert_to_range();
+
+                let left_start_vec = match &left_start {
+                    Bound::Included(vec) | Bound::Excluded(vec) => vec,
+                    _ => &vec![],
+                };
+                let right_start_vec = match &right_start {
+                    Bound::Included(vec) | Bound::Excluded(vec) => vec,
+                    _ => &vec![],
+                };
+
+                if left_start_vec.is_empty() && right_start_vec.is_empty() {
+                    return Ordering::Less;
+                }
+
+                if left_start_vec.is_empty() {
+                    return Ordering::Less;
+                }
+
+                if right_start_vec.is_empty() {
+                    return Ordering::Greater;
+                }
+
+                let cmp_column_len = left_start_vec.len().min(right_start_vec.len());
+                cmp_rows(
+                    &left_start_vec[0..cmp_column_len],
+                    &right_start_vec[0..cmp_column_len],
+                    &order_types[0..cmp_column_len],
+                )
+            });
+
+            if scan_ranges.is_empty() {
+                return Ok(None);
+            }
+
+            if scan_ranges.len() == 1 {
+                return Ok(Some((scan_ranges, true)));
+            }
+
+            let mut output_scan_ranges: Vec<ScanRange> = vec![];
+            output_scan_ranges.push(scan_ranges[0].clone());
+            let mut idx = 1;
+            loop {
+                if idx >= scan_ranges.len() {
+                    break;
+                }
+
+                let scan_range_left = output_scan_ranges.last_mut().unwrap();
+                let scan_range_right = &scan_ranges[idx];
+
+                if scan_range_left.eq_conds == scan_range_right.eq_conds {
+                    // range merge
+
+                    if !ScanRange::is_overlap(scan_range_left, scan_range_right, &order_types) {
+                        // not merge
+                        output_scan_ranges.push(scan_range_right.clone());
+                        idx += 1;
+                        continue;
+                    }
+
+                    // merge range
+                    fn merge_bound(
+                        left_scan_range: &Bound<Vec<Option<ScalarImpl>>>,
+                        right_scan_range: &Bound<Vec<Option<ScalarImpl>>>,
+                        order_types: &[OrderType],
+                        left_bound: bool,
+                    ) -> Bound<Vec<Option<ScalarImpl>>> {
+                        let left_scan_range = match left_scan_range {
+                            Bound::Included(vec) | Bound::Excluded(vec) => vec,
+                            Bound::Unbounded => return Bound::Unbounded,
+                        };
+
+                        let right_scan_range = match right_scan_range {
+                            Bound::Included(vec) | Bound::Excluded(vec) => vec,
+                            Bound::Unbounded => return Bound::Unbounded,
+                        };
+
+                        let cmp_len = left_scan_range.len().min(right_scan_range.len());
+
+                        let cmp = cmp_rows(
+                            &left_scan_range[..cmp_len],
+                            &right_scan_range[..cmp_len],
+                            &order_types[..cmp_len],
+                        );
+
+                        let bound = {
+                            if (cmp.is_le() && left_bound) || (cmp.is_ge() && !left_bound) {
+                                left_scan_range.to_vec()
+                            } else {
+                                right_scan_range.to_vec()
+                            }
+                        };
+
+                        // Included Bound just for convenience, the correctness will be guaranteed by the upper level filter.
+                        Bound::Included(bound)
+                    }
+
+                    scan_range_left.range.0 = merge_bound(
+                        &scan_range_left.range.0,
+                        &scan_range_right.range.0,
+                        &order_types,
+                        true,
+                    );
+
+                    scan_range_left.range.1 = merge_bound(
+                        &scan_range_left.range.1,
+                        &scan_range_right.range.1,
+                        &order_types,
+                        false,
+                    );
+
+                    if scan_range_left.is_full_table_scan() {
+                        return Ok(None);
+                    }
+                } else {
+                    output_scan_ranges.push(scan_range_right.clone());
+                }
+
+                idx += 1;
+            }
+
+            Ok(Some((output_scan_ranges, true)))
         }
+    }
+
+    fn split_row_cmp_to_scan_ranges(
+        &self,
+        table_desc: Rc<TableDesc>,
+    ) -> Result<Option<(Vec<ScanRange>, Self)>> {
+        let (mut row_conjunctions, row_conjunctions_without_struct): (Vec<_>, Vec<_>) =
+            self.conjunctions.clone().into_iter().partition(|expr| {
+                if let Some(f) = expr.as_function_call() {
+                    if let Some(left_input) = f.inputs().get(0)
+                        && let Some(left_input) = left_input.as_function_call()
+                        && matches!(left_input.func_type(), ExprType::Row)
+                        && left_input.inputs().iter().all(|x| x.is_input_ref())
+                        && let Some(right_input) = f.inputs().get(1)
+                        && right_input.is_literal()
+                    {
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            });
+
+        // optimize for single row conjunctions. More optimisations may come later
+        // For example, (v1,v2,v3) > (1, 2, 3) means all data from (1, 2, 3).
+        // Suppose v1 v2 v3 are both pk, we can push (v1,v2,v3）> (1,2,3) down to scan
+        // Suppose v1 v2 are both pk, we can push (v1,v2）> (1,2) down to scan and add (v1,v2,v3) > (1,2,3) in filter, it is still possible to reduce the value of scan
+        if row_conjunctions.len() == 1 {
+            let row_conjunction = row_conjunctions.pop().unwrap();
+            let row_left_inputs = row_conjunction
+                .as_function_call()
+                .unwrap()
+                .inputs()
+                .get(0)
+                .unwrap()
+                .as_function_call()
+                .unwrap()
+                .inputs();
+            let row_right_literal = row_conjunction
+                .as_function_call()
+                .unwrap()
+                .inputs()
+                .get(1)
+                .unwrap()
+                .as_literal()
+                .unwrap();
+            if !matches!(row_right_literal.get_data(), Some(ScalarImpl::Struct(_))) {
+                return Ok(None);
+            }
+            let row_right_literal_data = row_right_literal.get_data().clone().unwrap();
+            let right_iter = row_right_literal_data.as_struct().fields();
+            let func_type = row_conjunction.as_function_call().unwrap().func_type();
+            if row_left_inputs.len() > 1
+                && (matches!(func_type, ExprType::LessThan)
+                    || matches!(func_type, ExprType::GreaterThan))
+            {
+                let mut pk_struct = vec![];
+                let mut order_type = None;
+                let mut all_added = true;
+                let mut iter = row_left_inputs.iter().zip_eq_fast(right_iter);
+                for column_order in &table_desc.pk {
+                    if let Some((left_expr, right_expr)) = iter.next() {
+                        if left_expr.as_input_ref().unwrap().index != column_order.column_index {
+                            all_added = false;
+                            break;
+                        }
+                        match order_type {
+                            Some(o) => {
+                                if o != column_order.order_type {
+                                    all_added = false;
+                                    break;
+                                }
+                            }
+                            None => order_type = Some(column_order.order_type),
+                        }
+                        pk_struct.push(right_expr.clone());
+                    }
+                }
+
+                // Here it is necessary to determine whether all of row is included in the `ScanRanges`, if so, the data for eq is not needed
+                if !pk_struct.is_empty() {
+                    if !all_added {
+                        let scan_range = ScanRange {
+                            eq_conds: vec![],
+                            range: match func_type {
+                                ExprType::GreaterThan => {
+                                    (Bound::Included(pk_struct), Bound::Unbounded)
+                                }
+                                ExprType::LessThan => {
+                                    (Bound::Unbounded, Bound::Included(pk_struct))
+                                }
+                                _ => unreachable!(),
+                            },
+                        };
+                        return Ok(Some((
+                            vec![scan_range],
+                            Condition {
+                                conjunctions: self.conjunctions.clone(),
+                            },
+                        )));
+                    } else {
+                        let scan_range = ScanRange {
+                            eq_conds: vec![],
+                            range: match func_type {
+                                ExprType::GreaterThan => {
+                                    (Bound::Excluded(pk_struct), Bound::Unbounded)
+                                }
+                                ExprType::LessThan => {
+                                    (Bound::Unbounded, Bound::Excluded(pk_struct))
+                                }
+                                _ => unreachable!(),
+                            },
+                        };
+                        return Ok(Some((
+                            vec![scan_range],
+                            Condition {
+                                conjunctions: row_conjunctions_without_struct,
+                            },
+                        )));
+                    }
+                }
+            }
+        }
+        Ok(None)
     }
 
     /// See also [`ScanRange`](risingwave_pb::batch_plan::ScanRange).
@@ -370,23 +644,34 @@ impl Condition {
         // It's an OR.
         if self.conjunctions.len() == 1 {
             if let Some(disjunctions) = self.conjunctions[0].as_or_disjunctions() {
-                if let Some((scan_ranges, other_condition)) = Self::disjunctions_to_scan_ranges(
-                    table_desc,
-                    max_split_range_gap,
-                    disjunctions,
-                )? {
-                    return Ok((scan_ranges, other_condition));
+                if let Some((scan_ranges, maintaining_condition)) =
+                    Self::disjunctions_to_scan_ranges(
+                        table_desc,
+                        max_split_range_gap,
+                        disjunctions,
+                    )?
+                {
+                    if maintaining_condition {
+                        return Ok((scan_ranges, self));
+                    } else {
+                        return Ok((scan_ranges, Condition::true_cond()));
+                    }
                 } else {
                     return Ok((vec![], self));
                 }
             }
         }
+        if let Some((scan_ranges, other_condition)) =
+            self.split_row_cmp_to_scan_ranges(table_desc.clone())?
+        {
+            return Ok((scan_ranges, other_condition));
+        }
 
         let mut groups = Self::classify_conjunctions_by_pk(self.conjunctions, &table_desc);
+        let mut other_conds = groups.pop().unwrap();
 
         // Analyze each group and use result to update scan range.
         let mut scan_range = ScanRange::full_table_scan();
-        let mut other_conds = groups.pop().unwrap();
         for i in 0..table_desc.order_column_indices().len() {
             let group = std::mem::take(&mut groups[i]);
             if group.is_empty() {
@@ -432,7 +717,12 @@ impl Condition {
                     scan_range.eq_conds.extend(eq_conds.into_iter());
                 }
                 0 => {
-                    scan_range.range = (lower_bound, upper_bound);
+                    let convert = |bound| match bound {
+                        Bound::Included(l) => Bound::Included(vec![Some(l)]),
+                        Bound::Excluded(l) => Bound::Excluded(vec![Some(l)]),
+                        Bound::Unbounded => Bound::Unbounded,
+                    };
+                    scan_range.range = (convert(lower_bound), convert(upper_bound));
                     other_conds.extend(groups[i + 1..].iter().flatten().cloned());
                     break;
                 }

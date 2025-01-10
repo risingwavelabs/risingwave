@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -43,9 +43,9 @@ impl MetricsInfo {
     pub fn for_test() -> Self {
         Self {
             metrics: Arc::new(StreamingMetrics::unused()),
-            table_id: "table_id test".to_string(),
-            actor_id: "actor_id test".to_string(),
-            desc: "desc test".to_string(),
+            table_id: "table_id test".to_owned(),
+            actor_id: "actor_id test".to_owned(),
+            desc: "desc test".to_owned(),
         }
     }
 }

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -81,7 +81,7 @@ impl Expr for UserDefinedFunction {
         ExprNode {
             function_type: Type::Unspecified.into(),
             return_type: Some(self.return_type().to_protobuf()),
-            rex_node: Some(RexNode::Udf(UserDefinedFunction {
+            rex_node: Some(RexNode::Udf(Box::new(UserDefinedFunction {
                 children: self.args.iter().map(Expr::to_expr_proto).collect(),
                 name: self.catalog.name.clone(),
                 arg_names: self.catalog.arg_names.clone(),
@@ -98,7 +98,7 @@ impl Expr for UserDefinedFunction {
                 body: self.catalog.body.clone(),
                 compressed_binary: self.catalog.compressed_binary.clone(),
                 always_retry_on_network_error: self.catalog.always_retry_on_network_error,
-            })),
+            }))),
         }
     }
 }

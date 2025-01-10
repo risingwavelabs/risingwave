@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -95,6 +95,7 @@ impl From<&BarrierManagerStatus> for PbRecoveryStatus {
 
 pub(crate) enum BarrierManagerRequest {
     GetDdlProgress(Sender<HashMap<u32, DdlProgress>>),
+    AdhocRecovery(Sender<()>),
 }
 
 #[derive(Debug)]
@@ -184,7 +185,6 @@ impl BarrierWorkerRuntimeInfoSnapshot {
     }
 }
 
-#[expect(dead_code)]
 #[derive(Debug)]
 struct DatabaseRuntimeInfoSnapshot {
     database_fragment_info: InflightDatabaseInfo,
@@ -196,7 +196,6 @@ struct DatabaseRuntimeInfoSnapshot {
 }
 
 impl DatabaseRuntimeInfoSnapshot {
-    #[expect(dead_code)]
     fn validate(
         &self,
         database_id: DatabaseId,

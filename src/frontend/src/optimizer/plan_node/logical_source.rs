@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,6 @@
 
 use std::rc::Rc;
 
-use fixedbitset::FixedBitSet;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, Field};
@@ -44,7 +43,9 @@ use crate::optimizer::plan_node::{
     ToStreamContext,
 };
 use crate::optimizer::property::Distribution::HashShard;
-use crate::optimizer::property::{Distribution, MonotonicityMap, Order, RequiredDist};
+use crate::optimizer::property::{
+    Distribution, MonotonicityMap, Order, RequiredDist, WatermarkColumns,
+};
 use crate::utils::{ColIndexMapping, Condition, IndexRewriter};
 
 /// `LogicalSource` returns contents of a table or other equivalent object
@@ -185,10 +186,10 @@ impl LogicalSource {
                 ColumnCatalog {
                     column_desc: ColumnDesc::from_field_with_column_id(
                         &Field {
-                            name: "filename".to_string(),
+                            name: "filename".to_owned(),
                             data_type: DataType::Varchar,
                             sub_fields: vec![],
-                            type_name: "".to_string(),
+                            type_name: "".to_owned(),
                         },
                         0,
                     ),
@@ -197,10 +198,10 @@ impl LogicalSource {
                 ColumnCatalog {
                     column_desc: ColumnDesc::from_field_with_column_id(
                         &Field {
-                            name: "last_edit_time".to_string(),
+                            name: "last_edit_time".to_owned(),
                             data_type: DataType::Timestamptz,
                             sub_fields: vec![],
-                            type_name: "".to_string(),
+                            type_name: "".to_owned(),
                         },
                         1,
                     ),
@@ -209,10 +210,10 @@ impl LogicalSource {
                 ColumnCatalog {
                     column_desc: ColumnDesc::from_field_with_column_id(
                         &Field {
-                            name: "file_size".to_string(),
+                            name: "file_size".to_owned(),
                             data_type: DataType::Int64,
                             sub_fields: vec![],
-                            type_name: "".to_string(),
+                            type_name: "".to_owned(),
                         },
                         0,
                     ),
@@ -228,7 +229,7 @@ impl LogicalSource {
                 Distribution::Single,
                 true, // `list` will keep listing all objects, it must be append-only
                 false,
-                FixedBitSet::with_capacity(logical_source.column_catalog.len()),
+                WatermarkColumns::new(),
                 MonotonicityMap::new(),
             ),
             core: logical_source,

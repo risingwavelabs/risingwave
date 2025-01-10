@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -198,8 +198,9 @@ mod tests {
     fn test_rank_state_bad_use() {
         let call = WindowFuncCall {
             kind: WindowFuncKind::RowNumber,
-            args: AggArgs::default(),
             return_type: DataType::Int64,
+            args: AggArgs::default(),
+            ignore_nulls: false,
             frame: Frame::rows(
                 FrameBound::UnboundedPreceding,
                 FrameBound::UnboundedFollowing,
@@ -215,8 +216,9 @@ mod tests {
     fn test_row_number_state() {
         let call = WindowFuncCall {
             kind: WindowFuncKind::RowNumber,
-            args: AggArgs::default(),
             return_type: DataType::Int64,
+            args: AggArgs::default(),
+            ignore_nulls: false,
             frame: Frame::rows(
                 FrameBound::UnboundedPreceding,
                 FrameBound::UnboundedFollowing,
@@ -257,8 +259,9 @@ mod tests {
     fn test_rank_state() {
         let call = WindowFuncCall {
             kind: WindowFuncKind::Rank,
-            args: AggArgs::default(),
             return_type: DataType::Int64,
+            args: AggArgs::default(),
+            ignore_nulls: false,
             frame: Frame::rows(
                 FrameBound::UnboundedPreceding,
                 FrameBound::UnboundedFollowing,
@@ -298,8 +301,9 @@ mod tests {
     fn test_dense_rank_state() {
         let call = WindowFuncCall {
             kind: WindowFuncKind::DenseRank,
-            args: AggArgs::default(),
             return_type: DataType::Int64,
+            args: AggArgs::default(),
+            ignore_nulls: false,
             frame: Frame::rows(
                 FrameBound::UnboundedPreceding,
                 FrameBound::UnboundedFollowing,

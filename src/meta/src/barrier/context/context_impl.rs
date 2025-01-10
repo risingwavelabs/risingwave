@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ use risingwave_common::catalog::DatabaseId;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::meta::PausedReason;
+use risingwave_pb::stream_plan::PbFragmentTypeFlag;
 use risingwave_pb::stream_service::streaming_control_stream_request::PbInitRequest;
 use risingwave_pb::stream_service::WaitEpochCommitRequest;
 use risingwave_rpc_client::StreamingControlHandle;
@@ -32,6 +33,7 @@ use crate::barrier::{
     Scheduled,
 };
 use crate::hummock::CommitEpochInfo;
+use crate::stream::SourceChange;
 use crate::{MetaError, MetaResult};
 
 impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
@@ -49,7 +51,9 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         database_id: Option<DatabaseId>,
         recovery_reason: RecoveryReason,
     ) {
-        self.set_status(BarrierManagerStatus::Recovering(recovery_reason));
+        if database_id.is_none() {
+            self.set_status(BarrierManagerStatus::Recovering(recovery_reason));
+        }
 
         // Mark blocked and abort buffered schedules, they might be dirty already.
         self.scheduled_barriers
@@ -58,7 +62,9 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
 
     fn mark_ready(&self, database_id: Option<DatabaseId>) {
         self.scheduled_barriers.mark_ready(database_id);
-        self.set_status(BarrierManagerStatus::Running);
+        if database_id.is_none() {
+            self.set_status(BarrierManagerStatus::Running);
+        }
     }
 
     async fn post_collect_command<'a>(&'a self, command: &'a CommandContext) -> MetaResult<()> {
@@ -154,14 +160,14 @@ impl CommandContext {
 
             Command::Resume(_) => {}
 
-            Command::SourceSplitAssignment(split_assignment) => {
+            Command::SourceChangeSplit(split_assignment) => {
                 barrier_manager_context
                     .metadata_manager
                     .update_actor_splits_by_split_assignment(split_assignment)
                     .await?;
                 barrier_manager_context
                     .source_manager
-                    .apply_source_change(None, None, Some(split_assignment.clone()), None)
+                    .apply_source_change(SourceChange::SplitChange(split_assignment.clone()))
                     .await;
             }
 
@@ -174,8 +180,65 @@ impl CommandContext {
                     .unregister_table_ids(unregistered_state_table_ids.iter().cloned())
                     .await?;
             }
-
             Command::CreateStreamingJob { info, job_type } => {
+                let mut is_sink_into_table = false;
+                match job_type {
+                    CreateStreamingJobType::SinkIntoTable(
+                        replace_plan @ ReplaceStreamJobPlan {
+                            old_fragments,
+                            new_fragments,
+                            dispatchers,
+                            init_split_assignment,
+                            ..
+                        },
+                    ) => {
+                        is_sink_into_table = true;
+                        barrier_manager_context
+                            .metadata_manager
+                            .catalog_controller
+                            .post_collect_job_fragments(
+                                new_fragments.stream_job_id().table_id as _,
+                                new_fragments.actor_ids(),
+                                dispatchers.clone(),
+                                init_split_assignment,
+                            )
+                            .await?;
+                        barrier_manager_context
+                            .source_manager
+                            .handle_replace_job(
+                                old_fragments,
+                                new_fragments.stream_source_fragments(),
+                                init_split_assignment.clone(),
+                                replace_plan.fragment_replacements(),
+                            )
+                            .await;
+                    }
+                    CreateStreamingJobType::Normal => {}
+                    CreateStreamingJobType::SnapshotBackfill(snapshot_backfill_info) => {
+                        barrier_manager_context
+                            .metadata_manager
+                            .catalog_controller
+                            .fill_snapshot_backfill_epoch(
+                                info.stream_job_fragments.fragments.iter().filter_map(
+                                    |(fragment_id, fragment)| {
+                                        if (fragment.fragment_type_mask
+                                            & PbFragmentTypeFlag::SnapshotBackfillStreamScan as u32)
+                                            != 0
+                                        {
+                                            Some(*fragment_id as _)
+                                        } else {
+                                            None
+                                        }
+                                    },
+                                ),
+                                &snapshot_backfill_info.upstream_mv_table_id_to_backfill_epoch,
+                            )
+                            .await?
+                    }
+                }
+
+                // Do `post_collect_job_fragments` of the original streaming job in the end, so that in any previous failure,
+                // we won't mark the job as `Creating`, and then the job will be later clean by the recovery triggered by the returned error.
                 let CreateStreamingJobCommandInfo {
                     stream_job_fragments,
                     dispatchers,
@@ -193,37 +256,17 @@ impl CommandContext {
                     )
                     .await?;
 
-                if let CreateStreamingJobType::SinkIntoTable(ReplaceStreamJobPlan {
-                    new_fragments,
-                    dispatchers,
-                    init_split_assignment,
-                    ..
-                }) = job_type
-                {
+                if !is_sink_into_table {
                     barrier_manager_context
-                        .metadata_manager
-                        .catalog_controller
-                        .post_collect_job_fragments(
-                            new_fragments.stream_job_id().table_id as _,
-                            new_fragments.actor_ids(),
-                            dispatchers.clone(),
-                            init_split_assignment,
-                        )
-                        .await?;
+                        .source_manager
+                        .apply_source_change(SourceChange::CreateJob {
+                            added_source_fragments: stream_job_fragments.stream_source_fragments(),
+                            added_backfill_fragments: stream_job_fragments
+                                .source_backfill_fragments()?,
+                            split_assignment: init_split_assignment.clone(),
+                        })
+                        .await;
                 }
-
-                // Extract the fragments that include source operators.
-                let source_fragments = stream_job_fragments.stream_source_fragments();
-                let backfill_fragments = stream_job_fragments.source_backfill_fragments()?;
-                barrier_manager_context
-                    .source_manager
-                    .apply_source_change(
-                        Some(source_fragments),
-                        Some(backfill_fragments),
-                        Some(init_split_assignment.clone()),
-                        None,
-                    )
-                    .await;
             }
             Command::RescheduleFragment {
                 reschedules,
@@ -236,13 +279,15 @@ impl CommandContext {
                     .await?;
             }
 
-            Command::ReplaceStreamJob(ReplaceStreamJobPlan {
-                old_fragments,
-                new_fragments,
-                dispatchers,
-                init_split_assignment,
-                ..
-            }) => {
+            Command::ReplaceStreamJob(
+                replace_plan @ ReplaceStreamJobPlan {
+                    old_fragments,
+                    new_fragments,
+                    dispatchers,
+                    init_split_assignment,
+                    ..
+                },
+            ) => {
                 // Update actors and actor_dispatchers for new table fragments.
                 barrier_manager_context
                     .metadata_manager
@@ -258,18 +303,11 @@ impl CommandContext {
                 // Apply the split changes in source manager.
                 barrier_manager_context
                     .source_manager
-                    .drop_source_fragments_vec(std::slice::from_ref(old_fragments))
-                    .await;
-                let source_fragments = new_fragments.stream_source_fragments();
-                // XXX: is it possible to have backfill fragments here?
-                let backfill_fragments = new_fragments.source_backfill_fragments()?;
-                barrier_manager_context
-                    .source_manager
-                    .apply_source_change(
-                        Some(source_fragments),
-                        Some(backfill_fragments),
-                        Some(init_split_assignment.clone()),
-                        None,
+                    .handle_replace_job(
+                        old_fragments,
+                        new_fragments.stream_source_fragments(),
+                        init_split_assignment.clone(),
+                        replace_plan.fragment_replacements(),
                     )
                     .await;
             }

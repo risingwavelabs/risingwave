@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -194,9 +194,9 @@ impl From<TonicStatusWrapper> for RwError {
 
         // TODO(error-handling): `message` loses the source chain.
         match status.inner().code() {
-            Code::InvalidArgument => ErrorCode::InvalidParameterValue(message.to_string()),
+            Code::InvalidArgument => ErrorCode::InvalidParameterValue(message.to_owned()),
             Code::NotFound | Code::AlreadyExists => ErrorCode::CatalogError(status.into()),
-            Code::PermissionDenied => ErrorCode::PermissionDenied(message.to_string()),
+            Code::PermissionDenied => ErrorCode::PermissionDenied(message.to_owned()),
             Code::Cancelled => ErrorCode::SchedulerError(status.into()),
             _ => ErrorCode::RpcError(status.into()),
         }

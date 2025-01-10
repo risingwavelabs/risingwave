@@ -39,6 +39,10 @@ use crate::{impl_parse_to, parser_v2};
 
 pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
 pub(crate) const WEBHOOK_CONNECTOR: &str = "webhook";
+// reserve i32::MIN for pause.
+pub const SOURCE_RATE_LIMIT_PAUSED: i32 = i32::MIN;
+// reserve i32::MIN + 1 for resume.
+pub const SOURCE_RATE_LIMIT_RESUMED: i32 = i32::MIN + 1;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ParserError {
@@ -327,6 +331,7 @@ impl Parser<'_> {
                 Keyword::FLUSH => Ok(Statement::Flush),
                 Keyword::WAIT => Ok(Statement::Wait),
                 Keyword::RECOVER => Ok(Statement::Recover),
+                Keyword::USE => Ok(self.parse_use()?),
                 _ => self.expected_at(checkpoint, "statement"),
             },
             Token::LParen => {
@@ -2205,6 +2210,8 @@ impl Parser<'_> {
         or_replace: bool,
         temporary: bool,
     ) -> PResult<Statement> {
+        impl_parse_to!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], self);
+
         let name = self.parse_object_name()?;
         self.expect_token(&Token::LParen)?;
         let args = if self.peek_token().token == Token::RParen {
@@ -2243,6 +2250,7 @@ impl Parser<'_> {
         Ok(Statement::CreateFunction {
             or_replace,
             temporary,
+            if_not_exists,
             name,
             args,
             returns: return_type,
@@ -2252,6 +2260,8 @@ impl Parser<'_> {
     }
 
     fn parse_create_aggregate(&mut self, or_replace: bool) -> PResult<Statement> {
+        impl_parse_to!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], self);
+
         let name = self.parse_object_name()?;
         self.expect_token(&Token::LParen)?;
         let args = self.parse_comma_separated(Parser::parse_function_arg)?;
@@ -2265,6 +2275,7 @@ impl Parser<'_> {
 
         Ok(Statement::CreateAggregate {
             or_replace,
+            if_not_exists,
             name,
             args,
             returns,
@@ -2613,6 +2624,20 @@ impl Parser<'_> {
             None
         };
 
+        let engine = if self.parse_keyword(Keyword::ENGINE) {
+            self.expect_token(&Token::Eq)?;
+            let engine_name = self.parse_object_name()?;
+            if "iceberg".eq_ignore_ascii_case(&engine_name.real_value()) {
+                Engine::Iceberg
+            } else if "hummock".eq_ignore_ascii_case(&engine_name.real_value()) {
+                Engine::Hummock
+            } else {
+                parser_err!("Unsupported engine: {}", engine_name);
+            }
+        } else {
+            Engine::Hummock
+        };
+
         Ok(Statement::CreateTable {
             name: table_name,
             temporary,
@@ -2631,6 +2656,7 @@ impl Parser<'_> {
             cdc_table_info,
             include_column_options: include_options,
             webhook_info,
+            engine,
         })
     }
 
@@ -3187,8 +3213,11 @@ impl Parser<'_> {
                 AlterTableOperation::SetSourceRateLimit { rate_limit }
             } else if let Some(rate_limit) = self.parse_alter_backfill_rate_limit()? {
                 AlterTableOperation::SetBackfillRateLimit { rate_limit }
+            } else if let Some(rate_limit) = self.parse_alter_dml_rate_limit()? {
+                AlterTableOperation::SetDmlRateLimit { rate_limit }
             } else {
-                return self.expected("SCHEMA/PARALLELISM/SOURCE_RATE_LIMIT after SET");
+                return self
+                    .expected("SCHEMA/PARALLELISM/SOURCE_RATE_LIMIT/DML_RATE_LIMIT after SET");
             }
         } else if self.parse_keyword(Keyword::DROP) {
             let _ = self.parse_keyword(Keyword::COLUMN);
@@ -3252,6 +3281,28 @@ impl Parser<'_> {
         }
         if self.expect_keyword(Keyword::TO).is_err() && self.expect_token(&Token::Eq).is_err() {
             return self.expected("TO or = after ALTER TABLE SET BACKFILL_RATE_LIMIT");
+        }
+        let rate_limit = if self.parse_keyword(Keyword::DEFAULT) {
+            -1
+        } else {
+            let s = self.parse_number_value()?;
+            if let Ok(n) = s.parse::<i32>() {
+                n
+            } else {
+                return self.expected("number or DEFAULT");
+            }
+        };
+        Ok(Some(rate_limit))
+    }
+
+    /// DML_RATE_LIMIT = default | NUMBER
+    /// DML_RATE_LIMIT TO default | NUMBER
+    pub fn parse_alter_dml_rate_limit(&mut self) -> PResult<Option<i32>> {
+        if !self.parse_word("DML_RATE_LIMIT") {
+            return Ok(None);
+        }
+        if self.expect_keyword(Keyword::TO).is_err() && self.expect_token(&Token::Eq).is_err() {
+            return self.expected("TO or = after ALTER TABLE SET DML_RATE_LIMIT");
         }
         let rate_limit = if self.parse_keyword(Keyword::DEFAULT) {
             -1
@@ -3386,6 +3437,28 @@ impl Parser<'_> {
         })
     }
 
+    /// SINK_RATE_LIMIT = default | NUMBER
+    /// SINK_RATE_LIMIT TO default | NUMBER
+    pub fn parse_alter_sink_rate_limit(&mut self) -> PResult<Option<i32>> {
+        if !self.parse_word("SINK_RATE_LIMIT") {
+            return Ok(None);
+        }
+        if self.expect_keyword(Keyword::TO).is_err() && self.expect_token(&Token::Eq).is_err() {
+            return self.expected("TO or = after ALTER SINK SET SINK_RATE_LIMIT");
+        }
+        let rate_limit = if self.parse_keyword(Keyword::DEFAULT) {
+            -1
+        } else {
+            let s = self.parse_number_value()?;
+            if let Ok(n) = s.parse::<i32>() {
+                n
+            } else {
+                return self.expected("number or DEFAULT");
+            }
+        };
+        Ok(Some(rate_limit))
+    }
+
     pub fn parse_alter_sink(&mut self) -> PResult<Statement> {
         let sink_name = self.parse_object_name()?;
         let operation = if self.parse_keyword(Keyword::RENAME) {
@@ -3420,6 +3493,8 @@ impl Parser<'_> {
                     parallelism: value,
                     deferred,
                 }
+            } else if let Some(rate_limit) = self.parse_alter_sink_rate_limit()? {
+                AlterSinkOperation::SetSinkRateLimit { rate_limit }
             } else {
                 return self.expected("SCHEMA/PARALLELISM after SET");
             }
@@ -3515,9 +3590,17 @@ impl Parser<'_> {
         } else if self.parse_keywords(&[Keyword::SWAP, Keyword::WITH]) {
             let target_source = self.parse_object_name()?;
             AlterSourceOperation::SwapRenameSource { target_source }
+        } else if self.parse_keyword(Keyword::PAUSE) {
+            AlterSourceOperation::SetSourceRateLimit {
+                rate_limit: SOURCE_RATE_LIMIT_PAUSED,
+            }
+        } else if self.parse_keyword(Keyword::RESUME) {
+            AlterSourceOperation::SetSourceRateLimit {
+                rate_limit: SOURCE_RATE_LIMIT_RESUMED,
+            }
         } else {
             return self.expected(
-                "RENAME, ADD COLUMN, OWNER TO, SET or SOURCE_RATE_LIMIT after ALTER SOURCE",
+                "RENAME, ADD COLUMN, OWNER TO, SET, PAUSE, RESUME, or SOURCE_RATE_LIMIT after ALTER SOURCE",
             );
         };
 
@@ -3620,11 +3703,11 @@ impl Parser<'_> {
         while let Some(t) = self.next_token_no_skip() {
             match t.token {
                 Token::Whitespace(Whitespace::Tab) => {
-                    values.push(Some(content.to_string()));
+                    values.push(Some(content.clone()));
                     content.clear();
                 }
                 Token::Whitespace(Whitespace::Newline) => {
-                    values.push(Some(content.to_string()));
+                    values.push(Some(content.clone()));
                     content.clear();
                 }
                 Token::Backslash => {
@@ -4171,17 +4254,17 @@ impl Parser<'_> {
             vec![]
         };
 
-        let limit = if self.parse_keyword(Keyword::LIMIT) {
-            self.parse_limit()?
-        } else {
-            None
-        };
+        let mut limit = None;
+        let mut offset = None;
+        for _x in 0..2 {
+            if limit.is_none() && self.parse_keyword(Keyword::LIMIT) {
+                limit = self.parse_limit()?
+            }
 
-        let offset = if self.parse_keyword(Keyword::OFFSET) {
-            Some(self.parse_offset()?)
-        } else {
-            None
-        };
+            if offset.is_none() && self.parse_keyword(Keyword::OFFSET) {
+                offset = Some(self.parse_offset()?)
+            }
+        }
 
         let fetch = if self.parse_keyword(Keyword::FETCH) {
             if limit.is_some() {
@@ -4414,7 +4497,7 @@ impl Parser<'_> {
                                 }
                                 Ok(SetTimeZoneValue::Ident(Ident::with_quote_unchecked(
                                     '\'',
-                                    "UTC".to_string(),
+                                    "UTC".to_owned(),
                                 )))
                             }
                             _ => Err(StrError("expect Value::Interval".into())),
@@ -5281,16 +5364,12 @@ impl Parser<'_> {
     }
 
     /// Parse a LIMIT clause
-    pub fn parse_limit(&mut self) -> PResult<Option<String>> {
+    pub fn parse_limit(&mut self) -> PResult<Option<Expr>> {
         if self.parse_keyword(Keyword::ALL) {
             Ok(None)
         } else {
-            let number = self.parse_number_value()?;
-            // TODO(Kexiang): support LIMIT expr
-            if self.consume_token(&Token::DoubleColon) {
-                self.expect_keyword(Keyword::BIGINT)?
-            }
-            Ok(Some(number))
+            let expr = self.parse_expr()?;
+            Ok(Some(expr))
         }
     }
 
@@ -5479,6 +5558,11 @@ impl Parser<'_> {
             comment,
         })
     }
+
+    fn parse_use(&mut self) -> PResult<Statement> {
+        let db_name = self.parse_object_name()?;
+        Ok(Statement::Use { db_name })
+    }
 }
 
 impl Word {
@@ -5506,7 +5590,7 @@ mod tests {
         run_parser_method(min_bigint, |parser| {
             assert_eq!(
                 parser.parse_expr().unwrap(),
-                Expr::Value(Value::Number("-9223372036854775808".to_string()))
+                Expr::Value(Value::Number("-9223372036854775808".to_owned()))
             )
         });
     }

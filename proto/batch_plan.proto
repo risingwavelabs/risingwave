@@ -48,7 +48,7 @@ message ScanRange {
 
   // `None` represent unbounded.
   message Bound {
-    bytes value = 1;
+    repeated bytes value = 1;
     bool inclusive = 2;
   }
   //  The lower bound of the next PK column subsequent to those in `eq_conds`.
@@ -71,6 +71,7 @@ message IcebergScanNode {
     ICEBERG_SCAN_TYPE_UNSPECIFIED = 0;
     ICEBERG_SCAN_TYPE_DATA_SCAN = 1;
     ICEBERG_SCAN_TYPE_EQUALITY_DELETE_SCAN = 2;
+    ICEBERG_SCAN_TYPE_POSITION_DELETE_SCAN = 3;
   }
   repeated plan_common.ColumnCatalog columns = 1;
   map<string, string> with_properties = 2;
@@ -88,6 +89,7 @@ message FileScanNode {
   enum StorageType {
     STORAGE_TYPE_UNSPECIFIED = 0;
     S3 = 1;
+    GCS = 2;
   }
 
   repeated plan_common.ColumnDesc columns = 1;
@@ -97,6 +99,19 @@ message FileScanNode {
   string s3_access_key = 5;
   string s3_secret_key = 6;
   repeated string file_location = 7;
+  string s3_endpoint = 8;
+}
+
+message GcsFileScanNode {
+  enum FileFormat {
+    FILE_FORMAT_UNSPECIFIED = 0;
+    PARQUET = 1;
+  }
+
+  repeated plan_common.ColumnDesc columns = 1;
+  FileFormat file_format = 2;
+  string credential = 3;
+  repeated string file_location = 4;
 }
 
 // NOTE(kwannoel): This will only be used in batch mode. We can change the definition as needed.
@@ -405,6 +420,7 @@ message PlanNode {
     IcebergScanNode iceberg_scan = 39;
     PostgresQueryNode postgres_query = 40;
     MySqlQueryNode mysql_query = 41;
+    GcsFileScanNode gcs_file_scan = 42;
     // The following nodes are used for testing.
     bool block_executor = 100;
     bool busy_loop_executor = 101;

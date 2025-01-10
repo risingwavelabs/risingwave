@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -317,6 +317,7 @@ pub struct SinkMetrics {
     // Log store reader metrics
     pub log_store_latest_read_epoch: LabelGuardedIntGaugeVec<4>,
     pub log_store_read_rows: LabelGuardedIntCounterVec<4>,
+    pub log_store_read_bytes: LabelGuardedIntCounterVec<4>,
     pub log_store_reader_wait_new_future_duration_ns: LabelGuardedIntCounterVec<4>,
 
     // Iceberg metrics
@@ -381,6 +382,14 @@ impl SinkMetrics {
         let log_store_read_rows = register_guarded_int_counter_vec_with_registry!(
             "log_store_read_rows",
             "The read rate of rows",
+            &["actor_id", "connector", "sink_id", "sink_name"],
+            registry
+        )
+        .unwrap();
+
+        let log_store_read_bytes = register_guarded_int_counter_vec_with_registry!(
+            "log_store_read_bytes",
+            "Total size of chunks read by log reader",
             &["actor_id", "connector", "sink_id", "sink_name"],
             registry
         )
@@ -451,6 +460,7 @@ impl SinkMetrics {
             log_store_write_rows,
             log_store_latest_read_epoch,
             log_store_read_rows,
+            log_store_read_bytes,
             log_store_reader_wait_new_future_duration_ns,
             iceberg_write_qps,
             iceberg_write_latency,
@@ -571,8 +581,8 @@ impl SinkWriterParam {
 
             actor_id: 1,
             sink_id: SinkId::new(1),
-            sink_name: "test_sink".to_string(),
-            connector: "test_connector".to_string(),
+            sink_name: "test_sink".to_owned(),
+            connector: "test_connector".to_owned(),
         }
     }
 }
@@ -607,13 +617,13 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
                 None => match user_specified {
                     SinkDecouple::Default | SinkDecouple::Enable => {
                         desc.properties.insert(
-                            COMMIT_CHECKPOINT_INTERVAL.to_string(),
+                            COMMIT_CHECKPOINT_INTERVAL.to_owned(),
                             DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE.to_string(),
                         );
                     }
                     SinkDecouple::Disable => {
                         desc.properties.insert(
-                            COMMIT_CHECKPOINT_INTERVAL.to_string(),
+                            COMMIT_CHECKPOINT_INTERVAL.to_owned(),
                             DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITHOUT_SINK_DECOUPLE.to_string(),
                         );
                     }

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -88,6 +88,7 @@ async fn do_handle_explain(
                     with_version_column,
                     include_column_options,
                     webhook_info,
+                    risingwave_common::catalog::Engine::Hummock,
                 )
                 .await?;
                 let context = plan.ctx();
@@ -219,6 +220,7 @@ async fn do_handle_explain(
                                 worker_node_manager_reader,
                                 session.env().catalog_reader().clone(),
                                 session.config().batch_parallelism().0,
+                                session.config().timezone().to_owned(),
                                 plan.clone(),
                             )?);
                             batch_plan_fragmenter_fmt = if explain_format == ExplainFormat::Dot {
@@ -291,16 +293,16 @@ pub async fn handle_explain(
     }
     if options.trace && options.explain_format == ExplainFormat::Json {
         return Err(ErrorCode::NotSupported(
-            "EXPLAIN (TRACE, JSON FORMAT)".to_string(),
-            "Only EXPLAIN (LOGICAL | PHYSICAL, JSON FORMAT) is supported.".to_string(),
+            "EXPLAIN (TRACE, JSON FORMAT)".to_owned(),
+            "Only EXPLAIN (LOGICAL | PHYSICAL, JSON FORMAT) is supported.".to_owned(),
         )
         .into());
     }
     if options.explain_type == ExplainType::DistSql && options.explain_format == ExplainFormat::Json
     {
         return Err(ErrorCode::NotSupported(
-            "EXPLAIN (TRACE, JSON FORMAT)".to_string(),
-            "Only EXPLAIN (LOGICAL | PHYSICAL, JSON FORMAT) is supported.".to_string(),
+            "EXPLAIN (TRACE, JSON FORMAT)".to_owned(),
+            "Only EXPLAIN (LOGICAL | PHYSICAL, JSON FORMAT) is supported.".to_owned(),
         )
         .into());
     }

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -34,12 +34,12 @@ pub async fn handle_create_database(
     {
         let user_reader = session.env().user_info_reader();
         let reader = user_reader.read_guard();
-        if let Some(info) = reader.get_user_by_name(session.user_name()) {
+        if let Some(info) = reader.get_user_by_name(&session.user_name()) {
             if !info.can_create_db && !info.is_super {
-                return Err(PermissionDenied("Do not have the privilege".to_string()).into());
+                return Err(PermissionDenied("Do not have the privilege".to_owned()).into());
             }
         } else {
-            return Err(PermissionDenied("Session user is invalid".to_string()).into());
+            return Err(PermissionDenied("Session user is invalid".to_owned()).into());
         }
     }
 
@@ -66,7 +66,7 @@ pub async fn handle_create_database(
             .read_guard()
             .get_user_by_name(&owner)
             .map(|u| u.id)
-            .ok_or_else(|| CatalogError::NotFound("user", owner.to_string()))?
+            .ok_or_else(|| CatalogError::NotFound("user", owner.clone()))?
     } else {
         session.user_id()
     };
@@ -107,8 +107,8 @@ mod tests {
         let res = frontend
             .run_user_sql(
                 "CREATE DATABASE database2",
-                "dev".to_string(),
-                "user".to_string(),
+                "dev".to_owned(),
+                "user".to_owned(),
                 user_id,
             )
             .await;
@@ -126,8 +126,8 @@ mod tests {
         frontend
             .run_user_sql(
                 "CREATE DATABASE database2",
-                "dev".to_string(),
-                "user2".to_string(),
+                "dev".to_owned(),
+                "user2".to_owned(),
                 user_id,
             )
             .await

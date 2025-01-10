@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -182,7 +182,7 @@ impl From<&SourceColumnDesc> for ColumnDesc {
             field_descs: fields.clone(),
             additional_column: additional_column.clone(),
             // additional fields below
-            type_name: "".to_string(),
+            type_name: "".to_owned(),
             generated_or_default_column: None,
             description: None,
             version: ColumnDescVersion::Pr13707,

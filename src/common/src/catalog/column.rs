@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,9 +23,10 @@ use risingwave_pb::plan_common::{
     AdditionalColumn, ColumnDescVersion, DefaultColumnDesc, PbColumnCatalog, PbColumnDesc,
 };
 
+use super::schema::FieldLike;
 use super::{
-    iceberg_sequence_num_column_desc, row_id_column_desc, rw_timestamp_column_desc,
-    USER_COLUMN_ID_OFFSET,
+    iceberg_file_path_column_desc, iceberg_file_pos_column_desc, iceberg_sequence_num_column_desc,
+    row_id_column_desc, rw_timestamp_column_desc, USER_COLUMN_ID_OFFSET,
 };
 use crate::catalog::{cdc_table_name_column_desc, offset_column_desc, Field, ROW_ID_COLUMN_ID};
 use crate::types::{DataType, StructType};
@@ -256,9 +257,9 @@ impl ColumnDesc {
         Self {
             data_type,
             column_id: ColumnId::new(column_id),
-            name: name.to_string(),
+            name: name.to_owned(),
             field_descs: vec![],
-            type_name: "".to_string(),
+            type_name: "".to_owned(),
             generated_or_default_column: None,
             description: None,
             additional_column: AdditionalColumn { column_type: None },
@@ -278,9 +279,9 @@ impl ColumnDesc {
         Self {
             data_type,
             column_id: ColumnId::new(column_id),
-            name: name.to_string(),
+            name: name.to_owned(),
             field_descs: fields,
-            type_name: type_name.to_string(),
+            type_name: type_name.to_owned(),
             generated_or_default_column: None,
             description: None,
             additional_column: AdditionalColumn { column_type: None },
@@ -412,6 +413,12 @@ impl ColumnCatalog {
         !self.is_generated() && !self.is_rw_timestamp_column()
     }
 
+    /// Returns whether the column is defined by user within the column definition clause
+    /// in the `CREATE TABLE` statement.
+    pub fn is_user_defined(&self) -> bool {
+        !self.is_hidden() && !self.is_rw_sys_column() && !self.is_connector_additional_column()
+    }
+
     /// If the column is a generated column
     pub fn generated_expr(&self) -> Option<&ExprNode> {
         if let Some(GeneratedOrDefaultColumn::GeneratedColumn(desc)) =
@@ -464,6 +471,10 @@ impl ColumnCatalog {
         }
     }
 
+    pub fn is_rw_sys_column(&self) -> bool {
+        self.column_desc.system_column.is_some()
+    }
+
     pub fn rw_timestamp_column() -> Self {
         Self {
             column_desc: rw_timestamp_column_desc(),
@@ -492,6 +503,20 @@ impl ColumnCatalog {
         }
     }
 
+    pub fn iceberg_file_path_column() -> Self {
+        Self {
+            column_desc: iceberg_file_path_column_desc(),
+            is_hidden: true,
+        }
+    }
+
+    pub fn iceberg_file_pos_column() -> Self {
+        Self {
+            column_desc: iceberg_file_pos_column_desc(),
+            is_hidden: true,
+        }
+    }
+
     pub fn cdc_table_name_column() -> Self {
         Self {
             column_desc: cdc_table_name_column_desc(),
@@ -516,6 +541,26 @@ impl ColumnCatalog {
         } else {
             Cow::Borrowed(&self.column_desc.name)
         }
+    }
+}
+
+impl FieldLike for ColumnDesc {
+    fn data_type(&self) -> &DataType {
+        &self.data_type
+    }
+
+    fn name(&self) -> &str {
+        &self.name
+    }
+}
+
+impl FieldLike for ColumnCatalog {
+    fn data_type(&self) -> &DataType {
+        &self.column_desc.data_type
+    }
+
+    fn name(&self) -> &str {
+        &self.column_desc.name
     }
 }
 
@@ -550,7 +595,7 @@ pub fn debug_assert_column_ids_distinct(columns: &[ColumnCatalog]) {
     );
 }
 
-/// FIXME: perhapts we should use sth like `ColumnIdGenerator::new_alter`,
+/// FIXME: Perhaps we should use sth like `ColumnIdGenerator::new_alter`,
 /// However, the `SourceVersion` is problematic: It doesn't contain `next_col_id`.
 /// (But for now this isn't a large problem, since drop column is not allowed for source yet..)
 ///

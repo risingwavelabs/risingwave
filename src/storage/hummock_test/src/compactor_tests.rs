@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -95,7 +95,7 @@ pub(crate) mod tests {
         hummock_manager_ref: &HummockManagerRef,
         table_ids: &[u32],
     ) -> HummockStorage {
-        let remote_dir = "hummock_001_test".to_string();
+        let remote_dir = "hummock_001_test".to_owned();
         let options = Arc::new(StorageOpts {
             sstable_size_mb: 1,
             block_size_kb: 1,
@@ -129,7 +129,7 @@ pub(crate) mod tests {
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         notification_client: impl NotificationClient,
     ) -> GlobalHummockStorage {
-        let remote_dir = "hummock_001_test".to_string();
+        let remote_dir = "hummock_001_test".to_owned();
         let options = Arc::new(StorageOpts {
             sstable_size_mb: 1,
             block_size_kb: 1,

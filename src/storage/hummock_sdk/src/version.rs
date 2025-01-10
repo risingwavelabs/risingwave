@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -271,6 +271,21 @@ impl HummockVersion {
                 .values()
                 .map(|table_watermark| table_watermark.estimated_encode_len())
                 .sum::<usize>()
+            + self
+                .table_change_log
+                .values()
+                .map(|c| {
+                    c.iter()
+                        .map(|l| {
+                            l.old_value
+                                .iter()
+                                .chain(l.new_value.iter())
+                                .map(|s| s.estimated_encode_len())
+                                .sum::<usize>()
+                        })
+                        .sum::<usize>()
+                })
+                .sum::<usize>()
     }
 }
 
@@ -524,32 +539,20 @@ where
     /// Note: the result can be false positive because we only collect the set of sst object ids in the `inserted_table_infos`,
     /// but it is possible that the object is moved or split from other compaction groups or levels.
     pub fn newly_added_object_ids(&self) -> HashSet<HummockSstableObjectId> {
-        self.newly_added_sst_infos(None)
+        self.newly_added_sst_infos()
             .map(|sst| sst.object_id())
             .collect()
     }
 
     pub fn newly_added_sst_ids(&self) -> HashSet<HummockSstableObjectId> {
-        self.newly_added_sst_infos(None)
+        self.newly_added_sst_infos()
             .map(|sst| sst.sst_id())
             .collect()
     }
 
-    pub fn newly_added_sst_infos<'a>(
-        &'a self,
-        select_group: Option<&'a HashSet<CompactionGroupId>>,
-    ) -> impl Iterator<Item = &'a T> + 'a {
+    pub fn newly_added_sst_infos(&self) -> impl Iterator<Item = &'_ T> {
         self.group_deltas
-            .iter()
-            .filter_map(move |(cg_id, group_deltas)| {
-                if let Some(select_group) = select_group
-                    && !select_group.contains(cg_id)
-                {
-                    None
-                } else {
-                    Some(group_deltas)
-                }
-            })
+            .values()
             .flat_map(|group_deltas| {
                 group_deltas.group_deltas.iter().flat_map(|group_delta| {
                     let sst_slice = match &group_delta {
@@ -567,7 +570,7 @@ where
             })
             .chain(self.change_log_delta.values().flat_map(|delta| {
                 // TODO: optimization: strip table change log
-                let new_log = delta.new_log.as_ref().unwrap();
+                let new_log = &delta.new_log;
                 new_log.new_value.iter().chain(new_log.old_value.iter())
             }))
     }
@@ -620,8 +623,8 @@ where
                     (
                         TableId::new(*table_id),
                         ChangeLogDeltaCommon {
-                            new_log: log_delta.new_log.as_ref().map(Into::into),
                             truncate_epoch: log_delta.truncate_epoch,
+                            new_log: log_delta.new_log.as_ref().unwrap().into(),
                         },
                     )
                 })
@@ -749,7 +752,7 @@ where
                     (
                         TableId::new(*table_id),
                         ChangeLogDeltaCommon {
-                            new_log: log_delta.new_log.clone().map(Into::into),
+                            new_log: log_delta.new_log.clone().unwrap().into(),
                             truncate_epoch: log_delta.truncate_epoch,
                         },
                     )

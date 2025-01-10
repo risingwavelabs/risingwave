@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -57,6 +57,8 @@ type SessionConfigResult<T> = std::result::Result<T, SessionConfigError>;
 // otherwise seems like it can't infer the type of -1 when written inline.
 const DISABLE_BACKFILL_RATE_LIMIT: i32 = -1;
 const DISABLE_SOURCE_RATE_LIMIT: i32 = -1;
+const DISABLE_DML_RATE_LIMIT: i32 = -1;
+const DISABLE_SINK_RATE_LIMIT: i32 = -1;
 
 /// Default to bypass cluster limits iff in debug mode.
 const BYPASS_CLUSTER_LIMITS: bool = cfg!(debug_assertions);
@@ -282,6 +284,18 @@ pub struct SessionConfig {
     #[parameter(default = DISABLE_SOURCE_RATE_LIMIT)]
     source_rate_limit: i32,
 
+    /// Set streaming rate limit (rows per second) for each parallelism for table DML.
+    /// If set to -1, disable rate limit.
+    /// If set to 0, this pauses the DML.
+    #[parameter(default = DISABLE_DML_RATE_LIMIT)]
+    dml_rate_limit: i32,
+
+    /// Set sink rate limit (rows per second) for each parallelism for external sink.
+    /// If set to -1, disable rate limit.
+    /// If set to 0, this pauses the sink.
+    #[parameter(default = DISABLE_SINK_RATE_LIMIT)]
+    sink_rate_limit: i32,
+
     /// Cache policy for partition cache in streaming over window.
     /// Can be "full", "recent", "`recent_first_n`" or "`recent_last_n`".
     #[serde_as(as = "DisplayFromStr")]
@@ -335,7 +349,7 @@ fn check_client_encoding(val: &str) -> Result<(), String> {
     // https://github.com/postgres/postgres/blob/REL_15_3/src/common/encnames.c#L525
     let clean = val.replace(|c: char| !c.is_ascii_alphanumeric(), "");
     if !clean.eq_ignore_ascii_case("UTF8") {
-        Err("Only support 'UTF8' for CLIENT_ENCODING".to_string())
+        Err("Only support 'UTF8' for CLIENT_ENCODING".to_owned())
     } else {
         Ok(())
     }
@@ -345,7 +359,7 @@ fn check_bytea_output(val: &str) -> Result<(), String> {
     if val == "hex" {
         Ok(())
     } else {
-        Err("Only support 'hex' for BYTEA_OUTPUT".to_string())
+        Err("Only support 'hex' for BYTEA_OUTPUT".to_owned())
     }
 }
 
@@ -420,10 +434,10 @@ mod test {
     #[test]
     fn test_session_config_alias() {
         let mut config = TestConfig::default();
-        config.set("test_param", "2".to_string(), &mut ()).unwrap();
+        config.set("test_param", "2".to_owned(), &mut ()).unwrap();
         assert_eq!(config.get("test_param_alias").unwrap(), "2");
         config
-            .set("alias_param_test", "3".to_string(), &mut ())
+            .set("alias_param_test", "3".to_owned(), &mut ())
             .unwrap();
         assert_eq!(config.get("test_param_alias").unwrap(), "3");
         assert!(TestConfig::check_no_alter_sys("test_param").unwrap());

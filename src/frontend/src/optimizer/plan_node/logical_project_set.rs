@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -403,9 +403,8 @@ impl ToStream for LogicalProjectSet {
         if self.select_list().iter().any(|item| item.has_now()) {
             // User may use `now()` in table function in a wrong way, because we allow `now()` in `FROM` clause.
             return Err(ErrorCode::NotSupported(
-                "General `now()` function in streaming queries".to_string(),
-                "Streaming `now()` is currently only supported in GenerateSeries and TemporalFilter patterns."
-                .to_string(),
+                "General `now()` function in streaming queries".to_owned(),
+                "Streaming `now()` is currently only supported in GenerateSeries and TemporalFilter patterns.".to_owned(),
             )
             .into());
         }

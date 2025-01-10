@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,11 +24,12 @@ use pgwire::pg_response::StatementType::{self, ABORT, BEGIN, COMMIT, ROLLBACK, S
 use pgwire::pg_response::{PgResponse, PgResponseBuilder, RowSetResult};
 use pgwire::pg_server::BoxedError;
 use pgwire::types::{Format, Row};
-use risingwave_common::bail_not_implemented;
 use risingwave_common::types::Fields;
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_common::{bail, bail_not_implemented};
 use risingwave_pb::meta::PbThrottleTarget;
 use risingwave_sqlparser::ast::*;
+use util::get_table_catalog_by_table_name;
 
 use self::util::{DataChunkToRowSetAdapter, SourceSchemaCompatExt};
 use crate::catalog::table_catalog::TableType;
@@ -98,6 +99,7 @@ pub mod query;
 mod recover;
 pub mod show;
 mod transaction;
+mod use_db;
 pub mod util;
 pub mod variable;
 mod wait;
@@ -196,8 +198,13 @@ impl HandlerArgs {
     fn normalize_sql(stmt: &Statement) -> String {
         let mut stmt = stmt.clone();
         match &mut stmt {
-            Statement::CreateView { or_replace, .. } => {
+            Statement::CreateView {
+                or_replace,
+                if_not_exists,
+                ..
+            } => {
                 *or_replace = false;
+                *if_not_exists = false;
             }
             Statement::CreateTable {
                 or_replace,
@@ -247,6 +254,8 @@ pub async fn handle(
     let _guard = session.txn_begin_implicit();
     let handler_args = HandlerArgs::new(session, &stmt, sql)?;
 
+    check_ban_ddl_for_iceberg_engine_table(handler_args.session.clone(), &stmt)?;
+
     match stmt {
         Statement::Explain {
             statement,
@@ -269,6 +278,7 @@ pub async fn handle(
         Statement::CreateFunction {
             or_replace,
             temporary,
+            if_not_exists,
             name,
             args,
             returns,
@@ -289,6 +299,7 @@ pub async fn handle(
                     handler_args,
                     or_replace,
                     temporary,
+                    if_not_exists,
                     name,
                     args,
                     returns,
@@ -301,6 +312,7 @@ pub async fn handle(
                     handler_args,
                     or_replace,
                     temporary,
+                    if_not_exists,
                     name,
                     args,
                     returns,
@@ -311,6 +323,7 @@ pub async fn handle(
         }
         Statement::CreateAggregate {
             or_replace,
+            if_not_exists,
             name,
             args,
             returns,
@@ -320,6 +333,7 @@ pub async fn handle(
             create_aggregate::handle_create_aggregate(
                 handler_args,
                 or_replace,
+                if_not_exists,
                 name,
                 args,
                 returns,
@@ -346,6 +360,7 @@ pub async fn handle(
             cdc_table_info,
             include_column_options,
             webhook_info,
+            engine,
         } => {
             if or_replace {
                 bail_not_implemented!("CREATE OR REPLACE TABLE");
@@ -363,6 +378,7 @@ pub async fn handle(
                     append_only,
                     on_conflict,
                     with_version_column,
+                    engine,
                 )
                 .await;
             }
@@ -382,6 +398,7 @@ pub async fn handle(
                 cdc_table_info,
                 include_column_options,
                 webhook_info,
+                engine,
             )
             .await
         }
@@ -580,7 +597,24 @@ pub async fn handle(
             local: _,
             variable,
             value,
-        } => variable::handle_set(handler_args, variable, value),
+        } => {
+            // special handle for `use database`
+            if variable.real_value().eq_ignore_ascii_case("database") {
+                let x = variable::set_var_to_param_str(&value);
+                let res = use_db::handle_use_db(
+                    handler_args,
+                    ObjectName::from(vec![Ident::new_unchecked(
+                        x.unwrap_or("default".to_owned()),
+                    )]),
+                )?;
+                let mut builder = RwPgResponse::builder(StatementType::SET_VARIABLE);
+                for notice in res.notices() {
+                    builder = builder.notice(notice);
+                }
+                return Ok(builder.into());
+            }
+            variable::handle_set(handler_args, variable, value)
+        }
         Statement::SetTimeZone { local: _, value } => {
             variable::handle_set_time_zone(handler_args, value)
         }
@@ -719,6 +753,18 @@ pub async fn handle(
             alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
                 handler_args,
                 PbThrottleTarget::TableWithSource,
+                name,
+                rate_limit,
+            )
+            .await
+        }
+        Statement::AlterTable {
+            name,
+            operation: AlterTableOperation::SetDmlRateLimit { rate_limit },
+        } => {
+            alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
+                handler_args,
+                PbThrottleTarget::TableDml,
                 name,
                 rate_limit,
             )
@@ -937,6 +983,18 @@ pub async fn handle(
             )
             .await
         }
+        Statement::AlterSink {
+            name,
+            operation: AlterSinkOperation::SetSinkRateLimit { rate_limit },
+        } => {
+            alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
+                handler_args,
+                PbThrottleTarget::Sink,
+                name,
+                rate_limit,
+            )
+            .await
+        }
         Statement::AlterSubscription {
             name,
             operation: AlterSubscriptionOperation::RenameSubscription { subscription_name },
@@ -1107,6 +1165,119 @@ pub async fn handle(
             object_name,
             comment,
         } => comment::handle_comment(handler_args, object_type, object_name, comment).await,
+        Statement::Use { db_name } => use_db::handle_use_db(handler_args, db_name),
         _ => bail_not_implemented!("Unhandled statement: {}", stmt),
     }
+}
+
+fn check_ban_ddl_for_iceberg_engine_table(
+    session: Arc<SessionImpl>,
+    stmt: &Statement,
+) -> Result<()> {
+    match stmt {
+        Statement::AlterTable {
+            name,
+            operation:
+                operation @ (AlterTableOperation::AddColumn { .. }
+                | AlterTableOperation::DropColumn { .. }),
+        } => {
+            let (table, schema_name) = get_table_catalog_by_table_name(session.as_ref(), name)?;
+            if table.is_iceberg_engine_table() {
+                bail!(
+                    "ALTER TABLE {} is not supported for iceberg table: {}.{}",
+                    operation,
+                    schema_name,
+                    name
+                );
+            }
+        }
+
+        Statement::AlterTable {
+            name,
+            operation: AlterTableOperation::RenameTable { .. },
+        } => {
+            let (table, schema_name) = get_table_catalog_by_table_name(session.as_ref(), name)?;
+            if table.is_iceberg_engine_table() {
+                bail!(
+                    "ALTER TABLE RENAME is not supported for iceberg table: {}.{}",
+                    schema_name,
+                    name
+                );
+            }
+        }
+
+        Statement::AlterTable {
+            name,
+            operation: AlterTableOperation::ChangeOwner { .. },
+        } => {
+            let (table, schema_name) = get_table_catalog_by_table_name(session.as_ref(), name)?;
+            if table.is_iceberg_engine_table() {
+                bail!(
+                    "ALTER TABLE CHANGE OWNER is not supported for iceberg table: {}.{}",
+                    schema_name,
+                    name
+                );
+            }
+        }
+
+        Statement::AlterTable {
+            name,
+            operation: AlterTableOperation::SetParallelism { .. },
+        } => {
+            let (table, schema_name) = get_table_catalog_by_table_name(session.as_ref(), name)?;
+            if table.is_iceberg_engine_table() {
+                bail!(
+                    "ALTER TABLE SET PARALLELISM is not supported for iceberg table: {}.{}",
+                    schema_name,
+                    name
+                );
+            }
+        }
+
+        Statement::AlterTable {
+            name,
+            operation: AlterTableOperation::SetSchema { .. },
+        } => {
+            let (table, schema_name) = get_table_catalog_by_table_name(session.as_ref(), name)?;
+            if table.is_iceberg_engine_table() {
+                bail!(
+                    "ALTER TABLE SET SCHEMA is not supported for iceberg table: {}.{}",
+                    schema_name,
+                    name
+                );
+            }
+        }
+
+        Statement::AlterTable {
+            name,
+            operation: AlterTableOperation::RefreshSchema,
+        } => {
+            let (table, schema_name) = get_table_catalog_by_table_name(session.as_ref(), name)?;
+            if table.is_iceberg_engine_table() {
+                bail!(
+                    "ALTER TABLE REFRESH SCHEMA is not supported for iceberg table: {}.{}",
+                    schema_name,
+                    name
+                );
+            }
+        }
+
+        Statement::AlterTable {
+            name,
+            operation: AlterTableOperation::SetSourceRateLimit { .. },
+        } => {
+            let (table, schema_name) = get_table_catalog_by_table_name(session.as_ref(), name)?;
+            if table.is_iceberg_engine_table() {
+                bail!(
+                    "ALTER TABLE SET SOURCE RATE LIMIT is not supported for iceberg table: {}.{}",
+                    schema_name,
+                    name
+                );
+            }
+        }
+
+        _ => {}
+    }
+
+    Ok(())
 }

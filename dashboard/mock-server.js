@@ -1,5 +1,5 @@
 /*
- * Copyright 2024 RisingWave Labs
+ * Copyright 2025 RisingWave Labs
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -75,10 +75,6 @@ app.get("/clusters/2", (req, res, next) => {
 
 app.get("/metrics/cluster", (req, res, next) => {
   res.json(require("./mock/metrics_cluster.json"))
-})
-
-app.get("/metrics/fragment/prometheus_back_pressures", (req, res, next) => {
-  res.json(require("./mock/fragment_prometheus_back_pressures.json"))
 })
 
 app.get("/monitor/await_tree/1", (req, res, next) => {

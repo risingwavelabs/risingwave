@@ -92,10 +92,13 @@ IcebergProperties:
     required: false
   - name: s3.access.key
     field_type: String
-    required: true
+    required: false
   - name: s3.secret.key
     field_type: String
-    required: true
+    required: false
+  - name: gcs.credential
+    field_type: String
+    required: false
   - name: warehouse.path
     field_type: String
     comments: Path of iceberg warehouse, only applicable in storage catalog.
@@ -143,6 +146,11 @@ IcebergProperties:
     required: false
   - name: s3.path.style.access
     field_type: bool
+    required: false
+    default: Default::default
+  - name: enable_config_load
+    field_type: bool
+    comments: enable config load currently is used by iceberg engine, so it only support jdbc catalog.
     required: false
     default: Default::default
   - name: catalog.jdbc.user
@@ -373,22 +381,26 @@ KafkaProperties:
     required: false
     alias:
     - region
+    - s3.region
   - name: aws.endpoint_url
     field_type: String
     required: false
     alias:
     - endpoint_url
     - endpoint
+    - s3.endpoint
   - name: aws.credentials.access_key_id
     field_type: String
     required: false
     alias:
     - access_key
+    - s3.access.key
   - name: aws.credentials.secret_access_key
     field_type: String
     required: false
     alias:
     - secret_key
+    - s3.secret.key
   - name: aws.credentials.session_token
     field_type: String
     required: false
@@ -993,22 +1005,26 @@ PulsarProperties:
     required: false
     alias:
     - region
+    - s3.region
   - name: aws.endpoint_url
     field_type: String
     required: false
     alias:
     - endpoint_url
     - endpoint
+    - s3.endpoint
   - name: aws.credentials.access_key_id
     field_type: String
     required: false
     alias:
     - access_key
+    - s3.access.key
   - name: aws.credentials.secret_access_key
     field_type: String
     required: false
     alias:
     - secret_key
+    - s3.secret.key
   - name: aws.credentials.session_token
     field_type: String
     required: false

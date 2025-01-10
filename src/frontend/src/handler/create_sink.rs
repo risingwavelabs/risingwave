@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,13 +15,10 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::{Arc, LazyLock};
 
-use anyhow::Context;
 use either::Either;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap, hashset};
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::array::arrow::arrow_schema_iceberg::DataType as ArrowDataType;
-use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::bail;
 use risingwave_common::catalog::{
     ColumnCatalog, ConnectionId, DatabaseId, ObjectId, Schema, SchemaId, UserId,
@@ -37,14 +34,14 @@ use risingwave_connector::sink::{
 use risingwave_connector::WithPropertiesExt;
 use risingwave_pb::catalog::connection_params::PbConnectionType;
 use risingwave_pb::catalog::{PbSink, PbSource, Table};
-use risingwave_pb::ddl_service::{ReplaceTablePlan, TableJobType};
+use risingwave_pb::ddl_service::{replace_job_plan, ReplaceJobPlan, TableJobType};
 use risingwave_pb::stream_plan::stream_node::{NodeBody, PbNodeBody};
 use risingwave_pb::stream_plan::{MergeNode, StreamFragmentGraph, StreamNode};
+use risingwave_pb::telemetry::TelemetryDatabaseObject;
 use risingwave_sqlparser::ast::{
     CreateSink, CreateSinkStatement, EmitMode, Encode, ExplainOptions, Format, FormatEncodeOptions,
     Query, Statement,
 };
-use risingwave_sqlparser::parser::Parser;
 
 use super::create_mv::get_column_names;
 use super::create_source::UPSTREAM_SOURCE_KEY;
@@ -62,9 +59,7 @@ use crate::handler::util::{
     check_connector_match_connection_type, ensure_connection_type_allowed, SourceSchemaCompatExt,
 };
 use crate::handler::HandlerArgs;
-use crate::optimizer::plan_node::{
-    generic, IcebergPartitionInfo, LogicalSource, PartitionComputeInfo, StreamProject,
-};
+use crate::optimizer::plan_node::{generic, LogicalSource, PartitionComputeInfo, StreamProject};
 use crate::optimizer::{OptimizerContext, PlanRef, RelationCollectorVisitor};
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
@@ -105,7 +100,7 @@ pub async fn gen_sink_plan(
     let session = handler_args.session.clone();
     let session = session.as_ref();
     let user_specified_columns = !stmt.columns.is_empty();
-    let db_name = session.database();
+    let db_name = &session.database();
     let (sink_schema_name, sink_table_name) =
         Binder::resolve_schema_qualified_name(db_name, stmt.sink_name.clone())?;
 
@@ -113,7 +108,11 @@ pub async fn gen_sink_plan(
 
     resolve_privatelink_in_with_option(&mut with_options)?;
     let (mut resolved_with_options, connection_type, connector_conn_ref) =
-        resolve_connection_ref_and_secret_ref(with_options, session)?;
+        resolve_connection_ref_and_secret_ref(
+            with_options,
+            session,
+            TelemetryDatabaseObject::Sink,
+        )?;
     ensure_connection_type_allowed(connection_type, &ALLOWED_CONNECTION_CONNECTOR)?;
 
     // if not using connection, we don't need to check connector match connection type
@@ -174,12 +173,11 @@ pub async fn gen_sink_plan(
     };
 
     if sink_into_table_name.is_some() {
-        let prev =
-            resolved_with_options.insert(CONNECTOR_TYPE_KEY.to_string(), "table".to_string());
+        let prev = resolved_with_options.insert(CONNECTOR_TYPE_KEY.to_owned(), "table".to_owned());
 
         if prev.is_some() {
             return Err(RwError::from(ErrorCode::BindError(
-                "In the case of sinking into table, the 'connector' parameter should not be provided.".to_string(),
+                "In the case of sinking into table, the 'connector' parameter should not be provided.".to_owned(),
             )));
         }
     }
@@ -215,7 +213,7 @@ pub async fn gen_sink_plan(
     };
 
     let definition = context.normalized_sql().to_owned();
-    let mut plan_root = Planner::new(context.into()).plan_query(bound)?;
+    let mut plan_root = Planner::new_for_stream(context.into()).plan_query(bound)?;
     if let Some(col_names) = &col_names {
         plan_root.set_out_names(col_names.clone())?;
     };
@@ -226,7 +224,7 @@ pub async fn gen_sink_plan(
                 true
             } else {
                 return Err(ErrorCode::BindError(
-                    "`snapshot = false` only support `CREATE SINK FROM MV or TABLE`".to_string(),
+                    "`snapshot = false` only support `CREATE SINK FROM MV or TABLE`".to_owned(),
                 )
                 .into());
             }
@@ -363,78 +361,14 @@ pub async fn get_partition_compute_info(
     }
 }
 
+#[allow(clippy::unused_async)]
 async fn get_partition_compute_info_for_iceberg(
-    iceberg_config: &IcebergConfig,
+    _iceberg_config: &IcebergConfig,
 ) -> Result<Option<PartitionComputeInfo>> {
-    // TODO: check table if exists
-    if iceberg_config.create_table_if_not_exists {
-        return Ok(None);
-    }
-    let table = iceberg_config.load_table().await?;
-    let Some(partition_spec) = table.current_table_metadata().current_partition_spec().ok() else {
-        return Ok(None);
-    };
+    // TODO: enable partition compute for iceberg after fixing the issue of sink decoupling.
+    Ok(None)
 
-    if partition_spec.is_unpartitioned() {
-        return Ok(None);
-    }
-
-    // Separate the partition spec into two parts: sparse partition and range partition.
-    // Sparse partition means that the data distribution is more sparse at a given time.
-    // Range partition means that the data distribution is likely same at a given time.
-    // Only compute the partition and shuffle by them for the sparse partition.
-    let has_sparse_partition = partition_spec.fields.iter().any(|f| match f.transform {
-        // Sparse partition
-        icelake::types::Transform::Identity
-        | icelake::types::Transform::Truncate(_)
-        | icelake::types::Transform::Bucket(_) => true,
-        // Range partition
-        icelake::types::Transform::Year
-        | icelake::types::Transform::Month
-        | icelake::types::Transform::Day
-        | icelake::types::Transform::Hour
-        | icelake::types::Transform::Void => false,
-    });
-
-    if !has_sparse_partition {
-        return Ok(None);
-    }
-
-    let arrow_type: ArrowDataType = table
-        .current_partition_type()
-        .map_err(|err| RwError::from(ErrorCode::SinkError(err.into())))?
-        .try_into()
-        .map_err(|_| {
-            RwError::from(ErrorCode::SinkError(
-                "Fail to convert iceberg partition type to arrow type".into(),
-            ))
-        })?;
-    let Some(schema) = table.current_table_metadata().current_schema().ok() else {
-        return Ok(None);
-    };
-    let partition_fields = partition_spec
-        .fields
-        .iter()
-        .map(|f| {
-            let source_f = schema
-                .look_up_field_by_id(f.source_column_id)
-                .ok_or(RwError::from(ErrorCode::SinkError(
-                    "Fail to look up iceberg partition field".into(),
-                )))?;
-            Ok((source_f.name.clone(), f.transform))
-        })
-        .collect::<Result<Vec<_>>>()?;
-
-    let ArrowDataType::Struct(partition_type) = arrow_type else {
-        return Err(RwError::from(ErrorCode::SinkError(
-            "Partition type of iceberg should be a struct type".into(),
-        )));
-    };
-
-    Ok(Some(PartitionComputeInfo::Iceberg(IcebergPartitionInfo {
-        partition_type: IcebergArrowConvert.struct_from_fields(&partition_type)?,
-        partition_fields,
-    })))
+    // TODO: migrate to iceberg-rust later
 }
 
 pub async fn handle_create_sink(
@@ -466,7 +400,7 @@ pub async fn handle_create_sink(
         if has_order_by {
             plan.ctx().warn_to_user(
                 r#"The ORDER BY clause in the CREATE SINK statement has no effect at all."#
-                    .to_string(),
+                    .to_owned(),
             );
         }
 
@@ -508,12 +442,16 @@ pub async fn handle_create_sink(
         // for new creating sink, we don't have a unique identity because the sink id is not generated yet.
         hijack_merger_for_target_table(&mut graph, &columns_without_rw_timestamp, &sink, None)?;
 
-        target_table_replace_plan = Some(ReplaceTablePlan {
-            source,
-            table: Some(table),
+        target_table_replace_plan = Some(ReplaceJobPlan {
+            replace_job: Some(replace_job_plan::ReplaceJob::ReplaceTable(
+                replace_job_plan::ReplaceTable {
+                    table: Some(table),
+                    source,
+                    job_type: TableJobType::General as _,
+                },
+            )),
             fragment_graph: Some(graph),
             table_col_index_mapping: None,
-            job_type: TableJobType::General as _,
         });
     }
 
@@ -547,7 +485,7 @@ pub fn fetch_incoming_sinks(
 ) -> Result<Vec<Arc<SinkCatalog>>> {
     let reader = session.env().catalog_reader().read_guard();
     let mut sinks = Vec::with_capacity(incoming_sink_ids.len());
-    let db_name = session.database();
+    let db_name = &session.database();
     for schema in reader.iter_schemas(db_name)? {
         for sink in schema.iter_sink() {
             if incoming_sink_ids.contains(&sink.id.sink_id) {
@@ -564,10 +502,7 @@ pub(crate) async fn reparse_table_for_sink(
     table_catalog: &Arc<TableCatalog>,
 ) -> Result<(StreamFragmentGraph, Table, Option<PbSource>)> {
     // Retrieve the original table definition and parse it to AST.
-    let [definition]: [_; 1] = Parser::parse_sql(&table_catalog.definition)
-        .context("unable to parse original table definition")?
-        .try_into()
-        .unwrap();
+    let definition = table_catalog.create_sql_ast()?;
     let Statement::CreateTable {
         name,
         format_encode,
@@ -594,10 +529,16 @@ pub(crate) async fn reparse_table_for_sink(
         on_conflict,
         with_version_column,
         include_column_options,
+        engine,
         ..
     } = definition
     else {
         panic!("unexpected statement type: {:?}", definition);
+    };
+
+    let engine = match engine {
+        risingwave_sqlparser::ast::Engine::Hummock => risingwave_common::catalog::Engine::Hummock,
+        risingwave_sqlparser::ast::Engine::Iceberg => risingwave_common::catalog::Engine::Iceberg,
     };
 
     let (graph, table, source, _) = generate_stream_graph_for_replace_table(
@@ -617,6 +558,7 @@ pub(crate) async fn reparse_table_for_sink(
         None,
         None,
         include_column_options,
+        engine,
     )
     .await?;
 
@@ -632,14 +574,14 @@ pub(crate) fn insert_merger_to_union_with_project(
         // TODO: MergeNode is used as a placeholder, see issue #17658
         node.input.push(StreamNode {
             input: vec![StreamNode {
-                node_body: Some(NodeBody::Merge(MergeNode {
+                node_body: Some(NodeBody::Merge(Box::new(MergeNode {
                     ..Default::default()
-                })),
+                }))),
                 ..Default::default()
             }],
             identity: uniq_identity
                 .unwrap_or(PbSink::UNIQUE_IDENTITY_FOR_CREATING_TABLE_SINK)
-                .to_string(),
+                .to_owned(),
             fields: node.fields.clone(),
             node_body: Some(project_node.clone()),
             ..Default::default()
@@ -781,6 +723,7 @@ fn bind_sink_format_desc(
         resolve_connection_ref_and_secret_ref(
             WithOptions::try_from(value.row_options.as_slice())?,
             session,
+            TelemetryDatabaseObject::Sink,
         )?;
     ensure_connection_type_allowed(connection_type_flag, &ALLOWED_CONNECTION_SCHEMA_REGISTRY)?;
     let (mut options, secret_refs) = props.into_parts();
@@ -925,7 +868,7 @@ pub mod tests {
         let sql = r#"CREATE SINK snk1 FROM mv1
                     WITH (connector = 'jdbc', mysql.endpoint = '127.0.0.1:3306', mysql.table =
                         '<table_name>', mysql.database = '<database_name>', mysql.user = '<user_name>',
-                        mysql.password = '<password>', type = 'append-only', force_append_only = 'true');"#.to_string();
+                        mysql.password = '<password>', type = 'append-only', force_append_only = 'true');"#.to_owned();
         frontend.run_sql(sql).await.unwrap();
 
         let session = frontend.session_ref();

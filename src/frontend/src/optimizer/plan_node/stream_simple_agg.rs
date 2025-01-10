@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::XmlNode;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
@@ -23,7 +22,7 @@ use super::utils::{childless_record, plan_node_name, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::property::{Distribution, MonotonicityMap};
+use crate::optimizer::property::{Distribution, MonotonicityMap, WatermarkColumns};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -55,7 +54,7 @@ impl StreamSimpleAgg {
         };
 
         // Empty because watermark column(s) must be in group key and simple agg have no group key.
-        let watermark_columns = FixedBitSet::with_capacity(core.output_len());
+        let watermark_columns = WatermarkColumns::new();
 
         // Simple agg executor might change the append-only behavior of the stream.
         let base = PlanBase::new_stream_with_core(
@@ -113,7 +112,7 @@ impl StreamNode for StreamSimpleAgg {
         let (intermediate_state_table, agg_states, distinct_dedup_tables) =
             self.core.infer_tables(&self.base, None, None);
 
-        PbNodeBody::SimpleAgg(SimpleAggNode {
+        PbNodeBody::SimpleAgg(Box::new(SimpleAggNode {
             agg_calls: self
                 .agg_calls()
                 .iter()
@@ -151,7 +150,7 @@ impl StreamNode for StreamSimpleAgg {
             row_count_index: self.row_count_idx as u32,
             version: PbAggNodeVersion::Issue13465 as _,
             must_output_per_barrier: self.must_output_per_barrier,
-        })
+        }))
     }
 }
 

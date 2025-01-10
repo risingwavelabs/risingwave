@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -141,7 +141,7 @@ mod test {
         let resp = TracedSubResp(SubscribeResponse {
             status: Some(Status {
                 code: 0,
-                message: "abc".to_string(),
+                message: "abc".to_owned(),
             }),
             info: None,
             operation: 1,

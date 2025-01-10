@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -887,7 +887,7 @@ impl ScalarImpl {
             DataType::Interval => Self::Interval(Interval::from_sql(&Type::INTERVAL, bytes)?),
             DataType::Jsonb => Self::Jsonb(
                 JsonbVal::value_deserialize(bytes)
-                    .ok_or_else(|| "invalid value of Jsonb".to_string())?,
+                    .ok_or_else(|| "invalid value of Jsonb".to_owned())?,
             ),
             DataType::Int256 => Self::Int256(Int256::from_binary(bytes)?),
             DataType::Struct(_) | DataType::List(_) | DataType::Map(_) => {
@@ -1163,7 +1163,7 @@ mod tests {
             StructType::new(vec![("i", DataType::Int32), ("j", DataType::Varchar)]).into();
         assert_eq!(
             format!("{}", d),
-            "struct<i integer, j character varying>".to_string()
+            "struct<i integer, j character varying>".to_owned()
         );
     }
 

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -427,7 +427,7 @@ impl HummockManager {
     }
 
     pub(crate) async fn load_now(&self) -> Result<Option<u64>> {
-        let now = hummock_sequence::Entity::find_by_id(HUMMOCK_NOW.to_string())
+        let now = hummock_sequence::Entity::find_by_id(HUMMOCK_NOW.to_owned())
             .one(&self.env.meta_store_ref().conn)
             .await?
             .map(|m| m.seq.try_into().unwrap());
@@ -535,7 +535,7 @@ impl HummockManager {
                 break;
             }
             let delete_batch: HashSet<_> = objects_to_delete.drain(..batch_size).collect();
-            tracing::debug!(?delete_batch, "Attempt to delete objects.");
+            tracing::info!(?delete_batch, "Attempt to delete objects.");
             let deleted_object_ids = delete_batch.clone();
             self.gc_manager
                 .delete_objects(delete_batch.into_iter())

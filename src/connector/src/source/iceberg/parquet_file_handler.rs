@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,7 +28,7 @@ use iceberg::io::{
 use iceberg::{Error, ErrorKind};
 use itertools::Itertools;
 use opendal::layers::{LoggingLayer, RetryLayer};
-use opendal::services::S3;
+use opendal::services::{Gcs, S3};
 use opendal::Operator;
 use parquet::arrow::async_reader::AsyncFileReader;
 use parquet::arrow::{parquet_to_arrow_schema, ParquetRecordBatchStreamBuilder, ProjectionMask};
@@ -108,20 +108,17 @@ pub fn new_s3_operator(
     s3_region: String,
     s3_access_key: String,
     s3_secret_key: String,
-    location: String,
+    bucket: String,
+    s3_endpoint: String,
 ) -> ConnectorResult<Operator> {
-    // Create s3 builder.
-    let bucket = extract_bucket(&location);
-    let mut builder = S3::default().bucket(&bucket).region(&s3_region);
-    builder = builder.secret_access_key(&s3_access_key);
-    builder = builder.secret_access_key(&s3_secret_key);
-    builder = builder.endpoint(&format!(
-        "https://{}.s3.{}.amazonaws.com",
-        bucket, s3_region
-    ));
-
-    builder = builder.disable_config_load();
-
+    let mut builder = S3::default();
+    builder = builder
+        .region(&s3_region)
+        .endpoint(&s3_endpoint)
+        .access_key_id(&s3_access_key)
+        .secret_access_key(&s3_secret_key)
+        .bucket(&bucket)
+        .disable_config_load();
     let op: Operator = Operator::new(builder)?
         .layer(LoggingLayer::default())
         .layer(RetryLayer::default())
@@ -130,53 +127,68 @@ pub fn new_s3_operator(
     Ok(op)
 }
 
-fn extract_bucket(location: &str) -> String {
-    let prefix = "s3://";
-    let start = prefix.len();
-    let end = location[start..]
-        .find('/')
-        .unwrap_or(location.len() - start);
-    location[start..start + end].to_string()
+pub fn new_gcs_operator(credential: String, bucket: String) -> ConnectorResult<Operator> {
+    // Create gcs builder.
+    let builder = Gcs::default().bucket(&bucket).credential(&credential);
+
+    let operator: Operator = Operator::new(builder)?
+        .layer(LoggingLayer::default())
+        .layer(RetryLayer::default())
+        .finish();
+    Ok(operator)
 }
 
-pub async fn list_s3_directory(
-    s3_region: String,
-    s3_access_key: String,
-    s3_secret_key: String,
+#[derive(Debug, Clone)]
+pub enum FileScanBackend {
+    S3,
+    Gcs,
+}
+
+pub fn extract_bucket_and_file_name(
+    location: &str,
+    file_scan_backend: &FileScanBackend,
+) -> ConnectorResult<(String, String)> {
+    let url = Url::parse(location)?;
+    let bucket = url
+        .host_str()
+        .ok_or_else(|| {
+            Error::new(
+                ErrorKind::DataInvalid,
+                format!("Invalid url: {}, missing bucket", location),
+            )
+        })?
+        .to_owned();
+    let prefix = match file_scan_backend {
+        FileScanBackend::S3 => format!("s3://{}/", bucket),
+        FileScanBackend::Gcs => format!("gcs://{}/", bucket),
+    };
+    let file_name = location[prefix.len()..].to_string();
+    Ok((bucket, file_name))
+}
+
+pub async fn list_data_directory(
+    op: Operator,
     dir: String,
+    file_scan_backend: &FileScanBackend,
 ) -> Result<Vec<String>, anyhow::Error> {
-    let url = Url::parse(&dir)?;
-    let bucket = url.host_str().ok_or_else(|| {
-        Error::new(
-            ErrorKind::DataInvalid,
-            format!("Invalid s3 url: {}, missing bucket", dir),
-        )
-    })?;
-
-    let prefix = format!("s3://{}/", bucket);
+    let (bucket, file_name) = extract_bucket_and_file_name(&dir, file_scan_backend)?;
+    let prefix = match file_scan_backend {
+        FileScanBackend::S3 => format!("s3://{}/", bucket),
+        FileScanBackend::Gcs => format!("gcs://{}/", bucket),
+    };
     if dir.starts_with(&prefix) {
-        let mut builder = S3::default();
-        builder = builder
-            .region(&s3_region)
-            .access_key_id(&s3_access_key)
-            .secret_access_key(&s3_secret_key)
-            .bucket(bucket);
-        let op = Operator::new(builder)?
-            .layer(RetryLayer::default())
-            .finish();
-
-        op.list(&dir[prefix.len()..])
+        op.list(&file_name)
             .await
             .map_err(|e| anyhow!(e))
             .map(|list| {
                 list.into_iter()
-                    .map(|entry| prefix.to_string() + entry.path())
+                    .map(|entry| prefix.clone() + entry.path())
                     .collect()
             })
     } else {
         Err(Error::new(
             ErrorKind::DataInvalid,
-            format!("Invalid s3 url: {}, should start with {}", dir, prefix),
+            format!("Invalid url: {}, should start with {}", dir, prefix),
         ))?
     }
 }
@@ -197,44 +209,39 @@ pub async fn list_s3_directory(
 ///   Parquet file schema that match the requested schema. If an error occurs during processing,
 ///   it returns an appropriate error.
 pub fn extract_valid_column_indices(
-    columns: Option<Vec<Column>>,
+    rw_columns: Vec<Column>,
     metadata: &FileMetaData,
 ) -> ConnectorResult<Vec<usize>> {
-    match columns {
-        Some(rw_columns) => {
-            let parquet_column_names = metadata
-                .schema_descr()
-                .columns()
-                .iter()
-                .map(|c| c.name())
-                .collect_vec();
+    let parquet_column_names = metadata
+        .schema_descr()
+        .columns()
+        .iter()
+        .map(|c| c.name())
+        .collect_vec();
 
-            let converted_arrow_schema =
-                parquet_to_arrow_schema(metadata.schema_descr(), metadata.key_value_metadata())
-                    .map_err(anyhow::Error::from)?;
+    let converted_arrow_schema =
+        parquet_to_arrow_schema(metadata.schema_descr(), metadata.key_value_metadata())
+            .map_err(anyhow::Error::from)?;
 
-            let valid_column_indices: Vec<usize> = rw_columns
-                .iter()
-                .filter_map(|column| {
-                    parquet_column_names
-                        .iter()
-                        .position(|&name| name == column.name)
-                        .and_then(|pos| {
-                            let arrow_data_type: &risingwave_common::array::arrow::arrow_schema_udf::DataType = converted_arrow_schema.field(pos).data_type();
-                            let rw_data_type: &risingwave_common::types::DataType = &column.data_type;
+    let valid_column_indices: Vec<usize> = rw_columns
+    .iter()
+    .filter_map(|column| {
+        parquet_column_names
+            .iter()
+            .position(|&name| name == column.name)
+            .and_then(|pos| {
+                let arrow_data_type: &risingwave_common::array::arrow::arrow_schema_udf::DataType = converted_arrow_schema.field(pos).data_type();
+                let rw_data_type: &risingwave_common::types::DataType = &column.data_type;
 
-                            if is_parquet_schema_match_source_schema(arrow_data_type, rw_data_type) {
-                                Some(pos)
-                            } else {
-                                None
-                            }
-                        })
-                })
-                .collect();
-            Ok(valid_column_indices)
-        }
-        None => Ok(vec![]),
-    }
+                if is_parquet_schema_match_source_schema(arrow_data_type, rw_data_type) {
+                    Some(pos)
+                } else {
+                    None
+                }
+            })
+    })
+    .collect();
+    Ok(valid_column_indices)
 }
 
 /// Reads a specified Parquet file and converts its content into a stream of chunks.
@@ -258,8 +265,14 @@ pub async fn read_parquet_file(
     let parquet_metadata = reader.get_metadata().await.map_err(anyhow::Error::from)?;
 
     let file_metadata = parquet_metadata.file_metadata();
-    let column_indices = extract_valid_column_indices(rw_columns, file_metadata)?;
-    let projection_mask = ProjectionMask::leaves(file_metadata.schema_descr(), column_indices);
+    let projection_mask = match rw_columns {
+        Some(columns) => {
+            let column_indices = extract_valid_column_indices(columns, file_metadata)?;
+            ProjectionMask::leaves(file_metadata.schema_descr(), column_indices)
+        }
+        None => ProjectionMask::all(),
+    };
+
     // For the Parquet format, we directly convert from a record batch to a stream chunk.
     // Therefore, the offset of the Parquet file represents the current position in terms of the number of rows read from the file.
     let record_batch_stream = ParquetRecordBatchStreamBuilder::new(reader)
@@ -289,7 +302,6 @@ pub async fn read_parquet_file(
             })
             .collect(),
     };
-
     let parquet_parser = ParquetParser::new(columns, file_name, offset)?;
     let msg_stream: Pin<
         Box<dyn Stream<Item = Result<StreamChunk, crate::error::ConnectorError>> + Send>,

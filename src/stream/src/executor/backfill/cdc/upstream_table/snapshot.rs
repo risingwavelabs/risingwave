@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,20 +13,18 @@
 // limitations under the License.
 
 use std::future::Future;
-use std::num::NonZeroU32;
 
 use futures::{pin_mut, Stream};
 use futures_async_stream::try_stream;
-use governor::clock::MonotonicClock;
-use governor::{Quota, RateLimiter};
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{Scalar, ScalarImpl, Timestamptz};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+use risingwave_common_rate_limit::RateLimiter;
 use risingwave_connector::source::cdc::external::{
-    CdcOffset, ExternalTableReader, SchemaTableName,
+    CdcOffset, ExternalTableReader, ExternalTableReaderImpl, SchemaTableName,
 };
 use risingwave_pb::plan_common::additional_column::ColumnType;
 
@@ -81,16 +79,13 @@ impl SnapshotReadArgs {
 /// because we need to customize the snapshot read for managed upstream table (e.g. mv, index)
 /// and external upstream table.
 pub struct UpstreamTableReader<T> {
-    inner: T,
+    table: T,
+    pub(crate) reader: ExternalTableReaderImpl,
 }
 
 impl<T> UpstreamTableReader<T> {
-    pub fn inner(&self) -> &T {
-        &self.inner
-    }
-
-    pub fn new(table: T) -> Self {
-        Self { inner: table }
+    pub fn new(table: T, reader: ExternalTableReaderImpl) -> Self {
+        Self { table, reader }
     }
 }
 
@@ -142,11 +137,11 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
     #[try_stream(ok = Option<StreamChunk>, error = StreamExecutorError)]
     async fn snapshot_read_full_table(&self, args: SnapshotReadArgs, batch_size: u32) {
         let primary_keys = self
-            .inner
+            .table
             .pk_indices()
             .iter()
             .map(|idx| {
-                let f = &self.inner.schema().fields[*idx];
+                let f = &self.table.schema().fields[*idx];
                 f.name.clone()
             })
             .collect_vec();
@@ -159,13 +154,12 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
             future.await;
             unreachable!();
         }
-        let limiter = args.rate_limit_rps.map(|limit| {
-            tracing::info!(rate_limit = limit, "rate limit applied");
-            RateLimiter::direct_with_clock(
-                Quota::per_second(NonZeroU32::new(limit).unwrap()),
-                &MonotonicClock,
-            )
-        });
+
+        let rate_limiter = RateLimiter::new(
+            args.rate_limit_rps
+                .inspect(|limit| tracing::info!(rate_limit = limit, "rate limit applied"))
+                .into(),
+        );
 
         let mut read_args = args;
         let schema_table_name = read_args.schema_table_name.clone();
@@ -179,8 +173,8 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
             );
 
             let mut read_count: usize = 0;
-            let row_stream = self.inner.table_reader().snapshot_read(
-                self.inner.schema_table_name(),
+            let row_stream = self.reader.snapshot_read(
+                self.table.schema_table_name(),
                 read_args.current_pos.clone(),
                 primary_keys.clone(),
                 batch_size,
@@ -188,7 +182,7 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
 
             pin_mut!(row_stream);
             let mut builder = DataChunkBuilder::new(
-                self.inner.schema().data_types(),
+                self.table.schema().data_types(),
                 limited_chunk_size(read_args.rate_limit_rps),
             );
             let chunk_stream = iter_chunks(row_stream, &mut builder);
@@ -213,7 +207,6 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
                 } else {
                     // Apply rate limit, see `risingwave_stream::executor::source::apply_rate_limit` for more.
                     // May be should be refactored to a common function later.
-                    let limiter = limiter.as_ref().unwrap();
                     let limit = read_args.rate_limit_rps.unwrap() as usize;
 
                     // Because we produce chunks with limited-sized data chunk builder and all rows
@@ -221,10 +214,7 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
                     assert!(chunk_size <= limit);
 
                     // `InsufficientCapacity` should never happen because we have check the cardinality
-                    limiter
-                        .until_n_ready(NonZeroU32::new(chunk_size as u32).unwrap())
-                        .await
-                        .unwrap();
+                    rate_limiter.wait(chunk_size as _).await;
                     yield Some(with_additional_columns(
                         chunk,
                         &read_args.additional_columns,
@@ -247,7 +237,7 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
     }
 
     async fn current_cdc_offset(&self) -> StreamExecutorResult<Option<CdcOffset>> {
-        let binlog = self.inner.table_reader().current_cdc_offset();
+        let binlog = self.reader.current_cdc_offset();
         let binlog = binlog.await?;
         Ok(Some(binlog))
     }
@@ -302,11 +292,11 @@ mod tests {
         loop {
             let row_stream = reader.snapshot_read(
                 SchemaTableName {
-                    schema_name: "mydb".to_string(),
-                    table_name: "orders_rw".to_string(),
+                    schema_name: "mydb".to_owned(),
+                    table_name: "orders_rw".to_owned(),
                 },
                 start_pk.clone(),
-                vec!["o_orderkey".to_string()],
+                vec!["o_orderkey".to_owned()],
                 1000,
             );
             let mut builder = DataChunkBuilder::new(rw_schema.clone().data_types(), 256);

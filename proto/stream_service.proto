@@ -68,6 +68,7 @@ message StreamingControlStreamRequest {
   message InitialPartialGraph {
     uint32 partial_graph_id = 1;
     repeated stream_plan.SubscriptionUpstreamInfo subscriptions = 2;
+    repeated common.ActorInfo actor_infos = 3;
   }
 
   message DatabaseInitialPartialGraph {
@@ -89,22 +90,44 @@ message StreamingControlStreamRequest {
     uint32 database_id = 2;
   }
 
+  message ResetDatabaseRequest {
+    uint32 database_id = 1;
+    uint32 reset_request_id = 2;
+  }
+
   oneof request {
     InitRequest init = 1;
     InjectBarrierRequest inject_barrier = 2;
     RemovePartialGraphRequest remove_partial_graph = 3;
     CreatePartialGraphRequest create_partial_graph = 4;
+    ResetDatabaseRequest reset_database = 5;
   }
+}
+
+message ScoredError {
+  string err_msg = 1;
+  int32 score = 2;
 }
 
 message StreamingControlStreamResponse {
   message InitResponse {}
   message ShutdownResponse {}
+  message ReportDatabaseFailureResponse {
+    uint32 database_id = 1;
+  }
+
+  message ResetDatabaseResponse {
+    uint32 database_id = 1;
+    optional ScoredError root_err = 2;
+    uint32 reset_request_id = 3;
+  }
 
   oneof response {
     InitResponse init = 1;
     BarrierCompleteResponse complete_barrier = 2;
     ShutdownResponse shutdown = 3;
+    ReportDatabaseFailureResponse report_database_failure = 4;
+    ResetDatabaseResponse reset_database = 5;
   }
 }
 

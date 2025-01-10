@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,17 +13,16 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::num::NonZeroU32;
+use std::time::Duration;
 
 use await_tree::InstrumentAwait;
-use governor::clock::MonotonicClock;
-use governor::{Quota, RateLimiter};
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
 use risingwave_common::row::Row;
+use risingwave_common_rate_limit::RateLimiter;
 use risingwave_connector::error::ConnectorError;
-use risingwave_connector::source::{BoxChunkSourceStream, SourceColumnDesc, SplitId};
+use risingwave_connector::source::{BoxSourceChunkStream, SourceColumnDesc, SplitId};
 use risingwave_pb::plan_common::additional_column::ColumnType;
 use risingwave_pb::plan_common::AdditionalColumn;
 pub use state_table_handler::*;
@@ -49,6 +48,7 @@ pub use source_backfill_state_table::BackfillStateTableHandler;
 pub mod state_table_handler;
 use futures_async_stream::try_stream;
 use tokio::sync::mpsc::UnboundedReceiver;
+use tokio_retry::strategy::{jitter, ExponentialBackoff};
 
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{Barrier, Message};
@@ -73,7 +73,7 @@ pub fn get_split_offset_mapping_from_chunk(
         let (_, row, _) = chunk.row_at(i);
         let split_id = row.datum_at(split_idx).unwrap().into_utf8().into();
         let offset = row.datum_at(offset_idx).unwrap().into_utf8();
-        split_offset_mapping.insert(split_id, offset.to_string());
+        split_offset_mapping.insert(split_id, offset.to_owned());
     }
     Some(split_offset_mapping)
 }
@@ -117,7 +117,7 @@ pub fn prune_additional_cols(
 }
 
 #[try_stream(ok = StreamChunk, error = ConnectorError)]
-pub async fn apply_rate_limit(stream: BoxChunkSourceStream, rate_limit_rps: Option<u32>) {
+pub async fn apply_rate_limit(stream: BoxSourceChunkStream, rate_limit_rps: Option<u32>) {
     if rate_limit_rps == Some(0) {
         // block the stream until the rate limit is reset
         let future = futures::future::pending::<()>();
@@ -125,31 +125,11 @@ pub async fn apply_rate_limit(stream: BoxChunkSourceStream, rate_limit_rps: Opti
         unreachable!();
     }
 
-    let limiter = rate_limit_rps.map(|limit| {
-        tracing::info!(rate_limit = limit, "rate limit applied");
-        RateLimiter::direct_with_clock(
-            Quota::per_second(NonZeroU32::new(limit).unwrap()),
-            &MonotonicClock,
-        )
-    });
-
-    fn compute_chunk_permits(chunk: &StreamChunk, limit: usize) -> usize {
-        let chunk_size = chunk.capacity();
-        let ends_with_update = if chunk_size >= 2 {
-            // Note we have to check if the 2nd last is `U-` to be consistenct with `StreamChunkBuilder`.
-            // If something inconsistent happens in the stream, we may not have `U+` after this `U-`.
-            chunk.ops()[chunk_size - 2].is_update_delete()
-        } else {
-            false
-        };
-        if chunk_size == limit + 1 && ends_with_update {
-            // If the chunk size exceed limit because of the last `Update` operation,
-            // we should minus 1 to make sure the permits consumed is within the limit (max burst).
-            chunk_size - 1
-        } else {
-            chunk_size
-        }
-    }
+    let limiter = RateLimiter::new(
+        rate_limit_rps
+            .inspect(|limit| tracing::info!(rate_limit = limit, "rate limit applied"))
+            .into(),
+    );
 
     #[for_await]
     for chunk in stream {
@@ -162,23 +142,30 @@ pub async fn apply_rate_limit(stream: BoxChunkSourceStream, rate_limit_rps: Opti
             continue;
         }
 
-        let limiter = limiter.as_ref().unwrap();
-        let limit = rate_limit_rps.unwrap() as usize;
-
-        let required_permits = compute_chunk_permits(&chunk, limit);
-        if required_permits <= limit {
-            let n = NonZeroU32::new(required_permits as u32).unwrap();
-            // `InsufficientCapacity` should never happen because we have check the cardinality
-            limiter.until_n_ready(n).await.unwrap();
-            yield chunk;
-        } else {
-            // Cut the chunk into smaller chunks
-            for chunk in chunk.split(limit) {
-                let n = NonZeroU32::new(compute_chunk_permits(&chunk, limit) as u32).unwrap();
-                // chunks split should have effective chunk size <= limit
-                limiter.until_n_ready(n).await.unwrap();
-                yield chunk;
-            }
+        let limit = rate_limit_rps.unwrap() as u64;
+        let required_permits = chunk.compute_rate_limit_chunk_permits();
+        if required_permits > limit {
+            // This should not happen after https://github.com/risingwavelabs/risingwave/pull/19698.
+            // But if it does happen, let's don't panic and just log an error.
+            tracing::error!(
+                chunk_size,
+                required_permits,
+                limit,
+                "unexpected large chunk size"
+            );
         }
+
+        limiter.wait(required_permits).await;
+        yield chunk;
     }
+}
+
+pub fn get_infinite_backoff_strategy() -> impl Iterator<Item = Duration> {
+    const BASE_DELAY: Duration = Duration::from_secs(1);
+    const BACKOFF_FACTOR: u64 = 2;
+    const MAX_DELAY: Duration = Duration::from_secs(10);
+    ExponentialBackoff::from_millis(BASE_DELAY.as_millis() as u64)
+        .factor(BACKOFF_FACTOR)
+        .max_delay(MAX_DELAY)
+        .map(jitter)
 }

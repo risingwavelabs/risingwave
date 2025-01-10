@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -94,8 +94,8 @@ impl PlainParser {
     ) -> ConnectorResult<ParseResult> {
         // plain parser also used in the shared cdc source,
         // we need to handle transaction metadata and schema change messages here
-        if let Some(msg_meta) = writer.row_meta
-            && let SourceMeta::DebeziumCdc(cdc_meta) = msg_meta.meta
+        if let Some(msg_meta) = writer.row_meta()
+            && let SourceMeta::DebeziumCdc(cdc_meta) = msg_meta.source_meta
             && let Some(data) = payload
         {
             match cdc_meta.msg_type {
@@ -217,7 +217,7 @@ mod tests {
     use super::*;
     use crate::parser::{MessageMeta, SourceStreamChunkBuilder, TransactionControl};
     use crate::source::cdc::DebeziumCdcMeta;
-    use crate::source::{ConnectorProperties, DataType, SourceMessage, SplitId};
+    use crate::source::{ConnectorProperties, DataType, SourceCtrlOpts, SourceMessage, SplitId};
 
     #[tokio::test]
     async fn test_emit_transactional_chunk() {
@@ -252,7 +252,11 @@ mod tests {
         let mut transactional = false;
         // for untransactional source, we expect emit a chunk for each message batch
         let message_stream = source_message_stream(transactional);
-        let chunk_stream = crate::parser::into_chunk_stream_inner(parser, message_stream.boxed());
+        let chunk_stream = crate::parser::parse_message_stream(
+            parser,
+            message_stream.boxed(),
+            SourceCtrlOpts::for_test(),
+        );
         let output: std::result::Result<Vec<_>, _> = block_on(chunk_stream.collect::<Vec<_>>())
             .into_iter()
             .collect();
@@ -289,7 +293,11 @@ mod tests {
         // for transactional source, we expect emit a single chunk for the transaction
         transactional = true;
         let message_stream = source_message_stream(transactional);
-        let chunk_stream = crate::parser::into_chunk_stream_inner(parser, message_stream.boxed());
+        let chunk_stream = crate::parser::parse_message_stream(
+            parser,
+            message_stream.boxed(),
+            SourceCtrlOpts::for_test(),
+        );
         let output: std::result::Result<Vec<_>, _> = block_on(chunk_stream.collect::<Vec<_>>())
             .into_iter()
             .collect();
@@ -328,7 +336,7 @@ mod tests {
                 // put begin message at first
                 source_msg_batch.push(SourceMessage {
                     meta: SourceMeta::DebeziumCdc(DebeziumCdcMeta::new(
-                        "orders".to_string(),
+                        "orders".to_owned(),
                         0,
                         if transactional {
                             cdc_message::CdcMessageType::TransactionMeta
@@ -346,7 +354,7 @@ mod tests {
             for data_msg in batch {
                 source_msg_batch.push(SourceMessage {
                     meta: SourceMeta::DebeziumCdc(DebeziumCdcMeta::new(
-                        "orders".to_string(),
+                        "orders".to_owned(),
                         0,
                         cdc_message::CdcMessageType::Data,
                     )),
@@ -360,7 +368,7 @@ mod tests {
                 // put commit message at last
                 source_msg_batch.push(SourceMessage {
                     meta: SourceMeta::DebeziumCdc(DebeziumCdcMeta::new(
-                        "orders".to_string(),
+                        "orders".to_owned(),
                         0,
                         if transactional {
                             cdc_message::CdcMessageType::TransactionMeta
@@ -406,19 +414,19 @@ mod tests {
         )
         .await
         .unwrap();
-        let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 0);
+        let mut builder = SourceStreamChunkBuilder::new(columns, SourceCtrlOpts::for_test());
 
         // "id":"35352:3962948040" Postgres transaction ID itself and LSN of given operation separated by colon, i.e. the format is txID:LSN
         let begin_msg = r#"{"schema":null,"payload":{"status":"BEGIN","id":"3E11FA47-71CA-11E1-9E33-C80AA9429562:23","event_count":null,"data_collections":null,"ts_ms":1704269323180}}"#;
         let commit_msg = r#"{"schema":null,"payload":{"status":"END","id":"3E11FA47-71CA-11E1-9E33-C80AA9429562:23","event_count":11,"data_collections":[{"data_collection":"public.orders_tx","event_count":5},{"data_collection":"public.person","event_count":6}],"ts_ms":1704269323180}}"#;
 
         let cdc_meta = SourceMeta::DebeziumCdc(DebeziumCdcMeta::new(
-            "orders".to_string(),
+            "orders".to_owned(),
             0,
             cdc_message::CdcMessageType::TransactionMeta,
         ));
         let msg_meta = MessageMeta {
-            meta: &cdc_meta,
+            source_meta: &cdc_meta,
             split_id: "1001",
             offset: "",
         };
@@ -451,8 +459,8 @@ mod tests {
             _ => panic!("unexpected parse result: {:?}", res),
         }
 
-        let output = builder.take(10);
-        assert_eq!(0, output.cardinality());
+        builder.finish_current_chunk();
+        assert!(builder.consume_ready_chunks().next().is_none());
     }
 
     #[tokio::test]
@@ -483,16 +491,16 @@ mod tests {
         )
         .await
         .unwrap();
-        let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 0);
+        let mut dummy_builder = SourceStreamChunkBuilder::new(columns, SourceCtrlOpts::for_test());
 
         let msg = r#"{"schema":null,"payload": { "databaseName": "mydb", "ddl": "ALTER TABLE test add column v2 varchar(32)", "schemaName": null, "source": { "connector": "mysql", "db": "mydb", "file": "binlog.000065", "gtid": null, "name": "RW_CDC_0", "pos": 234, "query": null, "row": 0, "sequence": null, "server_id": 1, "snapshot": "false", "table": "test", "thread": null, "ts_ms": 1718354727000, "version": "2.4.2.Final" }, "tableChanges": [ { "id": "\"mydb\".\"test\"", "table": { "columns": [ { "autoIncremented": false, "charsetName": null, "comment": null, "defaultValueExpression": null, "enumValues": null, "generated": false, "jdbcType": 4, "length": null, "name": "id", "nativeType": null, "optional": false, "position": 1, "scale": null, "typeExpression": "INT", "typeName": "INT" }, { "autoIncremented": false, "charsetName": null, "comment": null, "defaultValueExpression": null, "enumValues": null, "generated": false, "jdbcType": 2014, "length": null, "name": "v1", "nativeType": null, "optional": true, "position": 2, "scale": null, "typeExpression": "TIMESTAMP", "typeName": "TIMESTAMP" }, { "autoIncremented": false, "charsetName": "utf8mb4", "comment": null, "defaultValueExpression": null, "enumValues": null, "generated": false, "jdbcType": 12, "length": 32, "name": "v2", "nativeType": null, "optional": true, "position": 3, "scale": null, "typeExpression": "VARCHAR", "typeName": "VARCHAR" } ], "comment": null, "defaultCharsetName": "utf8mb4", "primaryKeyColumnNames": [ "id" ] }, "type": "ALTER" } ], "ts_ms": 1718354727594 }}"#;
         let cdc_meta = SourceMeta::DebeziumCdc(DebeziumCdcMeta::new(
-            "mydb.test".to_string(),
+            "mydb.test".to_owned(),
             0,
             cdc_message::CdcMessageType::SchemaChange,
         ));
         let msg_meta = MessageMeta {
-            meta: &cdc_meta,
+            source_meta: &cdc_meta,
             split_id: "1001",
             offset: "",
         };
@@ -501,7 +509,7 @@ mod tests {
             .parse_one_with_txn(
                 None,
                 Some(msg.as_bytes().to_vec()),
-                builder.row_writer().with_meta(msg_meta),
+                dummy_builder.row_writer().with_meta(msg_meta),
             )
             .await;
 

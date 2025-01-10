@@ -32,6 +32,7 @@ user client_encoding
 user client_min_messages
 user create_compaction_group_for_mv
 user datestyle
+user dml_rate_limit
 user enable_join_ordering
 user enable_share_plan
 user enable_two_phase_agg
@@ -51,6 +52,7 @@ user server_encoding
 user server_version
 user server_version_num
 user sink_decouple
+user sink_rate_limit
 user source_rate_limit
 user standard_conforming_strings
 user statement_timeout

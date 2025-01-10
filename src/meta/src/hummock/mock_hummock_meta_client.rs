@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -257,7 +257,7 @@ impl HummockMetaClient for MockHummockMetaClient {
             .add_worker_node(
                 WorkerType::Compactor,
                 HostAddress {
-                    host: "compactor".to_string(),
+                    host: "compactor".to_owned(),
                     port: 0,
                 },
                 Default::default(),

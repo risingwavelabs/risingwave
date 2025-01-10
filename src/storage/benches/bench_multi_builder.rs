@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -150,7 +150,7 @@ async fn generate_sstable_store(object_store: Arc<ObjectStoreImpl>) -> Arc<Sstab
         .unwrap();
     Arc::new(SstableStore::new(SstableStoreConfig {
         store: object_store,
-        path: "test".to_string(),
+        path: "test".to_owned(),
         prefetch_buffer_capacity: 64 << 20,
         max_prefetch_block_number: 16,
         recent_filter: None,

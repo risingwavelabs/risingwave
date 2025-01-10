@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -143,7 +143,7 @@ impl SessionImpl {
         let user_reader = self.env().user_info_reader();
         let reader = user_reader.read_guard();
 
-        if let Some(user) = reader.get_user_by_name(self.user_name()) {
+        if let Some(user) = reader.get_user_by_name(&self.user_name()) {
             if user.is_super {
                 return Ok(());
             }
@@ -153,11 +153,11 @@ impl SessionImpl {
                 }
                 let has_privilege = user.check_privilege(&item.object, item.mode);
                 if !has_privilege {
-                    return Err(PermissionDenied("Do not have the privilege".to_string()).into());
+                    return Err(PermissionDenied("Do not have the privilege".to_owned()).into());
                 }
             }
         } else {
-            return Err(PermissionDenied("Session user is invalid".to_string()).into());
+            return Err(PermissionDenied("Session user is invalid".to_owned()).into());
         }
 
         Ok(())
@@ -167,7 +167,7 @@ impl SessionImpl {
     pub fn is_super_user(&self) -> bool {
         let reader = self.env().user_info_reader().read_guard();
 
-        if let Some(info) = reader.get_user_by_name(self.user_name()) {
+        if let Some(info) = reader.get_user_by_name(&self.user_name()) {
             info.is_super
         } else {
             false
@@ -193,7 +193,7 @@ impl SessionImpl {
             .env()
             .catalog_reader()
             .read_guard()
-            .get_schema_by_name(self.database(), schema_name)
+            .get_schema_by_name(&self.database(), schema_name)
             .unwrap()
             .owner();
 
@@ -203,8 +203,7 @@ impl SessionImpl {
             && !self.is_super_user()
         {
             return Err(PermissionDenied(
-                "Only the relation owner, the schema owner, and superuser can drop or alter a relation."
-                    .to_string(),
+                "Only the relation owner, the schema owner, and superuser can drop or alter a relation.".to_owned(),
             )
             .into());
         }
@@ -227,7 +226,7 @@ impl SessionImpl {
     ) -> Result<()> {
         if self.user_id() != db_schema.owner() && !self.is_super_user() {
             return Err(PermissionDenied(
-                "Only the owner, and superuser can drop or alter a schema or database.".to_string(),
+                "Only the owner, and superuser can drop or alter a schema or database.".to_owned(),
             )
             .into());
         }
@@ -268,8 +267,8 @@ mod tests {
             )
             .await
             .unwrap();
-        let database = DEFAULT_DATABASE_NAME.to_string();
-        let user_name = "user".to_string();
+        let database = DEFAULT_DATABASE_NAME.to_owned();
+        let user_name = "user".to_owned();
         let user_id = {
             let user_reader = session.env().user_info_reader();
             user_reader

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -37,7 +37,7 @@ impl FunctionAttr {
                 FunctionAttr {
                     args: {
                         let mut args = self.args.clone();
-                        *args.last_mut().unwrap() = "...".to_string();
+                        *args.last_mut().unwrap() = "...".to_owned();
                         args
                     },
                     ..self.clone()
@@ -68,7 +68,7 @@ impl FunctionAttr {
             }
             let attr = FunctionAttr {
                 args: args.iter().map(|s| s.to_string()).collect(),
-                ret: ret.to_string(),
+                ret: ret.to_owned(),
                 ..self.clone()
             };
             attrs.push(attr);

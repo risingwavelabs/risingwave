@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,6 +30,7 @@ pub struct OpenSearchSink {
     config: ElasticSearchOpenSearchConfig,
     schema: Schema,
     pk_indices: Vec<usize>,
+    is_append_only: bool,
 }
 
 #[async_trait]
@@ -43,6 +44,7 @@ impl TryFrom<SinkParam> for OpenSearchSink {
             config,
             schema,
             pk_indices: param.downstream_pk,
+            is_append_only: param.sink_type.is_append_only(),
         })
     }
 }
@@ -69,6 +71,7 @@ impl Sink for OpenSearchSink {
             self.schema.clone(),
             self.pk_indices.clone(),
             Self::SINK_NAME,
+            self.is_append_only,
         )?
         .into_log_sinker(self.config.concurrent_requests))
     }
@@ -96,13 +99,13 @@ impl Sink for OpenSearchSink {
                     risingwave_common::session_config::sink_decouple::SinkDecouple::Default
                     | risingwave_common::session_config::sink_decouple::SinkDecouple::Enable => {
                         desc.properties.insert(
-                            crate::sink::decouple_checkpoint_log_sink::COMMIT_CHECKPOINT_INTERVAL.to_string(),
+                            crate::sink::decouple_checkpoint_log_sink::COMMIT_CHECKPOINT_INTERVAL.to_owned(),
                             crate::sink::decouple_checkpoint_log_sink::DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE.to_string(),
                         );
                     }
                     risingwave_common::session_config::sink_decouple::SinkDecouple::Disable => {
                         desc.properties.insert(
-                            crate::sink::decouple_checkpoint_log_sink::COMMIT_CHECKPOINT_INTERVAL.to_string(),
+                            crate::sink::decouple_checkpoint_log_sink::COMMIT_CHECKPOINT_INTERVAL.to_owned(),
                             crate::sink::decouple_checkpoint_log_sink::DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITHOUT_SINK_DECOUPLE.to_string(),
                         );
                     }

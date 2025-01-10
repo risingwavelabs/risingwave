@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -336,7 +336,10 @@ impl WorkerNodeSelector {
         } else {
             self.apply_worker_node_mask(self.manager.list_serving_worker_nodes())
         };
-        worker_nodes.iter().map(|node| node.parallelism()).sum()
+        worker_nodes
+            .iter()
+            .map(|node| node.compute_node_parallelism())
+            .sum()
     }
 
     pub fn fragment_mapping(&self, fragment_id: FragmentId) -> Result<WorkerSlotMapping> {

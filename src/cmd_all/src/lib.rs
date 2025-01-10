@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,4 +22,5 @@ pub mod single_node;
 pub use single_node::*;
 pub use standalone::*;
 
+risingwave_batch_executors::enable!();
 risingwave_expr_impl::enable!();

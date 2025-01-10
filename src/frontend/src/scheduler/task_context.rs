@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -39,13 +39,13 @@ pub struct FrontendBatchTaskContext {
 }
 
 impl FrontendBatchTaskContext {
-    pub fn new(session: Arc<SessionImpl>) -> Self {
+    pub fn create(session: Arc<SessionImpl>) -> Arc<dyn BatchTaskContext> {
         let mem_context =
             MemoryContext::new(Some(session.env().mem_context()), TrAdderAtomic::new(0));
-        Self {
+        Arc::new(Self {
             session,
             mem_context,
-        }
+        })
     }
 }
 

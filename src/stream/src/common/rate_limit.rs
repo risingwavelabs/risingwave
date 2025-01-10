@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,9 +13,9 @@
 // limitations under the License.
 
 /// Get the rate-limited max chunk size.
-pub(crate) fn limited_chunk_size(rate_limit: Option<u32>) -> usize {
+pub(crate) fn limited_chunk_size(rate_limit_burst: Option<u32>) -> usize {
     let config_chunk_size = crate::config::chunk_size();
-    rate_limit
-        .map(|limit| config_chunk_size.min(limit as usize))
+    rate_limit_burst
+        .map(|burst| config_chunk_size.min(burst as usize))
         .unwrap_or(config_chunk_size)
 }

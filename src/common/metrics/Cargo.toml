@@ -8,12 +8,6 @@ license = { workspace = true }
 repository = { workspace = true }
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-[package.metadata.cargo-machete]
-ignored = ["workspace-hack"]
-
-[package.metadata.cargo-udeps.ignore]
-normal = ["workspace-hack"]
-
 [dependencies]
 auto_impl = "1"
 bytes = "1"
@@ -29,7 +23,7 @@ hyper-util = { version = "0.1", features = ["client-legacy"] }
 hytra = { workspace = true }
 itertools = { workspace = true }
 parking_lot = { workspace = true }
-pin-project-lite = "0.2"
+pin-project-lite = { workspace = true }
 prometheus = { version = "0.13" }
 rw_iter_util = { workspace = true }
 rw_resource_util = { workspace = true }

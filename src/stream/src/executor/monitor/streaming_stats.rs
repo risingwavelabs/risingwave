@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -61,10 +61,9 @@ pub struct StreamingMetrics {
 
     // Streaming actor
     pub actor_count: LabelGuardedIntGaugeVec<1>,
-    #[expect(dead_code)]
-    actor_memory_usage: LabelGuardedIntGaugeVec<2>,
-    actor_in_record_cnt: RelabeledGuardedIntCounterVec<3>,
+    pub actor_in_record_cnt: RelabeledGuardedIntCounterVec<3>,
     pub actor_out_record_cnt: RelabeledGuardedIntCounterVec<2>,
+    pub actor_current_epoch: RelabeledGuardedIntGaugeVec<2>,
 
     // Source
     pub source_output_row_count: LabelGuardedIntCounterVec<4>,
@@ -73,6 +72,7 @@ pub struct StreamingMetrics {
 
     // Sink
     sink_input_row_count: LabelGuardedIntCounterVec<3>,
+    sink_input_bytes: LabelGuardedIntCounterVec<3>,
     sink_chunk_buffer_size: LabelGuardedIntGaugeVec<3>,
 
     // Exchange (see also `compute::ExchangeServiceMetrics`)
@@ -191,6 +191,7 @@ pub struct StreamingMetrics {
     materialize_cache_hit_count: RelabeledGuardedIntCounterVec<3>,
     materialize_cache_total_count: RelabeledGuardedIntCounterVec<3>,
     materialize_input_row_count: RelabeledGuardedIntCounterVec<3>,
+    pub materialize_current_epoch: RelabeledGuardedIntGaugeVec<3>,
 }
 
 pub static GLOBAL_STREAMING_METRICS: OnceLock<StreamingMetrics> = OnceLock::new();
@@ -244,9 +245,26 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let sink_input_bytes = register_guarded_int_counter_vec_with_registry!(
+            "stream_sink_input_bytes",
+            "Total size of chunks streamed into sink executors",
+            &["sink_id", "actor_id", "fragment_id"],
+            registry
+        )
+        .unwrap();
+
         let materialize_input_row_count = register_guarded_int_counter_vec_with_registry!(
             "stream_mview_input_row_count",
             "Total number of rows streamed into materialize executors",
+            &["actor_id", "table_id", "fragment_id"],
+            registry
+        )
+        .unwrap()
+        .relabel_debug_1(level);
+
+        let materialize_current_epoch = register_guarded_int_gauge_vec_with_registry!(
+            "stream_mview_current_epoch",
+            "The current epoch of the materialized executor",
             &["actor_id", "table_id", "fragment_id"],
             registry
         )
@@ -395,20 +413,20 @@ impl StreamingMetrics {
         .unwrap()
         .relabel_debug_1(level);
 
+        let actor_current_epoch = register_guarded_int_gauge_vec_with_registry!(
+            "stream_actor_current_epoch",
+            "Current epoch of actor",
+            &["actor_id", "fragment_id"],
+            registry
+        )
+        .unwrap()
+        .relabel_debug_1(level);
+
         let actor_count = register_guarded_int_gauge_vec_with_registry!(
             "stream_actor_count",
             "Total number of actors (parallelism)",
             &["fragment_id"],
             registry
-        )
-        .unwrap();
-
-        // dead code
-        let actor_memory_usage = register_guarded_int_gauge_vec_with_registry!(
-            "actor_memory_usage",
-            "Memory usage (bytes)",
-            &["actor_id", "fragment_id"],
-            registry,
         )
         .unwrap();
 
@@ -1049,13 +1067,14 @@ impl StreamingMetrics {
             actor_idle_duration,
             actor_idle_cnt,
             actor_count,
-            actor_memory_usage,
             actor_in_record_cnt,
             actor_out_record_cnt,
+            actor_current_epoch,
             source_output_row_count,
             source_split_change_count,
             source_backfill_row_count,
             sink_input_row_count,
+            sink_input_bytes,
             sink_chunk_buffer_size,
             exchange_frag_recv_size,
             merge_barrier_align_duration,
@@ -1135,6 +1154,7 @@ impl StreamingMetrics {
             materialize_cache_hit_count,
             materialize_cache_total_count,
             materialize_input_row_count,
+            materialize_current_epoch,
         }
     }
 
@@ -1229,6 +1249,7 @@ impl StreamingMetrics {
             sink_input_row_count: self
                 .sink_input_row_count
                 .with_guarded_label_values(label_list),
+            sink_input_bytes: self.sink_input_bytes.with_guarded_label_values(label_list),
             sink_chunk_buffer_size: self
                 .sink_chunk_buffer_size
                 .with_guarded_label_values(label_list),
@@ -1494,6 +1515,9 @@ impl StreamingMetrics {
             materialize_input_row_count: self
                 .materialize_input_row_count
                 .with_guarded_label_values(label_list),
+            materialize_current_epoch: self
+                .materialize_current_epoch
+                .with_guarded_label_values(label_list),
         }
     }
 }
@@ -1520,6 +1544,7 @@ pub struct ActorMetrics {
 
 pub struct SinkExecutorMetrics {
     pub sink_input_row_count: LabelGuardedIntCounter<3>,
+    pub sink_input_bytes: LabelGuardedIntCounter<3>,
     pub sink_chunk_buffer_size: LabelGuardedIntGauge<3>,
 }
 
@@ -1527,6 +1552,7 @@ pub struct MaterializeMetrics {
     pub materialize_cache_hit_count: LabelGuardedIntCounter<3>,
     pub materialize_cache_total_count: LabelGuardedIntCounter<3>,
     pub materialize_input_row_count: LabelGuardedIntCounter<3>,
+    pub materialize_current_epoch: LabelGuardedIntGauge<3>,
 }
 
 pub struct GroupTopNMetrics {

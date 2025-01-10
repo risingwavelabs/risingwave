@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -447,7 +447,7 @@ impl Serialize for DefaultParallelism {
             Int(usize),
         }
         match self {
-            DefaultParallelism::Full => Parallelism::Str("Full".to_string()).serialize(serializer),
+            DefaultParallelism::Full => Parallelism::Str("Full".to_owned()).serialize(serializer),
             DefaultParallelism::Default(val) => {
                 Parallelism::Int(val.get() as _).serialize(serializer)
             }
@@ -528,6 +528,10 @@ pub struct MetaDeveloperConfig {
     #[serde(default = "default::developer::hummock_time_travel_sst_info_fetch_batch_size")]
     /// Max number of SSTs fetched from meta store per SELECT, during time travel Hummock version replay.
     pub hummock_time_travel_sst_info_fetch_batch_size: usize,
+
+    #[serde(default = "default::developer::hummock_time_travel_sst_info_insert_batch_size")]
+    /// Max number of SSTs inserted into meta store per INSERT, during time travel metadata writing.
+    pub hummock_time_travel_sst_info_insert_batch_size: usize,
 }
 
 /// The section `[server]` in `risingwave.toml`.
@@ -865,7 +869,7 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::mem_table_spill_threshold")]
     pub mem_table_spill_threshold: usize,
 
-    /// The concurrent uploading number of `SSTables` of buidler
+    /// The concurrent uploading number of `SSTables` of builder
     #[serde(default = "default::storage::compactor_concurrent_uploading_sst_count")]
     pub compactor_concurrent_uploading_sst_count: Option<usize>,
 
@@ -1141,6 +1145,16 @@ pub struct StreamingDeveloperConfig {
     /// even if session variable set.
     /// If true, it's decided by session variable `streaming_use_shared_source` (default true)
     pub enable_shared_source: bool,
+
+    #[serde(default = "default::developer::switch_jdbc_pg_to_native")]
+    /// When true, all jdbc sinks with connector='jdbc' and jdbc.url="jdbc:postgresql://..."
+    /// will be switched from jdbc postgresql sinks to rust native (connector='postgres') sinks.
+    pub switch_jdbc_pg_to_native: bool,
+
+    /// Configure the system-wide cache row cardinality of hash join.
+    /// For example, if this is set to 1000, it means we can have at most 1000 rows in cache.
+    #[serde(default = "default::developer::streaming_hash_join_entry_state_max_rows")]
+    pub hash_join_entry_state_max_rows: usize,
 }
 
 /// The subsections `[batch.developer]`.
@@ -1391,7 +1405,7 @@ impl SystemConfig {
                 if let Some(hummock_state_store) = state_store.strip_prefix("hummock+") {
                     system_params.backup_storage_url = Some(hummock_state_store.to_owned());
                 } else {
-                    system_params.backup_storage_url = Some("memory".to_string());
+                    system_params.backup_storage_url = Some("memory".to_owned());
                 }
                 tracing::info!("initialize backup_storage_url based on state_store");
             }
@@ -1853,7 +1867,7 @@ pub mod default {
         use foyer::{Compression, RecoverMode, RuntimeOptions, TokioRuntimeOptions};
 
         pub fn dir() -> String {
-            "".to_string()
+            "".to_owned()
         }
 
         pub fn capacity_mb() -> usize {
@@ -1941,7 +1955,7 @@ pub mod default {
         }
 
         pub fn dir() -> String {
-            "./".to_string()
+            "./".to_owned()
         }
     }
 
@@ -2036,6 +2050,10 @@ pub mod default {
             10_000
         }
 
+        pub fn hummock_time_travel_sst_info_insert_batch_size() -> usize {
+            100
+        }
+
         pub fn memory_controller_threshold_aggressive() -> f64 {
             0.9
         }
@@ -2095,6 +2113,15 @@ pub mod default {
 
         pub fn stream_enable_auto_schema_change() -> bool {
             true
+        }
+
+        pub fn switch_jdbc_pg_to_native() -> bool {
+            false
+        }
+
+        pub fn streaming_hash_join_entry_state_max_rows() -> usize {
+            // NOTE(kwannoel): This is just an arbitrary number.
+            30000
         }
     }
 
@@ -2623,6 +2650,7 @@ pub struct CompactionConfig {
     pub max_level: u32,
 }
 
+/// Note: only applies to meta store backends other than `SQLite`.
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct MetaStoreConfig {
     /// Maximum number of connections for the meta store connection pool.
@@ -2682,7 +2710,7 @@ mod tests {
 
     fn rw_config_to_markdown() -> String {
         let mut config_rustdocs = BTreeMap::<String, Vec<(String, String)>>::new();
-        RwConfig::config_docs("".to_string(), &mut config_rustdocs);
+        RwConfig::config_docs("".to_owned(), &mut config_rustdocs);
 
         // Section -> Config Name -> ConfigItemDoc
         let mut configs: BTreeMap<String, BTreeMap<String, ConfigItemDoc>> = config_rustdocs
@@ -2695,7 +2723,7 @@ mod tests {
                             name,
                             ConfigItemDoc {
                                 desc,
-                                default: "".to_string(), // unset
+                                default: "".to_owned(), // unset
                             },
                         )
                     })
@@ -2707,10 +2735,10 @@ mod tests {
         let toml_doc: BTreeMap<String, toml::Value> =
             toml::from_str(&toml::to_string(&default_config_for_docs()).unwrap()).unwrap();
         toml_doc.into_iter().for_each(|(name, value)| {
-            set_default_values("".to_string(), name, value, &mut configs);
+            set_default_values("".to_owned(), name, value, &mut configs);
         });
 
-        let mut markdown = "# RisingWave System Configurations\n\n".to_string()
+        let mut markdown = "# RisingWave System Configurations\n\n".to_owned()
             + "This page is automatically generated by `./risedev generate-example-config`\n";
         for (section, configs) in configs {
             if configs.is_empty() {
@@ -2798,7 +2826,7 @@ mod tests {
                     .s3
                     .developer
                     .retryable_service_error_codes,
-                vec!["dummy".to_string()]
+                vec!["dummy".to_owned()]
             );
         }
 
@@ -2844,7 +2872,7 @@ mod tests {
                     .s3
                     .developer
                     .retryable_service_error_codes,
-                vec!["dummy".to_string()]
+                vec!["dummy".to_owned()]
             );
         }
     }

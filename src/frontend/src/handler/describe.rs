@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -267,10 +267,10 @@ mod tests {
                 columns.insert(
                     std::str::from_utf8(row.index(0).as_ref().unwrap())
                         .unwrap()
-                        .to_string(),
+                        .to_owned(),
                     std::str::from_utf8(row.index(1).as_ref().unwrap())
                         .unwrap()
-                        .to_string(),
+                        .to_owned(),
                 );
             }
         }

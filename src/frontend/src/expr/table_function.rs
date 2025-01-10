@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,7 +21,8 @@ use mysql_async::prelude::*;
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::types::{DataType, ScalarImpl, StructType};
 use risingwave_connector::source::iceberg::{
-    get_parquet_fields, list_s3_directory, new_s3_operator,
+    extract_bucket_and_file_name, get_parquet_fields, list_data_directory, new_gcs_operator,
+    new_s3_operator, FileScanBackend,
 };
 pub use risingwave_pb::expr::table_function::PbType as TableFunctionType;
 use risingwave_pb::expr::PbTableFunction;
@@ -79,19 +80,17 @@ impl TableFunction {
         let return_type = {
             // arguments:
             // file format e.g. parquet
-            // storage type e.g. s3
-            // s3 region
-            // s3 access key
-            // s3 secret key
-            // file location
-            if args.len() != 6 {
-                return Err(BindError("file_scan function only accepts 6 arguments: file_scan('parquet', 's3', s3 region, s3 access key, s3 secret key, file location)".to_string()).into());
+            // storage type e.g. s3, gcs
+            // For s3: file_scan(file_format, s3, s3_region, s3_access_key, s3_secret_key, file_location_or_directory)
+            // For gcs: file_scan(file_format, gcs, credential, file_location_or_directory)
+            if args.len() != 6 && args.len() != 4 {
+                return Err(BindError("file_scan function only accepts: file_scan('parquet', 's3', s3 region, s3 access key, s3 secret key, file location) or file_scan('parquet', 'gcs', credential, service_account, file location)".to_owned()).into());
             }
             let mut eval_args: Vec<String> = vec![];
             for arg in &args {
                 if arg.return_type() != DataType::Varchar {
                     return Err(BindError(
-                        "file_scan function only accepts string arguments".to_string(),
+                        "file_scan function only accepts string arguments".to_owned(),
                     )
                     .into());
                 }
@@ -99,7 +98,7 @@ impl TableFunction {
                     Some(Ok(value)) => {
                         if value.is_none() {
                             return Err(BindError(
-                                "file_scan function does not accept null arguments".to_string(),
+                                "file_scan function does not accept null arguments".to_owned(),
                             )
                             .into());
                         }
@@ -109,7 +108,7 @@ impl TableFunction {
                             }
                             _ => {
                                 return Err(BindError(
-                                    "file_scan function only accepts string arguments".to_string(),
+                                    "file_scan function only accepts string arguments".to_owned(),
                                 )
                                 .into())
                             }
@@ -120,7 +119,7 @@ impl TableFunction {
                     }
                     None => {
                         return Err(BindError(
-                            "file_scan function only accepts constant arguments".to_string(),
+                            "file_scan function only accepts constant arguments".to_owned(),
                         )
                         .into());
                     }
@@ -128,14 +127,16 @@ impl TableFunction {
             }
             if !"parquet".eq_ignore_ascii_case(&eval_args[0]) {
                 return Err(BindError(
-                    "file_scan function only accepts 'parquet' as file format".to_string(),
+                    "file_scan function only accepts 'parquet' as file format".to_owned(),
                 )
                 .into());
             }
 
-            if !"s3".eq_ignore_ascii_case(&eval_args[1]) {
+            if !"s3".eq_ignore_ascii_case(&eval_args[1])
+                && !"gcs".eq_ignore_ascii_case(&eval_args[1])
+            {
                 return Err(BindError(
-                    "file_scan function only accepts 's3' as storage type".to_string(),
+                    "file_scan function only accepts 's3' or 'gcs' as storage type".to_owned(),
                 )
                 .into());
             }
@@ -148,24 +149,59 @@ impl TableFunction {
 
             #[cfg(not(madsim))]
             {
-                let files = if eval_args[5].ends_with('/') {
+                let (file_scan_backend, input_file_location) =
+                    if "s3".eq_ignore_ascii_case(&eval_args[1]) {
+                        (FileScanBackend::S3, eval_args[5].clone())
+                    } else if "gcs".eq_ignore_ascii_case(&eval_args[1]) {
+                        (FileScanBackend::Gcs, eval_args[3].clone())
+                    } else {
+                        unreachable!();
+                    };
+                let op = match file_scan_backend {
+                    FileScanBackend::S3 => {
+                        let (bucket, _) = extract_bucket_and_file_name(
+                            &eval_args[5].clone(),
+                            &file_scan_backend,
+                        )?;
+
+                        let (s3_region, s3_endpoint) = match eval_args[2].starts_with("http") {
+                            true => ("us-east-1".to_owned(), eval_args[2].clone()), /* for minio, hard code region as not used but needed. */
+                            false => (
+                                eval_args[2].clone(),
+                                format!("https://{}.s3.{}.amazonaws.com", bucket, eval_args[2],),
+                            ),
+                        };
+                        new_s3_operator(
+                            s3_region.clone(),
+                            eval_args[3].clone(),
+                            eval_args[4].clone(),
+                            bucket.clone(),
+                            s3_endpoint.clone(),
+                        )?
+                    }
+                    FileScanBackend::Gcs => {
+                        let (bucket, _) =
+                            extract_bucket_and_file_name(&input_file_location, &file_scan_backend)?;
+
+                        new_gcs_operator(eval_args[2].clone(), bucket.clone())?
+                    }
+                };
+                let files = if input_file_location.ends_with('/') {
                     let files = tokio::task::block_in_place(|| {
                         FRONTEND_RUNTIME.block_on(async {
-                            let files = list_s3_directory(
-                                eval_args[2].clone(),
-                                eval_args[3].clone(),
-                                eval_args[4].clone(),
-                                eval_args[5].clone(),
+                            let files = list_data_directory(
+                                op.clone(),
+                                input_file_location.clone(),
+                                &file_scan_backend,
                             )
                             .await?;
 
                             Ok::<Vec<String>, anyhow::Error>(files)
                         })
                     })?;
-
                     if files.is_empty() {
                         return Err(BindError(
-                            "file_scan function only accepts non-empty directory".to_string(),
+                            "file_scan function only accepts non-empty directory".to_owned(),
                         )
                         .into());
                     }
@@ -174,26 +210,16 @@ impl TableFunction {
                 } else {
                     None
                 };
-
                 let schema = tokio::task::block_in_place(|| {
                     FRONTEND_RUNTIME.block_on(async {
-                        let op = new_s3_operator(
-                            eval_args[2].clone(),
-                            eval_args[3].clone(),
-                            eval_args[4].clone(),
-                            match files.as_ref() {
-                                Some(files) => files[0].clone(),
-                                None => eval_args[5].clone(),
-                            },
-                        )?;
-                        let fields = get_parquet_fields(
-                            op,
-                            match files.as_ref() {
-                                Some(files) => files[0].clone(),
-                                None => eval_args[5].clone(),
-                            },
-                        )
-                        .await?;
+                        let location = match files.as_ref() {
+                            Some(files) => files[0].clone(),
+                            None => input_file_location.clone(),
+                        };
+                        let (_, file_name) =
+                            extract_bucket_and_file_name(&location, &file_scan_backend)?;
+
+                        let fields = get_parquet_fields(op, file_name).await?;
 
                         let mut rw_types = vec![];
                         for field in &fields {
@@ -211,7 +237,10 @@ impl TableFunction {
 
                 if let Some(files) = files {
                     // if the file location is a directory, we need to remove the last argument and add all files in the directory as arguments
-                    args.remove(5);
+                    match file_scan_backend {
+                        FileScanBackend::S3 => args.remove(5),
+                        FileScanBackend::Gcs => args.remove(3),
+                    };
                     for file in files {
                         args.push(ExprImpl::Literal(Box::new(Literal::new(
                             Some(ScalarImpl::Utf8(file.into())),
@@ -235,7 +264,7 @@ impl TableFunction {
     pub fn new_postgres_query(args: Vec<ExprImpl>) -> RwResult<Self> {
         let args = {
             if args.len() != 6 {
-                return Err(BindError("postgres_query function only accepts 6 arguments: postgres_query(hostname varchar, port varchar, username varchar, password varchar, database_name varchar, postgres_query varchar)".to_string()).into());
+                return Err(BindError("postgres_query function only accepts 6 arguments: postgres_query(hostname varchar, port varchar, username varchar, password varchar, database_name varchar, postgres_query varchar)".to_owned()).into());
             }
             let mut cast_args = Vec::with_capacity(6);
             for arg in args {
@@ -251,8 +280,7 @@ impl TableFunction {
                     Some(Ok(value)) => {
                         let Some(scalar) = value else {
                             return Err(BindError(
-                                "postgres_query function does not accept null arguments"
-                                    .to_string(),
+                                "postgres_query function does not accept null arguments".to_owned(),
                             )
                             .into());
                         };
@@ -263,7 +291,7 @@ impl TableFunction {
                     }
                     None => {
                         return Err(BindError(
-                            "postgres_query function only accepts constant arguments".to_string(),
+                            "postgres_query function only accepts constant arguments".to_owned(),
                         )
                         .into());
                     }
@@ -311,7 +339,7 @@ impl TableFunction {
 
                     let mut rw_types = vec![];
                     for column in statement.columns() {
-                        let name = column.name().to_string();
+                        let name = column.name().to_owned();
                         let data_type = match *column.type_() {
                             TokioPgType::BOOL => DataType::Boolean,
                             TokioPgType::INT2 => DataType::Int16,
@@ -329,10 +357,10 @@ impl TableFunction {
                             TokioPgType::JSONB => DataType::Jsonb,
                             TokioPgType::BYTEA => DataType::Bytea,
                             _ => {
-                                return Err(crate::error::ErrorCode::BindError(
-                                    format!("unsupported column type: {}", column.type_())
-                                        .to_string(),
-                                )
+                                return Err(crate::error::ErrorCode::BindError(format!(
+                                    "unsupported column type: {}",
+                                    column.type_()
+                                ))
                                 .into());
                             }
                         };
@@ -357,7 +385,7 @@ impl TableFunction {
         static MYSQL_ARGS_LEN: usize = 6;
         let args = {
             if args.len() != MYSQL_ARGS_LEN {
-                return Err(BindError("mysql_query function only accepts 6 arguments: mysql_query(hostname varchar, port varchar, username varchar, password varchar, database_name varchar, mysql_query varchar)".to_string()).into());
+                return Err(BindError("mysql_query function only accepts 6 arguments: mysql_query(hostname varchar, port varchar, username varchar, password varchar, database_name varchar, mysql_query varchar)".to_owned()).into());
             }
             let mut cast_args = Vec::with_capacity(MYSQL_ARGS_LEN);
             for arg in args {
@@ -373,7 +401,7 @@ impl TableFunction {
                     Some(Ok(value)) => {
                         let Some(scalar) = value else {
                             return Err(BindError(
-                                "mysql_query function does not accept null arguments".to_string(),
+                                "mysql_query function does not accept null arguments".to_owned(),
                             )
                             .into());
                         };
@@ -384,7 +412,7 @@ impl TableFunction {
                     }
                     None => {
                         return Err(BindError(
-                            "mysql_query function only accepts constant arguments".to_string(),
+                            "mysql_query function only accepts constant arguments".to_owned(),
                         )
                         .into());
                     }
@@ -485,10 +513,10 @@ impl TableFunction {
                             | MySqlColumnType::MYSQL_TYPE_SET
                             | MySqlColumnType::MYSQL_TYPE_GEOMETRY
                             | MySqlColumnType::MYSQL_TYPE_NULL => {
-                                return Err(crate::error::ErrorCode::BindError(
-                                    format!("unsupported column type: {:?}", column.column_type())
-                                        .to_string(),
-                                )
+                                return Err(crate::error::ErrorCode::BindError(format!(
+                                    "unsupported column type: {:?}",
+                                    column.column_type()
+                                ))
                                 .into());
                             }
                         };

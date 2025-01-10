@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -40,13 +40,13 @@ impl Parse for FunctionAttr {
             Some(s) => (true, s),
             None => (false, ret),
         };
-        parsed.name = name.trim().to_string();
+        parsed.name = name.trim().to_owned();
         parsed.args = if args.is_empty() {
             vec![]
         } else {
-            args.split(',').map(|s| s.trim().to_string()).collect()
+            args.split(',').map(|s| s.trim().to_owned()).collect()
         };
-        parsed.ret = ret.trim().to_string();
+        parsed.ret = ret.trim().to_owned();
         parsed.is_table_function = is_table_function;
 
         if input.parse::<Token![,]>().is_err() {

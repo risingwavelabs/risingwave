@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -285,7 +285,6 @@ impl<S: StateStore> StateStore for TracedStateStore<S> {
 }
 
 impl<S: StateStoreRead> StateStoreRead for TracedStateStore<S> {
-    type ChangeLogIter = impl StateStoreReadChangeLogIter;
     type Iter = impl StateStoreReadIter;
     type RevIter = impl StateStoreReadIter;
 
@@ -336,6 +335,10 @@ impl<S: StateStoreRead> StateStoreRead for TracedStateStore<S> {
         );
         self.traced_iter(self.inner.rev_iter(key_range, epoch, read_options), span)
     }
+}
+
+impl<S: StateStoreReadLog> StateStoreReadLog for TracedStateStore<S> {
+    type ChangeLogIter = impl StateStoreReadChangeLogIter;
 
     fn iter_log(
         &self,

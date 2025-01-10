@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,6 @@
 
 use std::rc::Rc;
 
-use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::Field;
@@ -30,7 +29,7 @@ use crate::catalog::source_catalog::SourceCatalog;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::{childless_record, Distill};
 use crate::optimizer::plan_node::{generic, ExprRewritable, StreamNode};
-use crate::optimizer::property::{Distribution, MonotonicityMap};
+use crate::optimizer::property::{Distribution, MonotonicityMap, WatermarkColumns};
 use crate::scheduler::SchedulerResult;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::{Explain, TableCatalog};
@@ -56,7 +55,7 @@ impl StreamSourceScan {
             Distribution::SomeShard,
             core.catalog.as_ref().map_or(true, |s| s.append_only),
             false,
-            FixedBitSet::with_capacity(core.column_catalog.len()),
+            WatermarkColumns::new(),
             MonotonicityMap::new(),
         );
 
@@ -85,15 +84,15 @@ impl StreamSourceScan {
 
         let key = Field {
             data_type: DataType::Varchar,
-            name: "partition_id".to_string(),
+            name: "partition_id".to_owned(),
             sub_fields: vec![],
-            type_name: "".to_string(),
+            type_name: "".to_owned(),
         };
         let value = Field {
             data_type: DataType::Jsonb,
-            name: "backfill_progress".to_string(),
+            name: "backfill_progress".to_owned(),
             sub_fields: vec![],
-            type_name: "".to_string(),
+            type_name: "".to_owned(),
         };
 
         let ordered_col_idx = builder.add_column(&key);
@@ -158,7 +157,7 @@ impl StreamSourceScan {
                     ..Default::default()
                 },
             ],
-            node_body: Some(PbNodeBody::SourceBackfill(backfill)),
+            node_body: Some(PbNodeBody::SourceBackfill(Box::new(backfill))),
             stream_key,
             operator_id: self.base.id().0 as u64,
             identity: self.distill_to_string(),

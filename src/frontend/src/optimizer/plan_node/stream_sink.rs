@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use fixedbitset::FixedBitSet;
-use icelake::types::Transform;
+use iceberg::spec::Transform;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnCatalog, CreateType};
@@ -261,13 +261,13 @@ impl StreamSink {
 
                 if !user_defined_primary_key_table && !sink_is_append_only {
                     return Err(RwError::from(ErrorCode::BindError(
-                        "Only append-only sinks can sink to a table without primary keys. please try to add type = 'append-only' in the with option. e.g. create sink s into t as select * from t1 with (type = 'append-only')".to_string(),
+                        "Only append-only sinks can sink to a table without primary keys. please try to add type = 'append-only' in the with option. e.g. create sink s into t as select * from t1 with (type = 'append-only')".to_owned(),
                     )));
                 }
 
                 if t.append_only && !sink_is_append_only {
                     return Err(RwError::from(ErrorCode::BindError(
-                        "Only append-only sinks can sink to a append only table. please try to add type = 'append-only' in the with option. e.g. create sink s into t as select * from t1 with (type = 'append-only')".to_string(),
+                        "Only append-only sinks can sink to a append only table. please try to add type = 'append-only' in the with option. e.g. create sink s into t as select * from t1 with (type = 'append-only')".to_owned(),
                     )));
                 }
 
@@ -281,7 +281,7 @@ impl StreamSink {
                     .map(|c| {
                         target_table_mapping[c.column_index].ok_or(
                             ErrorCode::SinkError(Box::new(Error::new(ErrorKind::InvalidInput,
-                                "When using non append only sink into table, the primary key of the table must be included in the sink result.".to_string()
+                                "When using non append only sink into table, the primary key of the table must be included in the sink result.".to_owned()
                         ))).into())})
                     .try_collect::<_, _, RwError>()?
                 }
@@ -598,11 +598,12 @@ impl StreamNode for StreamSink {
             .infer_kv_log_store_table_catalog()
             .with_id(state.gen_table_id_wrapped());
 
-        PbNodeBody::Sink(SinkNode {
+        PbNodeBody::Sink(Box::new(SinkNode {
             sink_desc: Some(self.sink_desc.to_proto()),
             table: Some(table.to_internal_table_prost()),
             log_store_type: self.log_store_type as i32,
-        })
+            rate_limit: self.base.ctx().overwrite_options().sink_rate_limit,
+        }))
     }
 }
 
@@ -612,13 +613,12 @@ impl ExprVisitable for StreamSink {}
 
 #[cfg(test)]
 mod test {
-    use icelake::types::Transform;
     use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId};
     use risingwave_common::types::{DataType, StructType};
     use risingwave_common::util::iter_util::ZipEqDebug;
     use risingwave_pb::expr::expr_node::Type;
 
-    use super::IcebergPartitionInfo;
+    use super::{IcebergPartitionInfo, *};
     use crate::expr::{Expr, ExprImpl};
 
     fn create_column_catalog() -> Vec<ColumnCatalog> {
