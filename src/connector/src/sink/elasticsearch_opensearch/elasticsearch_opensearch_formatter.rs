@@ -30,7 +30,6 @@ pub struct ElasticSearchOpenSearchFormatter {
     index_column: Option<usize>,
     index: Option<String>,
     routing_column: Option<usize>,
-    pk_indices: Vec<usize>,
 }
 
 pub struct BuildBulkPara {
@@ -112,7 +111,6 @@ impl ElasticSearchOpenSearchFormatter {
             index_column,
             index,
             routing_column,
-            pk_indices,
         })
     }
 
@@ -121,7 +119,7 @@ impl ElasticSearchOpenSearchFormatter {
         chunk: StreamChunk,
         is_append_only: bool,
     ) -> Result<Vec<BuildBulkPara>> {
-        let mut update_delete_row: Option<RowRef<'_>> = None;
+        let mut update_delete_row: Option<(String, RowRef<'_>)> = None;
         let mut result_vec = Vec::with_capacity(chunk.capacity());
         for (op, rows) in chunk.rows() {
             let index = if let Some(index_column) = self.index_column {
@@ -156,7 +154,9 @@ impl ElasticSearchOpenSearchFormatter {
                 Op::Insert | Op::UpdateInsert => {
                     let key = self.key_encoder.encode(rows)?;
                     let mut modified_col_indices = Vec::new();
-                    if let Some(delete_row) = update_delete_row.take() {
+                    if let Some((delete_key, delete_row)) = update_delete_row.take()
+                        && delete_key == key
+                    {
                         delete_row
                             .iter()
                             .enumerate()
@@ -171,13 +171,6 @@ impl ElasticSearchOpenSearchFormatter {
                                     modified_col_indices.push(index);
                                 }
                             });
-                        if self
-                            .pk_indices
-                            .iter()
-                            .any(|&index| modified_col_indices.contains(&index))
-                        {
-                            modified_col_indices = (0..self.value_encoder.schema().len()).collect();
-                        }
                     } else {
                         modified_col_indices = (0..self.value_encoder.schema().len()).collect();
                     }
@@ -214,7 +207,8 @@ impl ElasticSearchOpenSearchFormatter {
                             "`UpdateDelete` operation is not supported in `append_only` mode"
                         )));
                     } else {
-                        update_delete_row = Some(rows);
+                        let key = self.key_encoder.encode(rows)?;
+                        update_delete_row = Some((key, rows));
                     }
                 }
             }
