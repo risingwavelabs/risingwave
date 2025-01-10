@@ -123,7 +123,7 @@
     select * from t where ts + interval '1 hour' > date_trunc('day', now());
   expected_outputs:
     - stream_plan
-- name: date_truc_with_timezone
+- name: date_trunc_with_timezone
   sql: |
     create table t (ts timestamp with time zone, a int);
     select * from t where ts + interval '1 hour' > date_trunc('day', now(), 'Asia/Singapore');
