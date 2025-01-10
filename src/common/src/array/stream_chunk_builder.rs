@@ -214,10 +214,10 @@ impl StreamChunkBuilder {
     ) -> Option<StreamChunk> {
         self.ops.push(op);
         for (i, datum) in iter1 {
-            self.column_builders[i].append(datum);
+            self.buffer[i].push(datum.to_owned_datum());
         }
         for (i, datum) in iter2 {
-            self.column_builders[i].append(datum);
+            self.buffer[i].push(datum.to_owned_datum());
         }
         self.vis_builder.append(VIS);
         self.size += 1;
