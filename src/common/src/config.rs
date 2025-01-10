@@ -532,6 +532,9 @@ pub struct MetaDeveloperConfig {
     #[serde(default = "default::developer::hummock_time_travel_sst_info_insert_batch_size")]
     /// Max number of SSTs inserted into meta store per INSERT, during time travel metadata writing.
     pub hummock_time_travel_sst_info_insert_batch_size: usize,
+
+    #[serde(default = "default::developer::hummock_delta_log_delete_batch_size")]
+    pub hummock_delta_log_delete_batch_size: usize,
 }
 
 /// The section `[server]` in `risingwave.toml`.
@@ -2052,6 +2055,10 @@ pub mod default {
 
         pub fn hummock_time_travel_sst_info_insert_batch_size() -> usize {
             100
+        }
+
+        pub fn hummock_delta_log_delete_batch_size() -> usize {
+            512
         }
 
         pub fn memory_controller_threshold_aggressive() -> f64 {

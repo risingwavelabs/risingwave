@@ -183,23 +183,23 @@ impl HummockManager {
         let mut versioning_guard = self.versioning.write().await;
         let versioning = versioning_guard.deref_mut();
         let context_info = self.context_info.read().await;
-        let deltas_to_delete = versioning
+        let deltas_to_delete_count = versioning
+            .hummock_version_deltas
+            .range(..=versioning.checkpoint.version.id)
+            .count();
+        let batch = versioning
             .hummock_version_deltas
             .range(..=versioning.checkpoint.version.id)
             .map(|(k, _)| *k)
+            .take(batch_size)
             .collect_vec();
         // If there is any safe point, skip this to ensure meta backup has required delta logs to
         // replay version.
         if !context_info.version_safe_points.is_empty() {
-            return Ok((0, deltas_to_delete.len()));
+            return Ok((0, deltas_to_delete_count));
         }
         let mut hummock_version_deltas =
             BTreeMapTransaction::new(&mut versioning.hummock_version_deltas);
-        let batch = deltas_to_delete
-            .iter()
-            .take(batch_size)
-            .cloned()
-            .collect_vec();
         if batch.is_empty() {
             return Ok((0, 0));
         }
@@ -213,7 +213,7 @@ impl HummockManager {
             drop(versioning_guard);
             self.check_state_consistency().await;
         }
-        Ok((batch.len(), deltas_to_delete.len() - batch.len()))
+        Ok((batch.len(), deltas_to_delete_count - batch.len()))
     }
 
     /// Filters by Hummock version and Writes GC history.
@@ -487,7 +487,7 @@ impl HummockManager {
     ///
     /// Returns number of deleted deltas
     pub async fn delete_metadata(&self) -> MetaResult<usize> {
-        let batch_size = 64usize;
+        let batch_size = self.env.opts.hummock_delta_log_delete_batch_size;
         let mut total_deleted = 0;
         loop {
             if total_deleted != 0 && self.env.opts.vacuum_spin_interval_ms != 0 {
