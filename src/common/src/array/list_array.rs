@@ -442,6 +442,7 @@ impl ListValue {
     }
 
     /// Returns the data type of the elements in the list.
+    #[deprecated]
     pub fn data_type(&self) -> DataType {
         self.as_scalar_ref().data_type()
     }
@@ -517,6 +518,7 @@ pub enum ListRef<'a> {
         end: u32,
     },
     BRow {
+        multi_dimensional: bool,
         row: BRowRef<'a>,
     },
 }
@@ -526,7 +528,7 @@ impl<'a> ListRef<'a> {
     pub fn len(&self) -> usize {
         match *self {
             ListRef::Columnar { start, end, .. } => (end - start) as usize,
-            ListRef::BRow { row } => row.len(),
+            ListRef::BRow { row, .. } => row.len(),
         }
     }
 
@@ -567,7 +569,54 @@ impl<'a> ListRef<'a> {
             ListRef::Columnar { array, start, end } => {
                 Either::Left((start..end).map(move |i| array.value_at(i as usize)))
             }
-            ListRef::BRow { row } => Either::Right(row.iter()),
+            ListRef::BRow { row, .. } => Either::Right(row.iter()),
+        }
+    }
+
+    fn columnar_flatten(self) -> ListRef<'a> {
+        match self {
+            ListRef::Columnar { array, start, end } => match array {
+                ArrayImpl::List(inner) => ListRef::Columnar {
+                    array: &inner.value,
+                    start: inner.offsets[start as usize],
+                    end: inner.offsets[end as usize],
+                }
+                .columnar_flatten(),
+                _ => self,
+            },
+            _ => unreachable!(),
+        }
+    }
+
+    fn brow_flatten_iter(self) -> impl Iterator<Item = DatumRef<'a>> + 'a {
+        match self {
+            ListRef::BRow {
+                row,
+                multi_dimensional,
+            } => std::iter::from_coroutine(
+                #[coroutine]
+                move || {
+                    for datum in row.iter() {
+                        match datum {
+                            Some(ScalarRefImpl::List(list)) => {
+                                for datum in Box::new(list.brow_flatten_iter()) {
+                                    yield datum;
+                                }
+                            }
+                            None if multi_dimensional => {}
+                            _ => yield datum,
+                        }
+                    }
+                },
+            ),
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn flatten_iter(self) -> impl Iterator<Item = DatumRef<'a>> + 'a {
+        match self {
+            ListRef::Columnar { .. } => Either::Left(self.columnar_flatten().iter()),
+            ListRef::BRow { .. } => Either::Right(self.brow_flatten_iter()),
         }
     }
 
@@ -578,7 +627,7 @@ impl<'a> ListRef<'a> {
                 ListRef::Columnar { array, start, .. } => {
                     Some(array.value_at(start as usize + index))
                 }
-                ListRef::BRow { row } => Some(row.datum_at(index)),
+                ListRef::BRow { row, .. } => Some(row.datum_at(index)),
             }
         } else {
             None
@@ -703,7 +752,7 @@ impl Row for ListRef<'_> {
     fn datum_at(&self, index: usize) -> DatumRef<'_> {
         match *self {
             ListRef::Columnar { array, start, .. } => array.value_at(start as usize + index),
-            ListRef::BRow { row } => row.datum_at(index),
+            ListRef::BRow { row, .. } => row.datum_at(index),
         }
     }
 
@@ -712,7 +761,7 @@ impl Row for ListRef<'_> {
             ListRef::Columnar { array, start, .. } => {
                 array.value_at_unchecked(start as usize + index)
             }
-            ListRef::BRow { row } => row.datum_at_unchecked(index),
+            ListRef::BRow { row, .. } => row.datum_at_unchecked(index),
         }
     }
 

@@ -38,6 +38,7 @@
 #![feature(register_tool)]
 #![feature(btree_cursors)]
 #![register_tool(rw)]
+#![feature(iter_from_coroutine)]
 
 #[cfg_attr(not(test), allow(unused_extern_crates))]
 extern crate self as risingwave_common;
