@@ -63,6 +63,7 @@ type ChangeLogRowVnodeStream<St> = Pin<Box<StreamWithVnode<St>>>;
 
 pub(super) struct VnodeStream<St: ChangeLogRowStream> {
     streams: FuturesUnordered<StreamFuture<ChangeLogRowVnodeStream<St>>>,
+    pk_indices: Vec<usize>,
     finished_vnode: HashMap<VirtualNode, usize>,
     data_chunk_builder: DataChunkBuilder,
     ops: Vec<Op>,
@@ -71,6 +72,7 @@ pub(super) struct VnodeStream<St: ChangeLogRowStream> {
 impl<St: ChangeLogRowStream> VnodeStream<St> {
     pub(super) fn new(
         vnode_streams: impl IntoIterator<Item = (VirtualNode, St, usize)>,
+        pk_indices: Vec<usize>,
         data_chunk_builder: DataChunkBuilder,
     ) -> Self {
         assert!(data_chunk_builder.is_empty());
@@ -89,6 +91,7 @@ impl<St: ChangeLogRowStream> VnodeStream<St> {
         let ops = Vec::with_capacity(data_chunk_builder.batch_size());
         Self {
             streams,
+            pk_indices,
             finished_vnode: HashMap::new(),
             data_chunk_builder,
             ops,
@@ -123,7 +126,6 @@ impl<St: ChangeLogRowStream> VnodeStream<St> {
         }
     }
 
-    #[cfg_attr(not(test), expect(dead_code))]
     pub(super) fn consume_builder(&mut self) -> Option<StreamChunk> {
         self.data_chunk_builder.consume_all().map(|chunk| {
             let ops = replace(
@@ -134,10 +136,8 @@ impl<St: ChangeLogRowStream> VnodeStream<St> {
         })
     }
 
-    #[cfg_attr(not(test), expect(dead_code))]
     pub(super) async fn for_vnode_pk_progress(
         &mut self,
-        pk_indices: &[usize],
         mut on_vnode_progress: impl FnMut(VirtualNode, usize, Option<OwnedRow>),
     ) -> StreamExecutorResult<()> {
         assert!(self.data_chunk_builder.is_empty());
@@ -166,14 +166,14 @@ impl<St: ChangeLogRowStream> VnodeStream<St> {
                         } => {
                             if cfg!(debug_assertions) {
                                 assert_eq!(
-                                    old_value.project(pk_indices),
-                                    new_value.project(pk_indices)
+                                    old_value.project(&self.pk_indices),
+                                    new_value.project(&self.pk_indices)
                                 );
                             }
                             new_value
                         }
                     };
-                    let pk = row.project(pk_indices).to_owned_row();
+                    let pk = row.project(&self.pk_indices).to_owned_row();
                     on_vnode_progress(vnode_stream.vnode, vnode_stream.row_count, Some(pk));
                     self.streams.push(vnode_stream.into_future());
                 }
@@ -299,7 +299,7 @@ mod tests {
                 .map(|(vnode, row_count, progress)| (vnode, (row_count, progress)))
                 .collect();
             let mut progress_map = HashMap::new();
-            self.for_vnode_pk_progress(&[0], |vnode, row_count, progress| {
+            self.for_vnode_pk_progress(|vnode, row_count, progress| {
                 progress_map
                     .try_insert(vnode, (row_count, progress))
                     .unwrap();
@@ -321,6 +321,7 @@ mod tests {
                 (vnode2, UnboundedReceiverStream::new(rx2), 0),
             ]
             .into_iter(),
+            vec![0],
             DataChunkBuilder::new(DATA_TYPES.clone(), 3),
         );
         assert!(stream.next().now_or_never().is_none());
@@ -359,6 +360,7 @@ mod tests {
         let (tx, rx) = unbounded_channel();
         let mut stream = VnodeStream::new(
             [(VirtualNode::ZERO, UnboundedReceiverStream::new(rx), 0)].into_iter(),
+            vec![0],
             DataChunkBuilder::new(DATA_TYPES.clone(), 3),
         );
         assert!(stream.next().now_or_never().is_none());
@@ -381,6 +383,7 @@ mod tests {
     async fn test_empty() {
         let mut stream = VnodeStream::<UnboundedReceiverStream<_>>::new(
             [].into_iter(),
+            vec![0],
             DataChunkBuilder::new(DATA_TYPES.clone(), 1024),
         );
         assert!(stream.next().await.is_none());
@@ -392,6 +395,7 @@ mod tests {
             let (tx, rx) = unbounded_channel();
             let mut stream = VnodeStream::new(
                 [(VirtualNode::ZERO, UnboundedReceiverStream::new(rx), 0)].into_iter(),
+                vec![0],
                 DataChunkBuilder::new(DATA_TYPES.clone(), 3),
             );
             assert!(stream.next().now_or_never().is_none());
@@ -402,10 +406,11 @@ mod tests {
             let (tx, rx) = unbounded_channel();
             let mut stream = VnodeStream::new(
                 [(VirtualNode::ZERO, UnboundedReceiverStream::new(rx), 0)].into_iter(),
+                vec![0],
                 DataChunkBuilder::new(DATA_TYPES.clone(), 3),
             );
             assert!(stream.next().now_or_never().is_none());
-            let future = stream.for_vnode_pk_progress(&[0], |_, _, _| unreachable!());
+            let future = stream.for_vnode_pk_progress(|_, _, _| unreachable!());
             pin_mut!(future);
             assert!((&mut future).now_or_never().is_none());
             tx.send(Err(anyhow!("err").into())).unwrap();
@@ -418,6 +423,7 @@ mod tests {
         let (tx, rx) = unbounded_channel();
         let mut stream = VnodeStream::new(
             [(VirtualNode::ZERO, UnboundedReceiverStream::new(rx), 0)].into_iter(),
+            vec![0],
             DataChunkBuilder::new(DATA_TYPES.clone(), 1024),
         );
         // poll the stream for once, and then the stream future inside it will be stored in the pending list.

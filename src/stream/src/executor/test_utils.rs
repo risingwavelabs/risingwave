@@ -756,10 +756,15 @@ pub mod hash_join_executor {
         let params_l = JoinParams::new(vec![0], vec![1]);
         let params_r = JoinParams::new(vec![0], vec![1]);
 
+        let cache_size = match workload {
+            HashJoinWorkload::InCache => Some(1_000_000),
+            HashJoinWorkload::NotInCache => None,
+        };
+
         match join_type {
             JoinType::Inner => {
                 let executor =
-                    HashJoinExecutor::<Key128, MemoryStateStore, { ConstJoinType::Inner }>::new(
+                    HashJoinExecutor::<Key128, MemoryStateStore, { ConstJoinType::Inner }>::new_with_cache_size(
                         ActorContext::for_test(123),
                         info,
                         source_l,
@@ -779,6 +784,7 @@ pub mod hash_join_executor {
                         Arc::new(StreamingMetrics::unused()),
                         1024, // chunk_size
                         2048, // high_join_amplification_threshold
+                        cache_size,
                     );
                 (tx_l, tx_r, executor.boxed().execute())
             }
@@ -787,7 +793,7 @@ pub mod hash_join_executor {
                     Key128,
                     MemoryStateStore,
                     { ConstJoinType::LeftOuter },
-                >::new(
+                >::new_with_cache_size(
                     ActorContext::for_test(123),
                     info,
                     source_l,
@@ -807,6 +813,7 @@ pub mod hash_join_executor {
                     Arc::new(StreamingMetrics::unused()),
                     1024, // chunk_size
                     2048, // high_join_amplification_threshold
+                    cache_size,
                 );
                 (tx_l, tx_r, executor.boxed().execute())
             }
@@ -852,10 +859,13 @@ pub mod hash_join_executor {
             // Push a single record into tx_r, so 100K records to be matched are cached.
             let chunk = build_chunk(amp, 200_000);
             tx_r.push_chunk(chunk);
-        }
 
-        tx_l.push_barrier(test_epoch(2), false);
-        tx_r.push_barrier(test_epoch(2), false);
+            // Ensure that the chunk on the rhs is processed, before inserting a chunk
+            // into the lhs. This is to ensure that the rhs chunk is cached,
+            // and we don't get interleaving of chunks between lhs and rhs.
+            tx_l.push_barrier(test_epoch(2), false);
+            tx_r.push_barrier(test_epoch(2), false);
+        }
 
         // Push a chunk of records into tx_l, matches 100K records in the build side.
         let chunk_size = match hash_join_workload {
@@ -880,12 +890,14 @@ pub mod hash_join_executor {
             }
         }
 
-        match stream.next().await {
-            Some(Ok(Message::Barrier(b))) => {
-                assert_eq!(b.epoch.curr, test_epoch(2));
-            }
-            other => {
-                panic!("Expected a barrier, got {:?}", other);
+        if matches!(hash_join_workload, HashJoinWorkload::InCache) {
+            match stream.next().await {
+                Some(Ok(Message::Barrier(b))) => {
+                    assert_eq!(b.epoch.curr, test_epoch(2));
+                }
+                other => {
+                    panic!("Expected a barrier, got {:?}", other);
+                }
             }
         }
 
