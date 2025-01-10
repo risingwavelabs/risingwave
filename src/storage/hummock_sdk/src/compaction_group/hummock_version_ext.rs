@@ -157,10 +157,10 @@ pub fn safe_epoch_table_watermarks_impl(
 }
 
 pub fn safe_epoch_read_table_watermarks_impl(
-    safe_epoch_watermarks: &BTreeMap<u32, TableWatermarks>,
+    safe_epoch_watermarks: BTreeMap<u32, TableWatermarks>,
 ) -> BTreeMap<TableId, ReadTableWatermark> {
     safe_epoch_watermarks
-        .iter()
+        .into_iter()
         .map(|(table_id, watermarks)| {
             assert_eq!(watermarks.watermarks.len(), 1);
             let vnode_watermarks = &watermarks.watermarks.first().expect("should exist").1;
@@ -178,7 +178,7 @@ pub fn safe_epoch_read_table_watermarks_impl(
                 }
             }
             (
-                TableId::from(*table_id),
+                TableId::from(table_id),
                 ReadTableWatermark {
                     direction: watermarks.direction,
                     vnode_watermarks: vnode_watermark_map,

@@ -27,6 +27,7 @@ use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::TableStatsMap;
+use risingwave_hummock_sdk::table_watermark::{TableWatermarks, WatermarkSerdeType};
 use risingwave_hummock_sdk::{can_concat, EpochWithGap, KeyComparator};
 use risingwave_pb::hummock::compact_task::PbTaskType;
 use risingwave_pb::hummock::{BloomFilterType, PbLevelType, PbTableSchema};
@@ -39,7 +40,8 @@ use crate::hummock::compactor::{
     TtlCompactionFilter,
 };
 use crate::hummock::iterator::{
-    Forward, HummockIterator, MergeIterator, SkipWatermarkIterator, UserIterator,
+    Forward, HummockIterator, MergeIterator, NonPkPrefixSkipWatermarkIterator,
+    SkipWatermarkIterator, UserIterator,
 };
 use crate::hummock::multi_builder::TableBuilderFactory;
 use crate::hummock::sstable::DEFAULT_ENTRY_SIZE;
@@ -365,17 +367,25 @@ pub async fn check_compaction_result(
     }
 
     let iter = MergeIterator::for_compactor(table_iters);
-    let left_iter = UserIterator::new(
-        SkipWatermarkIterator::from_safe_epoch_watermarks(
-            iter,
-            &compact_task.table_watermarks,
+    let (pk_watermarks, non_pk_prefix_watermarks) = split_watermark_from_task(compact_task);
+    let left_iter = {
+        let skip_watermark_iter =
+            SkipWatermarkIterator::from_safe_epoch_watermarks(iter, pk_watermarks.clone());
+
+        let combine_iter = NonPkPrefixSkipWatermarkIterator::from_safe_epoch_watermarks(
+            skip_watermark_iter,
+            non_pk_prefix_watermarks.clone(),
             compaction_catalog_agent_ref.clone(),
-        ),
-        (Bound::Unbounded, Bound::Unbounded),
-        u64::MAX,
-        0,
-        None,
-    );
+        );
+
+        UserIterator::new(
+            combine_iter,
+            (Bound::Unbounded, Bound::Unbounded),
+            u64::MAX,
+            0,
+            None,
+        )
+    };
     let iter = ConcatSstableIterator::new(
         compact_task.existing_table_ids.clone(),
         compact_task.sorted_output_ssts.clone(),
@@ -384,17 +394,24 @@ pub async fn check_compaction_result(
         Arc::new(TaskProgress::default()),
         context.storage_opts.compactor_iter_max_io_retry_times,
     );
-    let right_iter = UserIterator::new(
-        SkipWatermarkIterator::from_safe_epoch_watermarks(
-            iter,
-            &compact_task.table_watermarks,
-            compaction_catalog_agent_ref.clone(),
-        ),
-        (Bound::Unbounded, Bound::Unbounded),
-        u64::MAX,
-        0,
-        None,
-    );
+    let right_iter = {
+        let skip_watermark_iter =
+            SkipWatermarkIterator::from_safe_epoch_watermarks(iter, pk_watermarks);
+
+        let combine_iter = NonPkPrefixSkipWatermarkIterator::from_safe_epoch_watermarks(
+            skip_watermark_iter,
+            non_pk_prefix_watermarks,
+            compaction_catalog_agent_ref,
+        );
+
+        UserIterator::new(
+            combine_iter,
+            (Bound::Unbounded, Bound::Unbounded),
+            u64::MAX,
+            0,
+            None,
+        )
+    };
 
     check_result(left_iter, right_iter).await
 }
@@ -645,4 +662,24 @@ pub fn calculate_task_parallelism_impl(
 ) -> usize {
     let parallelism = compaction_size.div_ceil(parallel_compact_size);
     worker_num.min(parallelism.min(max_sub_compaction as u64) as usize)
+}
+
+pub fn split_watermark_from_task(
+    compact_task: &CompactTask,
+) -> (
+    BTreeMap<u32, TableWatermarks>,
+    BTreeMap<u32, TableWatermarks>,
+) {
+    let mut pk_watermarks = BTreeMap::default();
+    let mut non_pk_prefix_watermarks = BTreeMap::default();
+
+    for (table_id, watermark) in &compact_task.table_watermarks {
+        if let WatermarkSerdeType::PkPrefix = watermark.watermark_type {
+            pk_watermarks.insert(*table_id, watermark.clone());
+        } else {
+            non_pk_prefix_watermarks.insert(*table_id, watermark.clone());
+        }
+    }
+
+    (pk_watermarks, non_pk_prefix_watermarks)
 }

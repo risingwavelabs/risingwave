@@ -38,6 +38,7 @@ use risingwave_pb::hummock::LevelType;
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Receiver;
 
+use super::compaction_utils::split_watermark_from_task;
 use super::iterator::MonitoredCompactorIterator;
 use super::task_progress::TaskProgress;
 use super::{CompactionStatistics, TaskConfig};
@@ -53,7 +54,8 @@ use crate::hummock::compactor::{
     CompactorContext,
 };
 use crate::hummock::iterator::{
-    Forward, HummockIterator, MergeIterator, SkipWatermarkIterator, ValueMeta,
+    Forward, HummockIterator, MergeIterator, NonPkPrefixSkipWatermarkIterator,
+    SkipWatermarkIterator, ValueMeta,
 };
 use crate::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFactory};
 use crate::hummock::utils::MemoryTracker;
@@ -158,7 +160,7 @@ impl CompactorRunner {
     fn build_sst_iter(
         &self,
         task_progress: Arc<TaskProgress>,
-        compaction_catalog_manager_ref: CompactionCatalogAgentRef,
+        compaction_catalog_agent_ref: CompactionCatalogAgentRef,
     ) -> HummockResult<impl HummockIterator<Direction = Forward>> {
         let compactor_iter_max_io_retry_times = self
             .compactor
@@ -241,14 +243,26 @@ impl CompactorRunner {
 
         // The `SkipWatermarkIterator` is used to handle the table watermark state cleaning introduced
         // in https://github.com/risingwavelabs/risingwave/issues/13148
-        Ok(SkipWatermarkIterator::from_safe_epoch_watermarks(
-            MonitoredCompactorIterator::new(
-                MergeIterator::for_compactor(table_iters),
-                task_progress.clone(),
-            ),
-            &self.compact_task.table_watermarks,
-            compaction_catalog_manager_ref.clone(),
-        ))
+        let combine_iter = {
+            let (pk_watermarks, non_pk_prefix_watermarks) =
+                split_watermark_from_task(&self.compact_task);
+
+            let skip_watermark_iter = SkipWatermarkIterator::from_safe_epoch_watermarks(
+                MonitoredCompactorIterator::new(
+                    MergeIterator::for_compactor(table_iters),
+                    task_progress.clone(),
+                ),
+                pk_watermarks,
+            );
+
+            NonPkPrefixSkipWatermarkIterator::from_safe_epoch_watermarks(
+                skip_watermark_iter,
+                non_pk_prefix_watermarks,
+                compaction_catalog_agent_ref,
+            )
+        };
+
+        Ok(combine_iter)
     }
 }
 

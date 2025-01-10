@@ -32,11 +32,12 @@ use risingwave_hummock_sdk::{can_concat, compact_task_to_string, EpochWithGap, L
 
 use crate::compaction_catalog_manager::CompactionCatalogAgentRef;
 use crate::hummock::block_stream::BlockDataStream;
+use crate::hummock::compactor::compaction_utils::split_watermark_from_task;
 use crate::hummock::compactor::task_progress::TaskProgress;
 use crate::hummock::compactor::{
     CompactionStatistics, Compactor, CompactorContext, RemoteBuilderFactory, TaskConfig,
 };
-use crate::hummock::iterator::SkipWatermarkState;
+use crate::hummock::iterator::{NonPkPrefixSkipWatermarkState, SkipWatermarkState};
 use crate::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFactory};
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
@@ -425,13 +426,23 @@ impl CompactorRunner {
             task_progress.clone(),
             context.storage_opts.compactor_iter_max_io_retry_times,
         ));
-        let state = SkipWatermarkState::from_safe_epoch_watermarks(
-            &task.table_watermarks,
+
+        let (pk_watermarks, non_pk_prefix_watermarks) = split_watermark_from_task(&task);
+
+        let state = SkipWatermarkState::from_safe_epoch_watermarks(pk_watermarks);
+        let non_pk_prefix_state = NonPkPrefixSkipWatermarkState::from_safe_epoch_watermarks(
+            non_pk_prefix_watermarks,
             compaction_catalog_agent_ref,
         );
 
         Self {
-            executor: CompactTaskExecutor::new(sst_builder, task_config, task_progress, state),
+            executor: CompactTaskExecutor::new(
+                sst_builder,
+                task_config,
+                task_progress,
+                state,
+                non_pk_prefix_state,
+            ),
             left,
             right,
             task_id: task.task_id,
@@ -625,6 +636,7 @@ pub struct CompactTaskExecutor<F: TableBuilderFactory> {
     skip_watermark_state: SkipWatermarkState,
     last_key_is_delete: bool,
     progress_key_num: u32,
+    non_pk_prefix_skip_watermark_state: NonPkPrefixSkipWatermarkState,
 }
 
 impl<F: TableBuilderFactory> CompactTaskExecutor<F> {
@@ -633,6 +645,7 @@ impl<F: TableBuilderFactory> CompactTaskExecutor<F> {
         task_config: TaskConfig,
         task_progress: Arc<TaskProgress>,
         skip_watermark_state: SkipWatermarkState,
+        non_pk_prefix_skip_watermark_state: NonPkPrefixSkipWatermarkState,
     ) -> Self {
         Self {
             builder,
@@ -645,6 +658,7 @@ impl<F: TableBuilderFactory> CompactTaskExecutor<F> {
             task_progress,
             skip_watermark_state,
             progress_key_num: 0,
+            non_pk_prefix_skip_watermark_state,
         }
     }
 
@@ -681,6 +695,8 @@ impl<F: TableBuilderFactory> CompactTaskExecutor<F> {
         target_key: FullKey<&[u8]>,
     ) -> HummockResult<()> {
         self.skip_watermark_state.reset_watermark();
+        self.non_pk_prefix_skip_watermark_state.reset_watermark();
+
         while iter.is_valid() && iter.key().le(&target_key) {
             let is_new_user_key =
                 !self.last_key.is_empty() && iter.key().user_key != self.last_key.user_key.as_ref();
@@ -705,9 +721,8 @@ impl<F: TableBuilderFactory> CompactTaskExecutor<F> {
             } else if !self.task_config.retain_multiple_version && !is_first_or_new_user_key {
                 drop = true;
             }
-            if self.skip_watermark_state.has_watermark()
-                && self.skip_watermark_state.should_delete(&iter.key())
-            {
+
+            if self.watermark_should_delete(&iter.key()) {
                 drop = true;
                 self.last_key_is_delete = true;
             }
@@ -754,11 +769,17 @@ impl<F: TableBuilderFactory> CompactTaskExecutor<F> {
             // because it would cause a deleted key could be see by user again.
             return false;
         }
-        if self.skip_watermark_state.has_watermark()
-            && self.skip_watermark_state.should_delete(smallest_key)
-        {
+
+        if self.watermark_should_delete(smallest_key) {
             return false;
         }
+
         true
+    }
+
+    fn watermark_should_delete(&mut self, key: &FullKey<&[u8]>) -> bool {
+        (self.skip_watermark_state.has_watermark() && self.skip_watermark_state.should_delete(key))
+            || (self.non_pk_prefix_skip_watermark_state.has_watermark()
+                && self.non_pk_prefix_skip_watermark_state.should_delete(key))
     }
 }

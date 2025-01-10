@@ -66,7 +66,7 @@ pub(crate) mod tests {
     };
     use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
     use risingwave_storage::hummock::iterator::{
-        ConcatIterator, SkipWatermarkIterator, UserIterator,
+        ConcatIterator, NonPkPrefixSkipWatermarkIterator, SkipWatermarkIterator, UserIterator,
     };
     use risingwave_storage::hummock::sstable_store::SstableStoreRef;
     use risingwave_storage::hummock::test_utils::gen_test_sstable_info;
@@ -1835,22 +1835,36 @@ pub(crate) mod tests {
         let watermark = BTreeMap::from_iter([(TableId::new(1), watermark)]);
         let compaction_catalog_agent = CompactionCatalogAgent::for_test(vec![1]);
 
-        let mut normal_iter = UserIterator::for_test(
-            SkipWatermarkIterator::new(
+        let combine_iter = {
+            let iter = SkipWatermarkIterator::new(
                 ConcatIterator::new(ret, sstable_store.clone(), read_options.clone()),
                 watermark.clone(),
+            );
+
+            NonPkPrefixSkipWatermarkIterator::new(
+                iter,
+                BTreeMap::default(),
                 compaction_catalog_agent.clone(),
-            ),
-            (Bound::Unbounded, Bound::Unbounded),
-        );
-        let mut fast_iter = UserIterator::for_test(
-            SkipWatermarkIterator::new(
-                ConcatIterator::new(fast_ret, sstable_store, read_options),
-                watermark,
+            )
+        };
+
+        let mut normal_iter =
+            UserIterator::for_test(combine_iter, (Bound::Unbounded, Bound::Unbounded));
+
+        let combine_iter = {
+            let iter = SkipWatermarkIterator::new(
+                ConcatIterator::new(fast_ret, sstable_store.clone(), read_options.clone()),
+                watermark.clone(),
+            );
+
+            NonPkPrefixSkipWatermarkIterator::new(
+                iter,
+                BTreeMap::default(),
                 compaction_catalog_agent.clone(),
-            ),
-            (Bound::Unbounded, Bound::Unbounded),
-        );
+            )
+        };
+        let mut fast_iter =
+            UserIterator::for_test(combine_iter, (Bound::Unbounded, Bound::Unbounded));
         normal_iter.rewind().await.unwrap();
         fast_iter.rewind().await.unwrap();
         let mut count = 0;
