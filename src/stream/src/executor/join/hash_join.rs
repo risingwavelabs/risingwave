@@ -36,7 +36,7 @@ use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 use thiserror_ext::AsReport;
 
-use super::row::{DegreeType, EncodedJoinRow, UnencodedJoinRow};
+use super::row::{DegreeType, UnencodedJoinRow};
 use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTable;
@@ -795,7 +795,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             state
                 .insert(pk, value.encode_noop(), inequality_key)
                 .with_context(|| self.state.error_context(&value.row))?;
-            self.update_state(key, entry.into());
+            self.update_state(key, state.into());
         }
 
         // Update the flush buffer.

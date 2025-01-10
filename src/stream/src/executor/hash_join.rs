@@ -1061,7 +1061,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     // cache refill
                     if entry_state_count <= entry_state_max_rows {
                         let row_ref = entry_state
-                            .insert(encoded_pk, matched_row.encode(), None) // TODO(kwannoel): handle ineq key for asof join.
+                            .insert(encoded_pk, matched_row.encode_noop(), None) // TODO(kwannoel): handle ineq key for asof join.
                             .with_context(|| format!("row: {}", row.display(),))?;
                         matched_row_ref = Some(row_ref);
                         entry_state_count += 1;

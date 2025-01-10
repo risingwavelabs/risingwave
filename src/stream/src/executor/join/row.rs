@@ -82,6 +82,7 @@ impl UnencodedJoinRow {
         })
     }
 
+    #[allow(dead_code)]
     fn decode_row(&self, _data_types: &[DataType]) -> StreamExecutorResult<OwnedRow> {
         Ok(self.row.to_owned_row())
     }
