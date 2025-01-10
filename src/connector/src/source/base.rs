@@ -49,6 +49,7 @@ use crate::parser::schema_change::SchemaChangeEnvelope;
 use crate::parser::ParserConfig;
 use crate::source::filesystem::FsPageItem;
 use crate::source::monitor::EnumeratorMetrics;
+use crate::source::cdc::CDC_STRONG_SCHEMA_KEY;
 use crate::source::SplitImpl::{CitusCdc, MongodbCdc, MysqlCdc, PostgresCdc, SqlServerCdc};
 use crate::with_options::WithOptions;
 use crate::{
@@ -497,6 +498,18 @@ impl ConnectorProperties {
             || matches!(self, ConnectorProperties::OpendalS3(_))
             || matches!(self, ConnectorProperties::Gcs(_))
             || matches!(self, ConnectorProperties::Azblob(_))
+    }
+
+    /// Whether to enable strong schema for the source.
+    pub fn enable_strong_schema(&self) -> bool {
+        let ConnectorProperties::MongodbCdc(mongo) = self else {
+            return true;
+        };
+
+        mongo
+            .properties
+            .get(CDC_STRONG_SCHEMA_KEY)
+            .map_or(false, |v| v == "true")
     }
 }
 
