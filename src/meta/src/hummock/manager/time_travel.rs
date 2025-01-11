@@ -413,7 +413,7 @@ impl HummockManager {
                 }
                 hummock_sstable_info::Entity::insert_many(batch)
                     .on_conflict(
-                        OnConflict::new()
+                        OnConflict::column(hummock_sstable_info::Column::SstId)
                             .update_column(hummock_sstable_info::Column::SstId)
                             .to_owned(),
                     )
@@ -467,7 +467,7 @@ impl HummockManager {
             };
             hummock_time_travel_version::Entity::insert(m)
                 .on_conflict(
-                    OnConflict::new()
+                    OnConflict::column(hummock_time_travel_version::Column::VersionId)
                         .update_column(hummock_time_travel_version::Column::VersionId)
                         .to_owned(),
                 )
@@ -499,7 +499,7 @@ impl HummockManager {
             };
             hummock_time_travel_delta::Entity::insert(m)
                 .on_conflict(
-                    OnConflict::new()
+                    OnConflict::column(hummock_time_travel_delta::Column::VersionId)
                         .update_column(hummock_time_travel_delta::Column::VersionId)
                         .to_owned(),
                 )

@@ -477,7 +477,7 @@ impl HummockManager {
             }
             hummock_gc_history::Entity::insert_many(batch)
                 .on_conflict(
-                    OnConflict::new()
+                    OnConflict::column(hummock_gc_history::Column::ObjectId)
                         .update_column(hummock_gc_history::Column::ObjectId)
                         .to_owned(),
                 )
