@@ -631,9 +631,11 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
                         if let Some(matched_row_by_inequality) = matched_row_by_inequality {
                             let matched_row = matched_row_by_inequality?;
 
-                            if let Some(chunk) =
-                                join_chunk_builder.with_match_on_insert(&row, &matched_row)
-                            {
+                            if let Some(chunk) = join_chunk_builder.with_match_on_insert(
+                                chunk.data_chunk().clone(),
+                                &row,
+                                matched_row.clone(),
+                            ) {
                                 yield chunk;
                             }
                         } else if let Some(chunk) =
@@ -647,9 +649,11 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
                         if let Some(matched_row_by_inequality) = matched_row_by_inequality {
                             let matched_row = matched_row_by_inequality?;
 
-                            if let Some(chunk) =
-                                join_chunk_builder.with_match_on_delete(&row, &matched_row)
-                            {
+                            if let Some(chunk) = join_chunk_builder.with_match_on_delete(
+                                chunk.data_chunk().clone(),
+                                &row,
+                                matched_row.clone(),
+                            ) {
                                 yield chunk;
                             }
                         } else if let Some(chunk) =

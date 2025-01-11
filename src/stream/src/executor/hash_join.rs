@@ -18,7 +18,7 @@ use std::time::Duration;
 use anyhow::Context;
 use itertools::Itertools;
 use multimap::MultiMap;
-use risingwave_common::array::Op;
+use risingwave_common::array::{DataChunk, Op};
 use risingwave_common::hash::{HashKey, NullBitmap};
 use risingwave_common::row::RowExt;
 use risingwave_common::types::{DefaultOrd, ToOwnedDatum};
@@ -870,6 +870,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             ]);
 
         let keys = K::build_many(&side_update.join_key_indices, chunk.data_chunk());
+
         for (r, key) in chunk.rows_with_holes().zip_eq_debug(keys.iter()) {
             let Some((op, row)) = r else {
                 continue;
@@ -904,6 +905,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         cond,
                         append_only_optimize,
                         entry_state_max_rows,
+                        chunk.data_chunk().clone(),
                     )
                 };
             }
@@ -945,7 +947,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             }
         }
         // NOTE(kwannoel): We don't track metrics for this last chunk.
-        if let Some(chunk) = hashjoin_chunk_builder.take() {
+        if let Some(chunk) = hashjoin_chunk_builder.take2() {
             yield chunk;
         }
     }
@@ -975,6 +977,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         cond: &'a mut Option<NonStrictExpression>,
         append_only_optimize: bool,
         entry_state_max_rows: usize,
+        data_chunk: DataChunk,
     ) {
         let cache_hit = matches!(cached_lookup_result, CacheResult::Hit(_));
         let mut entry_state = JoinEntryState::default();
@@ -1007,6 +1010,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     append_only_optimize,
                     &mut append_only_matched_row,
                     &mut matched_rows_to_clean,
+                    data_chunk.clone(),
                 )
             };
         }
@@ -1150,6 +1154,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         append_only_optimize: bool,
         append_only_matched_row: &mut Option<JoinRow<OwnedRow>>,
         matched_rows_to_clean: &mut Vec<JoinRow<OwnedRow>>,
+        data_chunk: DataChunk,
     ) -> Option<StreamChunk> {
         let mut need_state_clean = false;
         let mut chunk_opt = None;
@@ -1174,9 +1179,11 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             // Inserts must happen before degrees are updated,
             // FIXME(kwannoel): We should let deletes and inserts happen BEFORE degree updates.
             if matches!(JOIN_OP, JoinOp::Insert) && !forward_exactly_once(T, SIDE) {
-                if let Some(chunk) =
-                    hashjoin_chunk_builder.with_match::<JOIN_OP>(&update_row, &matched_row)
-                {
+                if let Some(chunk) = hashjoin_chunk_builder.with_match::<JOIN_OP>(
+                    data_chunk.clone(),
+                    &update_row,
+                    matched_row.clone(),
+                ) {
                     chunk_opt = Some(chunk);
                 }
             }
@@ -1203,9 +1210,11 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             // Deletes must happen after degree table is updated.
             // FIXME(kwannoel): We should let deletes and inserts happen BEFORE degree updates.
             if matches!(JOIN_OP, JoinOp::Delete) && !forward_exactly_once(T, SIDE) {
-                if let Some(chunk) =
-                    hashjoin_chunk_builder.with_match::<JOIN_OP>(&update_row, &matched_row)
-                {
+                if let Some(chunk) = hashjoin_chunk_builder.with_match::<JOIN_OP>(
+                    data_chunk.clone(),
+                    &update_row,
+                    matched_row.clone(),
+                ) {
                     chunk_opt = Some(chunk);
                 }
             }

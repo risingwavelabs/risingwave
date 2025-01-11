@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::array::DataChunk;
+use risingwave_common::row::OwnedRow;
+
 use crate::array::stream_record::Record;
 use crate::array::{ArrayBuilderImpl, Op, StreamChunk};
 use crate::bitmap::BitmapBuilder;
@@ -43,6 +46,12 @@ pub struct StreamChunkBuilder {
 
     /// Number of currently pending rows.
     size: usize,
+
+    data_chunk_buffer: Vec<DataChunk>,
+
+    row_update_index: Vec<Vec<usize>>,
+
+    row_match: Vec<OwnedRow>,
 }
 
 impl Drop for StreamChunkBuilder {
@@ -75,6 +84,9 @@ impl StreamChunkBuilder {
             .map(|datatype| datatype.create_array_builder(initial_capacity))
             .collect();
         let vis_builder = BitmapBuilder::with_capacity(initial_capacity);
+        let data_chunk_buffer: Vec<DataChunk> = Vec::with_capacity(initial_capacity);
+        let row_update_index: Vec<Vec<usize>> = Vec::with_capacity(initial_capacity);
+        let row_match: Vec<OwnedRow> = Vec::with_capacity(initial_capacity);
         Self {
             ops,
             column_builders,
@@ -83,6 +95,9 @@ impl StreamChunkBuilder {
             max_chunk_size: Some(max_chunk_size),
             initial_capacity,
             size: 0,
+            data_chunk_buffer,
+            row_update_index,
+            row_match,
         }
     }
 
@@ -90,6 +105,9 @@ impl StreamChunkBuilder {
     /// The builder will only yield chunks when `take` is called.
     pub fn unlimited(data_types: Vec<DataType>, initial_capacity: Option<usize>) -> Self {
         let initial_capacity = initial_capacity.unwrap_or(DEFAULT_INITIAL_CAPACITY);
+        let data_chunk_buffer: Vec<DataChunk> = Vec::with_capacity(initial_capacity);
+        let row_update_index: Vec<Vec<usize>> = Vec::with_capacity(initial_capacity);
+        let row_match: Vec<OwnedRow> = Vec::with_capacity(initial_capacity);
         Self {
             ops: Vec::with_capacity(initial_capacity),
             column_builders: data_types
@@ -101,6 +119,9 @@ impl StreamChunkBuilder {
             max_chunk_size: None,
             initial_capacity,
             size: 0,
+            data_chunk_buffer,
+            row_update_index,
+            row_match,
         }
     }
 
@@ -180,6 +201,102 @@ impl StreamChunkBuilder {
         let vis = std::mem::take(&mut self.vis_builder).finish();
 
         Some(StreamChunk::with_visibility(ops, columns, vis))
+    }
+
+    pub fn take2(
+        &mut self,
+        update_to_output: &Vec<(usize, usize)>,
+        matched_to_output: &Vec<(usize, usize)>,
+    ) -> Option<StreamChunk> {
+        if self.size == 0 {
+            return None;
+        }
+
+        assert_eq!(self.data_chunk_buffer.len(), self.row_update_index.len());
+
+        let mut row_match_iter = self.row_match.iter();
+        for (chunk, update_indices) in self
+            .data_chunk_buffer
+            .iter()
+            .zip(self.row_update_index.iter())
+        {
+            for &index in update_indices {
+                if let Some(row_match) = row_match_iter.next() {
+                    self.size -= 1;
+                    let row_update = chunk.row_at_unchecked_vis(index);
+                    for &(update_idx, output_idx) in update_to_output {
+                        self.column_builders[output_idx].append(row_update.datum_at(update_idx));
+                    }
+                    for &(matched_idx, output_idx) in matched_to_output {
+                        self.column_builders[output_idx].append(row_match.datum_at(matched_idx));
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+        }
+        self.data_chunk_buffer.clear();
+        self.row_update_index.clear();
+        self.row_match.clear();
+        assert_eq!(self.size, 0);
+
+        let ops = std::mem::replace(&mut self.ops, Vec::with_capacity(self.initial_capacity));
+        let columns = self
+            .column_builders
+            .iter_mut()
+            .zip_eq_fast(&self.data_types)
+            .map(|(builder, datatype)| {
+                std::mem::replace(
+                    builder,
+                    datatype.create_array_builder(self.initial_capacity),
+                )
+                .finish()
+            })
+            .map(Into::into)
+            .collect::<Vec<_>>();
+        let vis = std::mem::take(&mut self.vis_builder).finish();
+
+        Some(StreamChunk::with_visibility(ops, columns, vis))
+    }
+
+    pub fn append2<'a, const VIS: bool>(
+        &mut self,
+        op: Op,
+        data_chunk: DataChunk,
+        row_update_idx: usize,
+        row_matched: OwnedRow,
+        update_to_output: &Vec<(usize, usize)>,
+        matched_to_output: &Vec<(usize, usize)>,
+    ) -> Option<StreamChunk> {
+        self.ops.push(op);
+        if self.data_chunk_buffer.is_empty()
+            || (*self.data_chunk_buffer.last().unwrap() != data_chunk)
+        {
+            self.data_chunk_buffer.push(data_chunk);
+            self.row_update_index.push(Vec::with_capacity(128));
+        }
+        (*self.row_update_index.last_mut().unwrap()).push(row_update_idx);
+        self.row_match.push(row_matched);
+        self.vis_builder.append(VIS);
+        self.size += 1;
+
+        if let Some(max_chunk_size) = self.max_chunk_size {
+            if self.size == max_chunk_size && !op.is_update_delete() || self.size > max_chunk_size {
+                // Two situations here:
+                // 1. `self.size == max_chunk_size && op == Op::UpdateDelete`
+                //    We should wait for next `UpdateInsert` to join the chunk.
+                // 2. `self.size > max_chunk_size`
+                //    Here we assert that `self.size == max_chunk_size + 1`. It's possible that
+                //    the `Op` after `UpdateDelete` is not `UpdateInsert`, if something inconsistent
+                //    happens, we should still take the existing data.
+                self.take2(update_to_output, matched_to_output)
+            } else {
+                None
+            }
+        } else {
+            // unlimited
+            None
+        }
     }
 
     #[must_use]

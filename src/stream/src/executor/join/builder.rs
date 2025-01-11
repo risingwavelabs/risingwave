@@ -14,7 +14,7 @@
 
 use risingwave_common::array::stream_chunk::StreamChunkMut;
 use risingwave_common::array::stream_chunk_builder::StreamChunkBuilder;
-use risingwave_common::array::{Op, RowRef, StreamChunk};
+use risingwave_common::array::{DataChunk, Op, RowRef, StreamChunk};
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, DatumRef};
 
@@ -101,6 +101,23 @@ impl JoinStreamChunkBuilder {
         )
     }
 
+    pub fn append_row2(
+        &mut self,
+        data_chunk: DataChunk,
+        op: Op,
+        row_update_idx: usize,
+        row_matched: OwnedRow,
+    ) -> Option<StreamChunk> {
+        self.builder.append2::<true>(
+            op,
+            data_chunk,
+            row_update_idx,
+            row_matched,
+            &self.update_to_output,
+            &self.matched_to_output,
+        )
+    }
+
     /// Append a row with coming update value and fill the other side with null.
     ///
     /// A [`StreamChunk`] will be returned when `size == capacity`.
@@ -143,6 +160,11 @@ impl JoinStreamChunkBuilder {
     #[must_use]
     pub fn take(&mut self) -> Option<StreamChunk> {
         self.builder.take()
+    }
+
+    pub fn take2(&mut self) -> Option<StreamChunk> {
+        self.builder
+            .take2(&self.update_to_output, &self.matched_to_output)
     }
 }
 
@@ -204,19 +226,21 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> JoinChunkBuilder
     /// We just introduce this wrapper function to avoid large code diffs.
     pub fn with_match<const OP: JoinOpPrimitive>(
         &mut self,
+        chunk: DataChunk,
         row: &RowRef<'_>,
-        matched_row: &JoinRow<OwnedRow>,
+        matched_row: JoinRow<OwnedRow>,
     ) -> Option<StreamChunk> {
         match OP {
-            JoinOp::Insert => self.with_match_on_insert(row, matched_row),
-            JoinOp::Delete => self.with_match_on_delete(row, matched_row),
+            JoinOp::Insert => self.with_match_on_insert(chunk, row, matched_row),
+            JoinOp::Delete => self.with_match_on_delete(chunk, row, matched_row),
         }
     }
 
     pub fn with_match_on_insert(
         &mut self,
+        chunk: DataChunk,
         row: &RowRef<'_>,
-        matched_row: &JoinRow<OwnedRow>,
+        matched_row: JoinRow<OwnedRow>,
     ) -> Option<StreamChunk> {
         // Left/Right Anti sides
         if is_anti(T) {
@@ -249,20 +273,21 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> JoinChunkBuilder
                 unreachable!("`Op::UpdateDelete` should not yield chunk");
             }
             self.stream_chunk_builder
-                .append_row(Op::UpdateInsert, row, &matched_row.row)
+                .append_row(Op::UpdateInsert, row, matched_row.row)
                 .map(Self::post_process)
         // Inner sides
         } else {
             self.stream_chunk_builder
-                .append_row(Op::Insert, row, &matched_row.row)
+                .append_row2(chunk, Op::Insert, row.index(), matched_row.row)
                 .map(Self::post_process)
         }
     }
 
     pub fn with_match_on_delete(
         &mut self,
+        data_chunk: DataChunk,
         row: &RowRef<'_>,
-        matched_row: &JoinRow<OwnedRow>,
+        matched_row: JoinRow<OwnedRow>,
     ) -> Option<StreamChunk> {
         // Left/Right Anti sides
         if is_anti(T) {
@@ -341,5 +366,9 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> JoinChunkBuilder
     #[inline]
     pub fn take(&mut self) -> Option<StreamChunk> {
         self.stream_chunk_builder.take().map(Self::post_process)
+    }
+
+    pub fn take2(&mut self) -> Option<StreamChunk> {
+        self.stream_chunk_builder.take2().map(Self::post_process)
     }
 }
