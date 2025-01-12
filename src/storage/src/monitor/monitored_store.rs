@@ -40,18 +40,39 @@ use crate::store_impl::AsHummock;
 
 /// A state store wrapper for monitoring metrics.
 #[derive(Clone)]
-pub struct MonitoredStateStore<S> {
+pub struct MonitoredStateStore<S, E = ()> {
     inner: Box<S>,
-
     storage_metrics: Arc<MonitoredStorageMetrics>,
+    extra: E,
 }
+
+type MonitoredTableStateStore<S> = MonitoredStateStore<S, TableId>;
 
 impl<S> MonitoredStateStore<S> {
     pub fn new(inner: S, storage_metrics: Arc<MonitoredStorageMetrics>) -> Self {
         Self {
             inner: Box::new(inner),
             storage_metrics,
+            extra: (),
         }
+    }
+
+    pub fn inner(&self) -> &S {
+        &self.inner
+    }
+}
+
+impl<S> MonitoredTableStateStore<S> {
+    fn new(inner: S, storage_metrics: Arc<MonitoredStorageMetrics>, table_id: TableId) -> Self {
+        Self {
+            inner: Box::new(inner),
+            storage_metrics,
+            extra: table_id,
+        }
+    }
+
+    fn table_id(&self) -> TableId {
+        self.extra
     }
 }
 
@@ -59,7 +80,7 @@ impl<S> MonitoredStateStore<S> {
 // the return type of `monitored_iter` only captures the lifetime `'s` and has nothing to do with
 // `'a`. If we simply use `impl StateStoreIter + 's`, the rust compiler will also capture
 // the lifetime `'a` in the scope defined in the scope.
-impl<S> MonitoredStateStore<S> {
+impl<S, E> MonitoredStateStore<S, E> {
     async fn monitored_iter<
         'a,
         Item: IterItem,
@@ -91,10 +112,6 @@ impl<S> MonitoredStateStore<S> {
         Ok(monitored)
     }
 
-    pub fn inner(&self) -> &S {
-        &self.inner
-    }
-
     async fn monitored_on_key_value<O>(
         &self,
         on_key_value_future: impl Future<Output = StorageResult<Option<(O, usize)>>>,
@@ -121,14 +138,14 @@ impl<S> MonitoredStateStore<S> {
     }
 }
 
-impl<S: StateStoreGet> StateStoreGet for MonitoredStateStore<S> {
+impl<S: StateStoreGet> StateStoreGet for MonitoredTableStateStore<S> {
     fn on_key_value<O: Send + 'static>(
         &self,
         key: TableKey<Bytes>,
         read_options: ReadOptions,
         on_key_value_fn: impl KeyValueFn<O>,
     ) -> impl StorageFuture<'_, Option<O>> {
-        let table_id = read_options.table_id;
+        let table_id = self.table_id();
         let key_len = key.len();
         self.monitored_on_key_value(
             self.inner
@@ -142,7 +159,7 @@ impl<S: StateStoreGet> StateStoreGet for MonitoredStateStore<S> {
     }
 }
 
-impl<S: StateStoreRead> StateStoreRead for MonitoredStateStore<S> {
+impl<S: StateStoreRead> StateStoreRead for MonitoredTableStateStore<S> {
     type Iter = impl StateStoreReadIter;
     type RevIter = impl StateStoreReadIter;
 
@@ -152,7 +169,7 @@ impl<S: StateStoreRead> StateStoreRead for MonitoredStateStore<S> {
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Self::Iter>> + '_ {
         self.monitored_iter::<'_, _, _, StateStoreIterStats>(
-            read_options.table_id,
+            self.table_id(),
             self.inner.iter(key_range, read_options),
         )
     }
@@ -163,7 +180,7 @@ impl<S: StateStoreRead> StateStoreRead for MonitoredStateStore<S> {
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Self::RevIter>> + '_ {
         self.monitored_iter::<'_, _, _, StateStoreIterStats>(
-            read_options.table_id,
+            self.table_id(),
             self.inner.rev_iter(key_range, read_options),
         )
     }
@@ -189,8 +206,8 @@ impl<S: StateStoreReadLog> StateStoreReadLog for MonitoredStateStore<S> {
     }
 }
 
-impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
-    type FlushedSnapshotReader = MonitoredStateStore<S::FlushedSnapshotReader>;
+impl<S: LocalStateStore> LocalStateStore for MonitoredTableStateStore<S> {
+    type FlushedSnapshotReader = MonitoredTableStateStore<S::FlushedSnapshotReader>;
 
     type Iter<'a> = impl StateStoreIter + 'a;
     type RevIter<'a> = impl StateStoreIter + 'a;
@@ -200,9 +217,8 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
         key_range: TableKeyRange,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Self::Iter<'_>>> + Send + '_ {
-        let table_id = read_options.table_id;
         self.monitored_iter::<'_, _, _, StateStoreIterStats>(
-            table_id,
+            self.table_id(),
             self.inner.iter(key_range, read_options),
         )
     }
@@ -212,9 +228,8 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
         key_range: TableKeyRange,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Self::RevIter<'_>>> + Send + '_ {
-        let table_id = read_options.table_id;
         self.monitored_iter::<'_, _, _, StateStoreIterStats>(
-            table_id,
+            self.table_id(),
             self.inner.rev_iter(key_range, read_options),
         )
     }
@@ -270,16 +285,17 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
     }
 
     fn new_flushed_snapshot_reader(&self) -> Self::FlushedSnapshotReader {
-        MonitoredStateStore::new(
+        MonitoredTableStateStore::new(
             self.inner.new_flushed_snapshot_reader(),
             self.storage_metrics.clone(),
+            self.table_id(),
         )
     }
 }
 
 impl<S: StateStore> StateStore for MonitoredStateStore<S> {
-    type Local = MonitoredStateStore<S::Local>;
-    type ReadSnapshot = MonitoredStateStore<S::ReadSnapshot>;
+    type Local = MonitoredTableStateStore<S::Local>;
+    type ReadSnapshot = MonitoredTableStateStore<S::ReadSnapshot>;
 
     fn try_wait_epoch(
         &self,
@@ -300,12 +316,14 @@ impl<S: StateStore> StateStore for MonitoredStateStore<S> {
     }
 
     async fn new_local(&self, option: NewLocalOptions) -> Self::Local {
-        MonitoredStateStore::new(
+        let table_id = option.table_id;
+        MonitoredTableStateStore::new(
             self.inner
                 .new_local(option)
                 .instrument_await("store_new_local")
                 .await,
             self.storage_metrics.clone(),
+            table_id,
         )
     }
 
@@ -314,9 +332,10 @@ impl<S: StateStore> StateStore for MonitoredStateStore<S> {
         epoch: HummockReadEpoch,
         options: NewReadSnapshotOptions,
     ) -> StorageResult<Self::ReadSnapshot> {
-        Ok(MonitoredStateStore::new(
+        Ok(MonitoredTableStateStore::new(
             self.inner.new_read_snapshot(epoch, options).await?,
             self.storage_metrics.clone(),
+            options.table_id,
         ))
     }
 }
