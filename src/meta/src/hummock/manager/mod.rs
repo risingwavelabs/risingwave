@@ -393,14 +393,14 @@ impl HummockManager {
             checkpoint_version
         };
         let mut applied_delta_count = 0;
-        let total_to_apply = hummock_version_deltas.range(redo_state.id..).count();
+        let total_to_apply = hummock_version_deltas.range(redo_state.id + 1..).count();
         tracing::info!(
             total_delta = hummock_version_deltas.len(),
             total_to_apply,
             "Start redo Hummock version."
         );
         for version_delta in hummock_version_deltas
-            .range(redo_state.id..)
+            .range(redo_state.id + 1..)
             .map(|(_, v)| v)
         {
             assert_eq!(
