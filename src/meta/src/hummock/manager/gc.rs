@@ -500,7 +500,10 @@ impl HummockManager {
                 break;
             }
         }
+        Ok(total_deleted)
+    }
 
+    pub async fn delete_time_travel_metadata(&self) -> MetaResult<()> {
         let current_epoch_time = Epoch::now().physical_time();
         let epoch_watermark = Epoch::from_physical_time(
             current_epoch_time.saturating_sub(
@@ -512,8 +515,7 @@ impl HummockManager {
         )
         .0;
         self.truncate_time_travel_metadata(epoch_watermark).await?;
-
-        Ok(total_deleted)
+        Ok(())
     }
 
     /// Deletes stale SST objects from object store.

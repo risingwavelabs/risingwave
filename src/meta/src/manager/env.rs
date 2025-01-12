@@ -109,6 +109,7 @@ pub struct MetaOpts {
     /// The spin interval inside a vacuum job. It avoids the vacuum job monopolizing resources of
     /// meta node.
     pub vacuum_spin_interval_ms: u64,
+    pub time_travel_vacuum_interval_sec: u64,
     /// Interval of hummock version checkpoint.
     pub hummock_version_checkpoint_interval_sec: u64,
     pub enable_hummock_data_archive: bool,
@@ -269,6 +270,7 @@ impl MetaOpts {
             compaction_deterministic_test: false,
             default_parallelism: DefaultParallelism::Full,
             vacuum_interval_sec: 30,
+            time_travel_vacuum_interval_sec: 30,
             vacuum_spin_interval_ms: 0,
             hummock_version_checkpoint_interval_sec: 30,
             enable_hummock_data_archive: false,

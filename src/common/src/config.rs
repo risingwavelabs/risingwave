@@ -535,6 +535,9 @@ pub struct MetaDeveloperConfig {
 
     #[serde(default = "default::developer::hummock_delta_log_delete_batch_size")]
     pub hummock_delta_log_delete_batch_size: usize,
+
+    #[serde(default = "default::developer::time_travel_vacuum_interval_sec")]
+    pub time_travel_vacuum_interval_sec: u64,
 }
 
 /// The section `[server]` in `risingwave.toml`.
@@ -1478,7 +1481,7 @@ pub mod default {
         }
 
         pub fn vacuum_spin_interval_ms() -> u64 {
-            200
+            100
         }
 
         pub fn hummock_version_checkpoint_interval_sec() -> u64 {
@@ -2059,6 +2062,10 @@ pub mod default {
 
         pub fn hummock_delta_log_delete_batch_size() -> usize {
             512
+        }
+
+        pub fn time_travel_vacuum_interval_sec() -> u64 {
+            30
         }
 
         pub fn memory_controller_threshold_aggressive() -> f64 {
