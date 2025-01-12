@@ -242,6 +242,11 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                         let barrier = receive_next_barrier(&mut self.barrier_rx).await?;
                         assert_eq!(upstream_barrier.epoch, barrier.epoch);
                         assert_eq!(barrier_epoch.curr, barrier.epoch.prev);
+                        {
+                            let next_prev_epoch =
+                                self.upstream_table.next_epoch(barrier_epoch.prev).await?;
+                            assert_eq!(next_prev_epoch, barrier.epoch.prev);
+                        }
                         barrier_epoch = barrier.epoch;
                         debug!(?barrier_epoch, kind = ?barrier.kind, "before consume change log");
                         // use `upstream_buffer.run_future` to poll upstream concurrently so that we won't have back-pressure
