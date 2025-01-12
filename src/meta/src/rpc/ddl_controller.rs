@@ -1771,6 +1771,8 @@ impl DdlController {
 
             release_ctx = Some(ReleaseContext {
                 database_id: stream_job.database_id() as i32,
+                // we do not remove the original table catalog as it's still needed for the streaming job
+                // just need to remove the ref to the state table
                 removed_streaming_job_ids: vec![id as i32],
                 removed_source_ids: vec![drop_table_associated_source_id.unwrap() as i32],
                 removed_state_table_ids: old_internal_table_ids
