@@ -682,7 +682,6 @@ where
         let read_options = ReadOptions {
             prefix_hint,
             retention_seconds: self.table_option.retention_seconds,
-            table_id: self.table_id,
             cache_policy: CachePolicy::Fill(CacheHint::Normal),
             ..Default::default()
         };
@@ -1342,10 +1341,8 @@ where
         let read_options = ReadOptions {
             prefix_hint,
             retention_seconds: self.table_option.retention_seconds,
-            table_id: self.table_id,
             prefetch_options,
             cache_policy: CachePolicy::Fill(CacheHint::Normal),
-            ..Default::default()
         };
 
         Ok(self.local_store.iter(table_key_range, read_options).await?)
@@ -1360,10 +1357,8 @@ where
         let read_options = ReadOptions {
             prefix_hint,
             retention_seconds: self.table_option.retention_seconds,
-            table_id: self.table_id,
             prefetch_options,
             cache_policy: CachePolicy::Fill(CacheHint::Normal),
-            ..Default::default()
         };
 
         Ok(self
