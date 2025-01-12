@@ -25,11 +25,11 @@ use risingwave_hummock_sdk::key::prefixed_range_with_vnode;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::StateStore;
-use risingwave_storage::hummock::test_utils::*;
+use risingwave_storage::hummock::test_utils::{ReadOptions, *};
 use risingwave_storage::hummock::{CachePolicy, HummockStorage};
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{
-    LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions, SealCurrentEpochOptions,
+    LocalStateStore, NewLocalOptions, PrefetchOptions, SealCurrentEpochOptions,
     TryWaitEpochOptions, WriteOptions,
 };
 

@@ -270,7 +270,6 @@ mod tests {
     use risingwave_storage::hummock::CachePolicy;
     use risingwave_storage::hummock::test_utils::*;
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::store::ReadOptions;
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;
