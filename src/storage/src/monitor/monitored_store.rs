@@ -175,7 +175,6 @@ impl<S> MonitoredStateStore<S> {
 }
 
 impl<S: StateStoreRead> StateStoreRead for MonitoredStateStore<S> {
-    type ChangeLogIter = impl StateStoreReadChangeLogIter;
     type Iter = impl StateStoreReadIter;
     type RevIter = impl StateStoreReadIter;
 
@@ -217,6 +216,10 @@ impl<S: StateStoreRead> StateStoreRead for MonitoredStateStore<S> {
             self.inner.rev_iter(key_range, epoch, read_options),
         )
     }
+}
+
+impl<S: StateStoreReadLog> StateStoreReadLog for MonitoredStateStore<S> {
+    type ChangeLogIter = impl StateStoreReadChangeLogIter;
 
     fn iter_log(
         &self,
