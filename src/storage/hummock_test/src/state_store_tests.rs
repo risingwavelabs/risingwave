@@ -35,7 +35,7 @@ use risingwave_storage::hummock::iterator::change_log::test_utils::{
     apply_test_log_data, gen_test_data,
 };
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
-use risingwave_storage::hummock::test_utils::*;
+use risingwave_storage::hummock::test_utils::{ReadOptions, *};
 use risingwave_storage::hummock::{CachePolicy, HummockStorage};
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::storage_value::StorageValue;
@@ -1354,6 +1354,7 @@ async fn test_clear_shared_buffer() {
 /// 2. GlobalStateStore cannot read replicated ReadVersion.
 #[tokio::test]
 async fn test_replicated_local_hummock_storage() {
+    use risingwave_storage::store::ReadOptions;
     const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
 
     let (hummock_storage, meta_client) = with_hummock_storage(TEST_TABLE_ID).await;
@@ -1378,13 +1379,14 @@ async fn test_replicated_local_hummock_storage() {
         .await
         .unwrap();
 
-    let read_options = ReadOptions {
+    let test_read_options = StateStoreTestReadOptions {
         table_id: TableId {
             table_id: TEST_TABLE_ID.table_id,
         },
         cache_policy: CachePolicy::Fill(CacheHint::Normal),
         ..Default::default()
     };
+    let read_options: ReadOptions = test_read_options.clone().into();
 
     let mut local_hummock_storage = hummock_storage
         .new_local(NewLocalOptions::new_replicated(
@@ -1503,7 +1505,7 @@ async fn test_replicated_local_hummock_storage() {
                     VirtualNode::ZERO,
                 ),
                 epoch2,
-                read_options.clone(),
+                test_read_options.clone(),
             )
             .await
             .unwrap()
@@ -1539,7 +1541,7 @@ async fn test_replicated_local_hummock_storage() {
                     VirtualNode::ZERO,
                 ),
                 epoch1,
-                read_options,
+                test_read_options,
             )
             .await
             .unwrap()

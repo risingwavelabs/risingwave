@@ -159,8 +159,8 @@ pub(crate) async fn new_hummock_java_binding_iter(
                 .iter(
                     key_range,
                     read_plan.epoch,
+                    table_id,
                     ReadOptions {
-                        table_id,
                         cache_policy: CachePolicy::NotFill,
                         ..Default::default()
                     },
