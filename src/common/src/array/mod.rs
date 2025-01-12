@@ -123,6 +123,13 @@ pub trait ArrayBuilder: Send + Sync + Sized + 'static {
         self.append_n(1, value);
     }
 
+    fn append_iter<'a>(
+        &mut self,
+        _data: impl IntoIterator<Item = Option<<Self::ArrayType as Array>::RefItem<'a>>> + 'a,
+    ) {
+        unimplemented!();
+    }
+
     /// Append an owned value to builder.
     fn append_owned(&mut self, value: Option<<Self::ArrayType as Array>::OwnedItem>) {
         let value = value.as_ref().map(|s| s.as_scalar_ref());
@@ -514,6 +521,24 @@ impl ArrayBuilderImpl {
     /// Append a [`Datum`] or [`DatumRef`], return error while type not match.
     pub fn append(&mut self, datum: impl ToDatumRef) {
         self.append_n(1, datum);
+    }
+
+    pub fn append_iter<'a>(&mut self, data: impl IntoIterator<Item = DatumRef<'a>> + 'a) {
+        dispatch_array_builder_variants!(self, inner, [I = VARIANT_NAME], {
+            let mapped_data = data.into_iter().map(|datum| match datum {
+                None => None,
+                Some(scalar) => {
+                    let scalar_type = scalar.get_ident();
+                    Some(scalar.try_into().unwrap_or_else(|_| {
+                        panic!(
+                            "type mismatch, array builder type: {}, scalar type: {}",
+                            I, scalar_type
+                        )
+                    }))
+                }
+            });
+            inner.append_iter(mapped_data);
+        })
     }
 
     pub fn append_array_element(&mut self, other: &ArrayImpl, idx: usize) {

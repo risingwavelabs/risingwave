@@ -78,6 +78,29 @@ impl ArrayBuilder for ListArrayBuilder {
         }
     }
 
+    fn append_iter<'a>(&mut self, data: impl IntoIterator<Item = Option<ListRef<'a>>> + 'a) {
+        for value in data {
+            self.len += 1;
+            match value {
+                None => {
+                    self.bitmap.append(false);
+                    let last = *self.offsets.last().unwrap();
+                    self.offsets.push(last);
+                }
+                Some(v) => {
+                    self.bitmap.append(true);
+                    let last = *self.offsets.last().unwrap();
+                    let elems = v.iter();
+                    self.offsets.push(
+                        last.checked_add(elems.len() as u32)
+                            .expect("offset overflow"),
+                    );
+                    self.value.append_iter(elems);
+                }
+            }
+        }
+    }
+
     fn append_n(&mut self, n: usize, value: Option<ListRef<'_>>) {
         match value {
             None => {

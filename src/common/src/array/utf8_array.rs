@@ -149,6 +149,12 @@ impl ArrayBuilder for Utf8ArrayBuilder {
         self.bytes.append_array(&other.bytes);
     }
 
+    fn append_iter<'a>(&mut self, data: impl IntoIterator<Item = Option<&'a str>> + 'a) {
+        for value in data {
+            self.bytes.append(value.map(|v| v.as_bytes()));
+        }
+    }
+
     #[inline]
     fn pop(&mut self) -> Option<()> {
         self.bytes.pop()

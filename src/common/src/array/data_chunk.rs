@@ -387,6 +387,10 @@ impl DataChunk {
         RowRef::new(self, pos)
     }
 
+    pub fn datum_at(&self, row_pos: usize, datum_pos: usize) -> DatumRef<'_> {
+        self.columns[datum_pos].value_at(row_pos)
+    }
+
     /// Returns a table-like text representation of the `DataChunk`.
     pub fn to_pretty(&self) -> impl Display {
         use comfy_table::Table;

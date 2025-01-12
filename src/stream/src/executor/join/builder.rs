@@ -285,7 +285,7 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> JoinChunkBuilder
 
     pub fn with_match_on_delete(
         &mut self,
-        data_chunk: DataChunk,
+        _data_chunk: DataChunk,
         row: &RowRef<'_>,
         matched_row: JoinRow<OwnedRow>,
     ) -> Option<StreamChunk> {

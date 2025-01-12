@@ -211,34 +211,58 @@ impl StreamChunkBuilder {
         if self.size == 0 {
             return None;
         }
+        self.size = 0;
 
         assert_eq!(self.data_chunk_buffer.len(), self.row_update_index.len());
 
-        let mut row_match_iter = self.row_match.iter();
-        for (chunk, update_indices) in self
-            .data_chunk_buffer
-            .iter()
-            .zip(self.row_update_index.iter())
-        {
-            for &index in update_indices {
-                if let Some(row_match) = row_match_iter.next() {
-                    self.size -= 1;
-                    let row_update = chunk.row_at_unchecked_vis(index);
-                    for &(update_idx, output_idx) in update_to_output {
-                        self.column_builders[output_idx].append(row_update.datum_at(update_idx));
-                    }
-                    for &(matched_idx, output_idx) in matched_to_output {
-                        self.column_builders[output_idx].append(row_match.datum_at(matched_idx));
-                    }
-                } else {
-                    unreachable!()
-                }
+        let update_count: usize = self.row_update_index.iter().map(|i| i.len()).sum::<usize>();
+        for &(update_idx, output_idx) in update_to_output {
+            for (chunk, row_update_indices) in self
+                .data_chunk_buffer
+                .iter()
+                .zip(self.row_update_index.iter())
+            {
+                let update_row_datum_iter = row_update_indices
+                    .iter()
+                    .map(|row_update_idx| chunk.datum_at(*row_update_idx, update_idx));
+                self.column_builders[output_idx].append_iter(update_row_datum_iter);
             }
         }
+
+        for &(matched_idx, output_idx) in matched_to_output {
+            let matched_row_data_iter = self
+                .row_match
+                .iter()
+                .map(|matched_row| matched_row.datum_at(matched_idx));
+            self.column_builders[output_idx].append_iter(matched_row_data_iter);
+        }
+
+        assert_eq!(update_count, self.row_match.len());
+
+        // let mut row_match_iter = self.row_match.iter();
+        // for (chunk, update_indices) in self
+        //     .data_chunk_buffer
+        //     .iter()
+        //     .zip(self.row_update_index.iter())
+        // {
+        //     for &index in update_indices {
+        //         if let Some(row_match) = row_match_iter.next() {
+        //             self.size -= 1;
+        //             let row_update = chunk.row_at_unchecked_vis(index);
+        //             for &(update_idx, output_idx) in update_to_output {
+        //                 self.column_builders[output_idx].append(row_update.datum_at(update_idx));
+        //             }
+        //             for &(matched_idx, output_idx) in matched_to_output {
+        //                 self.column_builders[output_idx].append(row_match.datum_at(matched_idx));
+        //             }
+        //         } else {
+        //             unreachable!()
+        //         }
+        //     }
+        // }
         self.data_chunk_buffer.clear();
         self.row_update_index.clear();
         self.row_match.clear();
-        assert_eq!(self.size, 0);
 
         let ops = std::mem::replace(&mut self.ops, Vec::with_capacity(self.initial_capacity));
         let columns = self

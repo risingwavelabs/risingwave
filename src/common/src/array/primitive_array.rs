@@ -301,6 +301,21 @@ impl<T: PrimitiveArrayItemType> ArrayBuilder for PrimitiveArrayBuilder<T> {
         }
     }
 
+    fn append_iter<'a>(&mut self, data: impl IntoIterator<Item = Option<T>> + 'a) {
+        for value in data {
+            match value {
+                Some(x) => {
+                    self.bitmap.append(true);
+                    self.data.push(x)
+                }
+                None => {
+                    self.bitmap.append(false);
+                    self.data.push(T::default());
+                }
+            }
+        }
+    }
+
     fn append_array(&mut self, other: &PrimitiveArray<T>) {
         for bit in other.bitmap.iter() {
             self.bitmap.append(bit);
