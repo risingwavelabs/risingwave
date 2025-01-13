@@ -328,6 +328,14 @@ impl TableCatalog {
         &self.columns
     }
 
+    pub fn columns_without_rw_timestamp(&self) -> Vec<ColumnCatalog> {
+        self.columns
+            .iter()
+            .filter(|c| !c.is_rw_timestamp_column())
+            .cloned()
+            .collect()
+    }
+
     /// Get a reference to the table catalog's pk desc.
     pub fn pk(&self) -> &[ColumnOrder] {
         self.pk.as_ref()
@@ -412,7 +420,12 @@ impl TableCatalog {
             schema_id,
             database_id,
             name: self.name.clone(),
-            columns: self.columns().iter().map(|c| c.to_protobuf()).collect(),
+            // ignore `_rw_timestamp` when serializing
+            columns: self
+                .columns_without_rw_timestamp()
+                .iter()
+                .map(|c| c.to_protobuf())
+                .collect(),
             pk: self.pk.iter().map(|o| o.to_protobuf()).collect(),
             stream_key: self.stream_key.iter().map(|x| *x as _).collect(),
             dependent_relations: vec![],
@@ -530,6 +543,10 @@ impl TableCatalog {
         self.columns.iter().any(|c| c.is_generated())
     }
 
+    pub fn has_rw_timestamp_column(&self) -> bool {
+        self.columns.iter().any(|c| c.is_rw_timestamp_column())
+    }
+
     pub fn column_schema(&self) -> Schema {
         Schema::new(
             self.columns
@@ -570,7 +587,12 @@ impl From<PbTable> for TableCatalog {
 
         let conflict_behavior = ConflictBehavior::from_protobuf(&tb_conflict_behavior);
         let version_column_index = tb.version_column_index.map(|value| value as usize);
-        let columns: Vec<ColumnCatalog> = tb.columns.into_iter().map(ColumnCatalog::from).collect();
+        let mut columns: Vec<ColumnCatalog> =
+            tb.columns.into_iter().map(ColumnCatalog::from).collect();
+        if columns.iter().all(|c| !c.is_rw_timestamp_column()) {
+            // Add system column `_rw_timestamp` to every table, but notice that this column is never persisted.
+            columns.push(ColumnCatalog::rw_timestamp_column());
+        }
         for (idx, catalog) in columns.clone().into_iter().enumerate() {
             let col_name = catalog.name();
             if !col_names.insert(col_name.to_string()) {
@@ -755,9 +777,11 @@ mod tests {
                             generated_or_default_column: None,
                             additional_column: AdditionalColumn { column_type: None },
                             version: ColumnDescVersion::Pr13707,
+                            system_column: None,
                         },
                         is_hidden: false
-                    }
+                    },
+                    ColumnCatalog::rw_timestamp_column(),
                 ],
                 stream_key: vec![0],
                 pk: vec![ColumnOrder::new(0, OrderType::ascending())],
@@ -774,7 +798,7 @@ mod tests {
                 conflict_behavior: ConflictBehavior::NoCheck,
                 read_prefix_len_hint: 0,
                 version: Some(TableVersion::new_initial_for_test(ColumnId::new(1))),
-                watermark_columns: FixedBitSet::with_capacity(2),
+                watermark_columns: FixedBitSet::with_capacity(3),
                 dist_key_in_pk: vec![],
                 cardinality: Cardinality::unknown(),
                 created_at_epoch: None,

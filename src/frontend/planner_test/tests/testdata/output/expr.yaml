@@ -113,10 +113,10 @@
   logical_plan: |-
     LogicalProject { exprs: [b.b2] }
     └─LogicalApply { type: LeftSemi, on: true, correlated_id: 1 }
-      ├─LogicalScan { table: b, columns: [b.b1, b.b2, b._row_id] }
+      ├─LogicalScan { table: b, columns: [b.b1, b.b2, b._row_id, b._rw_timestamp] }
       └─LogicalProject { exprs: [2:Int32] }
         └─LogicalFilter { predicate: (In(t.v1::Decimal, 3:Int32::Decimal, 1.0:Decimal) OR (t.v1 = CorrelatedInputRef { index: 0, correlated_id: 1 })) }
-          └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
+          └─LogicalScan { table: t, columns: [t.v1, t._row_id, t._rw_timestamp] }
   batch_plan: |-
     BatchNestedLoopJoin { type: LeftSemi, predicate: (In(t.v1::Decimal, 3:Decimal, 1.0:Decimal) OR (t.v1 = b.b1)), output: [b.b2] }
     ├─BatchExchange { order: [], dist: Single }
@@ -481,7 +481,7 @@
   logical_plan: |-
     LogicalProject { exprs: [t.v1] }
     └─LogicalFilter { predicate: (t.v1 >= Now) }
-      └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
+      └─LogicalScan { table: t, columns: [t.v1, t._row_id, t._rw_timestamp] }
   stream_plan: |-
     StreamMaterialize { columns: [v1, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck, watermark_columns: [v1] }
     └─StreamDynamicFilter { predicate: (t.v1 >= now), output_watermarks: [t.v1], output: [t.v1, t._row_id], cleaned_by_watermark: true }
@@ -495,7 +495,7 @@
   logical_plan: |-
     LogicalProject { exprs: [t.v1] }
     └─LogicalFilter { predicate: (t.v1 >= (Now - '00:00:02':Interval)) }
-      └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
+      └─LogicalScan { table: t, columns: [t.v1, t._row_id, t._rw_timestamp] }
   stream_plan: |-
     StreamMaterialize { columns: [v1, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck, watermark_columns: [v1] }
     └─StreamDynamicFilter { predicate: (t.v1 >= $expr1), output_watermarks: [t.v1], output: [t.v1, t._row_id], cleaned_by_watermark: true }
