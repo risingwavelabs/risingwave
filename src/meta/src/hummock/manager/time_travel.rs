@@ -108,8 +108,18 @@ impl HummockManager {
             txn.commit().await?;
             return Ok(());
         };
-        let (latest_valid_version_id, latest_valid_version_sst_ids) =
-            { (latest_valid_version.id, latest_valid_version.get_sst_ids()) };
+        let (
+            latest_valid_version_id,
+            latest_valid_version_sst_ids,
+            latest_valid_version_object_ids,
+        ) = {
+            (
+                latest_valid_version.id,
+                latest_valid_version.get_sst_ids(),
+                latest_valid_version.get_object_ids(),
+            )
+        };
+        let mut object_ids_to_delete: HashSet<_> = HashSet::default();
         let version_ids_to_delete: Vec<risingwave_meta_model::HummockVersionId> =
             hummock_time_travel_version::Entity::find()
                 .select_only()
@@ -153,6 +163,8 @@ impl HummockManager {
                 .filter(hummock_sstable_info::Column::SstId.is_in(sst_ids_to_delete))
                 .exec(&txn)
                 .await?;
+            let new_object_ids = delta_to_delete.newly_added_object_ids();
+            object_ids_to_delete.extend(&new_object_ids - &latest_valid_version_object_ids);
             tracing::debug!(
                 delta_id = delta_to_delete.id.to_u64(),
                 "delete {} rows from hummock_sstable_info",
@@ -182,12 +194,20 @@ impl HummockManager {
                 .filter(hummock_sstable_info::Column::SstId.is_in(sst_ids_to_delete))
                 .exec(&txn)
                 .await?;
+            let new_object_ids = prev_version.get_object_ids();
+            object_ids_to_delete.extend(&new_object_ids - &latest_valid_version_object_ids);
             tracing::debug!(
                 prev_version_id,
                 "delete {} rows from hummock_sstable_info",
                 res.rows_affected
             );
             next_version_sst_ids = sst_ids;
+        }
+        if !object_ids_to_delete.is_empty() {
+            // IMPORTANT: object_ids_to_delete may include objects that are still being used by SSTs not included in time travel metadata.
+            // So it's crucial to filter out those objects before actually deleting them, i.e. when using `try_take_may_delete_object_ids`.
+            self.gc_manager
+                .add_may_delete_object_ids(object_ids_to_delete.into_iter());
         }
 
         let res = hummock_time_travel_version::Entity::delete_many()
@@ -410,6 +430,7 @@ impl HummockManager {
             Ok(count)
         }
 
+        let mut batch = vec![];
         for (table_id, _cg_id, committed_epoch) in tables_to_commit {
             let version_id: u64 = delta.id.to_u64();
             let m = hummock_epoch_to_version::ActiveModel {
@@ -417,8 +438,24 @@ impl HummockManager {
                 table_id: Set(table_id.table_id.into()),
                 version_id: Set(version_id.try_into().unwrap()),
             };
+            batch.push(m);
+            if batch.len()
+                >= self
+                    .env
+                    .opts
+                    .hummock_time_travel_epoch_version_insert_batch_size
+            {
+                // There should be no conflict rows.
+                hummock_epoch_to_version::Entity::insert_many(std::mem::take(&mut batch))
+                    .do_nothing()
+                    .exec(txn)
+                    .await?;
+            }
+        }
+        if !batch.is_empty() {
             // There should be no conflict rows.
-            hummock_epoch_to_version::Entity::insert(m)
+            hummock_epoch_to_version::Entity::insert_many(batch)
+                .do_nothing()
                 .exec(txn)
                 .await?;
         }
