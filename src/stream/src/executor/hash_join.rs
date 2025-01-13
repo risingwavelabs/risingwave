@@ -1182,42 +1182,42 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 if let Some(chunk) = hashjoin_chunk_builder.with_match::<JOIN_OP>(
                     data_chunk.clone(),
                     &update_row,
-                    matched_row.clone(),
+                    matched_row,
                 ) {
                     chunk_opt = Some(chunk);
                 }
-            }
-            // TODO(kwannoel): We can actually statically decide this, using join side + join type.
-            if let Some(degree_table) = match_degree_table {
-                update_degree::<S, { JOIN_OP }>(
-                    match_order_key_indices,
-                    degree_table,
-                    &mut matched_row,
-                );
-                if MATCHED_ROWS_FROM_CACHE || matched_row_cache_ref.is_some() {
-                    // update matched row in cache
-                    match JOIN_OP {
-                        JoinOp::Insert => {
-                            matched_row_cache_ref.as_mut().unwrap().degree += 1;
-                        }
-                        JoinOp::Delete => {
-                            matched_row_cache_ref.as_mut().unwrap().degree -= 1;
-                        }
+            } else if matches!(JOIN_OP, JoinOp::Delete) && !forward_exactly_once(T, SIDE) {
+                // Deletes must happen after degree table is updated.
+                // FIXME(kwannoel): We should let deletes and inserts happen BEFORE degree updates.
+                {
+                    if let Some(chunk) = hashjoin_chunk_builder.with_match::<JOIN_OP>(
+                        data_chunk.clone(),
+                        &update_row,
+                        matched_row,
+                    ) {
+                        chunk_opt = Some(chunk);
                     }
                 }
             }
-
-            // Deletes must happen after degree table is updated.
-            // FIXME(kwannoel): We should let deletes and inserts happen BEFORE degree updates.
-            if matches!(JOIN_OP, JoinOp::Delete) && !forward_exactly_once(T, SIDE) {
-                if let Some(chunk) = hashjoin_chunk_builder.with_match::<JOIN_OP>(
-                    data_chunk.clone(),
-                    &update_row,
-                    matched_row.clone(),
-                ) {
-                    chunk_opt = Some(chunk);
-                }
-            }
+            // // TODO(kwannoel): We can actually statically decide this, using join side + join type.
+            // if let Some(degree_table) = match_degree_table {
+            //     update_degree::<S, { JOIN_OP }>(
+            //         match_order_key_indices,
+            //         degree_table,
+            //         &mut matched_row,
+            //     );
+            //     if MATCHED_ROWS_FROM_CACHE || matched_row_cache_ref.is_some() {
+            //         // update matched row in cache
+            //         match JOIN_OP {
+            //             JoinOp::Insert => {
+            //                 matched_row_cache_ref.as_mut().unwrap().degree += 1;
+            //             }
+            //             JoinOp::Delete => {
+            //                 matched_row_cache_ref.as_mut().unwrap().degree -= 1;
+            //             }
+            //         }
+            //     }
+            // }
         } else {
             // check if need state cleaning
             for (column_idx, watermark) in useful_state_clean_columns {
@@ -1238,18 +1238,18 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         // If the stream is append-only and the join key covers pk in both side,
         // then we can remove matched rows since pk is unique and will not be
         // inserted again
-        if append_only_optimize {
-            assert_matches!(JOIN_OP, JoinOp::Insert);
-            // Since join key contains pk and pk is unique, there should be only
-            // one row if matched.
-            assert!(append_only_matched_row.is_none());
-            *append_only_matched_row = Some(matched_row);
-        } else if need_state_clean {
-            // `append_only_optimize` and `need_state_clean` won't both be true.
-            // 'else' here is only to suppress compiler error, otherwise
-            // `matched_row` will be moved twice.
-            matched_rows_to_clean.push(matched_row);
-        }
+        // if append_only_optimize {
+        //     assert_matches!(JOIN_OP, JoinOp::Insert);
+        //     // Since join key contains pk and pk is unique, there should be only
+        //     // one row if matched.
+        //     assert!(append_only_matched_row.is_none());
+        //     *append_only_matched_row = Some(matched_row);
+        // } else if need_state_clean {
+        //     // `append_only_optimize` and `need_state_clean` won't both be true.
+        //     // 'else' here is only to suppress compiler error, otherwise
+        //     // `matched_row` will be moved twice.
+        //     matched_rows_to_clean.push(matched_row);
+        // }
 
         chunk_opt
     }
