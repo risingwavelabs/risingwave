@@ -40,14 +40,20 @@ struct SyncedKvLogStore<S: StateStore> {
 // - stream interface
 impl<S: StateStore> SyncedKvLogStore<S> {
     #[try_stream(ok = Message, error = StreamExecutorError)]
-    pub async fn into_stream(self) {
+    pub async fn into_stream(mut self) {
         loop {
-            select! {
-                // read from log store
-                // Read from upstream
-                // Block until write succeeds
-                c = self.poll_upstream() => yield c,
+            if let Some(msg) = self.next().await? {
+                yield msg;
             }
+        }
+    }
+
+    async fn next(&mut self) -> StreamExecutorResult<Option<Message>> {
+        select! {
+            // read from log store
+            // Read from upstream
+            // Block until write succeeds
+            c = self.poll_upstream() => Ok(Some(c?)),
         }
     }
 }
