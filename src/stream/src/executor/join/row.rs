@@ -47,11 +47,26 @@ impl<R: Row> JoinRow<R> {
         (&self.row, degree)
     }
 
-    pub fn encode(&self) -> EncodedJoinRow {
-        EncodedJoinRow {
-            compacted_row: (&self.row).into(),
+    pub fn encode(&self) -> UnencodedJoinRow {
+        UnencodedJoinRow {
+            row: self.row.to_owned_row(),
             degree: self.degree,
         }
+    }
+}
+
+#[derive(Clone, Debug, EstimateSize)]
+pub struct UnencodedJoinRow {
+    pub row: OwnedRow,
+    pub degree: DegreeType,
+}
+
+impl UnencodedJoinRow {
+    pub fn decode(&self, data_types: &[DataType]) -> StreamExecutorResult<JoinRow<OwnedRow>> {
+        Ok(JoinRow {
+            row: self.row.clone(),
+            degree: self.degree,
+        })
     }
 }
 

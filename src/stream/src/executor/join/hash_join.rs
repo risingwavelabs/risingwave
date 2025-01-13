@@ -36,7 +36,7 @@ use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 use thiserror_ext::AsReport;
 
-use super::row::{DegreeType, EncodedJoinRow};
+use super::row::{DegreeType, EncodedJoinRow, UnencodedJoinRow};
 use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTable;
@@ -51,7 +51,7 @@ use crate::task::{ActorId, AtomicU64Ref, FragmentId};
 type PkType = Vec<u8>;
 type InequalKeyType = Vec<u8>;
 
-pub type StateValueType = EncodedJoinRow;
+pub type StateValueType = UnencodedJoinRow;
 pub type HashValueType = Box<JoinEntryState>;
 
 impl EstimateSize for HashValueType {
