@@ -21,13 +21,16 @@ use crate::executor::StreamExecutorResult;
 /// This is a row with a match degree
 #[derive(Clone, Debug)]
 pub struct JoinRow<R: Row> {
-    pub row: R,
+    pub row: Box<R>,
     pub degree: DegreeType,
 }
 
 impl<R: Row> JoinRow<R> {
     pub fn new(row: R, degree: DegreeType) -> Self {
-        Self { row, degree }
+        Self {
+            row: Box::new(row),
+            degree,
+        }
     }
 
     pub fn is_zero_degree(&self) -> bool {
@@ -70,7 +73,7 @@ pub struct EncodedJoinRow {
 impl EncodedJoinRow {
     pub fn decode(&self, data_types: &[DataType]) -> StreamExecutorResult<JoinRow<OwnedRow>> {
         Ok(JoinRow {
-            row: self.decode_row(data_types)?,
+            row: Box::new(self.decode_row(data_types)?),
             degree: self.degree,
         })
     }

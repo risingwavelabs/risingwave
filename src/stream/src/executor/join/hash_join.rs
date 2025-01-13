@@ -1215,7 +1215,10 @@ mod tests {
                     .project(&[idx])
                     .memcmp_serialize(inequality_key_serializer.as_ref().unwrap())
             });
-            let join_row = JoinRow { row, degree: 0 };
+            let join_row = JoinRow {
+                row: Box::new(row),
+                degree: 0,
+            };
             managed_state
                 .insert(pk, join_row.encode(), inequality_key)
                 .unwrap();
