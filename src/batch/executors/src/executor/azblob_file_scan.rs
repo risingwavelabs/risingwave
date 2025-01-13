@@ -86,9 +86,9 @@ impl AzblobFileScanExecutor {
             let (bucket, file_name) =
                 extract_bucket_and_file_name(&file, &FileScanBackend::Azblob)?;
             let op = new_azblob_operator(
+                self.endpoint.clone(),
                 self.account_name.clone(),
                 self.account_key.clone(),
-                self.endpoint.clone(),
                 bucket.clone(),
             )?;
             let chunk_stream =

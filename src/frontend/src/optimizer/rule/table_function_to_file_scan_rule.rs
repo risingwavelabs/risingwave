@@ -108,9 +108,9 @@ impl Rule for TableFunctionToFileScanRule {
                     .into(),
                 )
             } else if "azblob".eq_ignore_ascii_case(&eval_args[1]) {
-                let account_name = eval_args[2].clone();
-                let account_key = eval_args[3].clone();
-                let endpoint = eval_args[4].clone();
+                let endpoint = eval_args[2].clone();
+                let account_name = eval_args[3].clone();
+                let account_key = eval_args[4].clone();
                 // The rest of the arguments are file locations
                 let file_location = eval_args[5..].iter().cloned().collect_vec();
                 Some(

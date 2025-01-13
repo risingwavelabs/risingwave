@@ -139,9 +139,9 @@ pub fn new_gcs_operator(credential: String, bucket: String) -> ConnectorResult<O
 }
 
 pub fn new_azblob_operator(
+    endpoint: String,
     account_name: String,
     account_key: String,
-    endpoint: String,
     container_name: String,
 ) -> ConnectorResult<Operator> {
     // Create azblob builder.
