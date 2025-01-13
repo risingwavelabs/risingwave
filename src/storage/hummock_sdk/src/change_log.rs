@@ -190,11 +190,11 @@ pub fn build_table_change_log_delta<'a>(
                 TableId::new(table_id),
                 ChangeLogDelta {
                     truncate_epoch,
-                    new_log: Some(EpochNewChangeLog {
+                    new_log: EpochNewChangeLog {
                         new_value: vec![],
                         old_value: vec![],
                         epochs: epochs.clone(),
-                    }),
+                    },
                 },
             )
         })
@@ -203,7 +203,7 @@ pub fn build_table_change_log_delta<'a>(
         for table_id in &sst.table_ids {
             match table_change_log.get_mut(&TableId::new(*table_id)) {
                 Some(log) => {
-                    log.new_log.as_mut().unwrap().old_value.push(sst.clone());
+                    log.new_log.old_value.push(sst.clone());
                 }
                 None => {
                     warn!(table_id, ?sst, "old value sst contains non-log-store table");
@@ -214,7 +214,7 @@ pub fn build_table_change_log_delta<'a>(
     for sst in new_value_ssts {
         for table_id in &sst.table_ids {
             if let Some(log) = table_change_log.get_mut(&TableId::new(*table_id)) {
-                log.new_log.as_mut().unwrap().new_value.push(sst.clone());
+                log.new_log.new_value.push(sst.clone());
             }
         }
     }
@@ -224,7 +224,7 @@ pub fn build_table_change_log_delta<'a>(
 #[derive(Debug, PartialEq, Clone)]
 pub struct ChangeLogDeltaCommon<T> {
     pub truncate_epoch: u64,
-    pub new_log: Option<EpochNewChangeLogCommon<T>>,
+    pub new_log: EpochNewChangeLogCommon<T>,
 }
 
 pub type ChangeLogDelta = ChangeLogDeltaCommon<SstableInfo>;
@@ -236,7 +236,7 @@ where
     fn from(val: &ChangeLogDeltaCommon<T>) -> Self {
         Self {
             truncate_epoch: val.truncate_epoch,
-            new_log: val.new_log.as_ref().map(|a| a.into()),
+            new_log: Some((&val.new_log).into()),
         }
     }
 }
@@ -248,7 +248,7 @@ where
     fn from(val: &PbChangeLogDelta) -> Self {
         Self {
             truncate_epoch: val.truncate_epoch,
-            new_log: val.new_log.as_ref().map(|a| a.into()),
+            new_log: val.new_log.as_ref().unwrap().into(),
         }
     }
 }
@@ -260,7 +260,7 @@ where
     fn from(val: ChangeLogDeltaCommon<T>) -> Self {
         Self {
             truncate_epoch: val.truncate_epoch,
-            new_log: val.new_log.map(|a| a.into()),
+            new_log: Some(val.new_log.into()),
         }
     }
 }
@@ -272,7 +272,7 @@ where
     fn from(val: PbChangeLogDelta) -> Self {
         Self {
             truncate_epoch: val.truncate_epoch,
-            new_log: val.new_log.map(|a| a.into()),
+            new_log: val.new_log.unwrap().into(),
         }
     }
 }

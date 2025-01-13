@@ -191,15 +191,15 @@ impl From<(&HummockVersionDelta, &HashSet<StateTableId>)> for IncompleteHummockV
                     }
                     debug_assert!(log_delta
                         .new_log
-                        .as_ref()
-                        .map(|d| {
-                            d.new_value.iter().chain(d.old_value.iter()).all(|s| {
-                                s.table_ids
-                                    .iter()
-                                    .any(|tid| time_travel_table_ids.contains(tid))
-                            })
-                        })
-                        .unwrap_or(true));
+                        .new_value
+                        .iter()
+                        .chain(log_delta.new_log.old_value.iter())
+                        .all(|s| {
+                            s.table_ids
+                                .iter()
+                                .any(|tid| time_travel_table_ids.contains(tid))
+                        }));
+
                     Some((*table_id, PbChangeLogDelta::from(log_delta).into()))
                 })
                 .collect(),

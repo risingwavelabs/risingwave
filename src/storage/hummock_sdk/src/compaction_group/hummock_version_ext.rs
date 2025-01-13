@@ -693,7 +693,7 @@ impl HummockVersion {
         changed_table_info: &HashMap<TableId, Option<StateTableInfo>>,
     ) {
         for (table_id, change_log_delta) in change_log_delta {
-            let new_change_log = change_log_delta.new_log.as_ref().unwrap();
+            let new_change_log = &change_log_delta.new_log;
             match table_change_log.entry(*table_id) {
                 Entry::Occupied(entry) => {
                     let change_log = entry.into_mut();

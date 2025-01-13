@@ -198,8 +198,13 @@ impl HandlerArgs {
     fn normalize_sql(stmt: &Statement) -> String {
         let mut stmt = stmt.clone();
         match &mut stmt {
-            Statement::CreateView { or_replace, .. } => {
+            Statement::CreateView {
+                or_replace,
+                if_not_exists,
+                ..
+            } => {
                 *or_replace = false;
+                *if_not_exists = false;
             }
             Statement::CreateTable {
                 or_replace,
