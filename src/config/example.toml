@@ -96,6 +96,8 @@ meta_hummock_time_travel_sst_info_insert_batch_size = 100
 meta_hummock_delta_log_delete_batch_size = 512
 meta_time_travel_vacuum_interval_sec = 30
 meta_hummock_time_travel_epoch_version_insert_batch_size = 1000
+meta_hummock_gc_history_insert_batch_size = 1000
+meta_hummock_time_travel_filter_out_objects_batch_size = 1000
 
 [meta.meta_store_config]
 max_connections = 10

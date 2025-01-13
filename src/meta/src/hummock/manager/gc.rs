@@ -343,7 +343,12 @@ impl HummockManager {
         let after_metadata_backup = object_ids.len();
         // filter by time travel archive
         let object_ids = self
-            .filter_out_objects_by_time_travel(object_ids.into_iter())
+            .filter_out_objects_by_time_travel(
+                object_ids.into_iter(),
+                self.env
+                    .opts
+                    .hummock_time_travel_filter_out_objects_batch_size,
+            )
             .await?;
         let after_time_travel = object_ids.len();
         // filter by SST id watermark, i.e. minimum id of uncommitted SSTs reported by compute nodes.
@@ -436,11 +441,10 @@ impl HummockManager {
             .filter(hummock_gc_history::Column::MarkDeleteAt.lt(gc_history_low_watermark))
             .exec(db)
             .await?;
-        const BATCH_SIZE: usize = 1000;
         let mut is_finished = false;
         while !is_finished {
             let mut batch = vec![];
-            let mut count: usize = BATCH_SIZE;
+            let mut count: usize = self.env.opts.hummock_gc_history_insert_batch_size;
             while count > 0 {
                 let Some(m) = models.next() else {
                     is_finished = true;
@@ -544,7 +548,14 @@ impl HummockManager {
         let object_ids = object_ids
             .into_iter()
             .filter(|s| !version_pinned.contains(s) && !backup_pinned.contains(s));
-        let object_ids = self.filter_out_objects_by_time_travel(object_ids).await?;
+        let object_ids = self
+            .filter_out_objects_by_time_travel(
+                object_ids,
+                self.env
+                    .opts
+                    .hummock_time_travel_filter_out_objects_batch_size,
+            )
+            .await?;
         // Retry is not necessary. Full GC will handle these objects eventually.
         self.delete_objects(object_ids.into_iter().collect())
             .await?;
