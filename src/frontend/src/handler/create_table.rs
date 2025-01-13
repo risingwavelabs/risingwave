@@ -70,7 +70,7 @@ use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::table_catalog::{TableVersion, ICEBERG_SINK_PREFIX, ICEBERG_SOURCE_PREFIX};
 use crate::catalog::{check_valid_column_name, ColumnId, DatabaseId, SchemaId};
-use crate::error::{ErrorCode, Result, RwError};
+use crate::error::{bail_bind_error, ErrorCode, Result, RwError};
 use crate::expr::{Expr, ExprImpl, ExprRewriter};
 use crate::handler::create_source::{
     bind_connector_props, bind_create_source_or_table_with_connector, bind_source_watermark,
@@ -391,6 +391,17 @@ pub fn bind_sql_column_constraints(
                     }
                 }
                 ColumnOption::DefaultValuePersisted { persisted, expr: _ } => {
+                    // When a `DEFAULT INTERNAL` is used internally for schema change, the persisted value
+                    // should already be set during purifcation. So if we encounter an empty value here, it
+                    // means the user has specified it explicitly in the SQL statement, typically by
+                    // directly copying the result of `SHOW CREATE TABLE` and executing it.
+                    if persisted.is_empty() {
+                        bail_bind_error!(
+                            "DEFAULT INTERNAL is only used for internal purposes, \
+                             please specify a concrete default value"
+                        );
+                    }
+
                     let desc = DefaultColumnDesc::decode(&*persisted)
                         .expect("failed to decode persisted `DefaultColumnDesc`");
 

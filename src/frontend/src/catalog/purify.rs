@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::Context;
+use itertools::Itertools;
 use prost::Message as _;
 use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnCatalog, ColumnId};
@@ -103,11 +105,20 @@ pub fn try_purify_table_source_create_sql_ast(
 
             let default_value_option = column_def
                 .options
-                .extract_if(|o| matches!(o.option, ColumnOption::DefaultValue { .. }))
-                .next();
+                .extract_if(|o| {
+                    matches!(
+                        o.option,
+                        ColumnOption::DefaultValue { .. }
+                            | ColumnOption::DefaultValuePersisted { .. }
+                    )
+                })
+                .at_most_one()
+                .ok()
+                .context("multiple default value options found")?;
 
-            let expr = default_value_option.map(|o| match o.option {
-                ColumnOption::DefaultValue(expr) => expr,
+            let expr = default_value_option.and_then(|o| match o.option {
+                ColumnOption::DefaultValue(expr) => Some(expr),
+                ColumnOption::DefaultValuePersisted { expr, .. } => expr,
                 _ => unreachable!(),
             });
 
