@@ -47,9 +47,9 @@ use super::{AZBLOB_CONNECTOR, GCS_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONN
 use crate::error::ConnectorResult as Result;
 use crate::parser::schema_change::SchemaChangeEnvelope;
 use crate::parser::ParserConfig;
+use crate::source::cdc::CDC_STRONG_SCHEMA_KEY;
 use crate::source::filesystem::FsPageItem;
 use crate::source::monitor::EnumeratorMetrics;
-use crate::source::cdc::CDC_STRONG_SCHEMA_KEY;
 use crate::source::SplitImpl::{CitusCdc, MongodbCdc, MysqlCdc, PostgresCdc, SqlServerCdc};
 use crate::with_options::WithOptions;
 use crate::{
