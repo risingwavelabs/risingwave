@@ -430,6 +430,7 @@ impl HummockManager {
             Ok(count)
         }
 
+        let mut batch = vec![];
         for (table_id, _cg_id, committed_epoch) in tables_to_commit {
             let version_id: u64 = delta.id.to_u64();
             let m = hummock_epoch_to_version::ActiveModel {
@@ -437,8 +438,20 @@ impl HummockManager {
                 table_id: Set(table_id.table_id.into()),
                 version_id: Set(version_id.try_into().unwrap()),
             };
+            batch.push(m);
+            // Use the same batch size as hummock_time_travel_sst_info_insert_batch_size.
+            if batch.len() >= self.env.opts.hummock_time_travel_sst_info_insert_batch_size {
+                // There should be no conflict rows.
+                hummock_epoch_to_version::Entity::insert_many(std::mem::take(&mut batch))
+                    .do_nothing()
+                    .exec(txn)
+                    .await?;
+            }
+        }
+        if !batch.is_empty() {
             // There should be no conflict rows.
-            hummock_epoch_to_version::Entity::insert(m)
+            hummock_epoch_to_version::Entity::insert_many(batch)
+                .do_nothing()
                 .exec(txn)
                 .await?;
         }
