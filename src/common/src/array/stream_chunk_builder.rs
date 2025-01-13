@@ -51,7 +51,7 @@ pub struct StreamChunkBuilder {
 
     row_update_index: Vec<Vec<usize>>,
 
-    row_match: Vec<Box<OwnedRow>>,
+    row_match: Vec<OwnedRow>,
 }
 
 impl Drop for StreamChunkBuilder {
@@ -86,7 +86,7 @@ impl StreamChunkBuilder {
         let vis_builder = BitmapBuilder::with_capacity(initial_capacity);
         let data_chunk_buffer: Vec<DataChunk> = Vec::with_capacity(initial_capacity);
         let row_update_index: Vec<Vec<usize>> = Vec::with_capacity(initial_capacity);
-        let row_match = Vec::with_capacity(initial_capacity);
+        let row_match: Vec<OwnedRow> = Vec::with_capacity(initial_capacity);
         Self {
             ops,
             column_builders,
@@ -107,7 +107,7 @@ impl StreamChunkBuilder {
         let initial_capacity = initial_capacity.unwrap_or(DEFAULT_INITIAL_CAPACITY);
         let data_chunk_buffer: Vec<DataChunk> = Vec::with_capacity(initial_capacity);
         let row_update_index: Vec<Vec<usize>> = Vec::with_capacity(initial_capacity);
-        let row_match = Vec::with_capacity(initial_capacity);
+        let row_match: Vec<OwnedRow> = Vec::with_capacity(initial_capacity);
         Self {
             ops: Vec::with_capacity(initial_capacity),
             column_builders: data_types
@@ -288,7 +288,7 @@ impl StreamChunkBuilder {
         op: Op,
         data_chunk: DataChunk,
         row_update_idx: usize,
-        row_matched: Box<OwnedRow>,
+        row_matched: OwnedRow,
         update_to_output: &Vec<(usize, usize)>,
         matched_to_output: &Vec<(usize, usize)>,
     ) -> Option<StreamChunk> {

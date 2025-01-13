@@ -106,7 +106,7 @@ impl JoinStreamChunkBuilder {
         data_chunk: DataChunk,
         op: Op,
         row_update_idx: usize,
-        row_matched: Box<OwnedRow>,
+        row_matched: OwnedRow,
     ) -> Option<StreamChunk> {
         self.builder.append2::<true>(
             op,
