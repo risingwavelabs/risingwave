@@ -77,7 +77,9 @@ pub async fn get_new_table_definition_for_cdc_table(
         definition,
         new_columns,
         None,
-        &original_catalog.pk_column_ids(),
+        // The IDs of `new_columns` may not be consistently maintained at this point.
+        // So we use the column names to identify the primary key columns.
+        &original_catalog.pk_column_names(),
     )?;
 
     Ok((new_definition, original_catalog))
