@@ -1349,6 +1349,7 @@ pub enum Statement {
     CreateFunction {
         or_replace: bool,
         temporary: bool,
+        if_not_exists: bool,
         name: ObjectName,
         args: Option<Vec<OperateFunctionArg>>,
         returns: Option<CreateFunctionReturns>,
@@ -1361,6 +1362,7 @@ pub enum Statement {
     /// Postgres: <https://www.postgresql.org/docs/15/sql-createaggregate.html>
     CreateAggregate {
         or_replace: bool,
+        if_not_exists: bool,
         name: ObjectName,
         args: Vec<OperateFunctionArg>,
         returns: DataType,
@@ -1768,6 +1770,7 @@ impl fmt::Display for Statement {
             Statement::CreateFunction {
                 or_replace,
                 temporary,
+                if_not_exists,
                 name,
                 args,
                 returns,
@@ -1776,9 +1779,10 @@ impl fmt::Display for Statement {
             } => {
                 write!(
                     f,
-                    "CREATE {or_replace}{temp}FUNCTION {name}",
+                    "CREATE {or_replace}{temp}FUNCTION {if_not_exists}{name}",
                     temp = if *temporary { "TEMPORARY " } else { "" },
                     or_replace = if *or_replace { "OR REPLACE " } else { "" },
+                    if_not_exists = if *if_not_exists { "IF NOT EXISTS " } else { "" },
                 )?;
                 if let Some(args) = args {
                     write!(f, "({})", display_comma_separated(args))?;
@@ -1792,6 +1796,7 @@ impl fmt::Display for Statement {
             }
             Statement::CreateAggregate {
                 or_replace,
+                if_not_exists,
                 name,
                 args,
                 returns,
@@ -1800,8 +1805,9 @@ impl fmt::Display for Statement {
             } => {
                 write!(
                     f,
-                    "CREATE {or_replace}AGGREGATE {name}",
+                    "CREATE {or_replace}AGGREGATE {if_not_exists}{name}",
                     or_replace = if *or_replace { "OR REPLACE " } else { "" },
+                    if_not_exists = if *if_not_exists { "IF NOT EXISTS " } else { "" },
                 )?;
                 write!(f, "({})", display_comma_separated(args))?;
                 write!(f, " RETURNS {}", returns)?;
@@ -3393,6 +3399,30 @@ impl Statement {
     pub fn to_redacted_string(&self, keywords: RedactSqlOptionKeywordsRef) -> String {
         REDACT_SQL_OPTION_KEYWORDS.sync_scope(keywords, || self.to_string())
     }
+
+    /// Create a new `CREATE TABLE` statement with the given `name` and empty fields.
+    pub fn default_create_table(name: ObjectName) -> Self {
+        Self::CreateTable {
+            name,
+            or_replace: false,
+            temporary: false,
+            if_not_exists: false,
+            columns: Vec::new(),
+            wildcard_idx: None,
+            constraints: Vec::new(),
+            with_options: Vec::new(),
+            format_encode: None,
+            source_watermarks: Vec::new(),
+            append_only: false,
+            on_conflict: None,
+            with_version_column: None,
+            query: None,
+            cdc_table_info: None,
+            include_column_options: Vec::new(),
+            webhook_info: None,
+            engine: Engine::Hummock,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -3527,8 +3557,9 @@ mod tests {
     #[test]
     fn test_create_function_display() {
         let create_function = Statement::CreateFunction {
-            temporary: false,
             or_replace: false,
+            temporary: false,
+            if_not_exists: false,
             name: ObjectName(vec![Ident::new_unchecked("foo")]),
             args: Some(vec![OperateFunctionArg::unnamed(DataType::Int)]),
             returns: Some(CreateFunctionReturns::Value(DataType::Int)),
@@ -3549,8 +3580,9 @@ mod tests {
             format!("{}", create_function)
         );
         let create_function = Statement::CreateFunction {
-            temporary: false,
             or_replace: false,
+            temporary: false,
+            if_not_exists: false,
             name: ObjectName(vec![Ident::new_unchecked("foo")]),
             args: Some(vec![OperateFunctionArg::unnamed(DataType::Int)]),
             returns: Some(CreateFunctionReturns::Value(DataType::Int)),

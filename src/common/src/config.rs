@@ -532,6 +532,10 @@ pub struct MetaDeveloperConfig {
     #[serde(default = "default::developer::hummock_time_travel_sst_info_insert_batch_size")]
     /// Max number of SSTs inserted into meta store per INSERT, during time travel metadata writing.
     pub hummock_time_travel_sst_info_insert_batch_size: usize,
+
+    #[serde(default = "default::developer::hummock_time_travel_epoch_version_insert_batch_size")]
+    /// Max number of epoch-to-version inserted into meta store per INSERT, during time travel metadata writing.
+    pub hummock_time_travel_epoch_version_insert_batch_size: usize,
 }
 
 /// The section `[server]` in `risingwave.toml`.
@@ -1150,6 +1154,11 @@ pub struct StreamingDeveloperConfig {
     /// When true, all jdbc sinks with connector='jdbc' and jdbc.url="jdbc:postgresql://..."
     /// will be switched from jdbc postgresql sinks to rust native (connector='postgres') sinks.
     pub switch_jdbc_pg_to_native: bool,
+
+    /// Configure the system-wide cache row cardinality of hash join.
+    /// For example, if this is set to 1000, it means we can have at most 1000 rows in cache.
+    #[serde(default = "default::developer::streaming_hash_join_entry_state_max_rows")]
+    pub hash_join_entry_state_max_rows: usize,
 }
 
 /// The subsections `[batch.developer]`.
@@ -2049,6 +2058,10 @@ pub mod default {
             100
         }
 
+        pub fn hummock_time_travel_epoch_version_insert_batch_size() -> usize {
+            1000
+        }
+
         pub fn memory_controller_threshold_aggressive() -> f64 {
             0.9
         }
@@ -2112,6 +2125,11 @@ pub mod default {
 
         pub fn switch_jdbc_pg_to_native() -> bool {
             false
+        }
+
+        pub fn streaming_hash_join_entry_state_max_rows() -> usize {
+            // NOTE(kwannoel): This is just an arbitrary number.
+            30000
         }
     }
 

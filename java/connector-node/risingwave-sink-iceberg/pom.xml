@@ -16,7 +16,7 @@
     <name>risingwave-sink-iceberg</name>
 
     <properties>
-        <iceberg.version>1.7.0</iceberg.version>
+        <iceberg.version>1.7.1</iceberg.version>
         <maven.compiler.source>11</maven.compiler.source>
         <maven.compiler.target>11</maven.compiler.target>
         <maven.javadoc.skip>true</maven.javadoc.skip>
@@ -102,6 +102,11 @@
         <dependency>
             <groupId>org.apache.iceberg</groupId>
             <artifactId>iceberg-aws</artifactId>
+            <version>${iceberg.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.iceberg</groupId>
+            <artifactId>iceberg-gcp</artifactId>
             <version>${iceberg.version}</version>
         </dependency>
         <dependency>
