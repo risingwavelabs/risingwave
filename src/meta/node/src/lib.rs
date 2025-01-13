@@ -370,6 +370,10 @@ pub fn start(
                     .meta
                     .developer
                     .hummock_time_travel_sst_info_insert_batch_size,
+                hummock_time_travel_epoch_version_insert_batch_size: config
+                    .meta
+                    .developer
+                    .hummock_time_travel_epoch_version_insert_batch_size,
                 min_delta_log_num_for_hummock_version_checkpoint: config
                     .meta
                     .min_delta_log_num_for_hummock_version_checkpoint,
