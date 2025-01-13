@@ -34,7 +34,7 @@ use risingwave_pb::meta::{SubscribeResponse, SubscribeType};
 use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::hummock::store::LocalHummockStorage;
 use risingwave_storage::hummock::test_utils::*;
-use risingwave_storage::store::{LocalStateStore, StateStoreIterExt, to_owned_item};
+use risingwave_storage::store::*;
 use risingwave_storage::{StateStore, StateStoreIter, StateStoreReadIter};
 use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 
@@ -248,12 +248,12 @@ impl LocalReplayRead for LocalReplayImpl {
         key: TracedBytes,
         read_options: TracedReadOptions,
     ) -> Result<Option<TracedBytes>> {
-        Ok(
-            LocalStateStore::get(&self.0, TableKey(key.into()), read_options.into())
-                .await
-                .unwrap()
-                .map(TracedBytes::from),
-        )
+        Ok(self
+            .0
+            .get(TableKey(key.into()), read_options.into())
+            .await
+            .unwrap()
+            .map(TracedBytes::from))
     }
 }
 
