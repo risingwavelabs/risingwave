@@ -800,7 +800,7 @@ impl AsHummock for SledStateStore {
 #[cfg(debug_assertions)]
 mod dyn_state_store {
     use std::future::Future;
-    use std::ops::{Deref, DerefMut};
+    use std::ops::DerefMut;
     use std::sync::Arc;
 
     use bytes::Bytes;
@@ -1173,25 +1173,27 @@ mod dyn_state_store {
 
     pub type StateStoreDynRef = StateStorePointer<Arc<dyn DynStateStore>>;
 
-    impl AsRef<dyn DynStateStoreRead> for dyn DynStateStore {
-        fn as_ref(&self) -> &dyn DynStateStoreRead {
-            self as _
-        }
+    macro_rules! state_store_pointer_dyn_as_ref {
+        ($pointer:ident < dyn $source_dyn_trait:ident > , $target_dyn_trait:ident) => {
+            impl AsRef<dyn $target_dyn_trait>
+                for StateStorePointer<$pointer<dyn $source_dyn_trait>>
+            {
+                fn as_ref(&self) -> &dyn $target_dyn_trait {
+                    (&*self.0) as _
+                }
+            }
+        };
     }
 
-    impl AsRef<dyn DynStateStoreRead> for dyn DynStateStoreRead {
-        fn as_ref(&self) -> &dyn DynStateStoreRead {
-            self
-        }
-    }
+    state_store_pointer_dyn_as_ref!(Arc<dyn DynStateStore>, DynStateStoreRead);
+    state_store_pointer_dyn_as_ref!(Arc<dyn DynStateStoreRead>, DynStateStoreRead);
 
     #[derive(Clone)]
     pub struct StateStorePointer<P>(pub(crate) P);
 
-    impl<
-            S: AsRef<dyn DynStateStoreRead> + ?Sized + StaticSendSync,
-            P: Deref<Target = S> + StaticSendSync,
-        > StateStoreRead for StateStorePointer<P>
+    impl<P> StateStoreRead for StateStorePointer<P>
+    where
+        StateStorePointer<P>: AsRef<dyn DynStateStoreRead> + StaticSendSync,
     {
         type Iter = BoxStateStoreReadIter;
         type RevIter = BoxStateStoreReadIter;
@@ -1202,7 +1204,7 @@ mod dyn_state_store {
             epoch: u64,
             read_options: ReadOptions,
         ) -> impl Future<Output = StorageResult<Option<StateStoreKeyedRow>>> + Send + '_ {
-            (*self.0).as_ref().get_keyed_row(key, epoch, read_options)
+            self.as_ref().get_keyed_row(key, epoch, read_options)
         }
 
         fn iter(
@@ -1211,7 +1213,7 @@ mod dyn_state_store {
             epoch: u64,
             read_options: ReadOptions,
         ) -> impl Future<Output = StorageResult<Self::Iter>> + '_ {
-            (*self.0).as_ref().iter(key_range, epoch, read_options)
+            self.as_ref().iter(key_range, epoch, read_options)
         }
 
         fn rev_iter(
@@ -1220,7 +1222,7 @@ mod dyn_state_store {
             epoch: u64,
             read_options: ReadOptions,
         ) -> impl Future<Output = StorageResult<Self::RevIter>> + '_ {
-            (*self.0).as_ref().rev_iter(key_range, epoch, read_options)
+            self.as_ref().rev_iter(key_range, epoch, read_options)
         }
     }
 
