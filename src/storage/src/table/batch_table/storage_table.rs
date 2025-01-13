@@ -717,17 +717,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
                 let pk_prefix_serializer = self.pk_serializer.prefix(pk_prefix.len() + k.len());
                 let key = pk_prefix.chain(k);
                 let serialized_key = serialize_pk(&key, &pk_prefix_serializer);
-                if is_start_bound {
-                    // Storage doesn't support excluded begin key yet, so transform it to
-                    // included.
-                    // We always serialize a u8 for null of datum which is not equal to '\xff',
-                    // so we can assert that the next_key would never be empty.
-                    let next_serialized_key = next_key(&serialized_key);
-                    assert!(!next_serialized_key.is_empty());
-                    Included(Bytes::from(next_serialized_key))
-                } else {
-                    Excluded(serialized_key)
-                }
+                Excluded(serialized_key)
             }
             Unbounded => {
                 let pk_prefix_serializer = self.pk_serializer.prefix(pk_prefix.len());
