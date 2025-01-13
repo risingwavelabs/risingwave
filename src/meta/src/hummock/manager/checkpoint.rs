@@ -179,7 +179,7 @@ impl HummockManager {
                                 .change_log_delta
                                 .values()
                                 .flat_map(|change_log| {
-                                    let new_log = change_log.new_log.as_ref().unwrap();
+                                    let new_log = &change_log.new_log;
                                     new_log
                                         .new_value
                                         .iter()

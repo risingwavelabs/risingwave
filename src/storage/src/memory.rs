@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::future::Future;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::{Bound, RangeBounds};
@@ -31,6 +31,7 @@ use risingwave_hummock_sdk::key::{
 use risingwave_hummock_sdk::table_watermark::WatermarkDirection;
 use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
 use thiserror_ext::AsReport;
+use tokio::task::yield_now;
 use tracing::error;
 
 use crate::error::StorageResult;
@@ -38,6 +39,7 @@ use crate::hummock::utils::{
     do_delete_sanity_check, do_insert_sanity_check, do_update_sanity_check, merge_stream,
     sanity_check_enabled,
 };
+use crate::hummock::HummockError;
 use crate::mem_table::{KeyOp, MemTable};
 use crate::storage_value::StorageValue;
 use crate::store::*;
@@ -118,6 +120,7 @@ impl RangeKv for BTreeMapRangeKv {
 pub mod sled {
     use std::fs::create_dir_all;
     use std::ops::RangeBounds;
+    use std::sync::Arc;
 
     use bytes::Bytes;
     use risingwave_hummock_sdk::key::FullKey;
@@ -253,12 +256,14 @@ pub mod sled {
         pub fn new(path: impl AsRef<std::path::Path>) -> Self {
             RangeKvStateStore {
                 inner: SledRangeKv::new(path),
+                table_next_epochs: Arc::new(Default::default()),
             }
         }
 
         pub fn new_temp() -> Self {
             RangeKvStateStore {
                 inner: SledRangeKv::new_temp(),
+                table_next_epochs: Arc::new(Default::default()),
             }
         }
     }
@@ -518,6 +523,8 @@ pub type MemoryStateStore = RangeKvStateStore<BTreeMapRangeKv>;
 pub struct RangeKvStateStore<R: RangeKv> {
     /// Stores (key, epoch) -> user value.
     inner: R,
+    /// `table_id` -> `prev_epoch` -> `curr_epoch`
+    table_next_epochs: Arc<parking_lot::Mutex<HashMap<TableId, BTreeMap<u64, u64>>>>,
 }
 
 fn to_full_key_range<R, B>(table_id: TableId, table_key_range: R) -> BytesFullKeyRange
@@ -679,6 +686,25 @@ impl<R: RangeKv> StateStoreRead for RangeKvStateStore<R> {
 
 impl<R: RangeKv> StateStoreReadLog for RangeKvStateStore<R> {
     type ChangeLogIter = RangeKvStateStoreChangeLogIter<R>;
+
+    async fn next_epoch(&self, epoch: u64, options: NextEpochOptions) -> StorageResult<u64> {
+        loop {
+            {
+                let table_next_epochs = self.table_next_epochs.lock();
+                let Some(table_next_epochs) = table_next_epochs.get(&options.table_id) else {
+                    return Err(HummockError::next_epoch(format!(
+                        "table {} not exist",
+                        options.table_id
+                    ))
+                    .into());
+                };
+                if let Some(next_epoch) = table_next_epochs.get(&epoch) {
+                    break Ok(*next_epoch);
+                }
+            }
+            yield_now().await;
+        }
+    }
 
     async fn iter_log(
         &self,
@@ -952,6 +978,12 @@ impl<R: RangeKv> LocalStateStore for RangeKvLocalStateStore<R> {
             "epoch in local state store of table id {:?} is init for more than once",
             self.table_id
         );
+        self.inner
+            .table_next_epochs
+            .lock()
+            .entry(self.table_id)
+            .or_default()
+            .insert(options.epoch.prev, options.epoch.curr);
 
         Ok(())
     }
@@ -971,6 +1003,14 @@ impl<R: RangeKv> LocalStateStore for RangeKvLocalStateStore<R> {
             next_epoch,
             prev_epoch
         );
+
+        self.inner
+            .table_next_epochs
+            .lock()
+            .entry(self.table_id)
+            .or_default()
+            .insert(prev_epoch, next_epoch);
+
         if let Some((direction, watermarks, _watermark_type)) = opts.table_watermarks {
             let delete_ranges = watermarks
                 .iter()

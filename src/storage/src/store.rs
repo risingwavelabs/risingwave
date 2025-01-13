@@ -230,6 +230,12 @@ impl<T: AsRef<[u8]>> ChangeLogValue<T> {
 
 pub type StateStoreReadLogItem = (TableKey<Bytes>, ChangeLogValue<Bytes>);
 pub type StateStoreReadLogItemRef<'a> = (TableKey<&'a [u8]>, ChangeLogValue<&'a [u8]>);
+
+#[derive(Clone)]
+pub struct NextEpochOptions {
+    pub table_id: TableId,
+}
+
 #[derive(Clone)]
 pub struct ReadLogOptions {
     pub table_id: TableId,
@@ -240,6 +246,8 @@ pub trait StorageFuture<'a, T> = Future<Output = StorageResult<T>> + Send + 'a;
 
 pub trait StateStoreReadLog: StaticSendSync {
     type ChangeLogIter: StateStoreReadChangeLogIter;
+
+    fn next_epoch(&self, epoch: u64, options: NextEpochOptions) -> impl StorageFuture<'_, u64>;
 
     fn iter_log(
         &self,

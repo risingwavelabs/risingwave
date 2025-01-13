@@ -195,10 +195,7 @@ pub(crate) mod tests {
                 .seal_and_sync_epoch(epoch, table_id_set.clone())
                 .await
                 .unwrap();
-            hummock_meta_client
-                .commit_epoch(epoch, res, false)
-                .await
-                .unwrap();
+            hummock_meta_client.commit_epoch(epoch, res).await.unwrap();
         }
     }
 
@@ -359,10 +356,7 @@ pub(crate) mod tests {
             .seal_and_sync_epoch(epoch, HashSet::from([table_id]))
             .await
             .unwrap();
-        hummock_meta_client
-            .commit_epoch(epoch, res, false)
-            .await
-            .unwrap();
+        hummock_meta_client.commit_epoch(epoch, res).await.unwrap();
     }
 
     async fn prepare_data(
@@ -568,10 +562,7 @@ pub(crate) mod tests {
                 .seal_and_sync_epoch(epoch, table_id_set.clone())
                 .await
                 .unwrap();
-            hummock_meta_client
-                .commit_epoch(epoch, res, false)
-                .await
-                .unwrap();
+            hummock_meta_client.commit_epoch(epoch, res).await.unwrap();
             epoch.inc_epoch();
         }
 
@@ -766,10 +757,7 @@ pub(crate) mod tests {
                 .seal_and_sync_epoch(epoch, table_id_set.clone())
                 .await
                 .unwrap();
-            hummock_meta_client
-                .commit_epoch(epoch, res, false)
-                .await
-                .unwrap();
+            hummock_meta_client.commit_epoch(epoch, res).await.unwrap();
             epoch += millisec_interval_epoch;
         }
 
@@ -981,10 +969,7 @@ pub(crate) mod tests {
                 .seal_and_sync_epoch(epoch, table_id_set.clone())
                 .await
                 .unwrap();
-            hummock_meta_client
-                .commit_epoch(epoch, res, false)
-                .await
-                .unwrap();
+            hummock_meta_client.commit_epoch(epoch, res).await.unwrap();
             epoch += millisec_interval_epoch;
         }
 
@@ -1999,10 +1984,7 @@ pub(crate) mod tests {
                     .seal_and_sync_epoch(*epoch, table_id_set.clone())
                     .await
                     .unwrap();
-                hummock_meta_client
-                    .commit_epoch(*epoch, res, false)
-                    .await
-                    .unwrap();
+                hummock_meta_client.commit_epoch(*epoch, res).await.unwrap();
                 *epoch += millisec_interval_epoch;
             }
         }
