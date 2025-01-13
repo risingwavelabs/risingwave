@@ -27,11 +27,12 @@ use tokio_stream::StreamExt;
 use super::reader::timeout_auto_rebuild::TimeoutAutoRebuildIter;
 use crate::common::log_store_impl::kv_log_store::buffer::LogStoreBufferItem;
 use crate::common::log_store_impl::kv_log_store::serde::{KvLogStoreItem, LogStoreItemMergeStream};
-use crate::executor::{Message, StreamExecutorError, StreamExecutorResult};
+use crate::executor::{BoxedMessageStream, Message, StreamExecutorError, StreamExecutorResult};
 
 struct SyncedKvLogStore<S: StateStore> {
     state_store_stream: Option<Pin<Box<LogStoreItemMergeStream<TimeoutAutoRebuildIter<S>>>>>,
     buffer: SyncedLogStoreBuffer,
+    upstream: BoxedMessageStream,
 }
 
 // Top-level interface:
@@ -41,13 +42,20 @@ impl<S: StateStore> SyncedKvLogStore<S> {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     pub async fn into_stream(self) {
         loop {
-            todo!()
-            // select! {
-            //     // read from log store
-            //     // Read from upstream
-            //     // Block until write succeeds
-            // }
+            select! {
+                // read from log store
+                // Read from upstream
+                // Block until write succeeds
+                c = self.poll_upstream() => yield c,
+            }
         }
+    }
+}
+
+// Poll upstream
+impl<S: StateStore> SyncedKvLogStore<S> {
+    async fn poll_upstream(&mut self) -> StreamExecutorResult<Message> {
+        todo!()
     }
 }
 
