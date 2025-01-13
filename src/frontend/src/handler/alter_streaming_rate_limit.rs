@@ -16,12 +16,10 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::bail;
 use risingwave_pb::meta::ThrottleTarget as PbThrottleTarget;
 use risingwave_sqlparser::ast::ObjectName;
-use risingwave_sqlparser::parser::{SOURCE_RATE_LIMIT_PAUSED, SOURCE_RATE_LIMIT_RESUMED};
 
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::table_catalog::TableType;
-use crate::error::ErrorCode::InvalidInputSyntax;
 use crate::error::{ErrorCode, Result};
 use crate::Binder;
 
@@ -58,17 +56,6 @@ pub async fn handle_alter_streaming_rate_limit(
             let reader = session.env().catalog_reader().read_guard();
             let (source, schema_name) =
                 reader.get_source_by_name(db_name, schema_path, &real_table_name)?;
-            if let Some(prev_limit) = source.rate_limit {
-                if rate_limit == SOURCE_RATE_LIMIT_PAUSED
-                    || (prev_limit != 0 && rate_limit == SOURCE_RATE_LIMIT_RESUMED)
-                {
-                    return Err(InvalidInputSyntax(
-                        "PAUSE or RESUME is invalid when the stream has pre configured ratelimit."
-                            .to_owned(),
-                    )
-                    .into());
-                }
-            }
             session.check_privilege_for_drop_alter(schema_name, &**source)?;
             (StatementType::ALTER_SOURCE, source.id)
         }
@@ -103,7 +90,10 @@ pub async fn handle_alter_streaming_rate_limit(
             let (table, schema_name) =
                 reader.get_created_table_by_name(db_name, schema_path, &real_table_name)?;
             if table.table_type != TableType::Table {
-                return Err(InvalidInputSyntax(format!("\"{table_name}\" is not a table",)).into());
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "\"{table_name}\" is not a table",
+                ))
+                .into());
             }
             session.check_privilege_for_drop_alter(schema_name, &**table)?;
             (StatementType::ALTER_TABLE, table.id.table_id)
@@ -114,11 +104,7 @@ pub async fn handle_alter_streaming_rate_limit(
     let meta_client = session.env().meta_client();
 
     let rate_limit = if rate_limit < 0 {
-        if rate_limit == SOURCE_RATE_LIMIT_PAUSED {
-            Some(0)
-        } else {
-            None
-        }
+        None
     } else {
         Some(rate_limit as u32)
     };
