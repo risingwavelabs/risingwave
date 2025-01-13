@@ -66,7 +66,9 @@ pub use compactor_client::{CompactorClient, GrpcCompactorProxyClient};
 pub use compute_client::{ComputeClient, ComputeClientPool, ComputeClientPoolRef};
 pub use connector_client::{SinkCoordinatorStreamHandle, SinkWriterStreamHandle};
 pub use frontend_client::{FrontendClientPool, FrontendClientPoolRef};
-pub use hummock_meta_client::{CompactionEventItem, HummockMetaClient};
+pub use hummock_meta_client::{
+    CompactionEventItem, HummockMetaClient, HummockMetaClientChangeLogInfo,
+};
 pub use meta_client::{MetaClient, SinkCoordinationRpcClient};
 use rw_futures_util::await_future_with_monitor_error_stream;
 pub use sink_coordinate_client::CoordinatorStreamHandle;

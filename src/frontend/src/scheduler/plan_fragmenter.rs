@@ -20,6 +20,7 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use async_recursion::async_recursion;
+use chrono::{MappedLocalTime, TimeZone};
 use enum_as_inner::EnumAsInner;
 use futures::TryStreamExt;
 use iceberg::expr::Predicate as IcebergPredicate;
@@ -33,6 +34,7 @@ use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::{Schema, TableDesc};
 use risingwave_common::hash::table_distribution::TableDistribution;
 use risingwave_common::hash::{WorkerSlotId, WorkerSlotMapping};
+use risingwave_common::types::Timestamptz;
 use risingwave_common::util::scan_range::ScanRange;
 use risingwave_connector::source::filesystem::opendal_source::opendal_enumerator::OpendalEnumerator;
 use risingwave_connector::source::filesystem::opendal_source::{
@@ -145,6 +147,7 @@ pub struct BatchPlanFragmenter {
     catalog_reader: CatalogReader,
 
     batch_parallelism: usize,
+    timezone: String,
 
     stage_graph_builder: Option<StageGraphBuilder>,
     stage_graph: Option<StageGraph>,
@@ -163,6 +166,7 @@ impl BatchPlanFragmenter {
         worker_node_manager: WorkerNodeSelector,
         catalog_reader: CatalogReader,
         batch_parallelism: Option<NonZeroU64>,
+        timezone: String,
         batch_node: PlanRef,
     ) -> SchedulerResult<Self> {
         // if batch_parallelism is None, it means no limit, we will use the available nodes count as
@@ -186,6 +190,7 @@ impl BatchPlanFragmenter {
             worker_node_manager,
             catalog_reader,
             batch_parallelism,
+            timezone,
             stage_graph_builder: Some(StageGraphBuilder::new(batch_parallelism)),
             stage_graph: None,
         };
@@ -311,7 +316,11 @@ impl SourceScanInfo {
         Self::Incomplete(fetch_info)
     }
 
-    pub async fn complete(self, batch_parallelism: usize) -> SchedulerResult<Self> {
+    pub async fn complete(
+        self,
+        batch_parallelism: usize,
+        timezone: String,
+    ) -> SchedulerResult<Self> {
         let fetch_info = match self {
             SourceScanInfo::Incomplete(fetch_info) => fetch_info,
             SourceScanInfo::Complete(_) => {
@@ -382,15 +391,36 @@ impl SourceScanInfo {
                     Some(AsOf::VersionString(_)) => {
                         bail!("Unsupported version string in iceberg time travel")
                     }
-                    Some(AsOf::TimestampString(ts)) => Some(
-                        speedate::DateTime::parse_str_rfc3339(&ts)
-                            .map(|t| {
-                                IcebergTimeTravelInfo::TimestampMs(
-                                    t.timestamp_tz() * 1000 + t.time.microsecond as i64 / 1000,
-                                )
-                            })
-                            .map_err(|_e| anyhow!("fail to parse timestamp"))?,
-                    ),
+                    Some(AsOf::TimestampString(ts)) => {
+                        let date_time = speedate::DateTime::parse_str_rfc3339(&ts)
+                            .map_err(|_e| anyhow!("fail to parse timestamp"))?;
+                        let timestamp = if date_time.time.tz_offset.is_none() {
+                            // If the input does not specify a time zone, use the time zone set by the "SET TIME ZONE" command.
+                            let tz =
+                                Timestamptz::lookup_time_zone(&timezone).map_err(|e| anyhow!(e))?;
+                            match tz.with_ymd_and_hms(
+                                date_time.date.year.into(),
+                                date_time.date.month.into(),
+                                date_time.date.day.into(),
+                                date_time.time.hour.into(),
+                                date_time.time.minute.into(),
+                                date_time.time.second.into(),
+                            ) {
+                                MappedLocalTime::Single(d) => Ok(d.timestamp()),
+                                MappedLocalTime::Ambiguous(_, _) | MappedLocalTime::None => {
+                                    Err(anyhow!(format!(
+                                        "failed to parse the timestamp {ts} with the specified time zone {tz}"
+                                    )))
+                                }
+                            }?
+                        } else {
+                            date_time.timestamp_tz()
+                        };
+
+                        Some(IcebergTimeTravelInfo::TimestampMs(
+                            timestamp * 1000 + date_time.time.microsecond as i64 / 1000,
+                        ))
+                    }
                     Some(AsOf::ProcessTime) | Some(AsOf::ProcessTimeWithInterval(_)) => {
                         unreachable!()
                     }
@@ -731,6 +761,7 @@ impl StageGraph {
         self,
         catalog_reader: &CatalogReader,
         worker_node_manager: &WorkerNodeSelector,
+        timezone: String,
     ) -> SchedulerResult<StageGraph> {
         let mut complete_stages = HashMap::new();
         self.complete_stage(
@@ -739,6 +770,7 @@ impl StageGraph {
             &mut complete_stages,
             catalog_reader,
             worker_node_manager,
+            timezone,
         )
         .await?;
         Ok(StageGraph {
@@ -758,6 +790,7 @@ impl StageGraph {
         complete_stages: &mut HashMap<StageId, QueryStageRef>,
         catalog_reader: &CatalogReader,
         worker_node_manager: &WorkerNodeSelector,
+        timezone: String,
     ) -> SchedulerResult<()> {
         let parallelism = if stage.parallelism.is_some() {
             // If the stage has parallelism, it means it's a complete stage.
@@ -772,7 +805,7 @@ impl StageGraph {
                 .as_ref()
                 .unwrap()
                 .clone()
-                .complete(self.batch_parallelism)
+                .complete(self.batch_parallelism, timezone.to_owned())
                 .await?;
 
             // For batch reading file source, the number of files involved is typically large.
@@ -842,6 +875,7 @@ impl StageGraph {
                 complete_stages,
                 catalog_reader,
                 worker_node_manager,
+                timezone.to_owned(),
             )
             .await?;
         }
@@ -935,7 +969,11 @@ impl BatchPlanFragmenter {
     pub async fn generate_complete_query(self) -> SchedulerResult<Query> {
         let stage_graph = self.stage_graph.unwrap();
         let new_stage_graph = stage_graph
-            .complete(&self.catalog_reader, &self.worker_node_manager)
+            .complete(
+                &self.catalog_reader,
+                &self.worker_node_manager,
+                self.timezone.to_owned(),
+            )
             .await?;
         Ok(Query {
             query_id: self.query_id,
@@ -1188,7 +1226,7 @@ impl BatchPlanFragmenter {
 
         if let Some(batch_file_scan) = node.as_batch_file_scan() {
             return Ok(Some(FileScanInfo {
-                file_location: batch_file_scan.core.file_location.clone(),
+                file_location: batch_file_scan.core.file_location().clone(),
             }));
         }
 

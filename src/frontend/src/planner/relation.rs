@@ -92,7 +92,9 @@ impl Planner {
         );
 
         match (base_table.table_catalog.engine, self.plan_for()) {
-            (Engine::Hummock, PlanFor::Stream) | (Engine::Hummock, PlanFor::Batch) => {
+            (Engine::Hummock, PlanFor::Stream)
+            | (Engine::Hummock, PlanFor::Batch)
+            | (Engine::Hummock, PlanFor::BatchDql) => {
                 match as_of {
                     None
                     | Some(AsOf::ProcessTime)
@@ -105,7 +107,7 @@ impl Planner {
                 };
                 Ok(scan.into())
             }
-            (Engine::Iceberg, PlanFor::Stream) => {
+            (Engine::Iceberg, PlanFor::Stream) | (Engine::Iceberg, PlanFor::Batch) => {
                 match as_of {
                     None
                     | Some(AsOf::VersionNum(_))
@@ -120,7 +122,7 @@ impl Planner {
                 }
                 Ok(scan.into())
             }
-            (Engine::Iceberg, PlanFor::Batch) => {
+            (Engine::Iceberg, PlanFor::BatchDql) => {
                 match as_of {
                     None
                     | Some(AsOf::VersionNum(_))

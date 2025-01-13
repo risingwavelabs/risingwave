@@ -576,7 +576,7 @@ where
             })
             .chain(self.change_log_delta.values().flat_map(|delta| {
                 // TODO: optimization: strip table change log
-                let new_log = delta.new_log.as_ref().unwrap();
+                let new_log = &delta.new_log;
                 new_log.new_value.iter().chain(new_log.old_value.iter())
             }))
     }
@@ -629,8 +629,8 @@ where
                     (
                         TableId::new(*table_id),
                         ChangeLogDeltaCommon {
-                            new_log: log_delta.new_log.as_ref().map(Into::into),
                             truncate_epoch: log_delta.truncate_epoch,
+                            new_log: log_delta.new_log.as_ref().unwrap().into(),
                         },
                     )
                 })
@@ -758,7 +758,7 @@ where
                     (
                         TableId::new(*table_id),
                         ChangeLogDeltaCommon {
-                            new_log: log_delta.new_log.clone().map(Into::into),
+                            new_log: log_delta.new_log.clone().unwrap().into(),
                             truncate_epoch: log_delta.truncate_epoch,
                         },
                     )
@@ -1121,11 +1121,11 @@ impl From<HummockVersionDelta> for LocalHummockVersionDelta {
                         k,
                         ChangeLogDeltaCommon {
                             truncate_epoch: v.truncate_epoch,
-                            new_log: v.new_log.map(|new_log| EpochNewChangeLogCommon {
-                                epochs: new_log.epochs,
+                            new_log: EpochNewChangeLogCommon {
+                                epochs: v.new_log.epochs,
                                 new_value: Vec::new(),
                                 old_value: Vec::new(),
-                            }),
+                            },
                         },
                     )
                 })
@@ -1154,11 +1154,11 @@ impl From<&HummockVersionDelta> for LocalHummockVersionDelta {
                         *k,
                         ChangeLogDeltaCommon {
                             truncate_epoch: v.truncate_epoch,
-                            new_log: v.new_log.clone().map(|new_log| EpochNewChangeLogCommon {
-                                epochs: new_log.epochs,
+                            new_log: EpochNewChangeLogCommon {
+                                epochs: v.new_log.epochs.clone(),
                                 new_value: Vec::new(),
                                 old_value: Vec::new(),
-                            }),
+                            },
                         },
                     )
                 })
