@@ -42,8 +42,11 @@ use crate::monitor::{
 use crate::opts::StorageOpts;
 use crate::StateStore;
 
-static FOYER_METRICS_REGISTRY: LazyLock<PrometheusMetricsRegistry> =
-    LazyLock::new(|| PrometheusMetricsRegistry::new(GLOBAL_METRICS_REGISTRY.clone()));
+static FOYER_METRICS_REGISTRY: LazyLock<Box<PrometheusMetricsRegistry>> = LazyLock::new(|| {
+    Box::new(PrometheusMetricsRegistry::new(
+        GLOBAL_METRICS_REGISTRY.clone(),
+    ))
+});
 
 mod opaque_type {
     use super::*;
