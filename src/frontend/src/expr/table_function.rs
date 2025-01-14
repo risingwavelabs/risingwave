@@ -83,7 +83,7 @@ impl TableFunction {
             // storage type e.g. s3, gcs, azblob
             // For s3: file_scan('parquet', 's3', s3_region, s3_access_key, s3_secret_key, file_location_or_directory)
             // For gcs: file_scan('parquet', 'gcs', credential, file_location_or_directory)
-            // For azblob: file_scan('parquet', 'azblob', account_name, account_key, endpoint, file_location)
+            // For azblob: file_scan('parquet', 'azblob', endpoint, account_name, account_key, file_location)
             let mut eval_args: Vec<String> = vec![];
             for arg in &args {
                 if arg.return_type() != DataType::Varchar {
