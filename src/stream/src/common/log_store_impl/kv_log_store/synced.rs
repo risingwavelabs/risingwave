@@ -18,6 +18,7 @@ use std::pin::Pin;
 
 use await_tree::InstrumentAwait;
 use futures_async_stream::try_stream;
+use parking_lot::Mutex;
 use risingwave_common::array::StreamChunk;
 use risingwave_connector::sink::log_store::{LogStoreReadItem, TruncateOffset};
 use risingwave_storage::StateStore;
@@ -27,11 +28,15 @@ use tokio_stream::StreamExt;
 use super::reader::timeout_auto_rebuild::TimeoutAutoRebuildIter;
 use crate::common::log_store_impl::kv_log_store::buffer::LogStoreBufferItem;
 use crate::common::log_store_impl::kv_log_store::serde::{KvLogStoreItem, LogStoreItemMergeStream};
-use crate::executor::{BoxedMessageStream, Message, StreamExecutorError, StreamExecutorResult};
+use crate::executor::{
+    Barrier, BoxedMessageStream, Message, StreamExecutorError, StreamExecutorResult,
+};
+
+type StateStoreStream<S> = Pin<Box<LogStoreItemMergeStream<TimeoutAutoRebuildIter<S>>>>;
 
 struct SyncedKvLogStore<S: StateStore> {
-    state_store_stream: Option<Pin<Box<LogStoreItemMergeStream<TimeoutAutoRebuildIter<S>>>>>,
-    buffer: SyncedLogStoreBuffer,
+    state_store_stream: Option<StateStoreStream<S>>,
+    buffer: Mutex<SyncedLogStoreBuffer>,
     upstream: BoxedMessageStream,
 }
 
@@ -51,36 +56,50 @@ impl<S: StateStore> SyncedKvLogStore<S> {
     async fn next(&mut self) -> StreamExecutorResult<Option<Message>> {
         select! {
             // read from log store
+            logstore_item = Self::try_next_item(&mut self.state_store_stream, &mut self.buffer) => {
+                let logstore_item = logstore_item?;
+                Ok(logstore_item.map(Message::Chunk))
+            }
             // Read from upstream
             // Block until write succeeds
-            c = self.poll_upstream() => Ok(Some(c?)),
+            upstream_item = Self::poll_upstream(&mut self.upstream) => {
+                let upstream_item = upstream_item?;
+                Ok(upstream_item.map(Message::Barrier))
+            }
         }
     }
 }
 
 // Poll upstream
 impl<S: StateStore> SyncedKvLogStore<S> {
-    async fn poll_upstream(&mut self) -> StreamExecutorResult<Message> {
+    async fn poll_upstream(
+        upstream: &mut BoxedMessageStream,
+    ) -> StreamExecutorResult<Option<Barrier>> {
         todo!()
     }
 }
 
 // Read methods
 impl<S: StateStore> SyncedKvLogStore<S> {
-    async fn try_next_item(&mut self) -> StreamExecutorResult<Option<StreamChunk>> {
+    async fn try_next_item(
+        state_store_stream: &mut Option<StateStoreStream<S>>,
+        buffer: &mut Mutex<SyncedLogStoreBuffer>,
+    ) -> StreamExecutorResult<Option<StreamChunk>> {
         // First try to read from the state store stream
-        if let Some(chunk) = self.try_next_state_store_item().await? {
+        if let Some(chunk) = Self::try_next_state_store_item(state_store_stream).await? {
             return Ok(Some(chunk));
         }
         // Then try to read from the buffer
-        if let Some(chunk) = self.try_next_buffer_item().await? {
+        if let Some(chunk) = Self::try_next_buffer_item(buffer).await? {
             return Ok(Some(chunk));
         }
         return Ok(None);
     }
 
-    async fn try_next_state_store_item(&mut self) -> StreamExecutorResult<Option<StreamChunk>> {
-        if let Some(state_store_stream) = &mut self.state_store_stream {
+    async fn try_next_state_store_item(
+        state_store_stream_opt: &mut Option<StateStoreStream<S>>,
+    ) -> StreamExecutorResult<Option<StreamChunk>> {
+        if let Some(state_store_stream) = state_store_stream_opt {
             match state_store_stream
                 .try_next()
                 .instrument_await("try_next item")
@@ -91,7 +110,7 @@ impl<S: StateStore> SyncedKvLogStore<S> {
                     KvLogStoreItem::Barrier { is_checkpoint } => Ok(None),
                 },
                 None => {
-                    self.state_store_stream = None;
+                    *state_store_stream_opt = None;
                     Ok(None)
                 }
             }
@@ -100,8 +119,10 @@ impl<S: StateStore> SyncedKvLogStore<S> {
         }
     }
 
-    async fn try_next_buffer_item(&mut self) -> StreamExecutorResult<Option<StreamChunk>> {
-        if let Some(LogStoreBufferItem::StreamChunk { chunk, .. }) = self.buffer.pop() {
+    async fn try_next_buffer_item(
+        buffer: &mut Mutex<SyncedLogStoreBuffer>,
+    ) -> StreamExecutorResult<Option<StreamChunk>> {
+        if let Some(LogStoreBufferItem::StreamChunk { chunk, .. }) = buffer.lock().pop() {
             Ok(Some(chunk))
         } else {
             Ok(None)
@@ -117,7 +138,7 @@ impl<S: StateStore> SyncedKvLogStore<S> {
     }
 
     async fn write_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<()> {
-        if self.buffer.is_full() {
+        if self.buffer.lock().is_full() {
             self.flush_buffer().await?;
         }
         // Try to write to the buffer
