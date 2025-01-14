@@ -566,23 +566,14 @@ async fn test_hummock_manager_basic() {
             init_version_id + commit_log_count + register_log_count,
         );
     }
-    assert_eq!(
-        hummock_manager
-            .delete_version_deltas(usize::MAX)
-            .await
-            .unwrap(),
-        (0, 0)
-    );
+    assert_eq!(hummock_manager.delete_version_deltas().await.unwrap(), 0);
     assert_eq!(
         hummock_manager.create_version_checkpoint(1).await.unwrap(),
         commit_log_count + register_log_count
     );
     assert_eq!(
-        hummock_manager
-            .delete_version_deltas(usize::MAX)
-            .await
-            .unwrap(),
-        ((commit_log_count + register_log_count) as usize, 0)
+        hummock_manager.delete_version_deltas().await.unwrap(),
+        (commit_log_count + register_log_count) as usize
     );
     hummock_manager
         .unpin_version_before(context_id_1, HummockVersionId::MAX)
