@@ -28,7 +28,7 @@ use risingwave_hummock_sdk::{
     get_object_id_from_path, get_sst_data_path, HummockSstableObjectId, OBJECT_SUFFIX,
 };
 use risingwave_meta_model::hummock_sequence::HUMMOCK_NOW;
-use risingwave_meta_model::{hummock_gc_history, hummock_sequence};
+use risingwave_meta_model::{hummock_gc_history, hummock_sequence, hummock_version_delta};
 use risingwave_meta_model_migration::OnConflict;
 use risingwave_object_store::object::{ObjectMetadataIter, ObjectStoreRef};
 use risingwave_pb::stream_service::GetMinUncommittedSstIdRequest;
@@ -37,10 +37,8 @@ use sea_orm::{ActiveValue, ColumnTrait, EntityTrait, QueryFilter, Set};
 
 use crate::backup_restore::BackupManagerRef;
 use crate::hummock::error::{Error, Result};
-use crate::hummock::manager::commit_multi_var;
 use crate::hummock::HummockManager;
 use crate::manager::MetadataManager;
-use crate::model::BTreeMapTransaction;
 use crate::MetaResult;
 
 pub(crate) struct GcManager {
@@ -178,7 +176,7 @@ impl HummockManager {
     /// Deletes at most `batch_size` deltas.
     ///
     /// Returns (number of deleted deltas, number of remain `deltas_to_delete`).
-    pub async fn delete_version_deltas(&self, batch_size: usize) -> Result<(usize, usize)> {
+    pub async fn delete_version_deltas(&self, _batch_size: usize) -> Result<(usize, usize)> {
         let mut versioning_guard = self.versioning.write().await;
         let versioning = versioning_guard.deref_mut();
         let context_info = self.context_info.read().await;
@@ -191,28 +189,32 @@ impl HummockManager {
         if !context_info.version_safe_points.is_empty() {
             return Ok((0, deltas_to_delete_count));
         }
-        let batch = versioning
+        let res = hummock_version_delta::Entity::delete_many()
+            .filter(
+                hummock_version_delta::Column::Id.lte(versioning.checkpoint.version.id.to_u64()),
+            )
+            .exec(&self.env.meta_store_ref().conn)
+            .await?;
+        tracing::debug!(
+            rows_affected = res.rows_affected,
+            deltas_to_delete_count,
+            "Deleted version deltas"
+        );
+        debug_assert_eq!(
+            res.rows_affected as usize, deltas_to_delete_count,
+            "{} {}",
+            res.rows_affected, deltas_to_delete_count
+        );
+        versioning
             .hummock_version_deltas
-            .range(..=versioning.checkpoint.version.id)
-            .map(|(k, _)| *k)
-            .take(batch_size)
-            .collect_vec();
-        let mut hummock_version_deltas =
-            BTreeMapTransaction::new(&mut versioning.hummock_version_deltas);
-        if batch.is_empty() {
-            return Ok((0, 0));
-        }
-        for delta_id in &batch {
-            hummock_version_deltas.remove(*delta_id);
-        }
-        commit_multi_var!(self.meta_store_ref(), hummock_version_deltas)?;
+            .retain(|id, _| *id > versioning.checkpoint.version.id);
         #[cfg(test)]
         {
             drop(context_info);
             drop(versioning_guard);
             self.check_state_consistency().await;
         }
-        Ok((batch.len(), deltas_to_delete_count - batch.len()))
+        Ok((deltas_to_delete_count, 0))
     }
 
     /// Filters by Hummock version and Writes GC history.
