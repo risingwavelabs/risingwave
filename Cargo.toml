@@ -96,7 +96,13 @@ normal = ["workspace-hack"]
 development = ["expect-test", "pretty_assertions"]
 
 [workspace.dependencies]
-foyer = { version = "0.13.1", features = ["tracing", "nightly", "prometheus"] }
+# Switch to a released foyer version after the next release.
+# foyer = { version = "0.13.1", features = ["tracing", "nightly", "prometheus"] }
+foyer = { git = "https://github.com/foyer-rs/foyer", rev = "bdf484622d487df7ac08533fcc93ab745ed418cf", features = [
+    "tracing",
+    "nightly",
+    "prometheus",
+] }
 apache-avro = { git = "https://github.com/risingwavelabs/avro", rev = "25113ba88234a9ae23296e981d8302c290fdaa4b", features = [
     "snappy",
     "zstandard",
@@ -154,7 +160,10 @@ icelake = { git = "https://github.com/risingwavelabs/icelake.git", rev = "0ec44f
     "prometheus",
 ] }
 # branch dev_rebase_main_20241230
-iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "683fb89edeaf8d1baae69e1f376d68b92be1d496", features = ["storage-s3", "storage-gcs"] }
+iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "683fb89edeaf8d1baae69e1f376d68b92be1d496", features = [
+    "storage-s3",
+    "storage-gcs",
+] }
 iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "683fb89edeaf8d1baae69e1f376d68b92be1d496" }
 iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "683fb89edeaf8d1baae69e1f376d68b92be1d496" }
 opendal = "0.49"
