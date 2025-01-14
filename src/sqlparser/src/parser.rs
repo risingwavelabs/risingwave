@@ -39,10 +39,6 @@ use crate::{impl_parse_to, parser_v2};
 
 pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
 pub(crate) const WEBHOOK_CONNECTOR: &str = "webhook";
-// reserve i32::MIN for pause.
-pub const SOURCE_RATE_LIMIT_PAUSED: i32 = i32::MIN;
-// reserve i32::MIN + 1 for resume.
-pub const SOURCE_RATE_LIMIT_RESUMED: i32 = i32::MIN + 1;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ParserError {
@@ -3559,17 +3555,9 @@ impl Parser<'_> {
         } else if self.parse_keywords(&[Keyword::SWAP, Keyword::WITH]) {
             let target_source = self.parse_object_name()?;
             AlterSourceOperation::SwapRenameSource { target_source }
-        } else if self.parse_keyword(Keyword::PAUSE) {
-            AlterSourceOperation::SetSourceRateLimit {
-                rate_limit: SOURCE_RATE_LIMIT_PAUSED,
-            }
-        } else if self.parse_keyword(Keyword::RESUME) {
-            AlterSourceOperation::SetSourceRateLimit {
-                rate_limit: SOURCE_RATE_LIMIT_RESUMED,
-            }
         } else {
             return self.expected(
-                "RENAME, ADD COLUMN, OWNER TO, SET, PAUSE, RESUME, or SOURCE_RATE_LIMIT after ALTER SOURCE",
+                "RENAME, ADD COLUMN, OWNER TO, SET or SOURCE_RATE_LIMIT after ALTER SOURCE",
             );
         };
 
