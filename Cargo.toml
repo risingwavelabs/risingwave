@@ -96,8 +96,9 @@ normal = ["workspace-hack"]
 development = ["expect-test", "pretty_assertions"]
 
 [workspace.dependencies]
+# Switch to a released foyer version after the next release.
 # foyer = { version = "0.13.1", features = ["tracing", "nightly", "prometheus"] }
-foyer = { git = "https://github.com/foyer-rs/foyer", rev = "719ab39", features = [
+foyer = { git = "https://github.com/foyer-rs/foyer", rev = "bdf484622d487df7ac08533fcc93ab745ed418cf", features = [
     "tracing",
     "nightly",
     "prometheus",
