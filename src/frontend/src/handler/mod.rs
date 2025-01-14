@@ -199,8 +199,13 @@ impl HandlerArgs {
     fn normalize_sql(stmt: &Statement) -> String {
         let mut stmt = stmt.clone();
         match &mut stmt {
-            Statement::CreateView { or_replace, .. } => {
+            Statement::CreateView {
+                or_replace,
+                if_not_exists,
+                ..
+            } => {
                 *or_replace = false;
+                *if_not_exists = false;
             }
             Statement::CreateTable {
                 or_replace,
@@ -274,6 +279,7 @@ pub async fn handle(
         Statement::CreateFunction {
             or_replace,
             temporary,
+            if_not_exists,
             name,
             args,
             returns,
@@ -294,6 +300,7 @@ pub async fn handle(
                     handler_args,
                     or_replace,
                     temporary,
+                    if_not_exists,
                     name,
                     args,
                     returns,
@@ -306,6 +313,7 @@ pub async fn handle(
                     handler_args,
                     or_replace,
                     temporary,
+                    if_not_exists,
                     name,
                     args,
                     returns,
@@ -316,6 +324,7 @@ pub async fn handle(
         }
         Statement::CreateAggregate {
             or_replace,
+            if_not_exists,
             name,
             args,
             returns,
@@ -325,6 +334,7 @@ pub async fn handle(
             create_aggregate::handle_create_aggregate(
                 handler_args,
                 or_replace,
+                if_not_exists,
                 name,
                 args,
                 returns,

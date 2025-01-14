@@ -56,6 +56,10 @@ pub fn start_hummock_workers(
             hummock_manager.clone(),
             Duration::from_secs(meta_opts.vacuum_interval_sec),
         ),
+        start_vacuum_time_travel_metadata_loop(
+            hummock_manager.clone(),
+            Duration::from_secs(meta_opts.time_travel_vacuum_interval_sec),
+        ),
     ];
     workers
 }
@@ -81,6 +85,32 @@ pub fn start_vacuum_metadata_loop(
             }
             if let Err(err) = hummock_manager.delete_metadata().await {
                 tracing::warn!(error = %err.as_report(), "Vacuum metadata error");
+            }
+        }
+    });
+    (join_handle, shutdown_tx)
+}
+
+pub fn start_vacuum_time_travel_metadata_loop(
+    hummock_manager: HummockManagerRef,
+    interval: Duration,
+) -> (JoinHandle<()>, Sender<()>) {
+    let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
+    let join_handle = tokio::spawn(async move {
+        let mut min_trigger_interval = tokio::time::interval(interval);
+        min_trigger_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            tokio::select! {
+                // Wait for interval
+                _ = min_trigger_interval.tick() => {},
+                // Shutdown vacuum
+                _ = &mut shutdown_rx => {
+                    tracing::info!("Vacuum time travel metadata loop is stopped");
+                    return;
+                }
+            }
+            if let Err(err) = hummock_manager.delete_time_travel_metadata().await {
+                tracing::warn!(error = %err.as_report(), "Vacuum time travel metadata error");
             }
         }
     });

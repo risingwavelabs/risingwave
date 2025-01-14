@@ -17,10 +17,10 @@ use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 use enum_as_inner::EnumAsInner;
-use foyer::prometheus::PrometheusMetricsRegistry;
 use foyer::{
     DirectFsDeviceOptions, Engine, HybridCacheBuilder, LargeEngineOptions, RateLimitPicker,
 };
+use mixtrics::registry::prometheus::PrometheusMetricsRegistry;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common_service::RpcNotificationClient;
 use risingwave_hummock_sdk::HummockSstableObjectId;
@@ -42,8 +42,11 @@ use crate::monitor::{
 use crate::opts::StorageOpts;
 use crate::StateStore;
 
-static FOYER_METRICS_REGISTRY: LazyLock<PrometheusMetricsRegistry> =
-    LazyLock::new(|| PrometheusMetricsRegistry::new(GLOBAL_METRICS_REGISTRY.clone()));
+static FOYER_METRICS_REGISTRY: LazyLock<Box<PrometheusMetricsRegistry>> = LazyLock::new(|| {
+    Box::new(PrometheusMetricsRegistry::new(
+        GLOBAL_METRICS_REGISTRY.clone(),
+    ))
+});
 
 mod opaque_type {
     use super::*;
@@ -228,7 +231,7 @@ pub mod verify {
     use std::fmt::Debug;
     use std::future::Future;
     use std::marker::PhantomData;
-    use std::ops::{Bound, Deref};
+    use std::ops::Deref;
     use std::sync::Arc;
 
     use bytes::Bytes;
@@ -240,7 +243,6 @@ pub mod verify {
 
     use crate::error::StorageResult;
     use crate::hummock::HummockStorage;
-    use crate::storage_value::StorageValue;
     use crate::store::*;
     use crate::store_impl::AsHummock;
 
@@ -263,6 +265,7 @@ pub mod verify {
         }
     }
 
+    #[derive(Clone)]
     pub struct VerifyStateStore<A, E, T = ()> {
         pub actual: A,
         pub expected: Option<E>,
@@ -276,7 +279,6 @@ pub mod verify {
     }
 
     impl<A: StateStoreRead, E: StateStoreRead> StateStoreRead for VerifyStateStore<A, E> {
-        type ChangeLogIter = impl StateStoreReadChangeLogIter;
         type Iter = impl StateStoreReadIter;
         type RevIter = impl StateStoreReadIter;
 
@@ -342,6 +344,18 @@ pub mod verify {
                 Ok(verify_iter::<StateStoreKeyedRow>(actual, expected))
             }
         }
+    }
+
+    impl<A: StateStoreReadLog, E: StateStoreReadLog> StateStoreReadLog for VerifyStateStore<A, E> {
+        type ChangeLogIter = impl StateStoreReadChangeLogIter;
+
+        async fn next_epoch(&self, epoch: u64, options: NextEpochOptions) -> StorageResult<u64> {
+            let actual = self.actual.next_epoch(epoch, options.clone()).await?;
+            if let Some(expected) = &self.expected {
+                assert_eq!(actual, expected.next_epoch(epoch, options).await?);
+            }
+            Ok(actual)
+        }
 
         async fn iter_log(
             &self,
@@ -389,36 +403,6 @@ pub mod verify {
             actual,
             expected,
             _phantom: PhantomData::<T>,
-        }
-    }
-
-    impl<A: StateStoreWrite, E: StateStoreWrite> StateStoreWrite for VerifyStateStore<A, E> {
-        fn ingest_batch(
-            &self,
-            kv_pairs: Vec<(TableKey<Bytes>, StorageValue)>,
-            delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
-            write_options: WriteOptions,
-        ) -> StorageResult<usize> {
-            let actual = self.actual.ingest_batch(
-                kv_pairs.clone(),
-                delete_ranges.clone(),
-                write_options.clone(),
-            );
-            if let Some(expected) = &self.expected {
-                let expected = expected.ingest_batch(kv_pairs, delete_ranges, write_options);
-                assert_eq!(actual.is_err(), expected.is_err());
-            }
-            actual
-        }
-    }
-
-    impl<A: Clone, E: Clone> Clone for VerifyStateStore<A, E> {
-        fn clone(&self) -> Self {
-            Self {
-                actual: self.actual.clone(),
-                expected: self.expected.clone(),
-                _phantom: PhantomData,
-            }
         }
     }
 
@@ -806,7 +790,7 @@ impl AsHummock for SledStateStore {
 }
 
 #[cfg(debug_assertions)]
-pub mod boxed_state_store {
+mod boxed_state_store {
     use std::future::Future;
     use std::ops::{Deref, DerefMut};
     use std::sync::Arc;
@@ -873,7 +857,11 @@ pub mod boxed_state_store {
             epoch: u64,
             read_options: ReadOptions,
         ) -> StorageResult<BoxStateStoreReadIter>;
+    }
 
+    #[async_trait::async_trait]
+    pub trait DynamicDispatchedStateStoreReadLog: StaticSendSync {
+        async fn next_epoch(&self, epoch: u64, options: NextEpochOptions) -> StorageResult<u64>;
         async fn iter_log(
             &self,
             epoch_range: (u64, u64),
@@ -911,6 +899,13 @@ pub mod boxed_state_store {
             Ok(Box::new(
                 self.rev_iter(key_range, epoch, read_options).await?,
             ))
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl<S: StateStoreReadLog> DynamicDispatchedStateStoreReadLog for S {
+        async fn next_epoch(&self, epoch: u64, options: NextEpochOptions) -> StorageResult<u64> {
+            self.next_epoch(epoch, options).await
         }
 
         async fn iter_log(
@@ -1159,7 +1154,6 @@ pub mod boxed_state_store {
     pub type BoxDynamicDispatchedStateStore = Box<dyn DynamicDispatchedStateStore>;
 
     impl StateStoreRead for BoxDynamicDispatchedStateStore {
-        type ChangeLogIter = BoxStateStoreReadChangeLogIter;
         type Iter = BoxStateStoreReadIter;
         type RevIter = BoxStateStoreReadIter;
 
@@ -1189,6 +1183,14 @@ pub mod boxed_state_store {
         ) -> impl Future<Output = StorageResult<Self::RevIter>> + '_ {
             self.deref().rev_iter(key_range, epoch, read_options)
         }
+    }
+
+    impl StateStoreReadLog for BoxDynamicDispatchedStateStore {
+        type ChangeLogIter = BoxStateStoreReadChangeLogIter;
+
+        async fn next_epoch(&self, epoch: u64, options: NextEpochOptions) -> StorageResult<u64> {
+            self.deref().next_epoch(epoch, options).await
+        }
 
         fn iter_log(
             &self,
@@ -1201,7 +1203,11 @@ pub mod boxed_state_store {
     }
 
     pub trait DynamicDispatchedStateStore:
-        DynClone + DynamicDispatchedStateStoreRead + DynamicDispatchedStateStoreExt + AsHummock
+        DynClone
+        + DynamicDispatchedStateStoreRead
+        + DynamicDispatchedStateStoreReadLog
+        + DynamicDispatchedStateStoreExt
+        + AsHummock
     {
     }
 
@@ -1214,7 +1220,11 @@ pub mod boxed_state_store {
     }
 
     impl<
-            S: DynClone + DynamicDispatchedStateStoreRead + DynamicDispatchedStateStoreExt + AsHummock,
+            S: DynClone
+                + DynamicDispatchedStateStoreRead
+                + DynamicDispatchedStateStoreReadLog
+                + DynamicDispatchedStateStoreExt
+                + AsHummock,
         > DynamicDispatchedStateStore for S
     {
     }

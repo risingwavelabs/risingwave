@@ -14,6 +14,7 @@
 
 #![cfg_attr(not(madsim), allow(unused_imports))]
 
+use std::cmp::max;
 use std::collections::HashMap;
 use std::future::Future;
 use std::io::Write;
@@ -209,6 +210,37 @@ metrics_level = "Disabled"
             ]
                 .into(),
             ..Default::default()
+        }
+    }
+
+    pub fn for_default_parallelism(default_parallelism: usize) -> Self {
+        let config_path = {
+            let mut file =
+                tempfile::NamedTempFile::new().expect("failed to create temp config file");
+
+            let config_data = format!(
+                r#"
+[server]
+telemetry_enabled = false
+metrics_level = "Disabled"
+[meta]
+default_parallelism = {default_parallelism}
+"#
+            )
+            .to_owned();
+            file.write_all(config_data.as_bytes())
+                .expect("failed to write config file");
+            file.into_temp_path()
+        };
+
+        Configuration {
+            config_path: ConfigPath::Temp(config_path.into()),
+            frontend_nodes: 1,
+            compute_nodes: 1,
+            meta_nodes: 1,
+            compactor_nodes: 1,
+            compute_node_cores: default_parallelism * 2,
+            per_session_queries: vec![].into(),
         }
     }
 

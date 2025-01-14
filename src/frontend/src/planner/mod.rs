@@ -48,9 +48,20 @@ pub struct Planner {
 pub enum PlanFor {
     Stream,
     Batch,
+    /// `BatchDql` is a special mode for batch.
+    /// Iceberg engine table will be converted to iceberg source based on this mode.
+    BatchDql,
 }
 
 impl Planner {
+    pub fn new_for_batch_dql(ctx: OptimizerContextRef) -> Planner {
+        Planner {
+            ctx,
+            share_cache: Default::default(),
+            plan_for: PlanFor::BatchDql,
+        }
+    }
+
     pub fn new_for_batch(ctx: OptimizerContextRef) -> Planner {
         Planner {
             ctx,

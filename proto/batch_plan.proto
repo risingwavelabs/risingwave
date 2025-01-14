@@ -89,6 +89,8 @@ message FileScanNode {
   enum StorageType {
     STORAGE_TYPE_UNSPECIFIED = 0;
     S3 = 1;
+    GCS = 2;
+    AZBLOB = 3;
   }
 
   repeated plan_common.ColumnDesc columns = 1;
@@ -98,6 +100,34 @@ message FileScanNode {
   string s3_access_key = 5;
   string s3_secret_key = 6;
   repeated string file_location = 7;
+  string s3_endpoint = 8;
+}
+
+message GcsFileScanNode {
+  enum FileFormat {
+    FILE_FORMAT_UNSPECIFIED = 0;
+    PARQUET = 1;
+  }
+
+  repeated plan_common.ColumnDesc columns = 1;
+  FileFormat file_format = 2;
+  string credential = 3;
+  repeated string file_location = 4;
+}
+
+message AzblobFileScanNode {
+  enum FileFormat {
+    FILE_FORMAT_UNSPECIFIED = 0;
+    PARQUET = 1;
+  }
+
+  repeated plan_common.ColumnDesc columns = 1;
+  FileFormat file_format = 2;
+  string account_name = 3;
+  string account_key = 4;
+  string endpoint = 5;
+
+  repeated string file_location = 6;
 }
 
 // NOTE(kwannoel): This will only be used in batch mode. We can change the definition as needed.
@@ -406,6 +436,8 @@ message PlanNode {
     IcebergScanNode iceberg_scan = 39;
     PostgresQueryNode postgres_query = 40;
     MySqlQueryNode mysql_query = 41;
+    GcsFileScanNode gcs_file_scan = 42;
+    AzblobFileScanNode azblob_file_scan = 43;
     // The following nodes are used for testing.
     bool block_executor = 100;
     bool busy_loop_executor = 101;
