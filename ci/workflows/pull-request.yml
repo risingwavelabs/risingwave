@@ -5,26 +5,26 @@ anchors:
         - signal_reason: agent_stop
           limit: 3
   - plugins:
-      - cargo-cache: &cargo-cache
-          nienbo/cache#v2.4.20:
-            id: cargo
-            key: "v1-cache-{{ id }}-{{ runner.os }}-{{ checksum 'Cargo.lock' }}"
-            restore-keys:
-              - "v1-cache-{{ id }}-{{ runner.os }}-"
-              - "v1-cache-{{ id }}-"
-            backend: s3
-            s3:
-              bucket: rw-ci-cache-bucket
-              args: "--no-progress"
-            paths:
-              - ".cargo/registry/index"
-              - ".cargo/registry/cache"
-              - ".cargo/git"
-      # we need to override args, so didn't include image here in the anchor
-      - docker-compose: &docker-compose
-          run: rw-build-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
+    - cargo-cache: &cargo-cache
+        nienbo/cache#v2.4.20:
+          id: cargo
+          key: "v1-cache-{{ id }}-{{ runner.os }}-{{ checksum 'Cargo.lock' }}"
+          restore-keys:
+            - "v1-cache-{{ id }}-{{ runner.os }}-"
+            - "v1-cache-{{ id }}-"
+          backend: s3
+          s3:
+            bucket: rw-ci-cache-bucket
+            args: "--no-progress"
+          paths:
+            - ".cargo/registry/index"
+            - ".cargo/registry/cache"
+            - ".cargo/git"
+    # we need to override args, so didn't include image here in the anchor
+    - docker-compose: &docker-compose
+        run: rw-build-env
+        config: ci/docker-compose.yml
+        mount-buildkite-agent: true
 
 other-sql-backend: &other-sql-backend
   matrix:
@@ -46,6 +46,7 @@ other-sql-backend: &other-sql-backend
           endpoint: "mysql://root:123456@mysql-meta:3306/rwmeta"
   env:
     RISEDEV_SQL_ENDPOINT: "{{matrix.endpoint}}"
+
 
 steps:
   - label: "check ci image rebuild"
@@ -79,7 +80,7 @@ steps:
       - docker-compose#v5.5.0:
           <<: *docker-compose
           environment:
-            - GITHUB_TOKEN
+          - GITHUB_TOKEN
     timeout_in_minutes: 14
     retry: *auto-retry
 
@@ -492,7 +493,7 @@ steps:
       - docker-compose#v5.5.0:
           <<: *docker-compose
           environment:
-            - CODECOV_TOKEN
+          - CODECOV_TOKEN
     timeout_in_minutes: 22
     retry: *auto-retry
 
@@ -559,7 +560,7 @@ steps:
       - docker-compose#v5.5.0:
           <<: *docker-compose
           environment:
-            - GITHUB_TOKEN
+          - GITHUB_TOKEN
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 30
     cancel_on_build_failing: true
@@ -605,7 +606,7 @@ steps:
       - docker-compose#v5.5.0:
           <<: *docker-compose
           environment:
-            - GITHUB_TOKEN
+          - GITHUB_TOKEN
     timeout_in_minutes: 20
 
   # Generates cpu flamegraph if label `cpu_flamegraph` is added to PR.
@@ -621,7 +622,7 @@ steps:
           <<: *docker-compose
           run: ci-flamegraph-env
           environment:
-            - GITHUB_TOKEN
+          - GITHUB_TOKEN
     # TODO(kwannoel): Here are the areas that can be further optimized:
     # - Nexmark event generation: ~3min for 100mil records.
     # - Generate Flamegraph: ~15min (see https://github.com/koute/not-perf/issues/30 on optimizing)
@@ -643,7 +644,7 @@ steps:
           <<: *docker-compose
           run: ci-flamegraph-env
           environment:
-            - GITHUB_TOKEN
+          - GITHUB_TOKEN
     # TODO(kwannoel): Here are the areas that can be further optimized:
     # - Nexmark event generation: ~3min for 100mil records.
     # - Generate Flamegraph: ~15min (see https://github.com/koute/not-perf/issues/30 on optimizing)
@@ -664,7 +665,7 @@ steps:
           <<: *docker-compose
           run: source-test-env
           environment:
-            - BUILDKITE_BRANCH
+          - BUILDKITE_BRANCH
       - ./ci/plugins/upload-failure-logs
     matrix:
       setup:
@@ -804,6 +805,6 @@ steps:
       - docker-compose#v5.5.0:
           <<: *docker-compose
           environment:
-            - BUILDKITE_TOKEN
-            - GITHUB_TOKEN
+          - BUILDKITE_TOKEN
+          - GITHUB_TOKEN
     timeout_in_minutes: 5
