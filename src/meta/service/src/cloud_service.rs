@@ -78,15 +78,9 @@ impl CloudService for CloudServiceImpl {
         };
         let props = props.unwrap();
 
-        async fn new_enumerator(
-            props: ConnectorProperties,
-        ) -> ConnectorResult<Box<dyn AnySplitEnumerator>> {
-            props
-                .create_split_enumerator(SourceEnumeratorContext::dummy().into())
-                .await
-        }
-
-        let enumerator = new_enumerator(props).await;
+        let enumerator = props
+            .create_split_enumerator(SourceEnumeratorContext::dummy().into())
+            .await;
         if let Err(e) = enumerator {
             return Ok(new_rwc_validate_fail_response(
                 ErrorType::KafkaInvalidProperties,

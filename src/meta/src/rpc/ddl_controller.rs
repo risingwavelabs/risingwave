@@ -651,14 +651,6 @@ impl DdlController {
                 )
             })?;
 
-        async fn new_enumerator_for_validate(
-            source_props: ConnectorProperties,
-        ) -> Result<Box<dyn AnySplitEnumerator>, ConnectorError> {
-            source_props
-                .create_split_enumerator(SourceEnumeratorContext::dummy().into())
-                .await
-        }
-
         for actor in &stream_scan_fragment.actors {
             if let Some(NodeBody::StreamCdcScan(ref stream_cdc_scan)) =
                 actor.nodes.as_ref().unwrap().node_body
@@ -671,7 +663,10 @@ impl DdlController {
                 let mut props = ConnectorProperties::extract(options_with_secret, true)?;
                 props.init_from_pb_cdc_table_desc(cdc_table_desc);
 
-                let _enumerator = new_enumerator_for_validate(props).await?;
+                // try creating a split enumerator to validate
+                let _enumerator = source_props
+                    .create_split_enumerator(SourceEnumeratorContext::dummy().into())
+                    .await?;
                 tracing::debug!(?table.id, "validate cdc table success");
             }
         }
