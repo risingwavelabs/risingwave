@@ -27,7 +27,7 @@ flush;
 
 sleep 1s
 
-query T
+query T retry 3 backoff 5s
 select count(*) from opentelemetry_test;
 ----
 1
