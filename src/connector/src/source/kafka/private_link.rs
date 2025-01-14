@@ -22,6 +22,7 @@ use risingwave_common::bail;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::catalog::connection::PrivateLinkService;
+use serde_derive::Deserialize;
 
 use crate::connector_common::{
     AwsPrivateLinkItem, PRIVATE_LINK_BROKER_REWRITE_MAP_KEY, PRIVATE_LINK_TARGETS_KEY,
@@ -30,13 +31,17 @@ use crate::error::ConnectorResult;
 use crate::source::kafka::{KAFKA_PROPS_BROKER_KEY, KAFKA_PROPS_BROKER_KEY_ALIAS};
 
 pub const PRIVATELINK_ENDPOINT_KEY: &str = "privatelink.endpoint";
-const PRIVATELINK_ENDPOINT_HOST_KEY: &str = "host";
 
 #[derive(Debug)]
 pub(super) enum PrivateLinkContextRole {
     Consumer,
     #[expect(dead_code)]
     Producer,
+}
+
+#[derive(Debug, Deserialize)]
+struct PrivateLinkEndpointItem {
+    host: String,
 }
 
 impl std::fmt::Display for PrivateLinkContextRole {
@@ -194,23 +199,28 @@ fn handle_privatelink_endpoint(
             broker_rewrite_map.insert(broker.to_string(), format!("{}:{}", endpoint, link.port));
         }
     } else if matches!(endpoint, serde_json::Value::Array(_)) {
-        let endpoint_list = endpoint.as_array().unwrap();
+        let endpoint_list: Vec<PrivateLinkEndpointItem> = endpoint
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| {
+                serde_json::from_value(v.clone()).map_err(|_| {
+                    anyhow!(
+                        "expect json schema {{\"host\": \"endpoint url\"}} but got {}",
+                        v
+                    )
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         for ((link, broker), endpoint) in link_targets
             .iter()
             .zip_eq_fast(broker_addrs.iter())
             .zip_eq_fast(endpoint_list.iter())
         {
-            let host = endpoint.get(PRIVATELINK_ENDPOINT_HOST_KEY).ok_or_else(|| {
-                anyhow!(
-                    "privatelink.endpoint's item does not contain key `{}`: {}",
-                    PRIVATELINK_ENDPOINT_HOST_KEY,
-                    endpoint
-                )
-            })?;
             // rewrite the broker address to endpoint:port
             broker_rewrite_map.insert(
                 broker.to_string(),
-                format!("{}:{}", host.as_str().unwrap(), link.port),
+                format!("{}:{}", endpoint.host, link.port),
             );
         }
     } else {
@@ -297,7 +307,7 @@ mod tests {
         .unwrap_err();
         assert_eq!(
             err.to_string(),
-            "privatelink.endpoint's item does not contain key `host`: {\"somekey_1\":\"aaaa\"}"
+            "expect json schema {\"host\": \"endpoint url\"} but got {\"somekey_1\":\"aaaa\"}"
         );
 
         // illegal json
