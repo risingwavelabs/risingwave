@@ -31,10 +31,7 @@ use risingwave_common::util::stream_graph_visitor::{
 };
 use risingwave_common::{bail, bail_not_implemented, hash, must_match};
 use risingwave_connector::connector_common::validate_connection;
-use risingwave_connector::error::ConnectorError;
-use risingwave_connector::source::{
-    AnySplitEnumerator, ConnectorProperties, SourceEnumeratorContext,
-};
+use risingwave_connector::source::{ConnectorProperties, SourceEnumeratorContext};
 use risingwave_connector::WithOptionsSecResolved;
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::{

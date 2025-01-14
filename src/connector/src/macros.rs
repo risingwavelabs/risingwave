@@ -157,7 +157,7 @@ macro_rules! dispatch_source_enum_inner {
     }}
 }
 
-/// Usage: `dispatch_source_enum!(EnumType, enum_value, inner_ident, body)`.
+/// Usage: `dispatch_source_enum!(EnumType, enum_value, |inner_ident| body)`.
 ///
 /// Inside `body`:
 /// - use `inner_ident` to represent the matched variant.
@@ -177,7 +177,7 @@ macro_rules! dispatch_source_enum_inner {
 /// Note: `inner_ident` must be passed as an argument due to macro hygiene.
 #[macro_export]
 macro_rules! dispatch_source_enum {
-    ($enum_type:ident, $enum_value:expr, $inner_name:ident, $body:expr) => {{
+    ($enum_type:ident, $enum_value:expr, |$inner_name:ident| $body:expr) => {{
         $crate::for_all_sources! {$crate::dispatch_source_enum_inner, $enum_type, { $enum_value }, $inner_name, $body}
     }};
 }
@@ -222,9 +222,9 @@ macro_rules! match_source_name_str {
 /// [`dispatch_source_enum`] with `SplitImpl` as the enum type.
 #[macro_export]
 macro_rules! dispatch_split_impl {
-    ($impl:expr, $inner_name:ident, $body:expr) => {{
+    ($impl:expr, | $inner_name:ident | $body:expr) => {{
         use $crate::source::SplitImpl;
-        $crate::dispatch_source_enum! {SplitImpl, { $impl }, $inner_name, $body}
+        $crate::dispatch_source_enum! {SplitImpl, { $impl }, |$inner_name| $body}
     }};
 }
 
@@ -346,9 +346,9 @@ macro_rules! impl_split {
 /// [`dispatch_source_enum`] with `ConnectorProperties` as the enum type.
 #[macro_export]
 macro_rules! dispatch_source_prop {
-    ($connector_properties:expr, $inner_ident:tt, $body:expr) => {{
+    ($connector_properties:expr, |$inner_ident:ident| $body:expr) => {{
         use $crate::source::ConnectorProperties;
-        $crate::dispatch_source_enum! {ConnectorProperties, { $connector_properties }, $inner_ident, {$body}}
+        $crate::dispatch_source_enum! {ConnectorProperties, { $connector_properties }, |$inner_ident| {$body}}
     }};
 }
 

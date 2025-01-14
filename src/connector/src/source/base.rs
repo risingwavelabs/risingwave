@@ -557,12 +557,13 @@ impl ConnectorProperties {
 
     /// Load additional info from `PbSource`. Currently only used by CDC.
     pub fn init_from_pb_source(&mut self, source: &PbSource) {
-        dispatch_source_prop!(self, prop, prop.init_from_pb_source(source))
+        dispatch_source_prop!(self, |prop| prop.init_from_pb_source(source))
     }
 
     /// Load additional info from `ExternalTableDesc`. Currently only used by CDC.
     pub fn init_from_pb_cdc_table_desc(&mut self, cdc_table_desc: &ExternalTableDesc) {
-        dispatch_source_prop!(self, prop, prop.init_from_pb_cdc_table_desc(cdc_table_desc))
+        dispatch_source_prop!(self, |prop| prop
+            .init_from_pb_cdc_table_desc(cdc_table_desc))
     }
 
     pub fn support_multiple_splits(&self) -> bool {
@@ -576,11 +577,9 @@ impl ConnectorProperties {
         self,
         context: crate::source::base::SourceEnumeratorContextRef,
     ) -> crate::error::ConnectorResult<Box<dyn AnySplitEnumerator>> {
-        let enumerator: Box<dyn AnySplitEnumerator> = dispatch_source_prop!(
-            self,
-            prop,
-            Box::new(<PropType as SourceProperties>::SplitEnumerator::new(*prop, context).await?)
-        );
+        let enumerator: Box<dyn AnySplitEnumerator> = dispatch_source_prop!(self, |prop| Box::new(
+            <PropType as SourceProperties>::SplitEnumerator::new(*prop, context).await?
+        ));
         Ok(enumerator)
     }
 
@@ -599,11 +598,15 @@ impl ConnectorProperties {
             "spawning connector split reader",
         );
 
-        dispatch_source_prop!(
-            self,
-            prop,
-            create_split_readers(*prop, splits, parser_config, source_ctx, columns, opt).await
+        dispatch_source_prop!(self, |prop| create_split_readers(
+            *prop,
+            splits,
+            parser_config,
+            source_ctx,
+            columns,
+            opt
         )
+        .await)
     }
 }
 
@@ -612,7 +615,7 @@ for_all_connections!(impl_connection);
 
 impl From<&SplitImpl> for ConnectorSplit {
     fn from(split: &SplitImpl) -> Self {
-        dispatch_split_impl!(split, inner, {
+        dispatch_split_impl!(split, |inner| {
             ConnectorSplit {
                 split_type: String::from(PropType::SOURCE_NAME),
                 encoded_split: inner.encode_to_bytes().to_vec(),
@@ -671,7 +674,7 @@ impl SplitImpl {
 
 impl SplitMetaData for SplitImpl {
     fn id(&self) -> SplitId {
-        dispatch_split_impl!(self, inner, inner.id())
+        dispatch_split_impl!(self, |inner| inner.id())
     }
 
     fn encode_to_json(&self) -> JsonbVal {
@@ -694,22 +697,22 @@ impl SplitMetaData for SplitImpl {
     }
 
     fn update_offset(&mut self, last_seen_offset: String) -> Result<()> {
-        dispatch_split_impl!(self, inner, inner.update_offset(last_seen_offset))
+        dispatch_split_impl!(self, |inner| inner.update_offset(last_seen_offset))
     }
 }
 
 impl SplitImpl {
     pub fn get_type(&self) -> String {
-        dispatch_split_impl!(self, _inner, PropType::SOURCE_NAME.to_owned())
+        dispatch_split_impl!(self, |_inner| PropType::SOURCE_NAME.to_owned())
     }
 
     pub fn update_in_place(&mut self, last_seen_offset: String) -> Result<()> {
-        dispatch_split_impl!(self, inner, inner.update_offset(last_seen_offset)?);
+        dispatch_split_impl!(self, |inner| inner.update_offset(last_seen_offset)?);
         Ok(())
     }
 
     pub fn encode_to_json_inner(&self) -> JsonbVal {
-        dispatch_split_impl!(self, inner, inner.encode_to_json())
+        dispatch_split_impl!(self, |inner| inner.encode_to_json())
     }
 }
 

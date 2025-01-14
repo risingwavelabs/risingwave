@@ -17,10 +17,7 @@ use std::sync::LazyLock;
 
 use async_trait::async_trait;
 use regex::Regex;
-use risingwave_connector::error::ConnectorResult;
-use risingwave_connector::source::{
-    AnySplitEnumerator, ConnectorProperties, SourceEnumeratorContext,
-};
+use risingwave_connector::source::{ConnectorProperties, SourceEnumeratorContext};
 use risingwave_connector::WithOptionsSecResolved;
 use risingwave_pb::cloud_service::cloud_service_server::CloudService;
 use risingwave_pb::cloud_service::rw_cloud_validate_source_response::{Error, ErrorType};
