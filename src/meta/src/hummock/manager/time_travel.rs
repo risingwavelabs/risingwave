@@ -243,14 +243,14 @@ impl HummockManager {
     pub(crate) async fn filter_out_objects_by_time_travel(
         &self,
         objects: impl Iterator<Item = HummockSstableObjectId>,
+        batch_size: usize,
     ) -> Result<HashSet<HummockSstableObjectId>> {
         // The input object count is much smaller than time travel pinned object count in meta store.
         // So search input object in meta store.
         let mut result: HashSet<_> = objects.collect();
         let mut remain: VecDeque<_> = result.iter().copied().collect();
-        const FILTER_BATCH_SIZE: usize = 1000;
         while !remain.is_empty() {
-            let batch = remain.drain(..std::cmp::min(remain.len(), FILTER_BATCH_SIZE));
+            let batch = remain.drain(..std::cmp::min(remain.len(), batch_size));
             let reject_object_ids: Vec<risingwave_meta_model::HummockSstableObjectId> =
                 hummock_sstable_info::Entity::find()
                     .filter(hummock_sstable_info::Column::ObjectId.is_in(batch))

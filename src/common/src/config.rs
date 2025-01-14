@@ -542,6 +542,12 @@ pub struct MetaDeveloperConfig {
     /// Max number of epoch-to-version inserted into meta store per INSERT, during time travel metadata writing.
     #[serde(default = "default::developer::hummock_time_travel_epoch_version_insert_batch_size")]
     pub hummock_time_travel_epoch_version_insert_batch_size: usize,
+
+    #[serde(default = "default::developer::hummock_gc_history_insert_batch_size")]
+    pub hummock_gc_history_insert_batch_size: usize,
+
+    #[serde(default = "default::developer::hummock_time_travel_filter_out_objects_batch_size")]
+    pub hummock_time_travel_filter_out_objects_batch_size: usize,
 }
 
 /// The section `[server]` in `risingwave.toml`.
@@ -2072,6 +2078,14 @@ pub mod default {
             30
         }
         pub fn hummock_time_travel_epoch_version_insert_batch_size() -> usize {
+            1000
+        }
+
+        pub fn hummock_gc_history_insert_batch_size() -> usize {
+            1000
+        }
+
+        pub fn hummock_time_travel_filter_out_objects_batch_size() -> usize {
             1000
         }
 
