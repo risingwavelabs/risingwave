@@ -89,11 +89,6 @@ pub trait SourceProperties: TryFromBTreeMap + Clone + WithOptions + std::fmt::De
 
     /// Load additional info from `ExternalTableDesc`. Currently only used by CDC.
     fn init_from_pb_cdc_table_desc(&mut self, _table_desc: &ExternalTableDesc) {}
-
-    // async fn create_split_enumerator(
-    //     self,
-    //     context: crate::source::SourceEnumeratorContextRef,
-    // ) -> Result<Self::SplitEnumerator>;
 }
 
 pub trait UnknownFields {
