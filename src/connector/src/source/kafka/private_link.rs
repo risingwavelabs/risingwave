@@ -310,6 +310,9 @@ mod tests {
             &broker_addrs,
         )
         .unwrap_err();
-        assert_eq!(err.to_string(), "expect a string or a json array for privatelink.endpoint, but got Object {}");
+        assert_eq!(
+            err.to_string(),
+            "expect a string or a json array for privatelink.endpoint, but got Object {}"
+        );
     }
 }
