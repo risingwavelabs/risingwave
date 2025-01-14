@@ -28,13 +28,16 @@ pub enum FileFormat {
 pub enum StorageType {
     S3,
     Gcs,
+    Azblob,
 }
 
+#[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone, Educe)]
 #[educe(PartialEq, Eq, Hash)]
 pub enum FileScanBackend {
     FileScan(FileScan),
     GcsFileScan(GcsFileScan),
+    AzblobFileScan(AzblobFileScan),
 }
 
 #[derive(Debug, Clone, Educe)]
@@ -69,6 +72,40 @@ impl GenericPlanNode for GcsFileScan {
     }
 }
 
+#[derive(Debug, Clone, Educe)]
+#[educe(PartialEq, Eq, Hash)]
+pub struct AzblobFileScan {
+    pub schema: Schema,
+    pub file_format: FileFormat,
+    pub storage_type: StorageType,
+    pub account_name: String,
+    pub account_key: String,
+    pub endpoint: String,
+    pub file_location: Vec<String>,
+
+    #[educe(PartialEq(ignore))]
+    #[educe(Hash(ignore))]
+    pub ctx: OptimizerContextRef,
+}
+
+impl GenericPlanNode for AzblobFileScan {
+    fn schema(&self) -> Schema {
+        self.schema.clone()
+    }
+
+    fn stream_key(&self) -> Option<Vec<usize>> {
+        None
+    }
+
+    fn ctx(&self) -> OptimizerContextRef {
+        self.ctx.clone()
+    }
+
+    fn functional_dependency(&self) -> FunctionalDependencySet {
+        FunctionalDependencySet::new(self.schema.len())
+    }
+}
+
 impl FileScan {
     pub fn columns(&self) -> Vec<ColumnDesc> {
         self.schema
@@ -81,7 +118,6 @@ impl FileScan {
             .collect()
     }
 }
-
 #[derive(Debug, Clone, Educe)]
 #[educe(PartialEq, Eq, Hash)]
 pub struct FileScan {
@@ -130,11 +166,26 @@ impl GcsFileScan {
     }
 }
 
+impl AzblobFileScan {
+    pub fn columns(&self) -> Vec<ColumnDesc> {
+        self.schema
+            .fields
+            .iter()
+            .enumerate()
+            .map(|(i, f)| {
+                ColumnDesc::named(f.name.clone(), ColumnId::new(i as i32), f.data_type.clone())
+            })
+            .collect()
+    }
+}
+
 impl GenericPlanNode for FileScanBackend {
     fn schema(&self) -> Schema {
         match self {
             FileScanBackend::FileScan(file_scan) => file_scan.schema(),
             FileScanBackend::GcsFileScan(gcs_file_scan) => gcs_file_scan.schema(),
+
+            FileScanBackend::AzblobFileScan(azblob_file_scan) => azblob_file_scan.schema(),
         }
     }
 
@@ -142,6 +193,8 @@ impl GenericPlanNode for FileScanBackend {
         match self {
             FileScanBackend::FileScan(file_scan) => file_scan.stream_key(),
             FileScanBackend::GcsFileScan(gcs_file_scan) => gcs_file_scan.stream_key(),
+
+            FileScanBackend::AzblobFileScan(azblob_file_scan) => azblob_file_scan.stream_key(),
         }
     }
 
@@ -149,6 +202,8 @@ impl GenericPlanNode for FileScanBackend {
         match self {
             FileScanBackend::FileScan(file_scan) => file_scan.ctx(),
             FileScanBackend::GcsFileScan(gcs_file_scan) => gcs_file_scan.ctx(),
+
+            FileScanBackend::AzblobFileScan(azblob_file_scan) => azblob_file_scan.ctx(),
         }
     }
 
@@ -156,6 +211,10 @@ impl GenericPlanNode for FileScanBackend {
         match self {
             FileScanBackend::FileScan(file_scan) => file_scan.functional_dependency(),
             FileScanBackend::GcsFileScan(gcs_file_scan) => gcs_file_scan.functional_dependency(),
+
+            FileScanBackend::AzblobFileScan(azblob_file_scan) => {
+                azblob_file_scan.functional_dependency()
+            }
         }
     }
 }
@@ -165,6 +224,10 @@ impl FileScanBackend {
         match self {
             FileScanBackend::FileScan(file_scan) => file_scan.file_location.clone(),
             FileScanBackend::GcsFileScan(gcs_file_scan) => gcs_file_scan.file_location.clone(),
+
+            FileScanBackend::AzblobFileScan(azblob_file_scan) => {
+                azblob_file_scan.file_location.clone()
+            }
         }
     }
 }
