@@ -186,7 +186,7 @@ fn handle_privatelink_endpoint(
     let endpoint = if let Ok(json) = serde_json::from_str::<serde_json::Value>(endpoint) {
         json
     } else {
-        serde_json::Value::String(endpoint.to_string())
+        serde_json::Value::String(endpoint.to_owned())
     };
     if matches!(endpoint, serde_json::Value::String(_)) {
         let endpoint = endpoint.as_str().unwrap();
@@ -201,9 +201,13 @@ fn handle_privatelink_endpoint(
             .zip_eq_fast(broker_addrs.iter())
             .zip_eq_fast(endpoint_list.iter())
         {
-            let host = endpoint
-                .get(PRIVATELINK_ENDPOINT_HOST_KEY)
-                .ok_or_else(|| anyhow!("privatelink.endpoint's item does not contain key `host`: {}", endpoint))?;
+            let host = endpoint.get(PRIVATELINK_ENDPOINT_HOST_KEY).ok_or_else(|| {
+                anyhow!(
+                    "privatelink.endpoint's item does not contain key `{}`: {}",
+                    PRIVATELINK_ENDPOINT_HOST_KEY,
+                    endpoint
+                )
+            })?;
             // rewrite the broker address to endpoint:port
             broker_rewrite_map.insert(
                 broker.to_string(),
@@ -224,16 +228,25 @@ mod tests {
     #[test]
     fn test_handle_privatelink_endpoint() {
         let endpoint = "some_url"; // raw string
-        let link_targets = vec![AwsPrivateLinkItem{
-            az_id: None, 
-            port: 9092,
-        }, AwsPrivateLinkItem {
-            az_id: None,
-            port: 9093,
-        } ];
+        let link_targets = vec![
+            AwsPrivateLinkItem {
+                az_id: None,
+                port: 9092,
+            },
+            AwsPrivateLinkItem {
+                az_id: None,
+                port: 9093,
+            },
+        ];
         let broker_addrs = vec!["broker1:9092", "broker2:9093"];
         let mut broker_rewrite_map = HashMap::new();
-        handle_privatelink_endpoint(endpoint, &mut broker_rewrite_map, &link_targets, &broker_addrs).unwrap();
+        handle_privatelink_endpoint(
+            endpoint,
+            &mut broker_rewrite_map,
+            &link_targets,
+            &broker_addrs,
+        )
+        .unwrap();
 
         assert_eq!(broker_rewrite_map.len(), 2);
         assert_eq!(broker_rewrite_map["broker1:9092"], "some_url:9092");
@@ -242,18 +255,28 @@ mod tests {
         // example 2: json array
         let endpoint = r#"[{"host": "aaaa"}, {"host": "bbbb"}, {"host": "cccc"}]"#;
         let broker_addrs = vec!["broker1:9092", "broker2:9093", "broker3:9094"];
-        let link_targets = vec![AwsPrivateLinkItem{
-            az_id: None, 
-            port: 9092,
-        }, AwsPrivateLinkItem {
-            az_id: None,
-            port: 9093,
-        }, AwsPrivateLinkItem {
-            az_id: None,
-            port: 9094,
-        } ];
+        let link_targets = vec![
+            AwsPrivateLinkItem {
+                az_id: None,
+                port: 9092,
+            },
+            AwsPrivateLinkItem {
+                az_id: None,
+                port: 9093,
+            },
+            AwsPrivateLinkItem {
+                az_id: None,
+                port: 9094,
+            },
+        ];
         let mut broker_rewrite_map = HashMap::new();
-        handle_privatelink_endpoint(endpoint, &mut broker_rewrite_map, &link_targets, &broker_addrs).unwrap();
+        handle_privatelink_endpoint(
+            endpoint,
+            &mut broker_rewrite_map,
+            &link_targets,
+            &broker_addrs,
+        )
+        .unwrap();
 
         assert_eq!(broker_rewrite_map.len(), 3);
         assert_eq!(broker_rewrite_map["broker1:9092"], "aaaa:9092");
@@ -263,7 +286,16 @@ mod tests {
         // no `host` in the json array
         let endpoint = r#"[{"somekey_1": "aaaa"}, {"somekey_2": "bbbb"}, {"somekey_3": "cccc"}]"#;
         let mut broker_rewrite_map = HashMap::new();
-        let err = handle_privatelink_endpoint(endpoint, &mut broker_rewrite_map, &link_targets, &broker_addrs).unwrap_err();
-        assert_eq!(err.to_string(), "privatelink.endpoint's item does not contain key `host`: {\"somekey_1\":\"aaaa\"}");
+        let err = handle_privatelink_endpoint(
+            endpoint,
+            &mut broker_rewrite_map,
+            &link_targets,
+            &broker_addrs,
+        )
+        .unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "privatelink.endpoint's item does not contain key `host`: {\"somekey_1\":\"aaaa\"}"
+        );
     }
 }
