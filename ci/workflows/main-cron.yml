@@ -540,7 +540,7 @@ steps:
         <<: *docker-compose
         environment:
           - ASTRA_STREAMING_TEST_TOKEN
-            - STREAMNATIVE_CLOUD_TEST_CONF
+          - STREAMNATIVE_CLOUD_TEST_CONF
     timeout_in_minutes: 20
     retry: *auto-retry
 
@@ -589,9 +589,9 @@ steps:
       - "build"
     plugins:
       - docker-compose#v5.5.0:
-        <<: *docker-compose
-        run: source-test-env
-        environment:
+          <<: *docker-compose
+          run: source-test-env
+          environment:
             - BUILDKITE_BRANCH
       - ./ci/plugins/upload-failure-logs
     matrix:
@@ -637,8 +637,8 @@ steps:
       - "build"
     plugins:
       - docker-compose#v5.5.0:
-        <<: *docker-compose
-        run: source-test-env
+          <<: *docker-compose
+          run: source-test-env
         mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 30
@@ -706,8 +706,8 @@ steps:
       - "build-other"
     plugins:
       - docker-compose#v5.5.0:
-        <<: *docker-compose
-        run: sink-test-env
+          <<: *docker-compose
+          run: sink-test-env
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
     retry: *auto-retry
@@ -724,8 +724,8 @@ steps:
       - "build-other"
     plugins:
       - docker-compose#v5.5.0:
-        <<: *docker-compose
-        run: sink-test-env
+          <<: *docker-compose
+          run: sink-test-env
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
     retry: *auto-retry
@@ -742,8 +742,8 @@ steps:
       - "build-other"
     plugins:
       - docker-compose#v5.5.0:
-        <<: *docker-compose
-        run: sink-test-env
+          <<: *docker-compose
+          run: sink-test-env
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
     retry: *auto-retry
@@ -760,8 +760,8 @@ steps:
       - "build-other"
     plugins:
       - docker-compose#v5.5.0:
-        <<: *docker-compose
-        run: sink-test-env
+          <<: *docker-compose
+          run: sink-test-env
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
     retry: *auto-retry
@@ -778,8 +778,8 @@ steps:
       - "build-other"
     plugins:
       - docker-compose#v5.5.0:
-        <<: *docker-compose
-        run: sink-test-env
+          <<: *docker-compose
+          run: sink-test-env
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
     retry: *auto-retry
@@ -796,8 +796,8 @@ steps:
       - "build-other"
     plugins:
       - docker-compose#v5.5.0:
-        <<: *docker-compose
-        run: sink-test-env
+          <<: *docker-compose
+          run: sink-test-env
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
     retry: *auto-retry
@@ -831,8 +831,8 @@ steps:
       - "build-other"
     plugins:
       - docker-compose#v5.5.0:
-        <<: *docker-compose
-        run: sink-test-env
+          <<: *docker-compose
+          run: sink-test-env
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
     retry: *auto-retry
@@ -849,8 +849,8 @@ steps:
       - "build-other"
     plugins:
       - docker-compose#v5.5.0:
-        <<: *docker-compose
-        run: sink-test-env
+          <<: *docker-compose
+          run: sink-test-env
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
     retry: *auto-retry
@@ -867,8 +867,8 @@ steps:
       - "build-other"
     plugins:
       - docker-compose#v5.5.0:
-        <<: *docker-compose
-        run: sink-test-env
+          <<: *docker-compose
+          run: sink-test-env
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
     retry: *auto-retry
@@ -885,8 +885,8 @@ steps:
       - "build-other"
     plugins:
       - docker-compose#v5.5.0:
-        <<: *docker-compose
-        run: sink-test-env
+          <<: *docker-compose
+          run: sink-test-env
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
     retry: *auto-retry
@@ -921,8 +921,8 @@ steps:
           env:
             GITHUB_TOKEN: github-token
       - docker-compose#v5.5.0:
-        <<: *docker-compose
-        run: release-env-x86
+          <<: *docker-compose
+          run: release-env-x86
         environment:
           - BINARY_NAME
           - GITHUB_TOKEN
@@ -939,8 +939,8 @@ steps:
           env:
             GITHUB_TOKEN: github-token
       - docker-compose#v5.5.0:
-        <<: *docker-compose
-        run: release-env-x86
+          <<: *docker-compose
+          run: release-env-x86
         environment:
           - BINARY_NAME
           - GITHUB_TOKEN
@@ -958,8 +958,8 @@ steps:
           env:
             GITHUB_TOKEN: github-token
       - docker-compose#v5.5.0:
-        <<: *docker-compose
-        run: release-env-arm
+          <<: *docker-compose
+          run: release-env-arm
         environment:
           - BINARY_NAME
           - GITHUB_TOKEN
@@ -978,8 +978,8 @@ steps:
           env:
             GITHUB_TOKEN: github-token
       - docker-compose#v5.5.0:
-        <<: *docker-compose
-        run: release-env-arm
+          <<: *docker-compose
+          run: release-env-arm
         environment:
           - BINARY_NAME
           - GITHUB_TOKEN

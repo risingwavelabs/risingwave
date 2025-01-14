@@ -78,8 +78,8 @@ steps:
           env:
             GITHUB_TOKEN: github-token
       - docker-compose#v5.5.0:
-        <<: *docker-compose
-        environment:
+          <<: *docker-compose
+          environment:
           - GITHUB_TOKEN
     timeout_in_minutes: 14
     retry: *auto-retry
@@ -196,9 +196,9 @@ steps:
       - "build-other"
     plugins:
       - docker-compose#v5.5.0:
-        <<: *docker-compose
-        run: source-test-env
-        upload-container-logs: always
+          <<: *docker-compose
+          run: source-test-env
+          upload-container-logs: always
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 20
     retry: *auto-retry
@@ -214,8 +214,8 @@ steps:
       - "build-other"
     plugins:
       - docker-compose#v5.5.0:
-        <<: *docker-compose
-        run: sink-test-env
+          <<: *docker-compose
+          run: sink-test-env
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 20
     cancel_on_build_failing: true
@@ -246,8 +246,8 @@ steps:
       - "build-other"
     plugins:
       - docker-compose#v5.5.0:
-        <<: *docker-compose
-        run: sink-test-env
+          <<: *docker-compose
+          run: sink-test-env
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 15
     retry: *auto-retry
@@ -260,8 +260,8 @@ steps:
       - "build-other"
     plugins:
       - docker-compose#v5.5.0:
-        <<: *docker-compose
-        run: sink-test-env
+          <<: *docker-compose
+          run: sink-test-env
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 17
     retry: *auto-retry
@@ -274,8 +274,8 @@ steps:
       - "build-other"
     plugins:
       - docker-compose#v5.5.0:
-        <<: *docker-compose
-        run: sink-test-env
+          <<: *docker-compose
+          run: sink-test-env
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 15
     retry: *auto-retry
@@ -288,8 +288,8 @@ steps:
       - "build-other"
     plugins:
       - docker-compose#v5.5.0:
-        <<: *docker-compose
-        run: iceberg-engine-env
+          <<: *docker-compose
+          run: iceberg-engine-env
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 15
     retry: *auto-retry
@@ -302,8 +302,8 @@ steps:
       - "build-other"
     plugins:
       - docker-compose#v5.5.0:
-        <<: *docker-compose
-        run: sink-test-env
+          <<: *docker-compose
+          run: sink-test-env
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
     retry: *auto-retry
@@ -316,8 +316,8 @@ steps:
       - "build-other"
     plugins:
       - docker-compose#v5.5.0:
-        <<: *docker-compose
-        run: sink-test-env
+          <<: *docker-compose
+          run: sink-test-env
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
     retry: *auto-retry
@@ -330,8 +330,8 @@ steps:
       - "build-other"
     plugins:
       - docker-compose#v5.5.0:
-        <<: *docker-compose
-        run: sink-test-env
+          <<: *docker-compose
+          run: sink-test-env
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
     retry: *auto-retry
@@ -358,8 +358,8 @@ steps:
       - "build-other"
     plugins:
       - docker-compose#v5.5.0:
-        <<: *docker-compose
-        run: sink-test-env
+          <<: *docker-compose
+          run: sink-test-env
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
     retry: *auto-retry
@@ -372,8 +372,8 @@ steps:
       - "build-other"
     plugins:
       - docker-compose#v5.5.0:
-        <<: *docker-compose
-        run: sink-test-env
+          <<: *docker-compose
+          run: sink-test-env
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
     retry: *auto-retry
@@ -386,8 +386,8 @@ steps:
       - "build-other"
     plugins:
       - docker-compose#v5.5.0:
-        <<: *docker-compose
-        run: sink-test-env
+          <<: *docker-compose
+          run: sink-test-env
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
     retry: *auto-retry
@@ -400,8 +400,8 @@ steps:
       - "build-other"
     plugins:
       - docker-compose#v5.5.0:
-        <<: *docker-compose
-        run: sink-test-env
+          <<: *docker-compose
+          run: sink-test-env
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
     retry: *auto-retry
@@ -414,8 +414,8 @@ steps:
       - "build-other"
     plugins:
       - docker-compose#v5.5.0:
-        <<: *docker-compose
-        run: sink-test-env
+          <<: *docker-compose
+          run: sink-test-env
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
     retry: *auto-retry
@@ -428,8 +428,8 @@ steps:
       - "build-other"
     plugins:
       - docker-compose#v5.5.0:
-        <<: *docker-compose
-        run: sink-test-env
+          <<: *docker-compose
+          run: sink-test-env
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
     retry: *auto-retry
@@ -442,8 +442,8 @@ steps:
       - "build-other"
     plugins:
       - docker-compose#v5.5.0:
-        <<: *docker-compose
-        run: sink-test-env
+          <<: *docker-compose
+          run: sink-test-env
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
     retry: *auto-retry
@@ -469,8 +469,8 @@ steps:
     depends_on: "build"
     plugins:
       - docker-compose#v5.5.0:
-        <<: *docker-compose
-        run: regress-test-env
+          <<: *docker-compose
+          run: regress-test-env
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 5
     retry: *auto-retry
@@ -491,8 +491,8 @@ steps:
           env:
             CODECOV_TOKEN: my-codecov-token
       - docker-compose#v5.5.0:
-        <<: *docker-compose
-        environment:
+          <<: *docker-compose
+          environment:
           - CODECOV_TOKEN
     timeout_in_minutes: 22
     retry: *auto-retry
@@ -558,8 +558,8 @@ steps:
           env:
             GITHUB_TOKEN: github-token
       - docker-compose#v5.5.0:
-        <<: *docker-compose
-        environment:
+          <<: *docker-compose
+          environment:
           - GITHUB_TOKEN
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 30
@@ -604,8 +604,8 @@ steps:
           env:
             GITHUB_TOKEN: github-token
       - docker-compose#v5.5.0:
-        <<: *docker-compose
-        environment:
+          <<: *docker-compose
+          environment:
           - GITHUB_TOKEN
     timeout_in_minutes: 20
 
@@ -619,8 +619,8 @@ steps:
           env:
             GITHUB_TOKEN: github-token
       - docker-compose#v5.5.0:
-        <<: *docker-compose
-        run: ci-flamegraph-env
+          <<: *docker-compose
+          run: ci-flamegraph-env
         environment:
           - GITHUB_TOKEN
     # TODO(kwannoel): Here are the areas that can be further optimized:
@@ -641,8 +641,8 @@ steps:
           env:
             GITHUB_TOKEN: github-token
       - docker-compose#v5.5.0:
-        <<: *docker-compose
-        run: ci-flamegraph-env
+          <<: *docker-compose
+          run: ci-flamegraph-env
         environment:
           - GITHUB_TOKEN
     # TODO(kwannoel): Here are the areas that can be further optimized:
@@ -662,8 +662,8 @@ steps:
       - "build"
     plugins:
       - docker-compose#v5.5.0:
-        <<: *docker-compose
-        run: source-test-env
+          <<: *docker-compose
+          run: source-test-env
         environment:
           - BUILDKITE_BRANCH
       - ./ci/plugins/upload-failure-logs
@@ -692,8 +692,8 @@ steps:
       - "build"
     plugins:
       - docker-compose#v5.5.0:
-        <<: *docker-compose
-        run: ci-flamegraph-env
+          <<: *docker-compose
+          run: ci-flamegraph-env
     timeout_in_minutes: 40
 
   - label: "Backfill tests"
@@ -703,8 +703,8 @@ steps:
       - "build"
     plugins:
       - docker-compose#v5.5.0:
-        <<: *docker-compose
-        run: source-test-env
+          <<: *docker-compose
+          run: source-test-env
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 30
 
@@ -744,8 +744,8 @@ steps:
       - "docslt"
     plugins:
       - docker-compose#v5.5.0:
-        <<: *docker-compose
-        run: ci-standard-env
+          <<: *docker-compose
+          run: ci-standard-env
         propagate-environment: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 32
@@ -803,8 +803,8 @@ steps:
             BUILDKITE_TOKEN: buildkite_token
             GITHUB_TOKEN: github-token
       - docker-compose#v5.5.0:
-        <<: *docker-compose
-        environment:
+          <<: *docker-compose
+          environment:
           - BUILDKITE_TOKEN
           - GITHUB_TOKEN
     timeout_in_minutes: 5
