@@ -215,7 +215,10 @@ fn handle_privatelink_endpoint(
             );
         }
     } else {
-        unreachable!()
+        bail!(
+            "expect a string or a json array for privatelink.endpoint, but got {:?}",
+            endpoint
+        )
     }
 
     Ok(())
@@ -297,5 +300,17 @@ mod tests {
             err.to_string(),
             "privatelink.endpoint's item does not contain key `host`: {\"somekey_1\":\"aaaa\"}"
         );
+
+        // illegal json
+        let endpoint = r#"{}"#;
+        let mut broker_rewrite_map = HashMap::new();
+        let err = handle_privatelink_endpoint(
+            endpoint,
+            &mut broker_rewrite_map,
+            &link_targets,
+            &broker_addrs,
+        )
+        .unwrap_err();
+        assert_eq!(err.to_string(), "expect a string or a json array for privatelink.endpoint, but got Object {}");
     }
 }
