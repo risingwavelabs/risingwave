@@ -60,11 +60,14 @@ impl<S: StateStore> SyncedKvLogStore<S> {
                 let logstore_item = logstore_item?;
                 Ok(logstore_item.map(Message::Chunk))
             }
-            // Read from upstream
-            // Block until write succeeds
-            upstream_item = Self::poll_upstream(&mut self.upstream) => {
-                let upstream_item = upstream_item?;
-                Ok(upstream_item.map(Message::Barrier))
+            // read from upstream
+            upstream_item = self.upstream.next() => {
+                match upstream_item {
+                    None => Ok(None),
+                    Some(upstream_item) => {
+                        Ok(Some(upstream_item?))
+                    }
+                }
             }
         }
     }
