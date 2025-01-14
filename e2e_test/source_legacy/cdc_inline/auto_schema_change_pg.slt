@@ -55,6 +55,7 @@ v7 timestamp without time zone false NULL
 v8 timestamp with time zone false NULL
 v9 interval false NULL
 v10 jsonb false NULL
+_rw_timestamp timestamp with time zone true NULL
 primary key id NULL NULL
 distribution key id NULL NULL
 table description rw_test_schema_change NULL NULL
@@ -100,6 +101,7 @@ v9 interval false NULL
 v10 jsonb false NULL
 v11 character varying false NULL
 v12 numeric false NULL
+_rw_timestamp timestamp with time zone true NULL
 primary key id NULL NULL
 distribution key id NULL NULL
 table description rw_test_schema_change NULL NULL
@@ -145,6 +147,7 @@ v9 interval false NULL
 v10 jsonb false NULL
 v11 character varying false NULL
 v12 numeric false NULL
+_rw_timestamp timestamp with time zone true NULL
 primary key id NULL NULL
 distribution key id NULL NULL
 table description rw_test_schema_change NULL NULL

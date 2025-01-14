@@ -375,83 +375,83 @@
     StreamFilter { predicate: IsNotNull(ps_partkey) }
     └── StreamExchange NoShuffle from 7
 
-    Table 0 { columns: [ p_partkey, p_mfgr, ps_partkey, min(ps_supplycost), _row_id ], primary key: [ $0 ASC, $3 ASC, $2 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 2, 3 ], read pk prefix len hint: 3 }
+    Table 0 { columns: [ p_partkey, p_mfgr, ps_partkey, min(ps_supplycost), _row_id, _rw_timestamp ], primary key: [ $0 ASC, $3 ASC, $2 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 2, 3 ], read pk prefix len hint: 3 }
 
-    Table 1 { columns: [ p_partkey, min(ps_supplycost), ps_partkey, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC ], value indices: [ 4 ], distribution key: [ 2, 1 ], read pk prefix len hint: 3 }
+    Table 1 { columns: [ p_partkey, min(ps_supplycost), ps_partkey, _row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC ], value indices: [ 4 ], distribution key: [ 2, 1 ], read pk prefix len hint: 3 }
 
-    Table 2 { columns: [ n_name, s_name, s_address, s_phone, s_acctbal, s_comment, ps_partkey, ps_supplycost, _row_id, _row_id_0, r_regionkey, _row_id_1, n_nationkey, s_suppkey, _row_id_2 ], primary key: [ $6 ASC, $7 ASC, $6 ASC, $8 ASC, $9 ASC, $10 ASC, $11 ASC, $12 ASC, $14 ASC, $13 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14 ], distribution key: [ 6, 7 ], read pk prefix len hint: 3 }
+    Table 2 { columns: [ n_name, s_name, s_address, s_phone, s_acctbal, s_comment, ps_partkey, ps_supplycost, _row_id, _row_id_0, r_regionkey, _row_id_1, n_nationkey, s_suppkey, _row_id_2, _rw_timestamp ], primary key: [ $6 ASC, $7 ASC, $6 ASC, $8 ASC, $9 ASC, $10 ASC, $11 ASC, $12 ASC, $14 ASC, $13 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14 ], distribution key: [ 6, 7 ], read pk prefix len hint: 3 }
 
-    Table 3 { columns: [ ps_partkey, ps_supplycost, ps_partkey_0, _row_id, _row_id_0, r_regionkey, _row_id_1, n_nationkey, _row_id_2, s_suppkey, _degree ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC ], value indices: [ 10 ], distribution key: [ 2, 1 ], read pk prefix len hint: 3 }
+    Table 3 { columns: [ ps_partkey, ps_supplycost, ps_partkey_0, _row_id, _row_id_0, r_regionkey, _row_id_1, n_nationkey, _row_id_2, s_suppkey, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC ], value indices: [ 10 ], distribution key: [ 2, 1 ], read pk prefix len hint: 3 }
 
-    Table 4 { columns: [ p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_container, p_retailprice, p_comment, _row_id ], primary key: [ $0 ASC, $9 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 4 { columns: [ p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_container, p_retailprice, p_comment, _row_id, _rw_timestamp ], primary key: [ $0 ASC, $9 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 5 { columns: [ p_partkey, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 5 { columns: [ p_partkey, _row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 6 { columns: [ ps_partkey, min(ps_supplycost) ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 6 { columns: [ ps_partkey, min(ps_supplycost), _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 7 { columns: [ ps_partkey, _degree ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 7 { columns: [ ps_partkey, _degree, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 8 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 8 { columns: [ partition_id, offset_info, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 9 { columns: [ ps_partkey, min(ps_supplycost), count ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 9 { columns: [ ps_partkey, min(ps_supplycost), count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 10 { columns: [ ps_partkey, ps_supplycost, s_nationkey, _row_id, ps_suppkey, _row_id_0 ], primary key: [ $2 ASC, $3 ASC, $5 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 2 ], read pk prefix len hint: 1 }
+    Table 10 { columns: [ ps_partkey, ps_supplycost, s_nationkey, _row_id, ps_suppkey, _row_id_0, _rw_timestamp ], primary key: [ $2 ASC, $3 ASC, $5 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 2 ], read pk prefix len hint: 1 }
 
-    Table 11 { columns: [ s_nationkey, _row_id, _row_id_0, ps_suppkey, _degree ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC ], value indices: [ 4 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 11 { columns: [ s_nationkey, _row_id, _row_id_0, ps_suppkey, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC ], value indices: [ 4 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 12 { columns: [ n_nationkey, _row_id, r_regionkey, _row_id_0 ], primary key: [ $0 ASC, $1 ASC, $3 ASC, $2 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 12 { columns: [ n_nationkey, _row_id, r_regionkey, _row_id_0, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $3 ASC, $2 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 13 { columns: [ n_nationkey, _row_id, _row_id_0, r_regionkey, _degree ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC ], value indices: [ 4 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 13 { columns: [ n_nationkey, _row_id, _row_id_0, r_regionkey, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC ], value indices: [ 4 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 14 { columns: [ ps_partkey, ps_suppkey, ps_supplycost, _row_id ], primary key: [ $1 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
+    Table 14 { columns: [ ps_partkey, ps_suppkey, ps_supplycost, _row_id, _rw_timestamp ], primary key: [ $1 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
 
-    Table 15 { columns: [ ps_suppkey, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 15 { columns: [ ps_suppkey, _row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 16 { columns: [ s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id ], primary key: [ $0 ASC, $7 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 16 { columns: [ s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id, _rw_timestamp ], primary key: [ $0 ASC, $7 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 17 { columns: [ s_suppkey, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 17 { columns: [ s_suppkey, _row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 18 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 18 { columns: [ partition_id, offset_info, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 19 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 19 { columns: [ partition_id, offset_info, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 20 { columns: [ r_regionkey, _row_id ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 20 { columns: [ r_regionkey, _row_id, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 21 { columns: [ r_regionkey, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 21 { columns: [ r_regionkey, _row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 22 { columns: [ n_nationkey, n_name, n_regionkey, _row_id ], primary key: [ $2 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 2 ], read pk prefix len hint: 1 }
+    Table 22 { columns: [ n_nationkey, n_name, n_regionkey, _row_id, _rw_timestamp ], primary key: [ $2 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 2 ], read pk prefix len hint: 1 }
 
-    Table 23 { columns: [ n_regionkey, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 23 { columns: [ n_regionkey, _row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 24 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 24 { columns: [ partition_id, offset_info, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 25 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 25 { columns: [ partition_id, offset_info, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 26 { columns: [ n_name, s_suppkey, s_name, s_address, s_phone, s_acctbal, s_comment, _row_id, _row_id_0, r_regionkey, n_nationkey, _row_id_1 ], primary key: [ $1 ASC, $7 ASC, $8 ASC, $9 ASC, $11 ASC, $10 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
+    Table 26 { columns: [ n_name, s_suppkey, s_name, s_address, s_phone, s_acctbal, s_comment, _row_id, _row_id_0, r_regionkey, n_nationkey, _row_id_1, _rw_timestamp ], primary key: [ $1 ASC, $7 ASC, $8 ASC, $9 ASC, $11 ASC, $10 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
 
-    Table 27 { columns: [ s_suppkey, _row_id, _row_id_0, r_regionkey, _row_id_1, n_nationkey, _degree ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC ], value indices: [ 6 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 27 { columns: [ s_suppkey, _row_id, _row_id_0, r_regionkey, _row_id_1, n_nationkey, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC ], value indices: [ 6 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 28 { columns: [ ps_partkey, ps_suppkey, ps_supplycost, _row_id ], primary key: [ $1 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
+    Table 28 { columns: [ ps_partkey, ps_suppkey, ps_supplycost, _row_id, _rw_timestamp ], primary key: [ $1 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
 
-    Table 29 { columns: [ ps_suppkey, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 29 { columns: [ ps_suppkey, _row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 30 { columns: [ n_nationkey, n_name, _row_id, r_regionkey, _row_id_0 ], primary key: [ $0 ASC, $2 ASC, $4 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 30 { columns: [ n_nationkey, n_name, _row_id, r_regionkey, _row_id_0, _rw_timestamp ], primary key: [ $0 ASC, $2 ASC, $4 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 31 { columns: [ n_nationkey, _row_id, _row_id_0, r_regionkey, _degree ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC ], value indices: [ 4 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 31 { columns: [ n_nationkey, _row_id, _row_id_0, r_regionkey, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC ], value indices: [ 4 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 32 { columns: [ s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id ], primary key: [ $3 ASC, $7 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ], distribution key: [ 3 ], read pk prefix len hint: 1 }
+    Table 32 { columns: [ s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id, _rw_timestamp ], primary key: [ $3 ASC, $7 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ], distribution key: [ 3 ], read pk prefix len hint: 1 }
 
-    Table 33 { columns: [ s_nationkey, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 33 { columns: [ s_nationkey, _row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 34 { columns: [ r_regionkey, _row_id ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 34 { columns: [ r_regionkey, _row_id, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 35 { columns: [ r_regionkey, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 35 { columns: [ r_regionkey, _row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 36 { columns: [ n_nationkey, n_name, n_regionkey, _row_id ], primary key: [ $2 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 2 ], read pk prefix len hint: 1 }
+    Table 36 { columns: [ n_nationkey, n_name, n_regionkey, _row_id, _rw_timestamp ], primary key: [ $2 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 2 ], read pk prefix len hint: 1 }
 
-    Table 37 { columns: [ n_regionkey, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 37 { columns: [ n_regionkey, _row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 4294967294 { columns: [ s_acctbal, s_name, n_name, p_partkey, p_mfgr, s_address, s_phone, s_comment, _row_id, min(ps_supplycost), ps_partkey, _row_id#1, _row_id#2, r_regionkey, _row_id#3, n_nationkey, _row_id#4, s_suppkey ], primary key: [ $0 DESC, $2 ASC, $1 ASC, $3 ASC, $8 ASC, $11 ASC, $12 ASC, $13 ASC, $14 ASC, $15 ASC, $16 ASC, $17 ASC, $9 ASC, $10 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17 ], distribution key: [ 3, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17 ], read pk prefix len hint: 14 }
+    Table 4294967294 { columns: [ s_acctbal, s_name, n_name, p_partkey, p_mfgr, s_address, s_phone, s_comment, _row_id, min(ps_supplycost), ps_partkey, _row_id#1, _row_id#2, r_regionkey, _row_id#3, n_nationkey, _row_id#4, s_suppkey, _rw_timestamp ], primary key: [ $0 DESC, $2 ASC, $1 ASC, $3 ASC, $8 ASC, $11 ASC, $12 ASC, $13 ASC, $14 ASC, $15 ASC, $16 ASC, $17 ASC, $9 ASC, $10 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17 ], distribution key: [ 3, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17 ], read pk prefix len hint: 14 }
 
 - id: tpch_q5
   before:
@@ -630,76 +630,81 @@
     StreamRowIdGen { row_id_index: 7 }
     └── StreamSource { source: supplier, columns: [s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id] } { tables: [ Source: 26 ] }
 
-    Table 0 { columns: [ n_name, sum($expr1), count ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 0 { columns: [ n_name, sum($expr1), count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 1 { columns: [ n_nationkey, n_name, _row_id, r_regionkey, _row_id_0 ], primary key: [ $0 ASC, $0 ASC, $2 ASC, $4 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 0, 0 ], read pk prefix len hint: 2 }
+    Table 1 { columns: [ n_nationkey, n_name, _row_id, r_regionkey, _row_id_0, _rw_timestamp ], primary key: [ $0 ASC, $0 ASC, $2 ASC, $4 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 0, 0 ], read pk prefix len hint: 2 }
 
-    Table 2 { columns: [ n_nationkey, n_nationkey_0, _row_id, _row_id_0, r_regionkey, _degree ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC ], value indices: [ 5 ], distribution key: [ 1, 0 ], read pk prefix len hint: 2 }
+    Table 2 { columns: [ n_nationkey, n_nationkey_0, _row_id, _row_id_0, r_regionkey, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC ], value indices: [ 5 ], distribution key: [ 1, 0 ], read pk prefix len hint: 2 }
 
     Table 3
-    ├── columns: [ c_nationkey, l_extendedprice, l_discount, s_nationkey, _row_id, _row_id_0, o_custkey, o_orderkey, _row_id_1, _row_id_2, l_suppkey ]
+    ├── columns: [ c_nationkey, l_extendedprice, l_discount, s_nationkey, _row_id, _row_id_0, o_custkey, o_orderkey, _row_id_1, _row_id_2, l_suppkey, _rw_timestamp ]
     ├── primary key: [ $3 ASC, $0 ASC, $4 ASC, $5 ASC, $6 ASC, $8 ASC, $9 ASC, $10 ASC, $7 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 ]
     ├── distribution key: [ 0, 3 ]
     └── read pk prefix len hint: 2
 
     Table 4
-    ├── columns: [ s_nationkey, c_nationkey, _row_id, _row_id_0, o_custkey, _row_id_1, _row_id_2, l_suppkey, o_orderkey, _degree ]
+    ├── columns: [ s_nationkey, c_nationkey, _row_id, _row_id_0, o_custkey, _row_id_1, _row_id_2, l_suppkey, o_orderkey, _degree, _rw_timestamp ]
     ├── primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC ]
     ├── value indices: [ 9 ]
     ├── distribution key: [ 1, 0 ]
     └── read pk prefix len hint: 2
 
-    Table 5 { columns: [ r_regionkey, r_name, r_comment, _row_id ], primary key: [ $0 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 5 { columns: [ r_regionkey, r_name, r_comment, _row_id, _rw_timestamp ], primary key: [ $0 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 6 { columns: [ r_regionkey, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 6 { columns: [ r_regionkey, _row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 7 { columns: [ n_nationkey, n_name, n_regionkey, n_comment, _row_id ], primary key: [ $2 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 2 ], read pk prefix len hint: 1 }
+    Table 7 { columns: [ n_nationkey, n_name, n_regionkey, n_comment, _row_id, _rw_timestamp ], primary key: [ $2 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 2 ], read pk prefix len hint: 1 }
 
-    Table 8 { columns: [ n_regionkey, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 8 { columns: [ n_regionkey, _row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 9 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 9 { columns: [ partition_id, offset_info, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 10 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 10 { columns: [ partition_id, offset_info, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 11 { columns: [ o_orderkey, c_nationkey, _row_id, o_custkey, _row_id_0 ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $4 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2 }
+    Table 11 { columns: [ o_orderkey, c_nationkey, _row_id, o_custkey, _row_id_0, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $4 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2 }
 
-    Table 12 { columns: [ o_orderkey, c_nationkey, _row_id, _row_id_0, o_custkey, _degree ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC ], value indices: [ 5 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2 }
+    Table 12 { columns: [ o_orderkey, c_nationkey, _row_id, _row_id_0, o_custkey, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC ], value indices: [ 5 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2 }
 
-    Table 13 { columns: [ l_orderkey, l_extendedprice, l_discount, s_nationkey, _row_id, l_suppkey, _row_id_0 ], primary key: [ $0 ASC, $3 ASC, $4 ASC, $6 ASC, $5 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6 ], distribution key: [ 0, 3 ], read pk prefix len hint: 2 }
+    Table 13 { columns: [ l_orderkey, l_extendedprice, l_discount, s_nationkey, _row_id, l_suppkey, _row_id_0, _rw_timestamp ], primary key: [ $0 ASC, $3 ASC, $4 ASC, $6 ASC, $5 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6 ], distribution key: [ 0, 3 ], read pk prefix len hint: 2 }
 
-    Table 14 { columns: [ l_orderkey, s_nationkey, _row_id, _row_id_0, l_suppkey, _degree ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC ], value indices: [ 5 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2 }
+    Table 14 { columns: [ l_orderkey, s_nationkey, _row_id, _row_id_0, l_suppkey, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC ], value indices: [ 5 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2 }
 
-    Table 15 { columns: [ o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, o_clerk, o_shippriority, o_comment, _row_id ], primary key: [ $1 ASC, $9 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
+    Table 15
+    ├── columns: [ o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, o_clerk, o_shippriority, o_comment, _row_id, _rw_timestamp ]
+    ├── primary key: [ $1 ASC, $9 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 ]
+    ├── distribution key: [ 1 ]
+    └── read pk prefix len hint: 1
 
-    Table 16 { columns: [ o_custkey, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 16 { columns: [ o_custkey, _row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 17 { columns: [ c_custkey, c_name, c_address, c_nationkey, c_phone, c_acctbal, c_mktsegment, c_comment, _row_id ], primary key: [ $0 ASC, $8 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 17 { columns: [ c_custkey, c_name, c_address, c_nationkey, c_phone, c_acctbal, c_mktsegment, c_comment, _row_id, _rw_timestamp ], primary key: [ $0 ASC, $8 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 18 { columns: [ c_custkey, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 18 { columns: [ c_custkey, _row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 19 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 19 { columns: [ partition_id, offset_info, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 20 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 20 { columns: [ partition_id, offset_info, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
     Table 21
-    ├── columns: [ l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment, _row_id ]
+    ├── columns: [ l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment, _row_id, _rw_timestamp ]
     ├── primary key: [ $2 ASC, $16 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 ]
     ├── distribution key: [ 2 ]
     └── read pk prefix len hint: 1
 
-    Table 22 { columns: [ l_suppkey, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 22 { columns: [ l_suppkey, _row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 23 { columns: [ s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id ], primary key: [ $0 ASC, $7 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 23 { columns: [ s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id, _rw_timestamp ], primary key: [ $0 ASC, $7 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 24 { columns: [ s_suppkey, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 24 { columns: [ s_suppkey, _row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 25 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 25 { columns: [ partition_id, offset_info, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 26 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 26 { columns: [ partition_id, offset_info, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 4294967294 { columns: [ n_name, revenue ], primary key: [ $1 DESC, $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 2 }
+    Table 4294967294 { columns: [ n_name, revenue, _rw_timestamp ], primary key: [ $1 DESC, $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 2 }
 
 - id: tpch_q7
   before:
@@ -900,74 +905,84 @@
     StreamRowIdGen { row_id_index: 9 }
     └── StreamSource { source: orders, columns: [o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, o_clerk, o_shippriority, o_comment, _row_id] } { tables: [ Source: 25 ] }
 
-    Table 0 { columns: [ n_name, n_name_0, $expr1, sum($expr2), count ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 3, 4 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 3 }
+    Table 0 { columns: [ n_name, n_name_0, $expr1, sum($expr2), count, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 3, 4 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 3 }
 
     Table 1
-    ├── columns: [ n_name, l_orderkey, l_extendedprice, l_discount, l_shipdate, _row_id, _row_id_0, n_nationkey, s_suppkey, _row_id_1 ]
+    ├── columns: [ n_name, l_orderkey, l_extendedprice, l_discount, l_shipdate, _row_id, _row_id_0, n_nationkey, s_suppkey, _row_id_1, _rw_timestamp ]
     ├── primary key: [ $1 ASC, $5 ASC, $6 ASC, $7 ASC, $9 ASC, $8 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 ]
     ├── distribution key: [ 1 ]
     └── read pk prefix len hint: 1
 
-    Table 2 { columns: [ l_orderkey, _row_id, _row_id_0, n_nationkey, _row_id_1, s_suppkey, _degree ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC ], value indices: [ 6 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 2 { columns: [ l_orderkey, _row_id, _row_id_0, n_nationkey, _row_id_1, s_suppkey, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC ], value indices: [ 6 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 3 { columns: [ n_name, o_orderkey, _row_id, _row_id_0, n_nationkey, c_custkey, _row_id_1 ], primary key: [ $1 ASC, $2 ASC, $3 ASC, $4 ASC, $6 ASC, $5 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
+    Table 3
+    ├── columns: [ n_name, o_orderkey, _row_id, _row_id_0, n_nationkey, c_custkey, _row_id_1, _rw_timestamp ]
+    ├── primary key: [ $1 ASC, $2 ASC, $3 ASC, $4 ASC, $6 ASC, $5 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4, 5, 6 ]
+    ├── distribution key: [ 1 ]
+    └── read pk prefix len hint: 1
 
-    Table 4 { columns: [ o_orderkey, _row_id, _row_id_0, n_nationkey, _row_id_1, c_custkey, _degree ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC ], value indices: [ 6 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 4 { columns: [ o_orderkey, _row_id, _row_id_0, n_nationkey, _row_id_1, c_custkey, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC ], value indices: [ 6 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 5 { columns: [ n_name, s_suppkey, _row_id, n_nationkey, _row_id_0 ], primary key: [ $1 ASC, $2 ASC, $4 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
+    Table 5 { columns: [ n_name, s_suppkey, _row_id, n_nationkey, _row_id_0, _rw_timestamp ], primary key: [ $1 ASC, $2 ASC, $4 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
 
-    Table 6 { columns: [ s_suppkey, _row_id, _row_id_0, n_nationkey, _degree ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC ], value indices: [ 4 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 6 { columns: [ s_suppkey, _row_id, _row_id_0, n_nationkey, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC ], value indices: [ 4 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 7
-    ├── columns: [ l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment, _row_id ]
+    ├── columns: [ l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment, _row_id, _rw_timestamp ]
     ├── primary key: [ $2 ASC, $16 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 ]
     ├── distribution key: [ 2 ]
     └── read pk prefix len hint: 1
 
-    Table 8 { columns: [ l_suppkey, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 8 { columns: [ l_suppkey, _row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 9 { columns: [ n_nationkey, n_name, _row_id ], primary key: [ $0 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 9 { columns: [ n_nationkey, n_name, _row_id, _rw_timestamp ], primary key: [ $0 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 10 { columns: [ n_nationkey, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 10 { columns: [ n_nationkey, _row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 11 { columns: [ s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id ], primary key: [ $3 ASC, $7 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ], distribution key: [ 3 ], read pk prefix len hint: 1 }
+    Table 11 { columns: [ s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id, _rw_timestamp ], primary key: [ $3 ASC, $7 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ], distribution key: [ 3 ], read pk prefix len hint: 1 }
 
-    Table 12 { columns: [ s_nationkey, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 12 { columns: [ s_nationkey, _row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 13 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 13 { columns: [ partition_id, offset_info, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 14 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 14 { columns: [ partition_id, offset_info, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 15 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 15 { columns: [ partition_id, offset_info, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 16 { columns: [ n_name, c_custkey, _row_id, n_nationkey, _row_id_0 ], primary key: [ $1 ASC, $2 ASC, $4 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
+    Table 16 { columns: [ n_name, c_custkey, _row_id, n_nationkey, _row_id_0, _rw_timestamp ], primary key: [ $1 ASC, $2 ASC, $4 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
 
-    Table 17 { columns: [ c_custkey, _row_id, _row_id_0, n_nationkey, _degree ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC ], value indices: [ 4 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 17 { columns: [ c_custkey, _row_id, _row_id_0, n_nationkey, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC ], value indices: [ 4 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 18
-    ├── columns: [ o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, o_clerk, o_shippriority, o_comment, _row_id ]
+    ├── columns: [ o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, o_clerk, o_shippriority, o_comment, _row_id, _rw_timestamp ]
     ├── primary key: [ $1 ASC, $9 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 ]
     ├── distribution key: [ 1 ]
     └── read pk prefix len hint: 1
 
-    Table 19 { columns: [ o_custkey, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 19 { columns: [ o_custkey, _row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 20 { columns: [ n_nationkey, n_name, _row_id ], primary key: [ $0 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 20 { columns: [ n_nationkey, n_name, _row_id, _rw_timestamp ], primary key: [ $0 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 21 { columns: [ n_nationkey, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 21 { columns: [ n_nationkey, _row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 22 { columns: [ c_custkey, c_name, c_address, c_nationkey, c_phone, c_acctbal, c_mktsegment, c_comment, _row_id ], primary key: [ $3 ASC, $8 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8 ], distribution key: [ 3 ], read pk prefix len hint: 1 }
+    Table 22
+    ├── columns: [ c_custkey, c_name, c_address, c_nationkey, c_phone, c_acctbal, c_mktsegment, c_comment, _row_id, _rw_timestamp ]
+    ├── primary key: [ $3 ASC, $8 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8 ]
+    ├── distribution key: [ 3 ]
+    └── read pk prefix len hint: 1
 
-    Table 23 { columns: [ c_nationkey, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 23 { columns: [ c_nationkey, _row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 24 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 24 { columns: [ partition_id, offset_info, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 25 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 25 { columns: [ partition_id, offset_info, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 4294967294 { columns: [ supp_nation, cust_nation, l_year, revenue ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 3 }
+    Table 4294967294 { columns: [ supp_nation, cust_nation, l_year, revenue, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 3 }
 
 - id: tpch_q8
   before:
@@ -1219,99 +1234,99 @@
     StreamRowIdGen { row_id_index: 9 }
     └── StreamSource { source: orders, columns: [o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, o_clerk, o_shippriority, o_comment, _row_id] } { tables: [ Source: 35 ] }
 
-    Table 0 { columns: [ $expr1, sum($expr3), sum($expr2), count ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 0 { columns: [ $expr1, sum($expr3), sum($expr2), count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 1 { columns: [ c_custkey, _row_id, _row_id_0, r_regionkey, n_nationkey, _row_id_1 ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $5 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 1 { columns: [ c_custkey, _row_id, _row_id_0, r_regionkey, n_nationkey, _row_id_1, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $5 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 2 { columns: [ c_custkey, _row_id, _row_id_0, r_regionkey, _row_id_1, n_nationkey, _degree ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC ], value indices: [ 6 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 2 { columns: [ c_custkey, _row_id, _row_id_0, r_regionkey, _row_id_1, n_nationkey, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC ], value indices: [ 6 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 3
-    ├── columns: [ n_name, l_extendedprice, l_discount, o_custkey, o_orderdate, _row_id, _row_id_0, n_nationkey, _row_id_1, _row_id_2, p_partkey, s_suppkey, l_orderkey, _row_id_3 ]
+    ├── columns: [ n_name, l_extendedprice, l_discount, o_custkey, o_orderdate, _row_id, _row_id_0, n_nationkey, _row_id_1, _row_id_2, p_partkey, s_suppkey, l_orderkey, _row_id_3, _rw_timestamp ]
     ├── primary key: [ $3 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC, $11 ASC, $13 ASC, $12 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13 ]
     ├── distribution key: [ 3 ]
     └── read pk prefix len hint: 1
 
     Table 4
-    ├── columns: [ o_custkey, _row_id, _row_id_0, n_nationkey, _row_id_1, _row_id_2, p_partkey, s_suppkey, _row_id_3, l_orderkey, _degree ]
+    ├── columns: [ o_custkey, _row_id, _row_id_0, n_nationkey, _row_id_1, _row_id_2, p_partkey, s_suppkey, _row_id_3, l_orderkey, _degree, _rw_timestamp ]
     ├── primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC ]
     ├── value indices: [ 10 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
 
-    Table 5 { columns: [ n_nationkey, _row_id, r_regionkey, _row_id_0 ], primary key: [ $0 ASC, $1 ASC, $3 ASC, $2 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 5 { columns: [ n_nationkey, _row_id, r_regionkey, _row_id_0, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $3 ASC, $2 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 6 { columns: [ n_nationkey, _row_id, _row_id_0, r_regionkey, _degree ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC ], value indices: [ 4 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 6 { columns: [ n_nationkey, _row_id, _row_id_0, r_regionkey, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC ], value indices: [ 4 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 7 { columns: [ c_custkey, c_name, c_address, c_nationkey, c_phone, c_acctbal, c_mktsegment, c_comment, _row_id ], primary key: [ $3 ASC, $8 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8 ], distribution key: [ 3 ], read pk prefix len hint: 1 }
+    Table 7 { columns: [ c_custkey, c_name, c_address, c_nationkey, c_phone, c_acctbal, c_mktsegment, c_comment, _row_id, _rw_timestamp ], primary key: [ $3 ASC, $8 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8 ], distribution key: [ 3 ], read pk prefix len hint: 1 }
 
-    Table 8 { columns: [ c_nationkey, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 8 { columns: [ c_nationkey, _row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 9 { columns: [ r_regionkey, r_name, r_comment, _row_id ], primary key: [ $0 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 9 { columns: [ r_regionkey, r_name, r_comment, _row_id, _rw_timestamp ], primary key: [ $0 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 10 { columns: [ r_regionkey, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 10 { columns: [ r_regionkey, _row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 11 { columns: [ n_nationkey, n_name, n_regionkey, _row_id ], primary key: [ $2 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 2 ], read pk prefix len hint: 1 }
+    Table 11 { columns: [ n_nationkey, n_name, n_regionkey, _row_id, _rw_timestamp ], primary key: [ $2 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 2 ], read pk prefix len hint: 1 }
 
-    Table 12 { columns: [ n_regionkey, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 12 { columns: [ n_regionkey, _row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 13 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 13 { columns: [ partition_id, offset_info, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 14 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 14 { columns: [ partition_id, offset_info, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 15 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 15 { columns: [ partition_id, offset_info, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
     Table 16
-    ├── columns: [ n_name, l_orderkey, l_extendedprice, l_discount, _row_id, _row_id_0, n_nationkey, s_suppkey, _row_id_1, _row_id_2, p_partkey ]
+    ├── columns: [ n_name, l_orderkey, l_extendedprice, l_discount, _row_id, _row_id_0, n_nationkey, s_suppkey, _row_id_1, _row_id_2, p_partkey, _rw_timestamp ]
     ├── primary key: [ $1 ASC, $4 ASC, $5 ASC, $6 ASC, $8 ASC, $9 ASC, $10 ASC, $7 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 ]
     ├── distribution key: [ 1 ]
     └── read pk prefix len hint: 1
 
-    Table 17 { columns: [ l_orderkey, _row_id, _row_id_0, n_nationkey, _row_id_1, _row_id_2, p_partkey, s_suppkey, _degree ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC ], value indices: [ 8 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 17 { columns: [ l_orderkey, _row_id, _row_id_0, n_nationkey, _row_id_1, _row_id_2, p_partkey, s_suppkey, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC ], value indices: [ 8 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 18 { columns: [ o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, o_clerk, o_shippriority, o_comment, _row_id ], primary key: [ $0 ASC, $9 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 18 { columns: [ o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, o_clerk, o_shippriority, o_comment, _row_id, _rw_timestamp ], primary key: [ $0 ASC, $9 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 19 { columns: [ o_orderkey, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 19 { columns: [ o_orderkey, _row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 20 { columns: [ n_name, s_suppkey, _row_id, n_nationkey, _row_id_0 ], primary key: [ $1 ASC, $2 ASC, $4 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
+    Table 20 { columns: [ n_name, s_suppkey, _row_id, n_nationkey, _row_id_0, _rw_timestamp ], primary key: [ $1 ASC, $2 ASC, $4 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
 
-    Table 21 { columns: [ s_suppkey, _row_id, _row_id_0, n_nationkey, _degree ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC ], value indices: [ 4 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 21 { columns: [ s_suppkey, _row_id, _row_id_0, n_nationkey, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC ], value indices: [ 4 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 22 { columns: [ l_orderkey, l_suppkey, l_extendedprice, l_discount, _row_id, p_partkey, _row_id_0 ], primary key: [ $1 ASC, $4 ASC, $6 ASC, $5 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
+    Table 22 { columns: [ l_orderkey, l_suppkey, l_extendedprice, l_discount, _row_id, p_partkey, _row_id_0, _rw_timestamp ], primary key: [ $1 ASC, $4 ASC, $6 ASC, $5 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
 
-    Table 23 { columns: [ l_suppkey, _row_id, _row_id_0, p_partkey, _degree ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC ], value indices: [ 4 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 23 { columns: [ l_suppkey, _row_id, _row_id_0, p_partkey, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC ], value indices: [ 4 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 24 { columns: [ n_nationkey, n_name, n_regionkey, _row_id ], primary key: [ $0 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 24 { columns: [ n_nationkey, n_name, n_regionkey, _row_id, _rw_timestamp ], primary key: [ $0 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 25 { columns: [ n_nationkey, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 25 { columns: [ n_nationkey, _row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 26 { columns: [ s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id ], primary key: [ $3 ASC, $7 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ], distribution key: [ 3 ], read pk prefix len hint: 1 }
+    Table 26 { columns: [ s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id, _rw_timestamp ], primary key: [ $3 ASC, $7 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ], distribution key: [ 3 ], read pk prefix len hint: 1 }
 
-    Table 27 { columns: [ s_nationkey, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 27 { columns: [ s_nationkey, _row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 28 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 28 { columns: [ partition_id, offset_info, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 29 { columns: [ p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_container, p_retailprice, p_comment, _row_id ], primary key: [ $0 ASC, $9 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 29 { columns: [ p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_container, p_retailprice, p_comment, _row_id, _rw_timestamp ], primary key: [ $0 ASC, $9 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 30 { columns: [ p_partkey, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 30 { columns: [ p_partkey, _row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 31
-    ├── columns: [ l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment, _row_id ]
+    ├── columns: [ l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment, _row_id, _rw_timestamp ]
     ├── primary key: [ $1 ASC, $16 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 ]
     ├── distribution key: [ 1 ]
     └── read pk prefix len hint: 1
 
-    Table 32 { columns: [ l_partkey, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 32 { columns: [ l_partkey, _row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 33 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 33 { columns: [ partition_id, offset_info, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 34 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 34 { columns: [ partition_id, offset_info, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 35 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 35 { columns: [ partition_id, offset_info, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 4294967294 { columns: [ o_year, mkt_share ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 4294967294 { columns: [ o_year, mkt_share, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
 - id: tpch_q9
   before:
@@ -1500,71 +1515,71 @@
     └── StreamRowIdGen { row_id_index: 16 }
         └── StreamSource { source: lineitem, columns: [l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment, _row_id] } { tables: [ Source: 26 ] }
 
-    Table 0 { columns: [ n_name, $expr1, sum($expr2), count ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2, 3 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2 }
+    Table 0 { columns: [ n_name, $expr1, sum($expr2), count, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2, 3 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2 }
 
-    Table 1 { columns: [ p_partkey, ps_partkey, ps_suppkey, ps_supplycost, _row_id, _row_id_0 ], primary key: [ $0 ASC, $2 ASC, $1 ASC, $2 ASC, $4 ASC, $5 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 2 ], read pk prefix len hint: 4 }
+    Table 1 { columns: [ p_partkey, ps_partkey, ps_suppkey, ps_supplycost, _row_id, _row_id_0, _rw_timestamp ], primary key: [ $0 ASC, $2 ASC, $1 ASC, $2 ASC, $4 ASC, $5 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 2 ], read pk prefix len hint: 4 }
 
-    Table 2 { columns: [ p_partkey, ps_suppkey, ps_partkey, ps_suppkey_0, _row_id, _row_id_0, _degree ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC ], value indices: [ 6 ], distribution key: [ 3 ], read pk prefix len hint: 4 }
+    Table 2 { columns: [ p_partkey, ps_suppkey, ps_partkey, ps_suppkey_0, _row_id, _row_id_0, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC ], value indices: [ 6 ], distribution key: [ 3 ], read pk prefix len hint: 4 }
 
     Table 3
-    ├── columns: [ n_name, s_suppkey, o_orderdate, l_partkey, l_suppkey, l_quantity, l_extendedprice, l_discount, _row_id, _row_id_0, n_nationkey, _row_id_1, _row_id_2, o_orderkey ]
+    ├── columns: [ n_name, s_suppkey, o_orderdate, l_partkey, l_suppkey, l_quantity, l_extendedprice, l_discount, _row_id, _row_id_0, n_nationkey, _row_id_1, _row_id_2, o_orderkey, _rw_timestamp ]
     ├── primary key: [ $3 ASC, $4 ASC, $3 ASC, $1 ASC, $8 ASC, $9 ASC, $10 ASC, $11 ASC, $12 ASC, $13 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13 ]
     ├── distribution key: [ 1 ]
     └── read pk prefix len hint: 4
 
-    Table 4 { columns: [ l_partkey, l_suppkey, l_partkey_0, s_suppkey, _row_id, _row_id_0, n_nationkey, _row_id_1, _row_id_2, o_orderkey, _degree ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC ], value indices: [ 10 ], distribution key: [ 3 ], read pk prefix len hint: 4 }
+    Table 4 { columns: [ l_partkey, l_suppkey, l_partkey_0, s_suppkey, _row_id, _row_id_0, n_nationkey, _row_id_1, _row_id_2, o_orderkey, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC ], value indices: [ 10 ], distribution key: [ 3 ], read pk prefix len hint: 4 }
 
-    Table 5 { columns: [ p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_container, p_retailprice, p_comment, _row_id ], primary key: [ $0 ASC, $9 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 5 { columns: [ p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_container, p_retailprice, p_comment, _row_id, _rw_timestamp ], primary key: [ $0 ASC, $9 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 6 { columns: [ p_partkey, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 6 { columns: [ p_partkey, _row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 7 { columns: [ ps_partkey, ps_suppkey, ps_availqty, ps_supplycost, ps_comment, _row_id ], primary key: [ $0 ASC, $5 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 7 { columns: [ ps_partkey, ps_suppkey, ps_availqty, ps_supplycost, ps_comment, _row_id, _rw_timestamp ], primary key: [ $0 ASC, $5 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 8 { columns: [ ps_partkey, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 8 { columns: [ ps_partkey, _row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 9 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 9 { columns: [ partition_id, offset_info, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 10 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 10 { columns: [ partition_id, offset_info, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 11 { columns: [ n_name, s_suppkey, _row_id, n_nationkey, _row_id_0 ], primary key: [ $1 ASC, $2 ASC, $4 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
+    Table 11 { columns: [ n_name, s_suppkey, _row_id, n_nationkey, _row_id_0, _rw_timestamp ], primary key: [ $1 ASC, $2 ASC, $4 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
 
-    Table 12 { columns: [ s_suppkey, _row_id, _row_id_0, n_nationkey, _degree ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC ], value indices: [ 4 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 12 { columns: [ s_suppkey, _row_id, _row_id_0, n_nationkey, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC ], value indices: [ 4 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 13 { columns: [ o_orderdate, l_partkey, l_suppkey, l_quantity, l_extendedprice, l_discount, _row_id, o_orderkey, _row_id_0 ], primary key: [ $2 ASC, $6 ASC, $8 ASC, $7 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8 ], distribution key: [ 2 ], read pk prefix len hint: 1 }
+    Table 13 { columns: [ o_orderdate, l_partkey, l_suppkey, l_quantity, l_extendedprice, l_discount, _row_id, o_orderkey, _row_id_0, _rw_timestamp ], primary key: [ $2 ASC, $6 ASC, $8 ASC, $7 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8 ], distribution key: [ 2 ], read pk prefix len hint: 1 }
 
-    Table 14 { columns: [ l_suppkey, _row_id, _row_id_0, o_orderkey, _degree ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC ], value indices: [ 4 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 14 { columns: [ l_suppkey, _row_id, _row_id_0, o_orderkey, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC ], value indices: [ 4 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 15 { columns: [ n_nationkey, n_name, n_regionkey, n_comment, _row_id ], primary key: [ $0 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 15 { columns: [ n_nationkey, n_name, n_regionkey, n_comment, _row_id, _rw_timestamp ], primary key: [ $0 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 16 { columns: [ n_nationkey, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 16 { columns: [ n_nationkey, _row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 17 { columns: [ s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id ], primary key: [ $3 ASC, $7 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ], distribution key: [ 3 ], read pk prefix len hint: 1 }
+    Table 17 { columns: [ s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id, _rw_timestamp ], primary key: [ $3 ASC, $7 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ], distribution key: [ 3 ], read pk prefix len hint: 1 }
 
-    Table 18 { columns: [ s_nationkey, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 18 { columns: [ s_nationkey, _row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 19 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 19 { columns: [ partition_id, offset_info, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 20 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 20 { columns: [ partition_id, offset_info, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 21 { columns: [ o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, o_clerk, o_shippriority, o_comment, _row_id ], primary key: [ $0 ASC, $9 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 21 { columns: [ o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, o_clerk, o_shippriority, o_comment, _row_id, _rw_timestamp ], primary key: [ $0 ASC, $9 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 22 { columns: [ o_orderkey, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 22 { columns: [ o_orderkey, _row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 23
-    ├── columns: [ l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment, _row_id ]
+    ├── columns: [ l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment, _row_id, _rw_timestamp ]
     ├── primary key: [ $0 ASC, $16 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
 
-    Table 24 { columns: [ l_orderkey, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 24 { columns: [ l_orderkey, _row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 25 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 25 { columns: [ partition_id, offset_info, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 26 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 26 { columns: [ partition_id, offset_info, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 4294967294 { columns: [ nation, o_year, sum_profit ], primary key: [ $0 ASC, $1 DESC ], value indices: [ 0, 1, 2 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2 }
+    Table 4294967294 { columns: [ nation, o_year, sum_profit, _rw_timestamp ], primary key: [ $0 ASC, $1 DESC ], value indices: [ 0, 1, 2 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2 }
 
 - id: tpch_q20
   before:
@@ -1743,51 +1758,51 @@
     └── StreamSource { source: lineitem, columns: [l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment, _row_id] }
         └── tables: [ Source: 21 ]
 
-    Table 0 { columns: [ s_suppkey, s_name, s_address, _row_id, s_nationkey, _row_id_0 ], primary key: [ $0 ASC, $3 ASC, $5 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 0 { columns: [ s_suppkey, s_name, s_address, _row_id, s_nationkey, _row_id_0, _rw_timestamp ], primary key: [ $0 ASC, $3 ASC, $5 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 1 { columns: [ s_suppkey, _row_id, _row_id_0, s_nationkey, _degree ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC ], value indices: [ 4 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 1 { columns: [ s_suppkey, _row_id, _row_id_0, s_nationkey, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC ], value indices: [ 4 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 2 { columns: [ ps_suppkey, _row_id, ps_partkey, l_partkey, l_suppkey ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 2 { columns: [ ps_suppkey, _row_id, ps_partkey, l_partkey, l_suppkey, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 3 { columns: [ ps_suppkey, _row_id, ps_partkey, _degree ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 3 { columns: [ ps_suppkey, _row_id, ps_partkey, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 4 { columns: [ s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id ], primary key: [ $3 ASC, $7 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ], distribution key: [ 3 ], read pk prefix len hint: 1 }
+    Table 4 { columns: [ s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id, _rw_timestamp ], primary key: [ $3 ASC, $7 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ], distribution key: [ 3 ], read pk prefix len hint: 1 }
 
-    Table 5 { columns: [ s_nationkey, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 5 { columns: [ s_nationkey, _row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 6 { columns: [ n_nationkey, n_name, n_regionkey, n_comment, _row_id ], primary key: [ $0 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 6 { columns: [ n_nationkey, n_name, n_regionkey, n_comment, _row_id, _rw_timestamp ], primary key: [ $0 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 7 { columns: [ n_nationkey, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 7 { columns: [ n_nationkey, _row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 8 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 8 { columns: [ partition_id, offset_info, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 9 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 9 { columns: [ partition_id, offset_info, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 10 { columns: [ ps_partkey, ps_suppkey, $expr1, _row_id ], primary key: [ $0 ASC, $1 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2 }
+    Table 10 { columns: [ ps_partkey, ps_suppkey, $expr1, _row_id, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2 }
 
-    Table 11 { columns: [ ps_partkey, ps_suppkey, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 3 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2 }
+    Table 11 { columns: [ ps_partkey, ps_suppkey, _row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 3 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2 }
 
-    Table 12 { columns: [ $expr2, l_partkey, l_suppkey ], primary key: [ $1 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 1, 2 ], read pk prefix len hint: 2 }
+    Table 12 { columns: [ $expr2, l_partkey, l_suppkey, _rw_timestamp ], primary key: [ $1 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 1, 2 ], read pk prefix len hint: 2 }
 
-    Table 13 { columns: [ l_partkey, l_suppkey, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2 }
+    Table 13 { columns: [ l_partkey, l_suppkey, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2 }
 
-    Table 14 { columns: [ ps_partkey, ps_suppkey, ps_availqty, ps_supplycost, ps_comment, _row_id ], primary key: [ $0 ASC, $5 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 14 { columns: [ ps_partkey, ps_suppkey, ps_availqty, ps_supplycost, ps_comment, _row_id, _rw_timestamp ], primary key: [ $0 ASC, $5 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 15 { columns: [ ps_partkey, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 15 { columns: [ ps_partkey, _row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 16 { columns: [ p_partkey, _row_id ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 16 { columns: [ p_partkey, _row_id, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 17 { columns: [ p_partkey, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 17 { columns: [ p_partkey, _row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 18 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 18 { columns: [ partition_id, offset_info, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 19 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 19 { columns: [ partition_id, offset_info, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 20 { columns: [ l_partkey, l_suppkey, sum(l_quantity), count ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2, 3 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2 }
+    Table 20 { columns: [ l_partkey, l_suppkey, sum(l_quantity), count, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2, 3 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2 }
 
-    Table 21 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 21 { columns: [ partition_id, offset_info, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 4294967294 { columns: [ s_name, s_address, _row_id, _row_id#1, s_nationkey, s_suppkey ], primary key: [ $0 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 2, 3, 4, 5 ], read pk prefix len hint: 5 }
+    Table 4294967294 { columns: [ s_name, s_address, _row_id, _row_id#1, s_nationkey, s_suppkey, _rw_timestamp ], primary key: [ $0 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 2, 3, 4, 5 ], read pk prefix len hint: 5 }
 
 - id: tpch_q21
   before:
@@ -2000,80 +2015,80 @@
     └── StreamFilter { predicate: (l_receiptdate > l_commitdate) }
         └── StreamExchange NoShuffle from 9
 
-    Table 0 { columns: [ s_name, count ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 0 { columns: [ s_name, count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 1
-    ├── columns: [ s_name, l_orderkey, l_suppkey, _row_id, _row_id_0, n_nationkey, _row_id_1, _row_id_2, o_orderkey, s_suppkey ]
+    ├── columns: [ s_name, l_orderkey, l_suppkey, _row_id, _row_id_0, n_nationkey, _row_id_1, _row_id_2, o_orderkey, s_suppkey, _rw_timestamp ]
     ├── primary key: [ $1 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 ]
     ├── distribution key: [ 1 ]
     └── read pk prefix len hint: 1
 
     Table 2
-    ├── columns: [ l_orderkey, _row_id, _row_id_0, n_nationkey, _row_id_1, _row_id_2, o_orderkey, s_suppkey, _degree ]
+    ├── columns: [ l_orderkey, _row_id, _row_id_0, n_nationkey, _row_id_1, _row_id_2, o_orderkey, s_suppkey, _degree, _rw_timestamp ]
     ├── primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC ]
     ├── value indices: [ 8 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
 
-    Table 3 { columns: [ l_orderkey, l_suppkey, _row_id ], primary key: [ $0 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 3 { columns: [ l_orderkey, l_suppkey, _row_id, _rw_timestamp ], primary key: [ $0 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 4 { columns: [ l_orderkey, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 4 { columns: [ l_orderkey, _row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 5
-    ├── columns: [ s_name, l_orderkey, l_suppkey, _row_id, _row_id_0, n_nationkey, s_suppkey, _row_id_1, _row_id_2, o_orderkey ]
+    ├── columns: [ s_name, l_orderkey, l_suppkey, _row_id, _row_id_0, n_nationkey, s_suppkey, _row_id_1, _row_id_2, o_orderkey, _rw_timestamp ]
     ├── primary key: [ $1 ASC, $3 ASC, $4 ASC, $5 ASC, $7 ASC, $8 ASC, $9 ASC, $6 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 ]
     ├── distribution key: [ 1 ]
     └── read pk prefix len hint: 1
 
     Table 6
-    ├── columns: [ l_orderkey, _row_id, _row_id_0, n_nationkey, _row_id_1, _row_id_2, o_orderkey, s_suppkey, _degree ]
+    ├── columns: [ l_orderkey, _row_id, _row_id_0, n_nationkey, _row_id_1, _row_id_2, o_orderkey, s_suppkey, _degree, _rw_timestamp ]
     ├── primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC ]
     ├── value indices: [ 8 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
 
-    Table 7 { columns: [ l_orderkey, l_suppkey, _row_id ], primary key: [ $0 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 7 { columns: [ l_orderkey, l_suppkey, _row_id, _rw_timestamp ], primary key: [ $0 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 8 { columns: [ l_orderkey, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 8 { columns: [ l_orderkey, _row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 9 { columns: [ s_suppkey, s_name, _row_id, n_nationkey, _row_id_0 ], primary key: [ $0 ASC, $2 ASC, $4 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 9 { columns: [ s_suppkey, s_name, _row_id, n_nationkey, _row_id_0, _rw_timestamp ], primary key: [ $0 ASC, $2 ASC, $4 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 10 { columns: [ s_suppkey, _row_id, _row_id_0, n_nationkey, _degree ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC ], value indices: [ 4 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 10 { columns: [ s_suppkey, _row_id, _row_id_0, n_nationkey, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC ], value indices: [ 4 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 11 { columns: [ l_orderkey, l_suppkey, _row_id, o_orderkey, _row_id_0 ], primary key: [ $1 ASC, $2 ASC, $4 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
+    Table 11 { columns: [ l_orderkey, l_suppkey, _row_id, o_orderkey, _row_id_0, _rw_timestamp ], primary key: [ $1 ASC, $2 ASC, $4 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
 
-    Table 12 { columns: [ l_suppkey, _row_id, _row_id_0, o_orderkey, _degree ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC ], value indices: [ 4 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 12 { columns: [ l_suppkey, _row_id, _row_id_0, o_orderkey, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC ], value indices: [ 4 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 13 { columns: [ n_nationkey, n_name, n_regionkey, n_comment, _row_id ], primary key: [ $0 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 13 { columns: [ n_nationkey, n_name, n_regionkey, n_comment, _row_id, _rw_timestamp ], primary key: [ $0 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 14 { columns: [ n_nationkey, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 14 { columns: [ n_nationkey, _row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 15 { columns: [ s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id ], primary key: [ $3 ASC, $7 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ], distribution key: [ 3 ], read pk prefix len hint: 1 }
+    Table 15 { columns: [ s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id, _rw_timestamp ], primary key: [ $3 ASC, $7 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ], distribution key: [ 3 ], read pk prefix len hint: 1 }
 
-    Table 16 { columns: [ s_nationkey, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 16 { columns: [ s_nationkey, _row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 17 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 17 { columns: [ partition_id, offset_info, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 18 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 18 { columns: [ partition_id, offset_info, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
     Table 19
-    ├── columns: [ o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, o_clerk, o_shippriority, o_comment, _row_id ]
+    ├── columns: [ o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, o_clerk, o_shippriority, o_comment, _row_id, _rw_timestamp ]
     ├── primary key: [ $0 ASC, $9 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
 
-    Table 20 { columns: [ o_orderkey, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 20 { columns: [ o_orderkey, _row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 21 { columns: [ l_orderkey, l_suppkey, l_commitdate, l_receiptdate, _row_id ], primary key: [ $0 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 21 { columns: [ l_orderkey, l_suppkey, l_commitdate, l_receiptdate, _row_id, _rw_timestamp ], primary key: [ $0 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 22 { columns: [ l_orderkey, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 22 { columns: [ l_orderkey, _row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 23 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 23 { columns: [ partition_id, offset_info, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 24 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 24 { columns: [ partition_id, offset_info, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 4294967294 { columns: [ s_name, numwait ], primary key: [ $1 DESC, $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 2 }
+    Table 4294967294 { columns: [ s_name, numwait, _rw_timestamp ], primary key: [ $1 DESC, $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 2 }
 

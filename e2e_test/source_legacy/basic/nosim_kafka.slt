@@ -51,6 +51,7 @@ productId bigint false NULL
 productName character varying false NULL
 tags character varying[] false NULL
 _row_id serial true NULL
+_rw_timestamp timestamp with time zone true NULL
 primary key _row_id NULL NULL
 distribution key _row_id NULL NULL
 table description kafka_json_schema_plain NULL NULL

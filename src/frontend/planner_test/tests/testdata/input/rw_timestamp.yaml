@@ -1,0 +1,22 @@
+- sql: |
+    create table t (a int);
+    select _rw_timestamp from t;
+  expected_outputs:
+    - logical_plan
+    - batch_plan
+    - stream_error
+- sql: |
+    create table t (a int);
+    select t.*, _rw_timestamp from t;
+  expected_outputs:
+    - logical_plan
+    - batch_plan
+    - stream_error
+- sql: |
+    create table t (a int);
+    create index idx on t(a);
+    select _rw_timestamp from t where a = 1;
+  expected_outputs:
+    - logical_plan
+    - batch_plan
+    - stream_error

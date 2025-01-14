@@ -7,12 +7,12 @@
     LogicalProject { exprs: [t1.x, t1.y] }
     └─LogicalFilter { predicate: (t1.x::Decimal > $expr1) }
       └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
-        ├─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
+        ├─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id, t1._rw_timestamp] }
         └─LogicalProject { exprs: [(1.5:Decimal * min(t2.x)::Decimal) as $expr1] }
           └─LogicalAgg { aggs: [min(t2.x)] }
             └─LogicalProject { exprs: [t2.x] }
               └─LogicalFilter { predicate: (CorrelatedInputRef { index: 1, correlated_id: 1 } = t2.y) AND (t2.y = 1000:Int32) }
-                └─LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id] }
+                └─LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id, t2._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
     LogicalJoin { type: Inner, on: (t1.y = t2.y) AND ($expr1 > $expr2), output: [t1.x, t1.y] }
     ├─LogicalProject { exprs: [t1.x, t1.y, t1.x::Decimal as $expr1] }
@@ -28,13 +28,13 @@
     LogicalProject { exprs: [t1.x, t1.y] }
     └─LogicalFilter { predicate: (t1.x > min(t2.x)) }
       └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
-        ├─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
+        ├─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id, t1._rw_timestamp] }
         └─LogicalProject { exprs: [min(t2.x)] }
           └─LogicalAgg { aggs: [min(t2.x)] }
             └─LogicalProject { exprs: [t2.x] }
               └─LogicalFilter { predicate: (t2.y = $expr1) }
                 └─LogicalApply { type: LeftOuter, on: true, correlated_id: 2, max_one_row: true }
-                  ├─LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id] }
+                  ├─LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id, t2._rw_timestamp] }
                   └─LogicalProject { exprs: [CorrelatedInputRef { index: 1, correlated_id: 1 } as $expr1] }
                     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - sql: |
@@ -46,19 +46,19 @@
     LogicalProject { exprs: [t1.x, t1.y] }
     └─LogicalFilter { predicate: (t1.x > min(t2.x)) }
       └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
-        ├─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
+        ├─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id, t1._rw_timestamp] }
         └─LogicalProject { exprs: [min(t2.x)] }
           └─LogicalAgg { aggs: [min(t2.x)] }
             └─LogicalProject { exprs: [t2.x] }
               └─LogicalFilter { predicate: (CorrelatedInputRef { index: 1, correlated_id: 1 } = t2.y) AND (CorrelatedInputRef { index: 0, correlated_id: 1 } = max(t3.x)) }
                 └─LogicalApply { type: LeftOuter, on: true, correlated_id: 2, max_one_row: true }
-                  ├─LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id] }
+                  ├─LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id, t2._rw_timestamp] }
                   └─LogicalProject { exprs: [max(t3.x)] }
                     └─LogicalAgg { aggs: [max(t3.x)] }
                       └─LogicalProject { exprs: [t3.x] }
                         └─LogicalFilter { predicate: (t3.y = CorrelatedInputRef { index: 1, correlated_id: 1 }) }
                           └─LogicalJoin { type: Inner, on: true, output: all }
-                            ├─LogicalScan { table: t3, columns: [t3.x, t3.y, t3._row_id] }
+                            ├─LogicalScan { table: t3, columns: [t3.x, t3.y, t3._row_id, t3._rw_timestamp] }
                             └─LogicalProject { exprs: [1:Int32] }
                               └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - sql: |
@@ -68,10 +68,10 @@
   logical_plan: |-
     LogicalProject { exprs: [t1.x, t1.y] }
     └─LogicalApply { type: LeftSemi, on: true, correlated_id: 1 }
-      ├─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
+      ├─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id, t1._rw_timestamp] }
       └─LogicalProject { exprs: [t2.x, t2.y] }
         └─LogicalFilter { predicate: (t2.y = 100:Int32) AND (CorrelatedInputRef { index: 0, correlated_id: 1 } = t2.x) AND (t2.x = 1000:Int32) AND (CorrelatedInputRef { index: 1, correlated_id: 1 } = t2.y) }
-          └─LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id] }
+          └─LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id, t2._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
     LogicalJoin { type: LeftSemi, on: (t1.x = t2.x) AND (t1.y = t2.y), output: all }
     ├─LogicalScan { table: t1, columns: [t1.x, t1.y] }
@@ -84,12 +84,12 @@
     LogicalProject { exprs: [t1.x, t1.y] }
     └─LogicalFilter { predicate: (t1.x::Decimal > $expr1) }
       └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
-        ├─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
+        ├─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id, t1._rw_timestamp] }
         └─LogicalProject { exprs: [(1.5:Decimal * min(t2.x)::Decimal) as $expr1] }
           └─LogicalAgg { aggs: [min(t2.x)] }
             └─LogicalProject { exprs: [t2.x] }
               └─LogicalFilter { predicate: (CorrelatedInputRef { index: 1, correlated_id: 1 } = t2.y) }
-                └─LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id] }
+                └─LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id, t2._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
     LogicalJoin { type: Inner, on: (t1.y = t2.y) AND ($expr1 > $expr2), output: [t1.x, t1.y] }
     ├─LogicalProject { exprs: [t1.x, t1.y, t1.x::Decimal as $expr1] }
@@ -105,12 +105,12 @@
     LogicalProject { exprs: [t1.x, t1.y] }
     └─LogicalFilter { predicate: (t1.x > count) }
       └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
-        ├─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
+        ├─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id, t1._rw_timestamp] }
         └─LogicalProject { exprs: [count] }
           └─LogicalAgg { aggs: [count] }
             └─LogicalProject { exprs: [] }
               └─LogicalFilter { predicate: (CorrelatedInputRef { index: 1, correlated_id: 1 } = t2.y) }
-                └─LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id] }
+                └─LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id, t2._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
     LogicalJoin { type: Inner, on: IsNotDistinctFrom(t1.y, t1.y) AND ($expr1 > count(1:Int32)), output: [t1.x, t1.y] }
     ├─LogicalProject { exprs: [t1.x, t1.y, t1.x::Int64 as $expr1] }
@@ -129,12 +129,12 @@
     LogicalProject { exprs: [t1.x, t1.y] }
     └─LogicalFilter { predicate: (t1.x > $expr1) }
       └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
-        ├─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
+        ├─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id, t1._rw_timestamp] }
         └─LogicalProject { exprs: [(count + count) as $expr1] }
           └─LogicalAgg { aggs: [count] }
             └─LogicalProject { exprs: [] }
               └─LogicalFilter { predicate: (CorrelatedInputRef { index: 1, correlated_id: 1 } = t2.y) }
-                └─LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id] }
+                └─LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id, t2._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
     LogicalJoin { type: Inner, on: IsNotDistinctFrom(t1.y, t1.y) AND ($expr1 > $expr2), output: [t1.x, t1.y] }
     ├─LogicalProject { exprs: [t1.x, t1.y, t1.x::Int64 as $expr1] }
@@ -153,12 +153,12 @@
   logical_plan: |-
     LogicalProject { exprs: [t1.a, array_agg(t1.a) filter(IsDistinctFrom(t1.a, 1:Int32))] }
     └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
-      ├─LogicalScan { table: t1, columns: [t1.a, t1.b, t1._row_id] }
+      ├─LogicalScan { table: t1, columns: [t1.a, t1.b, t1._row_id, t1._rw_timestamp] }
       └─LogicalProject { exprs: [array_agg(t1.a) filter(IsDistinctFrom(t1.a, 1:Int32))] }
         └─LogicalAgg { aggs: [array_agg(t1.a) filter(IsDistinctFrom(t1.a, 1:Int32))] }
           └─LogicalProject { exprs: [t1.a] }
             └─LogicalFilter { predicate: (t1.a <> CorrelatedInputRef { index: 1, correlated_id: 1 }) }
-              └─LogicalScan { table: t1, columns: [t1.a, t1.b, t1._row_id] }
+              └─LogicalScan { table: t1, columns: [t1.a, t1.b, t1._row_id, t1._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
     LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(t1.b, t1.b), output: [t1.a, array_agg(t1.a) filter(IsDistinctFrom(t1.a, 1:Int32) AND IsNotNull(1:Int32))] }
     ├─LogicalScan { table: t1, columns: [t1.a, t1.b] }
@@ -178,10 +178,10 @@
   logical_plan: |-
     LogicalProject { exprs: [t1.x] }
     └─LogicalApply { type: LeftSemi, on: (t1.y = t2.y), correlated_id: 1 }
-      ├─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
+      ├─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id, t1._rw_timestamp] }
       └─LogicalProject { exprs: [t2.y] }
         └─LogicalFilter { predicate: (CorrelatedInputRef { index: 0, correlated_id: 1 } = t2.x) }
-          └─LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id] }
+          └─LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id, t2._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
     LogicalJoin { type: LeftSemi, on: (t1.y = t2.y) AND (t1.x = t2.x), output: [t1.x] }
     ├─LogicalScan { table: t1, columns: [t1.x, t1.y] }
@@ -198,10 +198,10 @@
   logical_plan: |-
     LogicalProject { exprs: [t1.x] }
     └─LogicalApply { type: LeftSemi, on: (t1.y = t2.y), correlated_id: 1 }
-      ├─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
+      ├─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id, t1._rw_timestamp] }
       └─LogicalProject { exprs: [t2.y] }
         └─LogicalFilter { predicate: ((CorrelatedInputRef { index: 0, correlated_id: 1 } + t2.x) = 100:Int32) AND (CorrelatedInputRef { index: 1, correlated_id: 1 } = 1000:Int32) }
-          └─LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id] }
+          └─LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id, t2._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
     LogicalJoin { type: LeftSemi, on: (t1.y = t2.y) AND ((t1.x + t2.x) = 100:Int32), output: [t1.x] }
     ├─LogicalScan { table: t1, columns: [t1.x, t1.y], predicate: (t1.y = 1000:Int32) }
@@ -214,10 +214,10 @@
   logical_plan: |-
     LogicalProject { exprs: [t1.x] }
     └─LogicalApply { type: LeftSemi, on: (t1.y = t2.y), correlated_id: 1 }
-      ├─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
+      ├─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id, t1._rw_timestamp] }
       └─LogicalProject { exprs: [t2.y] }
         └─LogicalFilter { predicate: (CorrelatedInputRef { index: 0, correlated_id: 1 } > (t2.x + 1000:Int32)) }
-          └─LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id] }
+          └─LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id, t2._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
     LogicalJoin { type: LeftSemi, on: (t1.y = t2.y) AND (t1.x > $expr1), output: [t1.x] }
     ├─LogicalScan { table: t1, columns: [t1.x, t1.y] }
@@ -241,15 +241,15 @@
   logical_plan: |-
     LogicalProject { exprs: [t1.x] }
     └─LogicalApply { type: LeftSemi, on: (t1.y = t2.x), correlated_id: 1 }
-      ├─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
+      ├─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id, t1._rw_timestamp] }
       └─LogicalProject { exprs: [t2.x] }
         └─LogicalFilter { predicate: (t2.y = CorrelatedInputRef { index: 1, correlated_id: 1 }) AND (t2.x > min(t3.x)) }
           └─LogicalApply { type: LeftOuter, on: true, correlated_id: 2, max_one_row: true }
-            ├─LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id] }
+            ├─LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id, t2._rw_timestamp] }
             └─LogicalProject { exprs: [min(t3.x)] }
               └─LogicalAgg { aggs: [min(t3.x)] }
                 └─LogicalProject { exprs: [t3.x] }
-                  └─LogicalScan { table: t3, columns: [t3.x, t3.y, t3._row_id] }
+                  └─LogicalScan { table: t3, columns: [t3.x, t3.y, t3._row_id, t3._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
     LogicalJoin { type: LeftSemi, on: (t1.y = t2.x) AND (t2.y = t1.y), output: [t1.x] }
     ├─LogicalScan { table: t1, columns: [t1.x, t1.y] }
@@ -266,13 +266,13 @@
   logical_plan: |-
     LogicalProject { exprs: [t1.x] }
     └─LogicalApply { type: LeftSemi, on: (t1.y = t2.x), correlated_id: 1 }
-      ├─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
+      ├─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id, t1._rw_timestamp] }
       └─LogicalProject { exprs: [t2.x] }
         └─LogicalApply { type: LeftSemi, on: (t2.y = t3.y), correlated_id: 2 }
-          ├─LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id] }
+          ├─LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id, t2._rw_timestamp] }
           └─LogicalProject { exprs: [t3.y] }
             └─LogicalFilter { predicate: (CorrelatedInputRef { index: 1, correlated_id: 1 } = t3.y) }
-              └─LogicalScan { table: t3, columns: [t3.x, t3.y, t3._row_id] }
+              └─LogicalScan { table: t3, columns: [t3.x, t3.y, t3._row_id, t3._rw_timestamp] }
 - name: uncorrelated outer subquery with a correlated inner subquery
   sql: |
     create table t1(x int, y int);
@@ -282,13 +282,13 @@
   logical_plan: |-
     LogicalProject { exprs: [t1.x] }
     └─LogicalApply { type: LeftSemi, on: (t1.y = t2.x), correlated_id: 1 }
-      ├─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
+      ├─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id, t1._rw_timestamp] }
       └─LogicalProject { exprs: [t2.x] }
         └─LogicalApply { type: LeftSemi, on: (t2.y = t3.y), correlated_id: 2 }
-          ├─LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id] }
+          ├─LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id, t2._rw_timestamp] }
           └─LogicalProject { exprs: [t3.y] }
             └─LogicalFilter { predicate: (CorrelatedInputRef { index: 1, correlated_id: 2 } = t3.y) }
-              └─LogicalScan { table: t3, columns: [t3.x, t3.y, t3._row_id] }
+              └─LogicalScan { table: t3, columns: [t3.x, t3.y, t3._row_id, t3._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
     LogicalJoin { type: LeftSemi, on: (t1.y = t2.x), output: [t1.x] }
     ├─LogicalScan { table: t1, columns: [t1.x, t1.y] }
@@ -364,12 +364,12 @@
     └─LogicalApply { type: LeftSemi, on: true, correlated_id: 1 }
       ├─LogicalAgg { aggs: [] }
       │ └─LogicalProject { exprs: [] }
-      │   └─LogicalScan { table: a, columns: [a.a1, a.a2, a._row_id] }
+      │   └─LogicalScan { table: a, columns: [a.a1, a.a2, a._row_id, a._rw_timestamp] }
       └─LogicalProject { exprs: [1:Int32] }
         └─LogicalApply { type: LeftSemi, on: true, correlated_id: 2 }
-          ├─LogicalScan { table: b, columns: [b.b1, b.b2, b._row_id] }
+          ├─LogicalScan { table: b, columns: [b.b1, b.b2, b._row_id, b._rw_timestamp] }
           └─LogicalProject { exprs: [CorrelatedInputRef { index: 0, correlated_id: 2 } as $expr1] }
-            └─LogicalScan { table: c, columns: [c.c1, c.c2, c._row_id] }
+            └─LogicalScan { table: c, columns: [c.c1, c.c2, c._row_id, c._rw_timestamp] }
 - name: correlated column with depth=2 in HAVING
   sql: |
     create table a (a1 int, a2 int);
@@ -474,13 +474,13 @@
         └─LogicalFilter { predicate: (a.a3 = b.b2) AND (3:Int32 = count) }
           └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
             ├─LogicalJoin { type: Inner, on: true, output: all }
-            │ ├─LogicalScan { table: a, columns: [a.a1, a.a2, a.a3, a._row_id] }
-            │ └─LogicalScan { table: b, columns: [b.b1, b.b2, b.b3, b._row_id] }
+            │ ├─LogicalScan { table: a, columns: [a.a1, a.a2, a.a3, a._row_id, a._rw_timestamp] }
+            │ └─LogicalScan { table: b, columns: [b.b1, b.b2, b.b3, b._row_id, b._rw_timestamp] }
             └─LogicalProject { exprs: [count] }
               └─LogicalAgg { aggs: [count] }
                 └─LogicalProject { exprs: [] }
-                  └─LogicalFilter { predicate: (CorrelatedInputRef { index: 5, correlated_id: 1 } = c.c2) AND (CorrelatedInputRef { index: 2, correlated_id: 1 } = c.c3) }
-                    └─LogicalScan { table: c, columns: [c.c1, c.c2, c.c3, c._row_id] }
+                  └─LogicalFilter { predicate: (CorrelatedInputRef { index: 6, correlated_id: 1 } = c.c2) AND (CorrelatedInputRef { index: 2, correlated_id: 1 } = c.c3) }
+                    └─LogicalScan { table: c, columns: [c.c1, c.c2, c.c3, c._row_id, c._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
     LogicalAgg { aggs: [count] }
     └─LogicalJoin { type: Inner, on: IsNotDistinctFrom(a.a3, internal_last_seen_value(a.a3)) AND IsNotDistinctFrom(b.b2, b.b2), output: [] }
