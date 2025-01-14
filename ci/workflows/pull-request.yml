@@ -621,7 +621,7 @@ steps:
       - docker-compose#v5.5.0:
           <<: *docker-compose
           run: ci-flamegraph-env
-        environment:
+          environment:
           - GITHUB_TOKEN
     # TODO(kwannoel): Here are the areas that can be further optimized:
     # - Nexmark event generation: ~3min for 100mil records.
@@ -643,7 +643,7 @@ steps:
       - docker-compose#v5.5.0:
           <<: *docker-compose
           run: ci-flamegraph-env
-        environment:
+          environment:
           - GITHUB_TOKEN
     # TODO(kwannoel): Here are the areas that can be further optimized:
     # - Nexmark event generation: ~3min for 100mil records.
@@ -664,7 +664,7 @@ steps:
       - docker-compose#v5.5.0:
           <<: *docker-compose
           run: source-test-env
-        environment:
+          environment:
           - BUILDKITE_BRANCH
       - ./ci/plugins/upload-failure-logs
     matrix:
@@ -746,7 +746,7 @@ steps:
       - docker-compose#v5.5.0:
           <<: *docker-compose
           run: ci-standard-env
-        propagate-environment: true
+          propagate-environment: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 32
     retry: *auto-retry

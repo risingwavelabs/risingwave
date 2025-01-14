@@ -61,8 +61,8 @@ steps:
           env:
             GITHUB_TOKEN: github-token
       - docker-compose#v5.5.0:
-        <<: *docker-compose
-        environment:
+          <<: *docker-compose
+          environment:
           - GITHUB_TOKEN
     timeout_in_minutes: 12
     retry: *auto-retry
@@ -178,8 +178,8 @@ steps:
         - "build-other"
       plugins:
         - docker-compose#v5.5.0:
-          <<: *docker-compose-standard
-          run: source-test-env
+            <<: *docker-compose-standard
+            run: source-test-env
         - ./ci/plugins/upload-failure-logs
       timeout_in_minutes: 20
       retry: *auto-retry
@@ -197,8 +197,8 @@ steps:
         - "build-other"
       plugins:
         - docker-compose#v5.5.0:
-          <<: *docker-compose-standard
-          run: sink-test-env
+            <<: *docker-compose-standard
+            run: sink-test-env
         - ./ci/plugins/upload-failure-logs
       timeout_in_minutes: 35
       retry: *auto-retry
@@ -252,8 +252,8 @@ steps:
           env:
             CODECOV_TOKEN: my-codecov-token
       - docker-compose#v5.5.0:
-        <<: *docker-compose
-        environment:
+          <<: *docker-compose
+          environment:
           - CODECOV_TOKEN
     timeout_in_minutes: 22
     retry: *auto-retry
@@ -353,8 +353,8 @@ steps:
           env:
             GITHUB_TOKEN: github-token
       - docker-compose#v5.5.0:
-        <<: *docker-compose
-        environment:
+          <<: *docker-compose
+          environment:
           - GITHUB_TOKEN
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 135
@@ -373,8 +373,8 @@ steps:
           env:
             GITHUB_TOKEN: github-token
       - docker-compose#v5.5.0:
-        <<: *docker-compose
-        environment:
+          <<: *docker-compose
+          environment:
           - GITHUB_TOKEN
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 135
@@ -474,8 +474,8 @@ steps:
           env:
             S3_SOURCE_TEST_CONF: ci_s3_source_test_aws
       - docker-compose#v5.5.0:
-        <<: *docker-compose
-        environment:
+          <<: *docker-compose
+          environment:
           - S3_SOURCE_TEST_CONF
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 25
@@ -494,8 +494,8 @@ steps:
           env:
             S3_SOURCE_TEST_CONF: ci_s3_source_test_aws
       - docker-compose#v5.5.0:
-        <<: *docker-compose
-        environment:
+          <<: *docker-compose
+          environment:
           - S3_SOURCE_TEST_CONF
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 25
@@ -514,8 +514,8 @@ steps:
           env:
             S3_SOURCE_TEST_CONF: ci_s3_source_test_aws
       - docker-compose#v5.5.0:
-        <<: *docker-compose
-        environment:
+          <<: *docker-compose
+          environment:
           - S3_SOURCE_TEST_CONF
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 25
@@ -537,8 +537,8 @@ steps:
             ASTRA_STREAMING_TEST_TOKEN: astra_streaming_test_token
             STREAMNATIVE_CLOUD_TEST_CONF: streamnative_cloud_test_conf
       - docker-compose#v5.5.0:
-        <<: *docker-compose
-        environment:
+          <<: *docker-compose
+          environment:
           - ASTRA_STREAMING_TEST_TOKEN
           - STREAMNATIVE_CLOUD_TEST_CONF
     timeout_in_minutes: 20
@@ -571,10 +571,10 @@ steps:
             BUILDKITE_TOKEN: buildkite_token
             GITHUB_TOKEN: github-token
       - docker-compose#v5.5.0:
-        <<: *docker-compose
-        environment:
+          <<: *docker-compose
+          environment:
           - BUILDKITE_TOKEN
-            - GITHUB_TOKEN
+          - GITHUB_TOKEN
     timeout_in_minutes: 5
 
   # Backwards compatibility tests
@@ -639,7 +639,6 @@ steps:
       - docker-compose#v5.5.0:
           <<: *docker-compose
           run: source-test-env
-        mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 30
     retry: *auto-retry
@@ -923,7 +922,7 @@ steps:
       - docker-compose#v5.5.0:
           <<: *docker-compose
           run: release-env-x86
-        environment:
+          environment:
           - BINARY_NAME
           - GITHUB_TOKEN
           - BUILDKITE_TAG
@@ -941,7 +940,7 @@ steps:
       - docker-compose#v5.5.0:
           <<: *docker-compose
           run: release-env-x86
-        environment:
+          environment:
           - BINARY_NAME
           - GITHUB_TOKEN
           - BUILDKITE_TAG
@@ -960,7 +959,7 @@ steps:
       - docker-compose#v5.5.0:
           <<: *docker-compose
           run: release-env-arm
-        environment:
+          environment:
           - BINARY_NAME
           - GITHUB_TOKEN
           - BUILDKITE_TAG
@@ -980,7 +979,7 @@ steps:
       - docker-compose#v5.5.0:
           <<: *docker-compose
           run: release-env-arm
-        environment:
+          environment:
           - BINARY_NAME
           - GITHUB_TOKEN
           - BUILDKITE_TAG
