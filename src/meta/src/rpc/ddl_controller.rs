@@ -664,7 +664,7 @@ impl DdlController {
                 props.init_from_pb_cdc_table_desc(cdc_table_desc);
 
                 // try creating a split enumerator to validate
-                let _enumerator = source_props
+                let _enumerator = props
                     .create_split_enumerator(SourceEnumeratorContext::dummy().into())
                     .await?;
                 tracing::debug!(?table.id, "validate cdc table success");
