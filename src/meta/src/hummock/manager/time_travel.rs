@@ -456,8 +456,12 @@ impl HummockManager {
                 version_id: Set(version_id.try_into().unwrap()),
             };
             batch.push(m);
-            // Use the same batch size as hummock_time_travel_sst_info_insert_batch_size.
-            if batch.len() >= self.env.opts.hummock_time_travel_sst_info_insert_batch_size {
+            if batch.len()
+                >= self
+                    .env
+                    .opts
+                    .hummock_time_travel_epoch_version_insert_batch_size
+            {
                 // There should be no conflict rows.
                 hummock_epoch_to_version::Entity::insert_many(std::mem::take(&mut batch))
                     .do_nothing()
