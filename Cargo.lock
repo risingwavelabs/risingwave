@@ -4930,8 +4930,9 @@ dependencies = [
 
 [[package]]
 name = "foyer"
-version = "0.14.0-dev"
-source = "git+https://github.com/foyer-rs/foyer?rev=bdf484622d487df7ac08533fcc93ab745ed418cf#bdf484622d487df7ac08533fcc93ab745ed418cf"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3bf1816c59e7af29dc758386a5515d8e52b56c7f2b7b86714bc8428422beb196"
 dependencies = [
  "ahash 0.8.11",
  "anyhow",
@@ -4942,24 +4943,26 @@ dependencies = [
  "foyer-storage",
  "futures",
  "madsim-tokio",
+ "mixtrics",
  "tracing",
 ]
 
 [[package]]
 name = "foyer-common"
-version = "0.14.0-dev"
-source = "git+https://github.com/foyer-rs/foyer?rev=bdf484622d487df7ac08533fcc93ab745ed418cf#bdf484622d487df7ac08533fcc93ab745ed418cf"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6939d345c0941fdd7bfe14b4a70ef091b29ff82f4ba80701d18cb2f8895d0016"
 dependencies = [
  "ahash 0.8.11",
  "bytes",
  "cfg-if",
  "fastrace",
  "futures",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "madsim-tokio",
+ "mixtrics",
  "parking_lot 0.12.1",
  "pin-project",
- "prometheus",
  "serde",
 ]
 
@@ -4974,8 +4977,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-memory"
-version = "0.14.0-dev"
-source = "git+https://github.com/foyer-rs/foyer?rev=bdf484622d487df7ac08533fcc93ab745ed418cf#bdf484622d487df7ac08533fcc93ab745ed418cf"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b278703206c79f02ef555b78e5535b6c0831ad2165ab316a5cb4098b3bc28902"
 dependencies = [
  "ahash 0.8.11",
  "arc-swap",
@@ -4987,8 +4991,9 @@ dependencies = [
  "foyer-intrusive-collections",
  "futures",
  "hashbrown 0.15.0",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "madsim-tokio",
+ "mixtrics",
  "parking_lot 0.12.1",
  "pin-project",
  "serde",
@@ -4998,8 +5003,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-storage"
-version = "0.14.0-dev"
-source = "git+https://github.com/foyer-rs/foyer?rev=bdf484622d487df7ac08533fcc93ab745ed418cf#bdf484622d487df7ac08533fcc93ab745ed418cf"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "770ad58985c5b1d5b13c4447ff869d0de6a785b7991d5b216eb9251beb461486"
 dependencies = [
  "ahash 0.8.11",
  "allocator-api2",
@@ -5018,7 +5024,7 @@ dependencies = [
  "foyer-memory",
  "fs4",
  "futures",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "libc",
  "lz4",
  "madsim-tokio",
@@ -6508,6 +6514,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "itertools"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b192c782037fadd9cfa75548310488aabdbf3d2da73885b31bd0abd03351285"
+dependencies = [
+ "either",
+]
+
+[[package]]
 name = "itoa"
 version = "1.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7458,6 +7473,17 @@ name = "mirai-annotations"
 version = "1.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c9be0862c1b3f26a88803c4a49de6889c10e608b3ee9344e6ef5b45fb37ad3d1"
+
+[[package]]
+name = "mixtrics"
+version = "0.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "963c181b82211c6ab60041c047d1c42f253d2e2b13e255f18d1b1052e8c41220"
+dependencies = [
+ "itertools 0.14.0",
+ "parking_lot 0.12.1",
+ "prometheus",
+]
 
 [[package]]
 name = "mockall"
@@ -11896,6 +11922,7 @@ dependencies = [
  "madsim-tokio",
  "madsim-tonic",
  "memcomparable",
+ "mixtrics",
  "moka",
  "more-asserts",
  "nix 0.29.0",
