@@ -107,6 +107,11 @@ where
             tracing::warn!(
                 "Telemetry failed to set event reporting tx, event reporting will be disabled"
             );
+            // possible failure:
+            // When running in standalone mode, the static TELEMETRY_EVENT_REPORT_TX is shared
+            // and can be set by meta/compute nodes.
+            // In such case, the one first set the static will do the event reporting and others'
+            // event report is disabled.
             enable_event_report = false;
         });
         let mut event_stash = Vec::new();
