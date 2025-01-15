@@ -27,7 +27,6 @@ use crate::error::{ErrorCode, Result};
 use crate::TableCatalog;
 
 fn get_format_encode_from_table(table: &TableCatalog) -> Result<Option<FormatEncodeOptions>> {
-    // TODO(purify): use purified definition.
     let stmt = table.create_sql_ast()?;
     let Statement::CreateTable { format_encode, .. } = stmt else {
         unreachable!()
@@ -58,9 +57,8 @@ pub async fn handle_refresh_schema(
         .into());
     }
 
-    // Not using the purified definition because we want to re-fetch the schema.
     let definition = original_table
-        .create_sql_ast()
+        .create_sql_ast_purified()
         .context("unable to parse original table definition")?;
 
     let (source, table, graph, col_index_mapping, job_type) = {
