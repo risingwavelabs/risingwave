@@ -107,10 +107,35 @@ impl GlueSchemaLoader {
         schema_arn: &str,
         format_options: &BTreeMap<String, String>,
     ) -> Result<Self, InvalidOptionError> {
+        if let Some(mock_config) = format_options.get("aws.glue.mock_config") {
+            // Internal format for easy testing. See `MockGlueSchemaCache` for details.
+            let parsed: serde_json::Value =
+                serde_json::from_str(mock_config).expect("mock config shall be valid json");
+            let schema_version_id_str = parsed
+                .get("arn_to_latest_id")
+                .unwrap()
+                .as_object()
+                .unwrap()
+                .get(schema_arn)
+                .unwrap()
+                .as_str()
+                .unwrap();
+            let definition = parsed
+                .get("by_id")
+                .unwrap()
+                .as_object()
+                .unwrap()
+                .get(schema_version_id_str)
+                .unwrap()
+                .to_string();
+            return Ok(Self::Mock {
+                schema_version_id: schema_version_id_str.parse().unwrap(),
+                definition,
+            });
+        };
         let aws_auth_props =
             serde_json::from_value::<AwsAuthProps>(serde_json::to_value(format_options).unwrap())
                 .map_err(|_e| invalid_option_error!(""))?;
-        let mock_config = format_options.get("aws.glue.mock_config").cloned();
         let client = aws_sdk_glue::Client::new(&aws_auth_props.build_config().await.unwrap());
         Ok(Self::Real {
             client,
@@ -144,6 +169,8 @@ impl GlueSchemaLoader {
             }
         };
 
+        // https://github.com/awslabs/aws-glue-schema-registry/issues/32
+        // No references in AWS Glue Schema Registry yet
         let primary = Subject {
             version: 0,
             name: "".to_owned(),
