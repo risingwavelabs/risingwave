@@ -1232,17 +1232,23 @@ impl DdlController {
             removed_fragments,
         } = release_ctx;
 
-        // unregister sources.
+        self.stream_manager
+            .drop_streaming_jobs(
+                risingwave_common::catalog::DatabaseId::new(database_id as _),
+                removed_actors.into_iter().map(|id| id as _).collect(),
+                removed_streaming_job_ids,
+                removed_state_table_ids,
+                removed_fragments.iter().map(|id| *id as _).collect(),
+            )
+            .await;
+
+        // clean up sources after dropping streaming jobs.
+        // Otherwise, e.g., Kafka consumer groups might be recreated after deleted.
         self.source_manager
             .apply_source_change(SourceChange::DropSource {
                 dropped_source_ids: removed_source_ids.into_iter().map(|id| id as _).collect(),
             })
             .await;
-
-        // remove secrets.
-        for secret in secret_ids {
-            LocalSecretManager::global().remove_secret(secret as _);
-        }
 
         // unregister fragments and actors from source manager.
         // FIXME: need also unregister source backfill fragments.
@@ -1263,16 +1269,10 @@ impl DdlController {
             })
             .await;
 
-        // drop streaming jobs.
-        self.stream_manager
-            .drop_streaming_jobs(
-                risingwave_common::catalog::DatabaseId::new(database_id as _),
-                removed_actors.into_iter().map(|id| id as _).collect(),
-                removed_streaming_job_ids,
-                removed_state_table_ids,
-                removed_fragments.iter().map(|id| *id as _).collect(),
-            )
-            .await;
+        // remove secrets.
+        for secret in secret_ids {
+            LocalSecretManager::global().remove_secret(secret as _);
+        }
 
         Ok(version)
     }
