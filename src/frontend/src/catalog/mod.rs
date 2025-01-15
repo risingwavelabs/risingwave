@@ -61,7 +61,7 @@ pub(crate) type FragmentId = u32;
 pub(crate) type SecretId = risingwave_common::catalog::SecretId;
 
 /// Check if the column name does not conflict with the internally reserved column name.
-pub fn check_valid_column_name(column_name: &str) -> Result<()> {
+pub fn check_valid_column_name(column_name: &str, is_for_replace_plan: bool) -> Result<()> {
     if is_row_id_column_name(column_name) {
         return Err(ErrorCode::InternalError(format!(
             "column name prefixed with {:?} are reserved word.",
@@ -70,7 +70,10 @@ pub fn check_valid_column_name(column_name: &str) -> Result<()> {
         .into());
     }
 
-    if column_name.starts_with(RW_RESERVED_COLUMN_NAME_PREFIX) {
+    // additional column name may have prefix _rw
+    // When converting dropping the connector from table, the additional columns are converted to normal columns and keep the original name.
+    // Under this case, we loosen the check for _rw prefix.
+    if column_name.starts_with(RW_RESERVED_COLUMN_NAME_PREFIX) && !is_for_replace_plan {
         return Err(ErrorCode::InternalError(format!(
             "column name prefixed with {:?} are reserved word.",
             RW_RESERVED_COLUMN_NAME_PREFIX

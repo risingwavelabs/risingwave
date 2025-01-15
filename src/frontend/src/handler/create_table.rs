@@ -193,7 +193,10 @@ fn ensure_column_options_supported(c: &ColumnDef) -> Result<()> {
 /// Binds the column schemas declared in CREATE statement into `ColumnDesc`.
 /// If a column is marked as `primary key`, its `ColumnId` is also returned.
 /// This primary key is not combined with table constraints yet.
-pub fn bind_sql_columns(column_defs: &[ColumnDef]) -> Result<Vec<ColumnCatalog>> {
+pub fn bind_sql_columns(
+    column_defs: &[ColumnDef],
+    is_for_replace_plan: bool,
+) -> Result<Vec<ColumnCatalog>> {
     let mut columns = Vec::with_capacity(column_defs.len());
 
     for column in column_defs {
@@ -234,7 +237,7 @@ pub fn bind_sql_columns(column_defs: &[ColumnDef]) -> Result<Vec<ColumnCatalog>>
             }
         }
 
-        check_valid_column_name(&name.real_value())?;
+        check_valid_column_name(&name.real_value(), is_for_replace_plan)?;
 
         let field_descs: Vec<ColumnDesc> = if let AstDataType::Struct(fields) = &data_type {
             fields
@@ -597,8 +600,9 @@ pub(crate) fn gen_create_table_plan(
     mut col_id_gen: ColumnIdGenerator,
     source_watermarks: Vec<SourceWatermark>,
     props: CreateTableProps,
+    is_for_replace_plan: bool,
 ) -> Result<(PlanRef, PbTable)> {
-    let mut columns = bind_sql_columns(&column_defs)?;
+    let mut columns = bind_sql_columns(&column_defs, is_for_replace_plan)?;
     for c in &mut columns {
         c.column_desc.column_id = col_id_gen.generate(&*c)?;
     }
@@ -1101,6 +1105,7 @@ pub(super) async fn handle_create_table_plan(
                 col_id_gen,
                 source_watermarks,
                 props,
+                false,
             )?;
 
             ((plan, None, table), TableJobType::General)
@@ -1161,7 +1166,7 @@ pub(super) async fn handle_create_table_plan(
                     }
 
                     let (mut columns, pk_names) =
-                        bind_cdc_table_schema(&column_defs, &constraints, None)?;
+                        bind_cdc_table_schema(&column_defs, &constraints, None, false)?;
                     // read default value definition from external db
                     let (options, secret_refs) = cdc_with_options.clone().into_parts();
                     let config = ExternalTableConfig::try_from_btreemap(options, secret_refs)
@@ -1322,8 +1327,9 @@ fn bind_cdc_table_schema(
     column_defs: &Vec<ColumnDef>,
     constraints: &Vec<TableConstraint>,
     new_version_columns: Option<Vec<ColumnCatalog>>,
+    is_for_replace_plan: bool,
 ) -> Result<(Vec<ColumnCatalog>, Vec<String>)> {
-    let mut columns = bind_sql_columns(column_defs)?;
+    let mut columns = bind_sql_columns(column_defs, is_for_replace_plan)?;
     // If new_version_columns is provided, we are in the process of auto schema change.
     // update the default value column since the default value column is not set in the
     // column sql definition.
@@ -1888,6 +1894,7 @@ pub async fn generate_stream_graph_for_replace_table(
                 col_id_gen,
                 source_watermarks,
                 props,
+                true,
             )?;
             ((plan, None, table), TableJobType::General)
         }
@@ -1902,7 +1909,7 @@ pub async fn generate_stream_graph_for_replace_table(
             )?;
 
             let (column_catalogs, pk_names) =
-                bind_cdc_table_schema(&columns, &constraints, new_version_columns)?;
+                bind_cdc_table_schema(&columns, &constraints, new_version_columns, true)?;
 
             let context: OptimizerContextRef =
                 OptimizerContext::new(handler_args, ExplainOptions::default()).into();
@@ -2223,7 +2230,7 @@ mod tests {
                 panic!("test case should be create table")
             };
             let actual: Result<_> = (|| {
-                let mut columns = bind_sql_columns(&column_defs)?;
+                let mut columns = bind_sql_columns(&column_defs, false)?;
                 let mut col_id_gen = ColumnIdGenerator::new_initial();
                 for c in &mut columns {
                     c.column_desc.column_id = col_id_gen.generate(&*c).unwrap();

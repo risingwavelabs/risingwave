@@ -16,8 +16,10 @@ use std::collections::HashSet;
 use std::sync::{Arc, LazyLock};
 
 use anyhow::Context;
+use risingwave_common::error::{NotImplemented, TrackingIssue};
 use risingwave_connector::parser::additional_columns::gen_default_addition_col_name;
 use risingwave_connector::sink::decouple_checkpoint_log_sink::COMMIT_CHECKPOINT_INTERVAL;
+use risingwave_connector::WithPropertiesExt;
 use risingwave_sqlparser::ast::{ColumnDef, Ident};
 use risingwave_sqlparser::parser::Parser;
 
@@ -99,7 +101,17 @@ fn rewrite_table_definition(
         panic!("unexpected statement: {:?}", original_statement);
     };
 
-    for item in include_column_options {
+    // find if altering a cdc table
+    if original_source_def.with_properties.is_cdc_connector() {
+        return Err(ErrorCode::NotImplemented(NotImplemented {
+            feature: "Dropping connector from a cdc table".to_owned(),
+            issue: TrackingIssue::none(),
+        })
+        .into());
+    }
+
+    // identical logic with func `handle_addition_columns`, reverse the order to keep the original order of additional columns
+    for item in include_column_options.iter().rev() {
         let col_name = if let Some(col_alias) = &item.column_alias {
             col_alias.real_value()
         } else {
