@@ -299,7 +299,7 @@ impl TableCatalog {
                 let name = ast::ObjectName(vec![self.name.as_str().into()]);
                 ast::Statement::default_create_table(name)
             } else {
-                self.create_sql_ast_raw()?
+                self.create_sql_ast_from_persisted()?
             };
 
             match try_purify_table_source_create_sql_ast(
@@ -318,7 +318,7 @@ impl TableCatalog {
             }
         }
 
-        self.create_sql_ast_raw()
+        self.create_sql_ast_from_persisted()
     }
 }
 
@@ -506,11 +506,11 @@ impl TableCatalog {
             self.create_sql_ast_purified()
         } else {
             // Directly parse the persisted definition.
-            self.create_sql_ast_raw()
+            self.create_sql_ast_from_persisted()
         }
     }
 
-    fn create_sql_ast_raw(&self) -> Result<ast::Statement> {
+    fn create_sql_ast_from_persisted(&self) -> Result<ast::Statement> {
         Ok(Parser::parse_sql(&self.definition)
             .context("unable to parse definition sql")?
             .into_iter()
