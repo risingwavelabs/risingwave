@@ -182,7 +182,7 @@ pub async fn handle_alter_table_drop_connector(
 
     let new_statement = rewrite_table_definition(&table_def, &source_def, original_definition)?;
     let (_, table, graph, col_index_mapping, _) =
-        get_replace_table_plan(&session, table_name, new_statement, &table_def, None).await?;
+        get_replace_table_plan(&session, table_name, new_statement, &table_def).await?;
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer

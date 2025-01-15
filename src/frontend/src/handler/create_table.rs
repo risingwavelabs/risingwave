@@ -1166,13 +1166,13 @@ pub(super) async fn handle_create_table_plan(
                     }
 
                     let (mut columns, pk_names) =
-                        bind_cdc_table_schema(&column_defs, &constraints, None, false)?;
+                        bind_cdc_table_schema(&column_defs, &constraints, false)?;
                     // read default value definition from external db
                     let (options, secret_refs) = cdc_with_options.clone().into_parts();
                     let config = ExternalTableConfig::try_from_btreemap(options, secret_refs)
                         .context("failed to extract external table config")?;
 
-                    let table = ExternalTableImpl::connect(config)
+                    let table: ExternalTableImpl = ExternalTableImpl::connect(config)
                         .await
                         .context("failed to auto derive table schema")?;
                     let external_columns: Vec<_> = table
@@ -1326,26 +1326,11 @@ async fn bind_cdc_table_schema_externally(
 fn bind_cdc_table_schema(
     column_defs: &Vec<ColumnDef>,
     constraints: &Vec<TableConstraint>,
-    new_version_columns: Option<Vec<ColumnCatalog>>,
     is_for_replace_plan: bool,
 ) -> Result<(Vec<ColumnCatalog>, Vec<String>)> {
-    let mut columns = bind_sql_columns(column_defs, is_for_replace_plan)?;
-    // If new_version_columns is provided, we are in the process of auto schema change.
-    // update the default value column since the default value column is not set in the
-    // column sql definition.
-    if let Some(new_version_columns) = new_version_columns {
-        for (col, new_version_col) in columns
-            .iter_mut()
-            .zip_eq_fast(new_version_columns.into_iter())
-        {
-            assert_eq!(col.name(), new_version_col.name());
-            col.column_desc.generated_or_default_column =
-                new_version_col.column_desc.generated_or_default_column;
-        }
-    }
+    let columns = bind_sql_columns(column_defs, is_for_replace_plan)?;
 
     let pk_names = bind_sql_pk_names(column_defs, bind_table_constraints(constraints)?)?;
-
     Ok((columns, pk_names))
 }
 
@@ -1815,7 +1800,6 @@ pub async fn generate_stream_graph_for_replace_table(
     handler_args: HandlerArgs,
     statement: Statement,
     col_id_gen: ColumnIdGenerator,
-    new_version_columns: Option<Vec<ColumnCatalog>>,
 ) -> Result<(StreamFragmentGraph, Table, Option<PbSource>, TableJobType)> {
     use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 
@@ -1908,8 +1892,7 @@ pub async fn generate_stream_graph_for_replace_table(
                 cdc_table.external_table_name.clone(),
             )?;
 
-            let (column_catalogs, pk_names) =
-                bind_cdc_table_schema(&columns, &constraints, new_version_columns, true)?;
+            let (column_catalogs, pk_names) = bind_cdc_table_schema(&columns, &constraints, true)?;
 
             let context: OptimizerContextRef =
                 OptimizerContext::new(handler_args, ExplainOptions::default()).into();

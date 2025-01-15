@@ -429,6 +429,14 @@ impl TableCatalog {
             .collect()
     }
 
+    /// Get the column names of the primary key.
+    pub fn pk_column_names(&self) -> Vec<&str> {
+        self.pk
+            .iter()
+            .map(|x| self.columns[x.column_index].name())
+            .collect()
+    }
+
     /// Get a [`TableDesc`] of the table.
     ///
     /// Note: this must be called on existing tables, otherwise it will fail to get the vnode count
