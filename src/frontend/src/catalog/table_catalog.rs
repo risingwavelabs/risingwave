@@ -502,9 +502,10 @@ impl TableCatalog {
         if let TableType::Table = self.table_type()
             && self.definition.is_empty()
         {
-            // Fix `CREATE TABLE AS`.
+            // Always fix definition for `CREATE TABLE AS`.
             self.create_sql_ast_purified()
         } else {
+            // Directly parse the persisted definition.
             self.create_sql_ast_raw()
         }
     }
