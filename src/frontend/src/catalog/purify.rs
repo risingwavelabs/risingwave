@@ -23,6 +23,27 @@ use risingwave_sqlparser::ast::*;
 use crate::error::Result;
 use crate::utils::data_type::DataTypeToAst as _;
 
+mod pk_column {
+    use super::*;
+    // Identifies a primary key column...
+    pub trait PkColumn {
+        fn is(&self, column: &ColumnCatalog) -> bool;
+    }
+    // ...by column name.
+    impl PkColumn for &str {
+        fn is(&self, column: &ColumnCatalog) -> bool {
+            column.name() == *self
+        }
+    }
+    // ...by column ID.
+    impl PkColumn for ColumnId {
+        fn is(&self, column: &ColumnCatalog) -> bool {
+            column.column_id() == *self
+        }
+    }
+}
+use pk_column::PkColumn;
+
 /// Try to restore missing column definitions and constraints in the persisted table (or source)
 /// definition, if the schema is derived from external systems (like schema registry) or it's
 /// created by `CREATE TABLE AS`.
@@ -32,7 +53,7 @@ pub fn try_purify_table_source_create_sql_ast(
     mut base: Statement,
     columns: &[ColumnCatalog],
     row_id_index: Option<usize>,
-    pk_column_ids: &[ColumnId],
+    pk_column_ids: &[impl PkColumn],
 ) -> Result<Statement> {
     let (Statement::CreateTable {
         columns: column_defs,
@@ -141,8 +162,11 @@ pub fn try_purify_table_source_create_sql_ast(
     if !has_pk_column_constraint && row_id_index.is_none() {
         let mut pk_columns = Vec::new();
 
-        for &id in pk_column_ids {
-            let column = columns.iter().find(|c| c.column_id() == id).unwrap();
+        for id in pk_column_ids {
+            let column = columns
+                .iter()
+                .find(|c| id.is(c))
+                .context("primary key column not found")?;
             if !column.is_user_defined() {
                 bail /* unlikely */ !(
                     "primary key column \"{}\" is not user-defined",
