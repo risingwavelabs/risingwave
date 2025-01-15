@@ -27,7 +27,7 @@
     select true or 'abc'::int > c1 from t1;
   logical_plan: |-
     LogicalProject { exprs: [(true:Boolean OR ('abc':Varchar::Int32 > t1.c1)) as $expr1] }
-    └─LogicalScan { table: t1, columns: [t1.c1, t1.c2, t1.c3, t1._row_id] }
+    └─LogicalScan { table: t1, columns: [t1.c1, t1.c2, t1.c3, t1._row_id, t1._rw_timestamp] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [true:Boolean] }
@@ -39,7 +39,7 @@
     select false and 'abc'::int > c1 from t1;
   logical_plan: |-
     LogicalProject { exprs: [(false:Boolean AND ('abc':Varchar::Int32 > t1.c1)) as $expr1] }
-    └─LogicalScan { table: t1, columns: [t1.c1, t1.c2, t1.c3, t1._row_id] }
+    └─LogicalScan { table: t1, columns: [t1.c1, t1.c2, t1.c3, t1._row_id, t1._rw_timestamp] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [false:Boolean] }

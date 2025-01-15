@@ -12,7 +12,7 @@
     select (ARRAY[1, v1]) from t;
   logical_plan: |-
     LogicalProject { exprs: [Array(1:Int32, t.v1) as $expr1] }
-    └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
+    └─LogicalScan { table: t, columns: [t.v1, t._row_id, t._rw_timestamp] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [Array(1:Int32, t.v1) as $expr1] }

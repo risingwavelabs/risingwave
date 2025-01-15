@@ -1,0 +1,44 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t (a int, id int primary key);
+
+statement ok
+create index idx on t(a);
+
+statement ok
+insert into t values (1, 1), (2, 2);
+
+query ?? rowsort
+select ABS(EXTRACT(EPOCH FROM (_rw_timestamp - now()))) < 2, a, id from t;
+----
+t 1 1
+t 2 2
+
+sleep 3s
+
+statement ok
+update t set a = 11 where id = 1;
+
+query ?? rowsort
+select ABS(EXTRACT(EPOCH FROM (_rw_timestamp - now()))) < 2, a, id from t;
+----
+f 2 2
+t 11 1
+
+query ?? rowsort
+select ABS(EXTRACT(EPOCH FROM (_rw_timestamp - now()))) < 2, a, id from t where id = 1;
+----
+t 11 1
+
+query ?? rowsort
+select ABS(EXTRACT(EPOCH FROM (_rw_timestamp - now()))) < 2, a, id from t where a = 11;
+----
+t 11 1
+
+statement ok
+delete from t;
+
+statement ok
+drop table t;

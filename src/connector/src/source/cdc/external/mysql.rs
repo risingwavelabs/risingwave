@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context};
 use chrono::{DateTime, NaiveDateTime};
@@ -36,6 +37,8 @@ use serde_derive::{Deserialize, Serialize};
 use sqlx::mysql::MySqlConnectOptions;
 use sqlx::MySqlPool;
 use thiserror_ext::AsReport;
+use tokio_retry::strategy::jitter;
+use tracing::{error, warn};
 
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::source::cdc::external::{
@@ -385,6 +388,42 @@ impl ExternalTableReader for MySqlExternalTableReader {
     }
 }
 
+async fn get_mysql_conn(opts: mysql_async::Opts) -> ConnectorResult<mysql_async::Conn> {
+    let mut retry_count = 0;
+    let start_time = Instant::now();
+    let retry_count = &mut retry_count;
+    tokio_retry::RetryIf::spawn(
+        tokio_retry::strategy::ExponentialBackoff::from_millis(100)
+            .factor(5)
+            .max_delay(Duration::from_secs(5))
+            .map(jitter),
+        || async { Ok(mysql_async::Conn::new(opts.clone()).await?) },
+        |err: &ConnectorError| {
+            let elapsed = start_time.elapsed();
+            *retry_count += 1;
+            let should_retry = elapsed < Duration::from_secs(60);
+            if should_retry {
+                warn!(
+                    retry_count,
+                    ?elapsed,
+                    err = ?err.as_report(),
+                    "failed to connect. retry"
+                );
+                true
+            } else {
+                error!(
+                    retry_count,
+                    ?elapsed,
+                    err = ?err.as_report(),
+                    "failed to connect. exceed timeout"
+                );
+                false
+            }
+        },
+    )
+    .await
+}
+
 impl MySqlExternalTableReader {
     pub async fn new(config: ExternalTableConfig, rw_schema: Schema) -> ConnectorResult<Self> {
         let mut opts_builder = mysql_async::OptsBuilder::default()
@@ -405,7 +444,9 @@ impl MySqlExternalTableReader {
             }
         };
 
-        let conn = mysql_async::Conn::new(mysql_async::Opts::from(opts_builder)).await?;
+        let opts = mysql_async::Opts::from(opts_builder);
+
+        let conn = get_mysql_conn(opts).await?;
 
         let field_names = rw_schema
             .fields

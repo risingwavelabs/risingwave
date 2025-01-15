@@ -117,6 +117,7 @@ profile:
       - use: postgres
         port: 8432
         user: postgres
+        password: postgres
         database: metadata
       - use: meta-node
         meta-backend: postgres
@@ -552,6 +553,18 @@ profile:
 
   ci-1cn-1fe:
     config-path: src/config/ci.toml
+    steps:
+      - use: minio
+      - use: sqlite
+      - use: meta-node
+        meta-backend: sqlite
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+
+  ci-1cn-1fe-jdbc-to-native:
+    config-path: src/config/ci-jdbc-to-native.toml
     steps:
       - use: minio
       - use: sqlite

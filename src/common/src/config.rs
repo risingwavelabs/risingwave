@@ -488,13 +488,23 @@ pub struct MetaDeveloperConfig {
     #[serde(default = "default::developer::actor_cnt_per_worker_parallelism_hard_limit")]
     pub actor_cnt_per_worker_parallelism_hard_limit: usize,
 
-    #[serde(default = "default::developer::hummock_time_travel_sst_info_fetch_batch_size")]
     /// Max number of SSTs fetched from meta store per SELECT, during time travel Hummock version replay.
+    #[serde(default = "default::developer::hummock_time_travel_sst_info_fetch_batch_size")]
     pub hummock_time_travel_sst_info_fetch_batch_size: usize,
 
-    #[serde(default = "default::developer::hummock_time_travel_sst_info_insert_batch_size")]
     /// Max number of SSTs inserted into meta store per INSERT, during time travel metadata writing.
+    #[serde(default = "default::developer::hummock_time_travel_sst_info_insert_batch_size")]
     pub hummock_time_travel_sst_info_insert_batch_size: usize,
+
+    #[serde(default = "default::developer::hummock_delta_log_delete_batch_size")]
+    pub hummock_delta_log_delete_batch_size: usize,
+
+    #[serde(default = "default::developer::time_travel_vacuum_interval_sec")]
+    pub time_travel_vacuum_interval_sec: u64,
+
+    /// Max number of epoch-to-version inserted into meta store per INSERT, during time travel metadata writing.
+    #[serde(default = "default::developer::hummock_time_travel_epoch_version_insert_batch_size")]
+    pub hummock_time_travel_epoch_version_insert_batch_size: usize,
 }
 
 /// The section `[server]` in `risingwave.toml`.
@@ -1087,6 +1097,11 @@ pub struct StreamingDeveloperConfig {
     /// even if session variable set.
     /// If true, it's decided by session variable `streaming_use_shared_source` (default true)
     pub enable_shared_source: bool,
+
+    #[serde(default = "default::developer::switch_jdbc_pg_to_native")]
+    /// When true, all jdbc sinks with connector='jdbc' and jdbc.url="jdbc:postgresql://..."
+    /// will be switched from jdbc postgresql sinks to rust native (connector='postgres') sinks.
+    pub switch_jdbc_pg_to_native: bool,
 }
 
 /// The subsections `[batch.developer]`.
@@ -1407,7 +1422,7 @@ pub mod default {
         }
 
         pub fn vacuum_spin_interval_ms() -> u64 {
-            200
+            100
         }
 
         pub fn hummock_version_checkpoint_interval_sec() -> u64 {
@@ -1959,6 +1974,16 @@ pub mod default {
         pub fn hummock_time_travel_sst_info_insert_batch_size() -> usize {
             100
         }
+        pub fn hummock_delta_log_delete_batch_size() -> usize {
+            512
+        }
+
+        pub fn time_travel_vacuum_interval_sec() -> u64 {
+            30
+        }
+        pub fn hummock_time_travel_epoch_version_insert_batch_size() -> usize {
+            1000
+        }
 
         pub fn memory_controller_threshold_aggressive() -> f64 {
             0.9
@@ -2019,6 +2044,10 @@ pub mod default {
 
         pub fn stream_enable_auto_schema_change() -> bool {
             true
+        }
+
+        pub fn switch_jdbc_pg_to_native() -> bool {
+            false
         }
     }
 

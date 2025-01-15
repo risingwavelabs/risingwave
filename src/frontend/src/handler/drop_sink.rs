@@ -84,10 +84,11 @@ pub async fn handle_drop_sink(
 
         assert!(incoming_sink_ids.remove(&sink_id.sink_id));
 
+        let columns_without_rw_timestamp = table_catalog.columns_without_rw_timestamp();
         for sink in fetch_incoming_sinks(&session, &incoming_sink_ids)? {
             hijack_merger_for_target_table(
                 &mut graph,
-                table_catalog.columns(),
+                &columns_without_rw_timestamp,
                 &sink,
                 Some(&sink.unique_identity()),
             )?;

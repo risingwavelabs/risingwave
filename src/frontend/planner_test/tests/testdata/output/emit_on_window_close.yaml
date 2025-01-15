@@ -46,21 +46,21 @@
         └── StreamSource { source: t, columns: [v1, v2, v3, _row_id] } { tables: [ Source: 3 ] }
 
     Table 0
-    ├── columns: [ v1, min(v2), count(distinct v3), count ]
+    ├── columns: [ v1, min(v2), count(distinct v3), count, _rw_timestamp ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
 
     Table 1
-    ├── columns: [ v1, v3, count_for_agg_call_1 ]
+    ├── columns: [ v1, v3, count_for_agg_call_1, _rw_timestamp ]
     ├── primary key: [ $0 ASC, $1 ASC ]
     ├── value indices: [ 2 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 2
 
     Table 2
-    ├── columns: [ vnode, offset ]
+    ├── columns: [ vnode, offset, _rw_timestamp ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1 ]
     ├── distribution key: [ 0 ]
@@ -68,14 +68,14 @@
     └── vnode column idx: 0
 
     Table 3
-    ├── columns: [ partition_id, offset_info ]
+    ├── columns: [ partition_id, offset_info, _rw_timestamp ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1 ]
     ├── distribution key: []
     └── read pk prefix len hint: 1
 
     Table 4294967294
-    ├── columns: [ v1, min, agg ]
+    ├── columns: [ v1, min, agg, _rw_timestamp ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: [ 0 ]
@@ -116,17 +116,17 @@
         ├── Upstream
         └── BatchPlanNode
 
-    Table 0 { columns: [ $expr1, max(t_b), count ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 0 { columns: [ $expr1, max(t_b), count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 1
-    ├── columns: [ vnode, _row_id, backfill_finished, row_count ]
+    ├── columns: [ vnode, _row_id, backfill_finished, row_count, _rw_timestamp ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ window_start, max ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 4294967294 { columns: [ window_start, max, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
 - sql: |
     create source t (a int, b int, tm timestamp, watermark for tm as tm - interval '5 minutes') with (connector = 'kinesis') FORMAT PLAIN ENCODE JSON;
@@ -159,21 +159,21 @@
             └── StreamSource { source: t, columns: [a, b, tm, _row_id] } { tables: [ Source: 3 ] }
 
     Table 0
-    ├── columns: [ a, b, tm, _row_id ]
+    ├── columns: [ a, b, tm, _row_id, _rw_timestamp ]
     ├── primary key: [ $1 ASC, $2 ASC, $3 ASC ]
     ├── value indices: [ 0, 1, 2, 3 ]
     ├── distribution key: [ 1 ]
     └── read pk prefix len hint: 1
 
     Table 1
-    ├── columns: [ a, b, tm, _row_id ]
+    ├── columns: [ a, b, tm, _row_id, _rw_timestamp ]
     ├── primary key: [ $2 ASC, $1 ASC, $3 ASC ]
     ├── value indices: [ 0, 1, 2, 3 ]
     ├── distribution key: [ 1 ]
     └── read pk prefix len hint: 0
 
     Table 2
-    ├── columns: [ vnode, offset ]
+    ├── columns: [ vnode, offset, _rw_timestamp ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1 ]
     ├── distribution key: [ 0 ]
@@ -181,14 +181,14 @@
     └── vnode column idx: 0
 
     Table 3
-    ├── columns: [ partition_id, offset_info ]
+    ├── columns: [ partition_id, offset_info, _rw_timestamp ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1 ]
     ├── distribution key: []
     └── read pk prefix len hint: 1
 
     Table 4294967294
-    ├── columns: [ lag, _row_id, b ]
+    ├── columns: [ lag, _row_id, b, _rw_timestamp ]
     ├── primary key: [ $1 ASC, $2 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: [ 2 ]
