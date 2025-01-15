@@ -59,7 +59,9 @@ use futures::future::BoxFuture;
 use futures_async_stream::try_stream;
 use parking_lot::Mutex;
 use risingwave_common::array::StreamChunk;
-use risingwave_connector::sink::log_store::{ChunkId, LogStoreReadItem, LogStoreResult, TruncateOffset};
+use risingwave_connector::sink::log_store::{
+    ChunkId, LogStoreReadItem, LogStoreResult, TruncateOffset,
+};
 use risingwave_storage::StateStore;
 use tokio::select;
 use tokio_stream::StreamExt;
@@ -74,15 +76,14 @@ use crate::executor::{
 type StateStoreStream<S> = Pin<Box<LogStoreItemMergeStream<TimeoutAutoRebuildIter<S>>>>;
 type ReadFlushedChunkFuture = BoxFuture<'static, LogStoreResult<(ChunkId, StreamChunk, u64)>>;
 
-struct LogStoreState<S: StateStore> {
+struct SyncedKvLogStore<S: StateStore> {
+    // Upstream
+    upstream: BoxedMessageStream,
+
+    // Log store state
     state_store_stream: Option<StateStoreStream<S>>,
     flushed_chunk_future: Option<ReadFlushedChunkFuture>,
     buffer: Mutex<SyncedLogStoreBuffer>,
-}
-
-struct SyncedKvLogStore<S: StateStore> {
-    state: LogStoreState<S>,
-    upstream: BoxedMessageStream,
 }
 
 // Top-level interface:
@@ -101,11 +102,11 @@ impl<S: StateStore> SyncedKvLogStore<S> {
     async fn next(&mut self) -> StreamExecutorResult<Option<Message>> {
         select! {
             // read from log store
-            logstore_item = Self::try_next_item(&mut self.state_store_stream, &mut self.buffer) => {
+            logstore_item = Self::try_next_item(&mut self.state_store_stream, &mut self.flushed_chunk_future, &mut self.buffer) => {
                 let logstore_item = logstore_item?;
                 Ok(logstore_item.map(Message::Chunk))
             }
-            // read from upstream
+            // poll from upstream
             upstream_item = self.upstream.next() => {
                 match upstream_item {
                     None => Ok(None),
@@ -140,15 +141,23 @@ impl<S: StateStore> SyncedKvLogStore<S> {
 // Read methods
 impl<S: StateStore> SyncedKvLogStore<S> {
     async fn try_next_item(
-        state_store_stream: &mut Option<StateStoreStream<S>>,
+        log_store_state: &mut Option<StateStoreStream<S>>,
+        read_flushed_chunk_future: &mut Option<ReadFlushedChunkFuture>,
         buffer: &mut Mutex<SyncedLogStoreBuffer>,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
-        // First try to read from the state store stream
-        if let Some(chunk) = Self::try_next_state_store_item(state_store_stream).await? {
+        // 1. read state store
+        if let Some(chunk) = Self::try_next_state_store_item(log_store_state).await? {
             return Ok(Some(chunk));
         }
-        // Then try to read from the buffer
+
+        // 2. read existing flushed chunk future
+        if let Some(chunk) = Self::try_next_flushed_chunk_future(read_flushed_chunk_future).await? {
+            return Ok(Some(chunk));
+        }
+
+        // 3. read buffer
         if let Some(chunk) = Self::try_next_buffer_item(buffer).await? {
+            // TODO: read flushed_chunks
             return Ok(Some(chunk));
         }
         return Ok(None);
@@ -169,6 +178,23 @@ impl<S: StateStore> SyncedKvLogStore<S> {
                 },
                 None => {
                     *state_store_stream_opt = None;
+                    Ok(None)
+                }
+            }
+        } else {
+            Ok(None)
+        }
+    }
+
+    async fn try_next_flushed_chunk_future(
+        flushed_chunk_future: &mut Option<ReadFlushedChunkFuture>,
+    ) -> StreamExecutorResult<Option<StreamChunk>> {
+        if let Some(future) = flushed_chunk_future {
+            match future.await {
+                Ok((_, chunk, _)) => Ok(Some(chunk)),
+                Err(_) => {
+                    // TODO: log + propagate error
+                    *flushed_chunk_future = None;
                     Ok(None)
                 }
             }
