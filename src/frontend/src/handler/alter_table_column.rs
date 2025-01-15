@@ -28,7 +28,7 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{ProjectNode, StreamFragmentGraph};
 use risingwave_sqlparser::ast::{AlterTableOperation, ColumnOption, ObjectName, Statement};
 
-use super::create_source::schema_has_schema_registry;
+use super::create_source::{schema_has_schema_registry, SqlColumnStrategy};
 use super::create_table::{generate_stream_graph_for_replace_table, ColumnIdGenerator};
 use super::util::SourceSchemaCompatExt;
 use super::{HandlerArgs, RwPgResponse};
@@ -91,6 +91,7 @@ pub async fn get_replace_table_plan(
     table_name: ObjectName,
     new_definition: Statement,
     old_catalog: &Arc<TableCatalog>,
+    sql_column_strategy: SqlColumnStrategy,
 ) -> Result<(
     Option<Source>,
     Table,
@@ -145,6 +146,7 @@ pub async fn get_replace_table_plan(
         cdc_table_info,
         include_column_options,
         engine,
+        sql_column_strategy,
     )
     .await?;
 
@@ -392,8 +394,14 @@ pub async fn handle_alter_table_column(
         _ => unreachable!(),
     };
 
-    let (source, table, graph, col_index_mapping, job_type) =
-        get_replace_table_plan(&session, table_name, definition, &original_catalog).await?;
+    let (source, table, graph, col_index_mapping, job_type) = get_replace_table_plan(
+        &session,
+        table_name,
+        definition,
+        &original_catalog,
+        SqlColumnStrategy::Follow,
+    )
+    .await?;
 
     let catalog_writer = session.catalog_writer()?;
 

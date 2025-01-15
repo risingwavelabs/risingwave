@@ -44,7 +44,7 @@ use risingwave_sqlparser::ast::{
 };
 
 use super::create_mv::get_column_names;
-use super::create_source::UPSTREAM_SOURCE_KEY;
+use super::create_source::{SqlColumnStrategy, UPSTREAM_SOURCE_KEY};
 use super::util::gen_query_from_table_name;
 use super::RwPgResponse;
 use crate::binder::Binder;
@@ -559,6 +559,7 @@ pub(crate) async fn reparse_table_for_sink(
         None,
         include_column_options,
         engine,
+        SqlColumnStrategy::Follow,
     )
     .await?;
 

@@ -20,7 +20,7 @@ use risingwave_sqlparser::ast::{FormatEncodeOptions, ObjectName, Statement};
 use thiserror_ext::AsReport;
 
 use super::alter_table_column::fetch_table_catalog_for_alter;
-use super::create_source::schema_has_schema_registry;
+use super::create_source::{schema_has_schema_registry, SqlColumnStrategy};
 use super::util::SourceSchemaCompatExt;
 use super::{get_replace_table_plan, HandlerArgs, RwPgResponse};
 use crate::error::{ErrorCode, Result};
@@ -64,8 +64,14 @@ pub async fn handle_refresh_schema(
         .context("unable to parse original table definition")?;
 
     let (source, table, graph, col_index_mapping, job_type) = {
-        let result =
-            get_replace_table_plan(&session, table_name, definition, &original_table).await;
+        let result = get_replace_table_plan(
+            &session,
+            table_name,
+            definition,
+            &original_table,
+            SqlColumnStrategy::Ignore,
+        )
+        .await;
         match result {
             Ok((source, table, graph, col_index_mapping, job_type)) => {
                 Ok((source, table, graph, col_index_mapping, job_type))
