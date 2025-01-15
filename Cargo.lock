@@ -9455,7 +9455,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d0f3e5beed80eb580c68e2c600937ac2c4eedabdfd5ef1e5b7ea4f3fba84497b"
 dependencies = [
  "heck 0.5.0",
- "itertools 0.10.5",
+ "itertools 0.13.0",
  "log",
  "multimap 0.10.0",
  "once_cell",
@@ -9501,7 +9501,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "157c5a9d7ea5c2ed2d9fb8f495b64759f7816c7eaea54ba3978f0d63000162e3"
 dependencies = [
  "anyhow",
- "itertools 0.10.5",
+ "itertools 0.13.0",
  "proc-macro2",
  "quote",
  "syn 2.0.87",
@@ -13491,9 +13491,9 @@ dependencies = [
 
 [[package]]
 name = "sqllogictest"
-version = "0.26.2"
+version = "0.26.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b8640104ca47c0ad23ee7ca98677214060f215eb9252ecf89467f00dda9b3dc1"
+checksum = "2dba5b678841955201299013ad50dc34e4b75acf89d7cfbb0769a59910d9081b"
 dependencies = [
  "async-trait",
  "educe",
