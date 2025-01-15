@@ -309,14 +309,14 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         // the executor can only know it's finished when data coming in.
         // For blocking DDL, this would be annoying.
 
-        let (stream, backfill_info) = source_desc
+        let (stream, res) = source_desc
             .source
-            .build_stream_for_backfill(Some(splits), column_ids, Arc::new(source_ctx))
+            .build_stream(Some(splits), column_ids, Arc::new(source_ctx), false)
             .await
             .map_err(StreamExecutorError::connector_error)?;
         Ok((
             apply_rate_limit(stream, self.rate_limit_rps).boxed(),
-            backfill_info,
+            res.backfill_info,
         ))
     }
 

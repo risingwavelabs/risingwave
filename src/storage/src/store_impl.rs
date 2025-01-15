@@ -17,10 +17,10 @@ use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 use enum_as_inner::EnumAsInner;
-use foyer::prometheus::PrometheusMetricsRegistry;
 use foyer::{
     DirectFsDeviceOptions, Engine, HybridCacheBuilder, LargeEngineOptions, RateLimitPicker,
 };
+use mixtrics::registry::prometheus::PrometheusMetricsRegistry;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common_service::RpcNotificationClient;
 use risingwave_hummock_sdk::HummockSstableObjectId;
@@ -42,8 +42,11 @@ use crate::monitor::{
 use crate::opts::StorageOpts;
 use crate::StateStore;
 
-static FOYER_METRICS_REGISTRY: LazyLock<PrometheusMetricsRegistry> =
-    LazyLock::new(|| PrometheusMetricsRegistry::new(GLOBAL_METRICS_REGISTRY.clone()));
+static FOYER_METRICS_REGISTRY: LazyLock<Box<PrometheusMetricsRegistry>> = LazyLock::new(|| {
+    Box::new(PrometheusMetricsRegistry::new(
+        GLOBAL_METRICS_REGISTRY.clone(),
+    ))
+});
 
 mod opaque_type {
     use super::*;

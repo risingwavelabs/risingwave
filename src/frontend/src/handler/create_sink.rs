@@ -556,7 +556,6 @@ pub(crate) async fn reparse_table_for_sink(
         on_conflict,
         with_version_column,
         None,
-        None,
         include_column_options,
         engine,
     )

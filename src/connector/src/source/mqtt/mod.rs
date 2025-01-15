@@ -14,6 +14,7 @@
 
 pub mod enumerator;
 pub mod source;
+pub use enumerator::MqttSplitEnumerator;
 pub mod split;
 
 use std::collections::HashMap;
@@ -25,7 +26,6 @@ use thiserror::Error;
 use with_options::WithOptions;
 
 use crate::connector_common::{MqttCommon, MqttQualityOfService};
-use crate::source::mqtt::enumerator::MqttSplitEnumerator;
 use crate::source::mqtt::source::{MqttSplit, MqttSplitReader};
 use crate::source::SourceProperties;
 

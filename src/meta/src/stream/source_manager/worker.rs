@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_connector::source::AnySplitEnumerator;
+
 use super::*;
 
 const MAX_FAIL_CNT: u32 = 10;
@@ -25,14 +27,15 @@ type SharedSplitMapRef = Arc<Mutex<SharedSplitMap>>;
 
 /// `ConnectorSourceWorker` keeps fetching the latest split metadata from the external source service ([`Self::tick`]),
 /// and maintains it in `current_splits`.
-pub struct ConnectorSourceWorker<P: SourceProperties> {
+pub struct ConnectorSourceWorker {
     source_id: SourceId,
     source_name: String,
     current_splits: SharedSplitMapRef,
-    enumerator: P::SplitEnumerator,
+    // XXX: box or arc?
+    enumerator: Box<dyn AnySplitEnumerator>,
     period: Duration,
     metrics: Arc<MetaMetrics>,
-    connector_properties: P,
+    connector_properties: ConnectorProperties,
     fail_cnt: u32,
     source_is_up: LabelGuardedIntGauge<2>,
 }
@@ -68,10 +71,10 @@ pub async fn create_source_worker(
     let enable_scale_in = connector_properties.enable_drop_split();
     let enable_adaptive_splits = connector_properties.enable_adaptive_splits();
     let (sync_call_tx, sync_call_rx) = tokio::sync::mpsc::unbounded_channel();
-    let handle = dispatch_source_prop!(connector_properties, prop, {
+    let handle = {
         let mut worker = ConnectorSourceWorker::create(
             source,
-            *prop,
+            connector_properties,
             DEFAULT_SOURCE_WORKER_TICK_INTERVAL,
             current_splits_ref.clone(),
             metrics,
@@ -93,7 +96,7 @@ pub async fn create_source_worker(
             })??;
 
         tokio::spawn(async move { worker.run(sync_call_rx).await })
-    });
+    };
     Ok(ConnectorSourceWorkerHandle {
         handle,
         sync_call_tx,
@@ -124,30 +127,28 @@ pub fn create_source_worker_async(
         let mut ticker = time::interval(DEFAULT_SOURCE_WORKER_TICK_INTERVAL);
         ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
-        dispatch_source_prop!(connector_properties, prop, {
-            let mut worker = loop {
-                ticker.tick().await;
+        let mut worker = loop {
+            ticker.tick().await;
 
-                match ConnectorSourceWorker::create(
-                    &source,
-                    prop.deref().clone(),
-                    DEFAULT_SOURCE_WORKER_TICK_INTERVAL,
-                    current_splits_ref.clone(),
-                    metrics.clone(),
-                )
-                .await
-                {
-                    Ok(worker) => {
-                        break worker;
-                    }
-                    Err(e) => {
-                        tracing::warn!(error = %e.as_report(), "failed to create source worker");
-                    }
+            match ConnectorSourceWorker::create(
+                &source,
+                connector_properties.clone(),
+                DEFAULT_SOURCE_WORKER_TICK_INTERVAL,
+                current_splits_ref.clone(),
+                metrics.clone(),
+            )
+            .await
+            {
+                Ok(worker) => {
+                    break worker;
                 }
-            };
+                Err(e) => {
+                    tracing::warn!(error = %e.as_report(), "failed to create source worker");
+                }
+            }
+        };
 
-            worker.run(sync_call_rx).await
-        });
+        worker.run(sync_call_rx).await
     });
 
     managed_sources.insert(
@@ -165,20 +166,20 @@ pub fn create_source_worker_async(
 
 const DEFAULT_SOURCE_WORKER_TICK_INTERVAL: Duration = Duration::from_secs(30);
 
-impl<P: SourceProperties> ConnectorSourceWorker<P> {
+impl ConnectorSourceWorker {
     /// Recreate the `SplitEnumerator` to establish a new connection to the external source service.
     async fn refresh(&mut self) -> MetaResult<()> {
-        let enumerator = P::SplitEnumerator::new(
-            self.connector_properties.clone(),
-            Arc::new(SourceEnumeratorContext {
+        let enumerator = self
+            .connector_properties
+            .clone()
+            .create_split_enumerator(Arc::new(SourceEnumeratorContext {
                 metrics: self.metrics.source_enumerator_metrics.clone(),
                 info: SourceEnumeratorInfo {
                     source_id: self.source_id as u32,
                 },
-            }),
-        )
-        .await
-        .context("failed to create SplitEnumerator")?;
+            }))
+            .await
+            .context("failed to create SplitEnumerator")?;
         self.enumerator = enumerator;
         self.fail_cnt = 0;
         tracing::info!("refreshed source enumerator: {}", self.source_name);
@@ -189,22 +190,21 @@ impl<P: SourceProperties> ConnectorSourceWorker<P> {
     /// will not be updated until `tick` is called.
     pub async fn create(
         source: &Source,
-        connector_properties: P,
+        connector_properties: ConnectorProperties,
         period: Duration,
         splits: Arc<Mutex<SharedSplitMap>>,
         metrics: Arc<MetaMetrics>,
     ) -> MetaResult<Self> {
-        let enumerator = P::SplitEnumerator::new(
-            connector_properties.clone(),
-            Arc::new(SourceEnumeratorContext {
+        let enumerator = connector_properties
+            .clone()
+            .create_split_enumerator(Arc::new(SourceEnumeratorContext {
                 metrics: metrics.source_enumerator_metrics.clone(),
                 info: SourceEnumeratorInfo {
                     source_id: source.id,
                 },
-            }),
-        )
-        .await
-        .context("failed to create SplitEnumerator")?;
+            }))
+            .await
+            .context("failed to create SplitEnumerator")?;
 
         let source_is_up = metrics
             .source_is_up
@@ -251,7 +251,7 @@ impl<P: SourceProperties> ConnectorSourceWorker<P> {
         }
     }
 
-    /// Uses [`SplitEnumerator`] to fetch the latest split metadata from the external source service.
+    /// Uses [`risingwave_connector::source::SplitEnumerator`] to fetch the latest split metadata from the external source service.
     async fn tick(&mut self) -> MetaResult<()> {
         let source_is_up = |res: i64| {
             self.source_is_up.set(res);
@@ -266,7 +266,7 @@ impl<P: SourceProperties> ConnectorSourceWorker<P> {
         current_splits.splits.replace(
             splits
                 .into_iter()
-                .map(|split| (split.id(), P::Split::into(split)))
+                .map(|split| (split.id(), split))
                 .collect(),
         );
 
