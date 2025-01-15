@@ -650,11 +650,25 @@ pub fn bind_connector_props(
     Ok(with_properties)
 }
 
-/// When the schema can be inferred from external system,
-/// how to handle the columns (excluding generated columns) from SQL?
+/// When the schema can be inferred from external system (like schema registry),
+/// how to handle the regular columns (i.e., non-generated) from SQL?
 pub enum SqlColumnStrategy {
-    Ignore,
+    /// Follow all columns from SQL, ignore the columns from external system.
+    ///
+    /// This is the behavior when `SINK INTO` or `[ADD | DROP] COLUMN` atop the purified SQL,
+    /// ensuring that no accidental refresh will happen and the schema remains unchanged.
     Follow,
+
+    /// Merge the generated columns from SQL and columns from external system. If there are
+    /// regular columns from SQL, ignore silently.
+    ///
+    /// This is the behavior when `REFRESH SCHEMA` atop the purified SQL.
+    Ignore,
+
+    /// Merge the generated columns from SQL and columns from external system. If there are
+    /// regular columns from SQL, reject the request with an error.
+    ///
+    /// This is the behavior when creating a source with a purified SQL.
     Reject,
 }
 
