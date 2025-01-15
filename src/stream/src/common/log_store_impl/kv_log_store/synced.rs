@@ -65,7 +65,17 @@ impl<S: StateStore> SyncedKvLogStore<S> {
                 match upstream_item {
                     None => Ok(None),
                     Some(upstream_item) => {
-                        Ok(Some(upstream_item?))
+                        match upstream_item? {
+                            Message::Barrier(barrier) => {
+                                self.write_barrier(barrier.clone()).await?;
+                                Ok(Some(Message::Barrier(barrier)))
+                            }
+                            Message::Chunk(chunk) => {
+                                self.write_chunk(chunk).await?;
+                                Ok(None)
+                            }
+                            _ => Ok(None),
+                        }
                     }
                 }
             }
@@ -135,7 +145,7 @@ impl<S: StateStore> SyncedKvLogStore<S> {
 
 // Write methods
 impl<S: StateStore> SyncedKvLogStore<S> {
-    async fn write_barrier(&mut self, is_checkpoint: bool) -> StreamExecutorResult<()> {
+    async fn write_barrier(&mut self, barrier: Barrier) -> StreamExecutorResult<()> {
         // Write a barrier to the state store
         Ok(())
     }
