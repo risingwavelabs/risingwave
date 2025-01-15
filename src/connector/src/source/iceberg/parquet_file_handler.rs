@@ -36,7 +36,7 @@ use parquet::file::metadata::{FileMetaData, ParquetMetaData, ParquetMetaDataRead
 use risingwave_common::array::arrow::arrow_schema_udf::{DataType as ArrowDateType, IntervalUnit};
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::catalog::ColumnId;
+use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::types::DataType as RwDataType;
 use risingwave_common::util::tokio_util::compat::FuturesAsyncReadCompatExt;
 use url::Url;
@@ -328,11 +328,12 @@ pub async fn read_parquet_file(
             .enumerate()
             .map(|(index, field_ref)| {
                 let data_type = IcebergArrowConvert.type_from_field(field_ref).unwrap();
-                SourceColumnDesc::simple(
+                let column_desc = ColumnDesc::named(
                     field_ref.name().clone(),
-                    data_type,
                     ColumnId::new(index as i32),
-                )
+                    data_type,
+                );
+                SourceColumnDesc::from(&column_desc)
             })
             .collect(),
     };
