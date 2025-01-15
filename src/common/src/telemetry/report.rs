@@ -119,11 +119,7 @@ where
         loop {
             tokio::select! {
                 _ = interval.tick() => {},
-                event = event_rx.recv() => {
-                    if !enable_event_report {
-                        // if have error creating the channel, will get None message from the channel
-                        continue;
-                    }
+                event = event_rx.recv(), if enable_event_report => {
                     debug_assert!(event.is_some());
                     event_stash.push(event.unwrap());
                     if event_stash.len() >= TELEMETRY_EVENT_REPORT_STASH_SIZE {
@@ -131,10 +127,7 @@ where
                     }
                     continue;
                 }
-                _ = event_interval.tick() => {
-                    if !enable_event_report {
-                        continue;
-                    }
+                _ = event_interval.tick(), if enable_event_report => {
                     do_telemetry_event_report(&mut event_stash).await;
                     continue;
                 },
