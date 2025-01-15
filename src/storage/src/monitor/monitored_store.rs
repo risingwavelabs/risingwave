@@ -221,6 +221,10 @@ impl<S: StateStoreRead> StateStoreRead for MonitoredStateStore<S> {
 impl<S: StateStoreReadLog> StateStoreReadLog for MonitoredStateStore<S> {
     type ChangeLogIter = impl StateStoreReadChangeLogIter;
 
+    fn next_epoch(&self, epoch: u64, options: NextEpochOptions) -> impl StorageFuture<'_, u64> {
+        self.inner.next_epoch(epoch, options)
+    }
+
     fn iter_log(
         &self,
         epoch_range: (u64, u64),

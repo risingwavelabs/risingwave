@@ -31,11 +31,8 @@ use risingwave_common::util::stream_graph_visitor::{
 };
 use risingwave_common::{bail, bail_not_implemented, hash, must_match};
 use risingwave_connector::connector_common::validate_connection;
-use risingwave_connector::error::ConnectorError;
-use risingwave_connector::source::{
-    ConnectorProperties, SourceEnumeratorContext, SourceProperties, SplitEnumerator,
-};
-use risingwave_connector::{dispatch_source_prop, WithOptionsSecResolved};
+use risingwave_connector::source::{ConnectorProperties, SourceEnumeratorContext};
+use risingwave_connector::WithOptionsSecResolved;
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::{
     ConnectionId, DatabaseId, FunctionId, IndexId, ObjectId, SchemaId, SecretId, SinkId, SourceId,
@@ -660,12 +657,6 @@ impl DdlController {
                 )
             })?;
 
-        async fn new_enumerator_for_validate<P: SourceProperties>(
-            source_props: P,
-        ) -> Result<P::SplitEnumerator, ConnectorError> {
-            P::SplitEnumerator::new(source_props, SourceEnumeratorContext::dummy().into()).await
-        }
-
         for actor in &stream_scan_fragment.actors {
             if let Some(NodeBody::StreamCdcScan(ref stream_cdc_scan)) =
                 actor.nodes.as_ref().unwrap().node_body
@@ -678,9 +669,10 @@ impl DdlController {
                 let mut props = ConnectorProperties::extract(options_with_secret, true)?;
                 props.init_from_pb_cdc_table_desc(cdc_table_desc);
 
-                dispatch_source_prop!(props, props, {
-                    new_enumerator_for_validate(*props).await?;
-                });
+                // try creating a split enumerator to validate
+                let _enumerator = props
+                    .create_split_enumerator(SourceEnumeratorContext::dummy().into())
+                    .await?;
                 tracing::debug!(?table.id, "validate cdc table success");
             }
         }

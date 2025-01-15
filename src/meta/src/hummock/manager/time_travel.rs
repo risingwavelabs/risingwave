@@ -243,14 +243,14 @@ impl HummockManager {
     pub(crate) async fn filter_out_objects_by_time_travel(
         &self,
         objects: impl Iterator<Item = HummockSstableObjectId>,
+        batch_size: usize,
     ) -> Result<HashSet<HummockSstableObjectId>> {
         // The input object count is much smaller than time travel pinned object count in meta store.
         // So search input object in meta store.
         let mut result: HashSet<_> = objects.collect();
         let mut remain: VecDeque<_> = result.iter().copied().collect();
-        const FILTER_BATCH_SIZE: usize = 1000;
         while !remain.is_empty() {
-            let batch = remain.drain(..std::cmp::min(remain.len(), FILTER_BATCH_SIZE));
+            let batch = remain.drain(..std::cmp::min(remain.len(), batch_size));
             let reject_object_ids: Vec<risingwave_meta_model::HummockSstableObjectId> =
                 hummock_sstable_info::Entity::find()
                     .filter(hummock_sstable_info::Column::ObjectId.is_in(batch))
@@ -430,6 +430,7 @@ impl HummockManager {
             Ok(count)
         }
 
+        let mut batch = vec![];
         for (table_id, _cg_id, committed_epoch) in tables_to_commit {
             let version_id: u64 = delta.id.to_u64();
             let m = hummock_epoch_to_version::ActiveModel {
@@ -437,8 +438,24 @@ impl HummockManager {
                 table_id: Set(table_id.table_id.into()),
                 version_id: Set(version_id.try_into().unwrap()),
             };
+            batch.push(m);
+            if batch.len()
+                >= self
+                    .env
+                    .opts
+                    .hummock_time_travel_epoch_version_insert_batch_size
+            {
+                // There should be no conflict rows.
+                hummock_epoch_to_version::Entity::insert_many(std::mem::take(&mut batch))
+                    .do_nothing()
+                    .exec(txn)
+                    .await?;
+            }
+        }
+        if !batch.is_empty() {
             // There should be no conflict rows.
-            hummock_epoch_to_version::Entity::insert(m)
+            hummock_epoch_to_version::Entity::insert_many(batch)
+                .do_nothing()
                 .exec(txn)
                 .await?;
         }

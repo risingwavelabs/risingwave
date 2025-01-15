@@ -96,7 +96,8 @@ normal = ["workspace-hack"]
 development = ["expect-test", "pretty_assertions"]
 
 [workspace.dependencies]
-foyer = { version = "0.13.1", features = ["tracing", "nightly", "prometheus"] }
+foyer = { version = "0.14.0", features = ["tracing", "nightly"] }
+mixtrics ={ version = "0.0.2", features = ["prometheus"] }
 apache-avro = { git = "https://github.com/risingwavelabs/avro", rev = "25113ba88234a9ae23296e981d8302c290fdaa4b", features = [
     "snappy",
     "zstandard",
@@ -154,7 +155,10 @@ icelake = { git = "https://github.com/risingwavelabs/icelake.git", rev = "0ec44f
     "prometheus",
 ] }
 # branch dev_rebase_main_20241230
-iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "683fb89edeaf8d1baae69e1f376d68b92be1d496", features = ["storage-s3", "storage-gcs"] }
+iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "683fb89edeaf8d1baae69e1f376d68b92be1d496", features = [
+    "storage-s3",
+    "storage-gcs",
+] }
 iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "683fb89edeaf8d1baae69e1f376d68b92be1d496" }
 iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "683fb89edeaf8d1baae69e1f376d68b92be1d496" }
 opendal = "0.49"
@@ -168,7 +172,7 @@ clap = { version = "4", features = ["cargo", "derive", "env"] }
 # Use a forked version which removes the dependencies on dynamo db to reduce
 # compile time and binary size.
 deltalake = { version = "0.20.1", features = ["s3", "gcs", "datafusion"] }
-itertools = "0.13.0"
+itertools = "0.14.0"
 jsonbb = "0.1.4"
 linkme = { version = "0.3", features = ["used_linker"] }
 lru = { git = "https://github.com/risingwavelabs/lru-rs.git", rev = "2682b85" }

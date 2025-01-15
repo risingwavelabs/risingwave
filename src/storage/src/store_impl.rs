@@ -17,10 +17,10 @@ use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 use enum_as_inner::EnumAsInner;
-use foyer::prometheus::PrometheusMetricsRegistry;
 use foyer::{
     DirectFsDeviceOptions, Engine, HybridCacheBuilder, LargeEngineOptions, RateLimitPicker,
 };
+use mixtrics::registry::prometheus::PrometheusMetricsRegistry;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common_service::RpcNotificationClient;
 use risingwave_hummock_sdk::HummockSstableObjectId;
@@ -42,8 +42,11 @@ use crate::monitor::{
 use crate::opts::StorageOpts;
 use crate::StateStore;
 
-static FOYER_METRICS_REGISTRY: LazyLock<PrometheusMetricsRegistry> =
-    LazyLock::new(|| PrometheusMetricsRegistry::new(GLOBAL_METRICS_REGISTRY.clone()));
+static FOYER_METRICS_REGISTRY: LazyLock<Box<PrometheusMetricsRegistry>> = LazyLock::new(|| {
+    Box::new(PrometheusMetricsRegistry::new(
+        GLOBAL_METRICS_REGISTRY.clone(),
+    ))
+});
 
 mod opaque_type {
     use super::*;
@@ -345,6 +348,14 @@ pub mod verify {
 
     impl<A: StateStoreReadLog, E: StateStoreReadLog> StateStoreReadLog for VerifyStateStore<A, E> {
         type ChangeLogIter = impl StateStoreReadChangeLogIter;
+
+        async fn next_epoch(&self, epoch: u64, options: NextEpochOptions) -> StorageResult<u64> {
+            let actual = self.actual.next_epoch(epoch, options.clone()).await?;
+            if let Some(expected) = &self.expected {
+                assert_eq!(actual, expected.next_epoch(epoch, options).await?);
+            }
+            Ok(actual)
+        }
 
         async fn iter_log(
             &self,
@@ -850,6 +861,7 @@ mod boxed_state_store {
 
     #[async_trait::async_trait]
     pub trait DynamicDispatchedStateStoreReadLog: StaticSendSync {
+        async fn next_epoch(&self, epoch: u64, options: NextEpochOptions) -> StorageResult<u64>;
         async fn iter_log(
             &self,
             epoch_range: (u64, u64),
@@ -892,6 +904,10 @@ mod boxed_state_store {
 
     #[async_trait::async_trait]
     impl<S: StateStoreReadLog> DynamicDispatchedStateStoreReadLog for S {
+        async fn next_epoch(&self, epoch: u64, options: NextEpochOptions) -> StorageResult<u64> {
+            self.next_epoch(epoch, options).await
+        }
+
         async fn iter_log(
             &self,
             epoch_range: (u64, u64),
@@ -1171,6 +1187,10 @@ mod boxed_state_store {
 
     impl StateStoreReadLog for BoxDynamicDispatchedStateStore {
         type ChangeLogIter = BoxStateStoreReadChangeLogIter;
+
+        async fn next_epoch(&self, epoch: u64, options: NextEpochOptions) -> StorageResult<u64> {
+            self.deref().next_epoch(epoch, options).await
+        }
 
         fn iter_log(
             &self,

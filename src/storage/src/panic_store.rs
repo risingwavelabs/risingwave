@@ -67,6 +67,10 @@ impl StateStoreRead for PanicStateStore {
 impl StateStoreReadLog for PanicStateStore {
     type ChangeLogIter = PanicStateStoreIter<StateStoreReadLogItem>;
 
+    async fn next_epoch(&self, _epoch: u64, _options: NextEpochOptions) -> StorageResult<u64> {
+        unimplemented!()
+    }
+
     async fn iter_log(
         &self,
         _epoch_range: (u64, u64),
