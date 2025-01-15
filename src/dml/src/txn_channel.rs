@@ -16,7 +16,6 @@ use std::sync::Arc;
 
 use futures::FutureExt;
 use risingwave_common::transaction::transaction_message::TxnMsg;
-use risingwave_common::util::epoch::Epoch;
 use tokio::sync::{mpsc, oneshot, Semaphore};
 
 pub struct PermitValue(u32);
@@ -24,7 +23,6 @@ pub struct PermitValue(u32);
 pub struct TxnMsgWithPermits {
     pub txn_msg: TxnMsg,
     pub notificator: oneshot::Sender<usize>,
-    pub epoch_notificator: Option<oneshot::Sender<Epoch>>,
     pub permit_value: Option<PermitValue>,
 }
 
@@ -82,7 +80,6 @@ impl Sender {
         &self,
         txn_msg: TxnMsg,
         notificator: oneshot::Sender<usize>,
-        epoch_notificator: Option<oneshot::Sender<Epoch>>,
     ) -> Result<(), mpsc::error::SendError<TxnMsg>> {
         // The semaphores should never be closed.
         let permits = match &txn_msg {
@@ -102,14 +99,13 @@ impl Sender {
                     .forget();
                 Some(PermitValue(card as _))
             }
-            TxnMsg::Begin(_) | TxnMsg::Rollback(_) | TxnMsg::End(_) => None,
+            TxnMsg::Begin(_) | TxnMsg::Rollback(_) | TxnMsg::End(..) => None,
         };
 
         self.tx
             .send(TxnMsgWithPermits {
                 txn_msg,
                 notificator,
-                epoch_notificator,
                 permit_value: permits,
             })
             .map_err(|e| mpsc::error::SendError(e.0.txn_msg))
@@ -123,9 +119,8 @@ impl Sender {
         &self,
         txn_msg: TxnMsg,
         notificator: oneshot::Sender<usize>,
-        epoch_notificator: Option<oneshot::Sender<Epoch>>,
     ) -> Result<(), mpsc::error::SendError<TxnMsg>> {
-        self.send(txn_msg, notificator, epoch_notificator)
+        self.send(txn_msg, notificator)
             .now_or_never()
             .expect("cannot send immediately")
     }
@@ -146,17 +141,10 @@ impl Receiver {
     /// Receive the next message for this receiver, with the permits of this message added back.
     ///
     /// Returns `None` if the channel has been closed.
-    pub async fn recv(
-        &mut self,
-    ) -> Option<(
-        TxnMsg,
-        oneshot::Sender<usize>,
-        Option<oneshot::Sender<Epoch>>,
-    )> {
+    pub async fn recv(&mut self) -> Option<(TxnMsg, oneshot::Sender<usize>)> {
         let TxnMsgWithPermits {
             txn_msg,
             notificator,
-            epoch_notificator,
             permit_value: permits,
         } = self.rx.recv().await?;
 
@@ -164,6 +152,6 @@ impl Receiver {
             self.permits.add_permits(permits);
         }
 
-        Some((txn_msg, notificator, epoch_notificator))
+        Some((txn_msg, notificator))
     }
 }

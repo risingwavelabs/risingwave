@@ -45,9 +45,9 @@ message CreateTaskRequest {
 }
 
 message FastInsertRequest {
+  bool wait_epoch = 1;
   batch_plan.FastInsertNode fast_insert_node = 2;
 }
-
 
 message FastInsertResponse {
   // Optional error message for failed task.

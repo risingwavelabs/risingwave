@@ -127,11 +127,9 @@ impl TaskService for BatchServiceImpl {
         &self,
         request: Request<FastInsertRequest>,
     ) -> Result<Response<FastInsertResponse>, Status> {
-        let insert_node = request
-            .into_inner()
-            .fast_insert_node
-            .expect("no fast insert node found");
-        let res = self.do_fast_insert(insert_node).await;
+        let req = request.into_inner();
+        let insert_node = req.fast_insert_node.expect("no fast insert node found");
+        let res = self.do_fast_insert(insert_node, req.wait_epoch).await;
         match res {
             Ok(_) => Ok(Response::new(FastInsertResponse {
                 error_message: String::from("success"),
@@ -207,28 +205,33 @@ impl BatchServiceImpl {
         Ok(Response::new(ReceiverStream::new(rx)))
     }
 
-    async fn do_fast_insert(&self, insert_node: FastInsertNode) -> Result<(), BatchError> {
+    async fn do_fast_insert(
+        &self,
+        insert_node: FastInsertNode,
+        wait_epoch: bool,
+    ) -> Result<(), BatchError> {
         let table_id = insert_node.table_id;
         let (executor, data_chunk) =
             FastInsertExecutor::build(self.env.dml_manager_ref(), insert_node)?;
         let epoch = executor.do_execute(data_chunk).await?;
+        if wait_epoch {
+            dispatch_state_store!(self.env.state_store(), store, {
+                use risingwave_common::catalog::TableId;
+                use risingwave_hummock_sdk::HummockReadEpoch;
+                use risingwave_storage::store::TryWaitEpochOptions;
+                use risingwave_storage::StateStore;
 
-        dispatch_state_store!(self.env.state_store(), store, {
-            use risingwave_common::catalog::TableId;
-            use risingwave_hummock_sdk::HummockReadEpoch;
-            use risingwave_storage::store::TryWaitEpochOptions;
-            use risingwave_storage::StateStore;
-
-            store
-                .try_wait_epoch(
-                    HummockReadEpoch::Committed(epoch.0),
-                    TryWaitEpochOptions {
-                        table_id: TableId::new(table_id),
-                    },
-                )
-                .await
-                .map_err(BatchError::from)?;
-        });
+                store
+                    .try_wait_epoch(
+                        HummockReadEpoch::Committed(epoch.0),
+                        TryWaitEpochOptions {
+                            table_id: TableId::new(table_id),
+                        },
+                    )
+                    .await
+                    .map_err(BatchError::from)?;
+            });
+        }
         Ok(())
     }
 }

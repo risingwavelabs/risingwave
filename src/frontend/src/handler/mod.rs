@@ -91,7 +91,6 @@ pub mod drop_user;
 mod drop_view;
 pub mod explain;
 pub mod extended_handle;
-pub mod fast_insert;
 pub mod fetch_cursor;
 mod flush;
 pub mod handle_privilege;

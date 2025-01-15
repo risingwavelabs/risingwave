@@ -34,8 +34,6 @@ pub struct FastInsertExecutor {
     table_id: TableId,
     table_version_id: TableVersionId,
     dml_manager: DmlManagerRef,
-    // TODO(Kexiang): get rid of it?
-    input_schema: Schema,
     column_indices: Vec<usize>,
 
     // TODO(Kexiang): get rid of it?
@@ -86,7 +84,6 @@ impl FastInsertExecutor {
                 table_id,
                 insert_node.table_version_id,
                 dml_manager,
-                schema,
                 column_indices,
                 sorted_default_columns,
                 insert_node.row_id_index.as_ref().map(|index| *index as _),
@@ -101,7 +98,6 @@ impl FastInsertExecutor {
         table_id: TableId,
         table_version_id: TableVersionId,
         dml_manager: DmlManagerRef,
-        input_schema: Schema,
         column_indices: Vec<usize>,
         sorted_default_columns: Vec<(usize, BoxedExpression)>,
         row_id_index: Option<usize>,
@@ -112,7 +108,6 @@ impl FastInsertExecutor {
             table_id,
             table_version_id,
             dml_manager,
-            input_schema,
             column_indices,
             sorted_default_columns,
             row_id_index,
@@ -192,11 +187,13 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+    use crate::risingwave_common::array::ArrayBuilder;
     use crate::risingwave_common::types::Scalar;
     use crate::*;
 
     #[tokio::test]
-    async fn test_insert_executor() -> Result<()> {
+    async fn test_fast_insert() -> Result<()> {
+        let epoch = Epoch::now();
         let dml_manager = Arc::new(DmlManager::for_test());
         let store = MemoryStateStore::new();
         // Schema of the table
@@ -240,33 +237,28 @@ mod tests {
             table_id,
             INITIAL_TABLE_VERSION_ID,
             dml_manager,
-            schema,
             vec![0], // Ignoring insertion order
             vec![],
             row_id_index,
             0,
         ));
         let handle = tokio::spawn(async move {
-            insert_executor.do_execute(data_chunk).await.unwrap();
+            let epoch_recieved = insert_executor.do_execute(data_chunk).await.unwrap();
+            assert_eq!(epoch, epoch_recieved);
         });
 
         // Read
-        assert_matches!(reader.next().await.unwrap()?, (TxnMsg::Begin(_), _));
+        assert_matches!(reader.next().await.unwrap()?, TxnMsg::Begin(_));
 
-        assert_matches!(reader.next().await.unwrap()?, (TxnMsg::Data(_, chunk),_) => {
-            // assert_eq!(
-            //     chunk.columns()[0].as_int32().iter().collect::<Vec<_>>(),
-            //     vec![Some(1), Some(3), Some(5), Some(7), Some(9)]
-            // );
-
+        assert_matches!(reader.next().await.unwrap()?, TxnMsg::Data(_, chunk) => {
             assert_eq!(chunk.columns().len(),2);
             let array = chunk.columns()[0].as_jsonb().iter().collect::<Vec<_>>();
-            println!("WKXLOG arrar: {:?}",array);
-            // assert_eq!(*array,2);
-            // assert_eq!(*chunk.columns()[2], array);
+            assert_eq!(JsonbVal::from(array[0].unwrap()), jsonb_val);
         });
 
-        assert_matches!(reader.next().await.unwrap()?, (TxnMsg::End(_), _));
+        assert_matches!(reader.next().await.unwrap()?, TxnMsg::End(_, Some(epoch_notifier)) => {
+            epoch_notifier.send(epoch.clone()).unwrap();
+        });
         let epoch = u64::MAX;
         let full_range = (Bound::Unbounded, Bound::Unbounded);
         let store_content = store
