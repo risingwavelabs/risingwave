@@ -45,7 +45,7 @@ pub async fn list_kv(
     let range = (Unbounded, Unbounded);
     let read_snapshot = hummock
         .new_read_snapshot(
-            HummockReadEpoch::NoWait(epoch),
+            HummockReadEpoch::Committed(epoch),
             NewReadSnapshotOptions {
                 table_id: TableId { table_id },
             },

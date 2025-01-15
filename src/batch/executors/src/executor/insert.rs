@@ -274,7 +274,7 @@ mod tests {
     use risingwave_common::transaction::transaction_message::TxnMsg;
     use risingwave_common::types::StructType;
     use risingwave_dml::dml_manager::DmlManager;
-    use risingwave_storage::hummock::test_utils::StateStoreReadTestExt;
+    use risingwave_storage::hummock::test_utils::*;
     use risingwave_storage::hummock::CachePolicy;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::store::ReadOptions;

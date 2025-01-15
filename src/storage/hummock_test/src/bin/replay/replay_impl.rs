@@ -32,10 +32,9 @@ use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::subscribe_response::{Info, Operation as RespOperation};
 use risingwave_pb::meta::{SubscribeResponse, SubscribeType};
 use risingwave_storage::hummock::store::LocalHummockStorage;
+use risingwave_storage::hummock::test_utils::*;
 use risingwave_storage::hummock::HummockStorage;
-use risingwave_storage::store::{
-    to_owned_item, LocalStateStore, NewReadSnapshotOptions, StateStoreIterExt, StateStoreRead,
-};
+use risingwave_storage::store::{to_owned_item, LocalStateStore, StateStoreIterExt};
 use risingwave_storage::{StateStore, StateStoreIter, StateStoreReadIter};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
@@ -112,18 +111,11 @@ impl ReplayRead for GlobalReplayImpl {
             key_range.1.map(TracedBytes::into).map(TableKey),
         );
 
-        let snapshot = self
+        let iter = self
             .store
-            .new_read_snapshot(
-                HummockReadEpoch::NoWait(epoch),
-                NewReadSnapshotOptions {
-                    table_id: read_options.table_id.table_id.into(),
-                },
-            )
+            .iter(key_range, epoch, read_options.into())
             .await
             .unwrap();
-
-        let iter = snapshot.iter(key_range, read_options.into()).await.unwrap();
         let stream = GlobalReplayIter::new(iter).into_stream().boxed();
         Ok(stream)
     }
@@ -134,18 +126,9 @@ impl ReplayRead for GlobalReplayImpl {
         epoch: u64,
         read_options: TracedReadOptions,
     ) -> Result<Option<TracedBytes>> {
-        let snapshot = self
+        Ok(self
             .store
-            .new_read_snapshot(
-                HummockReadEpoch::NoWait(epoch),
-                NewReadSnapshotOptions {
-                    table_id: read_options.table_id.table_id.into(),
-                },
-            )
-            .await
-            .unwrap();
-        Ok(snapshot
-            .get(TableKey(key.into()), read_options.into())
+            .get(TableKey(key.into()), epoch, read_options.into())
             .await
             .unwrap()
             .map(TracedBytes::from))
