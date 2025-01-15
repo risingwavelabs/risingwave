@@ -737,12 +737,13 @@ pub enum ColumnOption {
     /// `DEFAULT <restricted-expr>`
     DefaultValue(Expr),
     /// Default value from previous bound `DefaultColumnDesc`. Used internally
-    /// and will not be parsed from SQL.
-    DefaultValuePersisted {
+    /// for schema change and should not be specified by users.
+    DefaultValueInternal {
         /// Protobuf encoded `DefaultColumnDesc`.
         persisted: Box<[u8]>,
         /// Optional AST for unparsing. If `None`, the default value will be
-        /// shown as `DEFAULT ...`, which is for demonstrating and not valid.
+        /// shown as `DEFAULT INTERNAL` which is for demonstrating and should
+        /// not be specified by users.
         expr: Option<Expr>,
     },
     /// `{ PRIMARY KEY | UNIQUE }`
@@ -775,7 +776,7 @@ impl fmt::Display for ColumnOption {
             Null => write!(f, "NULL"),
             NotNull => write!(f, "NOT NULL"),
             DefaultValue(expr) => write!(f, "DEFAULT {}", expr),
-            DefaultValuePersisted { persisted: _, expr } => {
+            DefaultValueInternal { persisted: _, expr } => {
                 if let Some(expr) = expr {
                     write!(f, "DEFAULT {}", expr)
                 } else {

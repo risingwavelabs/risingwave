@@ -181,7 +181,7 @@ fn ensure_column_options_supported(c: &ColumnDef) -> Result<()> {
         match option_def.option {
             ColumnOption::GeneratedColumns(_) => {}
             ColumnOption::DefaultValue(_) => {}
-            ColumnOption::DefaultValuePersisted { .. } => {}
+            ColumnOption::DefaultValueInternal { .. } => {}
             ColumnOption::Unique { is_primary: true } => {}
             _ => bail_not_implemented!("column constraints \"{}\"", option_def),
         }
@@ -390,7 +390,7 @@ pub fn bind_sql_column_constraints(
                         .into());
                     }
                 }
-                ColumnOption::DefaultValuePersisted { persisted, expr: _ } => {
+                ColumnOption::DefaultValueInternal { persisted, expr: _ } => {
                     // When a `DEFAULT INTERNAL` is used internally for schema change, the persisted value
                     // should already be set during purifcation. So if we encounter an empty value here, it
                     // means the user has specified it explicitly in the SQL statement, typically by
@@ -1148,7 +1148,7 @@ pub(super) async fn handle_create_table_plan(
                     for column_def in &column_defs {
                         for option_def in &column_def.options {
                             if let ColumnOption::DefaultValue(_)
-                            | ColumnOption::DefaultValuePersisted { .. } = option_def.option
+                            | ColumnOption::DefaultValueInternal { .. } = option_def.option
                             {
                                 return Err(ErrorCode::NotSupported(
                                             "Default value for columns defined on the table created from a CDC source".into(),

@@ -2795,7 +2795,7 @@ impl Parser<'_> {
             Ok(Some(ColumnOption::Null))
         } else if self.parse_keyword(Keyword::DEFAULT) {
             if self.parse_keyword(Keyword::INTERNAL) {
-                Ok(Some(ColumnOption::DefaultValuePersisted {
+                Ok(Some(ColumnOption::DefaultValueInternal {
                     // Placeholder. Will fill during definition purification for schema change.
                     persisted: Default::default(),
                     expr: None,

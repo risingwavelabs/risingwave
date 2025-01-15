@@ -109,7 +109,7 @@ pub fn try_purify_table_source_create_sql_ast(
                     matches!(
                         o.option,
                         ColumnOption::DefaultValue { .. }
-                            | ColumnOption::DefaultValuePersisted { .. }
+                            | ColumnOption::DefaultValueInternal { .. }
                     )
                 })
                 .at_most_one()
@@ -118,13 +118,13 @@ pub fn try_purify_table_source_create_sql_ast(
 
             let expr = default_value_option.and_then(|o| match o.option {
                 ColumnOption::DefaultValue(expr) => Some(expr),
-                ColumnOption::DefaultValuePersisted { expr, .. } => expr,
+                ColumnOption::DefaultValueInternal { expr, .. } => expr,
                 _ => unreachable!(),
             });
 
             column_def.options.push(ColumnOptionDef {
                 name: None,
-                option: ColumnOption::DefaultValuePersisted { persisted, expr },
+                option: ColumnOption::DefaultValueInternal { persisted, expr },
             });
         }
 
