@@ -53,6 +53,7 @@ macro_rules! for_all_variants {
             { Date,         Date,         date,         $crate::types::Date,        $crate::types::Date,                $crate::array::DateArray,           $crate::array::DateArrayBuilder         },
             { Time,         Time,         time,         $crate::types::Time,        $crate::types::Time,                $crate::array::TimeArray,           $crate::array::TimeArrayBuilder         },
             { Timestamp,    Timestamp,    timestamp,    $crate::types::Timestamp,   $crate::types::Timestamp,           $crate::array::TimestampArray,      $crate::array::TimestampArrayBuilder    },
+            { TimestampNano,    TimestampNano,    timestampnano,    $crate::types::TimestampNano,   $crate::types::TimestampNano,           $crate::array::TimestampNanoArray,      $crate::array::TimestampNanoArrayBuilder    },
             { Timestamptz,  Timestamptz,  timestamptz,  $crate::types::Timestamptz, $crate::types::Timestamptz,         $crate::array::TimestamptzArray,    $crate::array::TimestamptzArrayBuilder  },
             { Jsonb,        Jsonb,        jsonb,        $crate::types::JsonbVal,    $crate::types::JsonbRef<'scalar>,   $crate::array::JsonbArray,          $crate::array::JsonbArrayBuilder        },
             { Serial,       Serial,       serial,       $crate::types::Serial,      $crate::types::Serial,              $crate::array::SerialArray,         $crate::array::SerialArrayBuilder       },

@@ -245,6 +245,28 @@ impl ScalarRef<'_> for Timestamp {
     }
 }
 
+/// Implement `Scalar` for `Timestamp`.
+impl Scalar for TimestampNano {
+    type ScalarRefType<'a> = TimestampNano;
+
+    fn as_scalar_ref(&self) -> TimestampNano {
+        *self
+    }
+}
+
+/// Implement `ScalarRef` for `Timestamp`.
+impl ScalarRef<'_> for TimestampNano {
+    type ScalarType = TimestampNano;
+
+    fn to_owned_scalar(&self) -> TimestampNano {
+        *self
+    }
+
+    fn hash_scalar<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.hash(state)
+    }
+}
+
 /// Implement `Scalar` for `Time`.
 impl Scalar for Time {
     type ScalarRefType<'a> = Time;

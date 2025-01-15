@@ -129,6 +129,7 @@ impl_primitive_for_others! {
     { Date, Date, Date },
     { Time, Time, Time },
     { Timestamp, Timestamp, Timestamp },
+    { TimestampNano, TimestampNano, TimestampNano },
     { Timestamptz, Timestamptz, Timestamptz }
 }
 

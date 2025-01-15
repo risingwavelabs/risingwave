@@ -69,6 +69,7 @@ impl DataType {
                     $(
                     DataType::$enum => $len,
                     )*
+                    DataType::TimestampNano => 8,
                     DataType::Serial => 8,
                     DataType::Int256 => -1,
                     DataType::List(_) | DataType::Struct(_) | DataType::Map(_) => -1,
@@ -145,6 +146,7 @@ impl DataType {
                     DataType::List(_) => "list",
                     DataType::Serial => "serial",
                     DataType::Int256 => "rw_int256",
+                    DataType::TimestampNano => "timestamp_nano",
                     DataType::Map(_) => "map",
                 }
             }
