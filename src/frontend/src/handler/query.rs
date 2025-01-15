@@ -286,8 +286,6 @@ fn gen_batch_query_plan(
         QueryMode::Distributed => logical.gen_batch_distributed_plan()?,
     };
 
-    // println!("WKXLOG Generated query plan: {:?}", physical);
-
     Ok(BatchQueryPlanResult {
         plan: physical,
         query_mode,

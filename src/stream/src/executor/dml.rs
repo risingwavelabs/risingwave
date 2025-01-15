@@ -124,10 +124,7 @@ impl DmlExecutor {
         // Merge the two streams using `StreamReaderWithPause` because when we receive a pause
         // barrier, we should stop receiving the data from DML. We poll data from the two streams in
         // a round robin way.
-        let mut stream =
-            StreamReaderWithPause::<false, (TxnMsg, Option<oneshot::Sender<Epoch>>)>::new(
-                upstream, reader,
-            );
+        let mut stream = StreamReaderWithPause::<false, TxnMsg>::new(upstream, reader);
 
         // If the first barrier requires us to pause on startup, pause the stream.
         if barrier.is_pause_on_startup() {
@@ -202,7 +199,7 @@ impl DmlExecutor {
                     }
                     yield msg;
                 }
-                Either::Right((txn_msg, epoch_notifier)) => {
+                Either::Right(txn_msg) => {
                     // Batch data.
                     match txn_msg {
                         TxnMsg::Begin(txn_id) => {
@@ -212,7 +209,7 @@ impl DmlExecutor {
                                     panic!("Transaction id collision txn_id = {}.", txn_id)
                                 });
                         }
-                        TxnMsg::End(txn_id) => {
+                        TxnMsg::End(txn_id, epoch_notifier) => {
                             if let Some(sender) = epoch_notifier {
                                 let _ = sender.send(epoch);
                             }
@@ -314,34 +311,31 @@ impl Execute for DmlExecutor {
     }
 }
 
-type BoxTxnMessageStream =
-    BoxStream<'static, risingwave_dml::error::Result<(TxnMsg, Option<oneshot::Sender<Epoch>>)>>;
-#[try_stream(ok = (TxnMsg, Option<oneshot::Sender<Epoch>>), error = risingwave_dml::error::DmlError)]
+type BoxTxnMessageStream = BoxStream<'static, risingwave_dml::error::Result<TxnMsg>>;
+#[try_stream(ok = TxnMsg, error = risingwave_dml::error::DmlError)]
 async fn apply_dml_rate_limit(
     stream: BoxTxnMessageStream,
     rate_limiter: Arc<MonitoredRateLimiter>,
 ) {
     #[for_await]
     for txn_msg in stream {
-        let (txn_msg, epoch_notifier) = txn_msg?;
-        match txn_msg {
+        match txn_msg? {
             TxnMsg::Begin(txn_id) => {
-                yield (TxnMsg::Begin(txn_id), epoch_notifier);
+                yield TxnMsg::Begin(txn_id);
             }
-            TxnMsg::End(txn_id) => {
-                yield (TxnMsg::End(txn_id), epoch_notifier);
+            TxnMsg::End(txn_id, epoch_notifier) => {
+                yield TxnMsg::End(txn_id, epoch_notifier);
             }
             TxnMsg::Rollback(txn_id) => {
-                yield (TxnMsg::Rollback(txn_id), epoch_notifier);
+                yield TxnMsg::Rollback(txn_id);
             }
             TxnMsg::Data(txn_id, chunk) => {
                 let chunk_size = chunk.capacity();
                 if chunk_size == 0 {
                     // empty chunk
-                    yield (TxnMsg::Data(txn_id, chunk), None);
+                    yield TxnMsg::Data(txn_id, chunk);
                     continue;
                 }
-
                 let rate_limit = loop {
                     match rate_limiter.rate_limit() {
                         RateLimit::Pause => rate_limiter.wait(0).await,

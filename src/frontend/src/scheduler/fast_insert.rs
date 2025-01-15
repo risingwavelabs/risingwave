@@ -13,48 +13,24 @@
 // limitations under the License.
 
 //! Local execution for batch query.
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use futures::stream::BoxStream;
-use futures::{FutureExt, StreamExt};
-use futures_async_stream::try_stream;
 use itertools::Itertools;
-use pgwire::pg_server::SessionId;
 use risingwave_batch::error::BatchError;
-use risingwave_batch::executor::ExecutorBuilder;
-use risingwave_batch::task::{ShutdownToken, TaskId};
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
-use risingwave_common::array::DataChunk;
-use risingwave_common::bail;
-use risingwave_common::error::BoxedError;
 use risingwave_common::hash::WorkerSlotMapping;
-use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_common::util::tracing::{InstrumentStream, TracingContext};
-use risingwave_pb::batch_plan::exchange_info::DistributionMode;
-use risingwave_pb::batch_plan::exchange_source::LocalExecutePlan::Plan;
-use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::batch_plan::{
-    ExchangeInfo, ExchangeSource, FastInsertNode, LocalExecutePlan, PbTaskId, PlanFragment,
-    PlanNode as PbPlanNode, TaskOutputId,
-};
-use risingwave_pb::common::{BatchQueryEpoch, WorkerNode};
+use risingwave_pb::batch_plan::FastInsertNode;
+use risingwave_pb::common::WorkerNode;
 use risingwave_pb::task_service::FastInsertRequest;
-use tracing::debug;
 
-use super::plan_fragmenter::{PartitionInfo, QueryStage, QueryStageRef};
-use crate::catalog::{FragmentId, TableId};
-use crate::error::RwError;
-use crate::optimizer::plan_node::PlanNodeType;
-use crate::scheduler::plan_fragmenter::{ExecutionPlanNode, Query, StageId};
-use crate::scheduler::task_context::FrontendBatchTaskContext;
+use crate::catalog::TableId;
 use crate::scheduler::{SchedulerError, SchedulerResult};
 use crate::session::{FrontendEnv, SessionImpl};
 
 pub struct FastInsertExecution {
     fast_insert_node: FastInsertNode,
+    wait_for_persistence: bool,
     front_env: FrontendEnv,
     session: Arc<SessionImpl>,
     worker_node_manager: WorkerNodeSelector,
@@ -63,6 +39,7 @@ pub struct FastInsertExecution {
 impl FastInsertExecution {
     pub fn new(
         fast_insert_node: FastInsertNode,
+        wait_for_persistence: bool,
         front_env: FrontendEnv,
         session: Arc<SessionImpl>,
     ) -> Self {
@@ -71,6 +48,7 @@ impl FastInsertExecution {
 
         Self {
             fast_insert_node,
+            wait_for_persistence,
             front_env,
             session,
             worker_node_manager,
@@ -86,6 +64,7 @@ impl FastInsertExecution {
         let client = self.session.env().client_pool().get(&workers).await?;
         let request = FastInsertRequest {
             fast_insert_node: Some(self.fast_insert_node),
+            wait_epoch: self.wait_for_persistence,
         };
         let response = client.fast_insert(request).await?;
         println!("WKXLOG response: {:?}", response);
