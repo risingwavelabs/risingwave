@@ -13,14 +13,53 @@
 // limitations under the License.
 
 //! This contains the synced kv log store implementation.
+//!
+//! The synced kv log store polls two futures:
+//!
+//! 1. Upstream: upstream message source
+//!
+//!    It will write stream messages to the log store buffer. e.g. Message::Barrier, Message::Chunk, ...
+//!    When writing a stream chunk, if the log store buffer is full, it will:
+//!      a. Flush the buffer to the log store.
+//!      b. Convert the stream chunk into a reference (`LogStoreBufferItem::Flushed`)
+//!         which can read the corresponding chunks in the log store.
+//!         We will compact adjacent references,
+//!         so it can read multiple chunks if there's a build up.
+//!
+//!    On receiving barriers, it will:
+//!      a. Apply truncation to historical data in the logstore.
+//!      b. Flush and checkpoint the logstore data.
+//!
+//! 2. State store + buffer + recently flushed chunks: the storage components of the logstore.
+//!
+//!    It will read all historical data from the logstore first. This can be done just by
+//!    constructing a state store stream, which will read all data until the latest epoch.
+//!    This is a static snapshot of data.
+//!    For any subsequently flushed chunks, we will read them via
+//!    `flushed_chunk_future`. See the next paragraph below.
+//!
+//!    We will next read `flushed_chunk_future` (if there's one pre-existing one), see below for how
+//!    it's constructed, what it is.
+//!
+//!    Finally we will pop the earliest item in the buffer.
+//!    - If it's a chunk yield it.
+//!    - If it's a flushed chunk reference (LogStoreBufferItem::Flushed),
+//!      we will read the corresponding chunks in the log store.
+//!      This is done by constructing a `flushed_chunk_future` which will read the log store
+//!      using the `seq_id`.
+//!
+//! TODO(kwannoel):
+//! - [] Add metrics
+//! - [] Add tests
 
 use std::pin::Pin;
 
 use await_tree::InstrumentAwait;
+use futures::future::BoxFuture;
 use futures_async_stream::try_stream;
 use parking_lot::Mutex;
 use risingwave_common::array::StreamChunk;
-use risingwave_connector::sink::log_store::{LogStoreReadItem, TruncateOffset};
+use risingwave_connector::sink::log_store::{ChunkId, LogStoreReadItem, LogStoreResult, TruncateOffset};
 use risingwave_storage::StateStore;
 use tokio::select;
 use tokio_stream::StreamExt;
@@ -33,10 +72,16 @@ use crate::executor::{
 };
 
 type StateStoreStream<S> = Pin<Box<LogStoreItemMergeStream<TimeoutAutoRebuildIter<S>>>>;
+type ReadFlushedChunkFuture = BoxFuture<'static, LogStoreResult<(ChunkId, StreamChunk, u64)>>;
+
+struct LogStoreState<S: StateStore> {
+    state_store_stream: Option<StateStoreStream<S>>,
+    flushed_chunk_future: Option<ReadFlushedChunkFuture>,
+    buffer: Mutex<SyncedLogStoreBuffer>,
+}
 
 struct SyncedKvLogStore<S: StateStore> {
-    state_store_stream: Option<StateStoreStream<S>>,
-    buffer: Mutex<SyncedLogStoreBuffer>,
+    state: LogStoreState<S>,
     upstream: BoxedMessageStream,
 }
 
