@@ -735,7 +735,17 @@ pub enum ColumnOption {
     /// `NOT NULL`
     NotNull,
     /// `DEFAULT <restricted-expr>`
-    DefaultColumns(Expr),
+    DefaultValue(Expr),
+    /// Default value from previous bound `DefaultColumnDesc`. Used internally
+    /// for schema change and should not be specified by users.
+    DefaultValueInternal {
+        /// Protobuf encoded `DefaultColumnDesc`.
+        persisted: Box<[u8]>,
+        /// Optional AST for unparsing. If `None`, the default value will be
+        /// shown as `DEFAULT INTERNAL` which is for demonstrating and should
+        /// not be specified by users.
+        expr: Option<Expr>,
+    },
     /// `{ PRIMARY KEY | UNIQUE }`
     Unique { is_primary: bool },
     /// A referential integrity constraint (`[FOREIGN KEY REFERENCES
@@ -765,7 +775,14 @@ impl fmt::Display for ColumnOption {
         match self {
             Null => write!(f, "NULL"),
             NotNull => write!(f, "NOT NULL"),
-            DefaultColumns(expr) => write!(f, "DEFAULT {}", expr),
+            DefaultValue(expr) => write!(f, "DEFAULT {}", expr),
+            DefaultValueInternal { persisted: _, expr } => {
+                if let Some(expr) = expr {
+                    write!(f, "DEFAULT {}", expr)
+                } else {
+                    write!(f, "DEFAULT INTERNAL")
+                }
+            }
             Unique { is_primary } => {
                 write!(f, "{}", if *is_primary { "PRIMARY KEY" } else { "UNIQUE" })
             }
