@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::future::Future;
 use std::ops::Bound;
 use std::sync::Arc;
@@ -20,17 +20,15 @@ use std::sync::Arc;
 use arc_swap::ArcSwap;
 use bytes::Bytes;
 use itertools::Itertools;
-use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::is_max_epoch;
 use risingwave_common_service::{NotificationClient, ObserverManager};
-use risingwave_hummock_sdk::change_log::TableChangeLogCommon;
 use risingwave_hummock_sdk::key::{
     is_empty_key_range, vnode, vnode_range, TableKey, TableKeyRange,
 };
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_watermark::TableWatermarksIndex;
-use risingwave_hummock_sdk::version::HummockVersion;
+use risingwave_hummock_sdk::version::{HummockVersion, LocalHummockVersion};
 use risingwave_hummock_sdk::{HummockReadEpoch, HummockSstableObjectId, SyncResult};
 use risingwave_rpc_client::HummockMetaClient;
 use thiserror_ext::AsReport;
@@ -643,12 +641,11 @@ impl StateStoreReadLog for HummockStorage {
 
     async fn next_epoch(&self, epoch: u64, options: NextEpochOptions) -> StorageResult<u64> {
         fn next_epoch(
-            table_change_logs: &Arc<RwLock<HashMap<TableId, TableChangeLogCommon<SstableInfo>>>>,
+            version: &LocalHummockVersion,
             epoch: u64,
             table_id: TableId,
         ) -> HummockResult<Option<u64>> {
-            let guard = table_change_logs.read();
-            let table_change_log = guard.get(&table_id).ok_or_else(|| {
+            let table_change_log = version.table_change_log.get(&table_id).ok_or_else(|| {
                 HummockError::next_epoch(format!("table {} has been dropped", table_id))
             })?;
             table_change_log.next_epoch(epoch).map_err(|_| {
@@ -663,7 +660,7 @@ impl StateStoreReadLog for HummockStorage {
             // fast path
             let recent_versions = self.recent_versions.load();
             if let Some(next_epoch) = next_epoch(
-                recent_versions.latest_version().table_change_log(),
+                recent_versions.latest_version().version(),
                 epoch,
                 options.table_id,
             )? {
@@ -674,9 +671,7 @@ impl StateStoreReadLog for HummockStorage {
         wait_for_update(
             &self.version_update_notifier_tx,
             |version| {
-                if let Some(next_epoch) =
-                    next_epoch(version.table_change_log(), epoch, options.table_id)?
-                {
+                if let Some(next_epoch) = next_epoch(version.version(), epoch, options.table_id)? {
                     next_epoch_ret = Some(next_epoch);
                     Ok(true)
                 } else {
