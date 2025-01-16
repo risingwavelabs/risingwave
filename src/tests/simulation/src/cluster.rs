@@ -241,6 +241,7 @@ default_parallelism = {default_parallelism}
             compactor_nodes: 1,
             compute_node_cores: default_parallelism * 2,
             per_session_queries: vec![].into(),
+            compute_resource_groups: Default::default(),
         }
     }
 
