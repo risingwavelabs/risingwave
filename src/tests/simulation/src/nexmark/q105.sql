@@ -12,4 +12,4 @@ FROM auction a
 JOIN bid b ON a.id = b.auction
 GROUP BY a.id, a.item_name
 ORDER BY bid_count DESC
-LIMIT 1000;
+LIMIT 1000 WITH TIES;
