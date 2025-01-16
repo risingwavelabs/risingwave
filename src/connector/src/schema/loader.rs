@@ -20,8 +20,9 @@ use super::schema_registry::{
     get_subject_by_strategy, handle_sr_list, name_strategy_from_str, Client, Subject,
 };
 use super::{
-    invalid_option_error, InvalidOptionError, SchemaFetchError, AWS_GLUE_SCHEMA_ARN_KEY,
-    KEY_MESSAGE_NAME_KEY, MESSAGE_NAME_KEY, NAME_STRATEGY_KEY, SCHEMA_REGISTRY_KEY,
+    invalid_option_error, malformed_response_error, InvalidOptionError, MalformedResponseError,
+    SchemaFetchError, AWS_GLUE_SCHEMA_ARN_KEY, KEY_MESSAGE_NAME_KEY, MESSAGE_NAME_KEY,
+    NAME_STRATEGY_KEY, SCHEMA_REGISTRY_KEY,
 };
 use crate::connector_common::AwsAuthProps;
 
@@ -58,7 +59,7 @@ impl ConfluentSchemaLoader {
     pub async fn from_format_options(
         topic: &str,
         format_options: &BTreeMap<String, String>,
-    ) -> Result<Self, InvalidOptionError> {
+    ) -> Result<Self, SchemaFetchError> {
         let schema_location = format_options
             .get(SCHEMA_REGISTRY_KEY)
             .ok_or_else(|| invalid_option_error!("{SCHEMA_REGISTRY_KEY} required"))?;
@@ -106,7 +107,7 @@ impl GlueSchemaLoader {
     pub async fn from_format_options(
         schema_arn: &str,
         format_options: &BTreeMap<String, String>,
-    ) -> Result<Self, InvalidOptionError> {
+    ) -> Result<Self, SchemaFetchError> {
         if let Some(mock_config) = format_options.get("aws.glue.mock_config") {
             // Internal format for easy testing. See `MockGlueSchemaCache` for details.
             let parsed: serde_json::Value =
@@ -129,14 +130,19 @@ impl GlueSchemaLoader {
                 .unwrap()
                 .to_string();
             return Ok(Self::Mock {
-                schema_version_id: schema_version_id_str.parse().unwrap(),
+                schema_version_id: schema_version_id_str.parse()?,
                 definition,
             });
         };
         let aws_auth_props =
             serde_json::from_value::<AwsAuthProps>(serde_json::to_value(format_options).unwrap())
                 .map_err(|_e| invalid_option_error!(""))?;
-        let client = aws_sdk_glue::Client::new(&aws_auth_props.build_config().await.unwrap());
+        let client = aws_sdk_glue::Client::new(
+            &aws_auth_props
+                .build_config()
+                .await
+                .map_err(SchemaFetchError::YetToMigrate)?,
+        );
         Ok(Self::Real {
             client,
             schema_arn: schema_arn.to_owned(),
@@ -162,9 +168,15 @@ impl GlueSchemaLoader {
                     )
                     .send()
                     .await
-                    .unwrap();
-                let schema_version_id = res.schema_version_id().unwrap().parse().unwrap();
-                let definition = res.schema_definition().unwrap().to_owned();
+                    .map_err(|e| e.into_service_error())?;
+                let schema_version_id = res
+                    .schema_version_id()
+                    .ok_or_else(|| malformed_response_error!("missing schema_version_id"))?
+                    .parse()?;
+                let definition = res
+                    .schema_definition()
+                    .ok_or_else(|| malformed_response_error!("missing schema_definition"))?
+                    .to_owned();
                 (schema_version_id, definition)
             }
         };
@@ -188,7 +200,7 @@ impl SchemaLoader {
     pub async fn from_format_options(
         topic: &str,
         format_options: &BTreeMap<String, String>,
-    ) -> Result<Self, InvalidOptionError> {
+    ) -> Result<Self, SchemaFetchError> {
         if let Some(schema_arn) = format_options.get(AWS_GLUE_SCHEMA_ARN_KEY) {
             Ok(Self::Glue(
                 GlueSchemaLoader::from_format_options(schema_arn, format_options).await?,

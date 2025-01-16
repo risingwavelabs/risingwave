@@ -36,12 +36,24 @@ pub struct InvalidOptionError {
     // source: Option<risingwave_common::error::BoxedError>,
 }
 
+#[derive(Debug, thiserror::Error, thiserror_ext::Macro)]
+#[error("Malformed response: {message}")]
+pub struct MalformedResponseError {
+    pub message: String,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum SchemaFetchError {
     #[error(transparent)]
     InvalidOption(#[from] InvalidOptionError),
     #[error(transparent)]
     Request(#[from] schema_registry::ConcurrentRequestError),
+    #[error(transparent)]
+    AwsGlue(#[from] aws_sdk_glue::operation::get_schema_version::GetSchemaVersionError),
+    #[error(transparent)]
+    MalformedResponse(#[from] MalformedResponseError),
+    #[error("schema version id invalid: {0}")]
+    InvalidUuid(#[from] uuid::Error),
     #[error("schema compilation error: {0}")]
     SchemaCompile(
         #[source]
