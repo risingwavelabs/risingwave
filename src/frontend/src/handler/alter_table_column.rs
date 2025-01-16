@@ -286,13 +286,6 @@ pub async fn handle_alter_table_column(
         }
     };
 
-    if columns.is_empty() {
-        Err(ErrorCode::NotSupported(
-            "alter a table with empty column definitions".to_owned(),
-            "Please recreate the table with column definitions.".to_owned(),
-        ))?
-    }
-
     if !original_catalog.incoming_sinks.is_empty()
         && matches!(operation, AlterTableOperation::DropColumn { .. })
     {
