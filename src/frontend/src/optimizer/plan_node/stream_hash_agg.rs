@@ -20,7 +20,7 @@ use super::generic::{self, PlanAggCall};
 use super::stream::prelude::*;
 use super::utils::{childless_record, plan_node_name, watermark_pretty, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
-use crate::error::{ErrorCode, Result};
+use crate::error::Result;
 use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::property::{MonotonicityMap, WatermarkColumns};
@@ -73,17 +73,15 @@ impl StreamHashAgg {
         let mut window_col_idx = None;
         let mapping = core.i2o_col_mapping();
         if emit_on_window_close {
-            let group_key_with_wtmk = core.group_key_with_watermark(input.watermark_columns());
-            assert!(group_key_with_wtmk.len() == 1); // checked in `to_eowc_version`
-            window_col_idx = Some(group_key_with_wtmk[0]);
+            let window_col = core
+                .eowc_window_column(input.watermark_columns())
+                .expect("checked in `to_eowc_version`");
             // EOWC HashAgg only propagate one watermark column, the window column.
             watermark_columns.insert(
-                mapping.map(group_key_with_wtmk[0]),
-                input
-                    .watermark_columns()
-                    .get_group(group_key_with_wtmk[0])
-                    .unwrap(),
+                mapping.map(window_col),
+                input.watermark_columns().get_group(window_col).unwrap(),
             );
+            window_col_idx = Some(window_col);
         } else {
             for idx in core.group_key.indices() {
                 if let Some(wtmk_group) = input.watermark_columns().get_group(idx) {
@@ -128,19 +126,9 @@ impl StreamHashAgg {
     // optimize for 2-phase EOWC aggregation later.
     pub fn to_eowc_version(&self) -> Result<PlanRef> {
         let input = self.input();
-        let group_key_with_wtmk = self
-            .core
-            .group_key_with_watermark(input.watermark_columns());
 
-        // TODO(rc): check according to watermark group
-        if group_key_with_wtmk.is_empty() || group_key_with_wtmk.len() > 1 {
-            return Err(ErrorCode::NotSupported(
-                "The query cannot be executed in Emit-On-Window-Close mode.".to_owned(),
-                "Please make sure there is one and only one watermark column in GROUP BY"
-                    .to_owned(),
-            )
-            .into());
-        }
+        // check whether the group by columns are valid
+        let _ = self.core.eowc_window_column(input.watermark_columns())?;
 
         Ok(Self::new_with_eowc(
             self.core.clone(),

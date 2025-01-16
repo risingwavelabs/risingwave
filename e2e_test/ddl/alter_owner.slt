@@ -68,6 +68,9 @@ statement ok
 CREATE MATERIALIZED VIEW mv AS SELECT v1, (t.v2).v1 AS v21 FROM t;
 
 statement ok
+CREATE INDEX mv_idx ON mv(v1);
+
+statement ok
 ALTER MATERIALIZED VIEW mv OWNER TO user1;
 
 query TT
@@ -84,6 +87,21 @@ WHERE
     AND pg_class.relname = 'mv';
 ----
 mv user1
+
+query TT
+SELECT
+    pg_class.relname AS rel_name,
+    pg_roles.rolname AS owner
+FROM
+    pg_class
+    JOIN pg_namespace ON pg_namespace.oid = pg_class.relnamespace
+    JOIN pg_roles ON pg_roles.oid = pg_class.relowner
+WHERE
+    pg_namespace.nspname NOT LIKE 'pg_%'
+    AND pg_namespace.nspname != 'information_schema'
+    AND pg_class.relname = 'mv_idx';
+----
+mv_idx user1
 
 statement ok
 CREATE SOURCE src (v INT) WITH (

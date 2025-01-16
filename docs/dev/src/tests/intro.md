@@ -16,8 +16,6 @@ RisingWave requires all code to pass fmt, clippy, sort and hakari checks. Run th
 ./risedev c             # Run all checks. Shortcut for ./risedev check
 ```
 
-There are also some miscellaneous checks. See `ci/scripts/misc-check.sh`.
-
 ## Unit and integration tests
 
 RiseDev runs unit tests with cargo-nextest. To run unit tests:

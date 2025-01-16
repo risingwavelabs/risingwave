@@ -79,3 +79,17 @@
   expected_outputs:
     - stream_plan
     - eowc_stream_plan
+- name: group by tumble window_start + window_end
+  sql: |
+    create table t (
+      foo int,
+      ts timestamp,
+      watermark for ts as ts - interval '5 minutes'
+    ) append only;
+    select
+      window_start, window_end, count(foo) as count
+    from tumble(t, ts, interval '1 hour')
+    group by window_start, window_end;
+  expected_outputs:
+    - stream_plan
+    - eowc_stream_plan

@@ -331,20 +331,15 @@ impl CatalogController {
                 }
 
                 // indexes.
-                let (index_ids, mut table_ids): (Vec<IndexId>, Vec<TableId>) =
-                    if table.table_type == TableType::Table {
-                        Index::find()
-                            .select_only()
-                            .columns([index::Column::IndexId, index::Column::IndexTableId])
-                            .filter(index::Column::PrimaryTableId.eq(object_id))
-                            .into_tuple::<(IndexId, TableId)>()
-                            .all(&txn)
-                            .await?
-                            .into_iter()
-                            .unzip()
-                    } else {
-                        (vec![], vec![])
-                    };
+                let (index_ids, mut table_ids): (Vec<IndexId>, Vec<TableId>) = Index::find()
+                    .select_only()
+                    .columns([index::Column::IndexId, index::Column::IndexTableId])
+                    .filter(index::Column::PrimaryTableId.eq(object_id))
+                    .into_tuple::<(IndexId, TableId)>()
+                    .all(&txn)
+                    .await?
+                    .into_iter()
+                    .unzip();
                 objects.push(PbObjectInfo::Table(ObjectModel(table, obj).into()));
 
                 // internal tables.
@@ -501,8 +496,7 @@ impl CatalogController {
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("table", object_id))?;
                 check_relation_name_duplicate(&table.name, database_id, new_schema, &txn).await?;
-                let (associated_src_id, table_type) =
-                    (table.optional_associated_source_id, table.table_type);
+                let associated_src_id = table.optional_associated_source_id;
 
                 let mut obj = obj.into_active_model();
                 obj.schema_id = Set(Some(new_schema));
@@ -531,24 +525,20 @@ impl CatalogController {
                 let (index_ids, (index_names, mut table_ids)): (
                     Vec<IndexId>,
                     (Vec<String>, Vec<TableId>),
-                ) = if table_type == TableType::Table {
-                    Index::find()
-                        .select_only()
-                        .columns([
-                            index::Column::IndexId,
-                            index::Column::Name,
-                            index::Column::IndexTableId,
-                        ])
-                        .filter(index::Column::PrimaryTableId.eq(object_id))
-                        .into_tuple::<(IndexId, String, TableId)>()
-                        .all(&txn)
-                        .await?
-                        .into_iter()
-                        .map(|(id, name, t_id)| (id, (name, t_id)))
-                        .unzip()
-                } else {
-                    (vec![], (vec![], vec![]))
-                };
+                ) = Index::find()
+                    .select_only()
+                    .columns([
+                        index::Column::IndexId,
+                        index::Column::Name,
+                        index::Column::IndexTableId,
+                    ])
+                    .filter(index::Column::PrimaryTableId.eq(object_id))
+                    .into_tuple::<(IndexId, String, TableId)>()
+                    .all(&txn)
+                    .await?
+                    .into_iter()
+                    .map(|(id, name, t_id)| (id, (name, t_id)))
+                    .unzip();
 
                 // internal tables.
                 let internal_tables: Vec<TableId> = Table::find()

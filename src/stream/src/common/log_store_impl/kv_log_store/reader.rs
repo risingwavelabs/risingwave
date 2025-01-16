@@ -674,54 +674,65 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
 
 #[cfg(test)]
 mod tests {
-    use std::ops::Bound::Unbounded;
+    use std::collections::{Bound, HashSet};
 
     use bytes::Bytes;
     use itertools::Itertools;
-    use risingwave_common::util::epoch::test_epoch;
-    use risingwave_hummock_sdk::key::TableKey;
+    use risingwave_common::hash::VirtualNode;
+    use risingwave_common::util::epoch::{test_epoch, EpochExt};
+    use risingwave_hummock_sdk::key::{prefixed_range_with_vnode, KeyPayloadType, TableKey};
+    use risingwave_hummock_test::local_state_store_test_utils::LocalStateStoreTestExt;
+    use risingwave_hummock_test::test_utils::prepare_hummock_test_env;
     use risingwave_storage::hummock::iterator::test_utils::{
         iterator_test_table_key_of, iterator_test_value_of,
     };
-    use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::storage_value::StorageValue;
-    use risingwave_storage::store::{ReadOptions, StateStoreRead, StateStoreWrite, WriteOptions};
-    use risingwave_storage::StateStoreIter;
+    use risingwave_storage::store::{
+        LocalStateStore, NewLocalOptions, ReadOptions, SealCurrentEpochOptions, StateStoreRead,
+    };
+    use risingwave_storage::{StateStore, StateStoreIter};
 
     use crate::common::log_store_impl::kv_log_store::reader::AutoRebuildStateStoreReadIter;
     use crate::common::log_store_impl::kv_log_store::test_utils::TEST_TABLE_ID;
 
     #[tokio::test]
     async fn test_auto_rebuild_iter() {
-        let state_store = MemoryStateStore::new();
+        let test_env = prepare_hummock_test_env().await;
+        test_env.register_table_id(TEST_TABLE_ID).await;
+        let mut state_store = test_env
+            .storage
+            .new_local(NewLocalOptions::for_test(TEST_TABLE_ID))
+            .await;
+        let epoch = test_epoch(1);
+        test_env
+            .storage
+            .start_epoch(epoch, HashSet::from_iter([TEST_TABLE_ID]));
+        state_store.init_for_test(epoch).await.unwrap();
         let key_count = 100;
         let pairs = (0..key_count)
             .map(|i| {
                 let key = iterator_test_table_key_of(i);
                 let value = iterator_test_value_of(i);
-                (TableKey(Bytes::from(key)), StorageValue::new_put(value))
+                (TableKey(Bytes::from(key)), Bytes::from(value))
             })
             .collect_vec();
-        let epoch = test_epoch(1);
-        state_store
-            .ingest_batch(
-                pairs.clone(),
-                vec![],
-                WriteOptions {
-                    epoch,
-                    table_id: TEST_TABLE_ID,
-                },
-            )
-            .unwrap();
+        for (key, value) in &pairs {
+            state_store
+                .insert(key.clone(), value.clone(), None)
+                .unwrap();
+        }
+        state_store.flush().await.unwrap();
+        state_store.seal_current_epoch(epoch.next_epoch(), SealCurrentEpochOptions::for_test());
+        test_env.commit_epoch(epoch).await;
+        let state_store = test_env.storage.clone();
 
         async fn validate(
-            mut kv_iter: impl Iterator<Item = (TableKey<Bytes>, StorageValue)>,
+            mut kv_iter: impl Iterator<Item = (TableKey<Bytes>, Bytes)>,
             mut iter: impl StateStoreIter,
         ) {
             while let Some((key, value)) = iter.try_next().await.unwrap() {
                 let (k, v) = kv_iter.next().unwrap();
                 assert_eq!(key.user_key.table_key, k.to_ref());
-                assert_eq!(v.user_value.as_deref(), Some(value));
+                assert_eq!(v.as_ref(), value);
             }
             assert!(kv_iter.next().is_none());
         }
@@ -730,10 +741,17 @@ mod tests {
             table_id: TEST_TABLE_ID,
             ..Default::default()
         };
+        let key_range = prefixed_range_with_vnode(
+            (
+                Bound::<KeyPayloadType>::Unbounded,
+                Bound::<KeyPayloadType>::Unbounded,
+            ),
+            VirtualNode::ZERO,
+        );
 
         let kv_iter = pairs.clone().into_iter();
         let iter = state_store
-            .iter((Unbounded, Unbounded), epoch, read_options.clone())
+            .iter(key_range.clone(), epoch, read_options.clone())
             .await
             .unwrap();
         validate(kv_iter, iter).await;
@@ -755,7 +773,7 @@ mod tests {
                     false
                 }
             },
-            (Unbounded, Unbounded),
+            key_range.clone(),
             epoch,
             read_options,
         )

@@ -22,6 +22,7 @@ use either::Either;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
+use prost::Message as _;
 use risingwave_common::catalog::{
     CdcTableDesc, ColumnCatalog, ColumnDesc, ConflictBehavior, Engine, FieldLike, TableId,
     TableVersionId, DEFAULT_SCHEMA_NAME, INITIAL_TABLE_VERSION_ID, RISINGWAVE_ICEBERG_ROW_ID,
@@ -69,7 +70,7 @@ use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::table_catalog::{TableVersion, ICEBERG_SINK_PREFIX, ICEBERG_SOURCE_PREFIX};
 use crate::catalog::{check_valid_column_name, ColumnId, DatabaseId, SchemaId};
-use crate::error::{ErrorCode, Result, RwError};
+use crate::error::{bail_bind_error, ErrorCode, Result, RwError};
 use crate::expr::{Expr, ExprImpl, ExprRewriter};
 use crate::handler::create_source::{
     bind_connector_props, bind_create_source_or_table_with_connector, bind_source_watermark,
@@ -179,7 +180,8 @@ fn ensure_column_options_supported(c: &ColumnDef) -> Result<()> {
     for option_def in &c.options {
         match option_def.option {
             ColumnOption::GeneratedColumns(_) => {}
-            ColumnOption::DefaultColumns(_) => {}
+            ColumnOption::DefaultValue(_) => {}
+            ColumnOption::DefaultValueInternal { .. } => {}
             ColumnOption::Unique { is_primary: true } => {}
             _ => bail_not_implemented!("column constraints \"{}\"", option_def),
         }
@@ -323,12 +325,13 @@ pub fn bind_sql_column_constraints(
     binder.bind_columns_to_context(table_name.clone(), column_catalogs)?;
 
     for column in columns {
+        let idx = binder.get_column_binding_index(table_name.clone(), &column.name.real_value())?;
+
         for option_def in column.options {
             match option_def.option {
                 ColumnOption::GeneratedColumns(expr) => {
                     binder.set_clause(Some(Clause::GeneratedColumn));
-                    let idx = binder
-                        .get_column_binding_index(table_name.clone(), &column.name.real_value())?;
+
                     let expr_impl = binder.bind_expr(expr).with_context(|| {
                         format!(
                             "fail to bind expression in generated column \"{}\"",
@@ -352,9 +355,7 @@ pub fn bind_sql_column_constraints(
                     );
                     binder.set_clause(None);
                 }
-                ColumnOption::DefaultColumns(expr) => {
-                    let idx = binder
-                        .get_column_binding_index(table_name.clone(), &column.name.real_value())?;
+                ColumnOption::DefaultValue(expr) => {
                     let expr_impl = binder
                         .bind_expr(expr)?
                         .cast_assign(column_catalogs[idx].data_type().clone())?;
@@ -388,6 +389,24 @@ pub fn bind_sql_column_constraints(
                         ))
                         .into());
                     }
+                }
+                ColumnOption::DefaultValueInternal { persisted, expr: _ } => {
+                    // When a `DEFAULT INTERNAL` is used internally for schema change, the persisted value
+                    // should already be set during purifcation. So if we encounter an empty value here, it
+                    // means the user has specified it explicitly in the SQL statement, typically by
+                    // directly copying the result of `SHOW CREATE TABLE` and executing it.
+                    if persisted.is_empty() {
+                        bail_bind_error!(
+                            "DEFAULT INTERNAL is only used for internal purposes, \
+                             please specify a concrete default value"
+                        );
+                    }
+
+                    let desc = DefaultColumnDesc::decode(&*persisted)
+                        .expect("failed to decode persisted `DefaultColumnDesc`");
+
+                    column_catalogs[idx].column_desc.generated_or_default_column =
+                        Some(GeneratedOrDefaultColumn::DefaultColumn(desc));
                 }
                 _ => {}
             }
@@ -1130,7 +1149,9 @@ pub(super) async fn handle_create_table_plan(
                 None => {
                     for column_def in &column_defs {
                         for option_def in &column_def.options {
-                            if let ColumnOption::DefaultColumns(_) = option_def.option {
+                            if let ColumnOption::DefaultValue(_)
+                            | ColumnOption::DefaultValueInternal { .. } = option_def.option
+                            {
                                 return Err(ErrorCode::NotSupported(
                                             "Default value for columns defined on the table created from a CDC source".into(),
                                             "Remove the default value expression in the column definitions".into(),
@@ -1141,13 +1162,13 @@ pub(super) async fn handle_create_table_plan(
                     }
 
                     let (mut columns, pk_names) =
-                        bind_cdc_table_schema(&column_defs, &constraints, None)?;
+                        bind_cdc_table_schema(&column_defs, &constraints)?;
                     // read default value definition from external db
                     let (options, secret_refs) = cdc_with_options.clone().into_parts();
                     let config = ExternalTableConfig::try_from_btreemap(options, secret_refs)
                         .context("failed to extract external table config")?;
 
-                    let table = ExternalTableImpl::connect(config)
+                    let table: ExternalTableImpl = ExternalTableImpl::connect(config)
                         .await
                         .context("failed to auto derive table schema")?;
                     let external_columns: Vec<_> = table
@@ -1301,25 +1322,9 @@ async fn bind_cdc_table_schema_externally(
 fn bind_cdc_table_schema(
     column_defs: &Vec<ColumnDef>,
     constraints: &Vec<TableConstraint>,
-    new_version_columns: Option<Vec<ColumnCatalog>>,
 ) -> Result<(Vec<ColumnCatalog>, Vec<String>)> {
-    let mut columns = bind_sql_columns(column_defs)?;
-    // If new_version_columns is provided, we are in the process of auto schema change.
-    // update the default value column since the default value column is not set in the
-    // column sql definition.
-    if let Some(new_version_columns) = new_version_columns {
-        for (col, new_version_col) in columns
-            .iter_mut()
-            .zip_eq_fast(new_version_columns.into_iter())
-        {
-            assert_eq!(col.name(), new_version_col.name());
-            col.column_desc.generated_or_default_column =
-                new_version_col.column_desc.generated_or_default_column;
-        }
-    }
-
+    let columns = bind_sql_columns(column_defs)?;
     let pk_names = bind_sql_pk_names(column_defs, bind_table_constraints(constraints)?)?;
-
     Ok((columns, pk_names))
 }
 
@@ -1797,7 +1802,6 @@ pub async fn generate_stream_graph_for_replace_table(
     on_conflict: Option<OnConflict>,
     with_version_column: Option<String>,
     cdc_table_info: Option<CdcTableInfo>,
-    new_version_columns: Option<Vec<ColumnCatalog>>,
     include_column_options: IncludeOption,
     engine: Engine,
 ) -> Result<(StreamFragmentGraph, Table, Option<PbSource>, TableJobType)> {
@@ -1853,8 +1857,7 @@ pub async fn generate_stream_graph_for_replace_table(
                 cdc_table.external_table_name.clone(),
             )?;
 
-            let (columns, pk_names) =
-                bind_cdc_table_schema(&column_defs, &constraints, new_version_columns)?;
+            let (columns, pk_names) = bind_cdc_table_schema(&column_defs, &constraints)?;
 
             let context: OptimizerContextRef =
                 OptimizerContext::new(handler_args, ExplainOptions::default()).into();

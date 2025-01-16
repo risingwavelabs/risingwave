@@ -9,8 +9,8 @@
         └─StreamExchange { dist: HashShard(t.v1) }
           └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
   eowc_stream_error: |-
-    Not supported: The query cannot be executed in Emit-On-Window-Close mode.
-    HINT: Please make sure there is one and only one watermark column in GROUP BY
+    Not supported: Emit-On-Window-Close mode requires a watermark column in GROUP BY.
+    HINT: Please try to GROUP BY a watermark column
 - sql: |
     create source t (v1 int, v2 int, v3 int, watermark for v1 as v1 - 10) with (connector = 'kinesis') FORMAT PLAIN ENCODE JSON;
     select v1, min(v2), count(distinct v3) as agg from t group by v1;

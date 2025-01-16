@@ -314,8 +314,8 @@
     Table 4294967294 { columns: [ category, avg, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
   eowc_stream_error: |-
-    Not supported: The query cannot be executed in Emit-On-Window-Close mode.
-    HINT: Please make sure there is one and only one watermark column in GROUP BY
+    Not supported: Emit-On-Window-Close mode requires a watermark column in GROUP BY.
+    HINT: Please try to GROUP BY a watermark column
 - id: nexmark_q5
   before:
   - create_sources
@@ -1325,8 +1325,8 @@
     Table 4294967294 { columns: [ day, total_bids, rank1_bids, rank2_bids, rank3_bids, total_bidders, rank1_bidders, rank2_bidders, rank3_bidders, total_auctions, rank1_auctions, rank2_auctions, rank3_auctions, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
   eowc_stream_error: |-
-    Not supported: The query cannot be executed in Emit-On-Window-Close mode.
-    HINT: Please make sure there is one and only one watermark column in GROUP BY
+    Not supported: Emit-On-Window-Close mode requires a watermark column in GROUP BY.
+    HINT: Please try to GROUP BY a watermark column
 - id: nexmark_q16
   before:
   - create_sources
@@ -1403,8 +1403,8 @@
     Table 4294967294 { columns: [ channel, day, minute, total_bids, rank1_bids, rank2_bids, rank3_bids, total_bidders, rank1_bidders, rank2_bidders, rank3_bidders, total_auctions, rank1_auctions, rank2_auctions, rank3_auctions, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2 }
 
   eowc_stream_error: |-
-    Not supported: The query cannot be executed in Emit-On-Window-Close mode.
-    HINT: Please make sure there is one and only one watermark column in GROUP BY
+    Not supported: Emit-On-Window-Close mode requires a watermark column in GROUP BY.
+    HINT: Please try to GROUP BY a watermark column
 - id: nexmark_q17
   before:
   - create_sources
@@ -1477,8 +1477,8 @@
     └── read pk prefix len hint: 2
 
   eowc_stream_error: |-
-    Not supported: The query cannot be executed in Emit-On-Window-Close mode.
-    HINT: Please make sure there is one and only one watermark column in GROUP BY
+    Not supported: Emit-On-Window-Close mode requires a watermark column in GROUP BY.
+    HINT: Please try to GROUP BY a watermark column
 - id: nexmark_q18
   before:
   - create_sources
@@ -1996,8 +1996,8 @@
     └── read pk prefix len hint: 2
 
   eowc_stream_error: |-
-    Not supported: The query cannot be executed in Emit-On-Window-Close mode.
-    HINT: Please make sure there is one and only one watermark column in GROUP BY
+    Not supported: Emit-On-Window-Close mode requires a watermark column in GROUP BY.
+    HINT: Please try to GROUP BY a watermark column
 - id: nexmark_q102
   before:
   - create_sources
@@ -2159,8 +2159,8 @@
     Table 4294967294 { columns: [ auction_id, auction_item_name, bid_count, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 2 }
 
   eowc_stream_error: |-
-    Not supported: The query cannot be executed in Emit-On-Window-Close mode.
-    HINT: Please make sure there is one and only one watermark column in GROUP BY
+    Not supported: Emit-On-Window-Close mode requires a watermark column in GROUP BY.
+    HINT: Please try to GROUP BY a watermark column
 - id: nexmark_q103
   before:
   - create_sources
@@ -2270,8 +2270,8 @@
     Table 4294967294 { columns: [ auction_id, auction_item_name, _row_id, _rw_timestamp ], primary key: [ $2 ASC, $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0, 2 ], read pk prefix len hint: 2 }
 
   eowc_stream_error: |-
-    Not supported: The query cannot be executed in Emit-On-Window-Close mode.
-    HINT: Please make sure there is one and only one watermark column in GROUP BY
+    Not supported: Emit-On-Window-Close mode requires a watermark column in GROUP BY.
+    HINT: Please try to GROUP BY a watermark column
 - id: nexmark_q104
   before:
   - create_sources
@@ -2381,8 +2381,8 @@
     Table 4294967294 { columns: [ auction_id, auction_item_name, _row_id, _rw_timestamp ], primary key: [ $2 ASC, $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0, 2 ], read pk prefix len hint: 2 }
 
   eowc_stream_error: |-
-    Not supported: The query cannot be executed in Emit-On-Window-Close mode.
-    HINT: Please make sure there is one and only one watermark column in GROUP BY
+    Not supported: Emit-On-Window-Close mode requires a watermark column in GROUP BY.
+    HINT: Please try to GROUP BY a watermark column
 - id: nexmark_q105
   before:
   - create_sources
@@ -2506,8 +2506,8 @@
     Table 4294967294 { columns: [ auction_id, auction_item_name, bid_count, _rw_timestamp ], primary key: [ $2 DESC, $0 ASC, $1 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 3 }
 
   eowc_stream_error: |-
-    Not supported: The query cannot be executed in Emit-On-Window-Close mode.
-    HINT: Please make sure there is one and only one watermark column in GROUP BY
+    Not supported: Emit-On-Window-Close mode requires a watermark column in GROUP BY.
+    HINT: Please try to GROUP BY a watermark column
 - id: nexmark_q106
   before:
   - create_sources
@@ -2637,5 +2637,5 @@
     Table 4294967294 { columns: [ min_final, _rw_timestamp ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
   eowc_stream_error: |-
-    Not supported: The query cannot be executed in Emit-On-Window-Close mode.
-    HINT: Please make sure there is one and only one watermark column in GROUP BY
+    Not supported: Emit-On-Window-Close mode requires a watermark column in GROUP BY.
+    HINT: Please try to GROUP BY a watermark column

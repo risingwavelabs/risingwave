@@ -17,6 +17,7 @@ use std::num::NonZeroUsize;
 
 use anyhow::anyhow;
 use itertools::Itertools;
+use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node;
@@ -117,9 +118,10 @@ impl CatalogController {
         let txn = inner.db.begin().await?;
         let create_type = streaming_job.create_type();
 
-        let streaming_parallelism = match parallelism {
-            None => StreamingParallelism::Adaptive,
-            Some(n) => StreamingParallelism::Fixed(n.parallelism as _),
+        let streaming_parallelism = match (parallelism, self.env.opts.default_parallelism) {
+            (None, DefaultParallelism::Full) => StreamingParallelism::Adaptive,
+            (None, DefaultParallelism::Default(n)) => StreamingParallelism::Fixed(n.get()),
+            (Some(n), _) => StreamingParallelism::Fixed(n.parallelism as _),
         };
 
         ensure_user_id(streaming_job.owner() as _, &txn).await?;
