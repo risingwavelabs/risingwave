@@ -543,6 +543,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
     let db_name: &str = &session.database();
     let (schema_name, _) = Binder::resolve_schema_qualified_name(db_name, table_name.clone())?;
 
+    // TODO: omit this step if `sql_column_strategy` is `Follow`.
     let (columns_from_resolve_source, source_info) = bind_columns_from_source(
         session,
         &format_encode,

@@ -201,6 +201,20 @@ pub(crate) fn bind_all_columns(
     sql_column_strategy: SqlColumnStrategy,
 ) -> Result<Vec<ColumnCatalog>> {
     if let Some(cols_from_source) = cols_from_source {
+        // Need to check `col_defs` to see if a column is generated, as we haven't bind the
+        // `GeneratedColumnDesc` in `ColumnCatalog` yet.
+        let generated_cols_from_sql = cols_from_sql
+            .iter()
+            .filter(|c| {
+                col_defs_from_sql
+                    .iter()
+                    .find(|d| d.name.real_value() == c.name())
+                    .unwrap()
+                    .is_generated()
+            })
+            .cloned()
+            .collect_vec();
+
         match sql_column_strategy {
             // Ignore `cols_from_source`, follow `cols_from_sql` without checking.
             SqlColumnStrategy::Follow => {
@@ -217,21 +231,6 @@ pub(crate) fn bind_all_columns(
                 // Perform extra check to see if there are non-generated columns in `cols_from_sql`
                 // and reject the request if there are. Based on different input, guess the user's
                 // intention and provide a more specific error message.
-
-                // Need to check `col_defs` to see if a column is generated, as we haven't bind the
-                // `GeneratedColumnDesc` in `ColumnCatalog` yet.
-                let generated_cols_from_sql = cols_from_sql
-                    .iter()
-                    .filter(|c| {
-                        col_defs_from_sql
-                            .iter()
-                            .find(|d| d.name.real_value() == c.name())
-                            .unwrap()
-                            .is_generated()
-                    })
-                    .cloned()
-                    .collect_vec();
-
                 if generated_cols_from_sql.len() != cols_from_sql.len() {
                     if wildcard_idx.is_some() {
                         // (*, normal_column INT)
@@ -253,16 +252,17 @@ pub(crate) fn bind_all_columns(
             }
         }
 
-        let wildcard_idx = wildcard_idx.unwrap_or(0);
+        // If we are planning based on a purified SQL, the wildcard may already be expanded thus absent.
+        // Default to 0 to leave the generated columns at the end.
+        let wildcard_idx = wildcard_idx.unwrap_or(0).min(generated_cols_from_sql.len());
 
-        // Replace `*` with `cols_from_source`
-        let mut cols_from_sql = cols_from_sql;
-        let mut cols_from_source = cols_from_source;
-        let mut cols_from_sql_r = cols_from_sql.split_off(wildcard_idx);
-        cols_from_sql.append(&mut cols_from_source);
-        cols_from_sql.append(&mut cols_from_sql_r);
+        // Merge `generated_cols_from_sql` with `cols_from_source`.
+        let mut merged_cols = generated_cols_from_sql;
+        let merged_cols_r = merged_cols.split_off(wildcard_idx);
+        merged_cols.extend(cols_from_source);
+        merged_cols.extend(merged_cols_r);
 
-        Ok(cols_from_sql)
+        Ok(merged_cols)
     } else {
         if wildcard_idx.is_some() {
             return Err(RwError::from(NotSupported(
