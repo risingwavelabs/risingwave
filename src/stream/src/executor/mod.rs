@@ -390,6 +390,10 @@ impl Barrier {
             .map_or(false, |actors| actors.contains(&actor_id))
     }
 
+    pub fn is_checkpoint(&self) -> bool {
+        self.kind == BarrierKind::Checkpoint
+    }
+
     /// Get the initial split assignments for the actor with `actor_id`.
     ///
     /// This should only be called on the initial barrier received by the executor. It must be
