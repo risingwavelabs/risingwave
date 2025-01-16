@@ -108,6 +108,7 @@ impl GlueSchemaLoader {
         schema_arn: &str,
         format_options: &BTreeMap<String, String>,
     ) -> Result<Self, SchemaFetchError> {
+        risingwave_common::license::Feature::GlueSchemaRegistry.check_available()?;
         if let Some(mock_config) = format_options.get("aws.glue.mock_config") {
             // Internal format for easy testing. See `MockGlueSchemaCache` for details.
             let parsed: serde_json::Value =
