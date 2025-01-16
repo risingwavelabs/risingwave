@@ -224,7 +224,8 @@ impl TelemetryReportCreator for MetaReportCreator {
             streaming_job_count,
             meta_backend: MetaBackend::Sql,
             job_desc: stream_job_desc,
-            cluster_type: telemetry_cluster_type_from_env_var(),
+            // it blocks the report if the cluster type is not valid or leak from test env
+            cluster_type: telemetry_cluster_type_from_env_var()?,
             object_store_media_type: self.object_store_media_type,
         })
     }
