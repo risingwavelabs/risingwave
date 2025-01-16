@@ -259,7 +259,7 @@ pub async fn handle_alter_source_with_sr(
     source.info = source_info;
     source.columns.extend(added_columns);
     source.definition = alter_definition_format_encode(
-        source.create_sql_ast()?,
+        source.create_sql_ast_purified()?,
         format_encode.row_options.clone(),
     )?;
 
