@@ -1791,6 +1791,8 @@ impl ScaleController {
             table_parallelisms,
         } = policy;
 
+        println!("table paralls {:#?}", table_parallelisms);
+
         let workers = self
             .metadata_manager
             .list_active_streaming_compute_nodes()
@@ -1845,6 +1847,13 @@ impl ScaleController {
             mgr: &MetadataManager,
             table_ids: Vec<ObjectId>,
         ) -> Result<(), MetaError> {
+            let working_set = mgr
+                .catalog_controller
+                .resolve_working_set_for_reschedule_tables(table_ids)
+                .await?;
+
+            println!("working set {:#?}", working_set);
+
             let RescheduleWorkingSet {
                 fragments,
                 actors,
@@ -1852,10 +1861,7 @@ impl ScaleController {
                 fragment_downstreams,
                 fragment_upstreams: _fragment_upstreams,
                 related_jobs: _related_jobs,
-            } = mgr
-                .catalog_controller
-                .resolve_working_set_for_reschedule_tables(table_ids)
-                .await?;
+            } = working_set;
 
             for (fragment_id, downstreams) in fragment_downstreams {
                 for (downstream_fragment_id, dispatcher_type) in downstreams {
@@ -1923,6 +1929,9 @@ impl ScaleController {
         );
 
         let mut target_plan = HashMap::new();
+
+        println!("table parallelisms {:#?}", table_parallelisms);
+        println!("table fragment ids {:#?}", table_fragment_id_map);
 
         for (table_id, parallelism) in table_parallelisms {
             let fragment_map = table_fragment_id_map.remove(&table_id).unwrap();
