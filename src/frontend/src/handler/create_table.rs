@@ -325,7 +325,14 @@ pub fn bind_sql_column_constraints(
     binder.bind_columns_to_context(table_name.clone(), column_catalogs)?;
 
     for column in columns {
-        let idx = binder.get_column_binding_index(table_name.clone(), &column.name.real_value())?;
+        let Some(idx) = column_catalogs
+            .iter()
+            .position(|c| c.name() == column.name.real_value())
+        else {
+            // It's possible that we don't follow the user defined columns in SQL but take the
+            // ones resolved from the source, thus missing some columns. Simply ignore them.
+            continue;
+        };
 
         for option_def in column.options {
             match option_def.option {
