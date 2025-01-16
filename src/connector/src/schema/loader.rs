@@ -56,7 +56,7 @@ pub enum SchemaVersion {
 }
 
 impl ConfluentSchemaLoader {
-    pub async fn from_format_options(
+    pub fn from_format_options(
         topic: &str,
         format_options: &BTreeMap<String, String>,
     ) -> Result<Self, SchemaFetchError> {
@@ -175,7 +175,7 @@ impl GlueSchemaLoader {
                     )
                     .send()
                     .await
-                    .map_err(|e| e.into_service_error())?;
+                    .map_err(|e| Box::new(e.into_service_error()))?;
                 let schema_version_id = res
                     .schema_version_id()
                     .ok_or_else(|| malformed_response_error!("missing schema_version_id"))?
@@ -213,9 +213,10 @@ impl SchemaLoader {
                 GlueSchemaLoader::from_format_options(schema_arn, format_options).await?,
             ))
         } else {
-            Ok(Self::Confluent(
-                ConfluentSchemaLoader::from_format_options(topic, format_options).await?,
-            ))
+            Ok(Self::Confluent(ConfluentSchemaLoader::from_format_options(
+                topic,
+                format_options,
+            )?))
         }
     }
 

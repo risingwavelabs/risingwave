@@ -51,7 +51,7 @@ pub enum SchemaFetchError {
     #[error(transparent)]
     Request(#[from] schema_registry::ConcurrentRequestError),
     #[error(transparent)]
-    AwsGlue(#[from] aws_sdk_glue::operation::get_schema_version::GetSchemaVersionError),
+    AwsGlue(#[from] Box<aws_sdk_glue::operation::get_schema_version::GetSchemaVersionError>),
     #[error(transparent)]
     MalformedResponse(#[from] MalformedResponseError),
     #[error("schema version id invalid: {0}")]
