@@ -56,7 +56,14 @@ impl CatalogController {
                     );
                     indexes
                 }
-                _ => {
+                ObjectType::Source
+                | ObjectType::Sink
+                | ObjectType::View
+                | ObjectType::Index
+                | ObjectType::Function
+                | ObjectType::Connection
+                | ObjectType::Subscription
+                | ObjectType::Secret => {
                     ensure_object_not_refer(object_type, object_id, &txn).await?;
                     vec![]
                 }
