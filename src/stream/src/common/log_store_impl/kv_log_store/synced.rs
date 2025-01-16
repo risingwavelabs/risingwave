@@ -157,7 +157,6 @@ impl<S: StateStore> SyncedKvLogStore<S> {
 
         // 3. read buffer
         if let Some(chunk) = Self::try_next_buffer_item(buffer).await? {
-            // TODO: read flushed_chunks
             return Ok(Some(chunk));
         }
         return Ok(None);
@@ -203,13 +202,24 @@ impl<S: StateStore> SyncedKvLogStore<S> {
         }
     }
 
+    // TODO: read flushed_chunks
     async fn try_next_buffer_item(
         buffer: &mut Mutex<SyncedLogStoreBuffer>,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
-        if let Some(LogStoreBufferItem::StreamChunk { chunk, .. }) = buffer.lock().pop() {
-            Ok(Some(chunk))
-        } else {
-            Ok(None)
+        let Some(item) = buffer.lock().pop() else {
+            return Ok(None);
+        };
+        match item {
+            LogStoreBufferItem::StreamChunk { chunk, .. } => Ok(Some(chunk)),
+            LogStoreBufferItem::Flushed {
+                vnode_bitmap,
+                start_seq_id,
+                end_seq_id,
+                chunk_id,
+            } => {
+                todo!()
+            }
+            LogStoreBufferItem::Barrier { .. } | LogStoreBufferItem::UpdateVnodes(_) => Ok(None),
         }
     }
 }
