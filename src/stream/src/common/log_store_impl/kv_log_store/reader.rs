@@ -51,7 +51,9 @@ use crate::common::log_store_impl::kv_log_store::buffer::{
 use crate::common::log_store_impl::kv_log_store::serde::{
     merge_log_store_item_stream, KvLogStoreItem, LogStoreItemMergeStream, LogStoreRowSerde,
 };
-use crate::common::log_store_impl::kv_log_store::KvLogStoreMetrics;
+use crate::common::log_store_impl::kv_log_store::{
+    KvLogStoreMetrics, KvLogStoreReadMetrics, SeqIdType,
+};
 
 pub(crate) const REWIND_BASE_DELAY: Duration = Duration::from_secs(1);
 pub(crate) const REWIND_BACKOFF_FACTOR: u64 = 2;
@@ -670,6 +672,52 @@ impl<S: StateStoreRead + Clone> LogReader for KvLogStoreReader<S> {
 
         Ok((true, Some((**self.serde.vnodes()).clone())))
     }
+}
+
+async fn read_flushed_chunk(
+    serde: LogStoreRowSerde,
+    state_store: impl StateStoreRead,
+    vnode_bitmap: Bitmap,
+    chunk_id: ChunkId,
+    start_seq_id: SeqIdType,
+    end_seq_id: SeqIdType,
+    item_epoch: u64,
+    table_id: TableId,
+    read_metrics: KvLogStoreReadMetrics,
+) -> LogStoreResult<(ChunkId, StreamChunk, u64)> {
+    let iters = try_join_all(vnode_bitmap.iter_vnodes().map(|vnode| {
+        let range_start = serde.serialize_log_store_pk(vnode, item_epoch, Some(start_seq_id));
+        let range_end = serde.serialize_log_store_pk(vnode, item_epoch, Some(end_seq_id));
+        let state_store = &state_store;
+
+        // Use MAX EPOCH here because the epoch to consume may be below the safe
+        // epoch
+        async move {
+            Ok::<_, anyhow::Error>(
+                state_store
+                    .iter(
+                        (Included(range_start), Included(range_end)),
+                        HummockEpoch::MAX,
+                        ReadOptions {
+                            prefetch_options: PrefetchOptions::prefetch_for_large_range_scan(),
+                            cache_policy: CachePolicy::Fill(CacheHint::Low),
+                            table_id,
+                            ..Default::default()
+                        },
+                    )
+                    .await?,
+            )
+        }
+    }))
+    .instrument_await("Wait Create Iter Stream")
+    .await?;
+
+    let chunk = serde
+        .deserialize_stream_chunk(iters, start_seq_id, end_seq_id, item_epoch, &read_metrics)
+        .instrument_await("Deserialize Stream Chunk")
+        .await?;
+
+    Ok((chunk_id, chunk, item_epoch))
 }
 
 #[cfg(test)]
