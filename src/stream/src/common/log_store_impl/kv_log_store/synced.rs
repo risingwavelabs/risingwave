@@ -43,14 +43,18 @@
 //!
 //!    Finally we will pop the earliest item in the buffer.
 //!    - If it's a chunk yield it.
+//!    - If it's a watermark yield it.
 //!    - If it's a flushed chunk reference (LogStoreBufferItem::Flushed),
 //!      we will read the corresponding chunks in the log store.
 //!      This is done by constructing a `flushed_chunk_future` which will read the log store
 //!      using the `seq_id`.
+//!   - Barrier,
+//!     because they are directly propagated from the upstream when polling it.
 //!
 //! TODO(kwannoel):
 //! - [] Add metrics
 //! - [] Add tests
+//! - [] Handle watermark r/w
 
 use std::pin::Pin;
 
@@ -58,14 +62,18 @@ use await_tree::InstrumentAwait;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use futures_async_stream::try_stream;
+use itertools::Itertools;
 use parking_lot::Mutex;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
+use risingwave_common::hash::VnodeBitmapExt;
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_connector::sink::log_store::{
     ChunkId, LogStoreReadItem, LogStoreResult, TruncateOffset,
 };
-use risingwave_storage::store::StateStoreRead;
+use risingwave_hummock_sdk::table_watermark::{VnodeWatermark, WatermarkDirection};
+use risingwave_storage::store::{LocalStateStore, SealCurrentEpochOptions, StateStoreRead};
 use risingwave_storage::StateStore;
 use tokio::select;
 use tokio_stream::StreamExt;
@@ -76,7 +84,10 @@ use crate::common::log_store_impl::kv_log_store::reader::read_flushed_chunk;
 use crate::common::log_store_impl::kv_log_store::serde::{
     KvLogStoreItem, LogStoreItemMergeStream, LogStoreRowSerde,
 };
-use crate::common::log_store_impl::kv_log_store::KvLogStoreReadMetrics;
+use crate::common::log_store_impl::kv_log_store::{
+    FlushInfo, KvLogStoreMetrics, KvLogStoreReadMetrics, ReaderTruncationOffsetType, SeqIdType,
+    FIRST_SEQ_ID,
+};
 use crate::executor::{
     Barrier, BoxedMessageStream, Message, StreamExecutorError, StreamExecutorResult,
 };
@@ -88,6 +99,7 @@ struct SyncedKvLogStore<S: StateStore> {
     table_id: TableId,
     read_metrics: KvLogStoreReadMetrics,
     serde: LogStoreRowSerde,
+    seq_id: SeqIdType,
 
     // Upstream
     upstream: BoxedMessageStream,
@@ -134,28 +146,21 @@ impl<S: StateStore> SyncedKvLogStore<S> {
                     Some(upstream_item) => {
                         match upstream_item? {
                             Message::Barrier(barrier) => {
-                                self.write_barrier(barrier.clone()).await?;
+                                // self.write_barrier(barrier).await?;
                                 Ok(Some(Message::Barrier(barrier)))
                             }
                             Message::Chunk(chunk) => {
                                 self.write_chunk(chunk).await?;
                                 Ok(None)
                             }
-                            _ => Ok(None),
+                            // TODO(kwannoel): This should be written to the logstore,
+                            // it will not bypass like barrier.
+                            Message::Watermark(_watermark) => Ok(None),
                         }
                     }
                 }
             }
         }
-    }
-}
-
-// Poll upstream
-impl<S: StateStore> SyncedKvLogStore<S> {
-    async fn poll_upstream(
-        upstream: &mut BoxedMessageStream,
-    ) -> StreamExecutorResult<Option<Barrier>> {
-        todo!()
     }
 }
 
@@ -284,8 +289,52 @@ impl<S: StateStore> SyncedKvLogStore<S> {
 
 // Write methods
 impl<S: StateStore> SyncedKvLogStore<S> {
-    async fn write_barrier(&mut self, barrier: Barrier) -> StreamExecutorResult<()> {
-        // Write a barrier to the state store
+    async fn write_barrier(
+        mut state_store: impl LocalStateStore,
+        serde: LogStoreRowSerde,
+        barrier: Barrier,
+        metrics: KvLogStoreMetrics,
+        truncation_offset: Option<ReaderTruncationOffsetType>,
+        seq_id: &mut SeqIdType,
+        buffer: &mut Mutex<SyncedLogStoreBuffer>,
+    ) -> StreamExecutorResult<()> {
+        let epoch = state_store.epoch();
+        let mut flush_info = FlushInfo::new();
+
+        // TODO(kwannoel): Handle paused stream.
+        for vnode in serde.vnodes().iter_vnodes() {
+            let (key, value) = serde.serialize_barrier(epoch, vnode, barrier.is_checkpoint());
+            flush_info.flush_one(key.estimated_size() + value.estimated_size());
+            state_store.insert(key, value, None)?;
+        }
+
+        flush_info.report(&metrics);
+
+        let watermark = truncation_offset.map(|truncation_offset| {
+            VnodeWatermark::new(
+                serde.vnodes().clone(),
+                serde.serialize_truncation_offset_watermark(truncation_offset),
+            )
+        });
+        state_store.flush().await?;
+        let watermark = watermark.into_iter().collect_vec();
+        state_store.seal_current_epoch(
+            barrier.epoch.curr,
+            SealCurrentEpochOptions {
+                table_watermarks: Some((WatermarkDirection::Ascending, watermark)),
+                switch_op_consistency_level: None,
+            },
+        );
+        // Add to buffer
+        buffer.lock().buffer.push((
+            epoch,
+            LogStoreBufferItem::Barrier {
+                is_checkpoint: barrier.is_checkpoint(),
+                next_epoch: barrier.epoch.curr,
+            },
+        ));
+
+        *seq_id = FIRST_SEQ_ID;
         Ok(())
     }
 
