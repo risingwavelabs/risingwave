@@ -1062,6 +1062,7 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
                 "float4" => DataType::Float32,
                 "float8" => DataType::Float64,
                 "timestamptz" => DataType::Timestamptz,
+                "timestampnano" => DataType::TimestampNano,
                 "text" => DataType::Varchar,
                 "serial" => {
                     return Err(ErrorCode::NotSupported(

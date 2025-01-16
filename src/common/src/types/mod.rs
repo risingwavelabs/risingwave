@@ -211,11 +211,12 @@ impl TryFrom<DataTypeName> for DataType {
             DataTypeName::Bytea => Ok(DataType::Bytea),
             DataTypeName::Date => Ok(DataType::Date),
             DataTypeName::Timestamp => Ok(DataType::Timestamp),
+            DataTypeName::TimestampNano => Ok(DataType::TimestampNano),
             DataTypeName::Timestamptz => Ok(DataType::Timestamptz),
             DataTypeName::Time => Ok(DataType::Time),
             DataTypeName::Interval => Ok(DataType::Interval),
             DataTypeName::Jsonb => Ok(DataType::Jsonb),
-            DataTypeName::Struct | DataTypeName::List | DataTypeName::Map | DataTypeName::TimestampNano => {
+            DataTypeName::Struct | DataTypeName::List | DataTypeName::Map => {
                 Err("Functions returning composite types can not be inferred. Please use `FunctionCall::new_unchecked`.")
             }
         }
@@ -318,6 +319,7 @@ pub mod data_types {
             DataType::Date
                 | DataType::Time
                 | DataType::Timestamp
+                | DataType::TimestampNano
                 | DataType::Timestamptz
                 | DataType::Interval
         };
@@ -412,6 +414,7 @@ impl DataType {
         match input {
             DataType::Timestamptz => Some(DataType::Timestamptz),
             DataType::Timestamp | DataType::Date => Some(DataType::Timestamp),
+            DataType::TimestampNano => Some(DataType::TimestampNano),
             _ => None,
         }
     }
@@ -896,7 +899,10 @@ impl ScalarImpl {
                     .ok_or_else(|| "invalid value of Jsonb".to_owned())?,
             ),
             DataType::Int256 => Self::Int256(Int256::from_binary(bytes)?),
-            DataType::Struct(_) | DataType::List(_) | DataType::Map(_) | DataType::TimestampNano => {
+            DataType::Struct(_)
+            | DataType::List(_)
+            | DataType::Map(_)
+            | DataType::TimestampNano => {
                 return Err(format!("unsupported data type: {}", data_type).into());
             }
         };
@@ -1256,7 +1262,9 @@ mod tests {
                     DataType::Timestamp,
                 ),
                 DataTypeName::TimestampNano => (
-                    ScalarImpl::TimestampNano(TimestampNano::from_timestamp_uncheck(23333333, 2333)),
+                    ScalarImpl::TimestampNano(TimestampNano::from_timestamp_uncheck(
+                        23333333, 2333,
+                    )),
                     DataType::TimestampNano,
                 ),
                 DataTypeName::Timestamptz => (

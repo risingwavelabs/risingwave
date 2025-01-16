@@ -122,11 +122,13 @@ impl DataType {
                         DataType::Struct(_) => 2287, // pseudo-type of array[struct] (see `pg_type.dat`)
                         DataType::List { .. } => unreachable!("Never reach here!"),
                         DataType::Map(_) => 1304,
+                        DataType::TimestampNano => 1306,
                     }
                     DataType::Serial => 20,
                     // XXX: what does the oid mean here? Why we don't have from_oid for them?
                     DataType::Int256 => 1301,
                     DataType::Map(_) => 1303,
+                    DataType::TimestampNano => 1305,
                     // TODO: Support to give a new oid for custom struct type. #9434
                     DataType::Struct(_) => 2249,  // pseudo-type of struct (see `pg_type.dat`)
                 }

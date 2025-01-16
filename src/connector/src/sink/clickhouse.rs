@@ -447,7 +447,8 @@ impl ClickHouseSink {
             risingwave_common::types::DataType::Time => Err(SinkError::ClickHouse(
                 "clickhouse can not support Time".to_owned(),
             )),
-            risingwave_common::types::DataType::Timestamp => Err(SinkError::ClickHouse(
+            risingwave_common::types::DataType::Timestamp
+            | risingwave_common::types::DataType::TimestampNano => Err(SinkError::ClickHouse(
                 "clickhouse does not have a type corresponding to naive timestamp".to_owned(),
             )),
             risingwave_common::types::DataType::Timestamptz => {
@@ -945,7 +946,7 @@ impl ClickHouseFieldWithNull {
                     "clickhouse can not support Time".to_owned(),
                 ))
             }
-            ScalarRefImpl::Timestamp(_) => {
+            ScalarRefImpl::Timestamp(_) | ScalarRefImpl::TimestampNano(_) => {
                 return Err(SinkError::ClickHouse(
                     "clickhouse does not have a type corresponding to naive timestamp".to_owned(),
                 ))

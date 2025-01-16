@@ -386,6 +386,7 @@ mod utils;
 /// | date        | `date`             | `Date`        | `Date`             | yes        |
 /// | time        | `time`             | `Time`        | `Time`             | yes        |
 /// | timestamp   | `timestamp`        | `Timestamp`   | `Timestamp`        | yes        |
+/// | timestampnano   | `timestampnano`        | `TimestampNano`   | `TimestampNano`        | yes        |
 /// | timestamptz | `timestamptz`      | `Timestamptz` | `Timestamptz`      | yes        |
 /// | interval    | `interval`         | `Interval`    | `Interval`         | yes        |
 /// | varchar     | `varchar`          | `Box<str>`    | `&str`             | no         |

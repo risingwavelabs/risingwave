@@ -186,9 +186,7 @@ pub trait ToArrow {
         &self,
         array: &TimestampNanoArray,
     ) -> Result<arrow_array::ArrayRef, ArrayError> {
-        Ok(Arc::new(arrow_array::TimestampNanosecondArray::from(
-            array,
-        )))
+        Ok(Arc::new(arrow_array::TimestampNanosecondArray::from(array)))
     }
 
     #[inline]
@@ -1198,7 +1196,9 @@ impl FromIntoArrowWithUnit for TimestampNano {
             TimeUnit::Microsecond => {
                 TimestampNano(DateTime::from_timestamp_micros(value).unwrap().naive_utc())
             }
-            TimeUnit::Nanosecond => TimestampNano(DateTime::from_timestamp_nanos(value).naive_utc()),
+            TimeUnit::Nanosecond => {
+                TimestampNano(DateTime::from_timestamp_nanos(value).naive_utc())
+            }
         }
     }
 

@@ -178,16 +178,23 @@ impl FromStr for Timestamp {
         let dt = s
             .parse::<jiff::civil::DateTime>()
             .map_err(|_| ErrorKind::ParseTimestamp)?;
-        Ok(
-            Self::new(Date::from_ymd_uncheck(dt.year() as i32, dt.month() as u32, dt.day() as u32).0.and_time(
-                Time::from_hms_micro_uncheck(
-                    dt.hour() as u32,
-                    dt.minute() as u32,
-                    dt.second() as u32,
-                    dt.microsecond() as u32,
-                ).0
-            ))
-        )
+        let subsec_nanosecond = dt.subsec_nanosecond();
+        if subsec_nanosecond % 1_000 != 0 {
+            return Err(ErrorKind::ParseTimestamp.into());
+        }
+        Ok(Self::new(
+            Date::from_ymd_uncheck(dt.year() as i32, dt.month() as u32, dt.day() as u32)
+                .0
+                .and_time(
+                    Time::from_hms_micro_uncheck(
+                        dt.hour() as u32,
+                        dt.minute() as u32,
+                        dt.second() as u32,
+                        subsec_nanosecond as u32 / 1_000,
+                    )
+                    .0,
+                ),
+        ))
     }
 }
 
@@ -210,17 +217,20 @@ impl FromStr for TimestampNano {
     fn from_str(s: &str) -> Result<Self> {
         let dt = s
             .parse::<jiff::civil::DateTime>()
-            .map_err(|_| ErrorKind::ParseTimestamp)?;
-        Ok(
-            Self::new(Date::from_ymd_uncheck(dt.year() as i32, dt.month() as u32, dt.day() as u32).0.and_time(
-                Time::from_hms_micro_uncheck(
-                    dt.hour() as u32,
-                    dt.minute() as u32,
-                    dt.second() as u32,
-                    dt.subsec_nanosecond() as u32,
-                ).0
-            ))
-        )
+            .map_err(|_| ErrorKind::ParseTimestampNano)?;
+        Ok(Self::new(
+            Date::from_ymd_uncheck(dt.year() as i32, dt.month() as u32, dt.day() as u32)
+                .0
+                .and_time(
+                    Time::from_hms_nano_uncheck(
+                        dt.hour() as u32,
+                        dt.minute() as u32,
+                        dt.second() as u32,
+                        dt.subsec_nanosecond() as u32,
+                    )
+                    .0,
+                ),
+        ))
     }
 }
 
@@ -242,6 +252,22 @@ impl From<Timestamp> for Date {
     }
 }
 
+/// # Example
+/// ```
+/// use std::str::FromStr;
+///
+/// use risingwave_common::types::{Date, TimestampNano};
+///
+/// let ts = TimestampNano::from_str("1999-01-08 04:02").unwrap();
+/// let date = Date::from(ts);
+/// assert_eq!(date, Date::from_str("1999-01-08").unwrap());
+/// ```
+impl From<TimestampNano> for Date {
+    fn from(ts: TimestampNano) -> Self {
+        Date::new(ts.0.date())
+    }
+}
+
 /// In `PostgreSQL`, casting from timestamp to time discards the date part.
 ///
 /// # Example
@@ -256,6 +282,22 @@ impl From<Timestamp> for Date {
 /// ```
 impl From<Timestamp> for Time {
     fn from(ts: Timestamp) -> Self {
+        Time::new(ts.0.time())
+    }
+}
+
+/// # Example
+/// ```
+/// use std::str::FromStr;
+///
+/// use risingwave_common::types::{Time, TimestampNano};
+///
+/// let ts = TimestampNano::from_str("1999-01-08 04:02").unwrap();
+/// let time = Time::from(ts);
+/// assert_eq!(time, Time::from_str("04:02").unwrap());
+/// ```
+impl From<TimestampNano> for Time {
+    fn from(ts: TimestampNano) -> Self {
         Time::new(ts.0.time())
     }
 }
@@ -496,19 +538,17 @@ fn is_leap_year(year: i32) -> bool {
     year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
 }
 
-
 macro_rules! impl_timestamp {
     ($type:ty) => {
         impl From<Date> for $type {
             fn from(date: Date) -> Self {
-                Self::new(date.0
-                        .and_time(Time::from_hms_nano_uncheck(0, 0, 0, 0).0))
+                Self::new(date.0.and_time(Time::from_hms_nano_uncheck(0, 0, 0, 0).0))
             }
         }
 
         impl CheckedAdd<Interval> for $type {
             type Output = $type;
-        
+
             fn checked_add(self, rhs: Interval) -> Option<$type> {
                 let mut date = self.0.date();
                 if rhs.months() != 0 {
@@ -520,7 +560,7 @@ macro_rules! impl_timestamp {
                     let interval_months = rhs.months();
                     let year_diff = interval_months / 12;
                     year += year_diff;
-        
+
                     // Calculate the number of month in this interval except the added year
                     // The range of month_diff is (-12, 12) (The month is negative when the interval is
                     // negative)
@@ -535,7 +575,7 @@ macro_rules! impl_timestamp {
                         year -= 1;
                         month += 12;
                     }
-        
+
                     // Fix the days after changing date.
                     // For example, 1970.1.31 + 1 month = 1970.2.28
                     day = day.min(get_mouth_days(year, month as usize));
@@ -544,7 +584,7 @@ macro_rules! impl_timestamp {
                 let mut datetime = NaiveDateTime::new(date, self.0.time());
                 datetime = datetime.checked_add_signed(Duration::days(rhs.days().into()))?;
                 datetime = datetime.checked_add_signed(Duration::microseconds(rhs.usecs()))?;
-        
+
                 Some(Self::new(datetime))
             }
         }
@@ -563,8 +603,12 @@ macro_rules! impl_timestamp {
                     suffix
                 )
             }
-        
-            fn write_with_type<W: std::fmt::Write>(&self, ty: &DataType, f: &mut W) -> std::fmt::Result {
+
+            fn write_with_type<W: std::fmt::Write>(
+                &self,
+                ty: &DataType,
+                f: &mut W,
+            ) -> std::fmt::Result {
                 match ty {
                     super::DataType::Timestamp => self.write(f),
                     super::DataType::TimestampNano => self.write(f),
@@ -581,24 +625,23 @@ macro_rules! impl_timestamp {
                         .ok_or_else(|| InvalidParamsError::datetime(secs, nsecs))?
                 }))
             }
-    
-        
+
             pub fn with_millis(timestamp_millis: i64) -> Result<Self> {
                 let secs = timestamp_millis.div_euclid(1_000);
                 let nsecs = timestamp_millis.rem_euclid(1_000) * 1_000_000;
                 Self::with_secs_nsecs(secs, nsecs as u32)
             }
-        
+
             pub fn with_micros(timestamp_micros: i64) -> Result<Self> {
                 let secs = timestamp_micros.div_euclid(1_000_000);
                 let nsecs = timestamp_micros.rem_euclid(1_000_000) * 1000;
                 Self::with_secs_nsecs(secs, nsecs as u32)
             }
-        
+
             pub fn from_timestamp_uncheck(secs: i64, nsecs: u32) -> Self {
                 Self::new(DateTime::from_timestamp(secs, nsecs).unwrap().naive_utc())
             }
-        
+
             /// Truncate the timestamp to the precision of microseconds.
             ///
             /// # Example
@@ -617,7 +660,7 @@ macro_rules! impl_timestamp {
                         .unwrap(),
                 )
             }
-        
+
             /// Truncate the timestamp to the precision of milliseconds.
             ///
             /// # Example
@@ -636,7 +679,7 @@ macro_rules! impl_timestamp {
                         .unwrap(),
                 )
             }
-        
+
             /// Truncate the timestamp to the precision of seconds.
             ///
             /// # Example
@@ -651,7 +694,7 @@ macro_rules! impl_timestamp {
             pub fn truncate_second(self) -> Self {
                 Self::new(self.0.with_nanosecond(0).unwrap())
             }
-        
+
             /// Truncate the timestamp to the precision of minutes.
             ///
             /// # Example
@@ -665,11 +708,12 @@ macro_rules! impl_timestamp {
             /// ```
             pub fn truncate_minute(self) -> Self {
                 Self::new(
-                    Date::new(self.0.date()).0
-                        .and_time(Time::from_hms_nano_uncheck(self.0.hour(), self.0.minute(), 0, 0).0),
+                    Date::new(self.0.date()).0.and_time(
+                        Time::from_hms_nano_uncheck(self.0.hour(), self.0.minute(), 0, 0).0,
+                    ),
                 )
             }
-        
+
             /// Truncate the timestamp to the precision of hours.
             ///
             /// # Example
@@ -683,11 +727,12 @@ macro_rules! impl_timestamp {
             /// ```
             pub fn truncate_hour(self) -> Self {
                 Self::new(
-                    Date::new(self.0.date()).0
+                    Date::new(self.0.date())
+                        .0
                         .and_time(Time::from_hms_nano_uncheck(self.0.hour(), 0, 0, 0).0),
                 )
             }
-        
+
             /// Truncate the timestamp to the precision of days.
             ///
             /// # Example
@@ -702,7 +747,7 @@ macro_rules! impl_timestamp {
             pub fn truncate_day(self) -> Self {
                 Date::new(self.0.date()).into()
             }
-        
+
             /// Truncate the timestamp to the precision of weeks.
             ///
             /// # Example
@@ -717,7 +762,7 @@ macro_rules! impl_timestamp {
             pub fn truncate_week(self) -> Self {
                 Date::new(self.0.date().week(Weekday::Mon).first_day()).into()
             }
-        
+
             /// Truncate the timestamp to the precision of months.
             ///
             /// # Example
@@ -732,7 +777,7 @@ macro_rules! impl_timestamp {
             pub fn truncate_month(self) -> Self {
                 Date::new(self.0.date().with_day(1).unwrap()).into()
             }
-        
+
             /// Truncate the timestamp to the precision of quarters.
             ///
             /// # Example
@@ -747,7 +792,7 @@ macro_rules! impl_timestamp {
             pub fn truncate_quarter(self) -> Self {
                 Date::from_ymd_uncheck(self.0.year(), self.0.month0() / 3 * 3 + 1, 1).into()
             }
-        
+
             /// Truncate the timestamp to the precision of years.
             ///
             /// # Example
@@ -762,7 +807,7 @@ macro_rules! impl_timestamp {
             pub fn truncate_year(self) -> Self {
                 Date::from_ymd_uncheck(self.0.year(), 1, 1).into()
             }
-        
+
             /// Truncate the timestamp to the precision of decades.
             ///
             /// # Example
@@ -777,7 +822,7 @@ macro_rules! impl_timestamp {
             pub fn truncate_decade(self) -> Self {
                 Date::from_ymd_uncheck(self.0.year() / 10 * 10, 1, 1).into()
             }
-        
+
             /// Truncate the timestamp to the precision of centuries.
             ///
             /// # Example
@@ -792,7 +837,7 @@ macro_rules! impl_timestamp {
             pub fn truncate_century(self) -> Self {
                 Date::from_ymd_uncheck((self.0.year() - 1) / 100 * 100 + 1, 1, 1).into()
             }
-        
+
             /// Truncate the timestamp to the precision of millenniums.
             ///
             /// # Example
@@ -819,17 +864,14 @@ impl TimestampNano {
             .read_i64::<BigEndian>()
             .context("failed to read i64 from TimestampNano buffer")?;
         let nsecs = cur
-                    .read_u32::<BigEndian>()
-                    .context("failed to read u32 from TimestampNano buffer")?;
+            .read_u32::<BigEndian>()
+            .context("failed to read u32 from TimestampNano buffer")?;
         Ok(TimestampNano::with_secs_nsecs(secs, nsecs)?)
     }
 
     pub fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
         let timestamp_size = output
-            .write(
-                &(self.0.and_utc().timestamp())
-                .to_be_bytes()
-            )
+            .write(&(self.0.and_utc().timestamp()).to_be_bytes())
             .map_err(Into::<ArrayError>::into)?;
         let timestamp_subsec_nanos_size = output
             .write(&(self.0.and_utc().timestamp_subsec_nanos()).to_be_bytes())
