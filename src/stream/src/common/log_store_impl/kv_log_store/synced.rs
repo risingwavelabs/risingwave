@@ -56,19 +56,27 @@ use std::pin::Pin;
 
 use await_tree::InstrumentAwait;
 use futures::future::BoxFuture;
+use futures::FutureExt;
 use futures_async_stream::try_stream;
 use parking_lot::Mutex;
 use risingwave_common::array::StreamChunk;
+use risingwave_common::bitmap::Bitmap;
+use risingwave_common::catalog::TableId;
 use risingwave_connector::sink::log_store::{
     ChunkId, LogStoreReadItem, LogStoreResult, TruncateOffset,
 };
+use risingwave_storage::store::StateStoreRead;
 use risingwave_storage::StateStore;
 use tokio::select;
 use tokio_stream::StreamExt;
 
 use super::reader::timeout_auto_rebuild::TimeoutAutoRebuildIter;
 use crate::common::log_store_impl::kv_log_store::buffer::LogStoreBufferItem;
-use crate::common::log_store_impl::kv_log_store::serde::{KvLogStoreItem, LogStoreItemMergeStream};
+use crate::common::log_store_impl::kv_log_store::reader::read_flushed_chunk;
+use crate::common::log_store_impl::kv_log_store::serde::{
+    KvLogStoreItem, LogStoreItemMergeStream, LogStoreRowSerde,
+};
+use crate::common::log_store_impl::kv_log_store::KvLogStoreReadMetrics;
 use crate::executor::{
     Barrier, BoxedMessageStream, Message, StreamExecutorError, StreamExecutorResult,
 };
@@ -77,12 +85,17 @@ type StateStoreStream<S> = Pin<Box<LogStoreItemMergeStream<TimeoutAutoRebuildIte
 type ReadFlushedChunkFuture = BoxFuture<'static, LogStoreResult<(ChunkId, StreamChunk, u64)>>;
 
 struct SyncedKvLogStore<S: StateStore> {
+    table_id: TableId,
+    read_metrics: KvLogStoreReadMetrics,
+    serde: LogStoreRowSerde,
+
     // Upstream
     upstream: BoxedMessageStream,
 
     // Log store state
     state_store_stream: Option<StateStoreStream<S>>,
     flushed_chunk_future: Option<ReadFlushedChunkFuture>,
+    state_store: S,
     buffer: Mutex<SyncedLogStoreBuffer>,
 }
 
@@ -102,7 +115,15 @@ impl<S: StateStore> SyncedKvLogStore<S> {
     async fn next(&mut self) -> StreamExecutorResult<Option<Message>> {
         select! {
             // read from log store
-            logstore_item = Self::try_next_item(&mut self.state_store_stream, &mut self.flushed_chunk_future, &mut self.buffer) => {
+            logstore_item = Self::try_next_item(
+                self.table_id,
+                &self.read_metrics,
+                &self.serde,
+                &mut self.state_store_stream,
+                &mut self.flushed_chunk_future,
+                self.state_store.clone(),
+                &mut self.buffer
+            ) => {
                 let logstore_item = logstore_item?;
                 Ok(logstore_item.map(Message::Chunk))
             }
@@ -141,8 +162,14 @@ impl<S: StateStore> SyncedKvLogStore<S> {
 // Read methods
 impl<S: StateStore> SyncedKvLogStore<S> {
     async fn try_next_item(
+        table_id: TableId,
+        read_metrics: &KvLogStoreReadMetrics,
+        serde: &LogStoreRowSerde,
+
+        // state
         log_store_state: &mut Option<StateStoreStream<S>>,
         read_flushed_chunk_future: &mut Option<ReadFlushedChunkFuture>,
+        state_store: S,
         buffer: &mut Mutex<SyncedLogStoreBuffer>,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
         // 1. read state store
@@ -156,7 +183,16 @@ impl<S: StateStore> SyncedKvLogStore<S> {
         }
 
         // 3. read buffer
-        if let Some(chunk) = Self::try_next_buffer_item(buffer).await? {
+        if let Some(chunk) = Self::try_next_buffer_item(
+            read_flushed_chunk_future,
+            serde,
+            state_store,
+            buffer,
+            table_id,
+            read_metrics,
+        )
+        .await?
+        {
             return Ok(Some(chunk));
         }
         return Ok(None);
@@ -190,7 +226,10 @@ impl<S: StateStore> SyncedKvLogStore<S> {
     ) -> StreamExecutorResult<Option<StreamChunk>> {
         if let Some(future) = flushed_chunk_future {
             match future.await {
-                Ok((_, chunk, _)) => Ok(Some(chunk)),
+                Ok((_, chunk, _)) => {
+                    *flushed_chunk_future = None;
+                    Ok(Some(chunk))
+                }
                 Err(_) => {
                     // TODO: log + propagate error
                     *flushed_chunk_future = None;
@@ -202,11 +241,15 @@ impl<S: StateStore> SyncedKvLogStore<S> {
         }
     }
 
-    // TODO: read flushed_chunks
     async fn try_next_buffer_item(
+        read_flushed_chunk_future: &mut Option<ReadFlushedChunkFuture>,
+        serde: &LogStoreRowSerde,
+        state_store: impl StateStoreRead,
         buffer: &mut Mutex<SyncedLogStoreBuffer>,
+        table_id: TableId,
+        read_metrics: &KvLogStoreReadMetrics,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
-        let Some(item) = buffer.lock().pop() else {
+        let Some((item_epoch, item)) = buffer.lock().pop() else {
             return Ok(None);
         };
         match item {
@@ -217,7 +260,22 @@ impl<S: StateStore> SyncedKvLogStore<S> {
                 end_seq_id,
                 chunk_id,
             } => {
-                todo!()
+                let serde = serde.clone();
+                let read_metrics = read_metrics.clone();
+                let read_flushed_chunk_fut = read_flushed_chunk(
+                    serde,
+                    state_store,
+                    vnode_bitmap,
+                    chunk_id,
+                    start_seq_id,
+                    end_seq_id,
+                    item_epoch,
+                    table_id,
+                    read_metrics,
+                )
+                .boxed();
+                *read_flushed_chunk_future = Some(read_flushed_chunk_fut);
+                Self::try_next_flushed_chunk_future(read_flushed_chunk_future).await
             }
             LogStoreBufferItem::Barrier { .. } | LogStoreBufferItem::UpdateVnodes(_) => Ok(None),
         }
@@ -247,7 +305,7 @@ impl<S: StateStore> SyncedKvLogStore<S> {
 }
 
 struct SyncedLogStoreBuffer {
-    buffer: Vec<LogStoreBufferItem>,
+    buffer: Vec<(u64, LogStoreBufferItem)>,
     max_size: usize,
 }
 
@@ -256,7 +314,7 @@ impl SyncedLogStoreBuffer {
         self.buffer.len() >= self.max_size
     }
 
-    pub fn pop(&mut self) -> Option<LogStoreBufferItem> {
+    pub fn pop(&mut self) -> Option<(u64, LogStoreBufferItem)> {
         self.buffer.pop()
     }
 }
