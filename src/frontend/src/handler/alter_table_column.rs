@@ -277,6 +277,7 @@ pub async fn handle_alter_table_column(
         if let Some(format_encode) = &format_encode
             && schema_has_schema_registry(format_encode)
         {
+            // TODO(purify): we may support this.
             Err(ErrorCode::NotSupported(
                 "alter table with schema registry".to_owned(),
                 "try `ALTER TABLE .. FORMAT .. ENCODE .. (...)` instead".to_owned(),

@@ -651,24 +651,27 @@ pub fn bind_connector_props(
 }
 
 /// When the schema can be inferred from external system (like schema registry),
-/// how to handle the regular columns (i.e., non-generated) from SQL?
+/// how to handle the regular columns (i.e., non-generated) defined in SQL?
 pub enum SqlColumnStrategy {
-    /// Follow all columns from SQL, ignore the columns from external system.
+    /// Follow all columns defined in SQL, ignore the columns from external system.
     ///
     /// This is the behavior when `SINK INTO` or `[ADD | DROP] COLUMN` atop the purified SQL,
     /// ensuring that no accidental refresh will happen and the schema remains unchanged.
+    // TODO(purify): we may validate whether defined columns are valid against the resolved schema.
     Follow,
 
-    /// Merge the generated columns from SQL and columns from external system. If there are
-    /// regular columns from SQL, ignore silently.
+    /// Merge the generated columns defined in SQL and columns from external system. If there
+    /// are also regular columns defined in SQL, ignore silently.
     ///
     /// This is the behavior when `REFRESH SCHEMA` atop the purified SQL.
     Ignore,
 
-    /// Merge the generated columns from SQL and columns from external system. If there are
-    /// regular columns from SQL, reject the request with an error.
+    /// Merge the generated columns defined in SQL and columns from external system. If there
+    /// are also regular columns defined in SQL, reject the request.
     ///
-    /// This is the behavior when creating a source with a purified SQL.
+    /// This is the behavior when creating a new table or source with a resolvable schema.
+    // TODO(purify): we may accept this as there are some practical use cases, see
+    //               https://github.com/risingwavelabs/risingwave/issues/12199
     Reject,
 }
 
