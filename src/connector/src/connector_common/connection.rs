@@ -261,9 +261,9 @@ impl Connection for IcebergConnection {
             token: self.token.clone(),
             oauth2_server_uri: self.oauth2_server_uri.clone(),
             scope: self.scope.clone(),
-            path_style_access: self.path_style_access.clone(),
+            path_style_access: self.path_style_access,
             database_name: Some("test_database".to_owned()),
-            table_name: "table_name".to_owned(),
+            table_name: "test_table".to_owned(),
             enable_config_load: Some(false),
         };
 
