@@ -47,6 +47,8 @@ pub enum SchemaFetchError {
     #[error(transparent)]
     InvalidOption(#[from] InvalidOptionError),
     #[error(transparent)]
+    License(#[from] risingwave_common::license::FeatureNotAvailable),
+    #[error(transparent)]
     Request(#[from] schema_registry::ConcurrentRequestError),
     #[error(transparent)]
     AwsGlue(#[from] aws_sdk_glue::operation::get_schema_version::GetSchemaVersionError),
