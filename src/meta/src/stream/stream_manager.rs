@@ -237,6 +237,8 @@ impl GlobalStreamManager {
     ///    actors.
     /// 3. Notify related worker nodes to update and build the actors.
     /// 4. Store related meta data.
+    ///
+    /// This function is a wrapper over [`Self::create_streaming_job_impl`].
     pub async fn create_streaming_job(
         self: &Arc<Self>,
         stream_job_fragments: StreamJobFragments,
@@ -330,6 +332,8 @@ impl GlobalStreamManager {
         bail!("receiver failed to get notification version for finished stream job")
     }
 
+    /// The function will only return after backfilling finishes
+    /// ([`crate::manager::MetadataManager::wait_streaming_job_finished`]).
     async fn create_streaming_job_impl(
         &self,
         stream_job_fragments: StreamJobFragments,

@@ -41,13 +41,11 @@ use risingwave_pb::catalog::source::PbOptionalAssociatedTableId;
 use risingwave_pb::catalog::table::PbOptionalAssociatedSourceId;
 use risingwave_pb::catalog::{PbCreateType, PbTable};
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
-use risingwave_pb::meta::relation::{PbRelationInfo, RelationInfo};
+use risingwave_pb::meta::object::PbObjectInfo;
 use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Info, Operation as NotificationOperation, Operation,
 };
-use risingwave_pb::meta::{
-    PbFragmentWorkerSlotMapping, PbRelation, PbRelationGroup, Relation, RelationGroup,
-};
+use risingwave_pb::meta::{PbFragmentWorkerSlotMapping, PbObject, PbObjectGroup};
 use risingwave_pb::source::{PbConnectorSplit, PbConnectorSplits};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
@@ -67,7 +65,7 @@ use crate::barrier::{ReplaceStreamJobPlan, Reschedule};
 use crate::controller::catalog::CatalogController;
 use crate::controller::rename::ReplaceTableExprRewriter;
 use crate::controller::utils::{
-    build_relation_group_for_delete, check_relation_name_duplicate, check_sink_into_table_cycle,
+    build_object_group_for_delete, check_relation_name_duplicate, check_sink_into_table_cycle,
     ensure_object_id, ensure_user_id, get_fragment_actor_ids, get_fragment_mappings,
     get_internal_tables_by_id, rebuild_fragment_mapping_from_actors, PartialObject,
 };
@@ -180,7 +178,7 @@ impl CatalogController {
             }
         }
 
-        let mut relations = vec![];
+        let mut objects = vec![];
 
         match streaming_job {
             StreamingJob::MaterializedView(table) => {
@@ -201,8 +199,8 @@ impl CatalogController {
                 let table_model: table::ActiveModel = table.clone().into();
                 Table::insert(table_model).exec(&txn).await?;
 
-                relations.push(Relation {
-                    relation_info: Some(RelationInfo::Table(table.to_owned())),
+                objects.push(PbObject {
+                    object_info: Some(PbObjectInfo::Table(table.to_owned())),
                 });
             }
             StreamingJob::Sink(sink, _) => {
@@ -354,12 +352,9 @@ impl CatalogController {
 
         txn.commit().await?;
 
-        if !relations.is_empty() {
-            self.notify_frontend(
-                Operation::Add,
-                Info::RelationGroup(RelationGroup { relations }),
-            )
-            .await;
+        if !objects.is_empty() {
+            self.notify_frontend(Operation::Add, Info::ObjectGroup(PbObjectGroup { objects }))
+                .await;
         }
 
         Ok(())
@@ -408,11 +403,11 @@ impl CatalogController {
         if job.is_materialized_view() {
             self.notify_frontend(
                 Operation::Add,
-                Info::RelationGroup(RelationGroup {
-                    relations: incomplete_internal_tables
+                Info::ObjectGroup(PbObjectGroup {
+                    objects: incomplete_internal_tables
                         .iter()
-                        .map(|table| Relation {
-                            relation_info: Some(RelationInfo::Table(table.clone())),
+                        .map(|table| PbObject {
+                            object_info: Some(PbObjectInfo::Table(table.clone())),
                         })
                         .collect(),
                 }),
@@ -621,7 +616,7 @@ impl CatalogController {
         if !objs.is_empty() {
             // We also have notified the frontend about these objects,
             // so we need to notify the frontend to delete them here.
-            self.notify_frontend(Operation::Delete, build_relation_group_for_delete(objs))
+            self.notify_frontend(Operation::Delete, build_object_group_for_delete(objs))
                 .await;
         }
         Ok((true, Some(database_id)))
@@ -827,10 +822,10 @@ impl CatalogController {
             .filter(table::Column::BelongsToJobId.eq(job_id))
             .all(&txn)
             .await?;
-        let mut relations = internal_table_objs
+        let mut objects = internal_table_objs
             .iter()
-            .map(|(table, obj)| PbRelation {
-                relation_info: Some(PbRelationInfo::Table(
+            .map(|(table, obj)| PbObject {
+                object_info: Some(PbObjectInfo::Table(
                     ObjectModel(table.clone(), obj.clone().unwrap()).into(),
                 )),
             })
@@ -854,16 +849,14 @@ impl CatalogController {
                         .one(&txn)
                         .await?
                         .ok_or_else(|| MetaError::catalog_id_not_found("source", source_id))?;
-                    relations.push(PbRelation {
-                        relation_info: Some(PbRelationInfo::Source(
+                    objects.push(PbObject {
+                        object_info: Some(PbObjectInfo::Source(
                             ObjectModel(src, obj.unwrap()).into(),
                         )),
                     });
                 }
-                relations.push(PbRelation {
-                    relation_info: Some(PbRelationInfo::Table(
-                        ObjectModel(table, obj.unwrap()).into(),
-                    )),
+                objects.push(PbObject {
+                    object_info: Some(PbObjectInfo::Table(ObjectModel(table, obj.unwrap()).into())),
                 });
             }
             ObjectType::Sink => {
@@ -872,10 +865,8 @@ impl CatalogController {
                     .one(&txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("sink", job_id))?;
-                relations.push(PbRelation {
-                    relation_info: Some(PbRelationInfo::Sink(
-                        ObjectModel(sink, obj.unwrap()).into(),
-                    )),
+                objects.push(PbObject {
+                    object_info: Some(PbObjectInfo::Sink(ObjectModel(sink, obj.unwrap()).into())),
                 });
             }
             ObjectType::Index => {
@@ -892,16 +883,14 @@ impl CatalogController {
                         .ok_or_else(|| {
                             MetaError::catalog_id_not_found("table", index.index_table_id)
                         })?;
-                    relations.push(PbRelation {
-                        relation_info: Some(PbRelationInfo::Table(
+                    objects.push(PbObject {
+                        object_info: Some(PbObjectInfo::Table(
                             ObjectModel(table, obj.unwrap()).into(),
                         )),
                     });
                 }
-                relations.push(PbRelation {
-                    relation_info: Some(PbRelationInfo::Index(
-                        ObjectModel(index, obj.unwrap()).into(),
-                    )),
+                objects.push(PbObject {
+                    object_info: Some(PbObjectInfo::Index(ObjectModel(index, obj.unwrap()).into())),
                 });
             }
             ObjectType::Source => {
@@ -910,8 +899,8 @@ impl CatalogController {
                     .one(&txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("source", job_id))?;
-                relations.push(PbRelation {
-                    relation_info: Some(PbRelationInfo::Source(
+                objects.push(PbObject {
+                    object_info: Some(PbObjectInfo::Source(
                         ObjectModel(source, obj.unwrap()).into(),
                     )),
                 });
@@ -957,17 +946,17 @@ impl CatalogController {
         let mut version = self
             .notify_frontend(
                 notification_op,
-                NotificationInfo::RelationGroup(PbRelationGroup { relations }),
+                NotificationInfo::ObjectGroup(PbObjectGroup { objects }),
             )
             .await;
 
-        if let Some((relations, fragment_mapping)) = replace_table_mapping_update {
+        if let Some((objects, fragment_mapping)) = replace_table_mapping_update {
             self.notify_fragment_mapping(NotificationOperation::Add, fragment_mapping)
                 .await;
             version = self
                 .notify_frontend(
                     NotificationOperation::Update,
-                    NotificationInfo::RelationGroup(PbRelationGroup { relations }),
+                    NotificationInfo::ObjectGroup(PbObjectGroup { objects }),
                 )
                 .await;
         }
@@ -991,7 +980,7 @@ impl CatalogController {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
-        let (relations, fragment_mapping) = Self::finish_replace_streaming_job_inner(
+        let (objects, fragment_mapping) = Self::finish_replace_streaming_job_inner(
             tmp_id,
             merge_updates,
             col_index_mapping,
@@ -1013,7 +1002,7 @@ impl CatalogController {
         let version = self
             .notify_frontend(
                 NotificationOperation::Update,
-                NotificationInfo::RelationGroup(PbRelationGroup { relations }),
+                NotificationInfo::ObjectGroup(PbObjectGroup { objects }),
             )
             .await;
 
@@ -1031,7 +1020,7 @@ impl CatalogController {
         }: SinkIntoTableContext,
         txn: &DatabaseTransaction,
         streaming_job: StreamingJob,
-    ) -> MetaResult<(Vec<Relation>, Vec<PbFragmentWorkerSlotMapping>)> {
+    ) -> MetaResult<(Vec<PbObject>, Vec<PbFragmentWorkerSlotMapping>)> {
         let original_job_id = streaming_job.id() as ObjectId;
         let job_type = streaming_job.job_type();
 
@@ -1222,7 +1211,7 @@ impl CatalogController {
         Object::delete_by_id(tmp_id).exec(txn).await?;
 
         // 4. update catalogs and notify.
-        let mut relations = vec![];
+        let mut objects = vec![];
         match job_type {
             StreamingJobType::Table(_) => {
                 let (table, table_obj) = Table::find_by_id(original_job_id)
@@ -1230,8 +1219,8 @@ impl CatalogController {
                     .one(txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("object", original_job_id))?;
-                relations.push(PbRelation {
-                    relation_info: Some(PbRelationInfo::Table(
+                objects.push(PbObject {
+                    object_info: Some(PbObjectInfo::Table(
                         ObjectModel(table, table_obj.unwrap()).into(),
                     )),
                 })
@@ -1242,8 +1231,8 @@ impl CatalogController {
                     .one(txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("object", original_job_id))?;
-                relations.push(PbRelation {
-                    relation_info: Some(PbRelationInfo::Source(
+                objects.push(PbObject {
+                    object_info: Some(PbObjectInfo::Source(
                         ObjectModel(source, source_obj.unwrap()).into(),
                     )),
                 })
@@ -1279,17 +1268,15 @@ impl CatalogController {
                     .one(txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("object", index.index_id))?;
-                relations.push(PbRelation {
-                    relation_info: Some(PbRelationInfo::Index(
-                        ObjectModel(index, index_obj).into(),
-                    )),
+                objects.push(PbObject {
+                    object_info: Some(PbObjectInfo::Index(ObjectModel(index, index_obj).into())),
                 });
             }
         }
 
         let fragment_mapping: Vec<_> = get_fragment_mappings(txn, original_job_id as _).await?;
 
-        Ok((relations, fragment_mapping))
+        Ok((objects, fragment_mapping))
     }
 
     /// Abort the replacing streaming job by deleting the temporary job object.
@@ -1417,15 +1404,14 @@ impl CatalogController {
 
         txn.commit().await?;
 
-        let relation_info = PbRelationInfo::Source(ObjectModel(source, obj.unwrap()).into());
-        let relation = PbRelation {
-            relation_info: Some(relation_info),
-        };
+        let relation_info = PbObjectInfo::Source(ObjectModel(source, obj.unwrap()).into());
         let _version = self
             .notify_frontend(
                 NotificationOperation::Update,
-                NotificationInfo::RelationGroup(PbRelationGroup {
-                    relations: vec![relation],
+                NotificationInfo::ObjectGroup(PbObjectGroup {
+                    objects: vec![PbObject {
+                        object_info: Some(relation_info),
+                    }],
                 }),
             )
             .await;

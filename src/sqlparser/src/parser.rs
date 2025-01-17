@@ -2794,7 +2794,15 @@ impl Parser<'_> {
         } else if self.parse_keyword(Keyword::NULL) {
             Ok(Some(ColumnOption::Null))
         } else if self.parse_keyword(Keyword::DEFAULT) {
-            Ok(Some(ColumnOption::DefaultColumns(self.parse_expr()?)))
+            if self.parse_keyword(Keyword::INTERNAL) {
+                Ok(Some(ColumnOption::DefaultValueInternal {
+                    // Placeholder. Will fill during definition purification for schema change.
+                    persisted: Default::default(),
+                    expr: None,
+                }))
+            } else {
+                Ok(Some(ColumnOption::DefaultValue(self.parse_expr()?)))
+            }
         } else if self.parse_keywords(&[Keyword::PRIMARY, Keyword::KEY]) {
             Ok(Some(ColumnOption::Unique { is_primary: true }))
         } else if self.parse_keyword(Keyword::UNIQUE) {
