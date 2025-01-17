@@ -9,4 +9,3 @@ drop_sqls = [
     'DROP TABLE IF EXISTS demo_db.test_connection_table',
     'DROP SCHEMA IF EXISTS demo_db',
 ]
-iceberg_connection
