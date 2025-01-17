@@ -71,9 +71,7 @@ use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common_estimate_size::EstimateSize;
-use risingwave_connector::sink::log_store::{
-    ChunkId, LogStoreResult,
-};
+use risingwave_connector::sink::log_store::{ChunkId, LogStoreResult};
 use risingwave_hummock_sdk::table_watermark::{VnodeWatermark, WatermarkDirection};
 use risingwave_storage::store::{LocalStateStore, SealCurrentEpochOptions, StateStoreRead};
 use risingwave_storage::StateStore;
@@ -318,23 +316,19 @@ impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStore<S, LS> {
             return Ok(None);
         };
         match item {
-            LogStoreBufferItem::StreamChunk { chunk, end_seq_id, .. } => {
-                truncation_offset.replace((
-                    item_epoch,
-                    Some(end_seq_id),
-                ));
+            LogStoreBufferItem::StreamChunk {
+                chunk, end_seq_id, ..
+            } => {
+                truncation_offset.replace((item_epoch, Some(end_seq_id)));
                 Ok(Some(chunk))
-            },
+            }
             LogStoreBufferItem::Flushed {
                 vnode_bitmap,
                 start_seq_id,
                 end_seq_id,
                 chunk_id,
             } => {
-                truncation_offset.replace((
-                    item_epoch,
-                    Some(end_seq_id),
-                ));
+                truncation_offset.replace((item_epoch, Some(end_seq_id)));
                 let serde = serde.clone();
                 let read_metrics = read_metrics.clone();
                 let read_flushed_chunk_fut = read_flushed_chunk(
@@ -352,14 +346,11 @@ impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStore<S, LS> {
                 *read_flushed_chunk_future = Some(read_flushed_chunk_fut);
                 Self::try_next_flushed_chunk_future(read_flushed_chunk_future).await
             }
-            LogStoreBufferItem::Barrier { next_epoch, .. }  => {
+            LogStoreBufferItem::Barrier { next_epoch, .. } => {
                 // FIXME(kwannoel): Is `next_epoch` correct for truncation??
-                truncation_offset.replace((
-                    next_epoch,
-                    None,
-                ));
+                truncation_offset.replace((next_epoch, None));
                 Ok(None)
-            },
+            }
             LogStoreBufferItem::UpdateVnodes(_) => Ok(None),
         }
     }
@@ -463,8 +454,11 @@ impl SyncedLogStoreBuffer {
 
         let should_flush_chunk = current_size + chunk_size >= self.max_size;
         if should_flush_chunk {
-            let new_vnode_bitmap = self.flush_chunk(serde, start_seq_id, end_seq_id, epoch, state_store, chunk).await?;
-            self.add_flushed_item_to_buffer(start_seq_id, end_seq_id, new_vnode_bitmap, epoch).await;
+            let new_vnode_bitmap = self
+                .flush_chunk(serde, start_seq_id, end_seq_id, epoch, state_store, chunk)
+                .await?;
+            self.add_flushed_item_to_buffer(start_seq_id, end_seq_id, new_vnode_bitmap, epoch)
+                .await;
         } else {
             self.add_chunk_to_buffer(chunk, start_seq_id, end_seq_id, epoch);
         }
@@ -478,7 +472,7 @@ impl SyncedLogStoreBuffer {
         end_seq_id: SeqIdType,
         epoch: u64,
         state_store: &mut impl LocalStateStore,
-        chunk: StreamChunk
+        chunk: StreamChunk,
     ) -> StreamExecutorResult<Bitmap> {
         // flush chunk to state store
         // TODO(kwannoel): Should refactor this into its own function
@@ -508,13 +502,13 @@ impl SyncedLogStoreBuffer {
         epoch: u64,
     ) {
         if let Some((
-                        item_epoch,
-                        LogStoreBufferItem::Flushed {
-                            end_seq_id: prev_end_seq_id,
-                            vnode_bitmap,
-                            ..
-                        },
-                    )) = self.buffer.front_mut()
+            item_epoch,
+            LogStoreBufferItem::Flushed {
+                end_seq_id: prev_end_seq_id,
+                vnode_bitmap,
+                ..
+            },
+        )) = self.buffer.front_mut()
         {
             assert!(
                 *prev_end_seq_id < start_seq_id,
