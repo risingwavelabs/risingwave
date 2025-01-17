@@ -641,6 +641,7 @@ impl<S: StateStoreRead + Clone> LogReader for KvLogStoreReader<S> {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn read_flushed_chunk(
     serde: LogStoreRowSerde,
     state_store: impl StateStoreRead,
