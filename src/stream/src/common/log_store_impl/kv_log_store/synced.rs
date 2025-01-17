@@ -135,6 +135,7 @@ impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStore<S, LS> {
                 self.table_id,
                 &self.read_metrics,
                 &self.serde,
+                &mut self.truncation_offset,
                 &mut self.state_store_stream,
                 &mut self.flushed_chunk_future,
                 self.state_store.clone(),
@@ -143,6 +144,7 @@ impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStore<S, LS> {
                 let logstore_item = logstore_item?;
                 Ok(logstore_item.map(Message::Chunk))
             }
+
             // poll from upstream
             upstream_item = self.upstream.next() => {
                 match upstream_item {
@@ -193,6 +195,7 @@ impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStore<S, LS> {
         table_id: TableId,
         read_metrics: &KvLogStoreReadMetrics,
         serde: &LogStoreRowSerde,
+        truncation_offset: &mut Option<ReaderTruncationOffsetType>,
 
         // state
         log_store_state: &mut Option<StateStoreStream<S>>,
@@ -212,6 +215,7 @@ impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStore<S, LS> {
 
         // 3. read buffer
         if let Some(chunk) = Self::try_next_buffer_item(
+            truncation_offset,
             read_flushed_chunk_future,
             serde,
             state_store,
@@ -270,6 +274,7 @@ impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStore<S, LS> {
     }
 
     async fn try_next_buffer_item(
+        truncation_offset: &mut Option<ReaderTruncationOffsetType>,
         read_flushed_chunk_future: &mut Option<ReadFlushedChunkFuture>,
         serde: &LogStoreRowSerde,
         state_store: impl StateStoreRead,
@@ -281,13 +286,23 @@ impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStore<S, LS> {
             return Ok(None);
         };
         match item {
-            LogStoreBufferItem::StreamChunk { chunk, .. } => Ok(Some(chunk)),
+            LogStoreBufferItem::StreamChunk { chunk, end_seq_id, .. } => {
+                truncation_offset.replace((
+                    item_epoch,
+                    Some(end_seq_id),
+                ));
+                Ok(Some(chunk))
+            },
             LogStoreBufferItem::Flushed {
                 vnode_bitmap,
                 start_seq_id,
                 end_seq_id,
                 chunk_id,
             } => {
+                truncation_offset.replace((
+                    item_epoch,
+                    Some(end_seq_id),
+                ));
                 let serde = serde.clone();
                 let read_metrics = read_metrics.clone();
                 let read_flushed_chunk_fut = read_flushed_chunk(
@@ -305,7 +320,15 @@ impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStore<S, LS> {
                 *read_flushed_chunk_future = Some(read_flushed_chunk_fut);
                 Self::try_next_flushed_chunk_future(read_flushed_chunk_future).await
             }
-            LogStoreBufferItem::Barrier { .. } | LogStoreBufferItem::UpdateVnodes(_) => Ok(None),
+            LogStoreBufferItem::Barrier { next_epoch, .. }  => {
+                // FIXME(kwannoel): Is `next_epoch` correct for truncation??
+                truncation_offset.replace((
+                    next_epoch,
+                    None,
+                ));
+                Ok(None)
+            },
+            LogStoreBufferItem::UpdateVnodes(_) => Ok(None),
         }
     }
 }
