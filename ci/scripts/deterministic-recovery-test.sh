@@ -16,7 +16,8 @@ risingwave_meta::barrier::mod=debug,\
 risingwave_simulation=debug,\
 risingwave_meta::stream::stream_manager=debug,\
 risingwave_meta::barrier::progress=debug,\
-sqlx=error"
+sqlx=debug"
+#sqlx=error"
 
 # Extra logs you can enable if the existing trace does not give enough info.
 #risingwave_stream::executor::backfill=trace,
@@ -78,7 +79,7 @@ echo "--- EXTRA_ARGS: ${EXTRA_ARGS}"
 #./e2e_test/streaming/\*\*/\*.slt 2> $LOGDIR/recovery-streaming-{}.log && rm $LOGDIR/recovery-streaming-{}.log'
 
 echo "--- deterministic simulation e2e, ci-3cn-2fe-1meta, recovery, batch"
-seq "$TEST_NUM" | parallel 'MADSIM_TEST_SEED={} ./risingwave_simulation \
+seq "$((TEST_NUM))" "$((TEST_NUM+20))" | parallel 'MADSIM_TEST_SEED={} ./risingwave_simulation \
 --kill \
 --kill-rate=${KILL_RATE} \
 --background-ddl-rate=${BACKGROUND_DDL_RATE} \

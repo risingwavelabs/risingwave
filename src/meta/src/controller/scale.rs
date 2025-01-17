@@ -36,7 +36,7 @@ use risingwave_meta_model_migration::{
 };
 use sea_orm::{
     ColumnTrait, ConnectionTrait, DbErr, DeriveEntityModel, DerivePartialModel, EntityTrait,
-    FromQueryResult, JoinType, QueryFilter, QuerySelect, RelationTrait, Statement,
+    FromQueryResult, JoinType, QueryFilter, QuerySelect, QueryTrait, RelationTrait, Statement,
     TransactionTrait,
 };
 use serde::{Deserialize, Serialize};
@@ -277,15 +277,35 @@ impl CatalogController {
 
         tracing::info!("debug table ids {:#?}", table_ids);
 
-        let fragment_ids: Vec<FragmentId> = Fragment::find()
-            .filter(fragment::Column::JobId.is_in(table_ids))
-            .all(&txn)
-            .await?
-            .into_iter()
-            .map(|fragment| fragment.fragment_id)
-            .collect();
+        // let select = Fragment::find().filter(fragment::Column::JobId.is_in(table_ids));
+        //
+        // tracing::info!("running {:#?}", select.build(txn.get_database_backend()));
+        // let fragment_ids: Vec<FragmentId> = select
+        //     .all(&txn)
+        //     .await?
+        //     .into_iter()
+        //     .map(|fragment| fragment.fragment_id)
+        //     .collect();
 
-        tracing::info!("debug fragment ids {:#?}", fragment_ids);
+        // let fragment_ids: Vec<(FragmentId, ObjectId)> = Fragment::find()
+        //     .select_only()
+        //     .columns([fragment::Column::FragmentId, fragment::Column::JobId])
+        //     // .filter(fragment::Column::JobId.is_in(table_ids))
+        //     .into_tuple()
+        //     .all(&txn)
+        //     .await?;
+        //
+        // tracing::info!("debug fragment ids {:#?}", fragment_ids);
+
+        let fragment_ids: Vec<FragmentId> = Fragment::find()
+            .select_only()
+            .filter(fragment::Column::JobId.is_in(table_ids))
+            .column(fragment::Column::FragmentId)
+            .into_tuple()
+            .all(&txn)
+            .await?;
+
+        tracing::info!("debug fragment ids#2 {:#?}", fragment_ids);
 
         self.resolve_working_set_for_reschedule_helper(&txn, fragment_ids)
             .await
@@ -539,6 +559,11 @@ impl CatalogController {
             all_streaming_job_fragments
         };
 
+        tracing::info!(
+            "all streaming job fragments {:#?}",
+            all_streaming_job_fragments
+        );
+
         for PartialStreamingJob { job_id, .. } in &created_streaming_jobs {
             let job_fragment_count = all_streaming_job_fragments
                 .get(job_id)
@@ -553,7 +578,8 @@ impl CatalogController {
 
             assert!(
                 job_fragment_count > 0,
-                format!("StreamingJob {job_id} has no fragments")
+                "StreamingJob {} has no fragments",
+                job_id
             );
         }
 
