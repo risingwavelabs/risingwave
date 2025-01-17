@@ -378,7 +378,7 @@ pub async fn get_parquet_fields(
 ///   - Arrow's `UInt32` matches with RisingWave's `Int64`.
 ///   - Arrow's `UInt64` matches with RisingWave's `Decimal`.
 /// - Arrow's `Float16` matches with RisingWave's `Float32`.
-fn is_parquet_schema_match_source_schema(
+pub fn is_parquet_schema_match_source_schema(
     arrow_data_type: &ArrowDateType,
     rw_data_type: &RwDataType,
 ) -> bool {
