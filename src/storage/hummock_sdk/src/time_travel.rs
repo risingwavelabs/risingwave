@@ -159,8 +159,7 @@ fn rewrite_levels(mut levels: PbLevels, time_travel_table_ids: &HashSet<StateTab
 /// [`IncompleteHummockVersionDelta`] is incomplete because `SSTableInfo` only has the `sst_id` set in the following fields:
 /// - `PbGroupDeltas`
 /// - `ChangeLogDelta`
-pub type IncompleteHummockVersionDelta =
-    HummockVersionDeltaCommon<SstableIdInVersion, SstableIdInVersion>;
+pub type IncompleteHummockVersionDelta = HummockVersionDeltaCommon<SstableIdInVersion>;
 
 /// `SStableInfo` will be stripped.
 impl From<(&HummockVersionDelta, &HashSet<StateTableId>)> for IncompleteHummockVersionDelta {
