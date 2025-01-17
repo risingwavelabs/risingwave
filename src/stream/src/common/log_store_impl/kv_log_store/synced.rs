@@ -458,7 +458,6 @@ impl SyncedLogStoreBuffer {
                 .flush_chunk(serde, start_seq_id, end_seq_id, epoch, state_store, chunk)
                 .await?;
             self.add_flushed_item_to_buffer(start_seq_id, end_seq_id, new_vnode_bitmap, epoch)
-                .await;
         } else {
             self.add_chunk_to_buffer(chunk, start_seq_id, end_seq_id, epoch);
         }
@@ -494,7 +493,7 @@ impl SyncedLogStoreBuffer {
 
     /// After flushing a chunk, we will preserve a `FlushedItem` inside the buffer.
     /// This doesn't contain any data, but it contains the metadata to read the flushed chunk.
-    async fn add_flushed_item_to_buffer(
+    fn add_flushed_item_to_buffer(
         &mut self,
         start_seq_id: SeqIdType,
         end_seq_id: SeqIdType,
