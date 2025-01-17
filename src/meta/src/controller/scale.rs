@@ -27,16 +27,19 @@ use risingwave_meta_model::prelude::{
 };
 use risingwave_meta_model::{
     actor, actor_dispatcher, fragment, sink, source, streaming_job, table, ActorId, ActorMapping,
-    ActorUpstreamActors, ConnectorSplits, FragmentId, I32Array, ObjectId, VnodeBitmap,
+    ActorUpstreamActors, ConnectorSplits, CreateType, FragmentId, I32Array, JobStatus, ObjectId,
+    StreamingParallelism, VnodeBitmap,
 };
 use risingwave_meta_model_migration::{
     Alias, CommonTableExpression, Expr, IntoColumnRef, QueryStatementBuilder, SelectStatement,
     UnionType, WithClause, WithQuery,
 };
 use sea_orm::{
-    ColumnTrait, ConnectionTrait, DbErr, DerivePartialModel, EntityTrait, FromQueryResult,
-    JoinType, QueryFilter, QuerySelect, RelationTrait, Statement, TransactionTrait,
+    ColumnTrait, ConnectionTrait, DbErr, DeriveEntityModel, DerivePartialModel, EntityTrait,
+    FromQueryResult, JoinType, QueryFilter, QuerySelect, RelationTrait, Statement,
+    TransactionTrait,
 };
+use serde::{Deserialize, Serialize};
 
 use crate::controller::catalog::CatalogController;
 use crate::{MetaError, MetaResult};
@@ -483,6 +486,7 @@ impl CatalogController {
         #[sea_orm(entity = "Fragment")]
         pub struct PartialFragment {
             pub fragment_id: FragmentId,
+            pub job_id: ObjectId,
             pub distribution_type: DistributionType,
             pub upstream_fragment_id: I32Array,
             pub vnode_count: i32,
@@ -499,7 +503,20 @@ impl CatalogController {
             pub vnode_bitmap: Option<VnodeBitmap>,
         }
 
+        #[derive(Clone, DerivePartialModel, FromQueryResult)]
+        #[sea_orm(entity = "StreamingJob")]
+        pub struct PartialStreamingJob {
+            pub job_id: i32,
+            pub job_status: JobStatus,
+        }
+
         let mut flag = false;
+
+        let created_streaming_jobs: Vec<PartialStreamingJob> = StreamingJob::find()
+            .filter(streaming_job::Column::JobStatus.eq(JobStatus::Created))
+            .into_partial_model()
+            .all(txn)
+            .await?;
 
         let fragments: Vec<PartialFragment> =
             Fragment::find().into_partial_model().all(txn).await?;
@@ -508,6 +525,37 @@ impl CatalogController {
             .into_iter()
             .map(|fragment| (fragment.fragment_id, fragment))
             .collect();
+
+        let all_streaming_job_fragments = {
+            let mut all_streaming_job_fragments = HashMap::new();
+
+            for (fragment_id, fragment) in &fragment_map {
+                all_streaming_job_fragments
+                    .entry(fragment.job_id)
+                    .or_insert(HashSet::new())
+                    .insert(*fragment_id);
+            }
+
+            all_streaming_job_fragments
+        };
+
+        for PartialStreamingJob { job_id, .. } in &created_streaming_jobs {
+            let job_fragment_count = all_streaming_job_fragments
+                .get(job_id)
+                .map(|fragments| fragments.len())
+                .unwrap_or(0);
+
+            // crit_check_in_loop!(
+            //     flag,
+            //     job_fragment_count > 0,
+            //     format!("StreamingJob {job_id} has no fragments",)
+            // );
+
+            assert!(
+                job_fragment_count > 0,
+                format!("StreamingJob {job_id} has no fragments")
+            );
+        }
 
         let actors: Vec<PartialActor> = Actor::find().into_partial_model().all(txn).await?;
 
