@@ -96,11 +96,13 @@ use crate::executor::{
 type StateStoreStream<S> = Pin<Box<LogStoreItemMergeStream<TimeoutAutoRebuildIter<S>>>>;
 type ReadFlushedChunkFuture = BoxFuture<'static, LogStoreResult<(ChunkId, StreamChunk, u64)>>;
 
-struct SyncedKvLogStore<S: StateStore> {
+struct SyncedKvLogStore<S: StateStore, LS: LocalStateStore> {
     table_id: TableId,
     read_metrics: KvLogStoreReadMetrics,
+    metrics: KvLogStoreMetrics,
     serde: LogStoreRowSerde,
     seq_id: SeqIdType,
+    truncation_offset: Option<ReaderTruncationOffsetType>,
 
     // Upstream
     upstream: BoxedMessageStream,
@@ -109,13 +111,14 @@ struct SyncedKvLogStore<S: StateStore> {
     state_store_stream: Option<StateStoreStream<S>>,
     flushed_chunk_future: Option<ReadFlushedChunkFuture>,
     state_store: S,
+    local_state_store: LS,
     buffer: Mutex<SyncedLogStoreBuffer>,
 }
 
 // Top-level interface:
 // - constructor
 // - stream interface
-impl<S: StateStore> SyncedKvLogStore<S> {
+impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStore<S, LS> {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     pub async fn into_stream(mut self) {
         loop {
@@ -147,7 +150,15 @@ impl<S: StateStore> SyncedKvLogStore<S> {
                     Some(upstream_item) => {
                         match upstream_item? {
                             Message::Barrier(barrier) => {
-                                // self.write_barrier(barrier).await?;
+                                Self::write_barrier(
+                                    &mut self.local_state_store,
+                                    self.serde.clone(),
+                                    barrier.clone(),
+                                    &mut self.metrics,
+                                    self.truncation_offset,
+                                    &mut self.seq_id,
+                                    &mut self.buffer,
+                                ).await?;
                                 Ok(Some(Message::Barrier(barrier)))
                             }
                             Message::Chunk(chunk) => {
@@ -166,7 +177,7 @@ impl<S: StateStore> SyncedKvLogStore<S> {
 }
 
 // Read methods
-impl<S: StateStore> SyncedKvLogStore<S> {
+impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStore<S, LS> {
     async fn try_next_item(
         table_id: TableId,
         read_metrics: &KvLogStoreReadMetrics,
@@ -289,12 +300,12 @@ impl<S: StateStore> SyncedKvLogStore<S> {
 }
 
 // Write methods
-impl<S: StateStore> SyncedKvLogStore<S> {
+impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStore<S, LS> {
     async fn write_barrier(
-        mut state_store: impl LocalStateStore,
+        state_store: &mut LS,
         serde: LogStoreRowSerde,
         barrier: Barrier,
-        metrics: KvLogStoreMetrics,
+        metrics: &mut KvLogStoreMetrics,
         truncation_offset: Option<ReaderTruncationOffsetType>,
         seq_id: &mut SeqIdType,
         buffer: &mut Mutex<SyncedLogStoreBuffer>,
