@@ -162,6 +162,8 @@ pub struct StateTableInner<
     op_consistency_level: StateTableOpConsistencyLevel,
 
     clean_watermark_index_in_pk: Option<i32>,
+
+    on_post_commit: bool,
 }
 
 /// `StateTable` will use `BasicSerde` as default
@@ -189,7 +191,7 @@ where
         Ok(())
     }
 
-    pub async fn try_wait_committed_epoch(&self, prev_epoch: u64) -> StorageResult<()> {
+    async fn try_wait_committed_epoch(&self, prev_epoch: u64) -> StorageResult<()> {
         self.store
             .try_wait_epoch(
                 HummockReadEpoch::Committed(prev_epoch),
@@ -533,6 +535,7 @@ where
             i2o_mapping,
             op_consistency_level: state_table_op_consistency_level,
             clean_watermark_index_in_pk: table_catalog.clean_watermark_index_in_pk,
+            on_post_commit: false,
         }
     }
 
@@ -682,41 +685,94 @@ where
             .await
             .map_err(Into::into)
     }
+}
+
+#[must_use]
+pub struct StateTablePostCommit<
+    'a,
+    S,
+    SD = BasicSerde,
+    const IS_REPLICATED: bool = false,
+    const USE_WATERMARK_CACHE: bool = false,
+> where
+    S: StateStore,
+    SD: ValueRowSerde,
+{
+    inner: &'a mut StateTableInner<S, SD, IS_REPLICATED, USE_WATERMARK_CACHE>,
+    barrier_epoch: EpochPair,
+}
+
+impl<'a, S, SD, const IS_REPLICATED: bool, const USE_WATERMARK_CACHE: bool>
+    StateTablePostCommit<'a, S, SD, IS_REPLICATED, USE_WATERMARK_CACHE>
+where
+    S: StateStore,
+    SD: ValueRowSerde,
+{
+    pub async fn post_yield_barrier(
+        mut self,
+        new_vnodes: Option<Arc<Bitmap>>,
+    ) -> StreamExecutorResult<
+        Option<(
+            (
+                Arc<Bitmap>,
+                Arc<Bitmap>,
+                &'a mut StateTableInner<S, SD, IS_REPLICATED, USE_WATERMARK_CACHE>,
+            ),
+            bool,
+        )>,
+    > {
+        self.inner.on_post_commit = false;
+        Ok(if let Some(new_vnodes) = new_vnodes {
+            self.inner
+                .try_wait_committed_epoch(self.barrier_epoch.prev)
+                .await?;
+            let (old_vnodes, cache_may_stale) = self.update_vnode_bitmap(new_vnodes.clone());
+            Some(((new_vnodes, old_vnodes, self.inner), cache_may_stale))
+        } else {
+            None
+        })
+    }
+
+    pub fn inner(&self) -> &StateTableInner<S, SD, IS_REPLICATED, USE_WATERMARK_CACHE> {
+        &*self.inner
+    }
 
     /// Update the vnode bitmap of the state table, returns the previous vnode bitmap.
-    #[must_use = "the executor should decide whether to manipulate the cache based on the previous vnode bitmap"]
-    pub fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) -> (Arc<Bitmap>, bool) {
+    fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) -> (Arc<Bitmap>, bool) {
         assert!(
-            !self.is_dirty(),
+            !self.inner.is_dirty(),
             "vnode bitmap should only be updated when state table is clean"
         );
-        let prev_vnodes = self.local_store.update_vnode_bitmap(new_vnodes.clone());
+        let prev_vnodes = self
+            .inner
+            .local_store
+            .update_vnode_bitmap(new_vnodes.clone());
         assert_eq!(
             &prev_vnodes,
-            self.vnodes(),
+            self.inner.vnodes(),
             "state table and state store vnode bitmap mismatches"
         );
 
-        if self.distribution.is_singleton() {
+        if self.inner.distribution.is_singleton() {
             assert_eq!(
                 &new_vnodes,
-                self.vnodes(),
+                self.inner.vnodes(),
                 "should not update vnode bitmap for singleton table"
             );
         }
-        assert_eq!(self.vnodes().len(), new_vnodes.len());
+        assert_eq!(self.inner.vnodes().len(), new_vnodes.len());
 
-        let cache_may_stale = cache_may_stale(self.vnodes(), &new_vnodes);
+        let cache_may_stale = cache_may_stale(self.inner.vnodes(), &new_vnodes);
 
         if cache_may_stale {
-            self.pending_watermark = None;
+            self.inner.pending_watermark = None;
             if USE_WATERMARK_CACHE {
-                self.watermark_cache.clear();
+                self.inner.watermark_cache.clear();
             }
         }
 
         (
-            self.distribution.update_vnode_bitmap(new_vnodes),
+            self.inner.distribution.update_vnode_bitmap(new_vnodes),
             cache_may_stale,
         )
     }
@@ -939,15 +995,34 @@ where
         self.committed_watermark.as_ref()
     }
 
-    pub async fn commit(&mut self, new_epoch: EpochPair) -> StreamExecutorResult<()> {
+    pub async fn commit(
+        &mut self,
+        new_epoch: EpochPair,
+    ) -> StreamExecutorResult<StateTablePostCommit<'_, S, SD, IS_REPLICATED, USE_WATERMARK_CACHE>>
+    {
         self.commit_inner(new_epoch, None).await
+    }
+
+    #[cfg(test)]
+    pub async fn commit_for_test(&mut self, new_epoch: EpochPair) -> StreamExecutorResult<()> {
+        self.commit_assert_no_update_vnode_bitmap(new_epoch).await
+    }
+
+    pub async fn commit_assert_no_update_vnode_bitmap(
+        &mut self,
+        new_epoch: EpochPair,
+    ) -> StreamExecutorResult<()> {
+        let post_commit = self.commit_inner(new_epoch, None).await?;
+        post_commit.post_yield_barrier(None).await?;
+        Ok(())
     }
 
     pub async fn commit_may_switch_consistent_op(
         &mut self,
         new_epoch: EpochPair,
         op_consistency_level: StateTableOpConsistencyLevel,
-    ) -> StreamExecutorResult<()> {
+    ) -> StreamExecutorResult<StateTablePostCommit<'_, S, SD, IS_REPLICATED, USE_WATERMARK_CACHE>>
+    {
         if self.op_consistency_level != op_consistency_level {
             info!(
                 ?new_epoch,
@@ -967,7 +1042,9 @@ where
         &mut self,
         new_epoch: EpochPair,
         switch_consistent_op: Option<StateTableOpConsistencyLevel>,
-    ) -> StreamExecutorResult<()> {
+    ) -> StreamExecutorResult<StateTablePostCommit<'_, S, SD, IS_REPLICATED, USE_WATERMARK_CACHE>>
+    {
+        assert!(!self.on_post_commit);
         assert_eq!(self.epoch(), new_epoch.prev);
         let switch_op_consistency_level = switch_consistent_op.map(|new_consistency_level| {
             assert_ne!(self.op_consistency_level, new_consistency_level);
@@ -1053,7 +1130,11 @@ where
             }
         }
 
-        Ok(())
+        self.on_post_commit = true;
+        Ok(StateTablePostCommit {
+            inner: self,
+            barrier_epoch: new_epoch,
+        })
     }
 
     /// Commit pending watermark and return vnode bitmap-watermark pairs to seal.

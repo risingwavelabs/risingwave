@@ -823,12 +823,16 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const APPEND_ONLY: b
                                 .init_epoch(barrier_epoch)
                                 .await?;
                         } else {
-                            self.memo_table
+                            let post_commit = self
+                                .memo_table
                                 .as_mut()
                                 .unwrap()
                                 .commit(barrier.epoch)
                                 .await?;
                             yield Message::Barrier(barrier);
+                            post_commit
+                                .post_yield_barrier(update_vnode_bitmap.clone())
+                                .await?;
                         }
                     } else {
                         yield Message::Barrier(barrier);
