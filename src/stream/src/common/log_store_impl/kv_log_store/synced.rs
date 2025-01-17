@@ -347,19 +347,20 @@ impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStore<S, LS> {
         let epoch = state_store.epoch();
         let mut flush_info = FlushInfo::new();
 
-        // TODO(kwannoel): Handle paused stream.
+        // FIXME(kwannoel): Handle paused stream.
         for vnode in serde.vnodes().iter_vnodes() {
             let (key, value) = serde.serialize_barrier(epoch, vnode, barrier.is_checkpoint());
             flush_info.flush_one(key.estimated_size() + value.estimated_size());
             state_store.insert(key, value, None)?;
         }
 
-        // TODO(kwannoel): Flush all unflushed chunks
+        // FIXME(kwannoel): Flush all unflushed chunks
         // As an optimization we can also change it into flushed items instead.
         // This will reduce memory consumption of logstore.
 
         flush_info.report(&metrics);
 
+        // Apply truncation
         let watermark = truncation_offset.map(|truncation_offset| {
             VnodeWatermark::new(
                 serde.vnodes().clone(),
@@ -375,6 +376,7 @@ impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStore<S, LS> {
                 switch_op_consistency_level: None,
             },
         );
+
         // Add to buffer
         let mut buffer = buffer.lock();
         buffer.buffer.push_back((
@@ -385,9 +387,7 @@ impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStore<S, LS> {
             },
         ));
         buffer.next_chunk_id = 0;
-
-        // TODO: Add metircs
-        // self.update_unconsumed_buffer_metrics();
+        buffer.update_unconsumed_buffer_metrics();
 
         *seq_id = FIRST_SEQ_ID;
         Ok(())
@@ -418,14 +418,6 @@ struct SyncedLogStoreBuffer {
 }
 
 impl SyncedLogStoreBuffer {
-    fn is_full(&self) -> bool {
-        self.buffer.len() >= self.max_size
-    }
-
-    fn pop_front(&mut self) -> Option<(u64, LogStoreBufferItem)> {
-        self.buffer.pop_front()
-    }
-
     async fn add_or_flush_chunk(
         &mut self,
         serde: &LogStoreRowSerde,
@@ -440,77 +432,116 @@ impl SyncedLogStoreBuffer {
 
         let should_flush_chunk = current_size + chunk_size >= self.max_size;
         if should_flush_chunk {
-            // flush chunk to state store
-            // TODO(kwannoel): Should refactor this into its own function
-            let mut vnode_bitmap_builder = BitmapBuilder::zeroed(serde.vnodes().len());
-            let mut flush_info = FlushInfo::new();
-            for (i, (op, row)) in chunk.rows().enumerate() {
-                let seq_id = start_seq_id + (i as SeqIdType);
-                assert!(seq_id <= end_seq_id);
-                let (vnode, key, value) = serde.serialize_data_row(epoch, seq_id, op, row);
-                vnode_bitmap_builder.set(vnode.to_index(), true);
-                flush_info.flush_one(key.estimated_size() + value.estimated_size());
-                state_store.insert(key, value, None)?;
-            }
-            flush_info.report(&self.metrics);
-            state_store.flush().await?;
+            let new_vnode_bitmap = self.flush_chunk(serde, start_seq_id, end_seq_id, epoch, state_store, chunk).await?;
+            self.add_flushed_item_to_buffer(start_seq_id, end_seq_id, new_vnode_bitmap, epoch).await;
+        } else {
+            self.add_chunk_to_buffer(chunk, start_seq_id, end_seq_id, epoch);
+        }
+        Ok(())
+    }
 
-            let new_vnode_bitmap = vnode_bitmap_builder.finish();
+    async fn flush_chunk(
+        &mut self,
+        serde: &LogStoreRowSerde,
+        start_seq_id: SeqIdType,
+        end_seq_id: SeqIdType,
+        epoch: u64,
+        state_store: &mut impl LocalStateStore,
+        chunk: StreamChunk
+    ) -> StreamExecutorResult<Bitmap> {
+        // flush chunk to state store
+        // TODO(kwannoel): Should refactor this into its own function
+        let mut vnode_bitmap_builder = BitmapBuilder::zeroed(serde.vnodes().len());
+        let mut flush_info = FlushInfo::new();
+        for (i, (op, row)) in chunk.rows().enumerate() {
+            let seq_id = start_seq_id + (i as SeqIdType);
+            assert!(seq_id <= end_seq_id);
+            let (vnode, key, value) = serde.serialize_data_row(epoch, seq_id, op, row);
+            vnode_bitmap_builder.set(vnode.to_index(), true);
+            flush_info.flush_one(key.estimated_size() + value.estimated_size());
+            state_store.insert(key, value, None)?;
+        }
+        flush_info.report(&self.metrics);
+        state_store.flush().await?;
 
-            // add to buffer
-            // TODO(kwannoel): Should refactor this into its own function
-            if let Some((
-                item_epoch,
-                LogStoreBufferItem::Flushed {
-                    end_seq_id: prev_end_seq_id,
-                    vnode_bitmap,
-                    ..
-                },
-            )) = self.buffer.front_mut()
-            {
-                assert!(
-                    *prev_end_seq_id < start_seq_id,
-                    "prev end_seq_id {} should be smaller than current start_seq_id {}",
-                    end_seq_id,
-                    start_seq_id
-                );
-                assert_eq!(
-                    epoch, *item_epoch,
-                    "epoch of newly added flushed item must be the same as the last flushed item"
-                );
-                *prev_end_seq_id = end_seq_id;
-                *vnode_bitmap |= new_vnode_bitmap;
-            } else {
-                let chunk_id = self.next_chunk_id;
-                self.next_chunk_id += 1;
-                self.buffer.push_back((
-                    epoch,
-                    LogStoreBufferItem::Flushed {
-                        start_seq_id,
-                        end_seq_id,
-                        vnode_bitmap: new_vnode_bitmap,
-                        chunk_id,
-                    },
-                ));
-            }
-            self.update_unconsumed_buffer_metrics();
+        Ok(vnode_bitmap_builder.finish())
+    }
+
+    /// After flushing a chunk, we will preserve a `FlushedItem` inside the buffer.
+    /// This doesn't contain any data, but it contains the metadata to read the flushed chunk.
+    async fn add_flushed_item_to_buffer(
+        &mut self,
+        start_seq_id: SeqIdType,
+        end_seq_id: SeqIdType,
+        new_vnode_bitmap: Bitmap,
+        epoch: u64,
+    ) {
+        if let Some((
+                        item_epoch,
+                        LogStoreBufferItem::Flushed {
+                            end_seq_id: prev_end_seq_id,
+                            vnode_bitmap,
+                            ..
+                        },
+                    )) = self.buffer.front_mut()
+        {
+            assert!(
+                *prev_end_seq_id < start_seq_id,
+                "prev end_seq_id {} should be smaller than current start_seq_id {}",
+                end_seq_id,
+                start_seq_id
+            );
+            assert_eq!(
+                epoch, *item_epoch,
+                "epoch of newly added flushed item must be the same as the last flushed item"
+            );
+            *prev_end_seq_id = end_seq_id;
+            *vnode_bitmap |= new_vnode_bitmap;
         } else {
             let chunk_id = self.next_chunk_id;
             self.next_chunk_id += 1;
-            // add chunk to buffer
             self.buffer.push_back((
                 epoch,
-                LogStoreBufferItem::StreamChunk {
-                    chunk,
+                LogStoreBufferItem::Flushed {
                     start_seq_id,
                     end_seq_id,
-                    flushed: false,
+                    vnode_bitmap: new_vnode_bitmap,
                     chunk_id,
                 },
             ));
-            self.update_unconsumed_buffer_metrics();
         }
-        Ok(())
+        // FIXME(kwannoel): Seems these metrics are updated _after_ the flush info is reported.
+        self.update_unconsumed_buffer_metrics();
+    }
+
+    fn add_chunk_to_buffer(
+        &mut self,
+        chunk: StreamChunk,
+        start_seq_id: SeqIdType,
+        end_seq_id: SeqIdType,
+        epoch: u64,
+    ) {
+        let chunk_id = self.next_chunk_id;
+        self.next_chunk_id += 1;
+        self.buffer.push_back((
+            epoch,
+            LogStoreBufferItem::StreamChunk {
+                chunk,
+                start_seq_id,
+                end_seq_id,
+                flushed: false,
+                chunk_id,
+            },
+        ));
+        self.update_unconsumed_buffer_metrics();
+    }
+
+    fn is_full(&self) -> bool {
+        self.buffer.len() >= self.max_size
+    }
+
+    fn pop_front(&mut self) -> Option<(u64, LogStoreBufferItem)> {
+        self.buffer.pop_front()
     }
 
     fn update_unconsumed_buffer_metrics(&self) {
