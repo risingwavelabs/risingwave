@@ -241,6 +241,12 @@ impl ConnectorSourceWorker {
                                     tracing::warn!(error = %e.as_report(), "error happened when drop fragment");
                                 }
                             }
+                            SourceWorkerCommand::FinishBackfill(fragment_ids) => {
+                                if let Err(e) = self.finish_backfill(fragment_ids).await {
+                                    // when error happens, we just log it and ignore
+                                    tracing::warn!(error = %e.as_report(), "error happened when finish backfill");
+                                }
+                            }
                             SourceWorkerCommand::Terminate => {
                                 return;
                             }
@@ -285,6 +291,11 @@ impl ConnectorSourceWorker {
 
     async fn drop_fragments(&mut self, fragment_ids: Vec<FragmentId>) -> MetaResult<()> {
         self.enumerator.on_drop_fragments(fragment_ids).await?;
+        Ok(())
+    }
+
+    async fn finish_backfill(&mut self, fragment_ids: Vec<FragmentId>) -> MetaResult<()> {
+        self.enumerator.on_finish_backfill(fragment_ids).await?;
         Ok(())
     }
 }
@@ -354,13 +365,23 @@ impl ConnectorSourceWorkerHandle {
     }
 
     pub fn drop_fragments(&self, fragment_ids: Vec<FragmentId>) {
+        tracing::debug!("drop_fragments: {:?}", fragment_ids);
         if let Err(e) = self.send_command(SourceWorkerCommand::DropFragments(fragment_ids)) {
             // ignore drop fragment error, just log it
             tracing::warn!(error = %e.as_report(), "failed to drop fragments");
         }
     }
 
+    pub fn finish_backfill(&self, fragment_ids: Vec<FragmentId>) {
+        tracing::debug!("finish_backfill: {:?}", fragment_ids);
+        if let Err(e) = self.send_command(SourceWorkerCommand::FinishBackfill(fragment_ids)) {
+            // ignore error, just log it
+            tracing::warn!(error = %e.as_report(), "failed to finish backfill");
+        }
+    }
+
     pub fn terminate(&self, dropped_fragments: Option<BTreeSet<FragmentId>>) {
+        tracing::debug!("terminate: {:?}", dropped_fragments);
         if let Some(dropped_fragments) = dropped_fragments {
             self.drop_fragments(dropped_fragments.into_iter().collect());
         }
@@ -378,6 +399,8 @@ pub enum SourceWorkerCommand {
     Tick(#[educe(Debug(ignore))] oneshot::Sender<MetaResult<()>>),
     /// Async command to drop a fragment.
     DropFragments(Vec<FragmentId>),
+    /// Async command to finish backfill.
+    FinishBackfill(Vec<FragmentId>),
     /// Terminate the worker task.
     Terminate,
 }
