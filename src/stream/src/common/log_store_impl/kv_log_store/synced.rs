@@ -381,7 +381,7 @@ impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStore<S, LS> {
     ) -> StreamExecutorResult<()> {
         let mut buffer = buffer.lock();
         buffer
-            .add_or_flush_chunk(serde, start_seq_id, end_seq_id, chunk, metrics, state_store)
+            .add_or_flush_chunk(serde, start_seq_id, end_seq_id, chunk, state_store)
             .await?;
         Ok(())
     }
@@ -391,6 +391,7 @@ struct SyncedLogStoreBuffer {
     buffer: VecDeque<(u64, LogStoreBufferItem)>,
     max_size: usize,
     next_chunk_id: ChunkId,
+    metrics: KvLogStoreMetrics,
 }
 
 impl SyncedLogStoreBuffer {
@@ -408,7 +409,6 @@ impl SyncedLogStoreBuffer {
         start_seq_id: SeqIdType,
         end_seq_id: SeqIdType,
         chunk: StreamChunk,
-        metrics: &KvLogStoreMetrics,
         state_store: &mut impl LocalStateStore,
     ) -> StreamExecutorResult<()> {
         let current_size = self.buffer.len();
@@ -429,7 +429,7 @@ impl SyncedLogStoreBuffer {
                 flush_info.flush_one(key.estimated_size() + value.estimated_size());
                 state_store.insert(key, value, None)?;
             }
-            flush_info.report(metrics);
+            flush_info.report(&self.metrics);
             state_store.flush().await?;
 
             let new_vnode_bitmap = vnode_bitmap_builder.finish();
@@ -470,8 +470,7 @@ impl SyncedLogStoreBuffer {
                     },
                 ));
             }
-            // TODO(kwannoel): Missing update metrics.
-            // see: self.update_unconsumed_buffer_metrics();
+            self.update_unconsumed_buffer_metrics();
         } else {
             let chunk_id = self.next_chunk_id;
             self.next_chunk_id += 1;
@@ -486,9 +485,42 @@ impl SyncedLogStoreBuffer {
                     chunk_id,
                 },
             ));
-            // TODO(kwannoel: Missing update metrics.
-            // see: self.update_unconsumed_buffer_metrics();
+            self.update_unconsumed_buffer_metrics();
         }
         Ok(())
+    }
+
+    fn update_unconsumed_buffer_metrics(&self) {
+        let mut epoch_count = 0;
+        let mut row_count = 0;
+        for (_, item) in &self.buffer {
+            match item {
+                LogStoreBufferItem::StreamChunk { chunk, .. } => {
+                    row_count += chunk.cardinality();
+                }
+                LogStoreBufferItem::Flushed {
+                    start_seq_id,
+                    end_seq_id,
+                    ..
+                } => {
+                    row_count += (end_seq_id - start_seq_id) as usize;
+                }
+                LogStoreBufferItem::Barrier { .. } => {
+                    epoch_count += 1;
+                }
+                LogStoreBufferItem::UpdateVnodes(_) => {}
+            }
+        }
+        self.metrics.buffer_unconsumed_epoch_count.set(epoch_count);
+        self.metrics.buffer_unconsumed_row_count.set(row_count as _);
+        self.metrics
+            .buffer_unconsumed_item_count
+            .set(self.buffer.len() as _);
+        self.metrics.buffer_unconsumed_min_epoch.set(
+            self.buffer
+                .front()
+                .map(|(epoch, _)| *epoch)
+                .unwrap_or_default() as _,
+        );
     }
 }
