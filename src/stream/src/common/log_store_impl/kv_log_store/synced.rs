@@ -152,7 +152,7 @@ impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStore<S, LS> {
                             Message::Barrier(barrier) => {
                                 Self::write_barrier(
                                     &mut self.local_state_store,
-                                    self.serde.clone(),
+                                    &self.serde,
                                     barrier.clone(),
                                     &mut self.metrics,
                                     self.truncation_offset,
@@ -162,7 +162,18 @@ impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStore<S, LS> {
                                 Ok(Some(Message::Barrier(barrier)))
                             }
                             Message::Chunk(chunk) => {
-                                // self.write_chunk(chunk).await?;
+                                let start_seq_id = self.seq_id;
+                                self.seq_id += chunk.cardinality() as SeqIdType;
+                                let end_seq_id = self.seq_id - 1;
+                                Self::write_chunk(
+                                    &self.serde,
+                                    start_seq_id,
+                                    end_seq_id,
+                                    &mut self.buffer,
+                                    chunk,
+                                    &self.metrics,
+                                    &mut self.local_state_store,
+                                ).await?;
                                 Ok(None)
                             }
                             // TODO(kwannoel): This should be written to the logstore,
@@ -303,7 +314,7 @@ impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStore<S, LS> {
 impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStore<S, LS> {
     async fn write_barrier(
         state_store: &mut LS,
-        serde: LogStoreRowSerde,
+        serde: &LogStoreRowSerde,
         barrier: Barrier,
         metrics: &mut KvLogStoreMetrics,
         truncation_offset: Option<ReaderTruncationOffsetType>,
@@ -366,7 +377,7 @@ impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStore<S, LS> {
         buffer: &mut Mutex<SyncedLogStoreBuffer>,
         chunk: StreamChunk,
         metrics: &KvLogStoreMetrics,
-        state_store: impl LocalStateStore,
+        state_store: &mut LS,
     ) -> StreamExecutorResult<()> {
         let mut buffer = buffer.lock();
         buffer
@@ -398,7 +409,7 @@ impl SyncedLogStoreBuffer {
         end_seq_id: SeqIdType,
         chunk: StreamChunk,
         metrics: &KvLogStoreMetrics,
-        mut state_store: impl LocalStateStore,
+        state_store: &mut impl LocalStateStore,
     ) -> StreamExecutorResult<()> {
         let current_size = self.buffer.len();
         let chunk_size = chunk.cardinality();
