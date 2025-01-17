@@ -206,10 +206,10 @@ impl FromStr for Timestamp {
 ///
 /// use risingwave_common::types::TimestampNano;
 ///
-/// Timestamp::from_str("1999-01-08 04:02").unwrap();
-/// Timestamp::from_str("1999-01-08 04:05:06").unwrap();
-/// Timestamp::from_str("1999-01-08T04:05:06").unwrap();
-/// Timestamp::from_str("1999-01-08T04:05:06.123456789").unwrap();
+/// TimestampNano::from_str("1999-01-08 04:02").unwrap();
+/// TimestampNano::from_str("1999-01-08 04:05:06").unwrap();
+/// TimestampNano::from_str("1999-01-08T04:05:06").unwrap();
+/// TimestampNano::from_str("1999-01-08T04:05:06.123456789").unwrap();
 /// ```
 impl FromStr for TimestampNano {
     type Err = InvalidParamsError;
