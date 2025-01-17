@@ -443,7 +443,7 @@ fn timestamp_now_sec() -> u64 {
 fn meta_node_info(host: &str, started_at: Option<u64>) -> PbWorkerNode {
     PbWorkerNode {
         id: META_NODE_ID,
-        r#type: WorkerType::Meta as _,
+        r#type: PbWorkerType::Meta.into(),
         host: HostAddr::try_from(host)
             .as_ref()
             .map(HostAddr::to_protobuf)
