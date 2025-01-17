@@ -75,7 +75,7 @@ pub async fn handle_refresh_schema(
 
     let (source, table, graph, col_index_mapping, job_type) = {
         let result =
-            get_replace_table_plan(&session, table_name, definition, &original_table, None).await;
+            get_replace_table_plan(&session, table_name, definition, &original_table).await;
         match result {
             Ok((source, table, graph, col_index_mapping, job_type)) => {
                 Ok((source, table, graph, col_index_mapping, job_type))
