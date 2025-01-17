@@ -312,7 +312,7 @@ pub fn infer_show_object(objects: &ShowObject) -> Vec<PgFieldDescriptor> {
     })
 }
 
-pub async fn handle_show_object<'a>(
+pub async fn handle_show_object(
     handler_args: HandlerArgs,
     command: ShowObject,
     filter: Option<ShowStatementFilter>,
