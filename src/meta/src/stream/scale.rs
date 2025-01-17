@@ -1873,6 +1873,7 @@ impl ScaleController {
             }
 
             for (fragment_id, fragment) in fragments {
+                tracing::info!("fragment {}", fragment_id);
                 fragment_distribution_map.insert(
                     fragment_id as FragmentId,
                     (

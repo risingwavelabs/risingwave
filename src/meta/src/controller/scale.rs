@@ -272,6 +272,8 @@ impl CatalogController {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
 
+        tracing::info!("debug table ids {:#?}", table_ids);
+
         let fragment_ids: Vec<FragmentId> = Fragment::find()
             .filter(fragment::Column::JobId.is_in(table_ids))
             .all(&txn)
@@ -279,6 +281,8 @@ impl CatalogController {
             .into_iter()
             .map(|fragment| fragment.fragment_id)
             .collect();
+
+        tracing::info!("debug fragment ids {:#?}", fragment_ids);
 
         self.resolve_working_set_for_reschedule_helper(&txn, fragment_ids)
             .await
@@ -351,6 +355,8 @@ impl CatalogController {
             .chain(upstream_fragments.into_iter())
             .chain(downstream_fragments.into_iter())
             .collect();
+
+        tracing::info!("debug all frag {:#?}", all_fragment_relations);
 
         let mut fragment_upstreams: HashMap<FragmentId, Vec<(FragmentId, DispatcherType)>> =
             HashMap::new();
@@ -426,6 +432,8 @@ impl CatalogController {
                 )
             })
             .collect();
+
+        tracing::info!("debug related jobs {:?}", related_jobs);
 
         Ok(RescheduleWorkingSet {
             fragments,
