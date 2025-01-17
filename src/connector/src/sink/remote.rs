@@ -302,6 +302,7 @@ impl RemoteLogSinker {
                 sink_param.schema(),
                 &sink_param.downstream_pk,
                 &sink_param.properties,
+                sink_param.sink_type.is_append_only(),
             )?,
         })
     }

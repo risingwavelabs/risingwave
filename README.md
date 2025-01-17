@@ -56,7 +56,7 @@ RisingWave can <b>ingest</b> millions of events per second, continuously <b>join
 
 Install RisingWave standalone mode:
 ```shell
-curl https://risingwave.com/sh | sh
+curl -L https://risingwave.com/sh | sh
 ```
 
 To learn about other installation options, such as using a Docker image, see [Quick Start](https://docs.risingwave.com/docs/current/get-started/).

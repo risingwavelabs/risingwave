@@ -14,13 +14,18 @@
 
 use std::sync::Arc;
 
-use risingwave_telemetry_event::get_telemetry_risingwave_cloud_uuid;
+use risingwave_pb::telemetry::PbEventMessage;
 pub use risingwave_telemetry_event::{
-    current_timestamp, post_telemetry_report_pb, TELEMETRY_REPORT_URL, TELEMETRY_TRACKING_ID,
+    current_timestamp, do_telemetry_event_report, post_telemetry_report_pb,
+    TELEMETRY_EVENT_REPORT_INTERVAL, TELEMETRY_REPORT_URL, TELEMETRY_TRACKING_ID,
+};
+use risingwave_telemetry_event::{
+    get_telemetry_risingwave_cloud_uuid, TELEMETRY_EVENT_REPORT_STASH_SIZE,
+    TELEMETRY_EVENT_REPORT_TX,
 };
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
-use tokio::time::{interval, Duration};
+use tokio::time::{interval as tokio_interval_fn, Duration};
 use uuid::Uuid;
 
 use super::{Result, TELEMETRY_REPORT_INTERVAL};
@@ -60,8 +65,12 @@ where
 
         let begin_time = std::time::Instant::now();
         let session_id = Uuid::new_v4().to_string();
-        let mut interval = interval(Duration::from_secs(TELEMETRY_REPORT_INTERVAL));
+        let mut interval = tokio_interval_fn(Duration::from_secs(TELEMETRY_REPORT_INTERVAL));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+        let mut event_interval =
+            tokio_interval_fn(Duration::from_secs(TELEMETRY_EVENT_REPORT_INTERVAL));
+        event_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
         // fetch telemetry tracking_id from the meta node only at the beginning
         // There is only one case tracking_id updated at the runtime ---- metastore data has been
@@ -91,9 +100,37 @@ where
                 )
             });
 
+        let (tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel::<PbEventMessage>();
+
+        let mut enable_event_report = true;
+        TELEMETRY_EVENT_REPORT_TX.set(tx).unwrap_or_else(|_| {
+            tracing::warn!(
+                "Telemetry failed to set event reporting tx, event reporting will be disabled"
+            );
+            // possible failure:
+            // When running in standalone mode, the static TELEMETRY_EVENT_REPORT_TX is shared
+            // and can be set by meta/compute nodes.
+            // In such case, the one first set the static will do the event reporting and others'
+            // event report is disabled.
+            enable_event_report = false;
+        });
+        let mut event_stash = Vec::new();
+
         loop {
             tokio::select! {
                 _ = interval.tick() => {},
+                event = event_rx.recv(), if enable_event_report => {
+                    debug_assert!(event.is_some());
+                    event_stash.push(event.unwrap());
+                    if event_stash.len() >= TELEMETRY_EVENT_REPORT_STASH_SIZE {
+                        do_telemetry_event_report(&mut event_stash).await;
+                    }
+                    continue;
+                }
+                _ = event_interval.tick(), if enable_event_report => {
+                    do_telemetry_event_report(&mut event_stash).await;
+                    continue;
+                },
                 _ = &mut shutdown_rx => {
                     tracing::info!("Telemetry exit");
                     return;

@@ -46,6 +46,8 @@ pub enum HummockErrorInner {
     SharedBufferError(String),
     #[error("Wait epoch error: {0}")]
     WaitEpoch(String),
+    #[error("Next epoch error: {0}")]
+    NextEpoch(String),
     #[error("Barrier read is unavailable for now. Likely the cluster is recovering")]
     ReadCurrentEpoch,
     #[error("Expired Epoch: watermark {safe_epoch}, epoch {epoch}")]
@@ -107,6 +109,10 @@ impl HummockError {
 
     pub fn wait_epoch(error: impl ToString) -> HummockError {
         HummockErrorInner::WaitEpoch(error.to_string()).into()
+    }
+
+    pub fn next_epoch(error: impl ToString) -> HummockError {
+        HummockErrorInner::NextEpoch(error.to_string()).into()
     }
 
     pub fn read_current_epoch() -> HummockError {

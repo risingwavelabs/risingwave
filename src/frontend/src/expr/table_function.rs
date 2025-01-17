@@ -21,8 +21,8 @@ use mysql_async::prelude::*;
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::types::{DataType, ScalarImpl, StructType};
 use risingwave_connector::source::iceberg::{
-    extract_bucket_and_file_name, get_parquet_fields, list_data_directory, new_gcs_operator,
-    new_s3_operator, FileScanBackend,
+    extract_bucket_and_file_name, get_parquet_fields, list_data_directory, new_azblob_operator,
+    new_gcs_operator, new_s3_operator, FileScanBackend,
 };
 pub use risingwave_pb::expr::table_function::PbType as TableFunctionType;
 use risingwave_pb::expr::PbTableFunction;
@@ -80,12 +80,10 @@ impl TableFunction {
         let return_type = {
             // arguments:
             // file format e.g. parquet
-            // storage type e.g. s3, gcs
-            // For s3: file_scan(file_format, s3, s3_region, s3_access_key, s3_secret_key, file_location_or_directory)
-            // For gcs: file_scan(file_format, gcs, credential, file_location_or_directory)
-            if args.len() != 6 && args.len() != 4 {
-                return Err(BindError("file_scan function only accepts: file_scan('parquet', 's3', s3 region, s3 access key, s3 secret key, file location) or file_scan('parquet', 'gcs', credential, service_account, file location)".to_owned()).into());
-            }
+            // storage type e.g. s3, gcs, azblob
+            // For s3: file_scan('parquet', 's3', s3_region, s3_access_key, s3_secret_key, file_location_or_directory)
+            // For gcs: file_scan('parquet', 'gcs', credential, file_location_or_directory)
+            // For azblob: file_scan('parquet', 'azblob', endpoint, account_name, account_key, file_location)
             let mut eval_args: Vec<String> = vec![];
             for arg in &args {
                 if arg.return_type() != DataType::Varchar {
@@ -125,6 +123,22 @@ impl TableFunction {
                     }
                 }
             }
+
+            if (eval_args.len() != 4 && eval_args.len() != 6)
+                || (eval_args.len() == 4 && !"gcs".eq_ignore_ascii_case(&eval_args[1]))
+                || (eval_args.len() == 6
+                    && !"s3".eq_ignore_ascii_case(&eval_args[1])
+                    && !"azblob".eq_ignore_ascii_case(&eval_args[1]))
+            {
+                return Err(BindError(
+                "file_scan function supports three backends: s3, gcs, and azblob. Their formats are as follows: \n
+                    file_scan('parquet', 's3', s3_region, s3_access_key, s3_secret_key, file_location) \n
+                    file_scan('parquet', 'gcs', credential, service_account, file_location) \n
+                    file_scan('parquet', 'azblob', endpoint, account_name, account_key, file_location)"
+                        .to_owned(),
+                )
+                .into());
+            }
             if !"parquet".eq_ignore_ascii_case(&eval_args[0]) {
                 return Err(BindError(
                     "file_scan function only accepts 'parquet' as file format".to_owned(),
@@ -134,9 +148,11 @@ impl TableFunction {
 
             if !"s3".eq_ignore_ascii_case(&eval_args[1])
                 && !"gcs".eq_ignore_ascii_case(&eval_args[1])
+                && !"azblob".eq_ignore_ascii_case(&eval_args[1])
             {
                 return Err(BindError(
-                    "file_scan function only accepts 's3' or 'gcs' as storage type".to_owned(),
+                    "file_scan function only accepts 's3', 'gcs' or 'azblob' as storage type"
+                        .to_owned(),
                 )
                 .into());
             }
@@ -154,6 +170,8 @@ impl TableFunction {
                         (FileScanBackend::S3, eval_args[5].clone())
                     } else if "gcs".eq_ignore_ascii_case(&eval_args[1]) {
                         (FileScanBackend::Gcs, eval_args[3].clone())
+                    } else if "azblob".eq_ignore_ascii_case(&eval_args[1]) {
+                        (FileScanBackend::Azblob, eval_args[5].clone())
                     } else {
                         unreachable!();
                     };
@@ -184,6 +202,17 @@ impl TableFunction {
                             extract_bucket_and_file_name(&input_file_location, &file_scan_backend)?;
 
                         new_gcs_operator(eval_args[2].clone(), bucket.clone())?
+                    }
+                    FileScanBackend::Azblob => {
+                        let (bucket, _) =
+                            extract_bucket_and_file_name(&input_file_location, &file_scan_backend)?;
+
+                        new_azblob_operator(
+                            eval_args[2].clone(),
+                            eval_args[3].clone(),
+                            eval_args[4].clone(),
+                            bucket.clone(),
+                        )?
                     }
                 };
                 let files = if input_file_location.ends_with('/') {
@@ -240,6 +269,7 @@ impl TableFunction {
                     match file_scan_backend {
                         FileScanBackend::S3 => args.remove(5),
                         FileScanBackend::Gcs => args.remove(3),
+                        FileScanBackend::Azblob => args.remove(5),
                     };
                     for file in files {
                         args.push(ExprImpl::Literal(Box::new(Literal::new(

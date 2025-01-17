@@ -14,7 +14,7 @@
 
 #[macro_export]
 macro_rules! for_all_classified_sources {
-    ($macro:path $(,$extra_args:tt)*) => {
+    ($macro:path $(, $extra_args:tt)*) => {
         $macro! {
             // cdc sources
             {
@@ -67,7 +67,7 @@ macro_rules! for_all_connections {
 #[macro_export]
 macro_rules! for_all_sources_inner {
     (
-        {$({ $cdc_source_type:ident }),* },
+        { $({ $cdc_source_type:ident }),* },
         { $({ $source_variant:ident, $prop_name:ty, $split:ty }),* },
         $macro:tt $(, $extra_args:tt)*
     ) => {
@@ -79,13 +79,14 @@ macro_rules! for_all_sources_inner {
                             [< $cdc_source_type Cdc >],
                             $crate::source::cdc::[< $cdc_source_type CdcProperties >],
                             $crate::source::cdc::DebeziumCdcSplit<$crate::source::cdc::$cdc_source_type>
-                        },
-                    )*
+                        }
+                    ),*
+                    ,
                     $(
                         { $source_variant, $prop_name, $split }
                     ),*
                 }
-                $(,$extra_args)*
+                $(, $extra_args)*
             }
         }
     };
@@ -98,22 +99,55 @@ macro_rules! for_all_sources {
     };
 }
 
+/// The invocation:
+/// ```ignore
+/// dispatch_source_enum_inner!(
+///     {
+///         {A1,B1,C1},
+///         {A2,B2,C2}
+///     },
+///     EnumType, enum_value, inner_ident, body
+/// );
+/// ```
+/// expands to:
+/// ```ignore
+/// match enum_value {
+///     EnumType::A1(inner_ident) => {
+///         #[allow(dead_code)]
+///         type PropType = B1;
+///         #[allow(dead_code)]
+///         type SplitType = C1;
+///         {
+///             body
+///         }
+///     }
+///     EnumType::A2(inner_ident) => {
+///         #[allow(dead_code)]
+///         type PropType = B2;
+///         #[allow(dead_code)]
+///         type SplitType = C2;
+///         {
+///             body
+///         }
+///     }
+/// }
+/// ```
 #[macro_export]
 macro_rules! dispatch_source_enum_inner {
     (
         {$({$source_variant:ident, $prop_name:ty, $split:ty }),*},
-        $enum_name:ident,
-        $impl:tt,
-        {$inner_name:ident, $prop_type_name:ident, $split_type_name:ident},
+        $enum_type:ident,
+        $enum_value:expr,
+        $inner_name:ident,
         $body:expr
     ) => {{
-        match $impl {
+        match $enum_value {
             $(
-                $enum_name::$source_variant($inner_name) => {
+                $enum_type::$source_variant($inner_name) => {
                     #[allow(dead_code)]
-                    type $prop_type_name = $prop_name;
+                    type PropType = $prop_name;
                     #[allow(dead_code)]
-                    type $split_type_name = $split;
+                    type SplitType = $split;
                     {
                         $body
                     }
@@ -123,10 +157,28 @@ macro_rules! dispatch_source_enum_inner {
     }}
 }
 
+/// Usage: `dispatch_source_enum!(EnumType, enum_value, |inner_ident| body)`.
+///
+/// Inside `body`:
+/// - use `inner_ident` to represent the matched variant.
+/// - use `PropType` to represent the concrete property type.
+/// - use `SplitType` to represent the concrete split type.
+///
+/// Expands to:
+/// ```ignore
+/// match enum_value {
+///     EnumType::Variant1(inner_ident) => {
+///         body
+///     }
+///     ...
+/// }
+/// ```
+///
+/// Note: `inner_ident` must be passed as an argument due to macro hygiene.
 #[macro_export]
 macro_rules! dispatch_source_enum {
-    ($enum_name:ident, $impl:expr, $inner_name:tt, $body:expr) => {{
-        $crate::for_all_sources! {$crate::dispatch_source_enum_inner, $enum_name, { $impl }, $inner_name, $body}
+    ($enum_type:ident, $enum_value:expr, |$inner_name:ident| $body:expr) => {{
+        $crate::for_all_sources! {$crate::dispatch_source_enum_inner, $enum_type, { $enum_value }, $inner_name, $body}
     }};
 }
 
@@ -167,11 +219,12 @@ macro_rules! match_source_name_str {
     }};
 }
 
+/// [`dispatch_source_enum`] with `SplitImpl` as the enum type.
 #[macro_export]
 macro_rules! dispatch_split_impl {
-    ($impl:expr, $inner_name:ident, $prop_type_name:ident, $body:expr) => {{
+    ($impl:expr, | $inner_name:ident | $body:expr) => {{
         use $crate::source::SplitImpl;
-        $crate::dispatch_source_enum! {SplitImpl, { $impl }, {$inner_name, $prop_type_name, IgnoreSplitType}, $body}
+        $crate::dispatch_source_enum! {SplitImpl, { $impl }, |$inner_name| $body}
     }};
 }
 
@@ -290,11 +343,12 @@ macro_rules! impl_split {
     }
 }
 
+/// [`dispatch_source_enum`] with `ConnectorProperties` as the enum type.
 #[macro_export]
 macro_rules! dispatch_source_prop {
-    ($impl:expr, $source_prop:tt, $body:expr) => {{
+    ($connector_properties:expr, |$inner_ident:ident| $body:expr) => {{
         use $crate::source::ConnectorProperties;
-        $crate::dispatch_source_enum! {ConnectorProperties, { $impl }, {$source_prop, IgnorePropType, IgnoreSplitType}, {$body}}
+        $crate::dispatch_source_enum! {ConnectorProperties, { $connector_properties }, |$inner_ident| {$body}}
     }};
 }
 

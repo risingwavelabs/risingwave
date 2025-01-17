@@ -13,6 +13,7 @@
 // limitations under the License.
 
 pub mod enumerator;
+pub use enumerator::client::KinesisSplitEnumerator;
 pub mod source;
 pub mod split;
 
@@ -24,7 +25,6 @@ pub use source::KinesisMeta;
 use with_options::WithOptions;
 
 use crate::connector_common::KinesisCommon;
-use crate::source::kinesis::enumerator::client::KinesisSplitEnumerator;
 use crate::source::kinesis::source::reader::KinesisSplitReader;
 use crate::source::kinesis::split::KinesisSplit;
 use crate::source::SourceProperties;

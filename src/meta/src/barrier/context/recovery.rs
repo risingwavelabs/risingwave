@@ -79,11 +79,10 @@ impl GlobalBarrierWorkerContextImpl {
 
         try_join_all(mviews.into_iter().map(|mview| async move {
             let table_id = TableId::new(mview.table_id as _);
-            let table_fragments = mgr
+            let stream_job_fragments = mgr
                 .catalog_controller
                 .get_job_fragments_by_id(mview.table_id)
                 .await?;
-            let stream_job_fragments = StreamJobFragments::from_protobuf(table_fragments);
             assert_eq!(stream_job_fragments.stream_job_id(), table_id);
             Ok((mview.definition, stream_job_fragments))
         }))
