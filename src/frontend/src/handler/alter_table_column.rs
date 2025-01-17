@@ -391,7 +391,7 @@ pub async fn handle_alter_table_column(
         table_name,
         definition,
         &original_catalog,
-        SqlColumnStrategy::Follow,
+        SqlColumnStrategy::FollowUnchecked,
     )
     .await?;
 
