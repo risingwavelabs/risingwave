@@ -55,6 +55,7 @@
 //! - [] Add metrics
 //! - [] Add tests
 //! - [] Handle watermark r/w
+//! - [] Handle paused stream
 
 use std::collections::VecDeque;
 use std::pin::Pin;
@@ -71,7 +72,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_connector::sink::log_store::{
-    ChunkId, LogStoreReadItem, LogStoreResult, TruncateOffset,
+    ChunkId, LogStoreResult,
 };
 use risingwave_hummock_sdk::table_watermark::{VnodeWatermark, WatermarkDirection};
 use risingwave_storage::store::{LocalStateStore, SealCurrentEpochOptions, StateStoreRead};
@@ -114,10 +115,42 @@ struct SyncedKvLogStore<S: StateStore, LS: LocalStateStore> {
     local_state_store: LS,
     buffer: Mutex<SyncedLogStoreBuffer>,
 }
+// Stream interface
+impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStore<S, LS> {
+    pub fn new(
+        table_id: TableId,
+        read_metrics: KvLogStoreReadMetrics,
+        metrics: KvLogStoreMetrics,
+        serde: LogStoreRowSerde,
+        seq_id: SeqIdType,
+        state_store: S,
+        local_state_store: LS,
+        buffer_max_size: usize,
+        upstream: BoxedMessageStream,
+    ) -> Self {
+        Self {
+            table_id,
+            read_metrics,
+            metrics: metrics.clone(),
+            serde,
+            seq_id,
+            truncation_offset: None,
+            state_store_stream: None,
+            flushed_chunk_future: None,
+            state_store,
+            local_state_store,
+            buffer: Mutex::new(SyncedLogStoreBuffer {
+                buffer: VecDeque::new(),
+                max_size: buffer_max_size,
+                next_chunk_id: 0,
+                metrics,
+            }),
+            upstream,
+        }
+    }
+}
 
-// Top-level interface:
-// - constructor
-// - stream interface
+// Stream interface
 impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStore<S, LS> {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     pub async fn into_stream(mut self) {
@@ -173,7 +206,6 @@ impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStore<S, LS> {
                                     end_seq_id,
                                     &mut self.buffer,
                                     chunk,
-                                    &self.metrics,
                                     &mut self.local_state_store,
                                 ).await?;
                                 Ok(None)
@@ -239,9 +271,9 @@ impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStore<S, LS> {
                 .instrument_await("try_next item")
                 .await?
             {
-                Some((epoch, item)) => match item {
+                Some((_epoch, item)) => match item {
                     KvLogStoreItem::StreamChunk(chunk) => Ok(Some(chunk)),
-                    KvLogStoreItem::Barrier { is_checkpoint } => Ok(None),
+                    KvLogStoreItem::Barrier { .. } => Ok(None),
                 },
                 None => {
                     *state_store_stream_opt = None;
@@ -399,7 +431,6 @@ impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStore<S, LS> {
         end_seq_id: SeqIdType,
         buffer: &mut Mutex<SyncedLogStoreBuffer>,
         chunk: StreamChunk,
-        metrics: &KvLogStoreMetrics,
         state_store: &mut LS,
     ) -> StreamExecutorResult<()> {
         let mut buffer = buffer.lock();
