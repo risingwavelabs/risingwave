@@ -36,7 +36,7 @@ use risingwave_pb::stream_plan::{FragmentTypeFlag, PbStreamContext, StreamActor,
 
 use super::{ActorId, FragmentId};
 use crate::model::MetadataModelResult;
-use crate::stream::{build_actor_connector_splits, build_actor_split_impls, SplitAssignment};
+use crate::stream::{build_actor_connector_splits, SplitAssignment};
 
 /// The parallelism for a `TableFragments`.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -93,10 +93,10 @@ impl From<TableParallelism> for PbTableParallelism {
 #[derive(Debug, Clone)]
 pub struct StreamJobFragments {
     /// The table id.
-    stream_job_id: TableId,
+    pub stream_job_id: TableId,
 
     /// The state of the table fragments.
-    state: State,
+    pub state: State,
 
     /// The table fragments.
     pub fragments: BTreeMap<FragmentId, Fragment>,
@@ -172,29 +172,6 @@ impl StreamJobFragments {
             node_label: "".to_owned(),
             backfill_done: true,
             max_parallelism: Some(self.max_parallelism as _),
-        }
-    }
-
-    pub fn from_protobuf(prost: PbTableFragments) -> Self {
-        let ctx = StreamContext::from_protobuf(prost.get_ctx().unwrap());
-
-        let default_parallelism = PbTableParallelism {
-            parallelism: Some(Parallelism::Custom(PbCustomParallelism {})),
-        };
-
-        let state = prost.state();
-
-        Self {
-            stream_job_id: TableId::new(prost.table_id),
-            state,
-            fragments: prost.fragments.into_iter().collect(),
-            actor_status: prost.actor_status.into_iter().collect(),
-            actor_splits: build_actor_split_impls(&prost.actor_splits),
-            ctx,
-            assigned_parallelism: prost.parallelism.unwrap_or(default_parallelism).into(),
-            max_parallelism: prost
-                .max_parallelism
-                .map_or(VirtualNode::COUNT_FOR_COMPAT, |v| v as _),
         }
     }
 }
