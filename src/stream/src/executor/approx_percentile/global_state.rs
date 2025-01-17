@@ -236,8 +236,12 @@ impl<S: StateStore> GlobalApproxPercentileState<S> {
                 .count_state_table
                 .update(last_row_count_state, row_count_row),
         }
-        self.count_state_table.commit(epoch).await?;
-        self.bucket_state_table.commit(epoch).await?;
+        self.count_state_table
+            .commit_assert_no_update_vnode_bitmap(epoch)
+            .await?;
+        self.bucket_state_table
+            .commit_assert_no_update_vnode_bitmap(epoch)
+            .await?;
         Ok(())
     }
 }

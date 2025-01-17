@@ -655,7 +655,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
                     this.state_table.try_flush().await?;
                 }
                 Message::Barrier(barrier) => {
-                    this.state_table.commit(barrier.epoch).await?;
+                    let post_commit = this.state_table.commit(barrier.epoch).await?;
 
                     let update_vnode_bitmap = barrier.as_update_vnode_bitmap(this.actor_ctx.id);
                     yield Message::Barrier(barrier);
@@ -672,9 +672,9 @@ impl<S: StateStore> OverWindowExecutor<S> {
                         .over_window_cache_miss_count
                         .inc_by(std::mem::take(&mut vars.stats.cache_miss));
 
-                    if let Some(vnode_bitmap) = update_vnode_bitmap {
-                        let (_, cache_may_stale) =
-                            this.state_table.update_vnode_bitmap1(vnode_bitmap);
+                    if let Some((_, cache_may_stale)) =
+                        post_commit.post_yield_barrier(update_vnode_bitmap).await?
+                    {
                         if cache_may_stale {
                             vars.cached_partitions.clear();
                             vars.recently_accessed_ranges.clear();

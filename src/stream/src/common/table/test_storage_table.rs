@@ -118,7 +118,7 @@ async fn test_storage_table_value_indices() {
     test_env
         .storage
         .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
-    state.commit(epoch).await.unwrap();
+    state.commit_for_test(epoch).await.unwrap();
     test_env.commit_epoch(epoch.prev).await;
 
     let get_row1_res = table
@@ -237,7 +237,7 @@ async fn test_shuffled_column_id_for_storage_table_get_row() {
     test_env
         .storage
         .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
-    state.commit(epoch).await.unwrap();
+    state.commit_for_test(epoch).await.unwrap();
     test_env.commit_epoch(epoch.prev).await;
 
     let get_row1_res = table
@@ -346,7 +346,7 @@ async fn test_row_based_storage_table_point_get_in_batch_mode() {
     test_env
         .storage
         .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
-    state.commit(epoch).await.unwrap();
+    state.commit_for_test(epoch).await.unwrap();
     test_env.commit_epoch(epoch.prev).await;
 
     let get_row1_res = table
@@ -463,7 +463,7 @@ async fn test_batch_scan_with_value_indices() {
     test_env
         .storage
         .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
-    state.commit(epoch).await.unwrap();
+    state.commit_for_test(epoch).await.unwrap();
     test_env.commit_epoch(epoch.prev).await;
 
     let iter = table
@@ -586,7 +586,7 @@ async fn test_batch_scan_chunk_with_value_indices() {
     test_env
         .storage
         .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
-    state.commit(epoch).await.unwrap();
+    state.commit_for_test(epoch).await.unwrap();
     test_env.commit_epoch(epoch.prev).await;
 
     let chunk_size = 2;

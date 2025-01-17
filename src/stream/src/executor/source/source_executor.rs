@@ -415,7 +415,10 @@ impl<S: StateStore> SourceExecutor<S> {
         }
 
         // commit anyway, even if no message saved
-        core.split_state_store.state_table.commit(epoch).await?;
+        core.split_state_store
+            .state_table
+            .commit_assert_no_update_vnode_bitmap(epoch)
+            .await?;
 
         let updated_splits = core.updated_splits_in_epoch.clone();
 

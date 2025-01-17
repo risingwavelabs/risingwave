@@ -281,10 +281,11 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                         self.may_have_downstream,
                         &self.depended_subscription_ids,
                     );
-                    self.state_table
+                    let post_commit = self
+                        .state_table
                         .commit_may_switch_consistent_op(b.epoch, op_consistency_level)
                         .await?;
-                    if !self.state_table.is_consistent_op() {
+                    if !post_commit.inner().is_consistent_op() {
                         assert_eq!(self.conflict_behavior, ConflictBehavior::Overwrite);
                     }
 
@@ -293,10 +294,9 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                     yield Message::Barrier(b);
 
                     // Update the vnode bitmap for the state table if asked.
-                    if let Some(vnode_bitmap) = update_vnode_bitmap {
-                        let (_, cache_may_stale) =
-                            self.state_table.update_vnode_bitmap1(vnode_bitmap);
-
+                    if let Some((_, cache_may_stale)) =
+                        post_commit.post_yield_barrier(update_vnode_bitmap).await?
+                    {
                         if cache_may_stale {
                             self.materialize_cache.data.clear();
                         }

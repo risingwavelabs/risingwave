@@ -119,14 +119,14 @@ impl<S: StateStore> AppendOnlyDedupExecutor<S> {
                 }
 
                 Message::Barrier(barrier) => {
-                    self.state_table.commit(barrier.epoch).await?;
+                    let post_commit = self.state_table.commit(barrier.epoch).await?;
 
                     let update_vnode_bitmap = barrier.as_update_vnode_bitmap(self.ctx.id);
                     yield Message::Barrier(barrier);
 
-                    if let Some(vnode_bitmap) = update_vnode_bitmap {
-                        let (_prev_vnode_bitmap, cache_may_stale) =
-                            self.state_table.update_vnode_bitmap1(vnode_bitmap);
+                    if let Some((_, cache_may_stale)) =
+                        post_commit.post_yield_barrier(update_vnode_bitmap).await?
+                    {
                         if cache_may_stale {
                             self.cache.clear();
                         }

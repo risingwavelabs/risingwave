@@ -272,7 +272,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                         }
                                     }
 
-                                    state_store_handler
+                                    let post_commit = state_store_handler
                                         .state_table
                                         .commit(barrier.epoch)
                                         .await?;
@@ -282,13 +282,10 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                     // Propagate the barrier.
                                     yield Message::Barrier(barrier);
 
-                                    if let Some(vnode_bitmap) = update_vnode_bitmap {
-                                        // if _cache_may_stale, we must rebuild the stream to adjust vnode mappings
-                                        let (_prev_vnode_bitmap, cache_may_stale) =
-                                            state_store_handler
-                                                .state_table
-                                                .update_vnode_bitmap1(vnode_bitmap);
-
+                                    if let Some((_, cache_may_stale)) =
+                                        post_commit.post_yield_barrier(update_vnode_bitmap).await?
+                                    {
+                                        // if cache_may_stale, we must rebuild the stream to adjust vnode mappings
                                         if cache_may_stale {
                                             splits_on_fetch = 0;
                                         }
