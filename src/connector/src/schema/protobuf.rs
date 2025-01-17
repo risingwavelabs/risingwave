@@ -86,9 +86,17 @@ pub async fn fetch_from_registry(
     format_options: &BTreeMap<String, String>,
     topic: &str,
 ) -> Result<(MessageDescriptor, i32), SchemaFetchError> {
-    let loader = SchemaLoader::from_format_options(topic, format_options)?;
+    let loader = SchemaLoader::from_format_options(topic, format_options).await?;
 
     let (vid, vpb) = loader.load_val_schema::<FileDescriptor>().await?;
+    let vid = match vid {
+        super::SchemaVersion::Confluent(vid) => vid,
+        super::SchemaVersion::Glue(_) => {
+            return Err(
+                invalid_option_error!("Protobuf with Glue Schema Registry unsupported").into(),
+            )
+        }
+    };
 
     Ok((
         vpb.parent_pool().get_message_by_name(message_name).unwrap(),
