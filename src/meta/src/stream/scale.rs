@@ -1791,7 +1791,7 @@ impl ScaleController {
             table_parallelisms,
         } = policy;
 
-        println!("table paralls {:#?}", table_parallelisms);
+        tracing::info!("table paralls {:#?}", table_parallelisms);
 
         let workers = self
             .metadata_manager
@@ -1851,8 +1851,6 @@ impl ScaleController {
                 .catalog_controller
                 .resolve_working_set_for_reschedule_tables(table_ids)
                 .await?;
-
-            println!("working set {:#?}", working_set);
 
             let RescheduleWorkingSet {
                 fragments,
@@ -1930,8 +1928,8 @@ impl ScaleController {
 
         let mut target_plan = HashMap::new();
 
-        println!("table parallelisms {:#?}", table_parallelisms);
-        println!("table fragment ids {:#?}", table_fragment_id_map);
+        tracing::info!("table parallelisms {:#?}", table_parallelisms);
+        tracing::info!("table fragment ids {:#?}", table_fragment_id_map);
 
         for (table_id, parallelism) in table_parallelisms {
             let fragment_map = table_fragment_id_map.remove(&table_id).unwrap();
