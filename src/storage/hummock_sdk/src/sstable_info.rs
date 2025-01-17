@@ -13,13 +13,15 @@
 // limitations under the License.
 
 use std::mem::size_of;
+use std::ops::Deref;
+use std::sync::Arc;
 
 use risingwave_pb::hummock::{PbBloomFilterType, PbKeyRange, PbSstableInfo};
 
 use crate::key_range::KeyRange;
 
 #[derive(Debug, PartialEq, Clone, Default)]
-pub struct SstableInfo {
+pub struct SstableInfoInner {
     pub object_id: u64,
     pub sst_id: u64,
     pub key_range: KeyRange,
@@ -35,7 +37,7 @@ pub struct SstableInfo {
     pub bloom_filter_kind: PbBloomFilterType,
 }
 
-impl SstableInfo {
+impl SstableInfoInner {
     pub fn estimated_encode_len(&self) -> usize {
         let mut basic = size_of::<u64>() // object_id
             + size_of::<u64>() // sstable_id
@@ -59,7 +61,7 @@ impl SstableInfo {
     }
 }
 
-impl From<PbSstableInfo> for SstableInfo {
+impl From<PbSstableInfo> for SstableInfoInner {
     fn from(pb_sstable_info: PbSstableInfo) -> Self {
         Self {
             object_id: pb_sstable_info.object_id,
@@ -91,7 +93,7 @@ impl From<PbSstableInfo> for SstableInfo {
     }
 }
 
-impl From<&PbSstableInfo> for SstableInfo {
+impl From<&PbSstableInfo> for SstableInfoInner {
     fn from(pb_sstable_info: &PbSstableInfo) -> Self {
         Self {
             object_id: pb_sstable_info.object_id,
@@ -122,8 +124,8 @@ impl From<&PbSstableInfo> for SstableInfo {
     }
 }
 
-impl From<SstableInfo> for PbSstableInfo {
-    fn from(sstable_info: SstableInfo) -> Self {
+impl From<SstableInfoInner> for PbSstableInfo {
+    fn from(sstable_info: SstableInfoInner) -> Self {
         PbSstableInfo {
             object_id: sstable_info.object_id,
             sst_id: sstable_info.sst_id,
@@ -158,8 +160,8 @@ impl From<SstableInfo> for PbSstableInfo {
     }
 }
 
-impl From<&SstableInfo> for PbSstableInfo {
-    fn from(sstable_info: &SstableInfo) -> Self {
+impl From<&SstableInfoInner> for PbSstableInfo {
+    fn from(sstable_info: &SstableInfoInner) -> Self {
         PbSstableInfo {
             object_id: sstable_info.object_id,
             sst_id: sstable_info.sst_id,
@@ -193,6 +195,55 @@ impl From<&SstableInfo> for PbSstableInfo {
 
 impl SstableInfo {
     pub fn remove_key_range(&mut self) {
-        self.key_range = KeyRange::default();
+        let mut sst = self.get_inner();
+        sst.key_range = KeyRange::default();
+        *self = sst.into()
+    }
+}
+
+#[derive(Debug, PartialEq, Clone, Default)]
+pub struct SstableInfo(Arc<SstableInfoInner>);
+
+impl From<&PbSstableInfo> for SstableInfo {
+    fn from(s: &PbSstableInfo) -> Self {
+        SstableInfo(SstableInfoInner::from(s).into())
+    }
+}
+
+impl From<PbSstableInfo> for SstableInfo {
+    fn from(s: PbSstableInfo) -> Self {
+        SstableInfo(SstableInfoInner::from(s).into())
+    }
+}
+
+impl From<SstableInfo> for PbSstableInfo {
+    fn from(s: SstableInfo) -> Self {
+        (&s).into()
+    }
+}
+
+impl From<SstableInfoInner> for SstableInfo {
+    fn from(s: SstableInfoInner) -> Self {
+        Self(s.into())
+    }
+}
+
+impl From<&SstableInfo> for PbSstableInfo {
+    fn from(s: &SstableInfo) -> Self {
+        s.0.as_ref().into()
+    }
+}
+
+impl Deref for SstableInfo {
+    type Target = SstableInfoInner;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl SstableInfo {
+    pub fn get_inner(&self) -> SstableInfoInner {
+        (*self.0).clone()
     }
 }

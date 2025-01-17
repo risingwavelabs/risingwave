@@ -22,6 +22,7 @@ use risingwave_hummock_sdk::table_watermark::ReadTableWatermark;
 
 use crate::hummock::compaction::picker::CompactionInput;
 use crate::hummock::level_handler::LevelHandler;
+
 pub struct VnodeWatermarkCompactionPicker {}
 
 impl VnodeWatermarkCompactionPicker {
@@ -109,7 +110,7 @@ mod tests {
     use risingwave_common::hash::VirtualNode;
     use risingwave_hummock_sdk::key::{FullKey, TableKey};
     use risingwave_hummock_sdk::key_range::KeyRange;
-    use risingwave_hummock_sdk::sstable_info::SstableInfo;
+    use risingwave_hummock_sdk::sstable_info::SstableInfoInner;
     use risingwave_hummock_sdk::table_watermark::{ReadTableWatermark, WatermarkDirection};
 
     use crate::hummock::compaction::picker::vnode_watermark_picker::should_delete_sst_by_watermark;
@@ -132,7 +133,7 @@ mod tests {
             TableKey(builder.freeze())
         };
 
-        let sst_info = SstableInfo {
+        let sst_info = SstableInfoInner {
             object_id: 1,
             sst_id: 1,
             key_range: KeyRange {
@@ -146,13 +147,14 @@ mod tests {
             },
             table_ids: vec![2],
             ..Default::default()
-        };
+        }
+        .into();
         assert!(
             !should_delete_sst_by_watermark(&sst_info, &table_watermarks),
             "should fail because no matching watermark found"
         );
 
-        let sst_info = SstableInfo {
+        let sst_info = SstableInfoInner {
             object_id: 1,
             sst_id: 1,
             key_range: KeyRange {
@@ -166,13 +168,14 @@ mod tests {
             },
             table_ids: vec![1],
             ..Default::default()
-        };
+        }
+        .into();
         assert!(
             !should_delete_sst_by_watermark(&sst_info, &table_watermarks),
             "should fail because no matching vnode found"
         );
 
-        let sst_info = SstableInfo {
+        let sst_info = SstableInfoInner {
             object_id: 1,
             sst_id: 1,
             key_range: KeyRange {
@@ -186,13 +189,14 @@ mod tests {
             },
             table_ids: vec![1],
             ..Default::default()
-        };
+        }
+        .into();
         assert!(
             !should_delete_sst_by_watermark(&sst_info, &table_watermarks),
             "should fail because different vnodes found"
         );
 
-        let sst_info = SstableInfo {
+        let sst_info = SstableInfoInner {
             object_id: 1,
             sst_id: 1,
             key_range: KeyRange {
@@ -206,13 +210,14 @@ mod tests {
             },
             table_ids: vec![1],
             ..Default::default()
-        };
+        }
+        .into();
         assert!(
             !should_delete_sst_by_watermark(&sst_info, &table_watermarks),
             "should fail because right key is greater than watermark"
         );
 
-        let sst_info = SstableInfo {
+        let sst_info = SstableInfoInner {
             object_id: 1,
             sst_id: 1,
             key_range: KeyRange {
@@ -226,7 +231,8 @@ mod tests {
             },
             table_ids: vec![1],
             ..Default::default()
-        };
+        }
+        .into();
         assert!(should_delete_sst_by_watermark(&sst_info, &table_watermarks));
     }
 }

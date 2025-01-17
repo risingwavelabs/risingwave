@@ -21,7 +21,7 @@ use risingwave_pb::hummock::{PbHummockVersion, PbHummockVersionDelta, PbStateTab
 
 use crate::change_log::{ChangeLogDelta, EpochNewChangeLog, TableChangeLog};
 use crate::level::{Level, Levels, OverlappingLevel};
-use crate::sstable_info::SstableInfo;
+use crate::sstable_info::{SstableInfo, SstableInfoInner};
 use crate::table_watermark::TableWatermarks;
 use crate::version::{
     GroupDelta, GroupDeltas, HummockVersion, HummockVersionDelta, HummockVersionStateTableInfo,
@@ -46,7 +46,7 @@ pub struct IncompleteHummockVersion {
 /// Clone from an `SstableInfo`, but only set the `sst_id` for the target, leaving other fields as default.
 /// The goal is to reduce the size of pb object generated afterward.
 fn stripped_sstable_info(origin: &SstableInfo) -> SstableInfo {
-    SstableInfo {
+    SstableInfoInner {
         object_id: Default::default(),
         sst_id: origin.sst_id,
         key_range: Default::default(),
@@ -61,6 +61,7 @@ fn stripped_sstable_info(origin: &SstableInfo) -> SstableInfo {
         range_tombstone_count: Default::default(),
         bloom_filter_kind: Default::default(),
     }
+    .into()
 }
 
 fn stripped_epoch_new_change_log(origin: &EpochNewChangeLog) -> EpochNewChangeLog {

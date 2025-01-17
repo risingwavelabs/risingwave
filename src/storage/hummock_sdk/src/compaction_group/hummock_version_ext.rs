@@ -1013,7 +1013,8 @@ fn split_sst_info_for_level(
             .cloned()
             .collect_vec();
         if !removed_table_ids.is_empty() {
-            let branch_sst = split_sst(sst_info, new_sst_id);
+            let (modified_sst, branch_sst) = split_sst(sst_info, new_sst_id);
+            *sst_info = modified_sst;
             insert_table_infos.push(branch_sst);
         }
     }
@@ -1335,14 +1336,18 @@ pub fn validate_version(version: &HummockVersion) -> Vec<String> {
     res
 }
 
-pub fn split_sst(sst_info: &mut SstableInfo, new_sst_id: &mut u64) -> SstableInfo {
+pub fn split_sst(
+    original_sst_info: &SstableInfo,
+    new_sst_id: &mut u64,
+) -> (SstableInfo, SstableInfo) {
+    let mut sst_info = original_sst_info.get_inner();
     let mut branch_table_info = sst_info.clone();
     branch_table_info.sst_id = *new_sst_id;
     *new_sst_id += 1;
     sst_info.sst_id = *new_sst_id;
     *new_sst_id += 1;
 
-    branch_table_info
+    (sst_info.into(), branch_table_info.into())
 }
 
 #[cfg(test)]
@@ -1353,7 +1358,7 @@ mod tests {
 
     use crate::compaction_group::hummock_version_ext::build_initial_compaction_group_levels;
     use crate::level::{Level, Levels, OverlappingLevel};
-    use crate::sstable_info::SstableInfo;
+    use crate::sstable_info::SstableInfoInner;
     use crate::version::{
         GroupDelta, GroupDeltas, HummockVersion, HummockVersionDelta, IntraLevelDelta,
     };
@@ -1385,22 +1390,24 @@ mod tests {
             .l0
             .sub_levels
             .push(Level {
-                table_infos: vec![SstableInfo {
+                table_infos: vec![SstableInfoInner {
                     object_id: 11,
                     sst_id: 11,
                     ..Default::default()
-                }],
+                }
+                .into()],
                 ..Default::default()
             });
         assert_eq!(version.get_object_ids().len(), 1);
 
         // Add to non sub level
         version.levels.get_mut(&0).unwrap().levels.push(Level {
-            table_infos: vec![SstableInfo {
+            table_infos: vec![SstableInfoInner {
                 object_id: 22,
                 sst_id: 22,
                 ..Default::default()
-            }],
+            }
+            .into()],
             ..Default::default()
         });
         assert_eq!(version.get_object_ids().len(), 2);
@@ -1460,11 +1467,12 @@ mod tests {
                         1,
                         0,
                         vec![],
-                        vec![SstableInfo {
+                        vec![SstableInfoInner {
                             object_id: 1,
                             sst_id: 1,
                             ..Default::default()
-                        }],
+                        }
+                        .into()],
                         0,
                     ))],
                 },
@@ -1483,11 +1491,12 @@ mod tests {
         cg1.levels[0] = Level {
             level_idx: 1,
             level_type: LevelType::Nonoverlapping,
-            table_infos: vec![SstableInfo {
+            table_infos: vec![SstableInfoInner {
                 object_id: 1,
                 sst_id: 1,
                 ..Default::default()
-            }],
+            }
+            .into()],
             ..Default::default()
         };
         assert_eq!(version, {
