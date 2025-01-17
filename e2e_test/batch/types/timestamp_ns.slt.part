@@ -2,7 +2,7 @@ statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
 statement ok
-create table t1(v1 int, v2 timestamp);
+create table t1(v1 int, v2 timestampnano);
 
 statement ok
 insert into t1 values(1,'2013-01-01 01:01:01.123456789'),(2,'2012-01-01 01:01:01.123456'),(3,'0000-01-01 01:01:01.123456789'),(4,'2213-01-01 01:01:01.123456789'),(5,null),(6,'2013-01-01 01:01:01.123456789');

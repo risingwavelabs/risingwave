@@ -462,6 +462,10 @@ impl Date {
     pub fn from_num_days_from_ce_uncheck(days: i32) -> Self {
         Self::with_days_since_ce(days).unwrap()
     }
+
+    pub fn and_hms_uncheck(self, hour: u32, min: u32, sec: u32) -> Timestamp {
+        Timestamp::new(self.0.and_time(Time::from_hms_uncheck(hour, min, sec).0))
+    }
 }
 
 impl Time {
