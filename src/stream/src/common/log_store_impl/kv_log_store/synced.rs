@@ -56,6 +56,7 @@
 //! - [] Add tests
 //! - [] Handle watermark r/w
 
+use std::collections::VecDeque;
 use std::pin::Pin;
 
 use await_tree::InstrumentAwait;
@@ -65,7 +66,7 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use parking_lot::Mutex;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::bitmap::Bitmap;
+use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common_estimate_size::EstimateSize;
@@ -150,7 +151,7 @@ impl<S: StateStore> SyncedKvLogStore<S> {
                                 Ok(Some(Message::Barrier(barrier)))
                             }
                             Message::Chunk(chunk) => {
-                                self.write_chunk(chunk).await?;
+                                // self.write_chunk(chunk).await?;
                                 Ok(None)
                             }
                             // TODO(kwannoel): This should be written to the logstore,
@@ -254,7 +255,7 @@ impl<S: StateStore> SyncedKvLogStore<S> {
         table_id: TableId,
         read_metrics: &KvLogStoreReadMetrics,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
-        let Some((item_epoch, item)) = buffer.lock().pop() else {
+        let Some((item_epoch, item)) = buffer.lock().pop_front() else {
             return Ok(None);
         };
         match item {
@@ -308,6 +309,10 @@ impl<S: StateStore> SyncedKvLogStore<S> {
             state_store.insert(key, value, None)?;
         }
 
+        // TODO(kwannoel): Flush all unflushed chunks
+        // As an optimization we can also change it into flushed items instead.
+        // This will reduce memory consumption of logstore.
+
         flush_info.report(&metrics);
 
         let watermark = truncation_offset.map(|truncation_offset| {
@@ -326,44 +331,142 @@ impl<S: StateStore> SyncedKvLogStore<S> {
             },
         );
         // Add to buffer
-        buffer.lock().buffer.push((
+        let mut buffer = buffer.lock();
+        buffer.buffer.push_back((
             epoch,
             LogStoreBufferItem::Barrier {
                 is_checkpoint: barrier.is_checkpoint(),
                 next_epoch: barrier.epoch.curr,
             },
         ));
+        buffer.next_chunk_id = 0;
+
+        // TODO: Add metircs
+        // self.update_unconsumed_buffer_metrics();
 
         *seq_id = FIRST_SEQ_ID;
         Ok(())
     }
 
-    async fn write_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<()> {
-        if self.buffer.lock().is_full() {
-            self.flush_buffer().await?;
-        }
-        // Try to write to the buffer
-        // If it is full, flush everything in the buffer to the state store.
-        Ok(())
-    }
-
-    async fn flush_buffer(&mut self) -> StreamExecutorResult<()> {
-        // Flush everything in the buffer to the state store.
+    async fn write_chunk(
+        serde: &LogStoreRowSerde,
+        start_seq_id: SeqIdType,
+        end_seq_id: SeqIdType,
+        buffer: &mut Mutex<SyncedLogStoreBuffer>,
+        chunk: StreamChunk,
+        metrics: &KvLogStoreMetrics,
+        state_store: impl LocalStateStore,
+    ) -> StreamExecutorResult<()> {
+        let mut buffer = buffer.lock();
+        buffer
+            .add_or_flush_chunk(serde, start_seq_id, end_seq_id, chunk, metrics, state_store)
+            .await?;
         Ok(())
     }
 }
 
 struct SyncedLogStoreBuffer {
-    buffer: Vec<(u64, LogStoreBufferItem)>,
+    buffer: VecDeque<(u64, LogStoreBufferItem)>,
     max_size: usize,
+    next_chunk_id: ChunkId,
 }
 
 impl SyncedLogStoreBuffer {
-    pub fn is_full(&self) -> bool {
+    fn is_full(&self) -> bool {
         self.buffer.len() >= self.max_size
     }
 
-    pub fn pop(&mut self) -> Option<(u64, LogStoreBufferItem)> {
-        self.buffer.pop()
+    fn pop_front(&mut self) -> Option<(u64, LogStoreBufferItem)> {
+        self.buffer.pop_front()
+    }
+
+    async fn add_or_flush_chunk(
+        &mut self,
+        serde: &LogStoreRowSerde,
+        start_seq_id: SeqIdType,
+        end_seq_id: SeqIdType,
+        chunk: StreamChunk,
+        metrics: &KvLogStoreMetrics,
+        mut state_store: impl LocalStateStore,
+    ) -> StreamExecutorResult<()> {
+        let current_size = self.buffer.len();
+        let chunk_size = chunk.cardinality();
+        let epoch = state_store.epoch();
+
+        let should_flush_chunk = current_size + chunk_size >= self.max_size;
+        if should_flush_chunk {
+            // flush chunk to state store
+            // TODO(kwannoel): Should refactor this into its own function
+            let mut vnode_bitmap_builder = BitmapBuilder::zeroed(serde.vnodes().len());
+            let mut flush_info = FlushInfo::new();
+            for (i, (op, row)) in chunk.rows().enumerate() {
+                let seq_id = start_seq_id + (i as SeqIdType);
+                assert!(seq_id <= end_seq_id);
+                let (vnode, key, value) = serde.serialize_data_row(epoch, seq_id, op, row);
+                vnode_bitmap_builder.set(vnode.to_index(), true);
+                flush_info.flush_one(key.estimated_size() + value.estimated_size());
+                state_store.insert(key, value, None)?;
+            }
+            flush_info.report(metrics);
+            state_store.flush().await?;
+
+            let new_vnode_bitmap = vnode_bitmap_builder.finish();
+
+            // add to buffer
+            // TODO(kwannoel): Should refactor this into its own function
+            if let Some((
+                item_epoch,
+                LogStoreBufferItem::Flushed {
+                    end_seq_id: prev_end_seq_id,
+                    vnode_bitmap,
+                    ..
+                },
+            )) = self.buffer.front_mut()
+            {
+                assert!(
+                    *prev_end_seq_id < start_seq_id,
+                    "prev end_seq_id {} should be smaller than current start_seq_id {}",
+                    end_seq_id,
+                    start_seq_id
+                );
+                assert_eq!(
+                    epoch, *item_epoch,
+                    "epoch of newly added flushed item must be the same as the last flushed item"
+                );
+                *prev_end_seq_id = end_seq_id;
+                *vnode_bitmap |= new_vnode_bitmap;
+            } else {
+                let chunk_id = self.next_chunk_id;
+                self.next_chunk_id += 1;
+                self.buffer.push_back((
+                    epoch,
+                    LogStoreBufferItem::Flushed {
+                        start_seq_id,
+                        end_seq_id,
+                        vnode_bitmap: new_vnode_bitmap,
+                        chunk_id,
+                    },
+                ));
+            }
+            // TODO(kwannoel): Missing update metrics.
+            // see: self.update_unconsumed_buffer_metrics();
+        } else {
+            let chunk_id = self.next_chunk_id;
+            self.next_chunk_id += 1;
+            // add chunk to buffer
+            self.buffer.push_back((
+                epoch,
+                LogStoreBufferItem::StreamChunk {
+                    chunk,
+                    start_seq_id,
+                    end_seq_id,
+                    flushed: false,
+                    chunk_id,
+                },
+            ));
+            // TODO(kwannoel: Missing update metrics.
+            // see: self.update_unconsumed_buffer_metrics();
+        }
+        Ok(())
     }
 }
