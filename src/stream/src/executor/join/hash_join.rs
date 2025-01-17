@@ -498,13 +498,14 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     }
 
     /// Update the vnode bitmap and manipulate the cache if necessary.
-    pub fn update_vnode_bitmap(&mut self, vnode_bitmap: Arc<Bitmap>) -> bool {
+    pub fn update_vnode_bitmap12(&mut self, vnode_bitmap: Arc<Bitmap>) -> bool {
         let (_previous_vnode_bitmap, cache_may_stale) =
-            self.state.table.update_vnode_bitmap(vnode_bitmap.clone());
-        let _ = self
-            .degree_state
-            .as_mut()
-            .map(|degree_state| degree_state.table.update_vnode_bitmap(vnode_bitmap.clone()));
+            self.state.table.update_vnode_bitmap1(vnode_bitmap.clone());
+        let _ = self.degree_state.as_mut().map(|degree_state| {
+            degree_state
+                .table
+                .update_vnode_bitmap1(vnode_bitmap.clone())
+        });
 
         if cache_may_stale {
             self.inner.clear();

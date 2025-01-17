@@ -449,15 +449,18 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
                     let barrier_start_time = Instant::now();
                     self.flush_data(barrier.epoch).await?;
 
+                    let update_vnode_bitmap = barrier.as_update_vnode_bitmap(self.ctx.id);
+                    yield Message::Barrier(barrier);
+
                     // Update the vnode bitmap for state tables of both sides if asked.
-                    if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.ctx.id) {
-                        if self.side_l.ht.update_vnode_bitmap(vnode_bitmap.clone()) {
+                    if let Some(vnode_bitmap) = update_vnode_bitmap {
+                        if self.side_l.ht.update_vnode_bitmap12(vnode_bitmap.clone()) {
                             self.watermark_buffers
                                 .values_mut()
                                 .for_each(|buffers| buffers.clear());
                             // self.inequality_watermarks.fill(None);
                         }
-                        self.side_r.ht.update_vnode_bitmap(vnode_bitmap);
+                        self.side_r.ht.update_vnode_bitmap12(vnode_bitmap);
                     }
 
                     // Report metrics of cached join rows/entries
@@ -470,7 +473,6 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
 
                     barrier_join_match_duration_ns
                         .inc_by(barrier_start_time.elapsed().as_nanos() as u64);
-                    yield Message::Barrier(barrier);
                 }
             }
             start_time = Instant::now();

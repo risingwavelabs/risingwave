@@ -122,19 +122,19 @@ impl<S: StateStore> SortExecutor<S> {
                 }
                 Message::Barrier(barrier) => {
                     this.buffer_table.commit(barrier.epoch).await?;
+                    let update_vnode_bitmap = barrier.as_update_vnode_bitmap(this.actor_ctx.id);
+                    yield Message::Barrier(barrier);
 
                     // Update the vnode bitmap for state tables of all agg calls if asked.
-                    if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(this.actor_ctx.id) {
+                    if let Some(vnode_bitmap) = update_vnode_bitmap {
                         let (_, cache_may_stale) =
-                            this.buffer_table.update_vnode_bitmap(vnode_bitmap);
+                            this.buffer_table.update_vnode_bitmap1(vnode_bitmap);
 
                         // Manipulate the cache if necessary.
                         if cache_may_stale {
                             vars.buffer.refill_cache(None, &this.buffer_table).await?;
                         }
                     }
-
-                    yield Message::Barrier(barrier);
                 }
             }
         }

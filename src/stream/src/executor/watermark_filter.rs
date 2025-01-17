@@ -218,19 +218,6 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                 Message::Barrier(barrier) => {
                     let prev_epoch = barrier.epoch.prev;
                     let is_checkpoint = barrier.kind.is_checkpoint();
-                    let mut need_update_global_max_watermark = false;
-                    // Update the vnode bitmap for state tables of all agg calls if asked.
-                    if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(ctx.id) {
-                        let other_vnodes_bitmap = Arc::new(!(*vnode_bitmap).clone());
-                        let _ = global_watermark_table.update_vnode_bitmap(other_vnodes_bitmap);
-                        let (previous_vnode_bitmap, _cache_may_stale) =
-                            table.update_vnode_bitmap(vnode_bitmap.clone());
-
-                        // Take the global max watermark when scaling happens.
-                        if previous_vnode_bitmap != vnode_bitmap {
-                            need_update_global_max_watermark = true;
-                        }
-                    }
 
                     if is_checkpoint && last_checkpoint_watermark != current_watermark {
                         last_checkpoint_watermark.clone_from(&current_watermark);
@@ -258,7 +245,22 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                         }
                     }
 
+                    let update_vnode_bitmap = barrier.as_update_vnode_bitmap(ctx.id);
                     yield Message::Barrier(barrier);
+
+                    let mut need_update_global_max_watermark = false;
+                    // Update the vnode bitmap for state tables of all agg calls if asked.
+                    if let Some(vnode_bitmap) = update_vnode_bitmap {
+                        let other_vnodes_bitmap = Arc::new(!(*vnode_bitmap).clone());
+                        let _ = global_watermark_table.update_vnode_bitmap(other_vnodes_bitmap);
+                        let (previous_vnode_bitmap, _cache_may_stale) =
+                            table.update_vnode_bitmap1(vnode_bitmap.clone());
+
+                        // Take the global max watermark when scaling happens.
+                        if previous_vnode_bitmap != vnode_bitmap {
+                            need_update_global_max_watermark = true;
+                        }
+                    }
 
                     if need_update_global_max_watermark {
                         current_watermark = Self::get_global_max_watermark(

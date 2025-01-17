@@ -369,7 +369,7 @@ impl<S: StateStore> BackfillState<S> {
         Ok(())
     }
 
-    pub(super) async fn update_vnode_bitmap(
+    pub(super) async fn update_vnode_bitmap12(
         &mut self,
         new_vnode_bitmap: Arc<Bitmap>,
         barrier_epoch: EpochPair,
@@ -377,7 +377,7 @@ impl<S: StateStore> BackfillState<S> {
         self.state_table
             .try_wait_committed_epoch(barrier_epoch.prev)
             .await?;
-        let (prev_vnode_bitmap, _) = self.state_table.update_vnode_bitmap(new_vnode_bitmap);
+        let (prev_vnode_bitmap, _) = self.state_table.update_vnode_bitmap1(new_vnode_bitmap);
         let committed_progress_rows = Self::load_vnode_progress_row(&self.state_table).await?;
         let mut new_state = HashMap::new();
         for (vnode, progress_row) in committed_progress_rows {

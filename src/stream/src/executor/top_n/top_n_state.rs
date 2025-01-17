@@ -73,8 +73,8 @@ impl<S: StateStore> ManagedTopNState<S> {
     }
 
     /// Update vnode bitmap of state table, returning `cache_may_stale`.
-    pub fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) -> bool {
-        self.state_table.update_vnode_bitmap(new_vnodes).1
+    pub fn update_vnode_bitmap12(&mut self, new_vnodes: Arc<Bitmap>) -> bool {
+        self.state_table.update_vnode_bitmap1(new_vnodes).1
     }
 
     /// Update watermark for the managed state table.

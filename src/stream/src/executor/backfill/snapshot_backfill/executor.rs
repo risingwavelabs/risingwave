@@ -356,7 +356,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                             .upstream_table
                             .update_vnode_bitmap(new_vnode_bitmap.clone());
                         backfill_state
-                            .update_vnode_bitmap(new_vnode_bitmap, barrier_epoch)
+                            .update_vnode_bitmap12(new_vnode_bitmap, barrier_epoch)
                             .await?;
                         backfill_state
                             .latest_progress()

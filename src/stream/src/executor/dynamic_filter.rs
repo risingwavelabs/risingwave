@@ -495,13 +495,14 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
                     committed_rhs_row.clone_from(&staging_rhs_row);
                     committed_rhs_value = Some(curr);
 
-                    // Update the vnode bitmap for the left state table if asked.
-                    if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.ctx.id) {
-                        let (_previous_vnode_bitmap, _cache_may_stale) =
-                            self.left_table.update_vnode_bitmap(vnode_bitmap);
-                    }
-
+                    let update_vnode_bitmap = barrier.as_update_vnode_bitmap(self.ctx.id);
                     yield Message::Barrier(barrier);
+
+                    // Update the vnode bitmap for the left state table if asked.
+                    if let Some(vnode_bitmap) = update_vnode_bitmap {
+                        let (_previous_vnode_bitmap, _cache_may_stale) =
+                            self.left_table.update_vnode_bitmap1(vnode_bitmap);
+                    }
                 }
             }
         }

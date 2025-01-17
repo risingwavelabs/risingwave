@@ -206,8 +206,8 @@ where
         self.managed_state.try_flush().await
     }
 
-    fn update_vnode_bitmap(&mut self, vnode_bitmap: Arc<Bitmap>) {
-        let cache_may_stale = self.managed_state.update_vnode_bitmap(vnode_bitmap);
+    fn update_vnode_bitmap123(&mut self, vnode_bitmap: Arc<Bitmap>) {
+        let cache_may_stale = self.managed_state.update_vnode_bitmap12(vnode_bitmap);
         if cache_may_stale {
             self.caches.clear();
         }

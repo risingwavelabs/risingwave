@@ -675,7 +675,7 @@ where
 
     /// Update the vnode bitmap of the state table, returns the previous vnode bitmap.
     #[must_use = "the executor should decide whether to manipulate the cache based on the previous vnode bitmap"]
-    pub fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) -> (Arc<Bitmap>, bool) {
+    pub fn update_vnode_bitmap1(&mut self, new_vnodes: Arc<Bitmap>) -> (Arc<Bitmap>, bool) {
         assert!(
             !self.is_dirty(),
             "vnode bitmap should only be updated when state table is clean"

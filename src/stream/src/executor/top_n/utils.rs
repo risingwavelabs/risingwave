@@ -42,7 +42,7 @@ pub trait TopNExecutorBase: Send + 'static {
 
     /// Update the vnode bitmap for the state table and manipulate the cache if necessary, only used
     /// by Group Top-N since it's distributed.
-    fn update_vnode_bitmap(&mut self, _vnode_bitmap: Arc<Bitmap>) {
+    fn update_vnode_bitmap123(&mut self, _vnode_bitmap: Arc<Bitmap>) {
         unreachable!()
     }
 
@@ -107,13 +107,13 @@ where
                 }
                 Message::Barrier(barrier) => {
                     self.inner.flush_data(barrier.epoch).await?;
+                    let update_vnode_bitmap = barrier.as_update_vnode_bitmap(self.ctx.id);
+                    yield Message::Barrier(barrier);
 
                     // Update the vnode bitmap, only used by Group Top-N.
-                    if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.ctx.id) {
-                        self.inner.update_vnode_bitmap(vnode_bitmap);
+                    if let Some(vnode_bitmap) = update_vnode_bitmap {
+                        self.inner.update_vnode_bitmap123(vnode_bitmap);
                     }
-
-                    yield Message::Barrier(barrier)
                 }
             };
         }

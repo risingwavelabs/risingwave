@@ -660,11 +660,14 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         }
                     }
 
+                    let update_vnode_bitmap = barrier.as_update_vnode_bitmap(this.actor_ctx.id);
+                    yield Message::Barrier(barrier);
+
                     // Update the vnode bitmap for state tables of all agg calls if asked.
-                    if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(this.actor_ctx.id) {
+                    if let Some(vnode_bitmap) = update_vnode_bitmap {
                         let previous_vnode_bitmap = this.intermediate_state_table.vnodes().clone();
                         this.all_state_tables_mut().for_each(|table| {
-                            let _ = table.update_vnode_bitmap(vnode_bitmap.clone());
+                            let _ = table.update_vnode_bitmap1(vnode_bitmap.clone());
                         });
 
                         // Manipulate the cache if necessary.
@@ -675,8 +678,6 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                             });
                         }
                     }
-
-                    yield Message::Barrier(barrier);
                 }
             }
         }
