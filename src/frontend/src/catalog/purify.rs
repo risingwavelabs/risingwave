@@ -74,25 +74,11 @@ pub fn try_purify_table_source_create_sql_ast(
         bail!("expect `CREATE TABLE` or `CREATE SOURCE` statement, found: `{base:?}`");
     };
 
-    // Filter out columns that are not defined by users in SQL.
-    let defined_columns = columns.iter().filter(|c| c.is_user_defined());
-
-    // If all columns are defined, check if the count matches.
-    if !column_defs.is_empty() && wildcard_idx.is_none() {
-        let defined_columns_len = defined_columns.clone().count();
-        if column_defs.len() != defined_columns_len {
-            bail /* unlikely */ !(
-                "column count mismatch: defined {} columns, but {} columns in the definition",
-                defined_columns_len,
-                column_defs.len()
-            );
-        }
-    }
-
-    // Now derive the missing columns and constraints.
-
     // First, remove the wildcard from the definition.
     *wildcard_idx = None;
+
+    // Filter out columns that are not defined by users in SQL.
+    let defined_columns = columns.iter().filter(|c| c.is_user_defined());
 
     // Derive `ColumnDef` from `ColumnCatalog`.
     let mut purified_column_defs = Vec::new();
