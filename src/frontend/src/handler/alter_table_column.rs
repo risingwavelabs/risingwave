@@ -272,20 +272,9 @@ pub async fn handle_alter_table_column(
     let format_encode = format_encode
         .clone()
         .map(|format_encode| format_encode.into_v2_with_warning());
-
-    let fail_if_has_schema_registry = || {
-        if let Some(format_encode) = &format_encode
-            && schema_has_schema_registry(format_encode)
-        {
-            // TODO(purify): we may support this.
-            Err(ErrorCode::NotSupported(
-                "alter table with schema registry".to_owned(),
-                "try `ALTER TABLE .. FORMAT .. ENCODE .. (...)` instead".to_owned(),
-            ))
-        } else {
-            Ok(())
-        }
-    };
+    let has_schema_registry = format_encode
+        .as_ref()
+        .is_some_and(schema_has_schema_registry);
 
     if !original_catalog.incoming_sinks.is_empty()
         && matches!(operation, AlterTableOperation::DropColumn { .. })
@@ -299,8 +288,6 @@ pub async fn handle_alter_table_column(
         AlterTableOperation::AddColumn {
             column_def: new_column,
         } => {
-            fail_if_has_schema_registry()?;
-
             // Duplicated names can actually be checked by `StreamMaterialize`. We do here for
             // better error reporting.
             let new_column_name = new_column.name.real_value();
@@ -338,10 +325,6 @@ pub async fn handle_alter_table_column(
 
             // Check if the column to drop is referenced by any generated columns.
             for column in original_catalog.columns() {
-                if column_name.real_value() == column.name() && !column.is_generated() {
-                    fail_if_has_schema_registry()?;
-                }
-
                 if let Some(expr) = column.generated_expr() {
                     let expr = ExprImpl::from_expr_proto(expr)?;
                     let refs = expr.collect_input_refs(original_catalog.columns().len());
@@ -386,12 +369,18 @@ pub async fn handle_alter_table_column(
         _ => unreachable!(),
     };
 
+    let sql_column_strategy = if has_schema_registry {
+        SqlColumnStrategy::FollowChecked
+    } else {
+        SqlColumnStrategy::FollowUnchecked
+    };
+
     let (source, table, graph, col_index_mapping, job_type) = get_replace_table_plan(
         &session,
         table_name,
         definition,
         &original_catalog,
-        SqlColumnStrategy::FollowUnchecked,
+        sql_column_strategy,
     )
     .await?;
 
