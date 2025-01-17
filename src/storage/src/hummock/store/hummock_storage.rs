@@ -659,11 +659,9 @@ impl StateStoreReadLog for HummockStorage {
         {
             // fast path
             let recent_versions = self.recent_versions.load();
-            if let Some(next_epoch) = next_epoch(
-                recent_versions.latest_version().version(),
-                epoch,
-                options.table_id,
-            )? {
+            if let Some(next_epoch) =
+                next_epoch(recent_versions.latest_version(), epoch, options.table_id)?
+            {
                 return Ok(next_epoch);
             }
         }
@@ -671,7 +669,7 @@ impl StateStoreReadLog for HummockStorage {
         wait_for_update(
             &self.version_update_notifier_tx,
             |version| {
-                if let Some(next_epoch) = next_epoch(version.version(), epoch, options.table_id)? {
+                if let Some(next_epoch) = next_epoch(version, epoch, options.table_id)? {
                     next_epoch_ret = Some(next_epoch);
                     Ok(true)
                 } else {

@@ -30,7 +30,9 @@ use risingwave_pb::hummock::{
 };
 use tracing::warn;
 
-use crate::change_log::{ChangeLogDeltaCommon, EpochNewChangeLogCommon, TableChangeLogCommon};
+use crate::change_log::{
+    ChangeLogDeltaCommon, EpochNewChangeLogCommon, TableChangeLog, TableChangeLogCommon,
+};
 use crate::compaction_group::hummock_version_ext::build_initial_compaction_group_levels;
 use crate::compaction_group::StaticCompactionGroupId;
 use crate::level::LevelsCommon;
@@ -217,7 +219,7 @@ impl HummockVersionStateTableInfo {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct HummockVersionCommon<T, L> {
+pub struct HummockVersionCommon<T, L = T> {
     pub id: HummockVersionId,
     pub levels: HashMap<CompactionGroupId, LevelsCommon<T>>,
     #[deprecated]
@@ -237,7 +239,7 @@ impl Default for HummockVersion {
     }
 }
 
-impl<T> HummockVersionCommon<T, T>
+impl<T> HummockVersionCommon<T>
 where
     T: for<'a> From<&'a PbSstableInfo>,
     PbSstableInfo: for<'a> From<&'a T>,
@@ -291,7 +293,7 @@ impl HummockVersion {
     }
 }
 
-impl<T> From<&PbHummockVersion> for HummockVersionCommon<T, T>
+impl<T> From<&PbHummockVersion> for HummockVersionCommon<T>
 where
     T: for<'a> From<&'a PbSstableInfo>,
 {
@@ -334,11 +336,11 @@ where
     }
 }
 
-impl<T> From<&HummockVersionCommon<T, T>> for PbHummockVersion
+impl<T> From<&HummockVersionCommon<T>> for PbHummockVersion
 where
     PbSstableInfo: for<'a> From<&'a T>,
 {
-    fn from(version: &HummockVersionCommon<T, T>) -> Self {
+    fn from(version: &HummockVersionCommon<T>) -> Self {
         #[expect(deprecated)]
         Self {
             id: version.id.0,
@@ -363,12 +365,12 @@ where
     }
 }
 
-impl<T> From<HummockVersionCommon<T, T>> for PbHummockVersion
+impl<T> From<HummockVersionCommon<T>> for PbHummockVersion
 where
     PbSstableInfo: From<T>,
     PbSstableInfo: for<'a> From<&'a T>,
 {
-    fn from(version: HummockVersionCommon<T, T>) -> Self {
+    fn from(version: HummockVersionCommon<T>) -> Self {
         #[expect(deprecated)]
         Self {
             id: version.id.0,
@@ -471,6 +473,13 @@ impl HummockVersion {
             state_table_info_delta: Default::default(),
         }
     }
+
+    pub fn split_change_log(mut self) -> (LocalHummockVersion, HashMap<TableId, TableChangeLog>) {
+        let table_change_log = std::mem::take(&mut self.table_change_log);
+        let local_version = LocalHummockVersion::from(self);
+
+        (local_version, table_change_log)
+    }
 }
 
 impl<T, L> HummockVersionCommon<T, L> {
@@ -483,7 +492,7 @@ impl<T, L> HummockVersionCommon<T, L> {
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub struct HummockVersionDeltaCommon<T, L> {
+pub struct HummockVersionDeltaCommon<T, L = T> {
     pub id: HummockVersionId,
     pub prev_id: HummockVersionId,
     pub group_deltas: HashMap<CompactionGroupId, GroupDeltasCommon<T>>,
@@ -506,7 +515,7 @@ impl Default for HummockVersionDelta {
     }
 }
 
-impl<T> HummockVersionDeltaCommon<T, T>
+impl<T> HummockVersionDeltaCommon<T>
 where
     T: for<'a> From<&'a PbSstableInfo>,
     PbSstableInfo: for<'a> From<&'a T>,
@@ -536,7 +545,7 @@ pub trait ObjectIdReader {
     fn object_id(&self) -> HummockSstableObjectId;
 }
 
-impl<T> HummockVersionDeltaCommon<T, T>
+impl<T> HummockVersionDeltaCommon<T>
 where
     T: SstableIdReader + ObjectIdReader,
 {
@@ -589,7 +598,7 @@ impl HummockVersionDelta {
     }
 }
 
-impl<T> From<&PbHummockVersionDelta> for HummockVersionDeltaCommon<T, T>
+impl<T> From<&PbHummockVersionDelta> for HummockVersionDeltaCommon<T>
 where
     T: for<'a> From<&'a PbSstableInfo>,
 {
@@ -645,11 +654,11 @@ where
     }
 }
 
-impl<T> From<&HummockVersionDeltaCommon<T, T>> for PbHummockVersionDelta
+impl<T> From<&HummockVersionDeltaCommon<T>> for PbHummockVersionDelta
 where
     PbSstableInfo: for<'a> From<&'a T>,
 {
-    fn from(version_delta: &HummockVersionDeltaCommon<T, T>) -> Self {
+    fn from(version_delta: &HummockVersionDeltaCommon<T>) -> Self {
         #[expect(deprecated)]
         Self {
             id: version_delta.id.0,
@@ -685,11 +694,11 @@ where
     }
 }
 
-impl<T> From<HummockVersionDeltaCommon<T, T>> for PbHummockVersionDelta
+impl<T> From<HummockVersionDeltaCommon<T>> for PbHummockVersionDelta
 where
     PbSstableInfo: From<T>,
 {
-    fn from(version_delta: HummockVersionDeltaCommon<T, T>) -> Self {
+    fn from(version_delta: HummockVersionDeltaCommon<T>) -> Self {
         #[expect(deprecated)]
         Self {
             id: version_delta.id.0,
@@ -725,7 +734,7 @@ where
     }
 }
 
-impl<T> From<PbHummockVersionDelta> for HummockVersionDeltaCommon<T, T>
+impl<T> From<PbHummockVersionDelta> for HummockVersionDeltaCommon<T>
 where
     T: From<PbSstableInfo>,
 {
@@ -1131,39 +1140,6 @@ impl From<HummockVersionDelta> for LocalHummockVersionDelta {
                 })
                 .collect(),
             state_table_info_delta: delta.state_table_info_delta,
-        }
-    }
-}
-
-impl From<&HummockVersionDelta> for LocalHummockVersionDelta {
-    #[expect(deprecated)]
-    fn from(delta: &HummockVersionDelta) -> Self {
-        Self {
-            id: delta.id,
-            prev_id: delta.prev_id,
-            group_deltas: delta.group_deltas.clone(),
-            max_committed_epoch: delta.max_committed_epoch,
-            trivial_move: delta.trivial_move,
-            new_table_watermarks: delta.new_table_watermarks.clone(),
-            removed_table_ids: delta.removed_table_ids.clone(),
-            change_log_delta: delta
-                .change_log_delta
-                .iter()
-                .map(|(k, v)| {
-                    (
-                        *k,
-                        ChangeLogDeltaCommon {
-                            truncate_epoch: v.truncate_epoch,
-                            new_log: EpochNewChangeLogCommon {
-                                epochs: v.new_log.epochs.clone(),
-                                new_value: Vec::new(),
-                                old_value: Vec::new(),
-                            },
-                        },
-                    )
-                })
-                .collect(),
-            state_table_info_delta: delta.state_table_info_delta.clone(),
         }
     }
 }

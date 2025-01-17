@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::ops::Deref;
 use std::pin::pin;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::Relaxed;
@@ -510,7 +511,7 @@ impl HummockEventHandler {
 
         let mut sst_delta_infos = vec![];
         if let Some(new_pinned_version) = Self::resolve_version_update_info(
-            pinned_version.clone(),
+            &pinned_version,
             version_payload,
             Some(&mut sst_delta_infos),
         ) {
@@ -520,16 +521,17 @@ impl HummockEventHandler {
     }
 
     fn resolve_version_update_info(
-        mut pinned_version: PinnedVersion,
+        pinned_version: &PinnedVersion,
         version_payload: HummockVersionUpdate,
         mut sst_delta_infos: Option<&mut Vec<SstDeltaInfo>>,
     ) -> Option<PinnedVersion> {
         match version_payload {
             HummockVersionUpdate::VersionDeltas(version_deltas) => {
-                let mut version_to_apply = pinned_version.version().clone();
-                let table_change_log_to_apply = pinned_version.take_change_log();
+                let mut version_to_apply = pinned_version.deref().clone();
                 {
-                    let mut table_change_log_to_apply_guard = table_change_log_to_apply.write();
+                    let mut table_change_log_to_apply_guard =
+                        pinned_version.table_change_log_write_lock();
+                    // let mut table_change_log_to_apply_guard = table_change_log_to_apply.write();
                     for version_delta in &version_deltas {
                         assert_eq!(version_to_apply.id, version_delta.prev_id);
 
@@ -552,7 +554,7 @@ impl HummockEventHandler {
                         }
 
                         let local_hummock_version_delta =
-                            LocalHummockVersionDelta::from(version_delta);
+                            LocalHummockVersionDelta::from(version_delta.clone());
                         if let Some(sst_delta_infos) = &mut sst_delta_infos {
                             sst_delta_infos.extend(
                                 version_to_apply
@@ -560,13 +562,14 @@ impl HummockEventHandler {
                                     .into_iter(),
                             );
                         }
+
                         version_to_apply.apply_version_delta(&local_hummock_version_delta);
                     }
                 }
 
-                pinned_version.new_pin_version_with_table_change_log(
+                pinned_version.new_with_change_log(
                     version_to_apply,
-                    table_change_log_to_apply,
+                    pinned_version.table_change_log().clone(),
                 )
             }
             HummockVersionUpdate::PinnedVersion(version) => {

@@ -92,22 +92,22 @@ impl Deref for PinnedVersion {
 
 impl PinnedVersion {
     pub fn new(
-        mut version: HummockVersion,
+        version: HummockVersion,
         pinned_version_manager_tx: UnboundedSender<PinVersionAction>,
     ) -> Self {
         let version_id = version.id;
-        let t = std::mem::take(&mut version.table_change_log);
+        let (local_version, table_id_to_change_logs) = version.split_change_log();
         PinnedVersion {
             guard: Arc::new(PinnedVersionGuard::new(
                 version_id,
                 pinned_version_manager_tx,
             )),
-            table_change_log: Arc::new(RwLock::new(t)),
-            version: Arc::new(LocalHummockVersion::from(version)),
+            table_change_log: Arc::new(RwLock::new(table_id_to_change_logs)),
+            version: Arc::new(local_version),
         }
     }
 
-    pub fn new_pin_version(&self, mut version: HummockVersion) -> Option<Self> {
+    pub fn new_pin_version(&self, version: HummockVersion) -> Option<Self> {
         assert!(
             version.id >= self.version.id,
             "pinning a older version {}. Current is {}",
@@ -118,19 +118,18 @@ impl PinnedVersion {
             return None;
         }
         let version_id = version.id;
-        let t = std::mem::take(&mut version.table_change_log);
-
+        let (local_version, table_id_to_change_logs) = version.split_change_log();
         Some(PinnedVersion {
             guard: Arc::new(PinnedVersionGuard::new(
                 version_id,
                 self.guard.pinned_version_manager_tx.clone(),
             )),
-            table_change_log: Arc::new(RwLock::new(t)),
-            version: Arc::new(LocalHummockVersion::from(version)),
+            table_change_log: Arc::new(RwLock::new(table_id_to_change_logs)),
+            version: Arc::new(local_version),
         })
     }
 
-    pub fn new_pin_version_with_table_change_log(
+    pub fn new_with_change_log(
         &self,
         version: LocalHummockVersion,
         table_change_log: Arc<RwLock<HashMap<TableId, TableChangeLogCommon<SstableInfo>>>>,
@@ -144,6 +143,7 @@ impl PinnedVersion {
         if version.id == self.version.id {
             return None;
         }
+
         let version_id = version.id;
 
         Some(PinnedVersion {
@@ -194,20 +194,17 @@ impl PinnedVersion {
         }
     }
 
-    pub fn version(&self) -> &LocalHummockVersion {
-        &self.version
-    }
-
     pub fn table_change_log(
         &self,
     ) -> &Arc<RwLock<HashMap<TableId, TableChangeLogCommon<SstableInfo>>>> {
         &self.table_change_log
     }
 
-    pub fn take_change_log(
-        &mut self,
-    ) -> Arc<RwLock<HashMap<TableId, TableChangeLogCommon<SstableInfo>>>> {
-        std::mem::take(&mut self.table_change_log)
+    pub fn table_change_log_write_lock(
+        &self,
+    ) -> parking_lot::RwLockWriteGuard<'_, HashMap<TableId, TableChangeLogCommon<SstableInfo>>>
+    {
+        self.table_change_log.write()
     }
 }
 

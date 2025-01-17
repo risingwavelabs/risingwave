@@ -28,7 +28,7 @@ use crate::version::{
 };
 use crate::{CompactionGroupId, HummockSstableId, HummockSstableObjectId};
 
-pub type IncompleteHummockVersion = HummockVersionCommon<SstableIdInVersion, SstableIdInVersion>;
+pub type IncompleteHummockVersion = HummockVersionCommon<SstableIdInVersion>;
 
 /// Populates `SstableInfo` for `table_id`.
 /// `SstableInfo` not associated with `table_id` is removed.
