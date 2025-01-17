@@ -199,6 +199,7 @@ impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStore<S, LS> {
                                 self.seq_id += chunk.cardinality() as SeqIdType;
                                 let end_seq_id = self.seq_id - 1;
                                 Self::write_chunk(
+                                    &self.metrics,
                                     &self.serde,
                                     start_seq_id,
                                     end_seq_id,
@@ -417,6 +418,7 @@ impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStore<S, LS> {
     }
 
     async fn write_chunk(
+        metrics: &KvLogStoreMetrics,
         serde: &LogStoreRowSerde,
         start_seq_id: SeqIdType,
         end_seq_id: SeqIdType,
@@ -424,10 +426,33 @@ impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStore<S, LS> {
         chunk: StreamChunk,
         state_store: &mut LS,
     ) -> StreamExecutorResult<()> {
-        let mut buffer = buffer.lock();
-        buffer
-            .add_or_flush_chunk(serde, start_seq_id, end_seq_id, chunk, state_store)
-            .await?;
+        let chunk_to_flush = {
+            let mut buffer = buffer.lock();
+            buffer.add_or_flush_chunk(serde, start_seq_id, end_seq_id, chunk, state_store)
+        };
+        match chunk_to_flush {
+            None => {}
+            Some(chunk_to_flush) => {
+                let new_vnode_bitmap = flush_chunk(
+                    metrics,
+                    serde,
+                    start_seq_id,
+                    end_seq_id,
+                    state_store,
+                    chunk_to_flush,
+                )
+                .await?;
+                {
+                    let mut buffer = buffer.lock();
+                    buffer.add_flushed_item_to_buffer(
+                        start_seq_id,
+                        end_seq_id,
+                        new_vnode_bitmap,
+                        state_store.epoch(),
+                    );
+                }
+            }
+        }
         Ok(())
     }
 }
@@ -439,56 +464,51 @@ struct SyncedLogStoreBuffer {
     metrics: KvLogStoreMetrics,
 }
 
+async fn flush_chunk(
+    metrics: &KvLogStoreMetrics,
+    serde: &LogStoreRowSerde,
+    start_seq_id: SeqIdType,
+    end_seq_id: SeqIdType,
+    state_store: &mut impl LocalStateStore,
+    chunk: StreamChunk,
+) -> StreamExecutorResult<Bitmap> {
+    let epoch = state_store.epoch();
+    let mut vnode_bitmap_builder = BitmapBuilder::zeroed(serde.vnodes().len());
+    let mut flush_info = FlushInfo::new();
+    for (i, (op, row)) in chunk.rows().enumerate() {
+        let seq_id = start_seq_id + (i as SeqIdType);
+        assert!(seq_id <= end_seq_id);
+        let (vnode, key, value) = serde.serialize_data_row(epoch, seq_id, op, row);
+        vnode_bitmap_builder.set(vnode.to_index(), true);
+        flush_info.flush_one(key.estimated_size() + value.estimated_size());
+        state_store.insert(key, value, None)?;
+    }
+    flush_info.report(metrics);
+    state_store.flush().await?;
+
+    Ok(vnode_bitmap_builder.finish())
+}
+
 impl SyncedLogStoreBuffer {
-    async fn add_or_flush_chunk(
+    fn add_or_flush_chunk(
         &mut self,
         serde: &LogStoreRowSerde,
         start_seq_id: SeqIdType,
         end_seq_id: SeqIdType,
         chunk: StreamChunk,
         state_store: &mut impl LocalStateStore,
-    ) -> StreamExecutorResult<()> {
+    ) -> Option<StreamChunk> {
         let current_size = self.buffer.len();
         let chunk_size = chunk.cardinality();
         let epoch = state_store.epoch();
 
         let should_flush_chunk = current_size + chunk_size >= self.max_size;
         if should_flush_chunk {
-            let new_vnode_bitmap = self
-                .flush_chunk(serde, start_seq_id, end_seq_id, epoch, state_store, chunk)
-                .await?;
-            self.add_flushed_item_to_buffer(start_seq_id, end_seq_id, new_vnode_bitmap, epoch)
+            Some(chunk)
         } else {
             self.add_chunk_to_buffer(chunk, start_seq_id, end_seq_id, epoch);
+            None
         }
-        Ok(())
-    }
-
-    async fn flush_chunk(
-        &mut self,
-        serde: &LogStoreRowSerde,
-        start_seq_id: SeqIdType,
-        end_seq_id: SeqIdType,
-        epoch: u64,
-        state_store: &mut impl LocalStateStore,
-        chunk: StreamChunk,
-    ) -> StreamExecutorResult<Bitmap> {
-        // flush chunk to state store
-        // TODO(kwannoel): Should refactor this into its own function
-        let mut vnode_bitmap_builder = BitmapBuilder::zeroed(serde.vnodes().len());
-        let mut flush_info = FlushInfo::new();
-        for (i, (op, row)) in chunk.rows().enumerate() {
-            let seq_id = start_seq_id + (i as SeqIdType);
-            assert!(seq_id <= end_seq_id);
-            let (vnode, key, value) = serde.serialize_data_row(epoch, seq_id, op, row);
-            vnode_bitmap_builder.set(vnode.to_index(), true);
-            flush_info.flush_one(key.estimated_size() + value.estimated_size());
-            state_store.insert(key, value, None)?;
-        }
-        flush_info.report(&self.metrics);
-        state_store.flush().await?;
-
-        Ok(vnode_bitmap_builder.finish())
     }
 
     /// After flushing a chunk, we will preserve a `FlushedItem` inside the buffer.
