@@ -365,6 +365,7 @@ impl ConnectorSourceWorkerHandle {
     }
 
     pub fn drop_fragments(&self, fragment_ids: Vec<FragmentId>) {
+        tracing::debug!("drop_fragments: {:?}", fragment_ids);
         if let Err(e) = self.send_command(SourceWorkerCommand::DropFragments(fragment_ids)) {
             // ignore drop fragment error, just log it
             tracing::warn!(error = %e.as_report(), "failed to drop fragments");
@@ -372,6 +373,7 @@ impl ConnectorSourceWorkerHandle {
     }
 
     pub fn finish_backfill(&self, fragment_ids: Vec<FragmentId>) {
+        tracing::debug!("finish_backfill: {:?}", fragment_ids);
         if let Err(e) = self.send_command(SourceWorkerCommand::FinishBackfill(fragment_ids)) {
             // ignore error, just log it
             tracing::warn!(error = %e.as_report(), "failed to finish backfill");
@@ -379,6 +381,7 @@ impl ConnectorSourceWorkerHandle {
     }
 
     pub fn terminate(&self, dropped_fragments: Option<BTreeSet<FragmentId>>) {
+        tracing::debug!("terminate: {:?}", dropped_fragments);
         if let Some(dropped_fragments) = dropped_fragments {
             self.drop_fragments(dropped_fragments.into_iter().collect());
         }

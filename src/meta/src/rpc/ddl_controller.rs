@@ -977,6 +977,7 @@ impl DdlController {
                     .await?;
                 if aborted {
                     tracing::warn!(id = job_id, "aborted streaming job");
+                    // FIXME: might also need other cleanup here
                     if let Some(source_id) = source_id {
                         self.source_manager
                             .apply_source_change(SourceChange::DropSource {

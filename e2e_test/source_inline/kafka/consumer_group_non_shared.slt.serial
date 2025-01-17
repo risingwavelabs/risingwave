@@ -48,8 +48,11 @@ c
 
 # There are 2 consumer groups, 1 for batch query (not listed below), 1 for MV.
 # All of them are "Empty" state with 0 members, because we manually `assign` partitions to them.
+# At the beginning, the MV's consumer group will not occur. They will be created after committing offset to Kafka.
+# (enable.auto.commit defaults to true, and auto.commit.interval.ms defaults to 5s)
+sleep 5s
 
-system ok
+system ok retry 3 backoff 5s
 ./e2e_test/source_inline/kafka/consumer_group.mjs --mv mv list-members
 ----
 0

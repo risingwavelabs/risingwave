@@ -22,7 +22,7 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use rdkafka::config::RDKafkaLogLevel;
-use rdkafka::consumer::{CommitMode, Consumer, StreamConsumer};
+use rdkafka::consumer::{Consumer, StreamConsumer};
 use rdkafka::error::KafkaError;
 use rdkafka::{ClientConfig, Message, Offset, TopicPartitionList};
 use risingwave_common::metrics::LabelGuardedIntGauge;
@@ -141,10 +141,6 @@ impl SplitReader for KafkaSplitReader {
         tracing::debug!("backfill_info: {:?}", backfill_info);
 
         consumer.assign(&tpl)?;
-        // commit the offsets to make the consumer group available immediately.
-        // (Otherwise we may fail to list or delete consumer groups)
-        tpl.set_all_offsets(Offset::Offset(0))?;
-        consumer.commit(&tpl, CommitMode::Sync).await?;
 
         // The two parameters below are only used by developers for performance testing purposes,
         // so we panic here on purpose if the input is not correctly recognized.
@@ -331,5 +327,6 @@ impl KafkaSplitReader {
             // yield in the outer loop so that we can always guarantee that some messages are read
             // every `MAX_CHUNK_SIZE`.
         }
+        tracing::info!("kafka reader finished");
     }
 }

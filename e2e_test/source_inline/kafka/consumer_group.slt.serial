@@ -54,20 +54,9 @@ EOF
 
 # There are 2 consumer groups, 1 for batch query (not listed below), 1 for Source.
 # All of them are "Empty" state with 0 members, because we manually `assign` partitions to them.
-
-
-system ok
-./e2e_test/source_inline/kafka/consumer_group.mjs --mv mv list-members
-----
-0
-
-
-# The lag for MV's group is 0.
-system ok
-./e2e_test/source_inline/kafka/consumer_group.mjs --mv mv list-lags
-----
-0
-
+# At the beginning, the Source's consumer group will not occur. They will be created after committing offset to Kafka.
+# (enable.auto.commit defaults to true, and auto.commit.interval.ms defaults to 5s)
+sleep 5s
 
 # Test delete consumer group on drop
 

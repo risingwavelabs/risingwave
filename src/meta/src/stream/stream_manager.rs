@@ -41,7 +41,7 @@ use crate::manager::{
     MetaSrvEnv, MetadataManager, NotificationVersion, StreamingJob, StreamingJobType,
 };
 use crate::model::{ActorId, FragmentId, StreamJobFragments, TableParallelism};
-use crate::stream::SourceManagerRef;
+use crate::stream::{SourceChange, SourceManagerRef};
 use crate::{MetaError, MetaResult};
 
 pub type GlobalStreamManagerRef = Arc<GlobalStreamManager>;
@@ -392,6 +392,10 @@ impl GlobalStreamManager {
                 .await?,
         );
 
+        let source_change = SourceChange::CreateJobFinished {
+            finished_backfill_fragments: stream_job_fragments.source_backfill_fragments()?,
+        };
+
         let info = CreateStreamingJobCommandInfo {
             stream_job_fragments,
             upstream_root_actors,
@@ -444,6 +448,7 @@ impl GlobalStreamManager {
             .metadata_manager
             .wait_streaming_job_finished(streaming_job.id() as _)
             .await?;
+        self.source_manager.apply_source_change(source_change).await;
         tracing::debug!(?streaming_job, "stream job finish");
         Ok(version)
     }
