@@ -18,7 +18,7 @@
 //!
 //! 1. Upstream: upstream message source
 //!
-//!    It will write stream messages to the log store buffer. e.g. Message::Barrier, Message::Chunk, ...
+//!    It will write stream messages to the log store buffer. e.g. `Message::Barrier`, `Message::Chunk`, ...
 //!    When writing a stream chunk, if the log store buffer is full, it will:
 //!      a. Flush the buffer to the log store.
 //!      b. Convert the stream chunk into a reference (`LogStoreBufferItem::Flushed`)
@@ -44,7 +44,7 @@
 //!    Finally we will pop the earliest item in the buffer.
 //!    - If it's a chunk yield it.
 //!    - If it's a watermark yield it.
-//!    - If it's a flushed chunk reference (LogStoreBufferItem::Flushed),
+//!    - If it's a flushed chunk reference (`LogStoreBufferItem::Flushed`),
 //!      we will read the corresponding chunks in the log store.
 //!      This is done by constructing a `flushed_chunk_future` which will read the log store
 //!      using the `seq_id`.
@@ -115,6 +115,7 @@ struct SyncedKvLogStore<S: StateStore, LS: LocalStateStore> {
 }
 // Stream interface
 impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStore<S, LS> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         table_id: TableId,
         read_metrics: KvLogStoreReadMetrics,
@@ -222,6 +223,7 @@ impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStore<S, LS> {
 
 // Read methods
 impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStore<S, LS> {
+    #[allow(clippy::too_many_arguments)]
     async fn try_next_item(
         table_id: TableId,
         read_metrics: &KvLogStoreReadMetrics,
@@ -258,7 +260,7 @@ impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStore<S, LS> {
         {
             return Ok(Some(chunk));
         }
-        return Ok(None);
+        Ok(None)
     }
 
     async fn try_next_state_store_item(
@@ -382,7 +384,7 @@ impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStore<S, LS> {
         // As an optimization we can also change it into flushed items instead.
         // This will reduce memory consumption of logstore.
 
-        flush_info.report(&metrics);
+        flush_info.report(metrics);
 
         // Apply truncation
         let watermark = truncation_offset.map(|truncation_offset| {
@@ -428,7 +430,7 @@ impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStore<S, LS> {
     ) -> StreamExecutorResult<()> {
         let chunk_to_flush = {
             let mut buffer = buffer.lock();
-            buffer.add_or_flush_chunk(serde, start_seq_id, end_seq_id, chunk, state_store)
+            buffer.add_or_flush_chunk(start_seq_id, end_seq_id, chunk, state_store)
         };
         match chunk_to_flush {
             None => {}
@@ -492,7 +494,6 @@ async fn flush_chunk(
 impl SyncedLogStoreBuffer {
     fn add_or_flush_chunk(
         &mut self,
-        serde: &LogStoreRowSerde,
         start_seq_id: SeqIdType,
         end_seq_id: SeqIdType,
         chunk: StreamChunk,
