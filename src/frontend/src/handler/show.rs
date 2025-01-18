@@ -431,13 +431,13 @@ pub async fn handle_show_object(
                     };
                     let source_names = schema
                         .get_source_ids_by_connection(c.id)
-                        .unwrap_or(Vec::new())
+                        .unwrap_or_default()
                         .into_iter()
                         .filter_map(|sid| schema.get_source_by_id(&sid).map(|catalog| catalog.name.as_str()))
                         .collect_vec();
                     let sink_names = schema
                         .get_sink_ids_by_connection(c.id)
-                        .unwrap_or(Vec::new())
+                        .unwrap_or_default()
                         .into_iter()
                         .filter_map(|sid| schema.get_sink_by_id(&sid).map(|catalog| catalog.name.as_str()))
                         .collect_vec();
