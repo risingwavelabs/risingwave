@@ -58,6 +58,7 @@ use sea_orm::{
 use serde::{Deserialize, Serialize};
 use tracing::debug;
 
+use crate::barrier::SnapshotBackfillInfo;
 use crate::controller::catalog::{CatalogController, CatalogControllerInner};
 use crate::controller::utils::{
     get_actor_dispatchers, get_fragment_mappings, rebuild_fragment_mapping_from_actors,
@@ -1297,7 +1298,8 @@ impl CatalogController {
     pub async fn fill_snapshot_backfill_epoch(
         &self,
         fragment_ids: impl Iterator<Item = FragmentId>,
-        upstream_mv_snapshot_epoch: &HashMap<risingwave_common::catalog::TableId, Option<u64>>,
+        snapshot_backfill_info: Option<&SnapshotBackfillInfo>,
+        cross_db_snapshot_backfill_info: &SnapshotBackfillInfo,
     ) -> MetaResult<()> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
@@ -1307,7 +1309,11 @@ impl CatalogController {
                 .await?
                 .context(format!("fragment {} not found", fragment_id))?;
             let mut node = fragment.stream_node.to_protobuf();
-            if crate::stream::fill_snapshot_backfill_epoch(&mut node, upstream_mv_snapshot_epoch)? {
+            if crate::stream::fill_snapshot_backfill_epoch(
+                &mut node,
+                snapshot_backfill_info,
+                cross_db_snapshot_backfill_info,
+            )? {
                 let node = StreamNode::from(&node);
                 Fragment::update(fragment::ActiveModel {
                     fragment_id: Set(fragment_id),

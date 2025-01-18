@@ -290,6 +290,7 @@ pub enum Command {
     CreateStreamingJob {
         info: CreateStreamingJobCommandInfo,
         job_type: CreateStreamingJobType,
+        cross_db_snapshot_backfill_info: SnapshotBackfillInfo,
     },
     MergeSnapshotBackfillStreamingJobs(
         HashMap<TableId, (SnapshotBackfillInfo, InflightStreamingJobInfo)>,
@@ -376,7 +377,7 @@ impl Command {
                     .map(|fragment_id| (*fragment_id, CommandFragmentChanges::RemoveFragment))
                     .collect(),
             ),
-            Command::CreateStreamingJob { info, job_type } => {
+            Command::CreateStreamingJob { info, job_type, .. } => {
                 assert!(
                     !matches!(job_type, CreateStreamingJobType::SnapshotBackfill(_)),
                     "should handle fragment changes separately for snapshot backfill"
@@ -549,26 +550,27 @@ impl CommandContext {
         let (sst_to_context, synced_ssts, new_table_watermarks, old_value_ssts) =
             collect_resp_info(resps);
 
-        let new_table_fragment_infos = if let Some(Command::CreateStreamingJob { info, job_type }) =
-            &self.command
-            && !matches!(job_type, CreateStreamingJobType::SnapshotBackfill(_))
-        {
-            let table_fragments = &info.stream_job_fragments;
-            let mut table_ids: HashSet<_> = table_fragments
-                .internal_table_ids()
-                .into_iter()
-                .map(TableId::new)
-                .collect();
-            if let Some(mv_table_id) = table_fragments.mv_table_id() {
-                table_ids.insert(TableId::new(mv_table_id));
-            }
+        let new_table_fragment_infos =
+            if let Some(Command::CreateStreamingJob { info, job_type, .. }) = &self.command
+                && !matches!(job_type, CreateStreamingJobType::SnapshotBackfill(_))
+            {
+                let table_fragments = &info.stream_job_fragments;
+                let mut table_ids: HashSet<_> = table_fragments
+                    .internal_table_ids()
+                    .into_iter()
+                    .map(TableId::new)
+                    .collect();
+                if let Some(mv_table_id) = table_fragments.mv_table_id() {
+                    table_ids.insert(TableId::new(mv_table_id));
+                }
 
-            vec![NewTableFragmentInfo { table_ids }]
-        } else {
-            vec![]
-        };
+                vec![NewTableFragmentInfo { table_ids }]
+            } else {
+                vec![]
+            };
 
         let mut mv_log_store_truncate_epoch = HashMap::new();
+        // TODO: may collect cross db snapshot backfill
         let mut update_truncate_epoch =
             |table_id: TableId, truncate_epoch| match mv_log_store_truncate_epoch
                 .entry(table_id.table_id)
@@ -685,6 +687,7 @@ impl Command {
                             ..
                         },
                     job_type,
+                    ..
                 } => {
                     let actor_dispatchers = dispatchers
                         .iter()
@@ -954,7 +957,7 @@ impl Command {
 
     pub fn actors_to_create(&self) -> Option<HashMap<WorkerId, Vec<StreamActor>>> {
         match self {
-            Command::CreateStreamingJob { info, job_type } => {
+            Command::CreateStreamingJob { info, job_type, .. } => {
                 let mut map = match job_type {
                     CreateStreamingJobType::Normal => HashMap::new(),
                     CreateStreamingJobType::SinkIntoTable(replace_table) => {
