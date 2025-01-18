@@ -14,6 +14,7 @@
 
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
 use risingwave_common::util::value_encoding::BasicSerde;
@@ -25,7 +26,7 @@ use super::*;
 use crate::common::table::state_table::{ReplicatedStateTable, StateTable};
 use crate::executor::{
     ArrangementBackfillExecutor, BackfillExecutor, ChainExecutor, RearrangedChainExecutor,
-    TroublemakerExecutor,
+    TroublemakerExecutor, UpstreamTableExecutor,
 };
 
 pub struct StreamScanExecutorBuilder;
@@ -142,6 +143,56 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                 } else {
                     new_executor!(BasicSerde)
                 }
+            }
+            StreamScanType::CrossDbSnapshotBackfill => {
+                let table_desc: &StorageTableDesc = node.get_table_desc()?;
+
+                let output_indices = node
+                    .output_indices
+                    .iter()
+                    .map(|&i| i as usize)
+                    .collect_vec();
+
+                let column_ids = node
+                    .upstream_column_ids
+                    .iter()
+                    .map(ColumnId::from)
+                    .collect_vec();
+
+                let vnodes = params.vnode_bitmap.map(Arc::new);
+                let barrier_rx = params
+                    .local_barrier_manager
+                    .subscribe_barrier(params.actor_context.id);
+
+                let upstream_table = StorageTable::new_partial(
+                    state_store.clone(),
+                    column_ids,
+                    vnodes.clone(),
+                    table_desc,
+                );
+
+                let state_table = node.get_state_table()?;
+                let state_table =
+                    StateTable::from_table_catalog(state_table, state_store.clone(), vnodes).await;
+
+                let chunk_size = params.env.config().developer.chunk_size;
+                let snapshot_epoch = node
+                    .snapshot_backfill_epoch
+                    .ok_or_else(|| anyhow!("snapshot epoch not set for {:?}", node))?;
+
+                UpstreamTableExecutor::new(
+                    upstream_table.table_id(),
+                    upstream_table,
+                    state_table,
+                    snapshot_epoch,
+                    output_indices,
+                    chunk_size,
+                    node.rate_limit.into(),
+                    params.actor_context,
+                    barrier_rx,
+                    progress,
+                )
+                .boxed()
             }
             StreamScanType::SnapshotBackfill => {
                 unreachable!("SnapshotBackfillExecutor is handled specially when in `StreamActorManager::create_nodes_inner`")
