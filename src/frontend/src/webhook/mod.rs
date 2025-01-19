@@ -64,6 +64,7 @@ pub(super) mod handlers {
     use risingwave_pb::batch_plan::FastInsertNode;
     use risingwave_pb::catalog::WebhookSourceInfo;
     use risingwave_pb::plan_common::DefaultColumns;
+    use risingwave_pb::task_service::fast_insert_response;
     // use risingwave_sqlparser::ast::{Query, SetExpr, Statement, Value, Values};
     use utils::{header_map_to_json, verify_signature};
 
@@ -133,10 +134,13 @@ pub(super) mod handlers {
         }
 
         let mut builder = JsonbArrayBuilder::with_type(1, DataType::Jsonb);
-        // TODO(kexiang): handle errors
-        let json_value = Value::from_text(&body.to_vec()).unwrap();
+        let json_value = Value::from_text(&body.to_vec()).map_err(|e| {
+            err(
+                anyhow!(e).context("Failed to parse body"),
+                StatusCode::UNPROCESSABLE_ENTITY,
+            )
+        })?;
         let jsonb_val = JsonbVal::from(json_value);
-        // Add 4 ListValues to ArrayBuilder
         builder.append(Some(jsonb_val.as_scalar_ref()));
 
         // Use builder to obtain a single (List) column DataChunk
@@ -150,8 +154,14 @@ pub(super) mod handlers {
             session.clone(),
         );
         let res = execution.my_execute().await.unwrap();
-
-        Ok(())
+        if res.status == fast_insert_response::Status::Succeeded as i32 {
+            Ok(())
+        } else {
+            Err(err(
+                anyhow!("Failed to fast insert: {}", res.error_message),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ))
+        }
     }
 
     async fn acquire_table_info(

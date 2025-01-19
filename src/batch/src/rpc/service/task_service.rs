@@ -18,8 +18,8 @@ use risingwave_common::util::tracing::TracingContext;
 use risingwave_pb::batch_plan::{FastInsertNode, TaskOutputId};
 use risingwave_pb::task_service::task_service_server::TaskService;
 use risingwave_pb::task_service::{
-    CancelTaskRequest, CancelTaskResponse, CreateTaskRequest, ExecuteRequest, FastInsertRequest,
-    FastInsertResponse, GetDataResponse, TaskInfoResponse,
+    fast_insert_response, CancelTaskRequest, CancelTaskResponse, CreateTaskRequest, ExecuteRequest,
+    FastInsertRequest, FastInsertResponse, GetDataResponse, TaskInfoResponse,
 };
 use risingwave_storage::dispatch_state_store;
 use thiserror_ext::AsReport;
@@ -132,9 +132,19 @@ impl TaskService for BatchServiceImpl {
         let res = self.do_fast_insert(insert_node, req.wait_epoch).await;
         match res {
             Ok(_) => Ok(Response::new(FastInsertResponse {
-                error_message: String::from("success"),
+                status: fast_insert_response::Status::Succeeded.into(),
+                error_message: "".to_string(),
             })),
-            Err(e) => Err(e.into()),
+            Err(e) => match e {
+                BatchError::Dml(e) => Ok(Response::new(FastInsertResponse {
+                    status: fast_insert_response::Status::DmlFailed.into(),
+                    error_message: format!("{}", e.as_report()),
+                })),
+                _ => {
+                    error!(error = %e.as_report(), "failed to fast insert");
+                    Err(e.into())
+                }
+            },
         }
     }
 }

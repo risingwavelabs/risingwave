@@ -22,7 +22,7 @@ use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::hash::WorkerSlotMapping;
 use risingwave_pb::batch_plan::FastInsertNode;
 use risingwave_pb::common::WorkerNode;
-use risingwave_pb::task_service::FastInsertRequest;
+use risingwave_pb::task_service::{FastInsertRequest, FastInsertResponse};
 
 use crate::catalog::TableId;
 use crate::scheduler::{SchedulerError, SchedulerResult};
@@ -55,7 +55,7 @@ impl FastInsertExecution {
         }
     }
 
-    pub async fn my_execute(self) -> SchedulerResult<()> {
+    pub async fn my_execute(self) -> SchedulerResult<FastInsertResponse> {
         let workers = self.choose_worker(
             &TableId::new(self.fast_insert_node.table_id),
             self.fast_insert_node.session_id,
@@ -67,8 +67,7 @@ impl FastInsertExecution {
             wait_epoch: self.wait_for_persistence,
         };
         let response = client.fast_insert(request).await?;
-        println!("WKXLOG response: {:?}", response);
-        Ok(())
+        Ok(response)
     }
 
     #[inline(always)]

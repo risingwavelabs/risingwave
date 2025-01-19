@@ -50,8 +50,13 @@ message FastInsertRequest {
 }
 
 message FastInsertResponse {
-  // Optional error message for failed task.
-  string error_message = 1;
+  enum Status {
+    UNSPECIFIED = 0;
+    SUCCEEDED = 1;
+    DML_FAILED = 2;
+  }
+  Status status = 1;
+  string error_message = 2;
 }
 
 message CancelTaskRequest {
