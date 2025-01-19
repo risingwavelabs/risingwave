@@ -209,7 +209,6 @@ mod tests {
 
         let json_value = json!(header_map);
         let jsonb_val = JsonbVal::from(json_value);
-        // Add 4 ListValues to ArrayBuilder
         builder.append(Some(jsonb_val.as_scalar_ref()));
 
         // Use builder to obtain a single (List) column DataChunk

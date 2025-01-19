@@ -108,8 +108,6 @@ impl LocalQueryExecution {
         let plan_fragment = self.create_plan_fragment()?;
         let plan_node = plan_fragment.root.unwrap();
 
-        // println!("WKXLOG plan_node: {:?}", plan_node);
-
         let executor = ExecutorBuilder::new(
             &plan_node,
             &task_id,
@@ -122,8 +120,6 @@ impl LocalQueryExecution {
         // The following loop can be slow.
         // Release potential large object in Query and PlanNode early.
         drop(self);
-
-        // println!("WKXLOG executor: {:?}", executor);
 
         #[for_await]
         for chunk in executor.execute() {
