@@ -90,6 +90,7 @@ pub struct StreamingJobInfo {
     pub job_status: JobStatus,
     pub parallelism: StreamingParallelism,
     pub max_parallelism: i32,
+    pub specific_resource_group: Option<String>,
 }
 
 impl CatalogControllerInner {
@@ -749,6 +750,7 @@ impl CatalogController {
                 streaming_job::Column::JobStatus,
                 streaming_job::Column::Parallelism,
                 streaming_job::Column::MaxParallelism,
+                streaming_job::Column::SpecificResourceGroup,
             ])
             .into_model()
             .all(&inner.db)

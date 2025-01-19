@@ -243,10 +243,10 @@ impl StreamManagerService for StreamServiceImpl {
     }
 
     #[cfg_attr(coverage, coverage(off))]
-    async fn list_table_fragment_states(
+    async fn list_streaming_job_states(
         &self,
-        _request: Request<ListTableFragmentStatesRequest>,
-    ) -> Result<Response<ListTableFragmentStatesResponse>, Status> {
+        _request: Request<ListStreamingJobStatesRequest>,
+    ) -> Result<Response<ListStreamingJobStatesResponse>, Status> {
         let job_infos = self
             .metadata_manager
             .catalog_controller
@@ -258,8 +258,10 @@ impl StreamManagerService for StreamServiceImpl {
                 |StreamingJobInfo {
                      job_id,
                      job_status,
+                     name,
                      parallelism,
                      max_parallelism,
+                     specific_resource_group,
                      ..
                  }| {
                     let parallelism = match parallelism {
@@ -268,17 +270,19 @@ impl StreamManagerService for StreamServiceImpl {
                         StreamingParallelism::Fixed(n) => model::TableParallelism::Fixed(n as _),
                     };
 
-                    list_table_fragment_states_response::TableFragmentState {
+                    list_streaming_job_states_response::StreamingJobState {
                         table_id: job_id as _,
+                        name,
                         state: PbState::from(job_status) as _,
                         parallelism: Some(parallelism.into()),
                         max_parallelism: max_parallelism as _,
+                        specific_resource_group,
                     }
                 },
             )
             .collect_vec();
 
-        Ok(Response::new(ListTableFragmentStatesResponse { states }))
+        Ok(Response::new(ListStreamingJobStatesResponse { states }))
     }
 
     #[cfg_attr(coverage, coverage(off))]

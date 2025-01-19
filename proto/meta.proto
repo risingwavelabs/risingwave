@@ -232,16 +232,18 @@ message ListTableFragmentsResponse {
   map<uint32, TableFragmentInfo> table_fragments = 1;
 }
 
-message ListTableFragmentStatesRequest {}
+message ListStreamingJobStatesRequest {}
 
-message ListTableFragmentStatesResponse {
-  message TableFragmentState {
+message ListStreamingJobStatesResponse {
+  message StreamingJobState {
     uint32 table_id = 1;
     TableFragments.State state = 2;
     TableParallelism parallelism = 3;
     uint32 max_parallelism = 4;
+    string name = 5;
+    optional string specific_resource_group = 6;
   }
-  repeated TableFragmentState states = 1;
+  repeated StreamingJobState states = 1;
 }
 
 message ListFragmentDistributionRequest {}
@@ -333,7 +335,7 @@ service StreamManagerService {
   rpc Resume(ResumeRequest) returns (ResumeResponse);
   rpc CancelCreatingJobs(CancelCreatingJobsRequest) returns (CancelCreatingJobsResponse);
   rpc ListTableFragments(ListTableFragmentsRequest) returns (ListTableFragmentsResponse);
-  rpc ListTableFragmentStates(ListTableFragmentStatesRequest) returns (ListTableFragmentStatesResponse);
+  rpc ListStreamingJobStates(ListStreamingJobStatesRequest) returns (ListStreamingJobStatesResponse);
   rpc ListFragmentDistribution(ListFragmentDistributionRequest) returns (ListFragmentDistributionResponse);
   rpc ListActorStates(ListActorStatesRequest) returns (ListActorStatesResponse);
   rpc ListActorSplits(ListActorSplitsRequest) returns (ListActorSplitsResponse);

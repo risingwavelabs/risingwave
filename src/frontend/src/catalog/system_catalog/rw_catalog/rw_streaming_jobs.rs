@@ -19,29 +19,31 @@ use crate::catalog::system_catalog::{extract_parallelism_from_table_state, SysCa
 use crate::error::Result;
 
 #[derive(Fields)]
-struct RwTableFragment {
+struct RwStreamingJob {
     #[primary_key]
-    table_id: i32,
+    job: i32,
+    name: String,
     status: String,
     parallelism: String,
     max_parallelism: i32,
+    specific_resource_group: Option<String>,
 }
 
-#[system_catalog(table, "rw_catalog.rw_table_fragments")]
-async fn read_rw_table_fragments_info(
-    reader: &SysCatalogReaderImpl,
-) -> Result<Vec<RwTableFragment>> {
+#[system_catalog(table, "rw_catalog.rw_streaming_jobs")]
+async fn read_rw_streaming_jobs(reader: &SysCatalogReaderImpl) -> Result<Vec<RwStreamingJob>> {
     let states = reader.meta_client.list_streaming_job_states().await?;
 
     Ok(states
         .into_iter()
         .map(|state| {
             let parallelism = extract_parallelism_from_table_state(&state);
-            RwTableFragment {
-                table_id: state.table_id as i32,
+            RwStreamingJob {
+                job: state.table_id as i32,
                 status: state.state().as_str_name().into(),
+                name: state.name,
                 parallelism: parallelism.to_uppercase(),
                 max_parallelism: state.max_parallelism as i32,
+                specific_resource_group: state.specific_resource_group,
             }
         })
         .collect())
