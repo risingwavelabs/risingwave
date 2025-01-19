@@ -1,40 +1,8 @@
-version: '3.1'
+include:
+  - ../../docker/docker-compose.yml
+  - ../mongodb/docker-compose.yaml
 
 services:
-  risingwave-standalone:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: risingwave-standalone
-  postgres-0:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: postgres-0
-  grafana-0:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: grafana-0
-  minio-0:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: minio-0
-  prometheus-0:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: prometheus-0
-
-  message_queue:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: message_queue
-
-  mongodb:
-    extends: ../mongodb/docker-compose.yaml
-    service: mongodb
-
-  mongodb-setup:
-    extends: ../mongodb/docker-compose.yaml
-    service: mongodb-setup
-
   debezium:
     image: debezium/connect:1.9
     container_name: debezium
@@ -61,7 +29,6 @@ services:
     extends: ../mongodb/docker-compose.yaml
     service: random_data_generator
 
-
   register-mongodb-connector:
     image: curlimages/curl:7.79.1
     container_name: register-mongodb-connector
@@ -82,10 +49,3 @@ services:
       - "8000:8000"
     environment:
       CONNECT_URL: http://debezium:8083
-
-volumes:
-  mongodb_data:
-  message_queue:
-    external: false
-  debezium:
-    external: false

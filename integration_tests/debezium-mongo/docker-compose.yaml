@@ -1,8 +1,6 @@
-version: "3.1"
-
 include:
-  - ../../docker/docker-compose.yml # 引入外部 Compose 文件
-  - ../mongodb/docker-compose.yaml # 引入 MongoDB 相关配置
+  - ../../docker/docker-compose.yml
+  - ../mongodb/docker-compose.yaml
 
 services:
   debezium:
