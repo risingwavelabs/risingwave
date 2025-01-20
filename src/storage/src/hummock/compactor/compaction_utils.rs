@@ -27,7 +27,6 @@ use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::TableStatsMap;
-use risingwave_hummock_sdk::table_watermark::{TableWatermarks, WatermarkSerdeType};
 use risingwave_hummock_sdk::{can_concat, EpochWithGap, KeyComparator};
 use risingwave_pb::hummock::compact_task::PbTaskType;
 use risingwave_pb::hummock::{BloomFilterType, PbLevelType, PbTableSchema};
@@ -41,7 +40,8 @@ use crate::hummock::compactor::{
 };
 use crate::hummock::iterator::{
     Forward, HummockIterator, MergeIterator, NonPkPrefixSkipWatermarkIterator,
-    SkipWatermarkIterator, UserIterator,
+    NonPkPrefixSkipWatermarkState, PkPrefixSkipWatermarkIterator, PkPrefixSkipWatermarkState,
+    UserIterator,
 };
 use crate::hummock::multi_builder::TableBuilderFactory;
 use crate::hummock::sstable::DEFAULT_ENTRY_SIZE;
@@ -367,15 +367,20 @@ pub async fn check_compaction_result(
     }
 
     let iter = MergeIterator::for_compactor(table_iters);
-    let (pk_watermarks, non_pk_prefix_watermarks) = split_watermark_from_task(compact_task);
     let left_iter = {
-        let skip_watermark_iter =
-            SkipWatermarkIterator::from_safe_epoch_watermarks(iter, pk_watermarks.clone());
+        let skip_watermark_iter = PkPrefixSkipWatermarkIterator::new(
+            iter,
+            PkPrefixSkipWatermarkState::from_safe_epoch_watermarks(
+                compact_task.pk_prefix_table_watermarks.clone(),
+            ),
+        );
 
-        let combine_iter = NonPkPrefixSkipWatermarkIterator::from_safe_epoch_watermarks(
+        let combine_iter = NonPkPrefixSkipWatermarkIterator::new(
             skip_watermark_iter,
-            non_pk_prefix_watermarks.clone(),
-            compaction_catalog_agent_ref.clone(),
+            NonPkPrefixSkipWatermarkState::from_safe_epoch_watermarks(
+                compact_task.non_pk_prefix_table_watermarks.clone(),
+                compaction_catalog_agent_ref.clone(),
+            ),
         );
 
         UserIterator::new(
@@ -395,13 +400,19 @@ pub async fn check_compaction_result(
         context.storage_opts.compactor_iter_max_io_retry_times,
     );
     let right_iter = {
-        let skip_watermark_iter =
-            SkipWatermarkIterator::from_safe_epoch_watermarks(iter, pk_watermarks);
+        let skip_watermark_iter = PkPrefixSkipWatermarkIterator::new(
+            iter,
+            PkPrefixSkipWatermarkState::from_safe_epoch_watermarks(
+                compact_task.pk_prefix_table_watermarks.clone(),
+            ),
+        );
 
-        let combine_iter = NonPkPrefixSkipWatermarkIterator::from_safe_epoch_watermarks(
+        let combine_iter = NonPkPrefixSkipWatermarkIterator::new(
             skip_watermark_iter,
-            non_pk_prefix_watermarks,
-            compaction_catalog_agent_ref,
+            NonPkPrefixSkipWatermarkState::from_safe_epoch_watermarks(
+                compact_task.non_pk_prefix_table_watermarks.clone(),
+                compaction_catalog_agent_ref,
+            ),
         );
 
         UserIterator::new(
@@ -662,24 +673,4 @@ pub fn calculate_task_parallelism_impl(
 ) -> usize {
     let parallelism = compaction_size.div_ceil(parallel_compact_size);
     worker_num.min(parallelism.min(max_sub_compaction as u64) as usize)
-}
-
-pub fn split_watermark_from_task(
-    compact_task: &CompactTask,
-) -> (
-    BTreeMap<u32, TableWatermarks>,
-    BTreeMap<u32, TableWatermarks>,
-) {
-    let mut pk_watermarks = BTreeMap::default();
-    let mut non_pk_prefix_watermarks = BTreeMap::default();
-
-    for (table_id, watermark) in &compact_task.table_watermarks {
-        if let WatermarkSerdeType::PkPrefix = watermark.watermark_type {
-            pk_watermarks.insert(*table_id, watermark.clone());
-        } else {
-            non_pk_prefix_watermarks.insert(*table_id, watermark.clone());
-        }
-    }
-
-    (pk_watermarks, non_pk_prefix_watermarks)
 }

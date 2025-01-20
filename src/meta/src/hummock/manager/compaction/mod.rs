@@ -729,22 +729,6 @@ impl HummockManager {
                 }
             }
 
-            let table_watermarks = version
-                .latest_version()
-                .table_watermarks
-                .iter()
-                .filter_map(|(table_id, table_watermarks)| {
-                    if matches!(
-                        table_watermarks.watermark_type,
-                        WatermarkSerdeType::PkPrefix,
-                    ) {
-                        Some((*table_id, table_watermarks.clone()))
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-
             while let Some(compact_task) = compact_status.get_compact_task(
                 version
                     .latest_version()
@@ -759,7 +743,7 @@ impl HummockManager {
                 selector,
                 &table_id_to_option,
                 developer_config.clone(),
-                &table_watermarks,
+                &version.latest_version().table_watermarks,
                 &version.latest_version().state_table_info,
             ) {
                 let target_level_id = compact_task.input.target_level as u32;
@@ -855,9 +839,20 @@ impl HummockManager {
                         &mut compact_task,
                         group_config.compaction_config.as_ref(),
                     );
-                    compact_task.table_watermarks = version
+                    let (pk_prefix_table_watermarks, non_pk_prefix_table_watermarks) = version
                         .latest_version()
-                        .safe_epoch_table_watermarks(&compact_task.existing_table_ids);
+                        .safe_epoch_table_watermarks(&compact_task.existing_table_ids)
+                        .into_iter()
+                        .partition(|(_table_id, table_watermarke)| {
+                            matches!(
+                                table_watermarke.watermark_type,
+                                WatermarkSerdeType::PkPrefix
+                            )
+                        });
+
+                    compact_task.pk_prefix_table_watermarks = pk_prefix_table_watermarks;
+                    compact_task.non_pk_prefix_table_watermarks = non_pk_prefix_table_watermarks;
+
                     compact_task.table_schemas = compact_task
                         .existing_table_ids
                         .iter()

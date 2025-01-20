@@ -32,12 +32,13 @@ use risingwave_hummock_sdk::{can_concat, compact_task_to_string, EpochWithGap, L
 
 use crate::compaction_catalog_manager::CompactionCatalogAgentRef;
 use crate::hummock::block_stream::BlockDataStream;
-use crate::hummock::compactor::compaction_utils::split_watermark_from_task;
 use crate::hummock::compactor::task_progress::TaskProgress;
 use crate::hummock::compactor::{
     CompactionStatistics, Compactor, CompactorContext, RemoteBuilderFactory, TaskConfig,
 };
-use crate::hummock::iterator::{NonPkPrefixSkipWatermarkState, SkipWatermarkState};
+use crate::hummock::iterator::{
+    NonPkPrefixSkipWatermarkState, PkPrefixSkipWatermarkState, SkipWatermarkState,
+};
 use crate::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFactory};
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
@@ -427,11 +428,12 @@ impl CompactorRunner {
             context.storage_opts.compactor_iter_max_io_retry_times,
         ));
 
-        let (pk_watermarks, non_pk_prefix_watermarks) = split_watermark_from_task(&task);
-
-        let state = SkipWatermarkState::from_safe_epoch_watermarks(pk_watermarks);
+        // Can not consume the watermarks because the watermarks may be used by `check_compact_result`.
+        let state = PkPrefixSkipWatermarkState::from_safe_epoch_watermarks(
+            task.pk_prefix_table_watermarks.clone(),
+        );
         let non_pk_prefix_state = NonPkPrefixSkipWatermarkState::from_safe_epoch_watermarks(
-            non_pk_prefix_watermarks,
+            task.non_pk_prefix_table_watermarks.clone(),
             compaction_catalog_agent_ref,
         );
 
@@ -633,7 +635,7 @@ pub struct CompactTaskExecutor<F: TableBuilderFactory> {
     builder: CapacitySplitTableBuilder<F>,
     task_config: TaskConfig,
     task_progress: Arc<TaskProgress>,
-    skip_watermark_state: SkipWatermarkState,
+    skip_watermark_state: PkPrefixSkipWatermarkState,
     last_key_is_delete: bool,
     progress_key_num: u32,
     non_pk_prefix_skip_watermark_state: NonPkPrefixSkipWatermarkState,
@@ -644,7 +646,7 @@ impl<F: TableBuilderFactory> CompactTaskExecutor<F> {
         builder: CapacitySplitTableBuilder<F>,
         task_config: TaskConfig,
         task_progress: Arc<TaskProgress>,
-        skip_watermark_state: SkipWatermarkState,
+        skip_watermark_state: PkPrefixSkipWatermarkState,
         non_pk_prefix_skip_watermark_state: NonPkPrefixSkipWatermarkState,
     ) -> Self {
         Self {

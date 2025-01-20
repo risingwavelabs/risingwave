@@ -34,9 +34,9 @@ use crate::hummock::value::HummockValue;
 use crate::hummock::HummockResult;
 use crate::monitor::StoreLocalStatistic;
 
-pub struct SkipWatermarkIterator<I> {
+pub struct SkipWatermarkIterator<I, S> {
     inner: I,
-    state: SkipWatermarkState,
+    state: S,
     /// The stats of skipped key-value pairs for each table.
     skipped_entry_table_stats: TableStatsMap,
     /// The id of table currently undergoing processing.
@@ -45,24 +45,11 @@ pub struct SkipWatermarkIterator<I> {
     last_table_stats: TableStats,
 }
 
-impl<I: HummockIterator<Direction = Forward>> SkipWatermarkIterator<I> {
-    pub fn new(inner: I, watermarks: BTreeMap<TableId, ReadTableWatermark>) -> Self {
+impl<I: HummockIterator<Direction = Forward>, S: SkipWatermarkState> SkipWatermarkIterator<I, S> {
+    pub fn new(inner: I, state: S) -> Self {
         Self {
             inner,
-            state: SkipWatermarkState::new(watermarks),
-            skipped_entry_table_stats: TableStatsMap::default(),
-            last_table_id: None,
-            last_table_stats: TableStats::default(),
-        }
-    }
-
-    pub fn from_safe_epoch_watermarks(
-        inner: I,
-        safe_epoch_watermarks: BTreeMap<u32, TableWatermarks>,
-    ) -> Self {
-        Self {
-            inner,
-            state: SkipWatermarkState::from_safe_epoch_watermarks(safe_epoch_watermarks),
+            state,
             skipped_entry_table_stats: TableStatsMap::default(),
             last_table_id: None,
             last_table_stats: TableStats::default(),
@@ -122,7 +109,9 @@ impl<I: HummockIterator<Direction = Forward>> SkipWatermarkIterator<I> {
     }
 }
 
-impl<I: HummockIterator<Direction = Forward>> HummockIterator for SkipWatermarkIterator<I> {
+impl<I: HummockIterator<Direction = Forward>, S: SkipWatermarkState> HummockIterator
+    for SkipWatermarkIterator<I, S>
+{
     type Direction = Forward;
 
     async fn next(&mut self) -> HummockResult<()> {
@@ -176,32 +165,30 @@ impl<I: HummockIterator<Direction = Forward>> HummockIterator for SkipWatermarkI
         self.inner.value_meta()
     }
 }
-pub struct SkipWatermarkState {
+
+pub trait SkipWatermarkState: Send {
+    fn has_watermark(&self) -> bool;
+    fn should_delete(&mut self, key: &FullKey<&[u8]>) -> bool;
+    fn reset_watermark(&mut self);
+
+    // fn new(watermarks: BTreeMap<TableId, ReadTableWatermark>) -> Self;
+    // fn from_safe_epoch_watermarks(safe_epoch_watermarks: BTreeMap<u32, TableWatermarks>) -> Self;
+
+    fn advance_watermark(&mut self, key: &FullKey<&[u8]>) -> bool;
+}
+
+pub struct PkPrefixSkipWatermarkState {
     watermarks: BTreeMap<TableId, ReadTableWatermark>,
     remain_watermarks: VecDeque<(TableId, VirtualNode, WatermarkDirection, Bytes)>,
 }
 
-impl SkipWatermarkState {
-    pub fn new(watermarks: BTreeMap<TableId, ReadTableWatermark>) -> Self {
-        Self {
-            remain_watermarks: VecDeque::new(),
-            watermarks,
-        }
-    }
-
-    pub fn from_safe_epoch_watermarks(
-        safe_epoch_watermarks: BTreeMap<u32, TableWatermarks>,
-    ) -> Self {
-        let watermarks = safe_epoch_read_table_watermarks_impl(safe_epoch_watermarks);
-        Self::new(watermarks)
-    }
-
+impl SkipWatermarkState for PkPrefixSkipWatermarkState {
     #[inline(always)]
-    pub fn has_watermark(&self) -> bool {
+    fn has_watermark(&self) -> bool {
         !self.remain_watermarks.is_empty()
     }
 
-    pub fn should_delete(&mut self, key: &FullKey<&[u8]>) -> bool {
+    fn should_delete(&mut self, key: &FullKey<&[u8]>) -> bool {
         if let Some((table_id, vnode, direction, watermark)) = self.remain_watermarks.front() {
             let key_table_id = key.user_key.table_id;
             let (key_vnode, inner_key) = key.user_key.table_key.split_vnode();
@@ -222,7 +209,7 @@ impl SkipWatermarkState {
         false
     }
 
-    pub fn reset_watermark(&mut self) {
+    fn reset_watermark(&mut self) {
         self.remain_watermarks = self
             .watermarks
             .iter()
@@ -307,6 +294,22 @@ impl SkipWatermarkState {
     }
 }
 
+impl PkPrefixSkipWatermarkState {
+    pub fn new(watermarks: BTreeMap<TableId, ReadTableWatermark>) -> Self {
+        Self {
+            remain_watermarks: VecDeque::new(),
+            watermarks,
+        }
+    }
+
+    pub fn from_safe_epoch_watermarks(
+        safe_epoch_watermarks: BTreeMap<u32, TableWatermarks>,
+    ) -> Self {
+        let watermarks = safe_epoch_read_table_watermarks_impl(safe_epoch_watermarks);
+        Self::new(watermarks)
+    }
+}
+
 pub struct NonPkPrefixSkipWatermarkState {
     watermarks: BTreeMap<TableId, ReadTableWatermark>,
     remain_watermarks: VecDeque<(TableId, VirtualNode, WatermarkDirection, Datum)>,
@@ -335,13 +338,15 @@ impl NonPkPrefixSkipWatermarkState {
         let watermarks = safe_epoch_read_table_watermarks_impl(safe_epoch_watermarks);
         Self::new(watermarks, compaction_catalog_agent_ref)
     }
+}
 
+impl SkipWatermarkState for NonPkPrefixSkipWatermarkState {
     #[inline(always)]
-    pub fn has_watermark(&self) -> bool {
+    fn has_watermark(&self) -> bool {
         !self.remain_watermarks.is_empty()
     }
 
-    pub fn should_delete(&mut self, key: &FullKey<&[u8]>) -> bool {
+    fn should_delete(&mut self, key: &FullKey<&[u8]>) -> bool {
         if let Some((table_id, vnode, direction, watermark)) = self.remain_watermarks.front() {
             let key_table_id = key.user_key.table_id;
             let (key_vnode, inner_key) = key.user_key.table_key.split_vnode();
@@ -382,7 +387,7 @@ impl NonPkPrefixSkipWatermarkState {
         false
     }
 
-    pub fn reset_watermark(&mut self) {
+    fn reset_watermark(&mut self) {
         self.remain_watermarks = self
             .watermarks
             .iter()
@@ -457,161 +462,10 @@ impl NonPkPrefixSkipWatermarkState {
     }
 }
 
-pub struct NonPkPrefixSkipWatermarkIterator<I> {
-    inner: I,
-    state: NonPkPrefixSkipWatermarkState,
-    /// The stats of skipped key-value pairs for each table.
-    skipped_entry_table_stats: TableStatsMap,
-    /// The id of table currently undergoing processing.
-    last_table_id: Option<u32>,
-    /// The stats of table currently undergoing processing.
-    last_table_stats: TableStats,
-}
+pub type PkPrefixSkipWatermarkIterator<I> = SkipWatermarkIterator<I, PkPrefixSkipWatermarkState>;
 
-impl<I: HummockIterator<Direction = Forward>> NonPkPrefixSkipWatermarkIterator<I> {
-    pub fn new(
-        inner: I,
-        watermarks: BTreeMap<TableId, ReadTableWatermark>,
-        compaction_catalog_agent_ref: CompactionCatalogAgentRef,
-    ) -> Self {
-        Self {
-            inner,
-            state: NonPkPrefixSkipWatermarkState::new(watermarks, compaction_catalog_agent_ref),
-            skipped_entry_table_stats: TableStatsMap::default(),
-            last_table_id: None,
-            last_table_stats: TableStats::default(),
-        }
-    }
-
-    pub fn from_safe_epoch_watermarks(
-        inner: I,
-        safe_epoch_watermarks: BTreeMap<u32, TableWatermarks>,
-        compaction_catalog_agent_ref: CompactionCatalogAgentRef,
-    ) -> Self {
-        Self {
-            inner,
-            state: NonPkPrefixSkipWatermarkState::from_safe_epoch_watermarks(
-                safe_epoch_watermarks,
-                compaction_catalog_agent_ref,
-            ),
-            skipped_entry_table_stats: TableStatsMap::default(),
-            last_table_id: None,
-            last_table_stats: TableStats::default(),
-        }
-    }
-
-    fn reset_watermark(&mut self) {
-        self.state.reset_watermark();
-    }
-
-    fn reset_skipped_entry_table_stats(&mut self) {
-        self.skipped_entry_table_stats = TableStatsMap::default();
-        self.last_table_id = None;
-        self.last_table_stats = TableStats::default();
-    }
-
-    /// Advance the key until iterator invalid or the current key will not be filtered by the latest watermark.
-    /// Calling this method should ensure that the first remaining watermark has been advanced to the current key.
-    ///
-    /// Return a flag indicating whether should later advance the watermark.
-    async fn advance_key_and_watermark(&mut self) -> HummockResult<()> {
-        // advance key and watermark in an interleave manner until nothing
-        // changed after the method is called.
-        while self.inner.is_valid() {
-            if !self.state.should_delete(&self.inner.key()) {
-                break;
-            }
-
-            let table_id = self.inner.key().user_key.table_id.table_id;
-
-            if self
-                .last_table_id
-                .map_or(true, |last_table_id| last_table_id != table_id)
-            {
-                self.add_last_table_stats();
-                self.last_table_id = Some(table_id);
-            }
-            self.last_table_stats.total_key_count -= 1;
-            self.last_table_stats.total_key_size -= self.inner.key().encoded_len() as i64;
-            self.last_table_stats.total_value_size -= self.inner.value().encoded_len() as i64;
-
-            self.inner.next().await?;
-        }
-        self.add_last_table_stats();
-        Ok(())
-    }
-
-    fn add_last_table_stats(&mut self) {
-        let Some(last_table_id) = self.last_table_id.take() else {
-            return;
-        };
-        let delta = std::mem::take(&mut self.last_table_stats);
-        let e = self
-            .skipped_entry_table_stats
-            .entry(last_table_id)
-            .or_default();
-        e.total_key_count += delta.total_key_count;
-        e.total_key_size += delta.total_key_size;
-        e.total_value_size += delta.total_value_size;
-    }
-}
-
-impl<I: HummockIterator<Direction = Forward>> HummockIterator
-    for NonPkPrefixSkipWatermarkIterator<I>
-{
-    type Direction = Forward;
-
-    async fn next(&mut self) -> HummockResult<()> {
-        self.inner.next().await?;
-        // Check whether there is any remaining watermark and return early to
-        // avoid calling the async `advance_key_and_watermark`, since in benchmark
-        // performance downgrade is observed without this early return.
-        if self.state.has_watermark() {
-            self.advance_key_and_watermark().await?;
-        }
-        Ok(())
-    }
-
-    fn key(&self) -> FullKey<&[u8]> {
-        self.inner.key()
-    }
-
-    fn value(&self) -> HummockValue<&[u8]> {
-        self.inner.value()
-    }
-
-    fn is_valid(&self) -> bool {
-        self.inner.is_valid()
-    }
-
-    async fn rewind(&mut self) -> HummockResult<()> {
-        self.reset_watermark();
-        self.reset_skipped_entry_table_stats();
-        self.inner.rewind().await?;
-        self.advance_key_and_watermark().await?;
-        Ok(())
-    }
-
-    async fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> HummockResult<()> {
-        self.reset_watermark();
-        self.reset_skipped_entry_table_stats();
-        self.inner.seek(key).await?;
-        self.advance_key_and_watermark().await?;
-        Ok(())
-    }
-
-    fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
-        add_table_stats_map(
-            &mut stats.skipped_by_watermark_table_stats,
-            &self.skipped_entry_table_stats,
-        );
-        self.inner.collect_local_statistic(stats)
-    }
-
-    fn value_meta(&self) -> ValueMeta {
-        self.inner.value_meta()
-    }
-}
+pub type NonPkPrefixSkipWatermarkIterator<I> =
+    SkipWatermarkIterator<I, NonPkPrefixSkipWatermarkState>;
 
 #[cfg(test)]
 mod tests {
@@ -632,11 +486,13 @@ mod tests {
     use risingwave_hummock_sdk::table_watermark::{ReadTableWatermark, WatermarkDirection};
     use risingwave_hummock_sdk::EpochWithGap;
 
+    use super::PkPrefixSkipWatermarkState;
     use crate::compaction_catalog_manager::{
         CompactionCatalogAgent, FilterKeyExtractorImpl, FullKeyFilterKeyExtractor,
     };
     use crate::hummock::iterator::{
-        HummockIterator, MergeIterator, NonPkPrefixSkipWatermarkIterator, SkipWatermarkIterator,
+        HummockIterator, MergeIterator, NonPkPrefixSkipWatermarkIterator,
+        NonPkPrefixSkipWatermarkState, PkPrefixSkipWatermarkIterator,
     };
     use crate::hummock::shared_buffer::shared_buffer_batch::{
         SharedBufferBatch, SharedBufferValue,
@@ -745,11 +601,14 @@ mod tests {
                 TABLE_ID,
             );
 
-            let iter = SkipWatermarkIterator::new(
+            let iter = PkPrefixSkipWatermarkIterator::new(
                 build_batch(items.clone().into_iter(), TABLE_ID)
                     .unwrap()
                     .into_forward_iter(),
-                BTreeMap::from_iter(once((TABLE_ID, read_watermark.clone()))),
+                PkPrefixSkipWatermarkState::new(BTreeMap::from_iter(once((
+                    TABLE_ID,
+                    read_watermark.clone(),
+                )))),
             );
             (batch.map(|batch| batch.into_forward_iter()), iter)
         };
@@ -882,8 +741,10 @@ mod tests {
 
                 let mut iter = NonPkPrefixSkipWatermarkIterator::new(
                     shared_buffer_batch.clone().into_forward_iter(),
-                    BTreeMap::from_iter(once((TABLE_ID, read_watermark.clone()))),
-                    compaction_catalog_agent_ref,
+                    NonPkPrefixSkipWatermarkState::new(
+                        BTreeMap::from_iter(once((TABLE_ID, read_watermark.clone()))),
+                        compaction_catalog_agent_ref,
+                    ),
                 );
 
                 iter.rewind().await.unwrap();
@@ -934,8 +795,10 @@ mod tests {
 
                 let mut iter = NonPkPrefixSkipWatermarkIterator::new(
                     shared_buffer_batch.clone().into_forward_iter(),
-                    BTreeMap::from_iter(once((TABLE_ID, read_watermark.clone()))),
-                    compaction_catalog_agent_ref,
+                    NonPkPrefixSkipWatermarkState::new(
+                        BTreeMap::from_iter(once((TABLE_ID, read_watermark.clone()))),
+                        compaction_catalog_agent_ref,
+                    ),
                 );
 
                 iter.rewind().await.unwrap();
@@ -997,8 +860,10 @@ mod tests {
 
                 let mut iter = NonPkPrefixSkipWatermarkIterator::new(
                     shared_buffer_batch.clone().unwrap().into_forward_iter(),
-                    BTreeMap::from_iter(once((TABLE_ID, read_watermark.clone()))),
-                    compaction_catalog_agent_ref,
+                    NonPkPrefixSkipWatermarkState::new(
+                        BTreeMap::from_iter(once((TABLE_ID, read_watermark.clone()))),
+                        compaction_catalog_agent_ref,
+                    ),
                 );
 
                 iter.rewind().await.unwrap();
@@ -1056,8 +921,10 @@ mod tests {
 
                 let mut iter = NonPkPrefixSkipWatermarkIterator::new(
                     shared_buffer_batch.clone().unwrap().into_forward_iter(),
-                    BTreeMap::from_iter(once((TABLE_ID, read_watermark.clone()))),
-                    compaction_catalog_agent_ref,
+                    NonPkPrefixSkipWatermarkState::new(
+                        BTreeMap::from_iter(once((TABLE_ID, read_watermark.clone()))),
+                        compaction_catalog_agent_ref,
+                    ),
                 );
 
                 iter.rewind().await.unwrap();
@@ -1115,8 +982,10 @@ mod tests {
 
                 let mut iter = NonPkPrefixSkipWatermarkIterator::new(
                     shared_buffer_batch.clone().unwrap().into_forward_iter(),
-                    BTreeMap::from_iter(once((TABLE_ID, read_watermark.clone()))),
-                    compaction_catalog_agent_ref,
+                    NonPkPrefixSkipWatermarkState::new(
+                        BTreeMap::from_iter(once((TABLE_ID, read_watermark.clone()))),
+                        compaction_catalog_agent_ref,
+                    ),
                 );
 
                 iter.rewind().await.unwrap();
@@ -1287,8 +1156,10 @@ mod tests {
 
             let mut iter = NonPkPrefixSkipWatermarkIterator::new(
                 merge_iter,
-                BTreeMap::from_iter(once((TABLE_ID, t1_read_watermark.clone()))),
-                compaction_catalog_agent_ref,
+                NonPkPrefixSkipWatermarkState::new(
+                    BTreeMap::from_iter(once((TABLE_ID, t1_read_watermark.clone()))),
+                    compaction_catalog_agent_ref,
+                ),
             );
 
             iter.rewind().await.unwrap();
@@ -1386,13 +1257,18 @@ mod tests {
 
             let non_pk_prefix_iter = NonPkPrefixSkipWatermarkIterator::new(
                 merge_iter,
-                BTreeMap::from_iter(once((t1_id, t1_read_watermark.clone()))),
-                compaction_catalog_agent_ref.clone(),
+                NonPkPrefixSkipWatermarkState::new(
+                    BTreeMap::from_iter(once((t1_id, t1_read_watermark.clone()))),
+                    compaction_catalog_agent_ref.clone(),
+                ),
             );
 
-            let mut mix_iter = SkipWatermarkIterator::new(
+            let mut mix_iter = PkPrefixSkipWatermarkIterator::new(
                 non_pk_prefix_iter,
-                BTreeMap::from_iter(once((t2_id, t2_read_watermark.clone()))),
+                PkPrefixSkipWatermarkState::new(BTreeMap::from_iter(once((
+                    t2_id,
+                    t2_read_watermark.clone(),
+                )))),
             );
 
             mix_iter.rewind().await.unwrap();

@@ -23,7 +23,8 @@ use risingwave_hummock_sdk::key::TableKey;
 use risingwave_storage::compaction_catalog_manager::CompactionCatalogAgent;
 use risingwave_storage::hummock::iterator::{
     Forward, HummockIterator, HummockIteratorUnion, MergeIterator,
-    NonPkPrefixSkipWatermarkIterator, SkipWatermarkIterator,
+    NonPkPrefixSkipWatermarkIterator, NonPkPrefixSkipWatermarkState, PkPrefixSkipWatermarkIterator,
+    PkPrefixSkipWatermarkState,
 };
 use risingwave_storage::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatch, SharedBufferBatchIterator, SharedBufferValue,
@@ -112,15 +113,17 @@ fn criterion_benchmark(c: &mut Criterion) {
     );
 
     let combine_iter = {
-        let iter = SkipWatermarkIterator::new(
+        let iter = PkPrefixSkipWatermarkIterator::new(
             MergeIterator::new(gen_interleave_shared_buffer_batch_iter(10000, 100)),
-            BTreeMap::new(),
+            PkPrefixSkipWatermarkState::new(BTreeMap::new()),
         );
 
         NonPkPrefixSkipWatermarkIterator::new(
             iter,
-            BTreeMap::new(),
-            Arc::new(CompactionCatalogAgent::dummy()),
+            NonPkPrefixSkipWatermarkState::new(
+                BTreeMap::new(),
+                Arc::new(CompactionCatalogAgent::dummy()),
+            ),
         )
     };
 

@@ -37,8 +37,7 @@ use crate::sstable_info::SstableInfo;
 use crate::table_watermark::{ReadTableWatermark, TableWatermarks};
 use crate::version::{
     GroupDelta, GroupDeltaCommon, HummockVersion, HummockVersionCommon, HummockVersionDelta,
-    HummockVersionStateTableInfo, IntraLevelDelta, IntraLevelDeltaCommon, ObjectIdReader,
-    SstableIdReader,
+    IntraLevelDelta, IntraLevelDeltaCommon, ObjectIdReader, SstableIdReader,
 };
 use crate::{can_concat, CompactionGroupId, HummockSstableId, HummockSstableObjectId};
 #[derive(Debug, Clone, Default)]
@@ -116,17 +115,12 @@ impl HummockVersion {
         &self,
         existing_table_ids: &[u32],
     ) -> BTreeMap<u32, TableWatermarks> {
-        safe_epoch_table_watermarks_impl(
-            &self.table_watermarks,
-            &self.state_table_info,
-            existing_table_ids,
-        )
+        safe_epoch_table_watermarks_impl(&self.table_watermarks, existing_table_ids)
     }
 }
 
 pub fn safe_epoch_table_watermarks_impl(
     table_watermarks: &HashMap<TableId, Arc<TableWatermarks>>,
-    _state_table_info: &HummockVersionStateTableInfo,
     existing_table_ids: &[u32],
 ) -> BTreeMap<u32, TableWatermarks> {
     fn extract_single_table_watermark(

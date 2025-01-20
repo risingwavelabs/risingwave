@@ -66,7 +66,8 @@ pub(crate) mod tests {
     };
     use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
     use risingwave_storage::hummock::iterator::{
-        ConcatIterator, NonPkPrefixSkipWatermarkIterator, SkipWatermarkIterator, UserIterator,
+        ConcatIterator, NonPkPrefixSkipWatermarkIterator, NonPkPrefixSkipWatermarkState,
+        PkPrefixSkipWatermarkIterator, PkPrefixSkipWatermarkState, UserIterator,
     };
     use risingwave_storage::hummock::sstable_store::SstableStoreRef;
     use risingwave_storage::hummock::test_utils::gen_test_sstable_info;
@@ -1783,7 +1784,7 @@ pub(crate) mod tests {
             target_file_size,
             compression_algorithm: 1,
             gc_delete_keys: true,
-            table_watermarks,
+            pk_prefix_table_watermarks: table_watermarks,
             ..Default::default()
         };
         let (ret, fast_ret) = run_fast_and_normal_runner(
@@ -1821,15 +1822,17 @@ pub(crate) mod tests {
         let compaction_catalog_agent = CompactionCatalogAgent::for_test(vec![1]);
 
         let combine_iter = {
-            let iter = SkipWatermarkIterator::new(
+            let iter = PkPrefixSkipWatermarkIterator::new(
                 ConcatIterator::new(ret, sstable_store.clone(), read_options.clone()),
-                watermark.clone(),
+                PkPrefixSkipWatermarkState::new(watermark.clone()),
             );
 
             NonPkPrefixSkipWatermarkIterator::new(
                 iter,
-                BTreeMap::default(),
-                compaction_catalog_agent.clone(),
+                NonPkPrefixSkipWatermarkState::new(
+                    BTreeMap::default(),
+                    compaction_catalog_agent.clone(),
+                ),
             )
         };
 
@@ -1837,15 +1840,17 @@ pub(crate) mod tests {
             UserIterator::for_test(combine_iter, (Bound::Unbounded, Bound::Unbounded));
 
         let combine_iter = {
-            let iter = SkipWatermarkIterator::new(
+            let iter = PkPrefixSkipWatermarkIterator::new(
                 ConcatIterator::new(fast_ret, sstable_store.clone(), read_options.clone()),
-                watermark.clone(),
+                PkPrefixSkipWatermarkState::new(watermark.clone()),
             );
 
             NonPkPrefixSkipWatermarkIterator::new(
                 iter,
-                BTreeMap::default(),
-                compaction_catalog_agent.clone(),
+                NonPkPrefixSkipWatermarkState::new(
+                    BTreeMap::default(),
+                    compaction_catalog_agent.clone(),
+                ),
             )
         };
         let mut fast_iter =

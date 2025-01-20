@@ -38,7 +38,6 @@ use risingwave_pb::hummock::LevelType;
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Receiver;
 
-use super::compaction_utils::split_watermark_from_task;
 use super::iterator::MonitoredCompactorIterator;
 use super::task_progress::TaskProgress;
 use super::{CompactionStatistics, TaskConfig};
@@ -55,7 +54,8 @@ use crate::hummock::compactor::{
 };
 use crate::hummock::iterator::{
     Forward, HummockIterator, MergeIterator, NonPkPrefixSkipWatermarkIterator,
-    SkipWatermarkIterator, ValueMeta,
+    NonPkPrefixSkipWatermarkState, PkPrefixSkipWatermarkIterator, PkPrefixSkipWatermarkState,
+    ValueMeta,
 };
 use crate::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFactory};
 use crate::hummock::utils::MemoryTracker;
@@ -241,24 +241,25 @@ impl CompactorRunner {
             }
         }
 
-        // The `SkipWatermarkIterator` is used to handle the table watermark state cleaning introduced
+        // The `Pk/NonPkPrefixSkipWatermarkIterator` is used to handle the table watermark state cleaning introduced
         // in https://github.com/risingwavelabs/risingwave/issues/13148
         let combine_iter = {
-            let (pk_watermarks, non_pk_prefix_watermarks) =
-                split_watermark_from_task(&self.compact_task);
-
-            let skip_watermark_iter = SkipWatermarkIterator::from_safe_epoch_watermarks(
+            let skip_watermark_iter = PkPrefixSkipWatermarkIterator::new(
                 MonitoredCompactorIterator::new(
                     MergeIterator::for_compactor(table_iters),
                     task_progress.clone(),
                 ),
-                pk_watermarks,
+                PkPrefixSkipWatermarkState::from_safe_epoch_watermarks(
+                    self.compact_task.pk_prefix_table_watermarks.clone(),
+                ),
             );
 
-            NonPkPrefixSkipWatermarkIterator::from_safe_epoch_watermarks(
+            NonPkPrefixSkipWatermarkIterator::new(
                 skip_watermark_iter,
-                non_pk_prefix_watermarks,
-                compaction_catalog_agent_ref,
+                NonPkPrefixSkipWatermarkState::from_safe_epoch_watermarks(
+                    self.compact_task.non_pk_prefix_table_watermarks.clone(),
+                    compaction_catalog_agent_ref,
+                ),
             )
         };
 
