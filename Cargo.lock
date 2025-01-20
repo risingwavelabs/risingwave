@@ -8771,6 +8771,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "peekable"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8a57300da5f2129ddfba13137c21ff56b1755da8c68c77576c052ec96934c49b"
+dependencies = [
+ "bytes",
+ "pin-project-lite",
+ "smallvec",
+ "tokio",
+]
+
+[[package]]
 name = "pem"
 version = "3.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8844,6 +8856,7 @@ dependencies = [
  "openssl",
  "panic-message",
  "parking_lot 0.12.1",
+ "peekable",
  "postgres-types",
  "reqwest 0.12.4",
  "risingwave_common",
