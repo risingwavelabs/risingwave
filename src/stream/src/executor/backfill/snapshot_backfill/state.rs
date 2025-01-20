@@ -390,23 +390,29 @@ impl<S: StateStore> BackfillStatePostCommit<'_, S> {
         self,
         new_vnode_bitmap: Option<Arc<Bitmap>>,
     ) -> StreamExecutorResult<Option<Arc<Bitmap>>> {
-        if let Some(new_vnode_bitmap) = new_vnode_bitmap.clone() {
-            self.update_vnode_bitmap(new_vnode_bitmap).await?;
-        }
+        let new_vnode_bitmap = if let Some(((new_vnode_bitmap, prev_vnode_bitmap, state), _)) =
+            self.inner.post_yield_barrier(new_vnode_bitmap).await?
+        {
+            Self::update_vnode_bitmap(&*state, self.vnode_state, self.pk_serde, prev_vnode_bitmap)
+                .await?;
+            Some(new_vnode_bitmap)
+        } else {
+            None
+        };
         Ok(new_vnode_bitmap)
     }
 
-    async fn update_vnode_bitmap(self, new_vnode_bitmap: Arc<Bitmap>) -> StreamExecutorResult<()> {
-        let ((_, prev_vnode_bitmap, state), _) = self
-            .inner
-            .post_yield_barrier(Some(new_vnode_bitmap))
-            .await?
-            .expect("should exist");
-        let committed_progress_rows = BackfillState::load_vnode_progress_row(&*state).await?;
+    async fn update_vnode_bitmap(
+        state_table: &StateTable<S>,
+        vnode_state: &mut HashMap<VirtualNode, VnodeBackfillState>,
+        pk_serde: &OrderedRowSerde,
+        prev_vnode_bitmap: Arc<Bitmap>,
+    ) -> StreamExecutorResult<()> {
+        let committed_progress_rows = BackfillState::load_vnode_progress_row(state_table).await?;
         let mut new_state = HashMap::new();
         for (vnode, progress_row) in committed_progress_rows {
             if let Some(progress_row) = progress_row {
-                let progress = VnodeBackfillProgress::from_row(&progress_row, self.pk_serde);
+                let progress = VnodeBackfillProgress::from_row(&progress_row, pk_serde);
                 assert!(new_state
                     .insert(vnode, VnodeBackfillState::Committed(progress))
                     .is_none());
@@ -414,10 +420,10 @@ impl<S: StateStore> BackfillStatePostCommit<'_, S> {
 
             if prev_vnode_bitmap.is_set(vnode.to_index()) {
                 // if the vnode exist previously, the new state should be the same as the previous one
-                assert_eq!(self.vnode_state.get(&vnode), new_state.get(&vnode));
+                assert_eq!(vnode_state.get(&vnode), new_state.get(&vnode));
             }
         }
-        *self.vnode_state = new_state;
+        *vnode_state = new_state;
         Ok(())
     }
 }
