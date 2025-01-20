@@ -109,10 +109,9 @@ struct SyncedKvLogStoreExecutor<S: StateStore, LS: LocalStateStore> {
     truncation_offset: Option<ReaderTruncationOffsetType>,
 
     // Upstream
-    upstream: BoxedMessageStream,
+    upstream: Executor,
 
     // Log store state
-    state_store_stream: Option<StateStoreStream<S>>,
     flushed_chunk_future: Option<ReadFlushedChunkFuture>,
     state_store: S,
     local_state_store: LS,
@@ -129,7 +128,7 @@ impl<S: StateStore<Local = LS>, LS: LocalStateStore> SyncedKvLogStoreExecutor<S,
         seq_id: SeqIdType,
         state_store: S,
         buffer_max_size: usize,
-        upstream: BoxedMessageStream,
+        upstream: Executor,
     ) -> Self {
         let local_state_store = state_store
             .new_local(NewLocalOptions {
@@ -151,7 +150,6 @@ impl<S: StateStore<Local = LS>, LS: LocalStateStore> SyncedKvLogStoreExecutor<S,
             serde,
             seq_id,
             truncation_offset: None,
-            state_store_stream: None,
             flushed_chunk_future: None,
             state_store,
             local_state_store,
@@ -170,16 +168,44 @@ impl<S: StateStore<Local = LS>, LS: LocalStateStore> SyncedKvLogStoreExecutor<S,
 impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStoreExecutor<S, LS> {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     pub async fn execute_inner(mut self) {
-        self.init().await?;
+        let mut input = self.upstream.execute();
+        let mut state_store_stream = Some(Self::init(
+            &mut input,
+            &mut self.local_state_store,
+            &self.serde,
+            self.table_id,
+            &self.metrics,
+            self.state_store.clone(),
+        ).await?);
         loop {
-            if let Some(msg) = self.next().await? {
+            if let Some(msg) = Self::next(
+                &mut input,
+                self.table_id,
+                &self.read_metrics,
+                &self.serde,
+                &mut self.truncation_offset,
+                &mut state_store_stream,
+                &mut self.flushed_chunk_future,
+                self.state_store.clone(),
+                &mut self.buffer,
+                &mut self.local_state_store,
+                &mut self.metrics,
+                &mut self.seq_id,
+            ).await? {
                 yield msg;
             }
         }
     }
 
-    async fn init(&mut self) -> StreamExecutorResult<()> {
-        let Some(msg) = self.upstream.next().await else {
+    async fn init(
+        input: &mut BoxedMessageStream,
+        local_state_store: &mut LS,
+        serde: &LogStoreRowSerde,
+        table_id: TableId,
+        metrics: &KvLogStoreMetrics,
+        state_store: S,
+    ) -> StreamExecutorResult<StateStoreStream<S>> {
+        let Some(msg) = input.next().await else {
             bail!("Expected a barrier message, got end of stream")
         };
         let barrier = match msg? {
@@ -187,67 +213,80 @@ impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStoreExecutor<S, LS> {
             other => bail!("Expected a barrier message, got {:?}", other),
         };
         let init_epoch_pair = barrier.epoch;
-        self.local_state_store.init(InitOptions::new(init_epoch_pair)).await?;
-        self.state_store_stream = Some(
+        local_state_store.init(InitOptions::new(init_epoch_pair)).await?;
+        let state_store_stream =
             read_persisted_log_store(
-                &self.serde,
-                self.table_id,
-                &self.metrics,
-                self.state_store.clone(),
+                serde,
+                table_id,
+                metrics,
+                state_store,
                 barrier.epoch.curr, // FIXME(kwannoel): Should this be curr or prev?
                 None,
-            ).await?
-        );
-        Ok(())
+            ).await?;
+        Ok(state_store_stream)
     }
 
-    async fn next(&mut self) -> StreamExecutorResult<Option<Message>> {
+    async fn next(
+        input: &mut BoxedMessageStream,
+        table_id: TableId,
+        read_metrics: &KvLogStoreReadMetrics,
+        serde: &LogStoreRowSerde,
+        truncation_offset: &mut Option<ReaderTruncationOffsetType>,
+        state_store_stream: &mut Option<StateStoreStream<S>>,
+        flushed_chunk_future: &mut Option<ReadFlushedChunkFuture>,
+        state_store: S,
+        buffer: &mut Mutex<SyncedLogStoreBuffer>,
+
+        local_state_store: &mut LS,
+        metrics: &mut KvLogStoreMetrics,
+        seq_id: &mut SeqIdType,
+    ) -> StreamExecutorResult<Option<Message>> {
         select! {
             // read from log store
             logstore_item = Self::try_next_item(
-                self.table_id,
-                &self.read_metrics,
-                &self.serde,
-                &mut self.truncation_offset,
-                &mut self.state_store_stream,
-                &mut self.flushed_chunk_future,
-                self.state_store.clone(),
-                &mut self.buffer
+                table_id,
+                read_metrics,
+                serde,
+                truncation_offset,
+                state_store_stream,
+                flushed_chunk_future,
+                state_store,
+                buffer
             ) => {
                 let logstore_item = logstore_item?;
                 Ok(logstore_item.map(Message::Chunk))
             }
 
             // poll from upstream
-            upstream_item = self.upstream.next() => {
+            upstream_item = input.next() => {
                 match upstream_item {
                     None => Ok(None),
                     Some(upstream_item) => {
                         match upstream_item? {
                             Message::Barrier(barrier) => {
                                 Self::write_barrier(
-                                    &mut self.local_state_store,
-                                    &self.serde,
+                                    local_state_store,
+                                    serde,
                                     barrier.clone(),
-                                    &mut self.metrics,
-                                    self.truncation_offset,
-                                    &mut self.seq_id,
-                                    &mut self.buffer,
+                                    metrics,
+                                    *truncation_offset,
+                                    seq_id,
+                                    buffer,
                                 ).await?;
                                 Ok(Some(Message::Barrier(barrier)))
                             }
                             Message::Chunk(chunk) => {
-                                let start_seq_id = self.seq_id;
-                                self.seq_id += chunk.cardinality() as SeqIdType;
-                                let end_seq_id = self.seq_id - 1;
+                                let start_seq_id = *seq_id;
+                                *seq_id += chunk.cardinality() as SeqIdType;
+                                let end_seq_id = *seq_id - 1;
                                 Self::write_chunk(
-                                    &self.metrics,
-                                    &self.serde,
+                                    metrics,
+                                    serde,
                                     start_seq_id,
                                     end_seq_id,
-                                    &mut self.buffer,
+                                    buffer,
                                     chunk,
-                                    &mut self.local_state_store,
+                                    local_state_store,
                                 ).await?;
                                 Ok(None)
                             }
@@ -669,4 +708,43 @@ where
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::catalog::Field;
+    use risingwave_storage::memory::MemoryStateStore;
+    use crate::executor::test_utils::MockSource;
+    use super::*;
+
+    // test read/write buffer
+    #[tokio::test]
+    async fn test_read_write_buffer() {
+        let schema = Schema {
+            fields: vec![
+                Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Int64),
+            ],
+        };
+        let pk_indices = vec![0];
+        let (mut tx, source) = MockSource::channel();
+        let source = source.into_executor(schema.clone(), pk_indices.clone());
+
+        let state_store = MemoryStateStore::new();
+
+        let log_store_executor = SyncedKvLogStoreExecutor::new(
+            1,
+            KvLogStoreReadMetrics::default(),
+            KvLogStoreMetrics::default(),
+            LogStoreRowSerde::new(schema, pk_indices),
+            0,
+            MemoryStateStore::new(),
+            10,
+            source,
+        ).await;
+    }
+
+    // test persisted read
+
+    // test flushed read
 }
