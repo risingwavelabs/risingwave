@@ -53,7 +53,9 @@ use crate::hummock::compactor::{
     CompactorContext,
 };
 use crate::hummock::iterator::{
-    Forward, HummockIterator, MergeIterator, SkipWatermarkIterator, ValueMeta,
+    Forward, HummockIterator, MergeIterator, NonPkPrefixSkipWatermarkIterator,
+    NonPkPrefixSkipWatermarkState, PkPrefixSkipWatermarkIterator, PkPrefixSkipWatermarkState,
+    ValueMeta,
 };
 use crate::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFactory};
 use crate::hummock::utils::MemoryTracker;
@@ -138,7 +140,8 @@ impl CompactorRunner {
         compaction_catalog_agent_ref: CompactionCatalogAgentRef,
         task_progress: Arc<TaskProgress>,
     ) -> HummockResult<CompactOutput> {
-        let iter = self.build_sst_iter(task_progress.clone())?;
+        let iter =
+            self.build_sst_iter(task_progress.clone(), compaction_catalog_agent_ref.clone())?;
         let (ssts, compaction_stat) = self
             .compactor
             .compact_key_range(
@@ -157,6 +160,7 @@ impl CompactorRunner {
     fn build_sst_iter(
         &self,
         task_progress: Arc<TaskProgress>,
+        compaction_catalog_agent_ref: CompactionCatalogAgentRef,
     ) -> HummockResult<impl HummockIterator<Direction = Forward>> {
         let compactor_iter_max_io_retry_times = self
             .compactor
@@ -237,15 +241,29 @@ impl CompactorRunner {
             }
         }
 
-        // The `SkipWatermarkIterator` is used to handle the table watermark state cleaning introduced
+        // The `Pk/NonPkPrefixSkipWatermarkIterator` is used to handle the table watermark state cleaning introduced
         // in https://github.com/risingwavelabs/risingwave/issues/13148
-        Ok(SkipWatermarkIterator::from_safe_epoch_watermarks(
-            MonitoredCompactorIterator::new(
-                MergeIterator::for_compactor(table_iters),
-                task_progress.clone(),
-            ),
-            &self.compact_task.table_watermarks,
-        ))
+        let combine_iter = {
+            let skip_watermark_iter = PkPrefixSkipWatermarkIterator::new(
+                MonitoredCompactorIterator::new(
+                    MergeIterator::for_compactor(table_iters),
+                    task_progress.clone(),
+                ),
+                PkPrefixSkipWatermarkState::from_safe_epoch_watermarks(
+                    self.compact_task.pk_prefix_table_watermarks.clone(),
+                ),
+            );
+
+            NonPkPrefixSkipWatermarkIterator::new(
+                skip_watermark_iter,
+                NonPkPrefixSkipWatermarkState::from_safe_epoch_watermarks(
+                    self.compact_task.non_pk_prefix_table_watermarks.clone(),
+                    compaction_catalog_agent_ref,
+                ),
+            )
+        };
+
+        Ok(combine_iter)
     }
 }
 
@@ -575,19 +593,7 @@ pub async fn compact(
     ),
     Option<MemoryTracker>,
 ) {
-    let existing_table_ids: HashSet<u32> =
-        HashSet::from_iter(compact_task.existing_table_ids.clone());
-    let compact_table_ids = Vec::from_iter(
-        compact_task
-            .input_ssts
-            .iter()
-            .flat_map(|level| level.table_infos.iter())
-            .flat_map(|sst| sst.table_ids.clone())
-            .filter(|table_id| existing_table_ids.contains(table_id))
-            .sorted()
-            .unique(),
-    );
-
+    let compact_table_ids = compact_task.build_compact_table_ids();
     let compaction_catalog_agent_ref = match compaction_catalog_manager_ref
         .acquire(compact_table_ids.clone())
         .await
