@@ -78,7 +78,7 @@ use risingwave_hummock_sdk::table_watermark::{VnodeWatermark, WatermarkDirection
 use risingwave_storage::store::{LocalStateStore, SealCurrentEpochOptions, StateStoreRead};
 use risingwave_storage::StateStore;
 use tokio::select;
-use tokio_stream::StreamExt;
+use futures::TryStreamExt;
 
 use crate::common::log_store_impl::kv_log_store::buffer::LogStoreBufferItem;
 use crate::common::log_store_impl::kv_log_store::reader::read_flushed_chunk;
@@ -154,7 +154,7 @@ impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStoreExecutor<S, LS> {
 // Stream interface
 impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStoreExecutor<S, LS> {
     #[try_stream(ok = Message, error = StreamExecutorError)]
-    pub async fn into_stream(mut self) {
+    pub async fn execute_inner(mut self) {
         loop {
             if let Some(msg) = self.next().await? {
                 yield msg;
@@ -623,5 +623,15 @@ impl SyncedLogStoreBuffer {
                 .map(|(epoch, _)| *epoch)
                 .unwrap_or_default() as _,
         );
+    }
+}
+
+impl<S, LS> Execute for SyncedKvLogStoreExecutor<S, LS>
+where
+    S: StateStore,
+    LS: LocalStateStore,
+{
+    fn execute(self: Box<Self>) -> BoxedMessageStream {
+        self.execute_inner().boxed()
     }
 }
