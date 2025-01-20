@@ -20,8 +20,9 @@ use async_trait::async_trait;
 use aws_sdk_s3::types::Object;
 use bytes::Bytes;
 use enum_as_inner::EnumAsInner;
+use futures::future::try_join_all;
 use futures::stream::BoxStream;
-use futures::Stream;
+use futures::{Stream, StreamExt};
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
@@ -31,6 +32,7 @@ use risingwave_common::types::{JsonbVal, Scalar};
 use risingwave_pb::catalog::{PbSource, PbStreamSourceInfo};
 use risingwave_pb::plan_common::ExternalTableDesc;
 use risingwave_pb::source::ConnectorSplit;
+use rw_futures_util::select_all;
 use serde::de::DeserializeOwned;
 use serde_json::json;
 use tokio::sync::mpsc;
@@ -114,31 +116,120 @@ impl<P: DeserializeOwned + UnknownFields> TryFromBTreeMap for P {
     }
 }
 
-pub async fn create_split_reader<P: SourceProperties>(
+#[derive(Default)]
+pub struct CreateSplitReaderOpt {
+    pub support_multiple_splits: bool,
+    pub seek_to_latest: bool,
+}
+
+#[derive(Default)]
+pub struct CreateSplitReaderResult {
+    pub latest_splits: Option<Vec<SplitImpl>>,
+    pub backfill_info: HashMap<SplitId, BackfillInfo>,
+}
+
+pub async fn create_split_readers<P: SourceProperties>(
     prop: P,
     splits: Vec<SplitImpl>,
     parser_config: ParserConfig,
     source_ctx: SourceContextRef,
     columns: Option<Vec<Column>>,
-) -> Result<P::SplitReader> {
+    opt: CreateSplitReaderOpt,
+) -> Result<(BoxSourceChunkStream, CreateSplitReaderResult)> {
     let splits = splits.into_iter().map(P::Split::try_from).try_collect()?;
-    P::SplitReader::new(prop, splits, parser_config, source_ctx, columns).await
+    let mut res = CreateSplitReaderResult {
+        backfill_info: HashMap::new(),
+        latest_splits: None,
+    };
+    if opt.support_multiple_splits {
+        let mut reader = P::SplitReader::new(
+            prop.clone(),
+            splits,
+            parser_config.clone(),
+            source_ctx.clone(),
+            columns.clone(),
+        )
+        .await?;
+        if opt.seek_to_latest {
+            res.latest_splits = Some(reader.seek_to_latest().await?);
+        }
+        res.backfill_info = reader.backfill_info();
+        Ok((reader.into_stream().boxed(), res))
+    } else {
+        let mut readers = try_join_all(splits.into_iter().map(|split| {
+            // TODO: is this reader split across multiple threads...? Realistically, we want
+            // source_ctx to live in a single actor.
+            P::SplitReader::new(
+                prop.clone(),
+                vec![split],
+                parser_config.clone(),
+                source_ctx.clone(),
+                columns.clone(),
+            )
+        }))
+        .await?;
+        if opt.seek_to_latest {
+            let mut latest_splits = vec![];
+            for reader in &mut readers {
+                latest_splits.extend(reader.seek_to_latest().await?);
+            }
+            res.latest_splits = Some(latest_splits);
+        }
+        res.backfill_info = readers.iter().flat_map(|r| r.backfill_info()).collect();
+        Ok((
+            select_all(readers.into_iter().map(|r| r.into_stream())).boxed(),
+            res,
+        ))
+    }
 }
 
 /// [`SplitEnumerator`] fetches the split metadata from the external source service.
 /// NOTE: It runs in the meta server, so probably it should be moved to the `meta` crate.
 #[async_trait]
-pub trait SplitEnumerator: Sized {
+pub trait SplitEnumerator: Sized + Send {
     type Split: SplitMetaData + Send;
     type Properties;
 
     async fn new(properties: Self::Properties, context: SourceEnumeratorContextRef)
         -> Result<Self>;
     async fn list_splits(&mut self) -> Result<Vec<Self::Split>>;
+    /// Do some cleanup work when a fragment is dropped, e.g., drop Kafka consumer group.
+    async fn on_drop_fragments(&mut self, _fragment_ids: Vec<u32>) -> Result<()> {
+        Ok(())
+    }
+    /// Do some cleanup work when a backfill fragment is finished, e.g., drop Kafka consumer group.
+    async fn on_finish_backfill(&mut self, _fragment_ids: Vec<u32>) -> Result<()> {
+        Ok(())
+    }
 }
 
 pub type SourceContextRef = Arc<SourceContext>;
 pub type SourceEnumeratorContextRef = Arc<SourceEnumeratorContext>;
+
+/// Dyn-compatible [`SplitEnumerator`].
+#[async_trait]
+pub trait AnySplitEnumerator: Send {
+    async fn list_splits(&mut self) -> Result<Vec<SplitImpl>>;
+    async fn on_drop_fragments(&mut self, _fragment_ids: Vec<u32>) -> Result<()>;
+    async fn on_finish_backfill(&mut self, _fragment_ids: Vec<u32>) -> Result<()>;
+}
+
+#[async_trait]
+impl<T: SplitEnumerator<Split: Into<SplitImpl>>> AnySplitEnumerator for T {
+    async fn list_splits(&mut self) -> Result<Vec<SplitImpl>> {
+        SplitEnumerator::list_splits(self)
+            .await
+            .map(|s| s.into_iter().map(|s| s.into()).collect())
+    }
+
+    async fn on_drop_fragments(&mut self, _fragment_ids: Vec<u32>) -> Result<()> {
+        SplitEnumerator::on_drop_fragments(self, _fragment_ids).await
+    }
+
+    async fn on_finish_backfill(&mut self, _fragment_ids: Vec<u32>) -> Result<()> {
+        SplitEnumerator::on_finish_backfill(self, _fragment_ids).await
+    }
+}
 
 /// The max size of a chunk yielded by source stream.
 pub const MAX_CHUNK_SIZE: usize = 1024;
@@ -485,12 +576,13 @@ impl ConnectorProperties {
 
     /// Load additional info from `PbSource`. Currently only used by CDC.
     pub fn init_from_pb_source(&mut self, source: &PbSource) {
-        dispatch_source_prop!(self, prop, prop.init_from_pb_source(source))
+        dispatch_source_prop!(self, |prop| prop.init_from_pb_source(source))
     }
 
     /// Load additional info from `ExternalTableDesc`. Currently only used by CDC.
     pub fn init_from_pb_cdc_table_desc(&mut self, cdc_table_desc: &ExternalTableDesc) {
-        dispatch_source_prop!(self, prop, prop.init_from_pb_cdc_table_desc(cdc_table_desc))
+        dispatch_source_prop!(self, |prop| prop
+            .init_from_pb_cdc_table_desc(cdc_table_desc))
     }
 
     pub fn support_multiple_splits(&self) -> bool {
@@ -511,6 +603,42 @@ impl ConnectorProperties {
             .get(CDC_STRONG_SCHEMA_KEY)
             .map_or(false, |v| v == "true")
     }
+
+    pub async fn create_split_enumerator(
+        self,
+        context: crate::source::base::SourceEnumeratorContextRef,
+    ) -> crate::error::ConnectorResult<Box<dyn AnySplitEnumerator>> {
+        let enumerator: Box<dyn AnySplitEnumerator> = dispatch_source_prop!(self, |prop| Box::new(
+            <PropType as SourceProperties>::SplitEnumerator::new(*prop, context).await?
+        ));
+        Ok(enumerator)
+    }
+
+    pub async fn create_split_reader(
+        self,
+        splits: Vec<SplitImpl>,
+        parser_config: ParserConfig,
+        source_ctx: SourceContextRef,
+        columns: Option<Vec<Column>>,
+        mut opt: crate::source::CreateSplitReaderOpt,
+    ) -> Result<(BoxSourceChunkStream, crate::source::CreateSplitReaderResult)> {
+        opt.support_multiple_splits = self.support_multiple_splits();
+        tracing::debug!(
+            ?splits,
+            support_multiple_splits = opt.support_multiple_splits,
+            "spawning connector split reader",
+        );
+
+        dispatch_source_prop!(self, |prop| create_split_readers(
+            *prop,
+            splits,
+            parser_config,
+            source_ctx,
+            columns,
+            opt
+        )
+        .await)
+    }
 }
 
 for_all_sources!(impl_split);
@@ -518,9 +646,9 @@ for_all_connections!(impl_connection);
 
 impl From<&SplitImpl> for ConnectorSplit {
     fn from(split: &SplitImpl) -> Self {
-        dispatch_split_impl!(split, inner, SourcePropType, {
+        dispatch_split_impl!(split, |inner| {
             ConnectorSplit {
-                split_type: String::from(SourcePropType::SOURCE_NAME),
+                split_type: String::from(PropType::SOURCE_NAME),
                 encoded_split: inner.encode_to_bytes().to_vec(),
             }
         })
@@ -577,7 +705,7 @@ impl SplitImpl {
 
 impl SplitMetaData for SplitImpl {
     fn id(&self) -> SplitId {
-        dispatch_split_impl!(self, inner, IgnoreType, inner.id())
+        dispatch_split_impl!(self, |inner| inner.id())
     }
 
     fn encode_to_json(&self) -> JsonbVal {
@@ -600,31 +728,22 @@ impl SplitMetaData for SplitImpl {
     }
 
     fn update_offset(&mut self, last_seen_offset: String) -> Result<()> {
-        dispatch_split_impl!(
-            self,
-            inner,
-            IgnoreType,
-            inner.update_offset(last_seen_offset)
-        )
+        dispatch_split_impl!(self, |inner| inner.update_offset(last_seen_offset))
     }
 }
 
 impl SplitImpl {
     pub fn get_type(&self) -> String {
-        dispatch_split_impl!(self, _ignored, PropType, {
-            PropType::SOURCE_NAME.to_owned()
-        })
+        dispatch_split_impl!(self, |_inner| PropType::SOURCE_NAME.to_owned())
     }
 
     pub fn update_in_place(&mut self, last_seen_offset: String) -> Result<()> {
-        dispatch_split_impl!(self, inner, IgnoreType, {
-            inner.update_offset(last_seen_offset)?
-        });
+        dispatch_split_impl!(self, |inner| inner.update_offset(last_seen_offset)?);
         Ok(())
     }
 
     pub fn encode_to_json_inner(&self) -> JsonbVal {
-        dispatch_split_impl!(self, inner, IgnoreType, inner.encode_to_json())
+        dispatch_split_impl!(self, |inner| inner.encode_to_json())
     }
 }
 

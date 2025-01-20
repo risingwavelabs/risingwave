@@ -354,6 +354,10 @@ pub fn start(
                 compaction_deterministic_test: config.meta.enable_compaction_deterministic,
                 default_parallelism: config.meta.default_parallelism,
                 vacuum_interval_sec: config.meta.vacuum_interval_sec,
+                time_travel_vacuum_interval_sec: config
+                    .meta
+                    .developer
+                    .time_travel_vacuum_interval_sec,
                 vacuum_spin_interval_ms: config.meta.vacuum_spin_interval_ms,
                 hummock_version_checkpoint_interval_sec: config
                     .meta
@@ -370,10 +374,22 @@ pub fn start(
                     .meta
                     .developer
                     .hummock_time_travel_sst_info_insert_batch_size,
+                hummock_delta_log_delete_batch_size: config
+                    .meta
+                    .developer
+                    .hummock_delta_log_delete_batch_size,
                 hummock_time_travel_epoch_version_insert_batch_size: config
                     .meta
                     .developer
                     .hummock_time_travel_epoch_version_insert_batch_size,
+                hummock_gc_history_insert_batch_size: config
+                    .meta
+                    .developer
+                    .hummock_gc_history_insert_batch_size,
+                hummock_time_travel_filter_out_objects_batch_size: config
+                    .meta
+                    .developer
+                    .hummock_time_travel_filter_out_objects_batch_size,
                 min_delta_log_num_for_hummock_version_checkpoint: config
                     .meta
                     .min_delta_log_num_for_hummock_version_checkpoint,

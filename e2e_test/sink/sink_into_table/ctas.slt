@@ -1,0 +1,25 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table ctas as select 1 as v;
+
+query I rowsort
+select * from ctas;
+----
+1
+
+statement ok
+create sink sk into ctas as select 2 as v with (type = 'append-only');
+
+query I rowsort
+select * from ctas;
+----
+1
+2
+
+statement ok
+drop sink sk;
+
+statement ok
+drop table ctas;

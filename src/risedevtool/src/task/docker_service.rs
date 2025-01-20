@@ -38,6 +38,11 @@ pub trait DockerServiceConfig: Send + 'static {
     /// The docker image to use, e.g. `mysql:5.7`.
     fn image(&self) -> String;
 
+    /// Additional arguments to pass to the docker container.
+    fn args(&self) -> Vec<String> {
+        vec![]
+    }
+
     /// The environment variables to pass to the docker container.
     fn envs(&self) -> Vec<(String, String)> {
         vec![]
@@ -119,6 +124,8 @@ where
         }
 
         cmd.arg(self.config.image());
+
+        cmd.args(self.config.args());
 
         Ok(cmd)
     }

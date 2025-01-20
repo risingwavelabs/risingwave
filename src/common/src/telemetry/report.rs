@@ -101,17 +101,25 @@ where
             });
 
         let (tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel::<PbEventMessage>();
+
+        let mut enable_event_report = true;
         TELEMETRY_EVENT_REPORT_TX.set(tx).unwrap_or_else(|_| {
             tracing::warn!(
                 "Telemetry failed to set event reporting tx, event reporting will be disabled"
             );
+            // possible failure:
+            // When running in standalone mode, the static TELEMETRY_EVENT_REPORT_TX is shared
+            // and can be set by meta/compute nodes.
+            // In such case, the one first set the static will do the event reporting and others'
+            // event report is disabled.
+            enable_event_report = false;
         });
         let mut event_stash = Vec::new();
 
         loop {
             tokio::select! {
                 _ = interval.tick() => {},
-                event = event_rx.recv() => {
+                event = event_rx.recv(), if enable_event_report => {
                     debug_assert!(event.is_some());
                     event_stash.push(event.unwrap());
                     if event_stash.len() >= TELEMETRY_EVENT_REPORT_STASH_SIZE {
@@ -119,7 +127,7 @@ where
                     }
                     continue;
                 }
-                _ = event_interval.tick() => {
+                _ = event_interval.tick(), if enable_event_report => {
                     do_telemetry_event_report(&mut event_stash).await;
                     continue;
                 },
