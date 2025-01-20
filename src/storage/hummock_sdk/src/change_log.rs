@@ -62,6 +62,12 @@ impl<T> TableChangeLogCommon<T> {
     pub(crate) fn change_log_into_iter(self) -> impl Iterator<Item = EpochNewChangeLogCommon<T>> {
         self.0.into_iter()
     }
+
+    pub(crate) fn change_log_iter_mut(
+        &mut self,
+    ) -> impl Iterator<Item = &mut EpochNewChangeLogCommon<T>> {
+        self.0.iter_mut()
+    }
 }
 
 pub type TableChangeLog = TableChangeLogCommon<SstableInfo>;

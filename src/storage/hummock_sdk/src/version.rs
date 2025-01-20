@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::hash_map::Entry;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::mem::{replace, size_of};
 use std::ops::Deref;
 use std::sync::{Arc, LazyLock};
@@ -229,7 +229,7 @@ pub struct HummockVersionCommon<T, L = T> {
     pub state_table_info: HummockVersionStateTableInfo,
 }
 
-pub type HummockVersion = HummockVersionCommon<SstableInfo, SstableInfo>;
+pub type HummockVersion = HummockVersionCommon<SstableInfo>;
 
 pub type LocalHummockVersion = HummockVersionCommon<SstableInfo, ()>;
 
@@ -475,7 +475,26 @@ impl HummockVersion {
     }
 
     pub fn split_change_log(mut self) -> (LocalHummockVersion, HashMap<TableId, TableChangeLog>) {
-        let table_change_log = std::mem::take(&mut self.table_change_log);
+        let table_change_log = {
+            let mut table_change_log = HashMap::new();
+            for (table_id, log) in &mut self.table_change_log {
+                let mut change_log = VecDeque::new();
+                for item in log.change_log_iter_mut() {
+                    let new_value = EpochNewChangeLogCommon {
+                        new_value: std::mem::take(&mut item.new_value),
+                        old_value: std::mem::take(&mut item.old_value),
+                        epochs: item.epochs.clone(),
+                    };
+
+                    change_log.push_back(new_value);
+                }
+                table_change_log
+                    .insert(*table_id, TableChangeLogCommon::new(change_log.into_iter()));
+            }
+
+            table_change_log
+        };
+
         let local_version = LocalHummockVersion::from(self);
 
         (local_version, table_change_log)
@@ -505,7 +524,7 @@ pub struct HummockVersionDeltaCommon<T, L = T> {
     pub state_table_info_delta: HashMap<TableId, StateTableInfoDelta>,
 }
 
-pub type HummockVersionDelta = HummockVersionDeltaCommon<SstableInfo, SstableInfo>;
+pub type HummockVersionDelta = HummockVersionDeltaCommon<SstableInfo>;
 
 pub type LocalHummockVersionDelta = HummockVersionDeltaCommon<SstableInfo, ()>;
 

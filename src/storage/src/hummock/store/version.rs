@@ -993,7 +993,7 @@ impl HummockVersionReader {
         options: ReadLogOptions,
     ) -> HummockResult<ChangeLogIterator> {
         let change_log = {
-            let table_change_logs = version.table_change_log().read();
+            let table_change_logs = version.table_change_log_read_lock();
             if let Some(change_log) = table_change_logs.get(&options.table_id) {
                 change_log.filter_epoch(epoch_range).cloned().collect_vec()
             } else {

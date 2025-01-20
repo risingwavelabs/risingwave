@@ -129,11 +129,8 @@ impl PinnedVersion {
         })
     }
 
-    pub fn new_with_change_log(
-        &self,
-        version: LocalHummockVersion,
-        table_change_log: Arc<RwLock<HashMap<TableId, TableChangeLogCommon<SstableInfo>>>>,
-    ) -> Option<Self> {
+    /// Create a new `PinnedVersion` with the given `LocalHummockVersion`. Referring to the usage in the `hummock_event_handler`.
+    pub fn new_with_local_version(&self, version: LocalHummockVersion) -> Option<Self> {
         assert!(
             version.id >= self.version.id,
             "pinning a older version {}. Current is {}",
@@ -151,7 +148,7 @@ impl PinnedVersion {
                 version_id,
                 self.guard.pinned_version_manager_tx.clone(),
             )),
-            table_change_log,
+            table_change_log: self.table_change_log.clone(),
             version: Arc::new(version),
         })
     }
@@ -194,10 +191,10 @@ impl PinnedVersion {
         }
     }
 
-    pub fn table_change_log(
+    pub fn table_change_log_read_lock(
         &self,
-    ) -> &Arc<RwLock<HashMap<TableId, TableChangeLogCommon<SstableInfo>>>> {
-        &self.table_change_log
+    ) -> parking_lot::RwLockReadGuard<'_, HashMap<TableId, TableChangeLogCommon<SstableInfo>>> {
+        self.table_change_log.read()
     }
 
     pub fn table_change_log_write_lock(
