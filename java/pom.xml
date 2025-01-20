@@ -65,14 +65,14 @@
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <!-- dependency versions -->
         <protobuf.version>3.25.5</protobuf.version> <!-- https://github.com/grpc/grpc-java/issues/11015 -->
-        <grpc.version>1.69.0</grpc.version>
+        <grpc.version>1.69.1</grpc.version>
         <log4j.version>2.24.3</log4j.version>
         <slf4j.version>2.0.16</slf4j.version>
         <debezium.version>2.6.2.Final</debezium.version>
         <jackson.version>2.18.2</jackson.version>
         <hadoop.version>3.4.1</hadoop.version>
         <testcontainers.version>1.20.4</testcontainers.version>
-        <aws.version>2.29.45</aws.version>
+        <aws.version>2.30.2</aws.version>
         <jetty.version>12.0.16</jetty.version>
         <parquet.version>1.15.0</parquet.version>
     </properties>
@@ -165,7 +165,7 @@
             <dependency>
                 <groupId>org.postgresql</groupId>
                 <artifactId>postgresql</artifactId>
-                <version>42.7.4</version>
+                <version>42.7.5</version>
             </dependency>
             <dependency>
                 <groupId>com.mysql</groupId>
@@ -175,7 +175,7 @@
             <dependency>
                 <groupId>org.elasticsearch.client</groupId>
                 <artifactId>elasticsearch-rest-high-level-client</artifactId>
-                <version>7.17.26</version>
+                <version>7.17.27</version>
             </dependency>
             <dependency>
                 <groupId>org.opensearch.client</groupId>
@@ -219,7 +219,7 @@
             <dependency>
                 <groupId>org.assertj</groupId>
                 <artifactId>assertj-core</artifactId>
-                <version>3.27.2</version>
+                <version>3.27.3</version>
                 <scope>test</scope>
             </dependency>
             <dependency>
@@ -310,7 +310,7 @@
             <dependency>
                 <groupId>org.xerial</groupId>
                 <artifactId>sqlite-jdbc</artifactId>
-                <version>3.47.2.0</version>
+                <version>3.48.0.0</version>
             </dependency>
             <dependency>
                 <groupId>software.amazon.awssdk</groupId>
@@ -423,7 +423,7 @@
             <plugin>
                 <groupId>com.diffplug.spotless</groupId>
                 <artifactId>spotless-maven-plugin</artifactId>
-                <version>2.43.0</version>
+                <version>2.44.2</version>
                 <configuration>
                     <java>
                         <googleJavaFormat>
