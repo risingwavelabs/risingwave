@@ -1066,6 +1066,12 @@ pub struct BatchDeveloperConfig {
     #[serde(default = "default::developer::batch_output_channel_size")]
     pub output_channel_size: usize,
 
+    #[serde(default = "default::developer::batch_receiver_channel_size")]
+    pub receiver_channel_size: usize,
+
+    #[serde(default = "default::developer::batch_root_stage_channel_size")]
+    pub root_stage_channel_size: usize,
+
     /// The size of a chunk produced by `RowSeqScanExecutor`
     #[serde(default = "default::developer::batch_chunk_size")]
     pub chunk_size: usize,
@@ -1818,6 +1824,14 @@ pub mod default {
 
         pub fn batch_output_channel_size() -> usize {
             64
+        }
+
+        pub fn batch_receiver_channel_size() -> usize {
+            1000
+        }
+
+        pub fn batch_root_stage_channel_size() -> usize {
+            100
         }
 
         pub fn batch_chunk_size() -> usize {

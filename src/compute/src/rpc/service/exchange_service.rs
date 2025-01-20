@@ -32,9 +32,6 @@ use tonic::{Request, Response, Status, Streaming};
 
 use crate::rpc::service::exchange_metrics::ExchangeServiceMetrics;
 
-/// Buffer size of the receiver of the remote channel.
-const BATCH_EXCHANGE_BUFFER_SIZE: usize = 1024;
-
 #[derive(Clone)]
 pub struct ExchangeServiceImpl {
     batch_mgr: Arc<BatchManager>,
@@ -62,7 +59,8 @@ impl ExchangeService for ExchangeServiceImpl {
             .into_inner()
             .task_output_id
             .expect("Failed to get task output id.");
-        let (tx, rx) = tokio::sync::mpsc::channel(BATCH_EXCHANGE_BUFFER_SIZE);
+        let (tx, rx) =
+            tokio::sync::mpsc::channel(self.batch_mgr.config().developer.receiver_channel_size);
         if let Err(e) = self.batch_mgr.get_data(tx, peer_addr, &pb_task_output_id) {
             error!(
                 %peer_addr,
