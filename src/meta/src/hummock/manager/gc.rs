@@ -28,7 +28,7 @@ use risingwave_hummock_sdk::{
     get_object_id_from_path, get_sst_data_path, HummockSstableObjectId, OBJECT_SUFFIX,
 };
 use risingwave_meta_model::hummock_sequence::HUMMOCK_NOW;
-use risingwave_meta_model::{hummock_gc_history, hummock_sequence};
+use risingwave_meta_model::{hummock_gc_history, hummock_sequence, hummock_version_delta};
 use risingwave_meta_model_migration::OnConflict;
 use risingwave_object_store::object::{ObjectMetadataIter, ObjectStoreRef};
 use risingwave_pb::stream_service::GetMinUncommittedSstIdRequest;
@@ -37,10 +37,8 @@ use sea_orm::{ActiveValue, ColumnTrait, EntityTrait, QueryFilter, Set};
 
 use crate::backup_restore::BackupManagerRef;
 use crate::hummock::error::{Error, Result};
-use crate::hummock::manager::commit_multi_var;
 use crate::hummock::HummockManager;
 use crate::manager::MetadataManager;
-use crate::model::BTreeMapTransaction;
 use crate::MetaResult;
 
 pub(crate) struct GcManager {
@@ -175,44 +173,36 @@ impl GcManager {
 }
 
 impl HummockManager {
-    /// Deletes at most `batch_size` deltas.
+    /// Deletes version deltas.
     ///
-    /// Returns (number of deleted deltas, number of remain `deltas_to_delete`).
-    pub async fn delete_version_deltas(&self, batch_size: usize) -> Result<(usize, usize)> {
+    /// Returns number of deleted deltas
+    pub async fn delete_version_deltas(&self) -> Result<usize> {
         let mut versioning_guard = self.versioning.write().await;
         let versioning = versioning_guard.deref_mut();
         let context_info = self.context_info.read().await;
-        let deltas_to_delete = versioning
-            .hummock_version_deltas
-            .range(..=versioning.checkpoint.version.id)
-            .map(|(k, _)| *k)
-            .collect_vec();
         // If there is any safe point, skip this to ensure meta backup has required delta logs to
         // replay version.
         if !context_info.version_safe_points.is_empty() {
-            return Ok((0, deltas_to_delete.len()));
+            return Ok(0);
         }
-        let mut hummock_version_deltas =
-            BTreeMapTransaction::new(&mut versioning.hummock_version_deltas);
-        let batch = deltas_to_delete
-            .iter()
-            .take(batch_size)
-            .cloned()
-            .collect_vec();
-        if batch.is_empty() {
-            return Ok((0, 0));
-        }
-        for delta_id in &batch {
-            hummock_version_deltas.remove(*delta_id);
-        }
-        commit_multi_var!(self.meta_store_ref(), hummock_version_deltas)?;
+        // The context_info lock must be held to prevent any potential metadata backup.
+        // The lock order requires version lock to be held as well.
+        let version_id = versioning.checkpoint.version.id;
+        let res = hummock_version_delta::Entity::delete_many()
+            .filter(hummock_version_delta::Column::Id.lte(version_id.to_u64()))
+            .exec(&self.env.meta_store_ref().conn)
+            .await?;
+        tracing::debug!(rows_affected = res.rows_affected, "Deleted version deltas");
+        versioning
+            .hummock_version_deltas
+            .retain(|id, _| *id > version_id);
         #[cfg(test)]
         {
             drop(context_info);
             drop(versioning_guard);
             self.check_state_consistency().await;
         }
-        Ok((batch.len(), deltas_to_delete.len() - batch.len()))
+        Ok(res.rows_affected as usize)
     }
 
     /// Filters by Hummock version and Writes GC history.
@@ -343,7 +333,12 @@ impl HummockManager {
         let after_metadata_backup = object_ids.len();
         // filter by time travel archive
         let object_ids = self
-            .filter_out_objects_by_time_travel(object_ids.into_iter())
+            .filter_out_objects_by_time_travel(
+                object_ids.into_iter(),
+                self.env
+                    .opts
+                    .hummock_time_travel_filter_out_objects_batch_size,
+            )
             .await?;
         let after_time_travel = object_ids.len();
         // filter by SST id watermark, i.e. minimum id of uncommitted SSTs reported by compute nodes.
@@ -436,11 +431,10 @@ impl HummockManager {
             .filter(hummock_gc_history::Column::MarkDeleteAt.lt(gc_history_low_watermark))
             .exec(db)
             .await?;
-        const BATCH_SIZE: usize = 1000;
         let mut is_finished = false;
         while !is_finished {
             let mut batch = vec![];
-            let mut count: usize = BATCH_SIZE;
+            let mut count: usize = self.env.opts.hummock_gc_history_insert_batch_size;
             while count > 0 {
                 let Some(m) = models.next() else {
                     is_finished = true;
@@ -460,24 +454,7 @@ impl HummockManager {
         Ok(())
     }
 
-    /// Deletes stale Hummock metadata.
-    ///
-    /// Returns number of deleted deltas
-    pub async fn delete_metadata(&self) -> MetaResult<usize> {
-        let batch_size = 64usize;
-        let mut total_deleted = 0;
-        loop {
-            if total_deleted != 0 && self.env.opts.vacuum_spin_interval_ms != 0 {
-                tokio::time::sleep(Duration::from_millis(self.env.opts.vacuum_spin_interval_ms))
-                    .await;
-            }
-            let (deleted, remain) = self.delete_version_deltas(batch_size).await?;
-            total_deleted += deleted;
-            if total_deleted == 0 || remain < batch_size {
-                break;
-            }
-        }
-
+    pub async fn delete_time_travel_metadata(&self) -> MetaResult<()> {
         let current_epoch_time = Epoch::now().physical_time();
         let epoch_watermark = Epoch::from_physical_time(
             current_epoch_time.saturating_sub(
@@ -489,8 +466,7 @@ impl HummockManager {
         )
         .0;
         self.truncate_time_travel_metadata(epoch_watermark).await?;
-
-        Ok(total_deleted)
+        Ok(())
     }
 
     /// Deletes stale SST objects from object store.
@@ -542,7 +518,14 @@ impl HummockManager {
         let object_ids = object_ids
             .into_iter()
             .filter(|s| !version_pinned.contains(s) && !backup_pinned.contains(s));
-        let object_ids = self.filter_out_objects_by_time_travel(object_ids).await?;
+        let object_ids = self
+            .filter_out_objects_by_time_travel(
+                object_ids,
+                self.env
+                    .opts
+                    .hummock_time_travel_filter_out_objects_batch_size,
+            )
+            .await?;
         // Retry is not necessary. Full GC will handle these objects eventually.
         self.delete_objects(object_ids.into_iter().collect())
             .await?;
