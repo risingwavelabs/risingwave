@@ -13,6 +13,8 @@
 // limitations under the License.
 
 //! This contains the synced kv log store implementation.
+//! It's meant to buffer a large number of records emitted from upstream,
+//! to avoid overwhelming the downstream executor.
 //!
 //! The synced kv log store polls two futures:
 //!
@@ -52,7 +54,7 @@
 //!     because they are directly propagated from the upstream when polling it.
 //!
 //! TODO(kwannoel):
-//! - [] Add metrics
+//! - [] Add dedicated metrics for sync log store, namespace according to the upstream.
 //! - [] Add tests
 //! - [] Handle watermark r/w
 //! - [] Handle paused stream
