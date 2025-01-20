@@ -28,7 +28,7 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{ProjectNode, StreamFragmentGraph};
 use risingwave_sqlparser::ast::{AlterTableOperation, ColumnOption, ObjectName, Statement};
 
-use super::create_source::{schema_has_schema_registry, SqlColumnStrategy};
+use super::create_source::SqlColumnStrategy;
 use super::create_table::{generate_stream_graph_for_replace_table, ColumnIdGenerator};
 use super::util::SourceSchemaCompatExt;
 use super::{HandlerArgs, RwPgResponse};
@@ -260,21 +260,9 @@ pub async fn handle_alter_table_column(
 
     // Retrieve the original table definition and parse it to AST.
     let mut definition = original_catalog.create_sql_ast_purified()?;
-    let Statement::CreateTable {
-        columns,
-        format_encode,
-        ..
-    } = &mut definition
-    else {
+    let Statement::CreateTable { columns, .. } = &mut definition else {
         panic!("unexpected statement: {:?}", definition);
     };
-
-    let format_encode = format_encode
-        .clone()
-        .map(|format_encode| format_encode.into_v2_with_warning());
-    let has_schema_registry = format_encode
-        .as_ref()
-        .is_some_and(schema_has_schema_registry);
 
     if !original_catalog.incoming_sinks.is_empty()
         && matches!(operation, AlterTableOperation::DropColumn { .. })
@@ -368,19 +356,12 @@ pub async fn handle_alter_table_column(
 
         _ => unreachable!(),
     };
-
-    let sql_column_strategy = if has_schema_registry {
-        SqlColumnStrategy::FollowChecked
-    } else {
-        SqlColumnStrategy::FollowUnchecked
-    };
-
     let (source, table, graph, col_index_mapping, job_type) = get_replace_table_plan(
         &session,
         table_name,
         definition,
         &original_catalog,
-        sql_column_strategy,
+        SqlColumnStrategy::FollowChecked, // applied only to tables with schema registry
     )
     .await?;
 
