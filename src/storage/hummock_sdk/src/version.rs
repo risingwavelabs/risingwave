@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::hash_map::Entry;
-use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::mem::{replace, size_of};
 use std::ops::Deref;
 use std::sync::{Arc, LazyLock};
@@ -478,18 +478,14 @@ impl HummockVersion {
         let table_change_log = {
             let mut table_change_log = HashMap::new();
             for (table_id, log) in &mut self.table_change_log {
-                let mut change_log = VecDeque::new();
-                for item in log.change_log_iter_mut() {
-                    let new_value = EpochNewChangeLogCommon {
-                        new_value: std::mem::take(&mut item.new_value),
-                        old_value: std::mem::take(&mut item.old_value),
-                        epochs: item.epochs.clone(),
-                    };
-
-                    change_log.push_back(new_value);
-                }
-                table_change_log
-                    .insert(*table_id, TableChangeLogCommon::new(change_log.into_iter()));
+                let change_log_iter =
+                    log.change_log_iter_mut()
+                        .map(|item| EpochNewChangeLogCommon {
+                            new_value: std::mem::take(&mut item.new_value),
+                            old_value: std::mem::take(&mut item.old_value),
+                            epochs: item.epochs.clone(),
+                        });
+                table_change_log.insert(*table_id, TableChangeLogCommon::new(change_log_iter));
             }
 
             table_change_log
