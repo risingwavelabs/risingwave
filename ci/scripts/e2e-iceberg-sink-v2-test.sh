@@ -52,6 +52,7 @@ poetry run python main.py -t ./test_case/iceberg_source_position_delete.toml
 poetry run python main.py -t ./test_case/iceberg_source_all_delete.toml
 poetry run python main.py -t ./test_case/iceberg_source_explain_for_delete.toml
 poetry run python main.py -t ./test_case/iceberg_predicate_pushdown.toml
+poetry run python main.py -t ./test_case/iceberg_connection.toml
 
 echo "--- Running benchmarks"
 poetry run python main.py -t ./benches/predicate_pushdown.toml

@@ -14,6 +14,8 @@
 
 use std::collections::HashMap;
 
+pub use opendal_enumerator::OpendalEnumerator;
+
 pub mod azblob_source;
 pub mod gcs_source;
 pub mod posix_fs_source;
@@ -25,7 +27,6 @@ use with_options::WithOptions;
 pub mod opendal_enumerator;
 pub mod opendal_reader;
 
-use self::opendal_enumerator::OpendalEnumerator;
 use self::opendal_reader::OpendalReader;
 use super::file_common::CompressionFormat;
 pub use super::s3::S3PropertiesCommon;

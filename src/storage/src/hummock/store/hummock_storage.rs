@@ -639,6 +639,49 @@ impl StateStoreRead for HummockStorage {
 impl StateStoreReadLog for HummockStorage {
     type ChangeLogIter = ChangeLogIterator;
 
+    async fn next_epoch(&self, epoch: u64, options: NextEpochOptions) -> StorageResult<u64> {
+        fn next_epoch(
+            version: &HummockVersion,
+            epoch: u64,
+            table_id: TableId,
+        ) -> HummockResult<Option<u64>> {
+            let table_change_log = version.table_change_log.get(&table_id).ok_or_else(|| {
+                HummockError::next_epoch(format!("table {} has been dropped", table_id))
+            })?;
+            table_change_log.next_epoch(epoch).map_err(|_| {
+                HummockError::next_epoch(format!(
+                    "invalid epoch {}, change log epoch: {:?}",
+                    epoch,
+                    table_change_log.epochs().collect_vec()
+                ))
+            })
+        }
+        {
+            // fast path
+            let recent_versions = self.recent_versions.load();
+            if let Some(next_epoch) =
+                next_epoch(recent_versions.latest_version(), epoch, options.table_id)?
+            {
+                return Ok(next_epoch);
+            }
+        }
+        let mut next_epoch_ret = None;
+        wait_for_update(
+            &self.version_update_notifier_tx,
+            |version| {
+                if let Some(next_epoch) = next_epoch(version, epoch, options.table_id)? {
+                    next_epoch_ret = Some(next_epoch);
+                    Ok(true)
+                } else {
+                    Ok(false)
+                }
+            },
+            || format!("wait next_epoch: epoch: {} {}", epoch, options.table_id),
+        )
+        .await?;
+        Ok(next_epoch_ret.expect("should be set before wait_for_update returns"))
+    }
+
     async fn iter_log(
         &self,
         epoch_range: (u64, u64),
