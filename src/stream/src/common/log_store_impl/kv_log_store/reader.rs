@@ -232,7 +232,7 @@ impl<S: StateStoreRead, F: FnMut() -> bool> AutoRebuildStateStoreReadIter<S, F> 
     }
 }
 
-pub mod timeout_auto_rebuild {
+pub(crate) mod timeout_auto_rebuild {
     use std::time::{Duration, Instant};
 
     use risingwave_hummock_sdk::key::TableKeyRange;
@@ -242,7 +242,7 @@ pub mod timeout_auto_rebuild {
 
     use crate::common::log_store_impl::kv_log_store::reader::AutoRebuildStateStoreReadIter;
 
-    pub type TimeoutAutoRebuildIter<S: StateStoreRead> =
+    pub(crate) type TimeoutAutoRebuildIter<S: StateStoreRead> =
         AutoRebuildStateStoreReadIter<S, impl FnMut() -> bool + Send>;
 
     pub(super) async fn iter_with_timeout_rebuild<S: StateStoreRead>(
@@ -599,7 +599,7 @@ impl<S: StateStoreRead + Clone> LogReader for KvLogStoreReader<S> {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub async fn read_flushed_chunk(
+pub(crate) async fn read_flushed_chunk(
     serde: LogStoreRowSerde,
     state_store: impl StateStoreRead,
     vnode_bitmap: Bitmap,
@@ -645,7 +645,7 @@ pub async fn read_flushed_chunk(
     Ok((chunk_id, chunk, item_epoch))
 }
 
-pub fn read_persisted_log_store<S: StateStoreRead + Clone>(
+pub(crate) fn read_persisted_log_store<S: StateStoreRead + Clone>(
     serde: &LogStoreRowSerde,
     table_id: TableId,
     metrics: &KvLogStoreMetrics,

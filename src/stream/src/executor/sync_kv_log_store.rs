@@ -96,7 +96,6 @@ use crate::common::log_store_impl::kv_log_store::{
 use crate::executor::{
     Barrier, BoxedMessageStream, Message, StreamExecutorError, StreamExecutorResult,
 };
-use crate::executor::test_utils::StreamExecutorTestExt;
 
 type StateStoreStream<S> = Pin<Box<LogStoreItemMergeStream<TimeoutAutoRebuildIter<S>>>>;
 type ReadFlushedChunkFuture = BoxFuture<'static, LogStoreResult<(ChunkId, StreamChunk, u64)>>;
@@ -171,6 +170,7 @@ impl<S: StateStore<Local = LS>, LS: LocalStateStore> SyncedKvLogStoreExecutor<S,
 impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStoreExecutor<S, LS> {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     pub async fn execute_inner(mut self) {
+        self.init().await?;
         loop {
             if let Some(msg) = self.next().await? {
                 yield msg;
@@ -620,10 +620,6 @@ impl SyncedLogStoreBuffer {
             },
         ));
         self.update_unconsumed_buffer_metrics();
-    }
-
-    fn is_full(&self) -> bool {
-        self.buffer.len() >= self.max_size
     }
 
     fn pop_front(&mut self) -> Option<(u64, LogStoreBufferItem)> {
