@@ -686,7 +686,7 @@ pub struct DeclareCursorStatement {
 
 impl ParseTo for DeclareCursorStatement {
     fn parse_to(p: &mut Parser<'_>) -> PResult<Self> {
-        impl_parse_to!(cursor_name: Ident, p);
+        let cursor_name = p.parse_identifier_non_reserved()?;
 
         let declare_cursor = if !p.parse_keyword(Keyword::SUBSCRIPTION) {
             p.expect_keyword(Keyword::CURSOR)?;
@@ -743,7 +743,7 @@ impl ParseTo for FetchCursorStatement {
             literal_u32(p)?
         };
         p.expect_keyword(Keyword::FROM)?;
-        impl_parse_to!(cursor_name: Ident, p);
+        let cursor_name = p.parse_identifier_non_reserved()?;
         impl_parse_to!(with_properties: WithProperties, p);
 
         Ok(Self {
@@ -782,7 +782,7 @@ impl ParseTo for CloseCursorStatement {
         let cursor_name = if p.parse_keyword(Keyword::ALL) {
             None
         } else {
-            Some(p.parse_identifier()?)
+            Some(p.parse_identifier_non_reserved()?)
         };
 
         Ok(Self { cursor_name })
