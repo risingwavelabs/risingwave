@@ -347,57 +347,14 @@ impl<S: StateStoreRead + Clone> KvLogStoreReader<S> {
     ) -> impl Future<
         Output = LogStoreResult<Pin<Box<LogStoreItemMergeStream<TimeoutAutoRebuildIter<S>>>>>,
     > + Send {
-        let range_start = if let Some(last_persisted_epoch) = last_persisted_epoch {
-            // start from the next epoch of last_persisted_epoch
-            Included(
-                self.serde
-                    .serialize_pk_epoch_prefix(last_persisted_epoch.next_epoch()),
-            )
-        } else {
-            Unbounded
-        };
-        let range_end = self.serde.serialize_pk_epoch_prefix(
-            self.first_write_epoch
-                .expect("should have set first write epoch"),
-        );
-
-        let serde = self.serde.clone();
-        let table_id = self.table_id;
-        let read_metrics = self.metrics.persistent_log_read_metrics.clone();
-        let streams_future = try_join_all(serde.vnodes().iter_vnodes().map(|vnode| {
-            let key_range = prefixed_range_with_vnode(
-                (range_start.clone(), Excluded(range_end.clone())),
-                vnode,
-            );
-            let state_store = self.state_store.clone();
-            async move {
-                // rebuild the iter every 10 minutes to avoid pinning hummock version for too long
-                iter_with_timeout_rebuild(
-                    state_store,
-                    key_range,
-                    HummockEpoch::MAX,
-                    ReadOptions {
-                        // This stream lives too long, the connection of prefetch object may break. So use a short connection prefetch.
-                        prefetch_options: PrefetchOptions::prefetch_for_small_range_scan(),
-                        cache_policy: CachePolicy::Fill(CacheHint::Low),
-                        table_id,
-                        ..Default::default()
-                    },
-                    Duration::from_secs(10 * 60),
-                )
-                .await
-            }
-        }));
-
-        streams_future.map_err(Into::into).map_ok(|streams| {
-            // TODO: set chunk size by config
-            Box::pin(merge_log_store_item_stream(
-                streams,
-                serde,
-                1024,
-                read_metrics,
-            ))
-        })
+        read_persisted_log_store(
+            &self.serde,
+            self.table_id,
+            &self.metrics,
+            self.state_store.clone(),
+            self.first_write_epoch.expect("should have init"),
+            last_persisted_epoch,
+        )
     }
 }
 
@@ -686,6 +643,68 @@ pub async fn read_flushed_chunk(
         .await?;
 
     Ok((chunk_id, chunk, item_epoch))
+}
+
+fn read_persisted_log_store<S: StateStoreRead + Clone>(
+    serde: &LogStoreRowSerde,
+    table_id: TableId,
+    metrics: &KvLogStoreMetrics,
+    state_store: S,
+    first_write_epoch: u64,
+    last_persisted_epoch: Option<u64>,
+) -> impl Future<
+    Output = LogStoreResult<Pin<Box<LogStoreItemMergeStream<TimeoutAutoRebuildIter<S>>>>>,
+> + Send {
+    let range_start = if let Some(last_persisted_epoch) = last_persisted_epoch {
+        // start from the next epoch of last_persisted_epoch
+        Included(
+            serde
+                .serialize_pk_epoch_prefix(last_persisted_epoch.next_epoch()),
+        )
+    } else {
+        Unbounded
+    };
+    let range_end = serde.serialize_pk_epoch_prefix(
+        first_write_epoch
+    );
+
+    let serde = serde.clone();
+    let table_id = table_id;
+    let read_metrics = metrics.persistent_log_read_metrics.clone();
+    let streams_future = try_join_all(serde.vnodes().iter_vnodes().map(|vnode| {
+        let key_range = prefixed_range_with_vnode(
+            (range_start.clone(), Excluded(range_end.clone())),
+            vnode,
+        );
+        let state_store = state_store.clone();
+        async move {
+            // rebuild the iter every 10 minutes to avoid pinning hummock version for too long
+            iter_with_timeout_rebuild(
+                state_store,
+                key_range,
+                HummockEpoch::MAX,
+                ReadOptions {
+                    // This stream lives too long, the connection of prefetch object may break. So use a short connection prefetch.
+                    prefetch_options: PrefetchOptions::prefetch_for_small_range_scan(),
+                    cache_policy: CachePolicy::Fill(CacheHint::Low),
+                    table_id,
+                    ..Default::default()
+                },
+                Duration::from_secs(10 * 60),
+            )
+                .await
+        }
+    }));
+
+    streams_future.map_err(Into::into).map_ok(|streams| {
+        // TODO: set chunk size by config
+        Box::pin(merge_log_store_item_stream(
+            streams,
+            serde,
+            1024,
+            read_metrics,
+        ))
+    })
 }
 
 #[cfg(test)]
