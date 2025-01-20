@@ -77,7 +77,7 @@ use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_connector::sink::log_store::{ChunkId, LogStoreResult};
 use risingwave_hummock_sdk::table_watermark::{VnodeWatermark, WatermarkDirection};
-use risingwave_storage::store::{InitOptions, LocalStateStore, NewLocalOptions, OpConsistencyLevel, SealCurrentEpochOptions, StateStoreRead};
+use risingwave_storage::store::{InitOptions, LocalStateStore, NewLocalOptions, OpConsistencyLevel, SealCurrentEpochOptions};
 use risingwave_storage::StateStore;
 use tokio::select;
 use futures::TryStreamExt;
@@ -186,7 +186,7 @@ impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStoreExecutor<S, LS> {
                 &mut self.truncation_offset,
                 &mut state_store_stream,
                 &mut self.flushed_chunk_future,
-                self.state_store.clone(),
+                &self.state_store,
                 &mut self.buffer,
                 &mut self.local_state_store,
                 &mut self.metrics,
@@ -234,7 +234,7 @@ impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStoreExecutor<S, LS> {
         truncation_offset: &mut Option<ReaderTruncationOffsetType>,
         state_store_stream: &mut Option<StateStoreStream<S>>,
         flushed_chunk_future: &mut Option<ReadFlushedChunkFuture>,
-        state_store: S,
+        state_store: &S,
         buffer: &mut Mutex<SyncedLogStoreBuffer>,
 
         local_state_store: &mut LS,
@@ -250,7 +250,7 @@ impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStoreExecutor<S, LS> {
                 truncation_offset,
                 state_store_stream,
                 flushed_chunk_future,
-                state_store,
+                &state_store,
                 buffer
             ) => {
                 let logstore_item = logstore_item?;
@@ -313,7 +313,7 @@ impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStoreExecutor<S, LS> {
         // state
         log_store_state: &mut Option<StateStoreStream<S>>,
         read_flushed_chunk_future: &mut Option<ReadFlushedChunkFuture>,
-        state_store: S,
+        state_store: &S,
         buffer: &mut Mutex<SyncedLogStoreBuffer>,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
         // 1. read state store
@@ -390,7 +390,7 @@ impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStoreExecutor<S, LS> {
         truncation_offset: &mut Option<ReaderTruncationOffsetType>,
         read_flushed_chunk_future: &mut Option<ReadFlushedChunkFuture>,
         serde: &LogStoreRowSerde,
-        state_store: impl StateStoreRead,
+        state_store: &S,
         buffer: &mut Mutex<SyncedLogStoreBuffer>,
         table_id: TableId,
         read_metrics: &KvLogStoreReadMetrics,
@@ -416,7 +416,7 @@ impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStoreExecutor<S, LS> {
                 let read_metrics = read_metrics.clone();
                 let read_flushed_chunk_fut = read_flushed_chunk(
                     serde,
-                    state_store,
+                    state_store.clone(),
                     vnode_bitmap,
                     chunk_id,
                     start_seq_id,
