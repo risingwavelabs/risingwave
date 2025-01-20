@@ -28,7 +28,7 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{ProjectNode, StreamFragmentGraph};
 use risingwave_sqlparser::ast::{AlterTableOperation, ColumnOption, ObjectName, Statement};
 
-use super::create_source::schema_has_schema_registry;
+use super::create_source::{schema_has_schema_registry, SqlColumnStrategy};
 use super::create_table::{generate_stream_graph_for_replace_table, ColumnIdGenerator};
 use super::util::SourceSchemaCompatExt;
 use super::{HandlerArgs, RwPgResponse};
@@ -90,6 +90,7 @@ pub async fn get_replace_table_plan(
     table_name: ObjectName,
     new_definition: Statement,
     old_catalog: &Arc<TableCatalog>,
+    sql_column_strategy: SqlColumnStrategy,
 ) -> Result<(
     Option<Source>,
     Table,
@@ -144,6 +145,7 @@ pub async fn get_replace_table_plan(
         cdc_table_info,
         include_column_options,
         engine,
+        sql_column_strategy,
     )
     .await?;
 
@@ -257,7 +259,7 @@ pub async fn handle_alter_table_column(
     }
 
     // Retrieve the original table definition and parse it to AST.
-    let mut definition = original_catalog.create_sql_ast()?;
+    let mut definition = original_catalog.create_sql_ast_purified()?;
     let Statement::CreateTable {
         columns,
         format_encode,
@@ -275,6 +277,7 @@ pub async fn handle_alter_table_column(
         if let Some(format_encode) = &format_encode
             && schema_has_schema_registry(format_encode)
         {
+            // TODO(purify): we may support this.
             Err(ErrorCode::NotSupported(
                 "alter table with schema registry".to_owned(),
                 "try `ALTER TABLE .. FORMAT .. ENCODE .. (...)` instead".to_owned(),
@@ -283,13 +286,6 @@ pub async fn handle_alter_table_column(
             Ok(())
         }
     };
-
-    if columns.is_empty() {
-        Err(ErrorCode::NotSupported(
-            "alter a table with empty column definitions".to_owned(),
-            "Please recreate the table with column definitions.".to_owned(),
-        ))?
-    }
 
     if !original_catalog.incoming_sinks.is_empty()
         && matches!(operation, AlterTableOperation::DropColumn { .. })
@@ -390,8 +386,14 @@ pub async fn handle_alter_table_column(
         _ => unreachable!(),
     };
 
-    let (source, table, graph, col_index_mapping, job_type) =
-        get_replace_table_plan(&session, table_name, definition, &original_catalog).await?;
+    let (source, table, graph, col_index_mapping, job_type) = get_replace_table_plan(
+        &session,
+        table_name,
+        definition,
+        &original_catalog,
+        SqlColumnStrategy::Follow,
+    )
+    .await?;
 
     let catalog_writer = session.catalog_writer()?;
 
