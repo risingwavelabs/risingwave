@@ -645,7 +645,7 @@ pub async fn read_flushed_chunk(
     Ok((chunk_id, chunk, item_epoch))
 }
 
-fn read_persisted_log_store<S: StateStoreRead + Clone>(
+pub fn read_persisted_log_store<S: StateStoreRead + Clone>(
     serde: &LogStoreRowSerde,
     table_id: TableId,
     metrics: &KvLogStoreMetrics,
