@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::RwPgResponse;
@@ -34,7 +35,7 @@ pub async fn handle_create_database(
     {
         let user_reader = session.env().user_info_reader();
         let reader = user_reader.read_guard();
-        if let Some(info) = reader.get_user_by_name(session.user_name()) {
+        if let Some(info) = reader.get_user_by_name(&session.user_name()) {
             if !info.can_create_db && !info.is_super {
                 return Err(PermissionDenied("Do not have the privilege".to_owned()).into());
             }
@@ -73,7 +74,8 @@ pub async fn handle_create_database(
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .create_database(&database_name, database_owner)
+        // TODO: add support for create database with resource_group
+        .create_database(&database_name, database_owner, DEFAULT_RESOURCE_GROUP)
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_DATABASE))

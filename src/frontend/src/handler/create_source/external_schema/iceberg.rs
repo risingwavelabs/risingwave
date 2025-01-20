@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@ pub async fn extract_iceberg_columns(
 ) -> anyhow::Result<Vec<ColumnCatalog>> {
     let props = ConnectorProperties::extract(with_properties.clone(), true)?;
     if let ConnectorProperties::Iceberg(properties) = props {
-        let table = properties.load_table_v2().await?;
+        let table = properties.load_table().await?;
         let iceberg_schema: arrow_schema_iceberg::Schema =
             ::iceberg::arrow::schema_to_arrow_schema(table.metadata().current_schema())?;
 
@@ -42,6 +42,8 @@ pub async fn extract_iceberg_columns(
             })
             .collect();
         columns.push(ColumnCatalog::iceberg_sequence_num_column());
+        columns.push(ColumnCatalog::iceberg_file_path_column());
+        columns.push(ColumnCatalog::iceberg_file_pos_column());
 
         Ok(columns)
     } else {
@@ -67,13 +69,17 @@ pub async fn check_iceberg_source(
     let schema = Schema {
         fields: columns
             .iter()
-            .filter(|&c| c.column_desc.name != ICEBERG_SEQUENCE_NUM_COLUMN_NAME)
+            .filter(|&c| {
+                c.column_desc.name != ICEBERG_SEQUENCE_NUM_COLUMN_NAME
+                    && c.column_desc.name != ICEBERG_FILE_PATH_COLUMN_NAME
+                    && c.column_desc.name != ICEBERG_FILE_POS_COLUMN_NAME
+            })
             .cloned()
             .map(|c| c.column_desc.into())
             .collect(),
     };
 
-    let table = properties.load_table_v2().await?;
+    let table = properties.load_table().await?;
 
     let iceberg_schema =
         ::iceberg::arrow::schema_to_arrow_schema(table.metadata().current_schema())?;

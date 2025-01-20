@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -179,7 +179,7 @@ impl HummockManager {
                                 .change_log_delta
                                 .values()
                                 .flat_map(|change_log| {
-                                    let new_log = change_log.new_log.as_ref().unwrap();
+                                    let new_log = &change_log.new_log;
                                     new_log
                                         .new_value
                                         .iter()

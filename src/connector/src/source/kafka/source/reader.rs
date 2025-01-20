@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -77,14 +77,7 @@ impl SplitReader for KafkaSplitReader {
         properties.connection.set_security_properties(&mut config);
         properties.set_client(&mut config);
 
-        let group_id_prefix = properties
-            .group_id_prefix
-            .as_deref()
-            .unwrap_or("rw-consumer");
-        config.set(
-            "group.id",
-            format!("{}-{}", group_id_prefix, source_ctx.fragment_id),
-        );
+        config.set("group.id", properties.group_id(source_ctx.fragment_id));
 
         let ctx_common = KafkaContextCommon::new(
             broker_rewrite_map,
@@ -334,5 +327,6 @@ impl KafkaSplitReader {
             // yield in the outer loop so that we can always guarantee that some messages are read
             // every `MAX_CHUNK_SIZE`.
         }
+        tracing::info!("kafka reader finished");
     }
 }

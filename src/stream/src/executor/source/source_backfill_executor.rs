@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -309,14 +309,14 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         // the executor can only know it's finished when data coming in.
         // For blocking DDL, this would be annoying.
 
-        let (stream, backfill_info) = source_desc
+        let (stream, res) = source_desc
             .source
-            .build_stream_for_backfill(Some(splits), column_ids, Arc::new(source_ctx))
+            .build_stream(Some(splits), column_ids, Arc::new(source_ctx), false)
             .await
             .map_err(StreamExecutorError::connector_error)?;
         Ok((
             apply_rate_limit(stream, self.rate_limit_rps).boxed(),
-            backfill_info,
+            res.backfill_info,
         ))
     }
 
@@ -636,6 +636,13 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                     .await?;
 
                                 if self.should_report_finished(&backfill_stage.states) {
+                                    // drop the backfill kafka consumers
+                                    backfill_stream = select_with_strategy(
+                                        input.by_ref().map(Either::Left),
+                                        futures::stream::pending().boxed().map(Either::Right),
+                                        select_strategy,
+                                    );
+
                                     self.progress.finish(
                                         barrier.epoch,
                                         backfill_stage.total_backfilled_rows(),
@@ -734,6 +741,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             }
         }
 
+        std::mem::drop(backfill_stream);
         let mut states = backfill_stage.states;
         // Make sure `Finished` state is persisted.
         self.backfill_state_store.set_states(states.clone()).await?;

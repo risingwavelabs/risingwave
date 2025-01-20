@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -37,6 +37,8 @@ use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
 use crate::utils::ordinal;
+
+pub const RESOURCE_GROUP_KEY: &str = "resource_group";
 
 pub(super) fn parse_column_names(columns: &[Ident]) -> Option<Vec<String>> {
     if columns.is_empty() {
@@ -108,7 +110,7 @@ pub fn gen_create_mv_plan_bound(
         context.warn_to_user("The session variable CREATE_COMPACTION_GROUP_FOR_MV has been deprecated. It will not take effect.");
     }
 
-    let db_name = session.database();
+    let db_name = &session.database();
     let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, name)?;
 
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
@@ -126,6 +128,7 @@ pub fn gen_create_mv_plan_bound(
     }
 
     let mut plan_root = Planner::new_for_stream(context).plan_query(query)?;
+    plan_root.set_req_dist_as_same_as_req_order();
     if let Some(col_names) = col_names {
         for name in &col_names {
             check_valid_column_name(name)?;
@@ -203,9 +206,22 @@ pub async fn handle_create_mv_bound(
         return Ok(resp);
     }
 
-    let (table, graph, dependencies) = {
+    let (table, graph, dependencies, resource_group) = {
         let context = OptimizerContext::from_handler_args(handler_args);
-        if !context.with_options().is_empty() {
+        let mut with_options = context.with_options().clone();
+
+        let resource_group = with_options.remove(&RESOURCE_GROUP_KEY.to_owned());
+
+        if resource_group.is_some()
+            && !context
+                .session_ctx()
+                .config()
+                .streaming_use_arrangement_backfill()
+        {
+            return Err(RwError::from(ProtocolError("The session config arrangement backfill must be enabled to use the resource_group option".to_owned())));
+        }
+
+        if !with_options.is_empty() {
             // get other useful fields by `remove`, the logic here is to reject unknown options.
             return Err(RwError::from(ProtocolError(format!(
                 "unexpected options in WITH clause: {:?}",
@@ -238,7 +254,7 @@ It only indicates the physical clustering of the data, which may improve the per
 
         let graph = build_graph(plan)?;
 
-        (table, graph, dependencies)
+        (table, graph, dependencies, resource_group)
     };
 
     // Ensure writes to `StreamJobTracker` are atomic.
@@ -256,7 +272,7 @@ It only indicates the physical clustering of the data, which may improve the per
     let session = session.clone();
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .create_materialized_view(table, graph, dependencies)
+        .create_materialized_view(table, graph, dependencies, resource_group)
         .await?;
 
     Ok(PgResponse::empty_result(

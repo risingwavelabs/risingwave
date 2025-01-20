@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use fixedbitset::FixedBitSet;
 use pretty_xmlish::XmlNode;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
@@ -40,20 +39,13 @@ impl StreamGroupTopN {
         assert!(!core.group_key.is_empty());
         assert!(core.limit_attr.limit() > 0);
         let input = &core.input;
-        let schema = input.schema().clone();
 
         // FIXME(rc): Actually only watermark messages on the first group-by column are propagated
         // acccoring to the current GroupTopN implementation. This should be fixed.
         let watermark_columns = if input.append_only() {
             input.watermark_columns().clone()
         } else {
-            let mut watermark_columns = FixedBitSet::with_capacity(schema.len());
-            for &idx in &core.group_key {
-                if input.watermark_columns().contains(idx) {
-                    watermark_columns.insert(idx);
-                }
-            }
-            watermark_columns
+            input.watermark_columns().retain_clone(&core.group_key)
         };
 
         let mut stream_key = core
@@ -129,9 +121,9 @@ impl StreamNode for StreamGroupTopN {
             order_by: self.topn_order().to_protobuf(),
         };
         if self.input().append_only() {
-            PbNodeBody::AppendOnlyGroupTopN(group_topn_node)
+            PbNodeBody::AppendOnlyGroupTopN(Box::new(group_topn_node))
         } else {
-            PbNodeBody::GroupTopN(group_topn_node)
+            PbNodeBody::GroupTopN(Box::new(group_topn_node))
         }
     }
 }

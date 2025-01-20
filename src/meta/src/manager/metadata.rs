@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -37,10 +37,8 @@ use crate::controller::catalog::CatalogControllerRef;
 use crate::controller::cluster::{ClusterControllerRef, StreamingClusterInfo, WorkerExtraInfo};
 use crate::controller::fragment::FragmentParallelismInfo;
 use crate::manager::{LocalNotification, NotificationVersion};
-use crate::model::{
-    ActorId, ClusterId, FragmentId, StreamJobFragments, SubscriptionId, TableParallelism,
-};
-use crate::stream::SplitAssignment;
+use crate::model::{ActorId, ClusterId, FragmentId, StreamJobFragments, SubscriptionId};
+use crate::stream::{JobReschedulePostUpdates, SplitAssignment};
 use crate::telemetry::MetaTelemetryJobDesc;
 use crate::{MetaError, MetaResult};
 
@@ -382,13 +380,13 @@ impl MetadataManager {
     pub async fn post_apply_reschedules(
         &self,
         reschedules: HashMap<FragmentId, Reschedule>,
-        table_parallelism_assignment: HashMap<TableId, TableParallelism>,
+        post_updates: &JobReschedulePostUpdates,
     ) -> MetaResult<()> {
         // temp convert u32 to i32
         let reschedules = reschedules.into_iter().map(|(k, v)| (k as _, v)).collect();
 
         self.catalog_controller
-            .post_apply_reschedules(reschedules, table_parallelism_assignment)
+            .post_apply_reschedules(reschedules, post_updates)
             .await
     }
 
@@ -543,11 +541,9 @@ impl MetadataManager {
         &self,
         job_id: &TableId,
     ) -> MetaResult<StreamJobFragments> {
-        let pb_table_fragments = self
-            .catalog_controller
+        self.catalog_controller
             .get_job_fragments_by_id(job_id.table_id as _)
-            .await?;
-        Ok(StreamJobFragments::from_protobuf(pb_table_fragments))
+            .await
     }
 
     pub async fn get_running_actors_of_fragment(
@@ -581,11 +577,11 @@ impl MetadataManager {
     ) -> MetaResult<Vec<StreamJobFragments>> {
         let mut table_fragments = vec![];
         for id in ids {
-            let pb_table_fragments = self
-                .catalog_controller
-                .get_job_fragments_by_id(id.table_id as _)
-                .await?;
-            table_fragments.push(StreamJobFragments::from_protobuf(pb_table_fragments));
+            table_fragments.push(
+                self.catalog_controller
+                    .get_job_fragments_by_id(id.table_id as _)
+                    .await?,
+            );
         }
         Ok(table_fragments)
     }
@@ -593,8 +589,7 @@ impl MetadataManager {
     pub async fn all_active_actors(&self) -> MetaResult<HashMap<ActorId, StreamActor>> {
         let table_fragments = self.catalog_controller.table_fragments().await?;
         let mut actor_maps = HashMap::new();
-        for (_, fragments) in table_fragments {
-            let tf = StreamJobFragments::from_protobuf(fragments);
+        for (_, tf) in table_fragments {
             for actor in tf.active_actors() {
                 actor_maps
                     .try_insert(actor.actor_id, actor)
@@ -732,6 +727,21 @@ impl MetadataManager {
     pub async fn get_job_max_parallelism(&self, table_id: TableId) -> MetaResult<usize> {
         self.catalog_controller
             .get_max_parallelism_by_id(table_id.table_id as _)
+            .await
+    }
+
+    pub async fn get_existing_job_resource_group(
+        &self,
+        streaming_job_id: ObjectId,
+    ) -> MetaResult<String> {
+        self.catalog_controller
+            .get_existing_job_resource_group(streaming_job_id)
+            .await
+    }
+
+    pub async fn get_database_resource_group(&self, database_id: ObjectId) -> MetaResult<String> {
+        self.catalog_controller
+            .get_database_resource_group(database_id)
             .await
     }
 

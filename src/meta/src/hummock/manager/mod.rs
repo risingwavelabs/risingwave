@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -392,11 +392,29 @@ impl HummockManager {
             self.write_checkpoint(&versioning_guard.checkpoint).await?;
             checkpoint_version
         };
-        for version_delta in hummock_version_deltas.values() {
-            if version_delta.prev_id == redo_state.id {
-                redo_state.apply_version_delta(version_delta);
+        let mut applied_delta_count = 0;
+        let total_to_apply = hummock_version_deltas.range(redo_state.id + 1..).count();
+        tracing::info!(
+            total_delta = hummock_version_deltas.len(),
+            total_to_apply,
+            "Start redo Hummock version."
+        );
+        for version_delta in hummock_version_deltas
+            .range(redo_state.id + 1..)
+            .map(|(_, v)| v)
+        {
+            assert_eq!(
+                version_delta.prev_id, redo_state.id,
+                "delta prev_id {}, redo state id {}",
+                version_delta.prev_id, redo_state.id
+            );
+            redo_state.apply_version_delta(version_delta);
+            applied_delta_count += 1;
+            if applied_delta_count % 1000 == 0 {
+                tracing::info!("Redo progress {applied_delta_count}/{total_to_apply}.");
             }
         }
+        tracing::info!("Finish redo Hummock version.");
         versioning_guard.version_stats = hummock_version_stats::Entity::find()
             .one(&meta_store.conn)
             .await

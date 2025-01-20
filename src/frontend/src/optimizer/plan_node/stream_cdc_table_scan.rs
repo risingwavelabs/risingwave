@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -190,10 +190,10 @@ impl StreamCdcTableScan {
             append_only: true,
             identity: "StreamCdcFilter".to_owned(),
             fields: cdc_source_schema.clone(),
-            node_body: Some(PbNodeBody::CdcFilter(CdcFilterNode {
+            node_body: Some(PbNodeBody::CdcFilter(Box::new(CdcFilterNode {
                 search_condition: Some(filter_expr.to_expr_proto()),
                 upstream_source_id,
-            })),
+            }))),
         };
 
         let exchange_operator_id = self.core.ctx.next_plan_node_id();
@@ -205,13 +205,13 @@ impl StreamCdcTableScan {
             append_only: true,
             identity: "Exchange".to_owned(),
             fields: cdc_source_schema.clone(),
-            node_body: Some(PbNodeBody::Exchange(ExchangeNode {
+            node_body: Some(PbNodeBody::Exchange(Box::new(ExchangeNode {
                 strategy: Some(DispatchStrategy {
                     r#type: DispatcherType::Simple as _,
                     dist_key_indices: vec![], // simple exchange doesn't need dist key
                     output_indices: (0..cdc_source_schema.len() as u32).collect(),
                 }),
-            })),
+            }))),
         };
 
         // The required columns from the external table
@@ -242,7 +242,7 @@ impl StreamCdcTableScan {
         );
 
         let options = self.core.options.to_proto();
-        let stream_scan_body = PbNodeBody::StreamCdcScan(StreamCdcScanNode {
+        let stream_scan_body = PbNodeBody::StreamCdcScan(Box::new(StreamCdcScanNode {
             table_id: upstream_source_id,
             upstream_column_ids,
             output_indices,
@@ -252,7 +252,7 @@ impl StreamCdcTableScan {
             rate_limit: self.base.ctx().overwrite_options().backfill_rate_limit,
             disable_backfill: options.disable_backfill,
             options: Some(options),
-        });
+        }));
 
         // plan: merge -> filter -> exchange(simple) -> stream_scan
         Ok(PbStreamNode {

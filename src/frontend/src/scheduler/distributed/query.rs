@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 // Licensed under the Apache License, Version 2.0 (the "License");
 //
 // you may not use this file except in compliance with the License.
@@ -593,6 +593,7 @@ pub(crate) mod tests {
             webhook_info: None,
             job_id: None,
             engine: Engine::Hummock,
+            clean_watermark_index_in_pk: None,
         };
         let batch_plan_node: PlanRef = LogicalScan::create(
             "".to_owned(),
@@ -733,6 +734,7 @@ pub(crate) mod tests {
             worker_node_selector,
             catalog_reader,
             None,
+            "UTC".to_owned(),
             batch_exchange_node.clone(),
         )
         .unwrap();

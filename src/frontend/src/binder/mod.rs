@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -328,7 +328,7 @@ impl Binder {
     ) -> Binder {
         Binder {
             catalog: session.env().catalog_reader().read_guard(),
-            db_name: session.database().to_owned(),
+            db_name: session.database(),
             session_id: session.id(),
             context: BindContext::new(),
             auth_context: session.auth_context(),
@@ -393,6 +393,7 @@ impl Binder {
         matches!(self.bind_for, BindFor::Stream)
     }
 
+    #[allow(dead_code)]
     fn is_for_batch(&self) -> bool {
         matches!(self.bind_for, BindFor::Batch)
     }

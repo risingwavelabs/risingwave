@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -37,7 +37,7 @@ use risingwave_common::util::meta_addr::MetaAddressStrategy;
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
-use risingwave_common::util::worker_util::DEFAULT_COMPUTE_NODE_LABEL;
+use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 use serde::{Deserialize, Serialize};
 
 /// If `total_memory_bytes` is not specified, the default memory limit will be set to
@@ -87,7 +87,8 @@ pub struct ComputeNodeOpts {
     pub total_memory_bytes: usize,
 
     /// Reserved memory for the compute node in bytes.
-    /// If not set, a portion (default to 30%) for the `total_memory_bytes` will be used as the reserved memory.
+    /// If not set, a portion (default to 30% for the first 16GB and 20% for the rest)
+    /// for the `total_memory_bytes` will be used as the reserved memory.
     ///
     /// The total memory compute and storage can use is `total_memory_bytes` - `reserved_memory_bytes`.
     #[clap(long, env = "RW_RESERVED_MEMORY_BYTES")]
@@ -97,6 +98,13 @@ pub struct ComputeNodeOpts {
     /// If not set, the default value is `total_memory_bytes` - `reserved_memory_bytes`
     ///
     /// It's strongly recommended to set it for standalone deployment.
+    ///
+    /// ## Why need this?
+    ///
+    /// Our [`crate::memory::manager::MemoryManager`] works by reading the memory statistics from
+    /// Jemalloc. This is fine when running the compute node alone; while for standalone mode,
+    /// the memory usage of **all nodes** are counted. Thus, we need to pass a reasonable total
+    /// usage so that the memory is kept around this value.
     #[clap(long, env = "RW_MEMORY_MANAGER_TARGET_BYTES")]
     pub memory_manager_target_bytes: Option<usize>,
 
@@ -105,9 +113,9 @@ pub struct ComputeNodeOpts {
     #[override_opts(if_absent, path = streaming.actor_runtime_worker_threads_num)]
     pub parallelism: usize,
 
-    /// The parallelism that the compute node will register to the scheduler of the meta service.
-    #[clap(long, env = "RW_NODE_LABEL", default_value_t = default_node_label())]
-    pub node_label: String,
+    /// Resource group for scheduling, default value is "default"
+    #[clap(long, env = "RW_RESOURCE_GROUP", default_value_t = default_resource_group())]
+    pub resource_group: String,
 
     /// Decides whether the compute node can be used for streaming and serving.
     #[clap(long, env = "RW_COMPUTE_NODE_ROLE", value_enum, default_value_t = default_role())]
@@ -254,8 +262,8 @@ pub fn default_parallelism() -> usize {
     total_cpu_available().ceil() as usize
 }
 
-pub fn default_node_label() -> String {
-    DEFAULT_COMPUTE_NODE_LABEL.to_owned()
+pub fn default_resource_group() -> String {
+    DEFAULT_RESOURCE_GROUP.to_owned()
 }
 
 pub fn default_role() -> Role {

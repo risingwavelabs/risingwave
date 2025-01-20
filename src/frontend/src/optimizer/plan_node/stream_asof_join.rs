@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::util::sort_util::OrderType;
@@ -22,7 +21,6 @@ use risingwave_pb::plan_common::{AsOfJoinDesc, AsOfJoinType, JoinType, PbAsOfJoi
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::AsOfJoinNode;
 
-use super::generic::GenericPlanNode;
 use super::stream::prelude::*;
 use super::utils::{
     childless_record, plan_node_name, watermark_pretty, Distill, TableCatalogBuilder,
@@ -35,7 +33,7 @@ use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{EqJoinPredicate, EqJoinPredicateDisplay};
-use crate::optimizer::property::MonotonicityMap;
+use crate::optimizer::property::{MonotonicityMap, WatermarkColumns};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::TableCatalog;
 
@@ -78,7 +76,7 @@ impl StreamAsOfJoin {
         );
 
         // TODO: derive watermarks
-        let watermark_columns = FixedBitSet::with_capacity(core.schema().len());
+        let watermark_columns = WatermarkColumns::new();
 
         // TODO: derive from input
         let base = PlanBase::new_stream_with_core(
@@ -310,7 +308,7 @@ impl StreamNode for StreamAsOfJoin {
             _ => unreachable!(),
         };
 
-        NodeBody::AsOfJoin(AsOfJoinNode {
+        NodeBody::AsOfJoin(Box::new(AsOfJoinNode {
             join_type: asof_join_type.into(),
             left_key: left_jk_indices_prost,
             right_key: right_jk_indices_prost,
@@ -321,7 +319,7 @@ impl StreamNode for StreamAsOfJoin {
             right_deduped_input_pk_indices,
             output_indices: self.core.output_indices.iter().map(|&x| x as u32).collect(),
             asof_desc: Some(self.inequality_desc),
-        })
+        }))
     }
 }
 

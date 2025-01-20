@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -197,7 +197,7 @@ impl CatalogController {
         let version = self
             .notify_frontend_relation_info(
                 NotificationOperation::Add,
-                PbRelationInfo::Source(pb_source),
+                PbObjectInfo::Source(pb_source),
             )
             .await;
         Ok((source_id, version))
@@ -399,10 +399,7 @@ impl CatalogController {
         txn.commit().await?;
 
         let version = self
-            .notify_frontend_relation_info(
-                NotificationOperation::Add,
-                PbRelationInfo::View(pb_view),
-            )
+            .notify_frontend_relation_info(NotificationOperation::Add, PbObjectInfo::View(pb_view))
             .await;
         Ok(version)
     }

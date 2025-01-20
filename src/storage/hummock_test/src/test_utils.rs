@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -256,10 +256,7 @@ impl HummockTestEnv {
             .seal_and_sync_epoch(epoch, table_ids)
             .await
             .unwrap();
-        self.meta_client
-            .commit_epoch(epoch, res, false)
-            .await
-            .unwrap();
+        self.meta_client.commit_epoch(epoch, res).await.unwrap();
 
         self.wait_sync_committed_version().await;
     }

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -112,9 +112,11 @@ pub async fn handle_create_as(
             vec![], // No watermark should be defined in for `CREATE TABLE AS`
             col_id_gen.into_version(),
             CreateTableProps {
-                definition: "".to_owned(), // TODO: empty definition means no schema change support
+                // Note: by providing and persisting an empty definition, querying the definition of the table
+                // will hit the purification logic, which will construct it based on the catalog.
+                definition: "".to_owned(),
                 append_only,
-                on_conflict,
+                on_conflict: on_conflict.into(),
                 with_version_column,
                 webhook_info: None,
                 engine,

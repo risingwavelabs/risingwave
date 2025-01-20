@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -132,4 +132,19 @@ pub fn current_cluster_version() -> String {
         "PostgreSQL {}-RisingWave-{} ({})",
         PG_VERSION, RW_VERSION, GIT_SHA
     )
+}
+
+/// Panics if `debug_assertions` is set, otherwise logs a warning.
+///
+/// Note: unlike `panic` which returns `!`, this macro returns `()`,
+/// which cannot be used like `result.unwrap_or_else(|| panic_if_debug!(...))`.
+#[macro_export]
+macro_rules! panic_if_debug {
+    ($($arg:tt)*) => {
+        if cfg!(debug_assertions) {
+            panic!($($arg)*)
+        } else {
+            tracing::warn!($($arg)*)
+        }
+    };
 }

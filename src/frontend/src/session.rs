@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@ use std::time::{Duration, Instant};
 use anyhow::anyhow;
 use bytes::Bytes;
 use either::Either;
+use itertools::Itertools;
 use parking_lot::{Mutex, RwLock, RwLockReadGuard};
 use pgwire::error::{PsqlError, PsqlResult};
 use pgwire::net::{Address, AddressRef};
@@ -623,6 +624,7 @@ impl FrontendEnv {
     }
 }
 
+#[derive(Clone)]
 pub struct AuthContext {
     pub database: String,
     pub user_name: String,
@@ -640,7 +642,7 @@ impl AuthContext {
 }
 pub struct SessionImpl {
     env: FrontendEnv,
-    auth_context: Arc<AuthContext>,
+    auth_context: Arc<RwLock<AuthContext>>,
     /// Used for user authentication.
     user_authenticator: UserAuthenticator,
     /// Stores the value of configurations.
@@ -733,7 +735,7 @@ impl From<CheckRelationError> for RwError {
 impl SessionImpl {
     pub fn new(
         env: FrontendEnv,
-        auth_context: Arc<AuthContext>,
+        auth_context: AuthContext,
         user_authenticator: UserAuthenticator,
         id: SessionId,
         peer_addr: AddressRef,
@@ -742,7 +744,7 @@ impl SessionImpl {
         let cursor_metrics = env.cursor_metrics.clone();
         Self {
             env,
-            auth_context,
+            auth_context: Arc::new(RwLock::new(auth_context)),
             user_authenticator,
             config_map: Arc::new(RwLock::new(session_config)),
             id,
@@ -762,11 +764,11 @@ impl SessionImpl {
         let env = FrontendEnv::mock();
         Self {
             env: FrontendEnv::mock(),
-            auth_context: Arc::new(AuthContext::new(
+            auth_context: Arc::new(RwLock::new(AuthContext::new(
                 DEFAULT_DATABASE_NAME.to_owned(),
                 DEFAULT_SUPER_USER.to_owned(),
                 DEFAULT_SUPER_USER_ID,
-            )),
+            ))),
             user_authenticator: UserAuthenticator::None,
             config_map: Default::default(),
             // Mock session use non-sense id.
@@ -791,19 +793,24 @@ impl SessionImpl {
     }
 
     pub fn auth_context(&self) -> Arc<AuthContext> {
-        self.auth_context.clone()
+        let ctx = self.auth_context.read();
+        Arc::new(ctx.clone())
     }
 
-    pub fn database(&self) -> &str {
-        &self.auth_context.database
+    pub fn database(&self) -> String {
+        self.auth_context.read().database.clone()
     }
 
-    pub fn user_name(&self) -> &str {
-        &self.auth_context.user_name
+    pub fn user_name(&self) -> String {
+        self.auth_context.read().user_name.clone()
     }
 
     pub fn user_id(&self) -> UserId {
-        self.auth_context.user_id
+        self.auth_context.read().user_id
+    }
+
+    pub fn update_database(&self, database: String) {
+        self.auth_context.write().database = database;
     }
 
     pub fn shared_config(&self) -> Arc<RwLock<SessionConfig>> {
@@ -818,6 +825,13 @@ impl SessionImpl {
         self.config_map
             .write()
             .set(key, value, &mut ())
+            .map_err(Into::into)
+    }
+
+    pub fn reset_config(&self, key: &str) -> Result<String> {
+        self.config_map
+            .write()
+            .reset(key, &mut ())
             .map_err(Into::into)
     }
 
@@ -881,13 +895,13 @@ impl SessionImpl {
         stmt_type: StatementType,
         if_not_exists: bool,
     ) -> std::result::Result<Either<(), RwPgResponse>, CheckRelationError> {
-        let db_name = self.database();
+        let db_name = &self.database();
         let catalog_reader = self.env().catalog_reader().read_guard();
         let (schema_name, relation_name) = {
             let (schema_name, relation_name) =
                 Binder::resolve_schema_qualified_name(db_name, name)?;
             let search_path = self.config().search_path();
-            let user_name = &self.auth_context().user_name;
+            let user_name = &self.user_name();
             let schema_name = match schema_name {
                 Some(schema_name) => schema_name,
                 None => catalog_reader
@@ -908,12 +922,12 @@ impl SessionImpl {
     }
 
     pub fn check_secret_name_duplicated(&self, name: ObjectName) -> Result<()> {
-        let db_name = self.database();
+        let db_name = &self.database();
         let catalog_reader = self.env().catalog_reader().read_guard();
         let (schema_name, secret_name) = {
             let (schema_name, secret_name) = Binder::resolve_schema_qualified_name(db_name, name)?;
             let search_path = self.config().search_path();
-            let user_name = &self.auth_context().user_name;
+            let user_name = &self.user_name();
             let schema_name = match schema_name {
                 Some(schema_name) => schema_name,
                 None => catalog_reader
@@ -928,13 +942,13 @@ impl SessionImpl {
     }
 
     pub fn check_connection_name_duplicated(&self, name: ObjectName) -> Result<()> {
-        let db_name = self.database();
+        let db_name = &self.database();
         let catalog_reader = self.env().catalog_reader().read_guard();
         let (schema_name, connection_name) = {
             let (schema_name, connection_name) =
                 Binder::resolve_schema_qualified_name(db_name, name)?;
             let search_path = self.config().search_path();
-            let user_name = &self.auth_context().user_name;
+            let user_name = &self.user_name();
             let schema_name = match schema_name {
                 Some(schema_name) => schema_name,
                 None => catalog_reader
@@ -948,15 +962,53 @@ impl SessionImpl {
             .map_err(RwError::from)
     }
 
+    pub fn check_function_name_duplicated(
+        &self,
+        stmt_type: StatementType,
+        name: ObjectName,
+        arg_types: &[DataType],
+        if_not_exists: bool,
+    ) -> Result<Either<(), RwPgResponse>> {
+        let db_name = &self.database();
+        let (schema_name, function_name) = Binder::resolve_schema_qualified_name(db_name, name)?;
+        let (database_id, schema_id) = self.get_database_and_schema_id_for_create(schema_name)?;
+
+        let catalog_reader = self.env().catalog_reader().read_guard();
+        if catalog_reader
+            .get_schema_by_id(&database_id, &schema_id)?
+            .get_function_by_name_args(&function_name, arg_types)
+            .is_some()
+        {
+            let full_name = format!(
+                "{function_name}({})",
+                arg_types.iter().map(|t| t.to_string()).join(",")
+            );
+            if if_not_exists {
+                Ok(Either::Right(
+                    PgResponse::builder(stmt_type)
+                        .notice(format!(
+                            "function \"{}\" already exists, skipping",
+                            full_name
+                        ))
+                        .into(),
+                ))
+            } else {
+                Err(CatalogError::Duplicated("function", full_name).into())
+            }
+        } else {
+            Ok(Either::Left(()))
+        }
+    }
+
     /// Also check if the user has the privilege to create in the schema.
     pub fn get_database_and_schema_id_for_create(
         &self,
         schema_name: Option<String>,
     ) -> Result<(DatabaseId, SchemaId)> {
-        let db_name = self.database();
+        let db_name = &self.database();
 
         let search_path = self.config().search_path();
-        let user_name = &self.auth_context().user_name;
+        let user_name = &self.user_name();
 
         let catalog_reader = self.env().catalog_reader().read_guard();
         let schema = match schema_name {
@@ -982,9 +1034,9 @@ impl SessionImpl {
         schema_name: Option<String>,
         connection_name: &str,
     ) -> Result<Arc<ConnectionCatalog>> {
-        let db_name = self.database();
+        let db_name = &self.database();
         let search_path = self.config().search_path();
-        let user_name = &self.auth_context().user_name;
+        let user_name = &self.user_name();
 
         let catalog_reader = self.env().catalog_reader().read_guard();
         let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
@@ -998,7 +1050,7 @@ impl SessionImpl {
         schema_id: SchemaId,
         subscription_name: &str,
     ) -> Result<Arc<SubscriptionCatalog>> {
-        let db_name = self.database();
+        let db_name = &self.database();
 
         let catalog_reader = self.env().catalog_reader().read_guard();
         let db_id = catalog_reader.get_database_by_name(db_name)?.id();
@@ -1019,9 +1071,9 @@ impl SessionImpl {
         schema_name: Option<String>,
         subscription_name: &str,
     ) -> Result<Arc<SubscriptionCatalog>> {
-        let db_name = self.database();
+        let db_name = &self.database();
         let search_path = self.config().search_path();
-        let user_name = &self.auth_context().user_name;
+        let user_name = &self.user_name();
 
         let catalog_reader = self.env().catalog_reader().read_guard();
         let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
@@ -1059,9 +1111,9 @@ impl SessionImpl {
         schema_name: Option<String>,
         secret_name: &str,
     ) -> Result<Arc<SecretCatalog>> {
-        let db_name = self.database();
+        let db_name = &self.database();
         let search_path = self.config().search_path();
-        let user_name = &self.auth_context().user_name;
+        let user_name = &self.user_name();
 
         let catalog_reader = self.env().catalog_reader().read_guard();
         let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
@@ -1415,11 +1467,7 @@ impl SessionManagerImpl {
 
             let session_impl: Arc<SessionImpl> = SessionImpl::new(
                 self.env.clone(),
-                Arc::new(AuthContext::new(
-                    database_name.to_owned(),
-                    user_name.to_owned(),
-                    user.id,
-                )),
+                AuthContext::new(database_name.to_owned(), user_name.to_owned(), user.id),
                 user_authenticator,
                 id,
                 peer_addr,

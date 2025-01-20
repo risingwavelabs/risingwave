@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -545,10 +545,10 @@ mod tests {
     use crate::mem_table::{KeyOp, MemTable, MemTableHummockIterator, MemTableStore};
     use crate::memory::MemoryStateStore;
     use crate::store::{
-        ChangeLogValue, NewLocalOptions, OpConsistencyLevel, ReadLogOptions, StateStoreIter,
-        StateStoreRead, CHECK_BYTES_EQUAL,
+        ChangeLogValue, NewLocalOptions, OpConsistencyLevel, ReadLogOptions, StateStoreReadLog,
+        CHECK_BYTES_EQUAL,
     };
-    use crate::StateStore;
+    use crate::{StateStore, StateStoreIter};
 
     #[tokio::test]
     async fn test_empty() {

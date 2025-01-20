@@ -39,10 +39,6 @@ use crate::{impl_parse_to, parser_v2};
 
 pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
 pub(crate) const WEBHOOK_CONNECTOR: &str = "webhook";
-// reserve i32::MIN for pause.
-pub const SOURCE_RATE_LIMIT_PAUSED: i32 = i32::MIN;
-// reserve i32::MIN + 1 for resume.
-pub const SOURCE_RATE_LIMIT_RESUMED: i32 = i32::MIN + 1;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ParserError {
@@ -331,6 +327,7 @@ impl Parser<'_> {
                 Keyword::FLUSH => Ok(Statement::Flush),
                 Keyword::WAIT => Ok(Statement::Wait),
                 Keyword::RECOVER => Ok(Statement::Recover),
+                Keyword::USE => Ok(self.parse_use()?),
                 _ => self.expected_at(checkpoint, "statement"),
             },
             Token::LParen => {
@@ -2209,6 +2206,8 @@ impl Parser<'_> {
         or_replace: bool,
         temporary: bool,
     ) -> PResult<Statement> {
+        impl_parse_to!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], self);
+
         let name = self.parse_object_name()?;
         self.expect_token(&Token::LParen)?;
         let args = if self.peek_token().token == Token::RParen {
@@ -2247,6 +2246,7 @@ impl Parser<'_> {
         Ok(Statement::CreateFunction {
             or_replace,
             temporary,
+            if_not_exists,
             name,
             args,
             returns: return_type,
@@ -2256,6 +2256,8 @@ impl Parser<'_> {
     }
 
     fn parse_create_aggregate(&mut self, or_replace: bool) -> PResult<Statement> {
+        impl_parse_to!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], self);
+
         let name = self.parse_object_name()?;
         self.expect_token(&Token::LParen)?;
         let args = self.parse_comma_separated(Parser::parse_function_arg)?;
@@ -2269,6 +2271,7 @@ impl Parser<'_> {
 
         Ok(Statement::CreateAggregate {
             or_replace,
+            if_not_exists,
             name,
             args,
             returns,
@@ -2791,7 +2794,15 @@ impl Parser<'_> {
         } else if self.parse_keyword(Keyword::NULL) {
             Ok(Some(ColumnOption::Null))
         } else if self.parse_keyword(Keyword::DEFAULT) {
-            Ok(Some(ColumnOption::DefaultColumns(self.parse_expr()?)))
+            if self.parse_keyword(Keyword::INTERNAL) {
+                Ok(Some(ColumnOption::DefaultValueInternal {
+                    // Placeholder. Will fill during definition purification for schema change.
+                    persisted: Default::default(),
+                    expr: None,
+                }))
+            } else {
+                Ok(Some(ColumnOption::DefaultValue(self.parse_expr()?)))
+            }
         } else if self.parse_keywords(&[Keyword::PRIMARY, Keyword::KEY]) {
             Ok(Some(ColumnOption::Unique { is_primary: true }))
         } else if self.parse_keyword(Keyword::UNIQUE) {
@@ -3409,12 +3420,37 @@ impl Parser<'_> {
                     parallelism: value,
                     deferred,
                 }
+            } else if self.parse_keyword(Keyword::RESOURCE_GROUP) && materialized {
+                if self.expect_keyword(Keyword::TO).is_err()
+                    && self.expect_token(&Token::Eq).is_err()
+                {
+                    return self
+                        .expected("TO or = after ALTER MATERIALIZED VIEW SET RESOURCE_GROUP");
+                }
+                let value = self.parse_set_variable()?;
+                let deferred = self.parse_keyword(Keyword::DEFERRED);
+
+                AlterViewOperation::SetResourceGroup {
+                    resource_group: Some(value),
+                    deferred,
+                }
             } else if materialized
                 && let Some(rate_limit) = self.parse_alter_backfill_rate_limit()?
             {
                 AlterViewOperation::SetBackfillRateLimit { rate_limit }
             } else {
                 return self.expected("SCHEMA/PARALLELISM/BACKFILL_RATE_LIMIT after SET");
+            }
+        } else if self.parse_keyword(Keyword::RESET) {
+            if self.parse_keyword(Keyword::RESOURCE_GROUP) && materialized {
+                let deferred = self.parse_keyword(Keyword::DEFERRED);
+
+                AlterViewOperation::SetResourceGroup {
+                    resource_group: None,
+                    deferred,
+                }
+            } else {
+                return self.expected("RESOURCE_GROUP after RESET");
             }
         } else {
             return self.expected(&format!(
@@ -3583,17 +3619,9 @@ impl Parser<'_> {
         } else if self.parse_keywords(&[Keyword::SWAP, Keyword::WITH]) {
             let target_source = self.parse_object_name()?;
             AlterSourceOperation::SwapRenameSource { target_source }
-        } else if self.parse_keyword(Keyword::PAUSE) {
-            AlterSourceOperation::SetSourceRateLimit {
-                rate_limit: SOURCE_RATE_LIMIT_PAUSED,
-            }
-        } else if self.parse_keyword(Keyword::RESUME) {
-            AlterSourceOperation::SetSourceRateLimit {
-                rate_limit: SOURCE_RATE_LIMIT_RESUMED,
-            }
         } else {
             return self.expected(
-                "RENAME, ADD COLUMN, OWNER TO, SET, PAUSE, RESUME, or SOURCE_RATE_LIMIT after ALTER SOURCE",
+                "RENAME, ADD COLUMN, OWNER TO, SET or SOURCE_RATE_LIMIT after ALTER SOURCE",
             );
         };
 
@@ -4247,17 +4275,17 @@ impl Parser<'_> {
             vec![]
         };
 
-        let limit = if self.parse_keyword(Keyword::LIMIT) {
-            self.parse_limit()?
-        } else {
-            None
-        };
+        let mut limit = None;
+        let mut offset = None;
+        for _x in 0..2 {
+            if limit.is_none() && self.parse_keyword(Keyword::LIMIT) {
+                limit = self.parse_limit()?
+            }
 
-        let offset = if self.parse_keyword(Keyword::OFFSET) {
-            Some(self.parse_offset()?)
-        } else {
-            None
-        };
+            if offset.is_none() && self.parse_keyword(Keyword::OFFSET) {
+                offset = Some(self.parse_offset()?)
+            }
+        }
 
         let fetch = if self.parse_keyword(Keyword::FETCH) {
             if limit.is_some() {
@@ -5357,16 +5385,12 @@ impl Parser<'_> {
     }
 
     /// Parse a LIMIT clause
-    pub fn parse_limit(&mut self) -> PResult<Option<String>> {
+    pub fn parse_limit(&mut self) -> PResult<Option<Expr>> {
         if self.parse_keyword(Keyword::ALL) {
             Ok(None)
         } else {
-            let number = self.parse_number_value()?;
-            // TODO(Kexiang): support LIMIT expr
-            if self.consume_token(&Token::DoubleColon) {
-                self.expect_keyword(Keyword::BIGINT)?
-            }
-            Ok(Some(number))
+            let expr = self.parse_expr()?;
+            Ok(Some(expr))
         }
     }
 
@@ -5554,6 +5578,11 @@ impl Parser<'_> {
             object_name,
             comment,
         })
+    }
+
+    fn parse_use(&mut self) -> PResult<Statement> {
+        let db_name = self.parse_object_name()?;
+        Ok(Statement::Use { db_name })
     }
 }
 

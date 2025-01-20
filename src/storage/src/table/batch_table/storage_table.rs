@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -49,8 +49,8 @@ use crate::row_serde::row_serde_util::{serialize_pk, serialize_pk_with_vnode};
 use crate::row_serde::value_serde::{ValueRowSerde, ValueRowSerdeNew};
 use crate::row_serde::{find_columns_by_ids, ColumnMapping};
 use crate::store::{
-    PrefetchOptions, ReadLogOptions, ReadOptions, StateStoreIter, StateStoreIterExt,
-    TryWaitEpochOptions,
+    NextEpochOptions, PrefetchOptions, ReadLogOptions, ReadOptions, StateStoreIter,
+    StateStoreIterExt, TryWaitEpochOptions,
 };
 use crate::table::merge_sort::NodePeek;
 use crate::table::{ChangeLogRow, KeyedRow, TableDistribution, TableIter};
@@ -921,6 +921,17 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
             )
             .await?
             .map_ok(|(_, row)| row))
+    }
+
+    pub async fn next_epoch(&self, epoch: u64) -> StorageResult<u64> {
+        self.store
+            .next_epoch(
+                epoch,
+                NextEpochOptions {
+                    table_id: self.table_id,
+                },
+            )
+            .await
     }
 
     async fn batch_iter_log_inner<K: CopyFromSlice>(

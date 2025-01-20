@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,10 +15,10 @@
 use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_common::catalog::FunctionId;
+use risingwave_common::catalog::{FunctionId, Schema};
 use risingwave_common::types::DataType;
 
-use super::{Expr, ExprImpl};
+use super::{Expr, ExprDisplay, ExprImpl};
 use crate::catalog::function_catalog::{FunctionCatalog, FunctionKind};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -81,7 +81,7 @@ impl Expr for UserDefinedFunction {
         ExprNode {
             function_type: Type::Unspecified.into(),
             return_type: Some(self.return_type().to_protobuf()),
-            rex_node: Some(RexNode::Udf(UserDefinedFunction {
+            rex_node: Some(RexNode::Udf(Box::new(UserDefinedFunction {
                 children: self.args.iter().map(Expr::to_expr_proto).collect(),
                 name: self.catalog.name.clone(),
                 arg_names: self.catalog.arg_names.clone(),
@@ -98,7 +98,26 @@ impl Expr for UserDefinedFunction {
                 body: self.catalog.body.clone(),
                 compressed_binary: self.catalog.compressed_binary.clone(),
                 always_retry_on_network_error: self.catalog.always_retry_on_network_error,
-            })),
+            }))),
         }
+    }
+}
+
+pub struct UserDefinedFunctionDisplay<'a> {
+    pub func_call: &'a UserDefinedFunction,
+    pub input_schema: &'a Schema,
+}
+
+impl std::fmt::Debug for UserDefinedFunctionDisplay<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let that = self.func_call;
+        let mut builder = f.debug_tuple(&that.catalog.name);
+        that.args.iter().for_each(|arg| {
+            builder.field(&ExprDisplay {
+                expr: arg,
+                input_schema: self.input_schema,
+            });
+        });
+        builder.finish()
     }
 }

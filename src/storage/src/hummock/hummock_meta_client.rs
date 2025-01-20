@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,9 @@ use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{SstObjectIdRange, SyncResult};
 use risingwave_pb::hummock::{PbHummockVersion, SubscribeCompactionEventRequest};
 use risingwave_rpc_client::error::Result;
-use risingwave_rpc_client::{CompactionEventItem, HummockMetaClient, MetaClient};
+use risingwave_rpc_client::{
+    CompactionEventItem, HummockMetaClient, HummockMetaClientChangeLogInfo, MetaClient,
+};
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::hummock::{HummockEpoch, HummockVersionId};
@@ -62,11 +64,11 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         res
     }
 
-    async fn commit_epoch(
+    async fn commit_epoch_with_change_log(
         &self,
         _epoch: HummockEpoch,
         _sync_result: SyncResult,
-        _is_log_store: bool,
+        _change_log_info: Option<HummockMetaClientChangeLogInfo>,
     ) -> Result<()> {
         panic!("Only meta service can commit_epoch in production.")
     }

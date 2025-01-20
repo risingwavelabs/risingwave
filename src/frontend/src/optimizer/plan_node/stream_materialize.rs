@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -180,24 +180,33 @@ impl StreamMaterialize {
                     user_distributed_by
                 }
                 TableType::MaterializedView => {
-                    assert_matches!(user_distributed_by, RequiredDist::Any);
-                    // ensure the same pk will not shuffle to different node
-                    let required_dist =
-                        RequiredDist::shard_by_key(input.schema().len(), input.expect_stream_key());
+                    match user_distributed_by {
+                        RequiredDist::PhysicalDist(Distribution::HashShard(_)) => {
+                            user_distributed_by
+                        }
+                        RequiredDist::Any => {
+                            // ensure the same pk will not shuffle to different node
+                            let required_dist = RequiredDist::shard_by_key(
+                                input.schema().len(),
+                                input.expect_stream_key(),
+                            );
 
-                    // If the input is a stream join, enforce the stream key as the materialized
-                    // view distribution key to avoid slow backfilling caused by
-                    // data skew of the dimension table join key.
-                    // See <https://github.com/risingwavelabs/risingwave/issues/12824> for more information.
-                    let is_stream_join = matches!(input.as_stream_hash_join(), Some(_join))
-                        || matches!(input.as_stream_temporal_join(), Some(_join))
-                        || matches!(input.as_stream_delta_join(), Some(_join));
+                            // If the input is a stream join, enforce the stream key as the materialized
+                            // view distribution key to avoid slow backfilling caused by
+                            // data skew of the dimension table join key.
+                            // See <https://github.com/risingwavelabs/risingwave/issues/12824> for more information.
+                            let is_stream_join = matches!(input.as_stream_hash_join(), Some(_join))
+                                || matches!(input.as_stream_temporal_join(), Some(_join))
+                                || matches!(input.as_stream_delta_join(), Some(_join));
 
-                    if is_stream_join {
-                        return Ok(required_dist.enforce(input, &Order::any()));
+                            if is_stream_join {
+                                return Ok(required_dist.enforce(input, &Order::any()));
+                            }
+
+                            required_dist
+                        }
+                        _ => unreachable!("{:?}", user_distributed_by),
                     }
-
-                    required_dist
                 }
                 TableType::Index => {
                     assert_matches!(
@@ -241,7 +250,9 @@ impl StreamMaterialize {
         let value_indices = (0..columns.len()).collect_vec();
         let distribution_key = input.distribution().dist_column_indices().to_vec();
         let append_only = input.append_only();
-        let watermark_columns = input.watermark_columns().clone();
+        // TODO(rc): In `TableCatalog` we still use `FixedBitSet` for watermark columns, ignoring the watermark group information.
+        // We will record the watermark group information in `TableCatalog` in the future. For now, let's flatten the watermark columns.
+        let watermark_columns = input.watermark_columns().indices().collect();
 
         let (table_pk, stream_key) = if let Some(pk_column_indices) = pk_column_indices {
             let table_pk = pk_column_indices
@@ -302,6 +313,7 @@ impl StreamMaterialize {
                     engine
                 }
             },
+            clean_watermark_index_in_pk: None, // TODO: fill this field
         })
     }
 
@@ -343,9 +355,10 @@ impl Distill for StreamMaterialize {
         vec.push(("pk_conflict", Pretty::from(pk_conflict_behavior)));
 
         let watermark_columns = &self.base.watermark_columns();
-        if self.base.watermark_columns().count_ones(..) > 0 {
+        if self.base.watermark_columns().n_indices() > 0 {
+            // TODO(rc): we ignore the watermark group info here, will be fixed it later
             let watermark_column_names = watermark_columns
-                .ones()
+                .indices()
                 .map(|i| table.columns()[i].name_with_hidden().to_string())
                 .map(Pretty::from)
                 .collect();
@@ -383,7 +396,7 @@ impl StreamNode for StreamMaterialize {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
         use risingwave_pb::stream_plan::*;
 
-        PbNodeBody::Materialize(MaterializeNode {
+        PbNodeBody::Materialize(Box::new(MaterializeNode {
             // We don't need table id for materialize node in frontend. The id will be generated on
             // meta catalog service.
             table_id: 0,
@@ -394,7 +407,7 @@ impl StreamNode for StreamMaterialize {
                 .map(ColumnOrder::to_protobuf)
                 .collect(),
             table: Some(self.table().to_internal_table_prost()),
-        })
+        }))
     }
 }
 

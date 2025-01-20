@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -151,12 +151,12 @@ impl ActorBuilder {
                 }];
 
                 Ok(StreamNode {
-                    node_body: Some(NodeBody::Merge(MergeNode {
+                    node_body: Some(NodeBody::Merge(Box::new(MergeNode {
                         upstream_actor_id: upstreams.actors.as_global_ids(),
                         upstream_fragment_id: upstreams.fragment_id.as_global_id(),
                         upstream_dispatcher_type: exchange.get_strategy()?.r#type,
                         fields: stream_node.get_fields().clone(),
-                    })),
+                    }))),
                     identity: "MergeExecutor".to_owned(),
                     ..stream_node.clone()
                 })
@@ -197,12 +197,12 @@ impl ActorBuilder {
                 let input = vec![
                     // Fill the merge node body with correct upstream info.
                     StreamNode {
-                        node_body: Some(NodeBody::Merge(MergeNode {
+                        node_body: Some(NodeBody::Merge(Box::new(MergeNode {
                             upstream_actor_id,
                             upstream_fragment_id: upstreams.fragment_id.as_global_id(),
                             upstream_dispatcher_type,
                             fields: merge_node.fields.clone(),
-                        })),
+                        }))),
                         ..merge_node.clone()
                     },
                     batch_plan_node.clone(),
@@ -246,12 +246,12 @@ impl ActorBuilder {
                 let input = vec![
                     // Fill the merge node body with correct upstream info.
                     StreamNode {
-                        node_body: Some(NodeBody::Merge(MergeNode {
+                        node_body: Some(NodeBody::Merge(Box::new(MergeNode {
                             upstream_actor_id,
                             upstream_fragment_id: upstreams.fragment_id.as_global_id(),
                             upstream_dispatcher_type: DispatcherType::NoShuffle as _,
                             fields: merge_node.fields.clone(),
-                        })),
+                        }))),
                         ..merge_node.clone()
                     },
                 ];
@@ -664,6 +664,7 @@ impl ActorGraphBuilder {
     /// graph is failed to be scheduled.
     pub fn new(
         streaming_job_id: u32,
+        resource_group: String,
         fragment_graph: CompleteStreamFragmentGraph,
         cluster_info: StreamingClusterInfo,
         default_parallelism: NonZeroUsize,
@@ -671,13 +672,16 @@ impl ActorGraphBuilder {
         let expected_vnode_count = fragment_graph.max_parallelism();
         let existing_distributions = fragment_graph.existing_distribution();
 
-        // Schedule the distribution of all building fragments.
+        let schedulable_workers =
+            cluster_info.filter_schedulable_workers_by_resource_group(&resource_group);
+
         let scheduler = schedule::Scheduler::new(
             streaming_job_id,
-            &cluster_info.worker_nodes,
+            &schedulable_workers,
             default_parallelism,
             expected_vnode_count,
         )?;
+
         let distributions = scheduler.schedule(&fragment_graph)?;
 
         // Fill the vnode count for each internal table, based on schedule result.

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,10 +24,9 @@ use risingwave_common::catalog::ColumnId;
 use crate::error::ConnectorResult;
 use crate::parser::{CommonParserConfig, ParserConfig, SpecificParserConfig};
 use crate::source::{
-    create_split_reader, BoxSourceChunkStream, ConnectorProperties, ConnectorState,
-    SourceColumnDesc, SourceContext, SplitReader,
+    BoxSourceChunkStream, ConnectorProperties, ConnectorState, SourceColumnDesc, SourceContext,
 };
-use crate::{dispatch_source_prop, WithOptionsSecResolved};
+use crate::WithOptionsSecResolved;
 
 #[derive(Clone, Debug)]
 pub struct FsSourceReader {
@@ -92,11 +91,16 @@ impl FsSourceReader {
         let stream = match state {
             None => pending().boxed(),
             Some(splits) => {
-                dispatch_source_prop!(config, prop, {
-                    create_split_reader(*prop, splits, parser_config, source_ctx, None)
-                        .await?
-                        .into_stream()
-                })
+                config
+                    .create_split_reader(
+                        splits,
+                        parser_config,
+                        source_ctx,
+                        None,
+                        Default::default(),
+                    )
+                    .await?
+                    .0
             }
         };
         Ok(stream)

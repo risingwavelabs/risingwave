@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -41,7 +41,7 @@ use crate::hummock::manager::transaction::{
 };
 use crate::hummock::manager::versioning::Versioning;
 use crate::hummock::metrics_utils::{
-    get_or_create_local_table_stat, trigger_local_table_stat, trigger_sst_stat,
+    get_or_create_local_table_stat, trigger_epoch_stat, trigger_local_table_stat, trigger_sst_stat,
 };
 use crate::hummock::model::CompactionGroup;
 use crate::hummock::sequence::{next_compaction_group_id, next_sstable_object_id};
@@ -293,6 +293,7 @@ impl HummockManager {
                 *compaction_group_id,
             );
         }
+        trigger_epoch_stat(&self.metrics, &versioning.current_version);
 
         drop(versioning_guard);
 

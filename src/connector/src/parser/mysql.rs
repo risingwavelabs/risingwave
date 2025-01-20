@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -32,8 +32,8 @@ use risingwave_common::types::{
 use rust_decimal::Decimal as RustDecimal;
 
 macro_rules! handle_data_type {
-    ($row:expr, $i:expr, $name:expr, $type:ty) => {{
-        match $row.take_opt::<Option<$type>, _>($i) {
+    ($row:expr, $i:expr, $name:expr, $typ:ty) => {{
+        match $row.take_opt::<Option<$typ>, _>($i) {
             None => bail!("no value found at column: {}, index: {}", $name, $i),
             Some(Ok(val)) => Ok(val.map(|v| ScalarImpl::from(v))),
             Some(Err(e)) => Err(anyhow::Error::new(e.clone())
@@ -42,21 +42,21 @@ macro_rules! handle_data_type {
                     "column: {}, index: {}, rust_type: {}",
                     $name,
                     $i,
-                    stringify!($type),
+                    stringify!($typ),
                 ))),
         }
     }};
-    ($row:expr, $i:expr, $name:expr, $type:ty, $rw_type:ty) => {{
-        match $row.take_opt::<Option<$type>, _>($i) {
+    ($row:expr, $i:expr, $name:expr, $typ:ty, $rw_type:ty) => {{
+        match $row.take_opt::<Option<$typ>, _>($i) {
             None => bail!("no value found at column: {}, index: {}", $name, $i),
             Some(Ok(val)) => Ok(val.map(|v| ScalarImpl::from(<$rw_type>::from(v)))),
             Some(Err(e)) => Err(anyhow::Error::new(e.clone())
-                .context("failed to deserialize MySQL value into rust value")
+                .context("failed to deserialize MySQL value into rw value")
                 .context(format!(
-                    "column: {}, index: {}, rust_type: {}",
+                    "column: {}, index: {}, rw_type: {}",
                     $name,
                     $i,
-                    stringify!($ty),
+                    stringify!($rw_type),
                 ))),
         }
     }};

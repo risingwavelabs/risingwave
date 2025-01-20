@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,18 +25,24 @@ pub type CompactionEventItem = std::result::Result<SubscribeCompactionEventRespo
 
 use crate::error::Result;
 
+pub type HummockMetaClientChangeLogInfo = Vec<u64>;
+
 #[async_trait]
 pub trait HummockMetaClient: Send + Sync + 'static {
     async fn unpin_version_before(&self, unpin_version_before: HummockVersionId) -> Result<()>;
     async fn get_current_version(&self) -> Result<HummockVersion>;
     async fn get_new_sst_ids(&self, number: u32) -> Result<SstObjectIdRange>;
     // We keep `commit_epoch` only for test/benchmark.
-    async fn commit_epoch(
+    async fn commit_epoch_with_change_log(
         &self,
         epoch: HummockEpoch,
         sync_result: SyncResult,
-        is_log_store: bool,
+        change_log_info: Option<HummockMetaClientChangeLogInfo>,
     ) -> Result<()>;
+    async fn commit_epoch(&self, epoch: HummockEpoch, sync_result: SyncResult) -> Result<()> {
+        self.commit_epoch_with_change_log(epoch, sync_result, None)
+            .await
+    }
     async fn trigger_manual_compaction(
         &self,
         compaction_group_id: u64,

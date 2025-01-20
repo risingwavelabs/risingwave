@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -129,7 +129,7 @@ impl<S: StateStore> SourceExecutor<S> {
         seek_to_latest: bool,
     ) -> StreamExecutorResult<(BoxSourceChunkStream, Option<Vec<SplitImpl>>)> {
         let (column_ids, source_ctx) = self.prepare_source_stream_build(source_desc);
-        let (stream, latest_splits) = source_desc
+        let (stream, res) = source_desc
             .source
             .build_stream(state, column_ids, Arc::new(source_ctx), seek_to_latest)
             .await
@@ -137,7 +137,7 @@ impl<S: StateStore> SourceExecutor<S> {
 
         Ok((
             apply_rate_limit(stream, self.rate_limit_rps).boxed(),
-            latest_splits,
+            res.latest_splits,
         ))
     }
 
@@ -554,7 +554,7 @@ impl<S: StateStore> SourceExecutor<S> {
                             false,  // not need to seek to latest since source state is initialized
                         )
                         .await {
-                        Ok((stream, latest_splits)) => Ok((stream, latest_splits)),
+                        Ok((stream, res)) => Ok((stream, res.latest_splits)),
                         Err(e) => {
                             tracing::warn!(error = %e.as_report(), "failed to build source stream, retrying...");
                             Err(e)

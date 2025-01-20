@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -61,7 +61,7 @@ pub struct StreamingMetrics {
 
     // Streaming actor
     pub actor_count: LabelGuardedIntGaugeVec<1>,
-    actor_in_record_cnt: RelabeledGuardedIntCounterVec<3>,
+    pub actor_in_record_cnt: RelabeledGuardedIntCounterVec<3>,
     pub actor_out_record_cnt: RelabeledGuardedIntCounterVec<2>,
     pub actor_current_epoch: RelabeledGuardedIntGaugeVec<2>,
 

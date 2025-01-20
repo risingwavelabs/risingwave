@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -176,7 +176,6 @@ async fn test_hummock_compaction_task() {
                 uncommitted_ssts: to_local_sstable_info(&original_tables),
                 ..Default::default()
             },
-            false,
         )
         .await
         .unwrap();
@@ -242,7 +241,6 @@ async fn test_hummock_table() {
                 uncommitted_ssts: to_local_sstable_info(&original_tables),
                 ..Default::default()
             },
-            false,
         )
         .await
         .unwrap();
@@ -305,7 +303,6 @@ async fn test_hummock_transaction() {
                     uncommitted_ssts: to_local_sstable_info(&tables_in_epoch1),
                     ..Default::default()
                 },
-                false,
             )
             .await
             .unwrap();
@@ -352,7 +349,6 @@ async fn test_hummock_transaction() {
                     uncommitted_ssts: to_local_sstable_info(&tables_in_epoch2),
                     ..Default::default()
                 },
-                false,
             )
             .await
             .unwrap();
@@ -508,7 +504,6 @@ async fn test_hummock_manager_basic() {
                     uncommitted_ssts: to_local_sstable_info(&original_tables),
                     ..Default::default()
                 },
-                false,
             )
             .await
             .unwrap();
@@ -571,23 +566,14 @@ async fn test_hummock_manager_basic() {
             init_version_id + commit_log_count + register_log_count,
         );
     }
-    assert_eq!(
-        hummock_manager
-            .delete_version_deltas(usize::MAX)
-            .await
-            .unwrap(),
-        (0, 0)
-    );
+    assert_eq!(hummock_manager.delete_version_deltas().await.unwrap(), 0);
     assert_eq!(
         hummock_manager.create_version_checkpoint(1).await.unwrap(),
         commit_log_count + register_log_count
     );
     assert_eq!(
-        hummock_manager
-            .delete_version_deltas(usize::MAX)
-            .await
-            .unwrap(),
-        ((commit_log_count + register_log_count) as usize, 0)
+        hummock_manager.delete_version_deltas().await.unwrap(),
+        (commit_log_count + register_log_count) as usize
     );
     hummock_manager
         .unpin_version_before(context_id_1, HummockVersionId::MAX)
@@ -631,7 +617,6 @@ async fn test_pin_snapshot_response_lost() {
                 uncommitted_ssts: to_local_sstable_info(&test_tables),
                 ..Default::default()
             },
-            false,
         )
         .await
         .unwrap();
@@ -660,7 +645,6 @@ async fn test_pin_snapshot_response_lost() {
                 uncommitted_ssts: to_local_sstable_info(&test_tables),
                 ..Default::default()
             },
-            false,
         )
         .await
         .unwrap();
@@ -696,7 +680,6 @@ async fn test_pin_snapshot_response_lost() {
                 uncommitted_ssts: to_local_sstable_info(&test_tables),
                 ..Default::default()
             },
-            false,
         )
         .await
         .unwrap();
@@ -724,7 +707,6 @@ async fn test_pin_snapshot_response_lost() {
                 uncommitted_ssts: to_local_sstable_info(&test_tables),
                 ..Default::default()
             },
-            false,
         )
         .await
         .unwrap();
@@ -763,7 +745,6 @@ async fn test_print_compact_task() {
                 uncommitted_ssts: to_local_sstable_info(&original_tables),
                 ..Default::default()
             },
-            false,
         )
         .await
         .unwrap();
@@ -803,7 +784,6 @@ async fn test_invalid_sst_id() {
                     uncommitted_ssts: ssts.clone(),
                     ..Default::default()
                 },
-                false,
             )
             .await
             .unwrap_err();
@@ -829,7 +809,6 @@ async fn test_invalid_sst_id() {
                 uncommitted_ssts: ssts_below_watermerk,
                 ..Default::default()
             },
-            false,
         )
         .await
         .unwrap_err();
@@ -845,7 +824,6 @@ async fn test_invalid_sst_id() {
                 uncommitted_ssts: ssts.clone(),
                 ..Default::default()
             },
-            false,
         )
         .await
         .unwrap();
@@ -987,7 +965,6 @@ async fn test_hummock_compaction_task_heartbeat() {
                 uncommitted_ssts: to_local_sstable_info(&original_tables),
                 ..Default::default()
             },
-            false,
         )
         .await
         .unwrap();
@@ -1117,7 +1094,6 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
                 uncommitted_ssts: to_local_sstable_info(&original_tables),
                 ..Default::default()
             },
-            false,
         )
         .await
         .unwrap();
@@ -1237,7 +1213,6 @@ async fn test_extend_objects_to_delete() {
                 uncommitted_ssts: vec![],
                 ..Default::default()
             },
-            false,
         )
         .await
         .unwrap();
@@ -1319,7 +1294,6 @@ async fn test_version_stats() {
                 uncommitted_ssts: ssts,
                 ..Default::default()
             },
-            false,
         )
         .await
         .unwrap();
@@ -1429,7 +1403,6 @@ async fn test_move_state_tables_to_dedicated_compaction_group_on_commit() {
                 uncommitted_ssts: vec![sst_1],
                 ..Default::default()
             },
-            false,
         )
         .await
         .unwrap();
@@ -1516,7 +1489,6 @@ async fn test_move_state_tables_to_dedicated_compaction_group_on_demand_basic() 
                 uncommitted_ssts: vec![sst_1, sst_2],
                 ..Default::default()
             },
-            false,
         )
         .await
         .unwrap();
@@ -1601,7 +1573,6 @@ async fn test_move_state_tables_to_dedicated_compaction_group_on_demand_non_triv
                 uncommitted_ssts: vec![sst_1],
                 ..Default::default()
             },
-            false,
         )
         .await
         .unwrap();
@@ -1703,7 +1674,6 @@ async fn test_move_state_tables_to_dedicated_compaction_group_trivial_expired() 
                 uncommitted_ssts: vec![sst_1, sst_2, sst_3, sst_4],
                 ..Default::default()
             },
-            false,
         )
         .await
         .unwrap();
@@ -1850,7 +1820,6 @@ async fn test_move_state_tables_to_dedicated_compaction_group_on_demand_bottom_l
                 uncommitted_ssts: vec![sst_1, sst_2, sst_3],
                 ..Default::default()
             },
-            false,
         )
         .await
         .unwrap();
@@ -1986,7 +1955,6 @@ async fn test_compaction_task_expiration_due_to_split_group() {
                 uncommitted_ssts: vec![sst_1, sst_2],
                 ..Default::default()
             },
-            false,
         )
         .await
         .unwrap();
@@ -2061,7 +2029,6 @@ async fn test_move_tables_between_compaction_group() {
                 uncommitted_ssts: vec![sst_1.clone()],
                 ..Default::default()
             },
-            false,
         )
         .await
         .unwrap();
@@ -2075,7 +2042,6 @@ async fn test_move_tables_between_compaction_group() {
                 uncommitted_ssts: vec![sst_2.clone()],
                 ..Default::default()
             },
-            false,
         )
         .await
         .unwrap();
@@ -2220,7 +2186,6 @@ async fn test_partition_level() {
                 uncommitted_ssts: vec![sst_1],
                 ..Default::default()
             },
-            false,
         )
         .await
         .unwrap();
@@ -2257,7 +2222,6 @@ async fn test_partition_level() {
                     uncommitted_ssts: vec![sst],
                     ..Default::default()
                 },
-                false,
             )
             .await
             .unwrap();
@@ -2349,7 +2313,6 @@ async fn test_unregister_moved_table() {
                 uncommitted_ssts: vec![sst_1, sst_2],
                 ..Default::default()
             },
-            false,
         )
         .await
         .unwrap();
@@ -2474,7 +2437,6 @@ async fn test_merge_compaction_group_task_expired() {
                 uncommitted_ssts: vec![sst_1, sst_2, sst_3, sst_4],
                 ..Default::default()
             },
-            false,
         )
         .await
         .unwrap();
@@ -2592,7 +2554,7 @@ async fn test_vacuum() {
         hummock_manager.clone(),
         context_id,
     ));
-    assert_eq!(hummock_manager.delete_metadata().await.unwrap(), 0);
+    assert_eq!(hummock_manager.delete_version_deltas().await.unwrap(), 0);
     hummock_manager.pin_version(context_id).await.unwrap();
     let compaction_group_id = StaticCompactionGroupId::StateDefault.into();
     let sst_infos = add_test_tables(
@@ -2601,10 +2563,10 @@ async fn test_vacuum() {
         compaction_group_id,
     )
     .await;
-    assert_eq!(hummock_manager.delete_metadata().await.unwrap(), 0);
+    assert_eq!(hummock_manager.delete_version_deltas().await.unwrap(), 0);
     hummock_manager.create_version_checkpoint(1).await.unwrap();
-    assert_eq!(hummock_manager.delete_metadata().await.unwrap(), 6);
-    assert_eq!(hummock_manager.delete_metadata().await.unwrap(), 0);
+    assert_eq!(hummock_manager.delete_version_deltas().await.unwrap(), 6);
+    assert_eq!(hummock_manager.delete_version_deltas().await.unwrap(), 0);
 
     hummock_manager
         .unpin_version_before(context_id, HummockVersionId::MAX)

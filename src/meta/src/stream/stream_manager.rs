@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use futures::future::join_all;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::{DatabaseId, TableId};
-use risingwave_meta_model::{ObjectId, WorkerId};
+use risingwave_meta_model::ObjectId;
 use risingwave_pb::catalog::{CreateType, Subscription, Table};
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use risingwave_pb::stream_plan::Dispatcher;
@@ -28,7 +28,10 @@ use tokio::sync::mpsc::Sender;
 use tokio::sync::{oneshot, Mutex};
 use tracing::Instrument;
 
-use super::{Locations, RescheduleOptions, ScaleControllerRef, TableResizePolicy};
+use super::{
+    JobParallelismTarget, JobReschedulePolicy, JobReschedulePostUpdates, JobRescheduleTarget,
+    JobResourceGroupTarget, Locations, RescheduleOptions, ScaleControllerRef,
+};
 use crate::barrier::{
     BarrierScheduler, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
     ReplaceStreamJobPlan, SnapshotBackfillInfo,
@@ -38,7 +41,7 @@ use crate::manager::{
     MetaSrvEnv, MetadataManager, NotificationVersion, StreamingJob, StreamingJobType,
 };
 use crate::model::{ActorId, FragmentId, StreamJobFragments, TableParallelism};
-use crate::stream::SourceManagerRef;
+use crate::stream::{SourceChange, SourceManagerRef};
 use crate::{MetaError, MetaResult};
 
 pub type GlobalStreamManagerRef = Arc<GlobalStreamManager>;
@@ -234,6 +237,8 @@ impl GlobalStreamManager {
     ///    actors.
     /// 3. Notify related worker nodes to update and build the actors.
     /// 4. Store related meta data.
+    ///
+    /// This function is a wrapper over [`Self::create_streaming_job_impl`].
     pub async fn create_streaming_job(
         self: &Arc<Self>,
         stream_job_fragments: StreamJobFragments,
@@ -327,6 +332,8 @@ impl GlobalStreamManager {
         bail!("receiver failed to get notification version for finished stream job")
     }
 
+    /// The function will only return after backfilling finishes
+    /// ([`crate::manager::MetadataManager::wait_streaming_job_finished`]).
     async fn create_streaming_job_impl(
         &self,
         stream_job_fragments: StreamJobFragments,
@@ -344,7 +351,6 @@ impl GlobalStreamManager {
         }: CreateStreamingJobContext,
     ) -> MetaResult<NotificationVersion> {
         let mut replace_table_command = None;
-        let mut replace_table_id = None;
 
         tracing::debug!(
             table_id = %stream_job_fragments.stream_job_id(),
@@ -361,8 +367,6 @@ impl GlobalStreamManager {
 
             let tmp_table_id = stream_job_fragments.stream_job_id();
             let init_split_assignment = self.source_manager.allocate_splits(&tmp_table_id).await?;
-
-            replace_table_id = Some(tmp_table_id);
 
             replace_table_command = Some(ReplaceStreamJobPlan {
                 old_fragments: context.old_fragments,
@@ -387,6 +391,10 @@ impl GlobalStreamManager {
                 .allocate_splits_for_backfill(&table_id, &dispatchers)
                 .await?,
         );
+
+        let source_change = SourceChange::CreateJobFinished {
+            finished_backfill_fragments: stream_job_fragments.source_backfill_fragments()?,
+        };
 
         let info = CreateStreamingJobCommandInfo {
             stream_job_fragments,
@@ -423,43 +431,26 @@ impl GlobalStreamManager {
                 }
             }
         };
-        let result: MetaResult<NotificationVersion> = try {
-            if need_pause {
-                // Special handling is required when creating sink into table, we need to pause the stream to avoid data loss.
-                self.barrier_scheduler
-                    .run_config_change_command_with_pause(
-                        streaming_job.database_id().into(),
-                        command,
-                    )
-                    .await?;
-            } else {
-                self.barrier_scheduler
-                    .run_command(streaming_job.database_id().into(), command)
-                    .await?;
-            }
 
-            tracing::debug!(?streaming_job, "first barrier collected for stream job");
-            let result = self
-                .metadata_manager
-                .wait_streaming_job_finished(streaming_job.id() as _)
+        if need_pause {
+            // Special handling is required when creating sink into table, we need to pause the stream to avoid data loss.
+            self.barrier_scheduler
+                .run_config_change_command_with_pause(streaming_job.database_id().into(), command)
                 .await?;
-            tracing::debug!(?streaming_job, "stream job finish");
-            result
-        };
-        match result {
-            Err(err) => {
-                if create_type == CreateType::Foreground || err.is_cancelled() {
-                    let mut table_ids: HashSet<TableId> =
-                        HashSet::from_iter(std::iter::once(table_id));
-                    if let Some(tmp_table_id) = replace_table_id {
-                        table_ids.insert(tmp_table_id);
-                    }
-                }
-
-                Err(err)
-            }
-            Ok(version) => Ok(version),
+        } else {
+            self.barrier_scheduler
+                .run_command(streaming_job.database_id().into(), command)
+                .await?;
         }
+
+        tracing::debug!(?streaming_job, "first barrier collected for stream job");
+        let version = self
+            .metadata_manager
+            .wait_streaming_job_finished(streaming_job.id() as _)
+            .await?;
+        self.source_manager.apply_source_change(source_change).await;
+        tracing::debug!(?streaming_job, "stream job finish");
+        Ok(version)
     }
 
     /// Send replace job command to barrier scheduler.
@@ -609,13 +600,18 @@ impl GlobalStreamManager {
         cancelled_ids
     }
 
-    pub(crate) async fn alter_table_parallelism(
+    pub(crate) async fn reschedule_streaming_job(
         &self,
         table_id: u32,
-        parallelism: TableParallelism,
+        target: JobRescheduleTarget,
         deferred: bool,
     ) -> MetaResult<()> {
         let _reschedule_job_lock = self.reschedule_lock_write_guard().await;
+
+        let JobRescheduleTarget {
+            parallelism: parallelism_change,
+            resource_group: resource_group_change,
+        } = target;
 
         let database_id = DatabaseId::new(
             self.metadata_manager
@@ -633,11 +629,6 @@ impl GlobalStreamManager {
             .filter(|w| w.is_streaming_schedulable())
             .collect_vec();
 
-        let worker_ids = worker_nodes
-            .iter()
-            .map(|node| node.id as WorkerId)
-            .collect::<BTreeSet<_>>();
-
         // Check if the provided parallelism is valid.
         let available_parallelism = worker_nodes
             .iter()
@@ -648,66 +639,85 @@ impl GlobalStreamManager {
             .get_job_max_parallelism(table_id)
             .await?;
 
-        match parallelism {
-            TableParallelism::Adaptive => {
-                if available_parallelism > max_parallelism {
-                    tracing::warn!(
+        if let JobParallelismTarget::Update(parallelism) = parallelism_change {
+            match parallelism {
+                TableParallelism::Adaptive => {
+                    if available_parallelism > max_parallelism {
+                        tracing::warn!(
                         "too many parallelism available, use max parallelism {} will be limited",
                         max_parallelism
                     );
+                    }
                 }
-            }
-            TableParallelism::Fixed(parallelism) => {
-                if parallelism > max_parallelism {
-                    bail_invalid_parameter!(
-                        "specified parallelism {} should not exceed max parallelism {}",
-                        parallelism,
-                        max_parallelism
-                    );
+                TableParallelism::Fixed(parallelism) => {
+                    if parallelism > max_parallelism {
+                        bail_invalid_parameter!(
+                            "specified parallelism {} should not exceed max parallelism {}",
+                            parallelism,
+                            max_parallelism
+                        );
+                    }
                 }
-            }
-            TableParallelism::Custom => {
-                bail_invalid_parameter!("should not alter parallelism to custom")
+                TableParallelism::Custom => {
+                    bail_invalid_parameter!("should not alter parallelism to custom")
+                }
             }
         }
 
-        let table_parallelism_assignment = HashMap::from([(table_id, parallelism)]);
+        let table_parallelism_assignment = match &parallelism_change {
+            JobParallelismTarget::Update(parallelism) => HashMap::from([(table_id, *parallelism)]),
+            JobParallelismTarget::Refresh => HashMap::new(),
+        };
+        let resource_group_assignment = match &resource_group_change {
+            JobResourceGroupTarget::Update(target) => {
+                HashMap::from([(table_id.table_id() as ObjectId, target.clone())])
+            }
+            JobResourceGroupTarget::Keep => HashMap::new(),
+        };
 
         if deferred {
             tracing::debug!(
-                "deferred mode enabled for job {}, set the parallelism directly to {:?}",
+                "deferred mode enabled for job {}, set the parallelism directly to parallelism {:?}, resource group {:?}",
                 table_id,
-                parallelism
+                parallelism_change,
+                resource_group_change,
             );
             self.scale_controller
-                .post_apply_reschedule(&HashMap::new(), &table_parallelism_assignment)
+                .post_apply_reschedule(
+                    &HashMap::new(),
+                    &JobReschedulePostUpdates {
+                        parallelism_updates: table_parallelism_assignment,
+                        resource_group_updates: resource_group_assignment,
+                    },
+                )
                 .await?;
         } else {
-            let reschedules = self
+            let reschedule_plan = self
                 .scale_controller
-                .generate_table_resize_plan(TableResizePolicy {
-                    worker_ids,
-                    table_parallelisms: table_parallelism_assignment
-                        .iter()
-                        .map(|(id, parallelism)| (id.table_id, *parallelism))
-                        .collect(),
+                .generate_job_reschedule_plan(JobReschedulePolicy {
+                    targets: HashMap::from([(
+                        table_id.table_id,
+                        JobRescheduleTarget {
+                            parallelism: parallelism_change,
+                            resource_group: resource_group_change,
+                        },
+                    )]),
                 })
                 .await?;
 
-            if reschedules.is_empty() {
-                tracing::debug!("empty reschedule plan generated for job {}, set the parallelism directly to {:?}", table_id, parallelism);
+            if reschedule_plan.reschedules.is_empty() {
+                tracing::debug!("empty reschedule plan generated for job {}, set the parallelism directly to {:?}", table_id, reschedule_plan.post_updates);
                 self.scale_controller
-                    .post_apply_reschedule(&HashMap::new(), &table_parallelism_assignment)
+                    .post_apply_reschedule(&HashMap::new(), &reschedule_plan.post_updates)
                     .await?;
             } else {
                 self.reschedule_actors(
                     database_id,
-                    reschedules,
+                    reschedule_plan,
                     RescheduleOptions {
                         resolve_no_shuffle_upstream: false,
                         skip_create_new_actors: false,
                     },
-                    Some(table_parallelism_assignment),
                 )
                 .await?;
             }

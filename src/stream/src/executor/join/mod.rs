@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,6 +21,16 @@ pub mod builder;
 pub mod hash_join;
 pub mod join_row_set;
 pub mod row;
+
+pub(crate) type JoinOpPrimitive = bool;
+
+#[allow(non_snake_case, non_upper_case_globals)]
+pub(crate) mod JoinOp {
+    use super::JoinOpPrimitive;
+
+    pub const Insert: JoinOpPrimitive = true;
+    pub const Delete: JoinOpPrimitive = false;
+}
 
 /// The `JoinType` and `SideType` are to mimic a enum, because currently
 /// enum is not supported in const generic.

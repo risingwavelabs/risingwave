@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,6 +26,7 @@ pub struct Model {
     pub database_id: DatabaseId,
     #[sea_orm(unique)]
     pub name: String,
+    pub resource_group: String,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -53,6 +54,7 @@ impl From<PbDatabase> for ActiveModel {
         Self {
             database_id: Set(db.id as _),
             name: Set(db.name),
+            resource_group: Set(db.resource_group),
         }
     }
 }

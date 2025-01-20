@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -31,7 +31,7 @@ use google_cloud_bigquery::grpc::apiv1::conn_pool::{WriteConnectionManager, DOMA
 use google_cloud_gax::conn::{ConnectionOptions, Environment};
 use google_cloud_gax::grpc::Request;
 use google_cloud_googleapis::cloud::bigquery::storage::v1::append_rows_request::{
-    ProtoData, Rows as AppendRowsRequestRows,
+    MissingValueInterpretation, ProtoData, Rows as AppendRowsRequestRows,
 };
 use google_cloud_googleapis::cloud::bigquery::storage::v1::{
     AppendRowsRequest, AppendRowsResponse, ProtoRows, ProtoSchema,
@@ -164,8 +164,8 @@ impl LogSinker for BigQueryLogSinker {
             tokio::select!(
                 offset = self.bigquery_future_manager.next_offset() => {
                         log_reader.truncate(offset?)?;
-                 }
-                 item_result = log_reader.next_item(), if self.bigquery_future_manager.offset_queue.len() <= self.future_num => {
+                }
+                item_result = log_reader.next_item(), if self.bigquery_future_manager.offset_queue.len() <= self.future_num => {
                     let (epoch, item) = item_result?;
                     match item {
                         LogStoreReadItem::StreamChunk { chunk_id, chunk } => {
@@ -815,6 +815,7 @@ impl StorageWriterClient {
             trace_id: Uuid::new_v4().hyphenated().to_string(),
             missing_value_interpretations: HashMap::default(),
             rows: Some(row),
+            default_missing_value_interpretation: MissingValueInterpretation::DefaultValue as i32,
         };
         self.request_sender
             .send(append_req)

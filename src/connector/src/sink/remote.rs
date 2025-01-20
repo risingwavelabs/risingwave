@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -301,6 +301,7 @@ impl RemoteLogSinker {
                 sink_param.schema(),
                 &sink_param.downstream_pk,
                 &sink_param.properties,
+                sink_param.sink_type.is_append_only(),
             )?,
         })
     }

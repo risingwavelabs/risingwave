@@ -182,6 +182,127 @@ INSERT INTO integers VALUES (1), (2), (3), (4), (5);
 # 4
 # 5
 
+# expression in the limit clause
+query I
+SELECT * FROM generate_series(0,10,1) as t(v) order by v limit 1+2;
+----
+0
+1
+2
+
+query I
+SELECT * FROM generate_series(0,10,1) as t(v) order by v limit 1.5*2;
+----
+0
+1
+2
+
+query I
+SELECT * FROM generate_series(0,10,1) as t(v) order by v limit -3+4;
+----
+0
+
+query I
+SELECT * FROM generate_series(0,10,1) as t(v) order by v limit 1.5*2 OFFSET 2;
+----
+2
+3
+4
+
+query I
+SELECT * FROM generate_series(0,3,1) as t(v) order by v limit NULL + 1;
+----
+0
+1
+2
+3
+
+query I
+SELECT * FROM generate_series(0,3,1) as t(v) order by v limit NULL + '1'::bigint;
+----
+0
+1
+2
+3
+
+
+statement error
+SELECT * FROM generate_series(0,3,1) as t(v) order by v limit NULL + '1';
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Failed to bind expression: NULL + '1'
+  2: Bind error: function add(unknown, unknown) is not unique
+HINT:  Could not choose a best candidate function. You might need to add explicit type casts.
+
+
+statement error
+SELECT * FROM generate_series(0,3,1) as t(v) order by v limit NULL + '1'::jsonb;
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Failed to bind expression: NULL + CAST('1' AS JSONB)
+  2: function add(unknown, jsonb) does not exist
+
+
+
+query I
+SELECT * FROM generate_series(0,3,1) as t(v) order by v limit 2.1::Decimal;
+----
+0
+1
+
+
+statement error
+SELECT * FROM generate_series(0,3,1) as t(v) order by v limit '1'::jsonb;
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Expr error
+  2: expects an integer or expression that can be evaluated to an integer after LIMIT
+
+
+
+query I
+SELECT * FROM generate_series(0,3,1) as t(v) order by v limit '2';
+----
+0
+1
+
+
+statement error
+SELECT * FROM generate_series(0,3,1) as t(v) order by v limit '-2';
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Expr error
+  2: LIMIT must not be negative, but found: -2
+
+
+statement error
+SELECT * FROM generate_series(0,3,1) as t(v) order by v limit '2.2';
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Expr error
+  2: expects an integer or expression that can be evaluated to an integer after LIMIT,
+but the evaluation of the expression returns error:Expr error: error while evaluating expression `str_parse('2.2')`: Parse error: bigint invalid digit found in string
+
+
+statement error
+select 1 limit generate_series(1, 2);
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Expr error
+  2: expects an integer or expression that can be evaluated to an integer after LIMIT, but found non-const expression
+
 
 # Subqueries that return negative values
 statement error

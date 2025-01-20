@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,9 +22,11 @@ use either::Either;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
+use prost::Message as _;
 use risingwave_common::catalog::{
-    CdcTableDesc, ColumnCatalog, ColumnDesc, Engine, FieldLike, TableId, TableVersionId,
-    DEFAULT_SCHEMA_NAME, INITIAL_TABLE_VERSION_ID, RISINGWAVE_ICEBERG_ROW_ID, ROWID_PREFIX,
+    CdcTableDesc, ColumnCatalog, ColumnDesc, ConflictBehavior, Engine, FieldLike, TableId,
+    TableVersionId, DEFAULT_SCHEMA_NAME, INITIAL_TABLE_VERSION_ID, RISINGWAVE_ICEBERG_ROW_ID,
+    ROWID_PREFIX,
 };
 use risingwave_common::config::MetaBackend;
 use risingwave_common::license::Feature;
@@ -61,14 +63,14 @@ use risingwave_sqlparser::ast::{
 use risingwave_sqlparser::parser::{IncludeOption, Parser};
 use thiserror_ext::AsReport;
 
-use super::create_source::{bind_columns_from_source, CreateSourceType};
+use super::create_source::{bind_columns_from_source, CreateSourceType, SqlColumnStrategy};
 use super::{create_sink, create_source, RwPgResponse};
 use crate::binder::{bind_data_type, bind_struct_field, Clause, SecureCompareContext};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::table_catalog::{TableVersion, ICEBERG_SINK_PREFIX, ICEBERG_SOURCE_PREFIX};
 use crate::catalog::{check_valid_column_name, ColumnId, DatabaseId, SchemaId};
-use crate::error::{ErrorCode, Result, RwError};
+use crate::error::{bail_bind_error, ErrorCode, Result, RwError};
 use crate::expr::{Expr, ExprImpl, ExprRewriter};
 use crate::handler::create_source::{
     bind_connector_props, bind_create_source_or_table_with_connector, bind_source_watermark,
@@ -178,7 +180,8 @@ fn ensure_column_options_supported(c: &ColumnDef) -> Result<()> {
     for option_def in &c.options {
         match option_def.option {
             ColumnOption::GeneratedColumns(_) => {}
-            ColumnOption::DefaultColumns(_) => {}
+            ColumnOption::DefaultValue(_) => {}
+            ColumnOption::DefaultValueInternal { .. } => {}
             ColumnOption::Unique { is_primary: true } => {}
             _ => bail_not_implemented!("column constraints \"{}\"", option_def),
         }
@@ -322,12 +325,20 @@ pub fn bind_sql_column_constraints(
     binder.bind_columns_to_context(table_name.clone(), column_catalogs)?;
 
     for column in columns {
+        let Some(idx) = column_catalogs
+            .iter()
+            .position(|c| c.name() == column.name.real_value())
+        else {
+            // It's possible that we don't follow the user defined columns in SQL but take the
+            // ones resolved from the source, thus missing some columns. Simply ignore them.
+            continue;
+        };
+
         for option_def in column.options {
             match option_def.option {
                 ColumnOption::GeneratedColumns(expr) => {
                     binder.set_clause(Some(Clause::GeneratedColumn));
-                    let idx = binder
-                        .get_column_binding_index(table_name.clone(), &column.name.real_value())?;
+
                     let expr_impl = binder.bind_expr(expr).with_context(|| {
                         format!(
                             "fail to bind expression in generated column \"{}\"",
@@ -351,9 +362,7 @@ pub fn bind_sql_column_constraints(
                     );
                     binder.set_clause(None);
                 }
-                ColumnOption::DefaultColumns(expr) => {
-                    let idx = binder
-                        .get_column_binding_index(table_name.clone(), &column.name.real_value())?;
+                ColumnOption::DefaultValue(expr) => {
                     let expr_impl = binder
                         .bind_expr(expr)?
                         .cast_assign(column_catalogs[idx].data_type().clone())?;
@@ -387,6 +396,24 @@ pub fn bind_sql_column_constraints(
                         ))
                         .into());
                     }
+                }
+                ColumnOption::DefaultValueInternal { persisted, expr: _ } => {
+                    // When a `DEFAULT INTERNAL` is used internally for schema change, the persisted value
+                    // should already be set during purifcation. So if we encounter an empty value here, it
+                    // means the user has specified it explicitly in the SQL statement, typically by
+                    // directly copying the result of `SHOW CREATE TABLE` and executing it.
+                    if persisted.is_empty() {
+                        bail_bind_error!(
+                            "DEFAULT INTERNAL is only used for internal purposes, \
+                             please specify a concrete default value"
+                        );
+                    }
+
+                    let desc = DefaultColumnDesc::decode(&*persisted)
+                        .expect("failed to decode persisted `DefaultColumnDesc`");
+
+                    column_catalogs[idx].column_desc.generated_or_default_column =
+                        Some(GeneratedOrDefaultColumn::DefaultColumn(desc));
                 }
                 _ => {}
             }
@@ -504,6 +531,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
     mut col_id_gen: ColumnIdGenerator,
     include_column_options: IncludeOption,
     props: CreateTableProps,
+    sql_column_strategy: SqlColumnStrategy,
 ) -> Result<(PlanRef, Option<PbSource>, PbTable)> {
     if props.append_only
         && format_encode.format != Format::Plain
@@ -519,9 +547,10 @@ pub(crate) async fn gen_create_table_plan_with_source(
     let session = &handler_args.session;
     let with_properties = bind_connector_props(&handler_args, &format_encode, false)?;
 
-    let db_name: &str = session.database();
+    let db_name: &str = &session.database();
     let (schema_name, _) = Binder::resolve_schema_qualified_name(db_name, table_name.clone())?;
 
+    // TODO: omit this step if `sql_column_strategy` is `Follow`.
     let (columns_from_resolve_source, source_info) = bind_columns_from_source(
         session,
         &format_encode,
@@ -547,6 +576,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
         &mut col_id_gen,
         CreateSourceType::Table,
         rate_limit,
+        sql_column_strategy,
     )
     .await?;
 
@@ -631,7 +661,7 @@ pub(crate) fn gen_create_table_plan_without_source(
     )?;
     let session = context.session_ctx().clone();
 
-    let db_name = session.database();
+    let db_name = &session.database();
     let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
 
     let info = CreateTableInfo {
@@ -667,6 +697,64 @@ fn gen_table_plan_with_source(
     gen_table_plan_inner(context, schema_name, table_name, info, props)
 }
 
+/// On-conflict behavior either from user input or existing table catalog.
+#[derive(Clone, Copy)]
+pub enum EitherOnConflict {
+    Ast(Option<OnConflict>),
+    Resolved(ConflictBehavior),
+}
+
+impl From<Option<OnConflict>> for EitherOnConflict {
+    fn from(v: Option<OnConflict>) -> Self {
+        Self::Ast(v)
+    }
+}
+
+impl From<ConflictBehavior> for EitherOnConflict {
+    fn from(v: ConflictBehavior) -> Self {
+        Self::Resolved(v)
+    }
+}
+
+impl EitherOnConflict {
+    /// Resolves the conflict behavior based on the given information.
+    pub fn to_behavior(self, append_only: bool, row_id_as_pk: bool) -> Result<ConflictBehavior> {
+        let conflict_behavior = match self {
+            EitherOnConflict::Ast(on_conflict) => {
+                if append_only {
+                    if row_id_as_pk {
+                        // Primary key will be generated, no conflict check needed.
+                        ConflictBehavior::NoCheck
+                    } else {
+                        // User defined PK on append-only table, enforce `DO NOTHING`.
+                        if let Some(on_conflict) = on_conflict
+                            && on_conflict != OnConflict::Nothing
+                        {
+                            return Err(ErrorCode::InvalidInputSyntax(
+                                "When PRIMARY KEY constraint applied to an APPEND ONLY table, \
+                                     the ON CONFLICT behavior must be DO NOTHING."
+                                    .to_owned(),
+                            )
+                            .into());
+                        }
+                        ConflictBehavior::IgnoreConflict
+                    }
+                } else {
+                    // Default to `UPDATE FULL` for non-append-only tables.
+                    match on_conflict.unwrap_or(OnConflict::UpdateFull) {
+                        OnConflict::UpdateFull => ConflictBehavior::Overwrite,
+                        OnConflict::Nothing => ConflictBehavior::IgnoreConflict,
+                        OnConflict::UpdateIfNotNull => ConflictBehavior::DoUpdateIfNotNull,
+                    }
+                }
+            }
+            EitherOnConflict::Resolved(b) => b,
+        };
+
+        Ok(conflict_behavior)
+    }
+}
+
 /// Arguments of the functions that generate a table plan, part 1.
 ///
 /// Compared to [`CreateTableProps`], this struct contains fields that need some work of binding
@@ -687,7 +775,7 @@ pub struct CreateTableInfo {
 pub struct CreateTableProps {
     pub definition: String,
     pub append_only: bool,
-    pub on_conflict: Option<OnConflict>,
+    pub on_conflict: EitherOnConflict,
     pub with_version_column: Option<String>,
     pub webhook_info: Option<PbWebhookSourceInfo>,
     pub engine: Engine,
@@ -708,11 +796,7 @@ fn gen_table_plan_inner(
         ref source_catalog,
         ..
     } = info;
-    let CreateTableProps {
-        append_only,
-        on_conflict,
-        ..
-    } = props;
+    let CreateTableProps { append_only, .. } = props;
 
     let (database_id, schema_id) = context
         .session_ctx()
@@ -740,21 +824,6 @@ fn gen_table_plan_inner(
         vec![],
     );
 
-    let pk_on_append_only = append_only && row_id_index.is_none();
-
-    let on_conflict = if pk_on_append_only {
-        let on_conflict = on_conflict.unwrap_or(OnConflict::Nothing);
-        if on_conflict != OnConflict::Nothing {
-            return Err(ErrorCode::InvalidInputSyntax(
-                "When PRIMARY KEY constraint applied to an APPEND ONLY table, the ON CONFLICT behavior must be DO NOTHING.".to_owned(),
-            )
-                .into());
-        }
-        Some(on_conflict)
-    } else {
-        on_conflict
-    };
-
     if !append_only && !watermark_descs.is_empty() {
         return Err(ErrorCode::NotSupported(
             "Defining watermarks on table requires the table to be append only.".to_owned(),
@@ -771,15 +840,7 @@ fn gen_table_plan_inner(
         .into());
     }
 
-    let materialize = plan_root.gen_table_plan(
-        context,
-        table_name,
-        info,
-        CreateTableProps {
-            on_conflict,
-            ..props
-        },
-    )?;
+    let materialize = plan_root.gen_table_plan(context, table_name, info, props)?;
 
     let mut table = materialize.table().to_prost(schema_id, database_id);
 
@@ -911,7 +972,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
         CreateTableProps {
             definition,
             append_only: false,
-            on_conflict,
+            on_conflict: on_conflict.into(),
             with_version_column,
             webhook_info: None,
             engine,
@@ -1015,7 +1076,7 @@ pub(super) async fn handle_create_table_plan(
     let props = CreateTableProps {
         definition: handler_args.normalized_sql.clone(),
         append_only,
-        on_conflict,
+        on_conflict: on_conflict.into(),
         with_version_column: with_version_column.clone(),
         webhook_info,
         engine,
@@ -1035,6 +1096,7 @@ pub(super) async fn handle_create_table_plan(
                 col_id_gen,
                 include_column_options,
                 props,
+                SqlColumnStrategy::Reject,
             )
             .await?,
             TableJobType::General,
@@ -1064,7 +1126,9 @@ pub(super) async fn handle_create_table_plan(
             )?;
 
             let session = &handler_args.session;
-            let db_name = session.database();
+            let db_name = &session.database();
+            let user_name = &session.user_name();
+            let search_path = session.config().search_path();
             let (schema_name, resolved_table_name) =
                 Binder::resolve_schema_qualified_name(db_name, table_name.clone())?;
             let (database_id, schema_id) =
@@ -1076,12 +1140,12 @@ pub(super) async fn handle_create_table_plan(
 
             let source = {
                 let catalog_reader = session.env().catalog_reader().read_guard();
-                let schema_name = format_encode
-                    .clone()
-                    .unwrap_or(DEFAULT_SCHEMA_NAME.to_owned());
+                let schema_path =
+                    SchemaPath::new(format_encode.as_deref(), &search_path, user_name);
+
                 let (source, _) = catalog_reader.get_source_by_name(
                     db_name,
-                    SchemaPath::Name(schema_name.as_str()),
+                    schema_path,
                     source_name.as_str(),
                 )?;
                 source.clone()
@@ -1096,7 +1160,9 @@ pub(super) async fn handle_create_table_plan(
                 None => {
                     for column_def in &column_defs {
                         for option_def in &column_def.options {
-                            if let ColumnOption::DefaultColumns(_) = option_def.option {
+                            if let ColumnOption::DefaultValue(_)
+                            | ColumnOption::DefaultValueInternal { .. } = option_def.option
+                            {
                                 return Err(ErrorCode::NotSupported(
                                             "Default value for columns defined on the table created from a CDC source".into(),
                                             "Remove the default value expression in the column definitions".into(),
@@ -1107,13 +1173,13 @@ pub(super) async fn handle_create_table_plan(
                     }
 
                     let (mut columns, pk_names) =
-                        bind_cdc_table_schema(&column_defs, &constraints, None)?;
+                        bind_cdc_table_schema(&column_defs, &constraints)?;
                     // read default value definition from external db
                     let (options, secret_refs) = cdc_with_options.clone().into_parts();
                     let config = ExternalTableConfig::try_from_btreemap(options, secret_refs)
                         .context("failed to extract external table config")?;
 
-                    let table = ExternalTableImpl::connect(config)
+                    let table: ExternalTableImpl = ExternalTableImpl::connect(config)
                         .await
                         .context("failed to auto derive table schema")?;
                     let external_columns: Vec<_> = table
@@ -1267,25 +1333,9 @@ async fn bind_cdc_table_schema_externally(
 fn bind_cdc_table_schema(
     column_defs: &Vec<ColumnDef>,
     constraints: &Vec<TableConstraint>,
-    new_version_columns: Option<Vec<ColumnCatalog>>,
 ) -> Result<(Vec<ColumnCatalog>, Vec<String>)> {
-    let mut columns = bind_sql_columns(column_defs)?;
-    // If new_version_columns is provided, we are in the process of auto schema change.
-    // update the default value column since the default value column is not set in the
-    // column sql definition.
-    if let Some(new_version_columns) = new_version_columns {
-        for (col, new_version_col) in columns
-            .iter_mut()
-            .zip_eq_fast(new_version_columns.into_iter())
-        {
-            assert_eq!(col.name(), new_version_col.name());
-            col.column_desc.generated_or_default_column =
-                new_version_col.column_desc.generated_or_default_column;
-        }
-    }
-
+    let columns = bind_sql_columns(column_defs)?;
     let pk_names = bind_sql_pk_names(column_defs, bind_table_constraints(constraints)?)?;
-
     Ok((columns, pk_names))
 }
 
@@ -1763,16 +1813,16 @@ pub async fn generate_stream_graph_for_replace_table(
     on_conflict: Option<OnConflict>,
     with_version_column: Option<String>,
     cdc_table_info: Option<CdcTableInfo>,
-    new_version_columns: Option<Vec<ColumnCatalog>>,
     include_column_options: IncludeOption,
     engine: Engine,
+    sql_column_strategy: SqlColumnStrategy,
 ) -> Result<(StreamFragmentGraph, Table, Option<PbSource>, TableJobType)> {
     use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 
     let props = CreateTableProps {
         definition: handler_args.normalized_sql.clone(),
         append_only,
-        on_conflict,
+        on_conflict: on_conflict.into(),
         with_version_column: with_version_column.clone(),
         webhook_info: original_catalog.webhook_info.clone(),
         engine,
@@ -1792,6 +1842,7 @@ pub async fn generate_stream_graph_for_replace_table(
                 col_id_gen,
                 include_column_options,
                 props,
+                sql_column_strategy,
             )
             .await?,
             TableJobType::General,
@@ -1819,8 +1870,7 @@ pub async fn generate_stream_graph_for_replace_table(
                 cdc_table.external_table_name.clone(),
             )?;
 
-            let (columns, pk_names) =
-                bind_cdc_table_schema(&column_defs, &constraints, new_version_columns)?;
+            let (columns, pk_names) = bind_cdc_table_schema(&column_defs, &constraints)?;
 
             let context: OptimizerContextRef =
                 OptimizerContext::new(handler_args, ExplainOptions::default()).into();
@@ -1887,7 +1937,7 @@ fn get_source_and_resolved_table_name(
     cdc_table: CdcTableInfo,
     table_name: ObjectName,
 ) -> Result<(Arc<SourceCatalog>, String, DatabaseId, SchemaId)> {
-    let db_name = session.database();
+    let db_name = &session.database();
     let (schema_name, resolved_table_name) =
         Binder::resolve_schema_qualified_name(db_name, table_name)?;
     let (database_id, schema_id) =
@@ -1931,7 +1981,7 @@ fn bind_webhook_info(
     } = webhook_info;
 
     // validate secret_ref
-    let db_name = session.database();
+    let db_name = &session.database();
     let (schema_name, secret_name) =
         Binder::resolve_schema_qualified_name(db_name, secret_ref.secret_name.clone())?;
     let secret_catalog = session.get_secret_by_name(schema_name, &secret_name)?;

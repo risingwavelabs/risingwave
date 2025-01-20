@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -263,10 +263,6 @@ impl Task for MetaNodeService {
 
         let mut cmd = risingwave_cmd("meta-node")?;
 
-        if crate::util::is_enable_backtrace() {
-            cmd.env("RUST_BACKTRACE", "1");
-        }
-
         if crate::util::is_env_set("RISEDEV_ENABLE_PROFILE") {
             cmd.env(
                 "RW_PROFILE_PATH",
@@ -281,19 +277,7 @@ impl Task for MetaNodeService {
             cmd.env("MALLOC_CONF", conf); // unprefixed for linux
         }
 
-        if crate::util::is_env_set("ENABLE_BUILD_RW_CONNECTOR") {
-            let prefix_bin = env::var("PREFIX_BIN")?;
-            cmd.env(
-                "CONNECTOR_LIBS_PATH",
-                Path::new(&prefix_bin).join("connector-node/libs/"),
-            );
-        }
-
         Self::apply_command_args(&mut cmd, &self.config, HummockInMemoryStrategy::Isolated)?;
-
-        let prefix_config = env::var("PREFIX_CONFIG")?;
-        cmd.arg("--config-path")
-            .arg(Path::new(&prefix_config).join("risingwave.toml"));
 
         if let MetaBackend::Env = self.config.meta_backend {
             if is_env_set("RISEDEV_CLEAN_START") {

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
+use risingwave_common::util::functional::SameOrElseExt;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{DeltaExpression, HashJoinNode, PbInequalityPair};
 
-use super::generic::Join;
+use super::generic::{GenericPlanNode, Join};
 use super::stream::prelude::*;
 use super::stream_join_common::StreamJoinCommon;
 use super::utils::{childless_record, plan_node_name, watermark_pretty, Distill};
@@ -30,9 +30,8 @@ use crate::expr::{Expr, ExprDisplay, ExprRewriter, ExprVisitor, InequalityInputP
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{EqJoinPredicate, EqJoinPredicateDisplay};
-use crate::optimizer::property::MonotonicityMap;
+use crate::optimizer::property::{MonotonicityMap, WatermarkColumns};
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::utils::ColIndexMappingRewriteExt;
 
 /// [`StreamHashJoin`] implements [`super::LogicalJoin`] with hash table. It builds a hash table
 /// from inner (right-side) relation and probes with data from outer (left-side) relation to
@@ -66,6 +65,8 @@ pub struct StreamHashJoin {
 
 impl StreamHashJoin {
     pub fn new(core: generic::Join<PlanRef>, eq_join_predicate: EqJoinPredicate) -> Self {
+        let ctx = core.ctx();
+
         // Inner join won't change the append-only behavior of the stream. The rest might.
         let append_only = match core.join_type {
             JoinType::Inner => core.left.append_only() && core.right.append_only(),
@@ -98,17 +99,25 @@ impl StreamHashJoin {
             let r2i = core.r2i_col_mapping();
 
             let mut equal_condition_clean_state = false;
-            let mut watermark_columns = FixedBitSet::with_capacity(core.internal_column_num());
+            let mut watermark_columns = WatermarkColumns::new();
             for (left_key, right_key) in eq_join_predicate.eq_indexes() {
-                if core.left.watermark_columns().contains(left_key)
-                    && core.right.watermark_columns().contains(right_key)
+                if let Some(l_wtmk_group) = core.left.watermark_columns().get_group(left_key)
+                    && let Some(r_wtmk_group) = core.right.watermark_columns().get_group(right_key)
                 {
                     equal_condition_clean_state = true;
                     if let Some(internal) = l2i.try_map(left_key) {
-                        watermark_columns.insert(internal);
+                        watermark_columns.insert(
+                            internal,
+                            l_wtmk_group
+                                .same_or_else(r_wtmk_group, || ctx.next_watermark_group_id()),
+                        );
                     }
                     if let Some(internal) = r2i.try_map(right_key) {
-                        watermark_columns.insert(internal);
+                        watermark_columns.insert(
+                            internal,
+                            l_wtmk_group
+                                .same_or_else(r_wtmk_group, || ctx.next_watermark_group_id()),
+                        );
                     }
                 }
             }
@@ -171,13 +180,13 @@ impl StreamHashJoin {
                 if let Some(internal) = internal_col1
                     && !watermark_columns.contains(internal)
                 {
-                    watermark_columns.insert(internal);
+                    watermark_columns.insert(internal, ctx.next_watermark_group_id());
                     is_valuable_inequality = true;
                 }
                 if let Some(internal) = internal_col2
                     && !watermark_columns.contains(internal)
                 {
-                    watermark_columns.insert(internal);
+                    watermark_columns.insert(internal, ctx.next_watermark_group_id());
                 }
                 if is_valuable_inequality {
                     inequality_pairs.push((
@@ -190,7 +199,7 @@ impl StreamHashJoin {
                     ));
                 }
             }
-            core.i2o_col_mapping().rewrite_bitset(&watermark_columns)
+            watermark_columns.map_clone(&core.i2o_col_mapping())
         };
 
         // TODO: derive from input
@@ -359,7 +368,7 @@ impl StreamNode for StreamHashJoin {
 
         let null_safe_prost = self.eq_join_predicate.null_safes().into_iter().collect();
 
-        NodeBody::HashJoin(HashJoinNode {
+        NodeBody::HashJoin(Box::new(HashJoinNode {
             join_type: self.core.join_type as i32,
             left_key: left_jk_indices_prost,
             right_key: right_jk_indices_prost,
@@ -403,7 +412,7 @@ impl StreamNode for StreamHashJoin {
             right_deduped_input_pk_indices,
             output_indices: self.core.output_indices.iter().map(|&x| x as u32).collect(),
             is_append_only: self.is_append_only,
-        })
+        }))
     }
 }
 

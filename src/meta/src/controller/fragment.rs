@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -64,8 +64,8 @@ use crate::controller::utils::{
     FragmentDesc, PartialActorLocation, PartialFragmentStateTables,
 };
 use crate::manager::LocalNotification;
-use crate::model::TableParallelism;
-use crate::stream::SplitAssignment;
+use crate::model::{StreamContext, StreamJobFragments, TableParallelism};
+use crate::stream::{build_actor_split_impls, SplitAssignment};
 use crate::{MetaError, MetaResult};
 
 #[derive(Clone, Debug)]
@@ -344,10 +344,10 @@ impl CatalogController {
         )>,
         parallelism: StreamingParallelism,
         max_parallelism: usize,
-    ) -> MetaResult<PbTableFragments> {
-        let mut pb_fragments = HashMap::new();
+    ) -> MetaResult<StreamJobFragments> {
+        let mut pb_fragments = BTreeMap::new();
         let mut pb_actor_splits = HashMap::new();
-        let mut pb_actor_status = HashMap::new();
+        let mut pb_actor_status = BTreeMap::new();
 
         for (fragment, actors, actor_dispatcher) in fragments {
             let (fragment, fragment_actor_status, fragment_actor_splits) =
@@ -355,28 +355,26 @@ impl CatalogController {
 
             pb_fragments.insert(fragment.fragment_id, fragment);
 
-            pb_actor_splits.extend(fragment_actor_splits.into_iter());
+            pb_actor_splits.extend(build_actor_split_impls(&fragment_actor_splits));
             pb_actor_status.extend(fragment_actor_status.into_iter());
         }
 
-        let table_fragments = PbTableFragments {
-            table_id,
+        let table_fragments = StreamJobFragments {
+            stream_job_id: table_id.into(),
             state: state as _,
             fragments: pb_fragments,
             actor_status: pb_actor_status,
             actor_splits: pb_actor_splits,
-            ctx: Some(ctx.unwrap_or_default()),
-            parallelism: Some(
-                match parallelism {
-                    StreamingParallelism::Custom => TableParallelism::Custom,
-                    StreamingParallelism::Adaptive => TableParallelism::Adaptive,
-                    StreamingParallelism::Fixed(n) => TableParallelism::Fixed(n as _),
-                }
-                .into(),
-            ),
-            node_label: "".to_owned(),
-            backfill_done: true,
-            max_parallelism: Some(max_parallelism as _),
+            ctx: ctx
+                .as_ref()
+                .map(StreamContext::from_protobuf)
+                .unwrap_or_default(),
+            assigned_parallelism: match parallelism {
+                StreamingParallelism::Custom => TableParallelism::Custom,
+                StreamingParallelism::Adaptive => TableParallelism::Adaptive,
+                StreamingParallelism::Fixed(n) => TableParallelism::Fixed(n as _),
+            },
+            max_parallelism,
         };
 
         Ok(table_fragments)
@@ -680,7 +678,10 @@ impl CatalogController {
         Ok(select.into_tuple().all(&inner.db).await?)
     }
 
-    pub async fn get_job_fragments_by_id(&self, job_id: ObjectId) -> MetaResult<PbTableFragments> {
+    pub async fn get_job_fragments_by_id(
+        &self,
+        job_id: ObjectId,
+    ) -> MetaResult<StreamJobFragments> {
         let inner = self.inner.read().await;
         let fragment_actors = Fragment::find()
             .find_with_related(Actor)
@@ -832,7 +833,7 @@ impl CatalogController {
     }
 
     // TODO: This function is too heavy, we should avoid using it and implement others on demand.
-    pub async fn table_fragments(&self) -> MetaResult<BTreeMap<ObjectId, PbTableFragments>> {
+    pub async fn table_fragments(&self) -> MetaResult<BTreeMap<ObjectId, StreamJobFragments>> {
         let inner = self.inner.read().await;
         let jobs = StreamingJob::find().all(&inner.db).await?;
         let mut table_fragments = BTreeMap::new();
@@ -1293,6 +1294,34 @@ impl CatalogController {
         Ok(())
     }
 
+    pub async fn fill_snapshot_backfill_epoch(
+        &self,
+        fragment_ids: impl Iterator<Item = FragmentId>,
+        upstream_mv_snapshot_epoch: &HashMap<risingwave_common::catalog::TableId, Option<u64>>,
+    ) -> MetaResult<()> {
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
+        for fragment_id in fragment_ids {
+            let fragment = Fragment::find_by_id(fragment_id)
+                .one(&txn)
+                .await?
+                .context(format!("fragment {} not found", fragment_id))?;
+            let mut node = fragment.stream_node.to_protobuf();
+            if crate::stream::fill_snapshot_backfill_epoch(&mut node, upstream_mv_snapshot_epoch)? {
+                let node = StreamNode::from(&node);
+                Fragment::update(fragment::ActiveModel {
+                    fragment_id: Set(fragment_id),
+                    stream_node: Set(node),
+                    ..Default::default()
+                })
+                .exec(&txn)
+                .await?;
+            }
+        }
+        txn.commit().await?;
+        Ok(())
+    }
+
     /// Get the actor ids of the fragment with `fragment_id` with `Running` status.
     pub async fn get_running_actors_of_fragment(
         &self,
@@ -1639,11 +1668,11 @@ mod tests {
         let mut input = vec![];
         for (upstream_fragment_id, upstream_actor_ids) in actor_upstream_actor_ids {
             input.push(PbStreamNode {
-                node_body: Some(PbNodeBody::Merge(MergeNode {
+                node_body: Some(PbNodeBody::Merge(Box::new(MergeNode {
                     upstream_actor_id: upstream_actor_ids.iter().map(|id| *id as _).collect(),
                     upstream_fragment_id: *upstream_fragment_id as _,
                     ..Default::default()
-                })),
+                }))),
                 ..Default::default()
             });
         }

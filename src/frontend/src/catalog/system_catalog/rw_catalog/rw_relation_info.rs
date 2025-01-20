@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -87,7 +87,7 @@ async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelat
                     schemaname: schema.clone(),
                     relationname: t.name.clone(),
                     relationowner: t.owner as i32,
-                    definition: t.definition.clone(),
+                    definition: t.create_sql(),
                     relationtype: "MATERIALIZED VIEW".into(),
                     relationid: t.id.table_id as i32,
                     relationtimezone: fragments.get_ctx().unwrap().get_timezone().clone(),
@@ -106,7 +106,7 @@ async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelat
                     schemaname: schema.clone(),
                     relationname: t.name.clone(),
                     relationowner: t.owner as i32,
-                    definition: t.definition.clone(),
+                    definition: t.create_sql_purified(),
                     relationtype: "TABLE".into(),
                     relationid: t.id.table_id as i32,
                     relationtimezone: fragments.get_ctx().unwrap().get_timezone().clone(),
@@ -144,7 +144,7 @@ async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelat
                     schemaname: schema.clone(),
                     relationname: t.name.clone(),
                     relationowner: t.index_table.owner as i32,
-                    definition: t.index_table.definition.clone(),
+                    definition: t.index_table.create_sql(),
                     relationtype: "INDEX".into(),
                     relationid: t.index_table.id.table_id as i32,
                     relationtimezone: fragments.get_ctx().unwrap().get_timezone().clone(),
@@ -174,7 +174,7 @@ async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelat
                 schemaname: schema.clone(),
                 relationname: t.name.clone(),
                 relationowner: t.owner as i32,
-                definition: t.definition.clone(),
+                definition: t.create_sql_purified(),
                 relationtype: "SOURCE".into(),
                 relationid: t.id as i32,
                 relationtimezone: timezone,

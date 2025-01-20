@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -129,7 +129,7 @@ pub async fn compute_node_serve(
             is_serving: opts.role.for_serving(),
             is_unschedulable: false,
             internal_rpc_host_addr: "".to_owned(),
-            node_label: Some(opts.node_label.clone()),
+            resource_group: Some(opts.resource_group.clone()),
         },
         &config.meta,
     )

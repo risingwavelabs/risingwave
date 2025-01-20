@@ -87,8 +87,65 @@ delete from t3 where a = 1 and b = 2;
 statement ok
 insert into t3 values(1, 2, 'abc');
 
+
+statement ok
+create table t4(
+    v1 int,
+    v2 int,
+    v3 int,
+    v4 int,
+);
+
+statement ok
+create sink t4_sink from t4
+with (
+    connector='mongodb',
+    type = 'upsert',
+    mongodb.url = 'mongodb://mongodb:27017/?replicaSet=rs0',
+    collection.name = 'demo.t4',
+    mongodb.bulk_write.max_entries = '1024',
+    primary_key='v1'
+);
+
+statement ok
+insert into t4 values(1, 1, 1, 1),(2, 2, 2, 2);
+
+statement ok
+drop sink t4_sink;
+
+statement ok
+drop table t4;
+
+statement ok
+create table t5(
+    v1 int,
+    v2 int,
+);
+
+statement ok
+create sink t5_sink from t5
+with (
+    connector='mongodb',
+    type = 'upsert',
+    mongodb.url = 'mongodb://mongodb:27017/?replicaSet=rs0',
+    collection.name = 'demo.t4',
+    mongodb.bulk_write.max_entries = '1024',
+    primary_key='v1'
+);
+
+statement ok
+insert into t5 values(1, 10),(2, 20);
+
 statement ok
 FLUSH;
+
+statement ok
+update t5 set v2 = 200 where v1 = 2;
+
+statement ok
+FLUSH;
+
+sleep 5s
 
 statement ok
 DROP SINK t1_sink;
@@ -107,3 +164,9 @@ DROP SINK t3_sink;
 
 statement ok
 DROP TABLE t3;
+
+statement ok
+DROP SINK t5_sink;
+
+statement ok
+DROP TABLE t5;

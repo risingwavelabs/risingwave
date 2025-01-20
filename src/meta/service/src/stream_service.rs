@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -208,15 +208,15 @@ impl StreamManagerService for StreamServiceImpl {
 
         let mut info = HashMap::new();
         for job_id in table_ids {
-            let pb_table_fragments = self
+            let table_fragments = self
                 .metadata_manager
                 .catalog_controller
                 .get_job_fragments_by_id(job_id as _)
                 .await?;
             info.insert(
-                pb_table_fragments.table_id,
+                table_fragments.stream_job_id().table_id,
                 TableFragmentInfo {
-                    fragments: pb_table_fragments
+                    fragments: table_fragments
                         .fragments
                         .into_iter()
                         .map(|(id, fragment)| FragmentInfo {
@@ -232,7 +232,7 @@ impl StreamManagerService for StreamServiceImpl {
                                 .collect_vec(),
                         })
                         .collect_vec(),
-                    ctx: pb_table_fragments.ctx,
+                    ctx: Some(table_fragments.ctx.to_protobuf()),
                 },
             );
         }

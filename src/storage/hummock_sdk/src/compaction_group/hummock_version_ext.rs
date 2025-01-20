@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
 use std::cmp::Ordering;
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::iter::once;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -35,7 +36,7 @@ use crate::level::{Level, LevelCommon, Levels, OverlappingLevel};
 use crate::sstable_info::SstableInfo;
 use crate::table_watermark::{ReadTableWatermark, TableWatermarks};
 use crate::version::{
-    GroupDelta, GroupDeltaCommon, HummockVersion, HummockVersionCommon, HummockVersionDelta,
+    GroupDelta, GroupDeltaCommon, HummockVersion, HummockVersionCommon, HummockVersionDeltaCommon,
     HummockVersionStateTableInfo, IntraLevelDelta, IntraLevelDeltaCommon, ObjectIdReader,
     SstableIdReader,
 };
@@ -49,7 +50,7 @@ pub struct SstDeltaInfo {
 
 pub type BranchedSstInfo = HashMap<CompactionGroupId, Vec<HummockSstableId>>;
 
-impl HummockVersion {
+impl<L> HummockVersionCommon<SstableInfo, L> {
     pub fn get_compaction_group_levels(&self, compaction_group_id: CompactionGroupId) -> &Levels {
         self.levels
             .get(&compaction_group_id)
@@ -186,7 +187,7 @@ pub fn safe_epoch_read_table_watermarks_impl(
         .collect()
 }
 
-impl HummockVersion {
+impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
     pub fn count_new_ssts_in_group_split(
         &self,
         parent_group_id: CompactionGroupId,
@@ -355,7 +356,10 @@ impl HummockVersion {
             .all(|level| !level.table_infos.is_empty()));
     }
 
-    pub fn build_sst_delta_infos(&self, version_delta: &HummockVersionDelta) -> Vec<SstDeltaInfo> {
+    pub fn build_sst_delta_infos(
+        &self,
+        version_delta: &HummockVersionDeltaCommon<SstableInfo, L>,
+    ) -> Vec<SstDeltaInfo> {
         let mut infos = vec![];
 
         // Skip trivial move delta for refiller
@@ -458,7 +462,10 @@ impl HummockVersion {
         infos
     }
 
-    pub fn apply_version_delta(&mut self, version_delta: &HummockVersionDelta) {
+    pub fn apply_version_delta(
+        &mut self,
+        version_delta: &HummockVersionDeltaCommon<SstableInfo, L>,
+    ) {
         assert_eq!(self.id, version_delta.prev_id);
 
         let (changed_table_info, mut is_commit_epoch) = self.state_table_info.apply_delta(
@@ -494,8 +501,8 @@ impl HummockVersion {
                             .member_table_ids
                             .clone_from(&group_construct.table_ids);
                         self.levels.insert(*compaction_group_id, new_levels);
-                        let member_table_ids = if group_construct.version
-                            >= CompatibilityVersion::NoMemberTableIds as _
+                        let member_table_ids = if group_construct.version()
+                            >= CompatibilityVersion::NoMemberTableIds
                         {
                             self.state_table_info
                                 .compaction_group_member_table_ids(*compaction_group_id)
@@ -508,8 +515,7 @@ impl HummockVersion {
                             BTreeSet::from_iter(group_construct.table_ids.clone())
                         };
 
-                        if group_construct.version >= CompatibilityVersion::SplitGroupByTableId as _
-                        {
+                        if group_construct.version() >= CompatibilityVersion::SplitGroupByTableId {
                             let split_key = if group_construct.split_key.is_some() {
                                 Some(Bytes::from(group_construct.split_key.clone().unwrap()))
                             } else {
@@ -693,20 +699,14 @@ impl HummockVersion {
         changed_table_info: &HashMap<TableId, Option<StateTableInfo>>,
     ) {
         for (table_id, change_log_delta) in change_log_delta {
-            let new_change_log = change_log_delta.new_log.as_ref().unwrap();
+            let new_change_log = &change_log_delta.new_log;
             match table_change_log.entry(*table_id) {
                 Entry::Occupied(entry) => {
                     let change_log = entry.into_mut();
-                    if let Some(prev_log) = change_log.0.last() {
-                        assert!(
-                            prev_log.epochs.last().expect("non-empty")
-                                < new_change_log.epochs.first().expect("non-empty")
-                        );
-                    }
-                    change_log.0.push(new_change_log.clone());
+                    change_log.add_change_log(new_change_log.clone());
                 }
                 Entry::Vacant(entry) => {
-                    entry.insert(TableChangeLogCommon(vec![new_change_log.clone()]));
+                    entry.insert(TableChangeLogCommon::new(once(new_change_log.clone())));
                 }
             };
         }
@@ -940,12 +940,6 @@ impl<T> HummockVersionCommon<T>
 where
     T: SstableIdReader + ObjectIdReader,
 {
-    pub fn get_combined_levels(&self) -> impl Iterator<Item = &'_ LevelCommon<T>> + '_ {
-        self.levels
-            .values()
-            .flat_map(|level| level.l0.sub_levels.iter().rev().chain(level.levels.iter()))
-    }
-
     pub fn get_object_ids(&self) -> HashSet<HummockSstableObjectId> {
         self.get_sst_infos().map(|s| s.object_id()).collect()
     }
@@ -958,7 +952,7 @@ where
         self.get_combined_levels()
             .flat_map(|level| level.table_infos.iter())
             .chain(self.table_change_log.values().flat_map(|change_log| {
-                change_log.0.iter().flat_map(|epoch_change_log| {
+                change_log.iter().flat_map(|epoch_change_log| {
                     epoch_change_log
                         .old_value
                         .iter()
@@ -1097,6 +1091,14 @@ impl Levels {
             }
         }
         sst_ids.is_empty()
+    }
+}
+
+impl<T, L> HummockVersionCommon<T, L> {
+    pub fn get_combined_levels(&self) -> impl Iterator<Item = &'_ LevelCommon<T>> + '_ {
+        self.levels
+            .values()
+            .flat_map(|level| level.l0.sub_levels.iter().rev().chain(level.levels.iter()))
     }
 }
 
@@ -1365,7 +1367,7 @@ pub fn object_size_map(version: &HummockVersion) -> HashMap<HummockSstableObject
                 .flat_map(|level| level.table_infos.iter().map(|t| (t.object_id, t.file_size)))
         })
         .chain(version.table_change_log.values().flat_map(|c| {
-            c.0.iter().flat_map(|l| {
+            c.iter().flat_map(|l| {
                 l.old_value
                     .iter()
                     .chain(l.new_value.iter())

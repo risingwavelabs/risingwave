@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
 use std::assert_matches::assert_matches;
 use std::collections::{HashMap, HashSet};
 
+use anyhow::Context as _;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{
@@ -30,11 +31,16 @@ use risingwave_pb::catalog::table::{
 use risingwave_pb::catalog::{PbCreateType, PbStreamJobStatus, PbTable, PbWebhookSourceInfo};
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::DefaultColumnDesc;
+use risingwave_sqlparser::ast;
+use risingwave_sqlparser::parser::Parser;
+use thiserror_ext::AsReport as _;
 
+use super::purify::try_purify_table_source_create_sql_ast;
 use super::{ColumnId, DatabaseId, FragmentId, OwnedByUserCatalog, SchemaId, SinkId};
-use crate::error::{ErrorCode, RwError};
+use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::ExprImpl;
 use crate::optimizer::property::Cardinality;
+use crate::session::current::notice_to_user;
 use crate::user::UserId;
 
 /// `TableCatalog` Includes full information about a table.
@@ -188,6 +194,8 @@ pub struct TableCatalog {
     pub job_id: Option<TableId>,
 
     pub engine: Engine,
+
+    pub clean_watermark_index_in_pk: Option<usize>,
 }
 
 pub const ICEBERG_SOURCE_PREFIX: &str = "__iceberg_source_";
@@ -265,6 +273,52 @@ impl TableVersion {
             version: self.version_id,
             next_column_id: self.next_column_id.into(),
         }
+    }
+}
+
+impl TableCatalog {
+    /// Returns the SQL definition when the table was created, purified with best effort
+    /// if it's a table.
+    ///
+    /// See [`Self::create_sql_ast_purified`] for more details.
+    pub fn create_sql_purified(&self) -> String {
+        self.create_sql_ast_purified()
+            .map(|stmt| stmt.to_string())
+            .unwrap_or_else(|_| self.create_sql())
+    }
+
+    /// Returns the parsed SQL definition when the table was created, purified with best effort
+    /// if it's a table.
+    ///
+    /// Returns error if it's invalid.
+    pub fn create_sql_ast_purified(&self) -> Result<ast::Statement> {
+        // Purification is only applicable to tables.
+        if let TableType::Table = self.table_type() {
+            let base = if self.definition.is_empty() {
+                // Created by `CREATE TABLE AS`, create a skeleton `CREATE TABLE` statement.
+                let name = ast::ObjectName(vec![self.name.as_str().into()]);
+                ast::Statement::default_create_table(name)
+            } else {
+                self.create_sql_ast_from_persisted()?
+            };
+
+            match try_purify_table_source_create_sql_ast(
+                base,
+                self.columns(),
+                self.row_id_index,
+                &self.pk_column_ids(),
+            ) {
+                Ok(stmt) => return Ok(stmt),
+                Err(e) => notice_to_user(format!(
+                    "error occurred while purifying definition for table \"{}\", \
+                     results may be inaccurate: {}",
+                    self.name,
+                    e.as_report()
+                )),
+            }
+        }
+
+        self.create_sql_ast_from_persisted()
     }
 }
 
@@ -377,6 +431,14 @@ impl TableCatalog {
             .collect()
     }
 
+    /// Get the column names of the primary key.
+    pub fn pk_column_names(&self) -> Vec<&str> {
+        self.pk
+            .iter()
+            .map(|x| self.columns[x.column_index].name())
+            .collect()
+    }
+
     /// Get a [`TableDesc`] of the table.
     ///
     /// Note: this must be called on existing tables, otherwise it will fail to get the vnode count
@@ -420,9 +482,40 @@ impl TableCatalog {
         )
     }
 
-    /// Returns the SQL statement that can be used to create this table.
+    /// Returns the SQL definition when the table was created.
+    ///
+    /// See [`Self::create_sql_ast`] for more details.
     pub fn create_sql(&self) -> String {
-        self.definition.clone()
+        self.create_sql_ast()
+            .map(|stmt| stmt.to_string())
+            .unwrap_or_else(|_| self.definition.clone())
+    }
+
+    /// Returns the parsed SQL definition when the table was created.
+    ///
+    /// Re-create the table with this statement may have different schema if the schema is derived
+    /// from external systems (like schema registry) or it's created by `CREATE TABLE AS`. If this
+    /// is not desired, use [`Self::create_sql_ast_purified`] instead.
+    ///
+    /// Returns error if it's invalid.
+    pub fn create_sql_ast(&self) -> Result<ast::Statement> {
+        if let TableType::Table = self.table_type()
+            && self.definition.is_empty()
+        {
+            // Always fix definition for `CREATE TABLE AS`.
+            self.create_sql_ast_purified()
+        } else {
+            // Directly parse the persisted definition.
+            self.create_sql_ast_from_persisted()
+        }
+    }
+
+    fn create_sql_ast_from_persisted(&self) -> Result<ast::Statement> {
+        Ok(Parser::parse_sql(&self.definition)
+            .context("unable to parse definition sql")?
+            .into_iter()
+            .exactly_one()
+            .context("expecting exactly one statement in definition")?)
     }
 
     /// Get a reference to the table catalog's version.
@@ -496,6 +589,7 @@ impl TableCatalog {
             webhook_info: self.webhook_info.clone(),
             job_id: self.job_id.map(|id| id.table_id),
             engine: Some(self.engine.to_protobuf().into()),
+            clean_watermark_index_in_pk: self.clean_watermark_index_in_pk.map(|x| x as i32),
         }
     }
 
@@ -700,6 +794,7 @@ impl From<PbTable> for TableCatalog {
             webhook_info: tb.webhook_info,
             job_id: tb.job_id.map(TableId::from),
             engine,
+            clean_watermark_index_in_pk: tb.clean_watermark_index_in_pk.map(|x| x as usize),
         }
     }
 }
@@ -795,6 +890,7 @@ mod tests {
             webhook_info: None,
             job_id: None,
             engine: Some(PbEngine::Hummock as i32),
+            clean_watermark_index_in_pk: None,
         }
         .into();
 
@@ -865,6 +961,7 @@ mod tests {
                 webhook_info: None,
                 job_id: None,
                 engine: Engine::Hummock,
+                clean_watermark_index_in_pk: None,
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));

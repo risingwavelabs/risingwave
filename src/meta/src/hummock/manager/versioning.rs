@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::cmp;
+use std::collections::Bound::{Excluded, Included};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use itertools::Itertools;
@@ -81,6 +82,31 @@ impl ContextInfo {
 impl Versioning {
     pub(super) fn mark_next_time_travel_version_snapshot(&mut self) {
         self.time_travel_snapshot_interval_counter = u64::MAX;
+    }
+
+    pub fn get_tracked_object_ids(
+        &self,
+        min_pinned_version_id: HummockVersionId,
+    ) -> HashSet<HummockSstableObjectId> {
+        // object ids in checkpoint version
+        let mut tracked_object_ids = self.checkpoint.version.get_object_ids();
+        // add object ids added between checkpoint version and current version
+        for (_, delta) in self.hummock_version_deltas.range((
+            Excluded(self.checkpoint.version.id),
+            Included(self.current_version.id),
+        )) {
+            tracked_object_ids.extend(delta.newly_added_object_ids());
+        }
+        // add stale object ids before the checkpoint version
+        tracked_object_ids.extend(
+            self.checkpoint
+                .stale_objects
+                .iter()
+                .filter(|(version_id, _)| **version_id >= min_pinned_version_id)
+                .flat_map(|(_, objects)| objects.id.iter())
+                .cloned(),
+        );
+        tracked_object_ids
     }
 }
 

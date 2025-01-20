@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::marker::PhantomData;
-use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -23,7 +22,6 @@ use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockReadEpoch;
 
 use crate::error::StorageResult;
-use crate::storage_value::StorageValue;
 use crate::store::*;
 
 /// A panic state store. If a workload is fully in-memory, we can use this state store to
@@ -32,7 +30,6 @@ use crate::store::*;
 pub struct PanicStateStore;
 
 impl StateStoreRead for PanicStateStore {
-    type ChangeLogIter = PanicStateStoreIter<StateStoreReadLogItem>;
     type Iter = PanicStateStoreIter<StateStoreKeyedRow>;
     type RevIter = PanicStateStoreIter<StateStoreKeyedRow>;
 
@@ -65,6 +62,14 @@ impl StateStoreRead for PanicStateStore {
     ) -> StorageResult<Self::RevIter> {
         panic!("should not read from the state store!");
     }
+}
+
+impl StateStoreReadLog for PanicStateStore {
+    type ChangeLogIter = PanicStateStoreIter<StateStoreReadLogItem>;
+
+    async fn next_epoch(&self, _epoch: u64, _options: NextEpochOptions) -> StorageResult<u64> {
+        unimplemented!()
+    }
 
     async fn iter_log(
         &self,
@@ -76,18 +81,8 @@ impl StateStoreRead for PanicStateStore {
     }
 }
 
-impl StateStoreWrite for PanicStateStore {
-    fn ingest_batch(
-        &self,
-        _kv_pairs: Vec<(TableKey<Bytes>, StorageValue)>,
-        _delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
-        _write_options: WriteOptions,
-    ) -> StorageResult<usize> {
-        panic!("should not write to the state store!");
-    }
-}
-
 impl LocalStateStore for PanicStateStore {
+    type FlushedSnapshotReader = PanicStateStore;
     type Iter<'a> = PanicStateStoreIter<StateStoreKeyedRow>;
     type RevIter<'a> = PanicStateStoreIter<StateStoreKeyedRow>;
 
@@ -164,6 +159,10 @@ impl LocalStateStore for PanicStateStore {
 
     fn get_table_watermark(&self, _vnode: VirtualNode) -> Option<Bytes> {
         panic!("should not operate on the panic state store!");
+    }
+
+    fn new_flushed_snapshot_reader(&self) -> Self::FlushedSnapshotReader {
+        panic!()
     }
 }
 

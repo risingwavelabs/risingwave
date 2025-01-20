@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -525,13 +525,26 @@ pub struct MetaDeveloperConfig {
     #[serde(default = "default::developer::actor_cnt_per_worker_parallelism_hard_limit")]
     pub actor_cnt_per_worker_parallelism_hard_limit: usize,
 
-    #[serde(default = "default::developer::hummock_time_travel_sst_info_fetch_batch_size")]
     /// Max number of SSTs fetched from meta store per SELECT, during time travel Hummock version replay.
+    #[serde(default = "default::developer::hummock_time_travel_sst_info_fetch_batch_size")]
     pub hummock_time_travel_sst_info_fetch_batch_size: usize,
 
-    #[serde(default = "default::developer::hummock_time_travel_sst_info_insert_batch_size")]
     /// Max number of SSTs inserted into meta store per INSERT, during time travel metadata writing.
+    #[serde(default = "default::developer::hummock_time_travel_sst_info_insert_batch_size")]
     pub hummock_time_travel_sst_info_insert_batch_size: usize,
+
+    #[serde(default = "default::developer::time_travel_vacuum_interval_sec")]
+    pub time_travel_vacuum_interval_sec: u64,
+
+    /// Max number of epoch-to-version inserted into meta store per INSERT, during time travel metadata writing.
+    #[serde(default = "default::developer::hummock_time_travel_epoch_version_insert_batch_size")]
+    pub hummock_time_travel_epoch_version_insert_batch_size: usize,
+
+    #[serde(default = "default::developer::hummock_gc_history_insert_batch_size")]
+    pub hummock_gc_history_insert_batch_size: usize,
+
+    #[serde(default = "default::developer::hummock_time_travel_filter_out_objects_batch_size")]
+    pub hummock_time_travel_filter_out_objects_batch_size: usize,
 }
 
 /// The section `[server]` in `risingwave.toml`.
@@ -1154,6 +1167,11 @@ pub struct StreamingDeveloperConfig {
     /// The maximum number of consecutive barriers allowed in a message when sent between actors.
     #[serde(default = "default::developer::stream_max_barrier_batch_size")]
     pub max_barrier_batch_size: u32,
+
+    /// Configure the system-wide cache row cardinality of hash join.
+    /// For example, if this is set to 1000, it means we can have at most 1000 rows in cache.
+    #[serde(default = "default::developer::streaming_hash_join_entry_state_max_rows")]
+    pub hash_join_entry_state_max_rows: usize,
 }
 
 /// The subsections `[batch.developer]`.
@@ -1474,7 +1492,7 @@ pub mod default {
         }
 
         pub fn vacuum_spin_interval_ms() -> u64 {
-            200
+            100
         }
 
         pub fn hummock_version_checkpoint_interval_sec() -> u64 {
@@ -2057,6 +2075,21 @@ pub mod default {
             100
         }
 
+        pub fn time_travel_vacuum_interval_sec() -> u64 {
+            30
+        }
+        pub fn hummock_time_travel_epoch_version_insert_batch_size() -> usize {
+            1000
+        }
+
+        pub fn hummock_gc_history_insert_batch_size() -> usize {
+            1000
+        }
+
+        pub fn hummock_time_travel_filter_out_objects_batch_size() -> usize {
+            1000
+        }
+
         pub fn memory_controller_threshold_aggressive() -> f64 {
             0.9
         }
@@ -2120,6 +2153,11 @@ pub mod default {
 
         pub fn switch_jdbc_pg_to_native() -> bool {
             false
+        }
+
+        pub fn streaming_hash_join_entry_state_max_rows() -> usize {
+            // NOTE(kwannoel): This is just an arbitrary number.
+            30000
         }
     }
 
@@ -2648,6 +2686,7 @@ pub struct CompactionConfig {
     pub max_level: u32,
 }
 
+/// Note: only applies to meta store backends other than `SQLite`.
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct MetaStoreConfig {
     /// Maximum number of connections for the meta store connection pool.

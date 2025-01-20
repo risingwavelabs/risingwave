@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -35,10 +35,10 @@ pub async fn handle_drop_table(
     cascade: bool,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
-    let db_name = session.database();
+    let db_name = &session.database();
     let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
     let search_path = session.config().search_path();
-    let user_name = &session.auth_context().user_name;
+    let user_name = &session.user_name();
 
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
@@ -128,17 +128,17 @@ pub async fn handle_drop_table(
             if let Some(either) = either {
                 let (iceberg_catalog, table_id) = match either {
                     Either::Left(iceberg_properties) => {
-                        let catalog = iceberg_properties.create_catalog_v2().await?;
+                        let catalog = iceberg_properties.create_catalog().await?;
                         let table_id = iceberg_properties
                             .common
-                            .full_table_name_v2()
+                            .full_table_name()
                             .context("Unable to parse table name")?;
                         (catalog, table_id)
                     }
                     Either::Right(iceberg_config) => {
-                        let catalog = iceberg_config.create_catalog_v2().await?;
+                        let catalog = iceberg_config.create_catalog().await?;
                         let table_id = iceberg_config
-                            .full_table_name_v2()
+                            .full_table_name()
                             .context("Unable to parse table name")?;
                         (catalog, table_id)
                     }

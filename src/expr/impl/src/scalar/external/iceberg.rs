@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -197,12 +197,12 @@ mod test {
     #[tokio::test]
     async fn test_year_month_day_hour() {
         let (input, expected) = DataChunk::from_pretty(
-            "TZ                                  i i i i
-            1970-01-01T00:00:00.000000000+00:00  0 0 0 0
-            1971-02-01T01:00:00.000000000+00:00  1 13 396 9505
-            1972-03-01T02:00:00.000000000+00:00  2 26 790 18962
-            1970-05-01T06:00:00.000000000+00:00  0 4 120 2886
-            1970-06-01T07:00:00.000000000+00:00  0 5 151 3631",
+            "TZ                                  i i D i
+            1970-01-01T00:00:00.000000000+00:00  0 0 1970-01-01 0
+            1971-02-01T01:00:00.000000000+00:00  1 13 1971-02-01 9505
+            1972-03-01T02:00:00.000000000+00:00  2 26 1972-03-01 18962
+            1970-05-01T06:00:00.000000000+00:00  0 4 1970-05-01 2886
+            1970-06-01T07:00:00.000000000+00:00  0 5 1970-06-01 3631",
         )
         .split_column_at(1);
 

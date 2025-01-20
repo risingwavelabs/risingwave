@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -58,11 +58,11 @@ pub async fn handle_alter_owner(
     stmt_type: StatementType,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
-    let db_name = session.database();
+    let db_name = &session.database();
     let (schema_name, real_obj_name) =
         Binder::resolve_schema_qualified_name(db_name, obj_name.clone())?;
     let search_path = session.config().search_path();
-    let user_name = &session.auth_context().user_name;
+    let user_name = &session.user_name();
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
     let new_owner_name = Binder::resolve_user_name(vec![new_owner_name].into())?;

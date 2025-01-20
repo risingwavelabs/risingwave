@@ -71,13 +71,11 @@ t
 t
 t
 
-# ensure now() is larger
-sleep 1s
-
 statement ok
 flush;
 
-query B
+# retry to ensure now() is larger
+query B retry 3 backoff 5s
 select _rw_kafka_timestamp < now() from s1
 ----
 t

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,7 +28,7 @@ use risingwave_hummock_sdk::key::{
 };
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_watermark::TableWatermarksIndex;
-use risingwave_hummock_sdk::version::HummockVersion;
+use risingwave_hummock_sdk::version::{HummockVersion, LocalHummockVersion};
 use risingwave_hummock_sdk::{HummockReadEpoch, HummockSstableObjectId, SyncResult};
 use risingwave_rpc_client::HummockMetaClient;
 use thiserror_ext::AsReport;
@@ -79,7 +79,7 @@ impl Drop for HummockStorageShutdownGuard {
 }
 
 /// `HummockStorage` is the entry point of the Hummock state store backend.
-/// It implements the `StateStore` and `StateStoreRead` traits but not the `StateStoreWrite` trait
+/// It implements the `StateStore` and `StateStoreRead` traits but without any write method
 /// since all writes should be done via `LocalHummockStorage` to ensure the single writer property
 /// of hummock. `LocalHummockStorage` instance can be created via `new_local` call.
 /// Hummock is the state store backend.
@@ -589,7 +589,6 @@ impl HummockStorage {
 }
 
 impl StateStoreRead for HummockStorage {
-    type ChangeLogIter = ChangeLogIterator;
     type Iter = HummockStorageIterator;
     type RevIter = HummockStorageRevIterator;
 
@@ -634,6 +633,53 @@ impl StateStoreRead for HummockStorage {
             read_options.table_id
         );
         self.rev_iter_inner(key_range, epoch, read_options)
+    }
+}
+
+impl StateStoreReadLog for HummockStorage {
+    type ChangeLogIter = ChangeLogIterator;
+
+    async fn next_epoch(&self, epoch: u64, options: NextEpochOptions) -> StorageResult<u64> {
+        fn next_epoch(
+            version: &LocalHummockVersion,
+            epoch: u64,
+            table_id: TableId,
+        ) -> HummockResult<Option<u64>> {
+            let table_change_log = version.table_change_log.get(&table_id).ok_or_else(|| {
+                HummockError::next_epoch(format!("table {} has been dropped", table_id))
+            })?;
+            table_change_log.next_epoch(epoch).map_err(|_| {
+                HummockError::next_epoch(format!(
+                    "invalid epoch {}, change log epoch: {:?}",
+                    epoch,
+                    table_change_log.epochs().collect_vec()
+                ))
+            })
+        }
+        {
+            // fast path
+            let recent_versions = self.recent_versions.load();
+            if let Some(next_epoch) =
+                next_epoch(recent_versions.latest_version(), epoch, options.table_id)?
+            {
+                return Ok(next_epoch);
+            }
+        }
+        let mut next_epoch_ret = None;
+        wait_for_update(
+            &self.version_update_notifier_tx,
+            |version| {
+                if let Some(next_epoch) = next_epoch(version, epoch, options.table_id)? {
+                    next_epoch_ret = Some(next_epoch);
+                    Ok(true)
+                } else {
+                    Ok(false)
+                }
+            },
+            || format!("wait next_epoch: epoch: {} {}", epoch, options.table_id),
+        )
+        .await?;
+        Ok(next_epoch_ret.expect("should be set before wait_for_update returns"))
     }
 
     async fn iter_log(

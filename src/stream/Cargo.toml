@@ -10,7 +10,6 @@ repository = { workspace = true }
 
 [dependencies]
 anyhow = "1"
-arc-swap = "1"
 async-recursion = "1"
 async-stream = "0.3"
 async-trait = "0.1"
@@ -27,7 +26,6 @@ fail = "0.5"
 foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
-governor = { workspace = true }
 hytra = "0.1.2"
 itertools = { workspace = true }
 jsonbb = { workspace = true }
@@ -44,6 +42,7 @@ prost = { workspace = true }
 rand = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_common_estimate_size = { workspace = true }
+risingwave_common_rate_limit = { workspace = true }
 risingwave_connector = { workspace = true }
 risingwave_dml = { workspace = true }
 risingwave_expr = { workspace = true }
@@ -82,6 +81,7 @@ workspace-hack = { path = "../workspace-hack" }
 assert_matches = "1"
 criterion = { workspace = true, features = ["async_tokio", "async"] }
 expect-test = "1"
+pretty_assertions = "1"
 risingwave_expr_impl = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
 risingwave_hummock_test = { path = "../storage/hummock_test", features = [

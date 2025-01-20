@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -44,17 +44,13 @@ impl FrontendHummockVersion {
                 .map(|(table_id, change_log)| {
                     (
                         *table_id,
-                        TableChangeLogCommon(
-                            change_log
-                                .0
-                                .iter()
-                                .map(|change_log| EpochNewChangeLogCommon {
-                                    new_value: vec![],
-                                    old_value: vec![],
-                                    epochs: change_log.epochs.clone(),
-                                })
-                                .collect(),
-                        ),
+                        TableChangeLogCommon::new(change_log.iter().map(|change_log| {
+                            EpochNewChangeLogCommon {
+                                new_value: vec![],
+                                old_value: vec![],
+                                epochs: change_log.epochs.clone(),
+                            }
+                        })),
                     )
                 })
                 .collect(),
@@ -76,7 +72,6 @@ impl FrontendHummockVersion {
                         table_id.table_id,
                         PbTableChangeLog {
                             change_logs: change_log
-                                .0
                                 .iter()
                                 .map(|change_log| PbEpochNewChangeLog {
                                     old_value: vec![],
@@ -102,17 +97,13 @@ impl FrontendHummockVersion {
                 .map(|(table_id, change_log)| {
                     (
                         TableId::new(table_id),
-                        TableChangeLogCommon(
-                            change_log
-                                .change_logs
-                                .into_iter()
-                                .map(|change_log| EpochNewChangeLogCommon {
-                                    new_value: vec![],
-                                    old_value: vec![],
-                                    epochs: change_log.epochs,
-                                })
-                                .collect(),
-                        ),
+                        TableChangeLogCommon::new(change_log.change_logs.into_iter().map(
+                            |change_log| EpochNewChangeLogCommon {
+                                new_value: vec![],
+                                old_value: vec![],
+                                epochs: change_log.epochs,
+                            },
+                        )),
                     )
                 })
                 .collect(),
@@ -160,14 +151,12 @@ impl FrontendHummockVersionDelta {
                         *table_id,
                         ChangeLogDeltaCommon {
                             truncate_epoch: change_log_delta.truncate_epoch,
-                            new_log: change_log_delta.new_log.as_ref().map(|new_log| {
-                                EpochNewChangeLogCommon {
-                                    // Here we need to determine if value is null but don't care what the value is, so we fill him in using `()`
-                                    new_value: vec![(); new_log.new_value.len()],
-                                    old_value: vec![(); new_log.old_value.len()],
-                                    epochs: new_log.epochs.clone(),
-                                }
-                            }),
+                            new_log: EpochNewChangeLogCommon {
+                                // Here we need to determine if value is null but don't care what the value is, so we fill him in using `()`
+                                new_value: vec![(); change_log_delta.new_log.new_value.len()],
+                                old_value: vec![(); change_log_delta.new_log.old_value.len()],
+                                epochs: change_log_delta.new_log.epochs.clone(),
+                            },
                         },
                     )
                 })
@@ -196,11 +185,17 @@ impl FrontendHummockVersionDelta {
                     (
                         table_id.table_id,
                         PbChangeLogDelta {
-                            new_log: delta.new_log.as_ref().map(|new_log| PbEpochNewChangeLog {
+                            new_log: Some(PbEpochNewChangeLog {
                                 // Here we need to determine if value is null but don't care what the value is, so we fill him in using `PbSstableInfo::default()`
-                                old_value: vec![PbSstableInfo::default(); new_log.old_value.len()],
-                                new_value: vec![PbSstableInfo::default(); new_log.new_value.len()],
-                                epochs: new_log.epochs.clone(),
+                                old_value: vec![
+                                    PbSstableInfo::default();
+                                    delta.new_log.old_value.len()
+                                ],
+                                new_value: vec![
+                                    PbSstableInfo::default();
+                                    delta.new_log.new_value.len()
+                                ],
+                                epochs: delta.new_log.epochs.clone(),
                             }),
                             truncate_epoch: delta.truncate_epoch,
                         },
@@ -237,14 +232,18 @@ impl FrontendHummockVersionDelta {
                         TableId::new(*table_id),
                         ChangeLogDeltaCommon {
                             truncate_epoch: change_log_delta.truncate_epoch,
-                            new_log: change_log_delta.new_log.as_ref().map(|new_log| {
-                                EpochNewChangeLogCommon {
-                                    // Here we need to determine if value is null but don't care what the value is, so we fill him in using `()`
-                                    new_value: vec![(); new_log.new_value.len()],
-                                    old_value: vec![(); new_log.old_value.len()],
-                                    epochs: new_log.epochs.clone(),
-                                }
-                            }),
+                            new_log: change_log_delta
+                                .new_log
+                                .as_ref()
+                                .map(|new_log| {
+                                    EpochNewChangeLogCommon {
+                                        // Here we need to determine if value is null but don't care what the value is, so we fill him in using `()`
+                                        new_value: vec![(); new_log.new_value.len()],
+                                        old_value: vec![(); new_log.old_value.len()],
+                                        epochs: new_log.epochs.clone(),
+                                    }
+                                })
+                                .unwrap(),
                         },
                     )
                 })

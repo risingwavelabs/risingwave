@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@ use risingwave_pb::compactor::{
 };
 use risingwave_pb::monitor_service::monitor_service_server::MonitorService;
 use risingwave_pb::monitor_service::{
-    AnalyzeHeapRequest, AnalyzeHeapResponse, GetBackPressureRequest, GetBackPressureResponse,
+    AnalyzeHeapRequest, AnalyzeHeapResponse, GetStreamingStatsRequest, GetStreamingStatsResponse,
     HeapProfilingRequest, HeapProfilingResponse, ListHeapProfilingRequest,
     ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse, StackTraceRequest,
     StackTraceResponse, TieredCacheTracingRequest, TieredCacheTracingResponse,
@@ -133,10 +133,10 @@ impl MonitorService for MonitorServiceImpl {
         ))
     }
 
-    async fn get_back_pressure(
+    async fn get_streaming_stats(
         &self,
-        _request: Request<GetBackPressureRequest>,
-    ) -> Result<Response<GetBackPressureResponse>, Status> {
+        _request: Request<GetStreamingStatsRequest>,
+    ) -> Result<Response<GetStreamingStatsResponse>, Status> {
         Err(Status::unimplemented(
             "Get Back Pressure unimplemented in compactor",
         ))

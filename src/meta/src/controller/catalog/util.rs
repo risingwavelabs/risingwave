@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@ pub(crate) async fn update_internal_tables(
     object_id: i32,
     column: object::Column,
     new_value: Value,
-    relations_to_notify: &mut Vec<PbRelationInfo>,
+    objects_to_notify: &mut Vec<PbObjectInfo>,
 ) -> MetaResult<()> {
     let internal_tables = get_internal_tables_by_id(object_id, txn).await?;
 
@@ -36,7 +36,7 @@ pub(crate) async fn update_internal_tables(
             .all(txn)
             .await?;
         for (table, table_obj) in table_objs {
-            relations_to_notify.push(PbRelationInfo::Table(
+            objects_to_notify.push(PbObjectInfo::Table(
                 ObjectModel(table, table_obj.unwrap()).into(),
             ));
         }

@@ -14,7 +14,13 @@ openssl-vendored = ["workspace-config/openssl-vendored"]
 default = ["rw-static-link"]
 
 [package.metadata.cargo-machete]
-ignored = ["workspace-hack", "workspace-config", "task_stats_alloc"]
+ignored = [
+    "workspace-hack",
+    "workspace-config",
+    "task_stats_alloc",
+    "tikv-jemallocator",
+    "tokio",
+]
 
 [package.metadata.cargo-udeps.ignore]
 normal = ["workspace-hack", "workspace-config", "task_stats_alloc"]

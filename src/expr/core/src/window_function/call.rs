@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -31,8 +31,9 @@ use crate::Result;
 #[derive(Debug, Clone)]
 pub struct WindowFuncCall {
     pub kind: WindowFuncKind,
-    pub args: AggArgs,
     pub return_type: DataType,
+    pub args: AggArgs,
+    pub ignore_nulls: bool,
     pub frame: Frame,
 }
 
@@ -40,8 +41,9 @@ impl WindowFuncCall {
     pub fn from_protobuf(call: &PbWindowFunction) -> Result<Self> {
         let call = WindowFuncCall {
             kind: WindowFuncKind::from_protobuf(call.get_type()?)?,
-            args: AggArgs::from_protobuf(call.get_args())?,
             return_type: DataType::from(call.get_return_type()?),
+            args: AggArgs::from_protobuf(call.get_args())?,
+            ignore_nulls: call.get_ignore_nulls(),
             frame: Frame::from_protobuf(call.get_frame()?)?,
         };
         Ok(call)

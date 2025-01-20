@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ use std::vec;
 use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, SchemaId, TableId};
 use risingwave_common::hash::VirtualNode;
+use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 use risingwave_pb::catalog::PbTable;
 use risingwave_pb::common::worker_node::Property;
 use risingwave_pb::common::{
@@ -206,14 +207,14 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         })
         .collect_vec();
     let source_node = StreamNode {
-        node_body: Some(NodeBody::Source(SourceNode {
+        node_body: Some(NodeBody::Source(Box::new(SourceNode {
             source_inner: Some(StreamSource {
                 source_id: 1,
                 state_table: Some(make_source_internal_table(0)),
                 columns,
                 ..Default::default()
             }),
-        })),
+        }))),
         stream_key: vec![2],
         ..Default::default()
     };
@@ -228,13 +229,13 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
 
     // exchange node
     let exchange_node = StreamNode {
-        node_body: Some(NodeBody::Exchange(ExchangeNode {
+        node_body: Some(NodeBody::Exchange(Box::new(ExchangeNode {
             strategy: Some(DispatchStrategy {
                 r#type: DispatcherType::Hash as i32,
                 dist_key_indices: vec![0],
                 output_indices: vec![0, 1, 2],
             }),
-        })),
+        }))),
         fields: vec![
             make_field(TypeName::Int32),
             make_field(TypeName::Int32),
@@ -252,7 +253,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         children: vec![make_inputref(0), make_inputref(1)],
     };
     let filter_node = StreamNode {
-        node_body: Some(NodeBody::Filter(FilterNode {
+        node_body: Some(NodeBody::Filter(Box::new(FilterNode {
             search_condition: Some(ExprNode {
                 function_type: GreaterThan as i32,
                 return_type: Some(DataType {
@@ -261,7 +262,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
                 }),
                 rex_node: Some(RexNode::FuncCall(function_call)),
             }),
-        })),
+        }))),
         fields: vec![], // TODO: fill this later
         input: vec![exchange_node],
         stream_key: vec![0, 1],
@@ -272,14 +273,14 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
 
     // simple agg node
     let simple_agg_node = StreamNode {
-        node_body: Some(NodeBody::SimpleAgg(SimpleAggNode {
+        node_body: Some(NodeBody::SimpleAgg(Box::new(SimpleAggNode {
             agg_calls: vec![make_sum_aggcall(0), make_sum_aggcall(1)],
             distribution_key: Default::default(),
             is_append_only: false,
             agg_call_states: vec![make_agg_call_result_state(), make_agg_call_result_state()],
             intermediate_state_table: Some(make_empty_table(1)),
             ..Default::default()
-        })),
+        }))),
         input: vec![filter_node],
         fields: vec![], // TODO: fill this later
         stream_key: vec![0, 1],
@@ -299,12 +300,12 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
 
     // exchange node
     let exchange_node_1 = StreamNode {
-        node_body: Some(NodeBody::Exchange(ExchangeNode {
+        node_body: Some(NodeBody::Exchange(Box::new(ExchangeNode {
             strategy: Some(DispatchStrategy {
                 r#type: DispatcherType::Simple as i32,
                 ..Default::default()
             }),
-        })),
+        }))),
         fields: vec![make_field(TypeName::Int64), make_field(TypeName::Int64)],
         input: vec![],
         stream_key: vec![0, 1],
@@ -315,14 +316,14 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
 
     // agg node
     let simple_agg_node_1 = StreamNode {
-        node_body: Some(NodeBody::SimpleAgg(SimpleAggNode {
+        node_body: Some(NodeBody::SimpleAgg(Box::new(SimpleAggNode {
             agg_calls: vec![make_sum_aggcall(0), make_sum_aggcall(1)],
             distribution_key: Default::default(),
             is_append_only: false,
             agg_call_states: vec![make_agg_call_result_state(), make_agg_call_result_state()],
             intermediate_state_table: Some(make_empty_table(2)),
             ..Default::default()
-        })),
+        }))),
         fields: vec![], // TODO: fill this later
         input: vec![exchange_node_1],
         stream_key: vec![0, 1],
@@ -336,7 +337,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         children: vec![make_inputref(0), make_inputref(1)],
     };
     let project_node = StreamNode {
-        node_body: Some(NodeBody::Project(ProjectNode {
+        node_body: Some(NodeBody::Project(Box::new(ProjectNode {
             select_list: vec![
                 ExprNode {
                     rex_node: Some(RexNode::FuncCall(function_call_1)),
@@ -350,7 +351,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
                 make_inputref(1),
             ],
             ..Default::default()
-        })),
+        }))),
         fields: vec![], // TODO: fill this later
         input: vec![simple_agg_node_1],
         stream_key: vec![1, 2],
@@ -363,11 +364,11 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
     let mview_node = StreamNode {
         input: vec![project_node],
         stream_key: vec![],
-        node_body: Some(NodeBody::Materialize(MaterializeNode {
+        node_body: Some(NodeBody::Materialize(Box::new(MaterializeNode {
             table_id: 1,
             table: Some(make_materialize_table(888)),
             column_orders: vec![make_column_order(1), make_column_order(2)],
-        })),
+        }))),
         fields: vec![], // TODO: fill this later
         operator_id: 7,
         identity: "MaterializeExecutor".to_owned(),
@@ -425,12 +426,13 @@ fn make_stream_graph() -> StreamFragmentGraphProto {
 }
 
 fn make_cluster_info() -> StreamingClusterInfo {
-    let worker_nodes = std::iter::once((
+    let worker_nodes: HashMap<u32, WorkerNode> = std::iter::once((
         0,
         WorkerNode {
             id: 0,
             property: Some(Property {
                 parallelism: 8,
+                resource_group: Some(DEFAULT_RESOURCE_GROUP.to_owned()),
                 ..Default::default()
             }),
             r#type: WorkerType::ComputeNode.into(),
@@ -438,8 +440,12 @@ fn make_cluster_info() -> StreamingClusterInfo {
         },
     ))
     .collect();
+
+    let schedulable_workers = worker_nodes.keys().cloned().collect();
+
     StreamingClusterInfo {
         worker_nodes,
+        schedulable_workers,
         unschedulable_workers: Default::default(),
     }
 }
@@ -460,6 +466,7 @@ async fn test_graph_builder() -> MetaResult<()> {
 
     let actor_graph_builder = ActorGraphBuilder::new(
         job.id(),
+        DEFAULT_RESOURCE_GROUP.to_owned(),
         CompleteStreamFragmentGraph::for_test(fragment_graph),
         make_cluster_info(),
         NonZeroUsize::new(parallel_degree).unwrap(),

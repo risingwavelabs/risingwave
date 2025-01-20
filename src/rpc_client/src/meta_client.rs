@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -107,7 +107,9 @@ use tonic::{Code, Request, Streaming};
 
 use crate::channel::{Channel, WrappedChannelExt};
 use crate::error::{Result, RpcError};
-use crate::hummock_meta_client::{CompactionEventItem, HummockMetaClient};
+use crate::hummock_meta_client::{
+    CompactionEventItem, HummockMetaClient, HummockMetaClientChangeLogInfo,
+};
 use crate::meta_rpc_client_method_impl;
 
 type ConnectionId = u32;
@@ -394,12 +396,14 @@ impl MetaClient {
         table: PbTable,
         graph: StreamFragmentGraph,
         dependencies: HashSet<ObjectId>,
+        specific_resource_group: Option<String>,
     ) -> Result<WaitVersion> {
         let request = CreateMaterializedViewRequest {
             materialized_view: Some(table),
             fragment_graph: Some(graph),
             backfill: PbBackfillType::Regular as _,
             dependencies: dependencies.into_iter().collect(),
+            specific_resource_group,
         };
         let resp = self.inner.create_materialized_view(request).await?;
         // TODO: handle error in `resp.status` here
@@ -575,6 +579,22 @@ impl MetaClient {
         };
 
         self.inner.alter_parallelism(request).await?;
+        Ok(())
+    }
+
+    pub async fn alter_resource_group(
+        &self,
+        table_id: u32,
+        resource_group: Option<String>,
+        deferred: bool,
+    ) -> Result<()> {
+        let request = AlterResourceGroupRequest {
+            table_id,
+            resource_group,
+            deferred,
+        };
+
+        self.inner.alter_resource_group(request).await?;
         Ok(())
     }
 
@@ -764,8 +784,8 @@ impl MetaClient {
             .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
-    pub async fn drop_schema(&self, schema_id: SchemaId) -> Result<WaitVersion> {
-        let request = DropSchemaRequest { schema_id };
+    pub async fn drop_schema(&self, schema_id: SchemaId, cascade: bool) -> Result<WaitVersion> {
+        let request = DropSchemaRequest { schema_id, cascade };
         let resp = self.inner.drop_schema(request).await?;
         Ok(resp
             .version
@@ -1565,11 +1585,11 @@ impl HummockMetaClient for MetaClient {
         Ok(SstObjectIdRange::new(resp.start_id, resp.end_id))
     }
 
-    async fn commit_epoch(
+    async fn commit_epoch_with_change_log(
         &self,
         _epoch: HummockEpoch,
         _sync_result: SyncResult,
-        _is_log_store: bool,
+        _change_log_info: Option<HummockMetaClientChangeLogInfo>,
     ) -> Result<()> {
         panic!("Only meta service can commit_epoch in production.")
     }
@@ -2089,6 +2109,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, alter_owner, AlterOwnerRequest, AlterOwnerResponse }
             ,{ ddl_client, alter_set_schema, AlterSetSchemaRequest, AlterSetSchemaResponse }
             ,{ ddl_client, alter_parallelism, AlterParallelismRequest, AlterParallelismResponse }
+            ,{ ddl_client, alter_resource_group, AlterResourceGroupRequest, AlterResourceGroupResponse }
             ,{ ddl_client, create_materialized_view, CreateMaterializedViewRequest, CreateMaterializedViewResponse }
             ,{ ddl_client, create_view, CreateViewRequest, CreateViewResponse }
             ,{ ddl_client, create_source, CreateSourceRequest, CreateSourceResponse }

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,9 +28,9 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::catalog::{TableOption, DEFAULT_SCHEMA_NAME, SYSTEM_SCHEMAS};
+use risingwave_common::current_cluster_version;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont_mut;
-use risingwave_common::{bail, current_cluster_version};
 use risingwave_connector::source::cdc::build_cdc_table_id;
 use risingwave_connector::source::UPSTREAM_SOURCE_KEY;
 use risingwave_meta_model::object::ObjectType;
@@ -40,9 +40,8 @@ use risingwave_meta_model::{
     actor, connection, database, fragment, function, index, object, object_dependency, schema,
     secret, sink, source, streaming_job, subscription, table, user_privilege, view, ActorId,
     ActorUpstreamActors, ColumnCatalogArray, ConnectionId, CreateType, DatabaseId, FragmentId,
-    FunctionId, I32Array, IndexId, JobStatus, ObjectId, Property, SchemaId, SecretId, SinkId,
-    SourceId, StreamNode, StreamSourceInfo, StreamingParallelism, SubscriptionId, TableId, UserId,
-    ViewId,
+    I32Array, IndexId, JobStatus, ObjectId, Property, SchemaId, SecretId, SinkId, SourceId,
+    StreamNode, StreamSourceInfo, StreamingParallelism, SubscriptionId, TableId, UserId, ViewId,
 };
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::subscription::SubscriptionState;
@@ -53,11 +52,11 @@ use risingwave_pb::catalog::{
 };
 use risingwave_pb::meta::cancel_creating_jobs_request::PbCreatingJobInfo;
 use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
-use risingwave_pb::meta::relation::PbRelationInfo;
+use risingwave_pb::meta::object::PbObjectInfo;
 use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Info, Operation as NotificationOperation, Operation,
 };
-use risingwave_pb::meta::{PbFragmentWorkerSlotMapping, PbRelation, PbRelationGroup};
+use risingwave_pb::meta::{PbFragmentWorkerSlotMapping, PbObject, PbObjectGroup};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::FragmentTypeFlag;
 use risingwave_pb::telemetry::PbTelemetryEventStage;
@@ -74,19 +73,11 @@ use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tracing::info;
 
 use super::utils::{
-    check_subscription_name_duplicate, get_fragment_ids_by_jobs, get_internal_tables_by_id,
-    rename_relation, rename_relation_refer,
+    check_subscription_name_duplicate, get_internal_tables_by_id, rename_relation,
+    rename_relation_refer,
 };
 use crate::controller::catalog::util::update_internal_tables;
-use crate::controller::utils::{
-    build_relation_group_for_delete, check_connection_name_duplicate,
-    check_database_name_duplicate, check_function_signature_duplicate,
-    check_relation_name_duplicate, check_schema_name_duplicate, check_secret_name_duplicate,
-    ensure_object_id, ensure_object_not_refer, ensure_schema_empty, ensure_user_id,
-    extract_external_table_name_from_definition, get_referring_objects,
-    get_referring_objects_cascade, get_user_privilege, list_user_info_by_ids,
-    resolve_source_register_info_for_jobs, PartialObject,
-};
+use crate::controller::utils::*;
 use crate::controller::ObjectModel;
 use crate::manager::{
     get_referred_connection_ids_from_source, get_referred_secret_ids_from_source, MetaSrvEnv,
@@ -121,20 +112,19 @@ pub struct CatalogController {
 #[derive(Clone, Default)]
 pub struct ReleaseContext {
     pub(crate) database_id: DatabaseId,
-    pub(crate) streaming_job_ids: Vec<ObjectId>,
+    pub(crate) removed_streaming_job_ids: Vec<ObjectId>,
     /// Dropped state table list, need to unregister from hummock.
-    pub(crate) state_table_ids: Vec<TableId>,
-    /// Dropped source list, need to unregister from source manager.
-    pub(crate) source_ids: Vec<SourceId>,
-    /// Dropped connection list, need to delete from vpc endpoints.
-    #[allow(dead_code)]
-    pub(crate) connections: Vec<ConnectionId>,
+    pub(crate) removed_state_table_ids: Vec<TableId>,
 
-    /// Dropped fragments that are fetching data from the target source.
-    pub(crate) source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
-    /// Dropped actors.
+    /// Dropped secrets, need to remove from secret manager.
+    pub(crate) removed_secret_ids: Vec<SecretId>,
+    /// Dropped sources (when `DROP SOURCE`), need to unregister from source manager.
+    pub(crate) removed_source_ids: Vec<SourceId>,
+    /// Dropped Source fragments (when `DROP MATERIALIZED VIEW` referencing sources),
+    /// need to unregister from source manager.
+    pub(crate) removed_source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
+
     pub(crate) removed_actors: HashSet<ActorId>,
-
     pub(crate) removed_fragments: HashSet<FragmentId>,
 }
 
@@ -189,11 +179,11 @@ impl CatalogController {
     pub(crate) async fn notify_frontend_relation_info(
         &self,
         operation: NotificationOperation,
-        relation_info: PbRelationInfo,
+        relation_info: PbObjectInfo,
     ) -> NotificationVersion {
         self.env
             .notification_manager()
-            .notify_frontend_relation_info(operation, relation_info)
+            .notify_frontend_object_info(operation, relation_info)
             .await
     }
 
@@ -238,22 +228,20 @@ impl CatalogController {
         &self,
         subscription_id: u32,
     ) -> MetaResult<NotificationVersion> {
-        let inner = self.inner.write().await;
-        let txn = inner.db.begin().await?;
+        let inner = self.inner.read().await;
         let job_id = subscription_id as i32;
         let (subscription, obj) = Subscription::find_by_id(job_id)
             .find_also_related(Object)
-            .one(&txn)
+            .one(&inner.db)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("subscription", job_id))?;
-        txn.commit().await?;
 
         let version = self
             .notify_frontend(
                 Operation::Add,
-                Info::RelationGroup(PbRelationGroup {
-                    relations: vec![PbRelation {
-                        relation_info: PbRelationInfo::Subscription(
+                Info::ObjectGroup(PbObjectGroup {
+                    objects: vec![PbObject {
+                        object_info: PbObjectInfo::Subscription(
                             ObjectModel(subscription, obj.unwrap()).into(),
                         )
                         .into(),
@@ -375,7 +363,9 @@ impl CatalogController {
             })
             .collect_vec();
 
-        let associated_source_ids: Vec<SourceId> = Table::find()
+        // The source ids for dirty tables with connector.
+        // FIXME: we should also clean dirty sources.
+        let dirty_associated_source_ids: Vec<SourceId> = Table::find()
             .select_only()
             .column(table::Column::OptionalAssociatedSourceId)
             .filter(
@@ -413,7 +403,7 @@ impl CatalogController {
             .clone()
             .into_iter()
             .chain(dirty_state_table_ids.into_iter())
-            .chain(associated_source_ids.clone().into_iter())
+            .chain(dirty_associated_source_ids.clone().into_iter())
             .collect();
 
         let res = Object::delete_many()
@@ -424,7 +414,7 @@ impl CatalogController {
 
         txn.commit().await?;
 
-        let relation_group = build_relation_group_for_delete(
+        let object_group = build_object_group_for_delete(
             dirty_mview_objs
                 .into_iter()
                 .chain(dirty_mview_internal_table_objs.into_iter())
@@ -432,10 +422,10 @@ impl CatalogController {
         );
 
         let _version = self
-            .notify_frontend(NotificationOperation::Delete, relation_group)
+            .notify_frontend(NotificationOperation::Delete, object_group)
             .await;
 
-        Ok(associated_source_ids)
+        Ok(dirty_associated_source_ids)
     }
 
     pub async fn comment_on(&self, comment: PbComment) -> MetaResult<NotificationVersion> {
@@ -490,7 +480,7 @@ impl CatalogController {
         let version = self
             .notify_frontend_relation_info(
                 NotificationOperation::Update,
-                PbRelationInfo::Table(ObjectModel(table, table_obj).into()),
+                PbObjectInfo::Table(ObjectModel(table, table_obj).into()),
             )
             .await;
 

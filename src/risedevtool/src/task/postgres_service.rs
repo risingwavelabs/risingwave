@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,6 +26,13 @@ impl DockerServiceConfig for PostgresConfig {
 
     fn image(&self) -> String {
         self.image.clone()
+    }
+
+    fn args(&self) -> Vec<String> {
+        // Enable CDC.
+        ["-c", "wal_level=logical", "-c", "max_replication_slots=30"]
+            .map(String::from)
+            .to_vec()
     }
 
     fn envs(&self) -> Vec<(String, String)> {

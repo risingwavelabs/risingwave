@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -33,7 +33,6 @@ pub use plan_visitor::{
     ExecutionModeDecider, PlanVisitor, ReadStorageTableVisitor, RelationCollectorVisitor,
     SysTableVisitor,
 };
-use risingwave_sqlparser::ast::OnConflict;
 
 mod logical_optimization;
 mod optimizer_context;
@@ -191,6 +190,18 @@ impl PlanRoot {
         }
         self.out_names = out_names;
         Ok(())
+    }
+
+    pub fn set_req_dist_as_same_as_req_order(&mut self) {
+        if self.required_order.len() != 0 {
+            let dist = self
+                .required_order
+                .column_orders
+                .iter()
+                .map(|o| o.column_index)
+                .collect_vec();
+            self.required_dist = RequiredDist::hash_shard(&dist)
+        }
     }
 
     /// Get the plan root's schema, only including the fields to be output.
@@ -848,17 +859,7 @@ impl PlanRoot {
             }
         }
 
-        let conflict_behavior = match on_conflict {
-            Some(on_conflict) => match on_conflict {
-                OnConflict::UpdateFull => ConflictBehavior::Overwrite,
-                OnConflict::Nothing => ConflictBehavior::IgnoreConflict,
-                OnConflict::UpdateIfNotNull => ConflictBehavior::DoUpdateIfNotNull,
-            },
-            None => match append_only {
-                true => ConflictBehavior::NoCheck,
-                false => ConflictBehavior::Overwrite,
-            },
-        };
+        let conflict_behavior = on_conflict.to_behavior(append_only, row_id_index.is_some())?;
 
         if let ConflictBehavior::IgnoreConflict = conflict_behavior
             && version_column_index.is_some()

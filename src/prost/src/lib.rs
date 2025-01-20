@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,8 +13,15 @@
 // limitations under the License.
 
 // for derived code of `Message`
-#![expect(clippy::all)]
 #![expect(clippy::doc_markdown)]
+#![expect(clippy::upper_case_acronyms)]
+#![expect(clippy::needless_lifetimes)]
+// For tonic::transport::Endpoint::connect
+#![expect(clippy::disallowed_methods)]
+#![expect(clippy::enum_variant_names)]
+#![expect(clippy::module_inception)]
+// FIXME: This should be fixed!!! https://github.com/risingwavelabs/risingwave/issues/19906
+#![expect(clippy::large_enum_variant)]
 
 use std::collections::HashMap;
 use std::str::FromStr;
@@ -235,6 +242,12 @@ impl common::WorkerNode {
         } else {
             None
         }
+    }
+
+    pub fn resource_group(&self) -> Option<String> {
+        self.property
+            .as_ref()
+            .and_then(|p| p.resource_group.clone())
     }
 }
 
@@ -496,11 +509,12 @@ impl std::fmt::Debug for plan_common::ColumnDesc {
             s.field("additional_column_type", additional_column_type);
         }
         s.field("version", version);
-        if let Some(AdditionalColumn { column_type }) = additional_column {
+        if let Some(AdditionalColumn {
+            column_type: Some(column_type),
+        }) = additional_column
+        {
             // AdditionalColumn { None } means a normal column
-            if let Some(column_type) = column_type {
-                s.field("additional_column", &column_type);
-            }
+            s.field("additional_column", &column_type);
         }
         if let Some(generated_or_default_column) = generated_or_default_column {
             s.field("generated_or_default_column", &generated_or_default_column);
@@ -513,11 +527,14 @@ impl std::fmt::Debug for plan_common::ColumnDesc {
 mod tests {
     use crate::data::{data_type, DataType};
     use crate::plan_common::Field;
+    use crate::stream_plan::stream_node::NodeBody;
 
     #[test]
     fn test_getter() {
-        let mut data_type: DataType = DataType::default();
-        data_type.is_nullable = true;
+        let data_type: DataType = DataType {
+            is_nullable: true,
+            ..Default::default()
+        };
         let field = Field {
             data_type: Some(data_type),
             name: "".to_owned(),
@@ -550,5 +567,13 @@ mod tests {
             ..Default::default()
         };
         assert!(!new_data_type.is_nullable);
+    }
+
+    #[test]
+    fn test_size() {
+        use static_assertions::const_assert_eq;
+        // box all fields in NodeBody to avoid large_enum_variant
+        // see https://github.com/risingwavelabs/risingwave/issues/19910
+        const_assert_eq!(std::mem::size_of::<NodeBody>(), 16);
     }
 }
