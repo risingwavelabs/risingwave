@@ -680,13 +680,13 @@ impl fmt::Display for DeclareCursor {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DeclareCursorStatement {
-    pub cursor_name: ObjectName,
+    pub cursor_name: Ident,
     pub declare_cursor: DeclareCursor,
 }
 
 impl ParseTo for DeclareCursorStatement {
     fn parse_to(p: &mut Parser<'_>) -> PResult<Self> {
-        impl_parse_to!(cursor_name: ObjectName, p);
+        impl_parse_to!(cursor_name: Ident, p);
 
         let declare_cursor = if !p.parse_keyword(Keyword::SUBSCRIPTION) {
             p.expect_keyword(Keyword::CURSOR)?;
@@ -711,7 +711,14 @@ impl fmt::Display for DeclareCursorStatement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut v: Vec<String> = vec![];
         impl_fmt_display!(cursor_name, v, self);
-        v.push("CURSOR FOR ".to_owned());
+        match &self.declare_cursor {
+            DeclareCursor::Query(_) => {
+                v.push("CURSOR FOR ".to_owned());
+            }
+            DeclareCursor::Subscription { .. } => {
+                v.push("SUBSCRIPTION CURSOR FOR ".to_owned());
+            }
+        }
         impl_fmt_display!(declare_cursor, v, self);
         v.iter().join(" ").fmt(f)
     }
@@ -723,7 +730,7 @@ impl fmt::Display for DeclareCursorStatement {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct FetchCursorStatement {
-    pub cursor_name: ObjectName,
+    pub cursor_name: Ident,
     pub count: u32,
     pub with_properties: WithProperties,
 }
@@ -736,7 +743,7 @@ impl ParseTo for FetchCursorStatement {
             literal_u32(p)?
         };
         p.expect_keyword(Keyword::FROM)?;
-        impl_parse_to!(cursor_name: ObjectName, p);
+        impl_parse_to!(cursor_name: Ident, p);
         impl_parse_to!(with_properties: WithProperties, p);
 
         Ok(Self {
@@ -767,7 +774,7 @@ impl fmt::Display for FetchCursorStatement {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct CloseCursorStatement {
-    pub cursor_name: Option<ObjectName>,
+    pub cursor_name: Option<Ident>,
 }
 
 impl ParseTo for CloseCursorStatement {
@@ -775,7 +782,7 @@ impl ParseTo for CloseCursorStatement {
         let cursor_name = if p.parse_keyword(Keyword::ALL) {
             None
         } else {
-            Some(p.parse_object_name()?)
+            Some(p.parse_identifier()?)
         };
 
         Ok(Self { cursor_name })
