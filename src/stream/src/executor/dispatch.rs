@@ -406,7 +406,7 @@ impl StreamConsumer for DispatchExecutor {
             let mut input = self.input.execute().peekable();
             loop {
                 let Some(message) =
-                    try_batch_message(max_barrier_count_per_batch, &mut input).await?
+                    try_batch_barriers(max_barrier_count_per_batch, &mut input).await?
                 else {
                     // end_of_stream
                     break;
@@ -448,8 +448,12 @@ impl StreamConsumer for DispatchExecutor {
     }
 }
 
+/// Tries to batch up to `max_barrier_count_per_batch` consecutive barriers within a single message batch.
+///
+/// Returns the message batch.
+///
 /// Returns None if end of stream.
-async fn try_batch_message(
+async fn try_batch_barriers(
     max_barrier_count_per_batch: u32,
     input: &mut Peekable<BoxedMessageStream>,
 ) -> StreamResult<Option<MessageBatch>> {
