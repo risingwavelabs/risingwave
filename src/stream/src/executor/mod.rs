@@ -112,6 +112,7 @@ mod row_merge;
 mod integration_tests;
 pub mod test_utils;
 mod utils;
+mod synced;
 
 pub use actor::{Actor, ActorContext, ActorContextRef};
 use anyhow::Context;
