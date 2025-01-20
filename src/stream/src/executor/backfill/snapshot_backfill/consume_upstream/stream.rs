@@ -14,10 +14,8 @@
 
 mod upstream_table_ext {
     use std::collections::HashMap;
-    use std::future::Future;
-    use std::pin::Pin;
 
-    use futures::future::try_join_all;
+    use futures::future::{try_join_all, BoxFuture};
     use futures::{TryFutureExt, TryStreamExt};
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::row::OwnedRow;
@@ -33,15 +31,15 @@ mod upstream_table_ext {
 
     pub(super) type UpstreamTableSnapshotStream<T: UpstreamTable> =
         VnodeStream<impl ChangeLogRowStream>;
-    pub(super) type UpstreamTableSnapshotStreamFuture<'a, T: UpstreamTable> =
-        impl Future<Output = StreamExecutorResult<UpstreamTableSnapshotStream<T>>> + Send + 'a;
+    pub(super) type UpstreamTableSnapshotStreamFuture<'a, T> =
+        BoxFuture<'a, StreamExecutorResult<UpstreamTableSnapshotStream<T>>>;
     pub(super) fn create_upstream_table_snapshot_stream<T: UpstreamTable>(
         upstream_table: &T,
         snapshot_epoch: u64,
         rate_limit: RateLimit,
         chunk_size: usize,
         vnode_progresses: HashMap<VirtualNode, (Option<OwnedRow>, usize)>,
-    ) -> Pin<Box<UpstreamTableSnapshotStreamFuture<'_, T>>> {
+    ) -> UpstreamTableSnapshotStreamFuture<'_, T> {
         Box::pin(async move {
             let streams = try_join_all(vnode_progresses.into_iter().map(
                 |(vnode, (start_pk, row_count))| {
@@ -63,8 +61,8 @@ mod upstream_table_ext {
 
     pub(super) type UpstreamTableChangeLogStream<T: UpstreamTable> =
         VnodeStream<impl ChangeLogRowStream>;
-    pub(super) type UpstreamTableChangeLogStreamFuture<'a, T: UpstreamTable> =
-        impl Future<Output = StreamExecutorResult<UpstreamTableChangeLogStream<T>>> + Send + 'a;
+    pub(super) type UpstreamTableChangeLogStreamFuture<'a, T> =
+        BoxFuture<'a, StreamExecutorResult<UpstreamTableChangeLogStream<T>>>;
 
     pub(super) fn create_upstream_table_change_log_stream<T: UpstreamTable>(
         upstream_table: &T,
@@ -72,7 +70,7 @@ mod upstream_table_ext {
         rate_limit: RateLimit,
         chunk_size: usize,
         vnode_progresses: HashMap<VirtualNode, (Option<OwnedRow>, usize)>,
-    ) -> Pin<Box<UpstreamTableChangeLogStreamFuture<'_, T>>> {
+    ) -> UpstreamTableChangeLogStreamFuture<'_, T> {
         Box::pin(async move {
             let streams = try_join_all(vnode_progresses.into_iter().map(
                 |(vnode, (start_pk, row_count))| {
@@ -90,12 +88,11 @@ mod upstream_table_ext {
         })
     }
 
-    pub(super) type NextEpochFuture<'a, T: UpstreamTable> =
-        impl Future<Output = StreamExecutorResult<u64>> + Send + 'a;
+    pub(super) type NextEpochFuture<'a> = BoxFuture<'a, StreamExecutorResult<u64>>;
     pub(super) fn next_epoch_future<T: UpstreamTable>(
         upstream_table: &T,
         epoch: u64,
-    ) -> Pin<Box<NextEpochFuture<'_, T>>> {
+    ) -> NextEpochFuture<'_> {
         Box::pin(async move { upstream_table.next_epoch(epoch).await })
     }
 }
@@ -105,7 +102,6 @@ use std::mem::take;
 use std::pin::Pin;
 use std::task::{ready, Context, Poll};
 
-use futures::Future;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::OwnedRow;
@@ -121,7 +117,7 @@ use crate::executor::{StreamExecutorError, StreamExecutorResult};
 
 enum ConsumeUpstreamStreamState<'a, T: UpstreamTable> {
     CreatingSnapshotStream {
-        future: Pin<Box<UpstreamTableSnapshotStreamFuture<'a, T>>>,
+        future: UpstreamTableSnapshotStreamFuture<'a, T>,
         snapshot_epoch: u64,
         pre_finished_vnodes: HashMap<VirtualNode, usize>,
     },
@@ -131,7 +127,7 @@ enum ConsumeUpstreamStreamState<'a, T: UpstreamTable> {
         pre_finished_vnodes: HashMap<VirtualNode, usize>,
     },
     CreatingChangeLogStream {
-        future: Pin<Box<UpstreamTableChangeLogStreamFuture<'a, T>>>,
+        future: UpstreamTableChangeLogStreamFuture<'a, T>,
         prev_epoch_finished_vnodes: Option<(u64, HashMap<VirtualNode, usize>)>,
         epoch: u64,
         pre_finished_vnodes: HashMap<VirtualNode, usize>,
@@ -142,7 +138,7 @@ enum ConsumeUpstreamStreamState<'a, T: UpstreamTable> {
         pre_finished_vnodes: HashMap<VirtualNode, usize>,
     },
     ResolvingNextEpoch {
-        future: Pin<Box<NextEpochFuture<'a, T>>>,
+        future: NextEpochFuture<'a>,
         prev_epoch_finished_vnodes: Option<(u64, HashMap<VirtualNode, usize>)>,
     },
     Err,
