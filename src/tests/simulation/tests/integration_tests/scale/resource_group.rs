@@ -120,7 +120,7 @@ async fn test_resource_group() -> Result<()> {
     session
         .run("select specific_resource_group from rw_streaming_jobs where name = 'm'")
         .await?
-        .assert_result_eq("");
+        .assert_result_eq("NULL");
 
     let union_fragment = cluster
         .locate_one_fragment([identity_contains("union")])

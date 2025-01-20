@@ -328,7 +328,7 @@ impl CatalogController {
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("streaming job", streaming_job_id))?;
 
-        get_database_resource_group(&inner.db, database_id).await
+        get_database_resource_group(&txn, database_id).await
     }
 
     pub async fn get_job_streaming_parallelisms(
