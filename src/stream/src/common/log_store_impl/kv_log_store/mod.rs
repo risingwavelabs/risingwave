@@ -55,7 +55,7 @@ pub(crate) const FIRST_SEQ_ID: SeqIdType = 0;
 pub(crate) type ReaderTruncationOffsetType = (u64, Option<SeqIdType>);
 
 #[derive(Clone)]
-pub(crate) struct KvLogStoreReadMetrics {
+pub struct KvLogStoreReadMetrics {
     pub storage_read_count: LabelGuardedIntCounter<5>,
     pub storage_read_size: LabelGuardedIntCounter<5>,
 }
