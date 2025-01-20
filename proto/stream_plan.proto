@@ -547,7 +547,7 @@ message MergeNode {
   //
   // `upstream_actor_id` stored in the plan node in `Fragment` meta model cannot be directly used.
   // See `compose_fragment`.
-  repeated uint32 upstream_actor_id = 1;
+  repeated uint32 upstream_actor_id = 1 [deprecated = true];
   uint32 upstream_fragment_id = 2;
   // Type of the upstream dispatcher. If there's always one upstream according to this
   // type, the compute node may use the `ReceiverExecutor` as an optimization.
