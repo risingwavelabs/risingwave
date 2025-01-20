@@ -732,11 +732,13 @@ mod tests {
 
         let state_store = MemoryStateStore::new();
 
+        let vnodes = Some(Bitmap::ones(16));
+
         let log_store_executor = SyncedKvLogStoreExecutor::new(
             1,
             KvLogStoreReadMetrics::default(),
             KvLogStoreMetrics::default(),
-            LogStoreRowSerde::new(schema, pk_indices),
+            LogStoreRowSerde::new(schema, vnodes, pk_indices),
             0,
             MemoryStateStore::new(),
             10,
