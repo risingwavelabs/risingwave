@@ -125,6 +125,8 @@ enable_spill = true
 [batch.developer]
 batch_connector_message_buffer_size = 16
 batch_output_channel_size = 64
+batch_receiver_channel_size = 1000
+batch_root_stage_channel_size = 100
 batch_chunk_size = 1024
 
 [streaming]
@@ -196,6 +198,9 @@ mem_table_spill_threshold = 4194304
 compactor_max_overlap_sst_count = 64
 compactor_max_preload_meta_file_count = 32
 time_travel_version_cache_capacity = 2
+
+[storage.cache]
+compactor_meta_cache_capacity_mb = 128
 
 [storage.cache.block_cache_eviction]
 algorithm = "Lru"
