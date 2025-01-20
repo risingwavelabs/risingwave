@@ -195,7 +195,7 @@ impl StreamTableScan {
                 // `row_count` column
                 catalog_builder.add_column(&Field::with_name(DataType::Int64, "row_count"));
             }
-            StreamScanType::SnapshotBackfill => {
+            StreamScanType::SnapshotBackfill | StreamScanType::CrossDbSnapshotBackfill => {
                 // `epoch` column
                 catalog_builder.add_column(&Field::with_name(DataType::Int64, "epoch"));
 
@@ -292,7 +292,8 @@ impl StreamTableScan {
             // For backfill, we additionally need the primary key columns.
             StreamScanType::Backfill
             | StreamScanType::ArrangementBackfill
-            | StreamScanType::SnapshotBackfill => self.core.output_and_pk_column_ids(),
+            | StreamScanType::SnapshotBackfill
+            | StreamScanType::CrossDbSnapshotBackfill => self.core.output_and_pk_column_ids(),
             StreamScanType::Chain | StreamScanType::Rearrange | StreamScanType::UpstreamOnly => {
                 self.core.output_column_ids()
             }

@@ -429,7 +429,7 @@ impl CreateMviewProgressTracker {
         version_stats: &HummockVersionStats,
     ) -> Vec<TrackingJob> {
         let new_tracking_job_info =
-            if let Some(Command::CreateStreamingJob { info, job_type }) = command {
+            if let Some(Command::CreateStreamingJob { info, job_type, .. }) = command {
                 match job_type {
                     CreateStreamingJobType::Normal => Some((info, None)),
                     CreateStreamingJobType::SinkIntoTable(replace_stream_job) => {

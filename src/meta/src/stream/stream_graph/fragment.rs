@@ -579,8 +579,14 @@ impl StreamFragmentGraph {
         self.upstreams.get(&fragment_id).unwrap_or(&EMPTY_HASHMAP)
     }
 
-    pub fn collect_snapshot_backfill_info(&self) -> MetaResult<Option<SnapshotBackfillInfo>> {
+    /// Returns `Ok((Some(``snapshot_backfill_info``), ``cross_db_snapshot_backfill_info``))`
+    pub fn collect_snapshot_backfill_info(
+        &self,
+    ) -> MetaResult<(Option<SnapshotBackfillInfo>, SnapshotBackfillInfo)> {
         let mut prev_stream_scan: Option<(Option<SnapshotBackfillInfo>, StreamScanNode)> = None;
+        let mut cross_db_info = SnapshotBackfillInfo {
+            upstream_mv_table_id_to_backfill_epoch: Default::default(),
+        };
         let mut result = Ok(());
         for (node, fragment_type_mask) in self
             .fragments
@@ -589,15 +595,31 @@ impl StreamFragmentGraph {
         {
             visit_stream_node_cont(node, |node| {
                 if let Some(NodeBody::StreamScan(stream_scan)) = node.node_body.as_ref() {
-                    let is_snapshot_backfill =
-                        stream_scan.stream_scan_type == StreamScanType::SnapshotBackfill as i32;
-                    if is_snapshot_backfill {
-                        assert!(
-                            (fragment_type_mask
-                                & (FragmentTypeFlag::SnapshotBackfillStreamScan as u32))
-                                > 0
-                        );
-                    }
+                    let stream_scan_type = StreamScanType::try_from(stream_scan.stream_scan_type)
+                        .expect("invalid stream_scan_type");
+                    let is_snapshot_backfill = match stream_scan_type {
+                        StreamScanType::SnapshotBackfill => {
+                            assert!(
+                                (fragment_type_mask
+                                    & (FragmentTypeFlag::SnapshotBackfillStreamScan as u32))
+                                    > 0
+                            );
+                            true
+                        }
+                        StreamScanType::CrossDbSnapshotBackfill => {
+                            assert!(
+                                (fragment_type_mask
+                                    & (FragmentTypeFlag::CrossDbSnapshotBackfillStreamScan as u32))
+                                    > 0
+                            );
+                            cross_db_info
+                                .upstream_mv_table_id_to_backfill_epoch
+                                .insert(TableId::new(stream_scan.table_id), None);
+
+                            return true;
+                        }
+                        _ => false,
+                    };
 
                     match &mut prev_stream_scan {
                         Some((prev_snapshot_backfill_info, prev_stream_scan)) => {
@@ -637,9 +659,12 @@ impl StreamFragmentGraph {
             })
         }
         result.map(|_| {
-            prev_stream_scan
-                .map(|(is_snapshot_backfill, _)| is_snapshot_backfill)
-                .unwrap_or(None)
+            (
+                prev_stream_scan
+                    .map(|(snapshot_backfill_info, _)| snapshot_backfill_info)
+                    .unwrap_or(None),
+                cross_db_info,
+            )
         })
     }
 }
@@ -648,7 +673,8 @@ impl StreamFragmentGraph {
 /// Return `true` when has change applied.
 pub fn fill_snapshot_backfill_epoch(
     node: &mut StreamNode,
-    upstream_mv_table_snapshot_epoch: &HashMap<TableId, Option<u64>>,
+    snapshot_backfill_info: Option<&SnapshotBackfillInfo>,
+    cross_db_snapshot_backfill_info: &SnapshotBackfillInfo,
 ) -> MetaResult<bool> {
     let mut result = Ok(());
     let mut applied = false;
@@ -658,8 +684,16 @@ pub fn fill_snapshot_backfill_epoch(
         {
             result = try {
                 let table_id = TableId::new(stream_scan.table_id);
-                let snapshot_epoch = upstream_mv_table_snapshot_epoch
+                let snapshot_epoch = cross_db_snapshot_backfill_info
+                    .upstream_mv_table_id_to_backfill_epoch
                     .get(&table_id)
+                    .or_else(|| {
+                        snapshot_backfill_info.and_then(|snapshot_backfill_info| {
+                            snapshot_backfill_info
+                                .upstream_mv_table_id_to_backfill_epoch
+                                .get(&table_id)
+                        })
+                    })
                     .ok_or_else(|| anyhow!("upstream table id not covered: {}", table_id))?
                     .ok_or_else(|| anyhow!("upstream table id not set: {}", table_id))?;
                 if let Some(prev_snapshot_epoch) =

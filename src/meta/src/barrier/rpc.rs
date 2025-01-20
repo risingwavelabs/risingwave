@@ -406,7 +406,12 @@ impl ControlStreamManager {
         let state = BarrierWorkerState::recovery(new_epoch, info, subscription_info, paused_reason);
         Ok((
             node_to_collect,
-            DatabaseCheckpointControl::recovery(database_id, tracker, state),
+            DatabaseCheckpointControl::recovery(
+                database_id,
+                tracker,
+                state,
+                barrier_info.prev_epoch.value().0,
+            ),
             barrier_info.prev_epoch.value().0,
         ))
     }
