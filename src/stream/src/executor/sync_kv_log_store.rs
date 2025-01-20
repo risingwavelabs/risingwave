@@ -72,18 +72,19 @@ use itertools::Itertools;
 use parking_lot::Mutex;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_connector::sink::log_store::{ChunkId, LogStoreResult};
 use risingwave_hummock_sdk::table_watermark::{VnodeWatermark, WatermarkDirection};
-use risingwave_storage::store::{LocalStateStore, SealCurrentEpochOptions, StateStoreRead};
+use risingwave_storage::store::{InitOptions, LocalStateStore, NewLocalOptions, OpConsistencyLevel, SealCurrentEpochOptions, StateStoreRead};
 use risingwave_storage::StateStore;
 use tokio::select;
 use futures::TryStreamExt;
+use risingwave_common::bail;
 
 use crate::common::log_store_impl::kv_log_store::buffer::LogStoreBufferItem;
-use crate::common::log_store_impl::kv_log_store::reader::read_flushed_chunk;
+use crate::common::log_store_impl::kv_log_store::reader::{read_flushed_chunk, read_persisted_log_store};
 use crate::common::log_store_impl::kv_log_store::reader::timeout_auto_rebuild::TimeoutAutoRebuildIter;
 use crate::common::log_store_impl::kv_log_store::serde::{
     KvLogStoreItem, LogStoreItemMergeStream, LogStoreRowSerde,
@@ -95,6 +96,7 @@ use crate::common::log_store_impl::kv_log_store::{
 use crate::executor::{
     Barrier, BoxedMessageStream, Message, StreamExecutorError, StreamExecutorResult,
 };
+use crate::executor::test_utils::StreamExecutorTestExt;
 
 type StateStoreStream<S> = Pin<Box<LogStoreItemMergeStream<TimeoutAutoRebuildIter<S>>>>;
 type ReadFlushedChunkFuture = BoxFuture<'static, LogStoreResult<(ChunkId, StreamChunk, u64)>>;
@@ -118,21 +120,33 @@ struct SyncedKvLogStoreExecutor<S: StateStore, LS: LocalStateStore> {
     buffer: Mutex<SyncedLogStoreBuffer>,
 }
 // Stream interface
-impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStoreExecutor<S, LS> {
+impl<S: StateStore<Local = LS>, LS: LocalStateStore> SyncedKvLogStoreExecutor<S, LS> {
     #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        table_id: TableId,
+    pub async fn new(
+        table_id: u32,
         read_metrics: KvLogStoreReadMetrics,
         metrics: KvLogStoreMetrics,
         serde: LogStoreRowSerde,
         seq_id: SeqIdType,
         state_store: S,
-        local_state_store: LS,
         buffer_max_size: usize,
         upstream: BoxedMessageStream,
     ) -> Self {
+        let local_state_store = state_store
+            .new_local(NewLocalOptions {
+                table_id: TableId {
+                    table_id,
+                },
+                op_consistency_level: OpConsistencyLevel::Inconsistent,
+                table_option: TableOption {
+                    retention_seconds: None,
+                },
+                is_replicated: false,
+                vnodes: serde.vnodes().clone(),
+            })
+            .await;
         Self {
-            table_id,
+            table_id: TableId::new(table_id),
             read_metrics,
             metrics: metrics.clone(),
             serde,
@@ -162,6 +176,29 @@ impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStoreExecutor<S, LS> {
                 yield msg;
             }
         }
+    }
+
+    async fn init(&mut self) -> StreamExecutorResult<()> {
+        let Some(msg) = self.upstream.next().await else {
+            bail!("Expected a barrier message, got end of stream")
+        };
+        let barrier = match msg? {
+            Message::Barrier(barrier) => barrier,
+            other => bail!("Expected a barrier message, got {:?}", other),
+        };
+        let init_epoch_pair = barrier.epoch;
+        self.local_state_store.init(InitOptions::new(init_epoch_pair)).await?;
+        self.state_store_stream = Some(
+            read_persisted_log_store(
+                &self.serde,
+                self.table_id,
+                &self.metrics,
+                self.state_store.clone(),
+                barrier.epoch.curr, // FIXME(kwannoel): Should this be curr or prev?
+                None,
+            ).await?
+        );
+        Ok(())
     }
 
     async fn next(&mut self) -> StreamExecutorResult<Option<Message>> {
