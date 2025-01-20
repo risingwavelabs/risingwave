@@ -160,7 +160,7 @@ steps:
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 12
+    timeout_in_minutes: 15
     retry: *auto-retry
 
   - group: "end-to-end connector test (release)"
@@ -440,7 +440,7 @@ steps:
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 15
+    timeout_in_minutes: 17
     retry: *auto-retry
 
   - label: "e2e java-binding test (release)"

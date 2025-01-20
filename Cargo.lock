@@ -7210,9 +7210,9 @@ dependencies = [
 
 [[package]]
 name = "madsim-rdkafka"
-version = "0.4.2+0.34.0"
+version = "0.4.3+0.34.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6038ceb55ecf0d80eeae01a85dc9db052f0629ca2d82732923c022185096a76c"
+checksum = "2685d6c4b7aa4a82b407cecaeaf623901d34800630b4a24190a0f3f7d1b66c88"
 dependencies = [
  "async-channel 1.9.0",
  "async-trait",
@@ -13491,9 +13491,9 @@ dependencies = [
 
 [[package]]
 name = "sqllogictest"
-version = "0.26.2"
+version = "0.26.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b8640104ca47c0ad23ee7ca98677214060f215eb9252ecf89467f00dda9b3dc1"
+checksum = "2dba5b678841955201299013ad50dc34e4b75acf89d7cfbb0769a59910d9081b"
 dependencies = [
  "async-trait",
  "educe",
@@ -15207,9 +15207,9 @@ checksum = "711b9620af191e0cdc7468a8d14e709c3dcdb115b36f838e601583af800a370a"
 
 [[package]]
 name = "uuid"
-version = "1.11.0"
+version = "1.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f8c5f0a0af699448548ad1a2fbf920fb4bee257eae39953ba95cb84891a0446a"
+checksum = "744018581f9a3454a9e15beb8a33b017183f1e7c0cd170232a2d1453b23a51c4"
 dependencies = [
  "getrandom",
  "rand",
