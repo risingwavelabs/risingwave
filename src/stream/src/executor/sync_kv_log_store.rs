@@ -60,6 +60,8 @@
 use std::collections::VecDeque;
 use std::pin::Pin;
 
+use crate::executor::prelude::*;
+
 use await_tree::InstrumentAwait;
 use futures::future::BoxFuture;
 use futures::FutureExt;
@@ -95,7 +97,7 @@ use crate::executor::{
 type StateStoreStream<S> = Pin<Box<LogStoreItemMergeStream<TimeoutAutoRebuildIter<S>>>>;
 type ReadFlushedChunkFuture = BoxFuture<'static, LogStoreResult<(ChunkId, StreamChunk, u64)>>;
 
-struct SyncedKvLogStore<S: StateStore, LS: LocalStateStore> {
+struct SyncedKvLogStoreExecutor<S: StateStore, LS: LocalStateStore> {
     table_id: TableId,
     read_metrics: KvLogStoreReadMetrics,
     metrics: KvLogStoreMetrics,
@@ -114,7 +116,7 @@ struct SyncedKvLogStore<S: StateStore, LS: LocalStateStore> {
     buffer: Mutex<SyncedLogStoreBuffer>,
 }
 // Stream interface
-impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStore<S, LS> {
+impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStoreExecutor<S, LS> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         table_id: TableId,
@@ -150,7 +152,7 @@ impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStore<S, LS> {
 }
 
 // Stream interface
-impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStore<S, LS> {
+impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStoreExecutor<S, LS> {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     pub async fn into_stream(mut self) {
         loop {
@@ -222,7 +224,7 @@ impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStore<S, LS> {
 }
 
 // Read methods
-impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStore<S, LS> {
+impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStoreExecutor<S, LS> {
     #[allow(clippy::too_many_arguments)]
     async fn try_next_item(
         table_id: TableId,
@@ -360,7 +362,7 @@ impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStore<S, LS> {
 }
 
 // Write methods
-impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStore<S, LS> {
+impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStoreExecutor<S, LS> {
     async fn write_barrier(
         state_store: &mut LS,
         serde: &LogStoreRowSerde,

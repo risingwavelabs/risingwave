@@ -112,7 +112,7 @@ mod row_merge;
 mod integration_tests;
 pub mod test_utils;
 mod utils;
-mod synced;
+mod sync_kv_log_store;
 
 pub use actor::{Actor, ActorContext, ActorContextRef};
 use anyhow::Context;
