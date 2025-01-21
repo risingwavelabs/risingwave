@@ -652,30 +652,21 @@ pub(crate) fn read_persisted_log_store<S: StateStoreRead + Clone>(
     state_store: S,
     first_write_epoch: u64,
     last_persisted_epoch: Option<u64>,
-) -> impl Future<
-    Output = LogStoreResult<Pin<Box<LogStoreItemMergeStream<TimeoutAutoRebuildIter<S>>>>>,
-> + Send {
+) -> impl Future<Output = LogStoreResult<Pin<Box<LogStoreItemMergeStream<TimeoutAutoRebuildIter<S>>>>>>
+       + Send {
     let range_start = if let Some(last_persisted_epoch) = last_persisted_epoch {
         // start from the next epoch of last_persisted_epoch
-        Included(
-            serde
-                .serialize_pk_epoch_prefix(last_persisted_epoch.next_epoch()),
-        )
+        Included(serde.serialize_pk_epoch_prefix(last_persisted_epoch.next_epoch()))
     } else {
         Unbounded
     };
-    let range_end = serde.serialize_pk_epoch_prefix(
-        first_write_epoch
-    );
+    let range_end = serde.serialize_pk_epoch_prefix(first_write_epoch);
 
     let serde = serde.clone();
-    let table_id = table_id;
     let read_metrics = metrics.persistent_log_read_metrics.clone();
     let streams_future = try_join_all(serde.vnodes().iter_vnodes().map(|vnode| {
-        let key_range = prefixed_range_with_vnode(
-            (range_start.clone(), Excluded(range_end.clone())),
-            vnode,
-        );
+        let key_range =
+            prefixed_range_with_vnode((range_start.clone(), Excluded(range_end.clone())), vnode);
         let state_store = state_store.clone();
         async move {
             // rebuild the iter every 10 minutes to avoid pinning hummock version for too long
@@ -692,7 +683,7 @@ pub(crate) fn read_persisted_log_store<S: StateStoreRead + Clone>(
                 },
                 Duration::from_secs(10 * 60),
             )
-                .await
+            .await
         }
     }));
 

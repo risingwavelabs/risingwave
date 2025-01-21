@@ -110,9 +110,9 @@ mod row_merge;
 
 #[cfg(test)]
 mod integration_tests;
+mod sync_kv_log_store;
 pub mod test_utils;
 mod utils;
-mod sync_kv_log_store;
 
 pub use actor::{Actor, ActorContext, ActorContextRef};
 use anyhow::Context;
