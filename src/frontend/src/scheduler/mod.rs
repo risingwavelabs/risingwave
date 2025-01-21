@@ -35,8 +35,7 @@ pub use local::*;
 mod fast_insert;
 pub use fast_insert::*;
 
-// pub use crate::scheduler::fast_insert::{run_inner_call, run_inner_call_2};
-pub use crate::scheduler::task_context::FrontendBatchTaskContext;
+use crate::scheduler::task_context::FrontendBatchTaskContext;
 
 mod error;
 pub mod streaming_manager;
