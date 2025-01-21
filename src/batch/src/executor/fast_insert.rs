@@ -15,7 +15,6 @@
 use std::iter::repeat;
 use std::sync::Arc;
 
-use anyhow::Context;
 use itertools::Itertools;
 use risingwave_common::array::{DataChunk, Op, SerialArray, StreamChunk};
 use risingwave_common::catalog::{Field, Schema, TableId, TableVersionId};
@@ -23,21 +22,17 @@ use risingwave_common::transaction::transaction_id::TxnId;
 use risingwave_common::types::DataType;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_dml::dml_manager::DmlManagerRef;
-use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::FastInsertNode;
-use risingwave_pb::plan_common::IndexAndExpr;
 
 use crate::error::Result;
 
+/// A fast insert executor spacially designed for non-pgwire inserts like websockets and webhooks.
 pub struct FastInsertExecutor {
     /// Target table id.
     table_id: TableId,
     table_version_id: TableVersionId,
     dml_manager: DmlManagerRef,
     column_indices: Vec<usize>,
-
-    // TODO(Kexiang): get rid of it?
-    sorted_default_columns: Vec<(usize, BoxedExpression)>,
 
     row_id_index: Option<usize>,
     txn_id: TxnId,
@@ -55,24 +50,6 @@ impl FastInsertExecutor {
             .iter()
             .map(|&i| i as usize)
             .collect();
-        let sorted_default_columns = if let Some(default_columns) = &insert_node.default_columns {
-            let mut default_columns = default_columns
-                .get_default_columns()
-                .iter()
-                .cloned()
-                .map(|IndexAndExpr { index: i, expr: e }| {
-                    Ok((
-                        i as usize,
-                        build_from_prost(&e.context("expression is None")?)
-                            .context("failed to build expression")?,
-                    ))
-                })
-                .collect::<Result<Vec<_>>>()?;
-            default_columns.sort_unstable_by_key(|(i, _)| *i);
-            default_columns
-        } else {
-            vec![]
-        };
         let mut schema = Schema::new(vec![Field::unnamed(DataType::Jsonb)]);
         schema.fields.push(Field::unnamed(DataType::Serial)); // row_id column
         let data_chunk_pb = insert_node
@@ -85,7 +62,6 @@ impl FastInsertExecutor {
                 insert_node.table_version_id,
                 dml_manager,
                 column_indices,
-                sorted_default_columns,
                 insert_node.row_id_index.as_ref().map(|index| *index as _),
                 insert_node.session_id,
             ),
@@ -99,7 +75,6 @@ impl FastInsertExecutor {
         table_version_id: TableVersionId,
         dml_manager: DmlManagerRef,
         column_indices: Vec<usize>,
-        sorted_default_columns: Vec<(usize, BoxedExpression)>,
         row_id_index: Option<usize>,
         session_id: u32,
     ) -> Self {
@@ -109,7 +84,6 @@ impl FastInsertExecutor {
             table_version_id,
             dml_manager,
             column_indices,
-            sorted_default_columns,
             row_id_index,
             txn_id,
             session_id,
@@ -138,7 +112,6 @@ impl FastInsertExecutor {
                 .enumerate()
                 .map(|(i, idx)| (*idx, columns[i].clone()))
                 .collect_vec();
-            ordered_columns.reserve(ordered_columns.len() + self.sorted_default_columns.len());
 
             ordered_columns.sort_unstable_by_key(|(idx, _)| *idx);
             columns = ordered_columns
@@ -174,14 +147,12 @@ mod tests {
     use std::ops::Bound;
 
     use assert_matches::assert_matches;
-    use foyer::CacheHint;
     use futures::StreamExt;
     use risingwave_common::array::{Array, JsonbArrayBuilder};
     use risingwave_common::catalog::{ColumnDesc, ColumnId, INITIAL_TABLE_VERSION_ID};
     use risingwave_common::transaction::transaction_message::TxnMsg;
     use risingwave_common::types::JsonbVal;
     use risingwave_dml::dml_manager::DmlManager;
-    use risingwave_storage::hummock::CachePolicy;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::store::{ReadOptions, StateStoreReadExt};
     use serde_json::json;
@@ -237,7 +208,6 @@ mod tests {
             INITIAL_TABLE_VERSION_ID,
             dml_manager,
             vec![0], // Ignoring insertion order
-            vec![],
             row_id_index,
             0,
         ));
@@ -261,15 +231,7 @@ mod tests {
         let epoch = u64::MAX;
         let full_range = (Bound::Unbounded, Bound::Unbounded);
         let store_content = store
-            .scan(
-                full_range,
-                epoch,
-                None,
-                ReadOptions {
-                    cache_policy: CachePolicy::Fill(CacheHint::Normal),
-                    ..Default::default()
-                },
-            )
+            .scan(full_range, epoch, None, ReadOptions::default())
             .await?;
         assert!(store_content.is_empty());
 

@@ -63,9 +63,7 @@ pub(super) mod handlers {
     use risingwave_common::array::JsonbArrayBuilder;
     use risingwave_pb::batch_plan::FastInsertNode;
     use risingwave_pb::catalog::WebhookSourceInfo;
-    use risingwave_pb::plan_common::DefaultColumns;
     use risingwave_pb::task_service::fast_insert_response;
-    // use risingwave_sqlparser::ast::{Query, SetExpr, Statement, Value, Values};
     use utils::{header_map_to_json, verify_signature};
 
     use super::*;
@@ -194,9 +192,6 @@ pub(super) mod handlers {
             table_version_id: table_catalog.version_id().expect("table must be versioned"),
             column_indices: vec![0],
             data_chunk: None,
-            default_columns: Some(DefaultColumns {
-                default_columns: vec![],
-            }),
             row_id_index: Some(1),
             session_id: session.id().0 as u32,
         };
