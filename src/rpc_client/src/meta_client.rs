@@ -28,6 +28,7 @@ use futures::stream::BoxStream;
 use list_rate_limits_response::RateLimitInfo;
 use lru::LruCache;
 use replace_job_plan::ReplaceJob;
+use risingwave_common::telemetry::telemetry_cluster_type_from_env_var;
 use risingwave_common::catalog::{FunctionId, IndexId, ObjectId, SecretId, TableId};
 use risingwave_common::config::{MetaConfig, MAX_CONNECTION_WINDOW_SIZE};
 use risingwave_common::hash::WorkerSlotMapping;
@@ -91,6 +92,7 @@ use risingwave_pb::meta::telemetry_info_service_client::TelemetryInfoServiceClie
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 use risingwave_pb::meta::*;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
+use risingwave_pb::telemetry::PbTelemetryClusterType;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::user_service_client::UserServiceClient;
 use risingwave_pb::user::*;
@@ -1674,6 +1676,11 @@ impl HummockMetaClient for MetaClient {
 #[async_trait]
 impl TelemetryInfoFetcher for MetaClient {
     async fn fetch_telemetry_info(&self) -> std::result::Result<Option<String>, String> {
+        // the err here means building cluster on test env, so we don't need to report telemetry
+        if telemetry_cluster_type_from_env_var().is_err() {
+            return Ok(None);
+        }
+
         let resp = self
             .get_telemetry_info()
             .await
