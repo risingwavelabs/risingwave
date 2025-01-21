@@ -751,9 +751,9 @@ mod tests {
         let table = gen_test_log_store_table(pk_info);
 
         let log_store_executor = SyncedKvLogStoreExecutor::new(
-            table.table_id,
-            KvLogStoreReadMetrics::default(),
-            KvLogStoreMetrics::default(),
+            table.id,
+            KvLogStoreReadMetrics::for_test(),
+            KvLogStoreMetrics::for_test(),
             LogStoreRowSerde::new(table, vnodes, pk_info),
             0,
             MemoryStateStore::new(),
