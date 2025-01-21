@@ -56,12 +56,12 @@ impl FastInsertExecution {
     }
 
     pub async fn my_execute(self) -> SchedulerResult<FastInsertResponse> {
-        let workers = self.choose_worker(
+        let worker = self.choose_worker(
             &TableId::new(self.fast_insert_node.table_id),
             self.fast_insert_node.session_id,
         )?;
 
-        let client = self.session.env().client_pool().get(&workers).await?;
+        let client = self.session.env().client_pool().get(&worker).await?;
         let request = FastInsertRequest {
             fast_insert_node: Some(self.fast_insert_node),
             wait_for_persistence: self.wait_for_persistence,
