@@ -34,7 +34,6 @@ use tower_http::add_extension::AddExtensionLayer;
 use tower_http::compression::CompressionLayer;
 use tower_http::cors::{self, CorsLayer};
 
-// use crate::handler::fast_insert::handle_fast_insert;
 use crate::scheduler::FastInsertExecution;
 use crate::webhook::utils::{err, Result};
 mod utils;
@@ -144,7 +143,7 @@ pub(super) mod handlers {
         // Use builder to obtain a single (List) column DataChunk
         let data_chunk = DataChunk::new(vec![builder.finish().into_ref()], 1);
         fast_insert_node.data_chunk = Some(data_chunk.to_protobuf());
-        // let context = FrontendBatchTaskContext::new(session.clone());
+
         let execution = FastInsertExecution::new(
             fast_insert_node,
             wait_for_persistence,
