@@ -61,7 +61,7 @@ impl FallibleRule for SourceToIcebergScanRule {
             );
             #[cfg(not(madsim))]
             {
-                let timezone = risingwave_expr::expr_context::TIME_ZONE::try_with(|v| v.clone())?;
+                let timezone = plan.ctx().get_session_timezone();
                 let time_travel_info = to_iceberg_time_travel_as_of(&source.core.as_of, &timezone)?;
                 let (delete_column_names, have_position_delete) =
                     tokio::task::block_in_place(|| {
