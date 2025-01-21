@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -212,8 +212,8 @@ mod tests {
             0,
         ));
         let handle = tokio::spawn(async move {
-            let epoch_recieved = insert_executor.do_execute(data_chunk).await.unwrap();
-            assert_eq!(epoch, epoch_recieved);
+            let epoch_received = insert_executor.do_execute(data_chunk).await.unwrap();
+            assert_eq!(epoch, epoch_received);
         });
 
         // Read
