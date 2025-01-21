@@ -131,7 +131,7 @@ statement ok
 flush;
 
 statement ok
-delete from s1;
+delete from s2;
 
 statement ok
 flush;
