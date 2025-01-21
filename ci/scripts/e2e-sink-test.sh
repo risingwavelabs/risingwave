@@ -123,6 +123,9 @@ else
   exit 1
 fi
 
+echo "--- testing postgres_sink"
+sqllogictest -p 4566 -d dev './e2e_test/sink/postgres_sink.slt'
+
 echo "--- testing kafka sink"
 ./ci/scripts/e2e-kafka-sink-test.sh
 if [ $? -eq 0 ]; then
