@@ -159,10 +159,9 @@ impl CheckpointControl {
             let max_prev_epoch = self.max_prev_epoch();
             let (database, max_prev_epoch) = match self.databases.entry(database_id) {
                 Entry::Occupied(entry) => (
-                    entry.into_mut().expect_running(&format!(
-                        "should not have command when not running {} {:?}",
-                        database_id, command
-                    )),
+                    entry
+                        .into_mut()
+                        .expect_running("should not have command when not running"),
                     max_prev_epoch.expect("should exist when having some database"),
                 ),
                 Entry::Vacant(entry) => match &command {
@@ -447,7 +446,7 @@ impl DatabaseCheckpointControlStatus {
         }
     }
 
-    fn expect_running(&mut self, reason: &str) -> &mut DatabaseCheckpointControl {
+    fn expect_running(&mut self, reason: &'static str) -> &mut DatabaseCheckpointControl {
         match self {
             DatabaseCheckpointControlStatus::Running(state) => state,
             DatabaseCheckpointControlStatus::Recovering(_) => {
