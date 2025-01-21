@@ -73,6 +73,8 @@ echo "--- killing risingwave cluster: ci-1cn-1fe-switch-to-pg-native"
 risedev ci-kill
 
 echo "--- starting risingwave cluster"
+# Use ci-inline-source-test since it will configure ports, db, host etc... env vars via risedev-env.
+# These are required for cli tools like psql have env vars correctly configured.
 risedev ci-start ci-inline-source-test
 
 echo "--- check connectivity for postgres"

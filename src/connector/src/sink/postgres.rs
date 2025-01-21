@@ -424,10 +424,6 @@ impl PostgresSinkWriter {
         // 1d flattened array of parameters to be deleted.
         for (op, row) in chunk.rows() {
             match op {
-                // FIXME(kwannoel): Use on conflict do update for `UpdateInsert`, ignore `UpdateDelete`.
-                // Op::UpdateInsert | Op::UpdateDelete => {
-                //     bail!("UpdateInsert and UpdateDelete should have been normalized by the sink executor")
-                // }
                 Op::UpdateInsert | Op::Insert => {
                     insert_parameter_buffer.add_row(row);
                 }
