@@ -82,8 +82,9 @@ echo "--- dumping risedev-env"
 echo "risedev-env:"
 risedev show-risedev-env
 
+# MUST use risedev slt, not sqllogictest, else env var not loaded and test fails.
 echo "--- testing postgres_sink"
-sqllogictest -p 4566 -d dev './e2e_test/sink/postgres_sink.slt'
+risedev slt -p 4566 -d dev './e2e_test/sink/postgres_sink.slt'
 
 echo "--- testing common sinks"
 sqllogictest -p 4566 -d dev './e2e_test/sink/append_only_sink.slt'
