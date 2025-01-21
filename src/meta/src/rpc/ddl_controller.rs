@@ -1435,6 +1435,8 @@ impl DdlController {
         drop_mode: DropMode,
         target_replace_info: Option<ReplaceStreamJobInfo>,
     ) -> MetaResult<NotificationVersion> {
+        let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
+
         let (object_id, object_type) = match job_id {
             StreamingJobId::MaterializedView(id) => (id as _, ObjectType::Table),
             StreamingJobId::Sink(id) => (id as _, ObjectType::Sink),
