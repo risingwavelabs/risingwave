@@ -105,6 +105,7 @@ impl SourceManagerCore {
     pub fn apply_source_change(&mut self, source_change: SourceChange) {
         let mut added_source_fragments = Default::default();
         let mut added_backfill_fragments = Default::default();
+        let mut finished_backfill_fragments = Default::default();
         let mut split_assignment = Default::default();
         let mut dropped_actors = Default::default();
         let mut fragment_replacements = Default::default();
@@ -120,6 +121,11 @@ impl SourceManagerCore {
                 added_source_fragments = added_source_fragments_;
                 added_backfill_fragments = added_backfill_fragments_;
                 split_assignment = split_assignment_;
+            }
+            SourceChange::CreateJobFinished {
+                finished_backfill_fragments: finished_backfill_fragments_,
+            } => {
+                finished_backfill_fragments = finished_backfill_fragments_;
             }
             SourceChange::SplitChange(split_assignment_) => {
                 split_assignment = split_assignment_;
@@ -186,6 +192,16 @@ impl SourceManagerCore {
                 .entry(source_id)
                 .or_default()
                 .extend(fragments);
+        }
+
+        for (source_id, fragments) in finished_backfill_fragments {
+            let handle = self.managed_sources.get(&source_id).unwrap_or_else(|| {
+                panic!(
+                    "source {} not found when adding backfill fragments {:?}",
+                    source_id, fragments
+                );
+            });
+            handle.finish_backfill(fragments.iter().map(|(id, _up_id)| *id).collect());
         }
 
         for (_, actor_splits) in split_assignment {
@@ -477,11 +493,20 @@ impl SourceManager {
 }
 
 pub enum SourceChange {
-    /// `CREATE SOURCE` (shared), or `CREATE MV`
+    /// `CREATE SOURCE` (shared), or `CREATE MV`.
+    /// This is applied after the job is successfully created (`post_collect` barrier).
     CreateJob {
         added_source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
+        /// (`source_id`, -> (`source_backfill_fragment_id`, `upstream_source_fragment_id`))
         added_backfill_fragments: HashMap<SourceId, BTreeSet<(FragmentId, FragmentId)>>,
         split_assignment: SplitAssignment,
+    },
+    /// `CREATE SOURCE` (shared), or `CREATE MV` is _finished_ (backfill is done).
+    /// This is applied after `wait_streaming_job_finished`.
+    /// XXX: Should we merge `CreateJob` into this?
+    CreateJobFinished {
+        /// (`source_id`, -> (`source_backfill_fragment_id`, `upstream_source_fragment_id`))
+        finished_backfill_fragments: HashMap<SourceId, BTreeSet<(FragmentId, FragmentId)>>,
     },
     SplitChange(SplitAssignment),
     /// `DROP SOURCE` or `DROP MV`

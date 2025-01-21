@@ -327,5 +327,6 @@ impl KafkaSplitReader {
             // yield in the outer loop so that we can always guarantee that some messages are read
             // every `MAX_CHUNK_SIZE`.
         }
+        tracing::info!("kafka reader finished");
     }
 }
