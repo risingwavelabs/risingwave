@@ -446,9 +446,12 @@ impl IcebergSplitEnumerator {
         Ok((delete_columns, have_position_delete))
     }
 
-    pub async fn get_delete_parameters(&self) -> ConnectorResult<(Vec<String>, bool)> {
+    pub async fn get_delete_parameters(
+        &self,
+        time_traval_info: Option<IcebergTimeTravelInfo>,
+    ) -> ConnectorResult<(Vec<String>, bool)> {
         let table = self.config.load_table().await?;
-        let snapshot_id = Self::get_snapshot_id(&table, None)?;
+        let snapshot_id = Self::get_snapshot_id(&table, time_traval_info)?;
         if snapshot_id.is_none() {
             return Ok((vec![], false));
         }
