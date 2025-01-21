@@ -75,6 +75,12 @@ risedev ci-kill
 echo "--- starting risingwave cluster"
 risedev ci-start ci-inline-source-test
 
+echo "--- check connectivity for postgres"
+PGPASSWORD=postgres psql -h db -U postgres -d postgres -p 5432 -c "SELECT 1;"
+
+echo "--- testing postgres_sink"
+sqllogictest -p 4566 -d dev './e2e_test/sink/postgres_sink.slt'
+
 echo "--- testing common sinks"
 sqllogictest -p 4566 -d dev './e2e_test/sink/append_only_sink.slt'
 sqllogictest -p 4566 -d dev './e2e_test/sink/create_sink_as.slt'
@@ -122,9 +128,6 @@ else
   echo "The output is not as expected."
   exit 1
 fi
-
-echo "--- testing postgres_sink"
-sqllogictest -p 4566 -d dev './e2e_test/sink/postgres_sink.slt'
 
 echo "--- testing kafka sink"
 ./ci/scripts/e2e-kafka-sink-test.sh
