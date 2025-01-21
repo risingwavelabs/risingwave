@@ -713,10 +713,10 @@ where
     > {
         self.inner.on_post_commit = false;
         Ok(if let Some(new_vnodes) = new_vnodes {
-            let (old_vnodes, cache_may_stale) = self.update_vnode_bitmap(new_vnodes.clone());
             self.inner
                 .try_wait_committed_epoch(self.barrier_epoch.prev)
                 .await?;
+            let (old_vnodes, cache_may_stale) = self.update_vnode_bitmap(new_vnodes.clone());
             Some(((new_vnodes, old_vnodes, self.inner), cache_may_stale))
         } else {
             None
