@@ -64,7 +64,7 @@ impl FastInsertExecution {
         let client = self.session.env().client_pool().get(&workers).await?;
         let request = FastInsertRequest {
             fast_insert_node: Some(self.fast_insert_node),
-            wait_epoch: self.wait_for_persistence,
+            wait_for_persistence: self.wait_for_persistence,
         };
         let response = client.fast_insert(request).await?;
         Ok(response)

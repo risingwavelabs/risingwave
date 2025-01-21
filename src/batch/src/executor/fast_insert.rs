@@ -20,13 +20,13 @@ use risingwave_common::array::{DataChunk, Op, SerialArray, StreamChunk};
 use risingwave_common::catalog::{Field, Schema, TableId, TableVersionId};
 use risingwave_common::transaction::transaction_id::TxnId;
 use risingwave_common::types::DataType;
-use risingwave_common::util::epoch::Epoch;
+use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_dml::dml_manager::DmlManagerRef;
 use risingwave_pb::batch_plan::FastInsertNode;
 
 use crate::error::Result;
 
-/// A fast insert executor spacially designed for non-pgwire inserts like websockets and webhooks.
+/// A fast insert executor spacially designed for non-pgwire inserts such as websockets and webhooks.
 pub struct FastInsertExecutor {
     /// Target table id.
     table_id: TableId,
@@ -92,7 +92,11 @@ impl FastInsertExecutor {
 }
 
 impl FastInsertExecutor {
-    pub async fn do_execute(self, data_chunk_to_insert: DataChunk) -> Result<Epoch> {
+    pub async fn do_execute(
+        self,
+        data_chunk_to_insert: DataChunk,
+        returning_epoch: bool,
+    ) -> Result<Epoch> {
         let table_dml_handle = self
             .dml_manager
             .table_dml_handle(self.table_id, self.table_version_id)?;
@@ -136,8 +140,13 @@ impl FastInsertExecutor {
             Result::Ok(())
         };
         write_txn_data(data_chunk_to_insert).await?;
-        let epoch = write_handle.end_returning_epoch().await?;
-        return Ok(epoch);
+        if returning_epoch {
+            write_handle.end_returning_epoch().await.map_err(Into::into)
+        } else {
+            write_handle.end().await?;
+            // the returned epoch is invalid and should not be used.
+            Ok(Epoch(INVALID_EPOCH))
+        }
     }
 }
 
@@ -212,7 +221,7 @@ mod tests {
             0,
         ));
         let handle = tokio::spawn(async move {
-            let epoch_received = insert_executor.do_execute(data_chunk).await.unwrap();
+            let epoch_received = insert_executor.do_execute(data_chunk, true).await.unwrap();
             assert_eq!(epoch, epoch_received);
         });
 
