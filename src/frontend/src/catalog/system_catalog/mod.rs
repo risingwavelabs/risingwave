@@ -314,6 +314,10 @@ pub fn get_sys_views_in_schema(schema_name: &str) -> Vec<Arc<ViewCatalog>> {
         .collect()
 }
 
+pub fn is_system_catalog(oid: u32) -> bool {
+    oid >= SYS_CATALOG_START_ID as u32
+}
+
 /// The global registry of all builtin catalogs.
 pub static SYS_CATALOGS: LazyLock<SystemCatalog> = LazyLock::new(|| {
     tracing::info!("found {} catalogs", SYS_CATALOGS_SLICE.len());
