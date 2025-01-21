@@ -233,6 +233,7 @@ impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStoreExecutor<S, LS> {
         Ok(state_store_stream)
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn next(
         input: &mut BoxedMessageStream,
         table_id: TableId,
@@ -257,7 +258,7 @@ impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStoreExecutor<S, LS> {
                 truncation_offset,
                 state_store_stream,
                 flushed_chunk_future,
-                &state_store,
+                state_store,
                 buffer
             ) => {
                 let logstore_item = logstore_item?;
@@ -721,6 +722,7 @@ where
 mod tests {
     use risingwave_common::catalog::Field;
     use risingwave_common::hash::VirtualNode;
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_storage::memory::MemoryStateStore;
 
     use super::*;
@@ -749,7 +751,7 @@ mod tests {
         let table = gen_test_log_store_table(pk_info);
 
         let log_store_executor = SyncedKvLogStoreExecutor::new(
-            1,
+            table.table_id,
             KvLogStoreReadMetrics::default(),
             KvLogStoreMetrics::default(),
             LogStoreRowSerde::new(table, vnodes, pk_info),
@@ -759,6 +761,37 @@ mod tests {
             source,
         )
         .await;
+
+        // Init
+        tx.push_barrier(test_epoch(1), false).await;
+
+        let chunk_1 = StreamChunk::from_pretty(
+            "  I   I
+            +  5  10
+            +  6  10
+            +  8  10
+            +  9  10
+            +  10 11",
+        );
+
+        let chunk_2 = StreamChunk::from_pretty(
+            "   I   I
+            -   5  10
+            -   6  10
+            -   8  10
+            U-  9  10
+            U+ 10  11",
+        );
+
+        tx.push_chunk(chunk_1.clone()).await;
+        tx.push_chunk(chunk_2.clone()).await;
+
+        tx.push_barrier(test_epoch(2), false).await;
+
+        #[for_await]
+        for msg in log_store_executor.execute() {
+            println!("{:?}", msg);
+        }
     }
 
     // test persisted read
