@@ -788,9 +788,27 @@ mod tests {
 
         tx.push_barrier(test_epoch(2), false).await;
 
-        #[for_await]
-        for msg in log_store_executor.execute() {
-            println!("{:?}", msg);
+        let mut stream = log_store_executor.execute().await;
+
+        match stream.next() {
+            Some(Ok(Message::Barrier(barrier))) => {
+                assert_eq!(barrier.epoch.curr, 1);
+            }
+            other => panic!("Expected a barrier message, got {:?}", other),
+        }
+
+        match stream.next() {
+            Some(Ok(Message::Chunk(chunk))) => {
+                assert_eq!(chunk, chunk_1);
+            }
+            other => panic!("Expected a chunk message, got {:?}", other),
+        }
+
+        match stream.next() {
+            Some(Ok(Message::Chunk(chunk))) => {
+                assert_eq!(chunk, chunk_2);
+            }
+            other => panic!("Expected a chunk message, got {:?}", other),
         }
     }
 
