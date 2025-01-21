@@ -34,7 +34,6 @@ use risingwave_common::hash::WorkerSlotMapping;
 use risingwave_common::monitor::EndpointExt;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::telemetry::report::TelemetryInfoFetcher;
-use risingwave_common::telemetry::telemetry_cluster_type_from_env_var;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::meta_addr::MetaAddressStrategy;
@@ -1675,11 +1674,6 @@ impl HummockMetaClient for MetaClient {
 #[async_trait]
 impl TelemetryInfoFetcher for MetaClient {
     async fn fetch_telemetry_info(&self) -> std::result::Result<Option<String>, String> {
-        // the err here means building cluster on test env, so we don't need to report telemetry
-        if telemetry_cluster_type_from_env_var().is_err() {
-            return Ok(None);
-        }
-
         let resp = self
             .get_telemetry_info()
             .await

@@ -156,6 +156,10 @@ impl MetaTelemetryInfoFetcher {
 #[async_trait::async_trait]
 impl TelemetryInfoFetcher for MetaTelemetryInfoFetcher {
     async fn fetch_telemetry_info(&self) -> TelemetryResult<Option<String>> {
+        // the err here means building cluster on test env, so we don't need to report telemetry
+        if telemetry_cluster_type_from_env_var().is_err() {
+            return Ok(None);
+        }
         Ok(Some(self.tracking_id.clone().into()))
     }
 }
