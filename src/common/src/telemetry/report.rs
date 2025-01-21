@@ -76,9 +76,10 @@ where
         // There is only one case tracking_id updated at the runtime ---- metastore data has been
         // cleaned. There is no way that metastore has been cleaned but nodes are still running
         let tracking_id = {
-            match (info_fetcher.fetch_telemetry_info().await, get_telemetry_risingwave_cloud_uuid()) {
-                (Ok(Some(_)), Some(cloud_uuid)) => cloud_uuid,
-                (Ok(Some(id)), None) => id,
+            match (
+                info_fetcher.fetch_telemetry_info().await,
+                get_telemetry_risingwave_cloud_uuid(),
+            ) {
                 (Ok(None), _) => {
                     tracing::info!("Telemetry is disabled");
                     return;
@@ -87,10 +88,11 @@ where
                     tracing::error!("Telemetry failed to get tracking_id, err {}", err);
                     return;
                 }
+                (Ok(Some(_)), Some(cloud_uuid)) => cloud_uuid,
+                (Ok(Some(id)), None) => id,
             }
         };
 
-        
         TELEMETRY_TRACKING_ID
             .set(tracking_id.clone())
             .unwrap_or_else(|_| {
