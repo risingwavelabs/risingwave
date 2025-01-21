@@ -190,7 +190,7 @@ impl KvLogStoreMetrics {
     }
 
     #[cfg(test)]
-    fn for_test() -> Self {
+    pub(crate) fn for_test() -> Self {
         KvLogStoreMetrics {
             storage_write_count: LabelGuardedIntCounter::test_int_counter(),
             storage_write_size: LabelGuardedIntCounter::test_int_counter(),

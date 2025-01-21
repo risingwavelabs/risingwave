@@ -720,6 +720,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use crate::executor::prelude::*;
+    use risingwave_common::test_prelude::*;
     use risingwave_common::catalog::Field;
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::test_epoch;
@@ -754,16 +756,16 @@ mod tests {
             table.id,
             KvLogStoreReadMetrics::for_test(),
             KvLogStoreMetrics::for_test(),
-            LogStoreRowSerde::new(table, vnodes, pk_info),
+            LogStoreRowSerde::new(&table, vnodes, pk_info),
             0,
             MemoryStateStore::new(),
             10,
             source,
         )
-        .await;
+        .await.boxed();
 
         // Init
-        tx.push_barrier(test_epoch(1), false).await;
+        tx.push_barrier(test_epoch(1), false);
 
         let chunk_1 = StreamChunk::from_pretty(
             "  I   I
@@ -783,32 +785,39 @@ mod tests {
             U+ 10  11",
         );
 
-        tx.push_chunk(chunk_1.clone()).await;
-        tx.push_chunk(chunk_2.clone()).await;
+        tx.push_chunk(chunk_1.clone());
+        tx.push_chunk(chunk_2.clone());
 
-        tx.push_barrier(test_epoch(2), false).await;
+        let mut stream = log_store_executor.execute();
 
-        let mut stream = log_store_executor.execute().await;
-
-        match stream.next() {
+        match stream.next().await {
             Some(Ok(Message::Barrier(barrier))) => {
                 assert_eq!(barrier.epoch.curr, 1);
             }
             other => panic!("Expected a barrier message, got {:?}", other),
         }
 
-        match stream.next() {
+        match stream.next().await {
             Some(Ok(Message::Chunk(chunk))) => {
                 assert_eq!(chunk, chunk_1);
             }
             other => panic!("Expected a chunk message, got {:?}", other),
         }
 
-        match stream.next() {
+        match stream.next().await {
             Some(Ok(Message::Chunk(chunk))) => {
                 assert_eq!(chunk, chunk_2);
             }
             other => panic!("Expected a chunk message, got {:?}", other),
+        }
+
+        tx.push_barrier(test_epoch(2), false);
+
+        match stream.next().await {
+            Some(Ok(Message::Barrier(barrier))) => {
+                assert_eq!(barrier.epoch.curr, 2);
+            }
+            other => panic!("Expected a barrier message, got {:?}", other),
         }
     }
 
