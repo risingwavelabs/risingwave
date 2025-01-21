@@ -374,10 +374,11 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                     .unwrap();
                             debug_assert_eq!(mapping.len(), 1);
                             if let Some((split_id, offset)) = mapping.into_iter().next() {
-                                let row = state_store_handler
-                                    .get(split_id.clone())
-                                    .await?
-                                    .expect("The fs_split should be in the state table.");
+                                let row = state_store_handler.get(split_id.clone()).await?
+                                    .unwrap_or_else(|| {
+                                        panic!("The fs_split (file_name) {:?} should be in the state table.",
+                                      split_id)
+                                    });
                                 let fs_split = match row.datum_at(1) {
                                     Some(ScalarRefImpl::Jsonb(jsonb_ref)) => {
                                         OpendalFsSplit::<Src>::restore_from_json(
