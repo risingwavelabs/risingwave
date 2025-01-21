@@ -36,7 +36,7 @@ pub mod buffer;
 pub mod reader;
 pub(crate) mod serde;
 #[cfg(test)]
-mod test_utils;
+pub mod test_utils;
 mod writer;
 
 pub(crate) use reader::{REWIND_BACKOFF_FACTOR, REWIND_BASE_DELAY, REWIND_MAX_DELAY};

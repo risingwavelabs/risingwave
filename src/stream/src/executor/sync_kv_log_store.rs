@@ -62,30 +62,31 @@
 use std::collections::VecDeque;
 use std::pin::Pin;
 
-use crate::executor::prelude::*;
-
 use await_tree::InstrumentAwait;
 use futures::future::BoxFuture;
-use futures::FutureExt;
+use futures::{FutureExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use parking_lot::Mutex;
 use risingwave_common::array::StreamChunk;
+use risingwave_common::bail;
 use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_connector::sink::log_store::{ChunkId, LogStoreResult};
 use risingwave_hummock_sdk::table_watermark::{VnodeWatermark, WatermarkDirection};
-use risingwave_storage::store::{InitOptions, LocalStateStore, NewLocalOptions, OpConsistencyLevel, SealCurrentEpochOptions};
+use risingwave_storage::store::{
+    InitOptions, LocalStateStore, NewLocalOptions, OpConsistencyLevel, SealCurrentEpochOptions,
+};
 use risingwave_storage::StateStore;
 use tokio::select;
-use futures::TryStreamExt;
-use risingwave_common::bail;
 
 use crate::common::log_store_impl::kv_log_store::buffer::LogStoreBufferItem;
-use crate::common::log_store_impl::kv_log_store::reader::{read_flushed_chunk, read_persisted_log_store};
 use crate::common::log_store_impl::kv_log_store::reader::timeout_auto_rebuild::TimeoutAutoRebuildIter;
+use crate::common::log_store_impl::kv_log_store::reader::{
+    read_flushed_chunk, read_persisted_log_store,
+};
 use crate::common::log_store_impl::kv_log_store::serde::{
     KvLogStoreItem, LogStoreItemMergeStream, LogStoreRowSerde,
 };
@@ -93,6 +94,7 @@ use crate::common::log_store_impl::kv_log_store::{
     FlushInfo, KvLogStoreMetrics, KvLogStoreReadMetrics, ReaderTruncationOffsetType, SeqIdType,
     FIRST_SEQ_ID,
 };
+use crate::executor::prelude::*;
 use crate::executor::{
     Barrier, BoxedMessageStream, Message, StreamExecutorError, StreamExecutorResult,
 };
@@ -132,9 +134,7 @@ impl<S: StateStore<Local = LS>, LS: LocalStateStore> SyncedKvLogStoreExecutor<S,
     ) -> Self {
         let local_state_store = state_store
             .new_local(NewLocalOptions {
-                table_id: TableId {
-                    table_id,
-                },
+                table_id: TableId { table_id },
                 op_consistency_level: OpConsistencyLevel::Inconsistent,
                 table_option: TableOption {
                     retention_seconds: None,
@@ -169,14 +169,17 @@ impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStoreExecutor<S, LS> {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     pub async fn execute_inner(mut self) {
         let mut input = self.upstream.execute();
-        let mut state_store_stream = Some(Self::init(
-            &mut input,
-            &mut self.local_state_store,
-            &self.serde,
-            self.table_id,
-            &self.metrics,
-            self.state_store.clone(),
-        ).await?);
+        let mut state_store_stream = Some(
+            Self::init(
+                &mut input,
+                &mut self.local_state_store,
+                &self.serde,
+                self.table_id,
+                &self.metrics,
+                self.state_store.clone(),
+            )
+            .await?,
+        );
         loop {
             if let Some(msg) = Self::next(
                 &mut input,
@@ -191,7 +194,9 @@ impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStoreExecutor<S, LS> {
                 &mut self.local_state_store,
                 &mut self.metrics,
                 &mut self.seq_id,
-            ).await? {
+            )
+            .await?
+            {
                 yield msg;
             }
         }
@@ -213,16 +218,18 @@ impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStoreExecutor<S, LS> {
             other => bail!("Expected a barrier message, got {:?}", other),
         };
         let init_epoch_pair = barrier.epoch;
-        local_state_store.init(InitOptions::new(init_epoch_pair)).await?;
-        let state_store_stream =
-            read_persisted_log_store(
-                serde,
-                table_id,
-                metrics,
-                state_store,
-                barrier.epoch.curr, // FIXME(kwannoel): Should this be curr or prev?
-                None,
-            ).await?;
+        local_state_store
+            .init(InitOptions::new(init_epoch_pair))
+            .await?;
+        let state_store_stream = read_persisted_log_store(
+            serde,
+            table_id,
+            metrics,
+            state_store,
+            barrier.epoch.curr, // FIXME(kwannoel): Should this be curr or prev?
+            None,
+        )
+        .await?;
         Ok(state_store_stream)
     }
 
@@ -713,9 +720,13 @@ where
 #[cfg(test)]
 mod tests {
     use risingwave_common::catalog::Field;
+    use risingwave_common::hash::VirtualNode;
     use risingwave_storage::memory::MemoryStateStore;
-    use crate::executor::test_utils::MockSource;
+
     use super::*;
+    use crate::common::log_store_impl::kv_log_store::test_utils::gen_test_log_store_table;
+    use crate::common::log_store_impl::kv_log_store::KV_LOG_STORE_V2_INFO;
+    use crate::executor::test_utils::MockSource;
 
     // test read/write buffer
     #[tokio::test]
@@ -732,18 +743,22 @@ mod tests {
 
         let state_store = MemoryStateStore::new();
 
-        let vnodes = Some(Bitmap::ones(16));
+        let vnodes = Some(Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)));
+
+        let pk_info = &KV_LOG_STORE_V2_INFO;
+        let table = gen_test_log_store_table(pk_info);
 
         let log_store_executor = SyncedKvLogStoreExecutor::new(
             1,
             KvLogStoreReadMetrics::default(),
             KvLogStoreMetrics::default(),
-            LogStoreRowSerde::new(schema, vnodes, pk_indices),
+            LogStoreRowSerde::new(table, vnodes, pk_info),
             0,
             MemoryStateStore::new(),
             10,
             source,
-        ).await;
+        )
+        .await;
     }
 
     // test persisted read
