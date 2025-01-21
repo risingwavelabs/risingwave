@@ -62,7 +62,7 @@ message GetDataResponse {
 }
 
 message FastInsertRequest {
-  bool wait_epoch = 1;
+  bool wait_for_persistence = 1;
   batch_plan.FastInsertNode fast_insert_node = 2;
   // TODO(kexiang): add support for default columns. plan_common.ExprContext expr_context is needed for it.
 }

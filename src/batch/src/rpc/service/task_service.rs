@@ -129,7 +129,9 @@ impl TaskService for BatchServiceImpl {
     ) -> Result<Response<FastInsertResponse>, Status> {
         let req = request.into_inner();
         let insert_node = req.fast_insert_node.expect("no fast insert node found");
-        let res = self.do_fast_insert(insert_node, req.wait_epoch).await;
+        let res = self
+            .do_fast_insert(insert_node, req.wait_for_persistence)
+            .await;
         match res {
             Ok(_) => Ok(Response::new(FastInsertResponse {
                 status: fast_insert_response::Status::Succeeded.into(),
@@ -218,13 +220,15 @@ impl BatchServiceImpl {
     async fn do_fast_insert(
         &self,
         insert_node: FastInsertNode,
-        wait_epoch: bool,
+        wait_for_persistence: bool,
     ) -> Result<(), BatchError> {
         let table_id = insert_node.table_id;
         let (executor, data_chunk) =
             FastInsertExecutor::build(self.env.dml_manager_ref(), insert_node)?;
-        let epoch = executor.do_execute(data_chunk).await?;
-        if wait_epoch {
+        let epoch = executor
+            .do_execute(data_chunk, wait_for_persistence)
+            .await?;
+        if wait_for_persistence {
             dispatch_state_store!(self.env.state_store(), store, {
                 use risingwave_common::catalog::TableId;
                 use risingwave_hummock_sdk::HummockReadEpoch;
