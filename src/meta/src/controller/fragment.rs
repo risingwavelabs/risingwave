@@ -26,10 +26,10 @@ use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::{Actor, Fragment, Sink, StreamingJob};
 use risingwave_meta_model::{
-    actor, actor_dispatcher, fragment, object, sink, source, streaming_job, table, ActorId,
-    ActorUpstreamActors, ConnectorSplits, DatabaseId, ExprContext, FragmentId, I32Array, JobStatus,
-    ObjectId, SchemaId, SinkId, SourceId, StreamNode, StreamingParallelism, TableId, VnodeBitmap,
-    WorkerId,
+    actor, actor_dispatcher, database, fragment, object, sink, source, streaming_job, table,
+    ActorId, ActorUpstreamActors, ConnectorSplits, DatabaseId, ExprContext, FragmentId, I32Array,
+    JobStatus, ObjectId, SchemaId, SinkId, SourceId, StreamNode, StreamingParallelism, TableId,
+    VnodeBitmap, WorkerId,
 };
 use risingwave_meta_model_migration::{Alias, SelectStatement};
 use risingwave_pb::common::PbActorLocation;
@@ -90,6 +90,7 @@ pub struct StreamingJobInfo {
     pub job_status: JobStatus,
     pub parallelism: StreamingParallelism,
     pub max_parallelism: i32,
+    pub resource_group: String,
 }
 
 impl CatalogControllerInner {
@@ -728,6 +729,7 @@ impl CatalogController {
             .select_only()
             .column(streaming_job::Column::JobId)
             .join(JoinType::InnerJoin, streaming_job::Relation::Object.def())
+            .join(JoinType::InnerJoin, object::Relation::Database2.def())
             .column(object::Column::ObjType)
             .join(JoinType::LeftJoin, table::Relation::Object1.def().rev())
             .join(JoinType::LeftJoin, source::Relation::Object.def().rev())
@@ -750,6 +752,16 @@ impl CatalogController {
                 streaming_job::Column::Parallelism,
                 streaming_job::Column::MaxParallelism,
             ])
+            .column_as(
+                Expr::if_null(
+                    Expr::col((
+                        streaming_job::Entity,
+                        streaming_job::Column::SpecificResourceGroup,
+                    )),
+                    Expr::col((database::Entity, database::Column::ResourceGroup)),
+                ),
+                "resource_group",
+            )
             .into_model()
             .all(&inner.db)
             .await?;
