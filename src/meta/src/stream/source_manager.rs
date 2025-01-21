@@ -24,6 +24,7 @@ use std::time::Duration;
 use anyhow::Context;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::metrics::LabelGuardedIntGauge;
+use risingwave_common::panic_if_debug;
 use risingwave_connector::error::ConnectorResult;
 use risingwave_connector::source::{
     fill_adaptive_split, ConnectorProperties, SourceEnumeratorContext, SourceEnumeratorInfo,
@@ -37,7 +38,7 @@ use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use risingwave_pb::stream_plan::Dispatcher;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
-use tokio::sync::{oneshot, Mutex};
+use tokio::sync::{oneshot, Mutex, MutexGuard};
 use tokio::task::JoinHandle;
 use tokio::time::MissedTickBehavior;
 use tokio::{select, time};
@@ -104,6 +105,7 @@ impl SourceManagerCore {
     pub fn apply_source_change(&mut self, source_change: SourceChange) {
         let mut added_source_fragments = Default::default();
         let mut added_backfill_fragments = Default::default();
+        let mut finished_backfill_fragments = Default::default();
         let mut split_assignment = Default::default();
         let mut dropped_actors = Default::default();
         let mut fragment_replacements = Default::default();
@@ -119,6 +121,11 @@ impl SourceManagerCore {
                 added_source_fragments = added_source_fragments_;
                 added_backfill_fragments = added_backfill_fragments_;
                 split_assignment = split_assignment_;
+            }
+            SourceChange::CreateJobFinished {
+                finished_backfill_fragments: finished_backfill_fragments_,
+            } => {
+                finished_backfill_fragments = finished_backfill_fragments_;
             }
             SourceChange::SplitChange(split_assignment_) => {
                 split_assignment = split_assignment_;
@@ -158,10 +165,11 @@ impl SourceManagerCore {
         }
 
         for source_id in dropped_source_ids {
+            let dropped_fragments = self.source_fragments.remove(&source_id);
+
             if let Some(handle) = self.managed_sources.remove(&source_id) {
-                handle.handle.abort();
+                handle.terminate(dropped_fragments);
             }
-            self.source_fragments.remove(&source_id);
             if let Some(_fragments) = self.backfill_fragments.remove(&source_id) {
                 // TODO: enable this assertion after we implemented cleanup for backfill fragments
                 // debug_assert!(
@@ -186,6 +194,16 @@ impl SourceManagerCore {
                 .extend(fragments);
         }
 
+        for (source_id, fragments) in finished_backfill_fragments {
+            let handle = self.managed_sources.get(&source_id).unwrap_or_else(|| {
+                panic!(
+                    "source {} not found when adding backfill fragments {:?}",
+                    source_id, fragments
+                );
+            });
+            handle.finish_backfill(fragments.iter().map(|(id, _up_id)| *id).collect());
+        }
+
         for (_, actor_splits) in split_assignment {
             for (actor_id, splits) in actor_splits {
                 // override previous splits info
@@ -198,24 +216,12 @@ impl SourceManagerCore {
         }
 
         for (source_id, fragment_ids) in dropped_source_fragments {
-            if let Entry::Occupied(mut entry) = self.source_fragments.entry(source_id) {
-                let managed_fragment_ids = entry.get_mut();
-                for fragment_id in &fragment_ids {
-                    managed_fragment_ids.remove(fragment_id);
-                }
-
-                if managed_fragment_ids.is_empty() {
-                    entry.remove();
-                }
-            }
+            self.drop_source_fragments(Some(source_id), fragment_ids);
         }
 
         for (old_fragment_id, new_fragment_id) in fragment_replacements {
-            for fragment_ids in self.source_fragments.values_mut() {
-                if fragment_ids.remove(&old_fragment_id) {
-                    fragment_ids.insert(new_fragment_id);
-                }
-            }
+            // TODO: add source_id to the fragment_replacements to avoid iterating all sources
+            self.drop_source_fragments(None, BTreeSet::from([old_fragment_id]));
 
             for fragment_ids in self.backfill_fragments.values_mut() {
                 let mut new_backfill_fragment_ids = fragment_ids.clone();
@@ -230,6 +236,51 @@ impl SourceManagerCore {
                     }
                 }
                 *fragment_ids = new_backfill_fragment_ids;
+            }
+        }
+    }
+
+    fn drop_source_fragments(
+        &mut self,
+        source_id: Option<SourceId>,
+        dropped_fragment_ids: BTreeSet<FragmentId>,
+    ) {
+        if let Some(source_id) = source_id {
+            if let Entry::Occupied(mut entry) = self.source_fragments.entry(source_id) {
+                let mut dropped_ids = vec![];
+                let managed_fragment_ids = entry.get_mut();
+                for fragment_id in &dropped_fragment_ids {
+                    managed_fragment_ids.remove(fragment_id);
+                    dropped_ids.push(*fragment_id);
+                }
+                if let Some(handle) = self.managed_sources.get(&source_id) {
+                    handle.drop_fragments(dropped_ids);
+                } else {
+                    panic_if_debug!(
+                        "source {source_id} not found when dropping fragment {dropped_ids:?}",
+                    );
+                }
+                if managed_fragment_ids.is_empty() {
+                    entry.remove();
+                }
+            }
+        } else {
+            for (source_id, fragment_ids) in &mut self.source_fragments {
+                let mut dropped_ids = vec![];
+                for fragment_id in &dropped_fragment_ids {
+                    if fragment_ids.remove(fragment_id) {
+                        dropped_ids.push(*fragment_id);
+                    }
+                }
+                if !dropped_ids.is_empty() {
+                    if let Some(handle) = self.managed_sources.get(source_id) {
+                        handle.drop_fragments(dropped_ids);
+                    } else {
+                        panic_if_debug!(
+                            "source {source_id} not found when dropping fragment {dropped_ids:?}",
+                        );
+                    }
+                }
             }
         }
     }
@@ -433,14 +484,29 @@ impl SourceManager {
             }
         }
     }
+
+    /// Pause the tick loop in source manager until the returned guard is dropped.
+    pub async fn pause_tick(&self) -> MutexGuard<'_, ()> {
+        tracing::debug!("pausing tick lock in source manager");
+        self.paused.lock().await
+    }
 }
 
 pub enum SourceChange {
-    /// `CREATE SOURCE` (shared), or `CREATE MV`
+    /// `CREATE SOURCE` (shared), or `CREATE MV`.
+    /// This is applied after the job is successfully created (`post_collect` barrier).
     CreateJob {
         added_source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
+        /// (`source_id`, -> (`source_backfill_fragment_id`, `upstream_source_fragment_id`))
         added_backfill_fragments: HashMap<SourceId, BTreeSet<(FragmentId, FragmentId)>>,
         split_assignment: SplitAssignment,
+    },
+    /// `CREATE SOURCE` (shared), or `CREATE MV` is _finished_ (backfill is done).
+    /// This is applied after `wait_streaming_job_finished`.
+    /// XXX: Should we merge `CreateJob` into this?
+    CreateJobFinished {
+        /// (`source_id`, -> (`source_backfill_fragment_id`, `upstream_source_fragment_id`))
+        finished_backfill_fragments: HashMap<SourceId, BTreeSet<(FragmentId, FragmentId)>>,
     },
     SplitChange(SplitAssignment),
     /// `DROP SOURCE` or `DROP MV`
