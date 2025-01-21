@@ -24,6 +24,7 @@ use super::{ApplyResult, BoxedRule, FallibleRule};
 use crate::error::Result;
 use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
+use crate::optimizer::plan_node::utils::to_iceberg_time_travel_as_of;
 use crate::optimizer::plan_node::{LogicalIcebergScan, LogicalJoin, LogicalSource};
 use crate::optimizer::PlanRef;
 use crate::utils::{Condition, FRONTEND_RUNTIME};
@@ -60,9 +61,11 @@ impl FallibleRule for SourceToIcebergScanRule {
             );
             #[cfg(not(madsim))]
             {
+                let timezone = risingwave_expr::expr_context::TIME_ZONE::try_with(|v| v.clone())?;
+                let time_travel_info = to_iceberg_time_travel_as_of(&source.core.as_of, &timezone)?;
                 let (delete_column_names, have_position_delete) =
                     tokio::task::block_in_place(|| {
-                        FRONTEND_RUNTIME.block_on(s.get_delete_parameters())
+                        FRONTEND_RUNTIME.block_on(s.get_delete_parameters(time_travel_info))
                     })?;
                 // data file scan
                 let mut data_iceberg_scan: PlanRef =
