@@ -109,7 +109,7 @@ async fn test_resource_group() -> Result<()> {
     assert_eq!(mat_fragment.inner.actors.len(), 4);
 
     session
-        .run("select specific_resource_group from rw_streaming_jobs where name = 'm'")
+        .run("select resource_group from rw_streaming_jobs where name = 'm'")
         .await?
         .assert_result_eq("test");
 
@@ -118,9 +118,9 @@ async fn test_resource_group() -> Result<()> {
         .await?;
 
     session
-        .run("select specific_resource_group from rw_streaming_jobs where name = 'm'")
+        .run("select resource_group from rw_streaming_jobs where name = 'm'")
         .await?
-        .assert_result_eq("NULL");
+        .assert_result_eq(DEFAULT_RESOURCE_GROUP);
 
     let union_fragment = cluster
         .locate_one_fragment([identity_contains("union")])

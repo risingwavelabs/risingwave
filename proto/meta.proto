@@ -241,7 +241,7 @@ message ListStreamingJobStatesResponse {
     TableParallelism parallelism = 3;
     uint32 max_parallelism = 4;
     string name = 5;
-    optional string specific_resource_group = 6;
+    string resource_group = 6;
   }
   repeated StreamingJobState states = 1;
 }

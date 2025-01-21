@@ -26,7 +26,7 @@ struct RwStreamingJob {
     status: String,
     parallelism: String,
     max_parallelism: i32,
-    specific_resource_group: Option<String>,
+    resource_group: String,
 }
 
 #[system_catalog(table, "rw_catalog.rw_streaming_jobs")]
@@ -43,7 +43,7 @@ async fn read_rw_streaming_jobs(reader: &SysCatalogReaderImpl) -> Result<Vec<RwS
                 name: state.name,
                 parallelism: parallelism.to_uppercase(),
                 max_parallelism: state.max_parallelism as i32,
-                specific_resource_group: state.specific_resource_group,
+                resource_group: state.resource_group,
             }
         })
         .collect())

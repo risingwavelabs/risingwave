@@ -261,7 +261,7 @@ impl StreamManagerService for StreamServiceImpl {
                      name,
                      parallelism,
                      max_parallelism,
-                     specific_resource_group,
+                     resource_group,
                      ..
                  }| {
                     let parallelism = match parallelism {
@@ -276,7 +276,7 @@ impl StreamManagerService for StreamServiceImpl {
                         state: PbState::from(job_status) as _,
                         parallelism: Some(parallelism.into()),
                         max_parallelism: max_parallelism as _,
-                        specific_resource_group,
+                        resource_group,
                     }
                 },
             )
