@@ -232,9 +232,6 @@ impl StreamChunkCompactor {
     ///   have three kind of patterns Insert, Delete or Update.
     /// - For the update (-old row, +old row), when old row is exactly same. The two rowOp will be
     ///   removed.
-    ///
-    /// All UPDATE INSERT and UPDATE DELETE will be converted to INSERT and DELETE, and dropped according to
-    /// certain rules (see `merge_insert` and `merge_delete` for more details).
     pub fn into_compacted_chunks(self) -> impl Iterator<Item = StreamChunk> {
         let (chunks, key_indices) = self.into_inner();
 
