@@ -155,9 +155,9 @@ impl Sink for PostgresSink {
             {
                 let pg_columns = pg_table.column_descs();
                 let sink_columns = self.schema.fields();
-                if pg_columns.len() != sink_columns.len() {
+                if pg_columns.len() < sink_columns.len() {
                     return Err(SinkError::Config(anyhow!(
-                    "Column count mismatch: Postgres table has {} columns, but sink schema has {} columns",
+                    "Column count mismatch: Postgres table has {} columns, but sink schema has {} columns, sink should have less or equal columns to the Postgres table",
                     pg_columns.len(),
                     sink_columns.len()
                 )));
@@ -424,13 +424,10 @@ impl PostgresSinkWriter {
         // 1d flattened array of parameters to be deleted.
         for (op, row) in chunk.rows() {
             match op {
-                Op::UpdateInsert | Op::UpdateDelete => {
-                    bail!("UpdateInsert and UpdateDelete should have been normalized by the sink executor")
-                }
-                Op::Insert => {
+                Op::UpdateInsert | Op::Insert => {
                     insert_parameter_buffer.add_row(row);
                 }
-                Op::Delete => {
+                Op::UpdateDelete | Op::Delete => {
                     delete_parameter_buffer.add_row(row.project(&self.pk_indices));
                 }
             }
@@ -472,14 +469,20 @@ impl PostgresSinkWriter {
         parameters: Vec<Vec<Option<ScalarAdapter>>>,
         remaining_parameter: Vec<Option<ScalarAdapter>>,
     ) -> Result<()> {
-        let column_length = schema.fields().len();
+        let column_length = match op {
+            Op::Insert => schema.len(),
+            Op::Delete => pk_indices.len(),
+            _ => unreachable!(),
+        };
         if !parameters.is_empty() {
             let parameter_length = parameters[0].len();
             let rows_length = parameter_length / column_length;
             assert_eq!(
                 parameter_length % column_length,
                 0,
-                "flattened parameters are unaligned"
+                "flattened parameters are unaligned, parameters={:#?} columns={:#?}",
+                parameters,
+                schema.fields(),
             );
             let statement = match op {
                 Op::Insert => create_insert_sql(schema, table_name, rows_length),
@@ -503,7 +506,9 @@ impl PostgresSinkWriter {
                 Op::Delete => create_delete_sql(schema, table_name, pk_indices, rows_length),
                 _ => unreachable!(),
             };
+            tracing::trace!("binding statement: {:?}", statement);
             let statement = transaction.prepare(&statement).await?;
+            tracing::trace!("binding parameters: {:?}", remaining_parameter);
             transaction
                 .execute_raw(&statement, remaining_parameter)
                 .await?;
