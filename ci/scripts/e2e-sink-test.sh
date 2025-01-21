@@ -78,6 +78,10 @@ risedev ci-start ci-inline-source-test
 echo "--- check connectivity for postgres"
 PGPASSWORD=postgres psql -h db -U postgres -d postgres -p 5432 -c "SELECT 1;"
 
+echo "--- dumping risedev-env"
+echo "risedev-env:"
+risedev show-risedev-env
+
 echo "--- testing postgres_sink"
 sqllogictest -p 4566 -d dev './e2e_test/sink/postgres_sink.slt'
 
