@@ -73,7 +73,7 @@ echo "--- killing risingwave cluster: ci-1cn-1fe-switch-to-pg-native"
 risedev ci-kill
 
 echo "--- starting risingwave cluster"
-risedev ci-start ci-1cn-1fe
+risedev ci-start ci-inline-source-test
 
 echo "--- testing common sinks"
 sqllogictest -p 4566 -d dev './e2e_test/sink/append_only_sink.slt'
