@@ -155,9 +155,9 @@ impl Sink for PostgresSink {
             {
                 let pg_columns = pg_table.column_descs();
                 let sink_columns = self.schema.fields();
-                if pg_columns.len() != sink_columns.len() {
+                if pg_columns.len() < sink_columns.len() {
                     return Err(SinkError::Config(anyhow!(
-                    "Column count mismatch: Postgres table has {} columns, but sink schema has {} columns",
+                    "Column count mismatch: Postgres table has {} columns, but sink schema has {} columns, sink should have less or equal columns to the Postgres table",
                     pg_columns.len(),
                     sink_columns.len()
                 )));
