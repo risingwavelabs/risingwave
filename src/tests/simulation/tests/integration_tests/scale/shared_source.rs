@@ -148,7 +148,7 @@ async fn test_shared_source() -> Result<()> {
     expect_test::expect![[r#"
         6 CREATED ADAPTIVE 256
         8 CREATED ADAPTIVE 256"#]]
-    .assert_eq(&cluster.run("select * from rw_table_fragments;").await?);
+    .assert_eq(&cluster.run("select * from rw_streaming_jobs;").await?);
 
     // SourceBackfill cannot be scaled because of NoShuffle.
     assert!(
@@ -192,7 +192,7 @@ async fn test_shared_source() -> Result<()> {
     expect_test::expect![[r#"
         6 CREATED CUSTOM 256
         8 CREATED CUSTOM 256"#]]
-    .assert_eq(&cluster.run("select * from rw_table_fragments;").await?);
+    .assert_eq(&cluster.run("select * from rw_streaming_jobs;").await?);
 
     // resolve_no_shuffle for backfill fragment is OK, which will scale the upstream together.
     cluster
@@ -216,7 +216,7 @@ async fn test_shared_source() -> Result<()> {
     expect_test::expect![[r#"
         6 CREATED CUSTOM 256
         8 CREATED CUSTOM 256"#]]
-    .assert_eq(&cluster.run("select * from rw_table_fragments;").await?);
+    .assert_eq(&cluster.run("select * from rw_streaming_jobs;").await?);
     Ok(())
 }
 
@@ -275,7 +275,11 @@ CREATE SOURCE s(v1 timestamp with time zone) WITH (
     expect_test::expect![[r#"
         6 CREATED ADAPTIVE 256
         8 CREATED ADAPTIVE 256"#]]
-    .assert_eq(&cluster.run("select * from rw_table_fragments;").await?);
+    .assert_eq(
+        &cluster
+            .run("select id, status, parallelism, max_parallelism from rw_streaming_jobs;")
+            .await?,
+    );
 
     // SourceBackfill/DynamicFilter cannot be scaled because of NoShuffle.
     assert!(
@@ -309,7 +313,7 @@ CREATE SOURCE s(v1 timestamp with time zone) WITH (
     expect_test::expect![[r#"
         6 CREATED CUSTOM 256
         8 CREATED ADAPTIVE 256"#]]
-    .assert_eq(&cluster.run("select * from rw_table_fragments;").await?);
+    .assert_eq(&cluster.run("select * from rw_streaming_jobs;").await?);
 
     // resolve_no_shuffle for backfill fragment is OK, which will scale the upstream together.
     cluster
@@ -334,6 +338,6 @@ CREATE SOURCE s(v1 timestamp with time zone) WITH (
     expect_test::expect![[r#"
         6 CREATED CUSTOM 256
         8 CREATED ADAPTIVE 256"#]]
-    .assert_eq(&cluster.run("select * from rw_table_fragments;").await?);
+    .assert_eq(&cluster.run("select * from rw_streaming_jobs;").await?);
     Ok(())
 }
