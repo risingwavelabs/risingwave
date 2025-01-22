@@ -252,22 +252,9 @@ impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStoreExecutor<S, LS> {
         seq_id: &mut SeqIdType,
     ) -> StreamExecutorResult<Option<Message>> {
         select! {
-            // read from log store
-            logstore_item = Self::try_next_item(
-                table_id,
-                read_metrics,
-                serde,
-                truncation_offset,
-                state_store_stream,
-                flushed_chunk_future,
-                state_store,
-                buffer
-            ) => {
-                let logstore_item = logstore_item?;
-                Ok(logstore_item.map(Message::Chunk))
-            }
-
+            biased;
             // poll from upstream
+            // Prefer this arm to let barrier bypass.
             upstream_item = input.next() => {
                 match upstream_item {
                     None => Ok(None),
@@ -306,6 +293,21 @@ impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStoreExecutor<S, LS> {
                         }
                     }
                 }
+            }
+
+            // read from log store
+            logstore_item = Self::try_next_item(
+                table_id,
+                read_metrics,
+                serde,
+                truncation_offset,
+                state_store_stream,
+                flushed_chunk_future,
+                state_store,
+                buffer
+            ) => {
+                let logstore_item = logstore_item?;
+                Ok(logstore_item.map(Message::Chunk))
             }
         }
     }
@@ -724,6 +726,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    use pretty_assertions::assert_eq;
     use crate::executor::prelude::*;
     use risingwave_common::test_prelude::*;
     use risingwave_common::catalog::Field;
@@ -732,7 +735,7 @@ mod tests {
     use risingwave_storage::memory::MemoryStateStore;
 
     use super::*;
-    use crate::common::log_store_impl::kv_log_store::test_utils::gen_test_log_store_table;
+    use crate::common::log_store_impl::kv_log_store::test_utils::{check_stream_chunk_eq, gen_test_log_store_table, test_payload_schema};
     use crate::common::log_store_impl::kv_log_store::KV_LOG_STORE_V2_INFO;
     use crate::executor::test_utils::MockSource;
 
@@ -932,12 +935,13 @@ mod tests {
     #[tokio::test]
     async fn test_max_chunk_persisted_read() {
         init_logger();
-        let schema = Schema {
-            fields: vec![
-                Field::unnamed(DataType::Int64),
-                Field::unnamed(DataType::Int64),
-            ],
-        };
+
+        let pk_info = &KV_LOG_STORE_V2_INFO;
+        let column_descs = test_payload_schema(&pk_info);
+        let fields = column_descs.into_iter().map(|desc| {
+            Field::new(desc.name.clone(), desc.data_type.clone())
+        }).collect_vec();
+        let schema = Schema { fields };
         let pk_indices = vec![0];
         let (mut tx, source) = MockSource::channel();
         let source = source.into_executor(schema.clone(), pk_indices.clone());
@@ -946,7 +950,6 @@ mod tests {
 
         let vnodes = Some(Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)));
 
-        let pk_info = &KV_LOG_STORE_V2_INFO;
         let table = gen_test_log_store_table(pk_info);
 
         let log_store_executor = SyncedKvLogStoreExecutor::new(
@@ -965,7 +968,7 @@ mod tests {
         tx.push_barrier(test_epoch(1), false);
 
         let chunk_1 = StreamChunk::from_pretty(
-            "  I   I
+            "  I   T
             +  5  10
             +  6  10
             +  8  10
@@ -974,7 +977,7 @@ mod tests {
         );
 
         let chunk_2 = StreamChunk::from_pretty(
-            "   I   I
+            "   I   T
             -   5  10
             -   6  10
             -   8  10
@@ -989,34 +992,33 @@ mod tests {
 
         let mut stream = log_store_executor.execute();
 
-        match stream.next().await {
-            Some(Ok(Message::Barrier(barrier))) => {
-                assert_eq!(barrier.epoch.curr, test_epoch(1));
+        for i in 1..=2 {
+            match stream.next().await {
+                Some(Ok(Message::Barrier(barrier))) => {
+                    assert_eq!(barrier.epoch.curr, test_epoch(i));
+                }
+                other => panic!("Expected a barrier message, got {:?}", other),
             }
-            other => panic!("Expected a barrier message, got {:?}", other),
         }
 
         match stream.next().await {
-            Some(Ok(Message::Chunk(chunk))) => {
-                assert_eq!(chunk, chunk_1);
+            Some(Ok(Message::Chunk(actual))) => {
+                let expected = StreamChunk::from_pretty(
+                    "   I   T
+                    +   5  10
+                    +   6  10
+                    +   8  10
+                    +   9  10
+                    +  10  11
+                    -   5  10
+                    -   6  10
+                    -   8  10
+                    U- 10  11
+                    U+ 10  10"
+                );
+                assert!(check_stream_chunk_eq(&actual, &expected), "Expected: {:#?}, got: {:#?}", expected, actual);
             }
             other => panic!("Expected a chunk message, got {:?}", other),
-        }
-
-        match stream.next().await {
-            Some(Ok(Message::Chunk(chunk))) => {
-                assert_eq!(chunk, chunk_2);
-            }
-            other => panic!("Expected a chunk message, got {:?}", other),
-        }
-
-        match stream.next().await {
-            Some(Ok(Message::Barrier(barrier))) => {
-                assert_eq!(barrier.epoch.curr, test_epoch(2));
-            }
-            other => panic!("Expected a barrier message, got {:?}", other),
         }
     }
-
-    // test max_chunk force flush + persisted read
 }
