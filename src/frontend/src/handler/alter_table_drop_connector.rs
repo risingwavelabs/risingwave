@@ -26,6 +26,7 @@ use risingwave_sqlparser::parser::Parser;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::error::{ErrorCode, Result};
+use crate::handler::create_source::SqlColumnStrategy;
 use crate::handler::{
     get_replace_table_plan, HandlerArgs, ObjectName, PgResponse, RwPgResponse, Statement,
     StatementType,
@@ -181,8 +182,14 @@ pub async fn handle_alter_table_drop_connector(
         .unwrap();
 
     let new_statement = rewrite_table_definition(&table_def, &source_def, original_definition)?;
-    let (_, table, graph, col_index_mapping, _) =
-        get_replace_table_plan(&session, table_name, new_statement, &table_def).await?;
+    let (_, table, graph, col_index_mapping, _) = get_replace_table_plan(
+        &session,
+        table_name,
+        new_statement,
+        &table_def,
+        SqlColumnStrategy::Follow,
+    )
+    .await?;
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer

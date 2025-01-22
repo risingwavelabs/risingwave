@@ -1017,7 +1017,7 @@ impl CatalogController {
             version = self
                 .notify_frontend(
                     NotificationOperation::Delete,
-                    build_relation_group_for_delete(to_drop_objects),
+                    build_object_group_for_delete(to_drop_objects),
                 )
                 .await;
         }
