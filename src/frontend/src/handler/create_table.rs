@@ -561,7 +561,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
 
     let overwrite_options = OverwriteOptions::new(&mut handler_args);
     let rate_limit = overwrite_options.source_rate_limit;
-    let (source_catalog, database_id, schema_id) = bind_create_source_or_table_with_connector(
+    let source_catalog = bind_create_source_or_table_with_connector(
         handler_args.clone(),
         table_name,
         format_encode,
@@ -580,7 +580,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
     )
     .await?;
 
-    let pb_source = source_catalog.to_prost(schema_id, database_id);
+    let pb_source = source_catalog.to_prost();
 
     let context = OptimizerContext::new(handler_args, explain_options);
 
@@ -840,9 +840,10 @@ fn gen_table_plan_inner(
         .into());
     }
 
-    let materialize = plan_root.gen_table_plan(context, table_name, info, props)?;
+    let materialize =
+        plan_root.gen_table_plan(context, table_name, database_id, schema_id, info, props)?;
 
-    let mut table = materialize.table().to_prost(schema_id, database_id);
+    let mut table = materialize.table().to_prost();
 
     table.owner = session.user_id();
     Ok((materialize.into(), table))
@@ -961,6 +962,8 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     let materialize = plan_root.gen_table_plan(
         context,
         resolved_table_name,
+        database_id,
+        schema_id,
         CreateTableInfo {
             columns,
             pk_column_ids,
@@ -979,7 +982,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
         },
     )?;
 
-    let mut table = materialize.table().to_prost(schema_id, database_id);
+    let mut table = materialize.table().to_prost();
     table.owner = session.user_id();
     table.cdc_table_id = Some(cdc_table_id);
     table.dependent_relations = vec![source.id];
