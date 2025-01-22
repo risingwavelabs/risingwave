@@ -459,6 +459,7 @@ impl<S: StateStore> SourceExecutor<S> {
                 Vec::default()
             };
         let is_pause_on_startup = first_barrier.is_pause_on_startup();
+        let mut is_uninitialized = first_barrier.is_newly_added(self.actor_ctx.id);
 
         yield Message::Barrier(first_barrier);
 
@@ -481,7 +482,6 @@ impl<S: StateStore> SourceExecutor<S> {
         core.split_state_store.init_epoch(first_epoch).await?;
         // initial_dispatch_num is 0 means the source executor doesn't have downstream jobs
         // and is newly created
-        let mut is_uninitialized = self.actor_ctx.initial_dispatch_num == 0;
         for ele in &mut boot_state {
             if let Some(recover_state) = core
                 .split_state_store
