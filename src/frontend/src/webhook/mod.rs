@@ -99,7 +99,7 @@ pub(super) mod handlers {
         let FastInsertContext {
             webhook_source_info,
             mut fast_insert_node,
-        } = acquire_table_info(&session, &database, &schema, &table).await?;
+        } = acquire_table_info(&session, &database, &schema, &table)?;
 
         let WebhookSourceInfo {
             signature_expr,
@@ -161,7 +161,7 @@ pub(super) mod handlers {
         }
     }
 
-    async fn acquire_table_info(
+    fn acquire_table_info(
         session: &Arc<SessionImpl>,
         database: &String,
         schema: &String,
