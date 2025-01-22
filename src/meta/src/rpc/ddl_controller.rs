@@ -23,7 +23,7 @@ use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::{ActorMapping, VnodeCountCompat};
-use risingwave_common::secret::SecretEncryption;
+use risingwave_common::secret::{LocalSecretManager, SecretEncryption};
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::stream_graph_visitor::{
@@ -49,7 +49,6 @@ use risingwave_pb::ddl_service::{
 };
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::PbFragment;
-use risingwave_pb::meta::PbTableParallelism;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::update_mutation::PbMergeUpdate;
 use risingwave_pb::stream_plan::{
@@ -74,8 +73,8 @@ use crate::model::{StreamContext, StreamJobFragments, TableParallelism};
 use crate::stream::{
     create_source_worker, validate_sink, ActorGraphBuildResult, ActorGraphBuilder,
     CompleteStreamFragmentGraph, CreateStreamingJobContext, CreateStreamingJobOption,
-    GlobalStreamManagerRef, ReplaceStreamJobContext, SourceChange, SourceManagerRef,
-    StreamFragmentGraph,
+    GlobalStreamManagerRef, JobRescheduleTarget, ReplaceStreamJobContext, SourceChange,
+    SourceManagerRef, StreamFragmentGraph,
 };
 use crate::{MetaError, MetaResult};
 
@@ -129,7 +128,7 @@ pub enum DdlCommand {
     CreateDatabase(Database),
     DropDatabase(DatabaseId),
     CreateSchema(Schema),
-    DropSchema(SchemaId),
+    DropSchema(SchemaId, DropMode),
     CreateNonSharedSource(Source),
     DropSource(SourceId, DropMode),
     CreateFunction(Function),
@@ -142,6 +141,7 @@ pub enum DdlCommand {
         CreateType,
         Option<ReplaceStreamJobInfo>,
         HashSet<ObjectId>,
+        Option<String>, // specific resource group
     ),
     DropStreamingJob(StreamingJobId, DropMode, Option<ReplaceStreamJobInfo>),
     AlterName(alter_name_request::Object, String),
@@ -164,7 +164,7 @@ impl DdlCommand {
     fn allow_in_recovery(&self) -> bool {
         match self {
             DdlCommand::DropDatabase(_)
-            | DdlCommand::DropSchema(_)
+            | DdlCommand::DropSchema(_, _)
             | DdlCommand::DropSource(_, _)
             | DdlCommand::DropFunction(_)
             | DdlCommand::DropView(_, _)
@@ -184,7 +184,7 @@ impl DdlCommand {
             | DdlCommand::CreateSecret(_)
             | DdlCommand::AlterSecret(_)
             | DdlCommand::AlterSwapRename(_) => true,
-            DdlCommand::CreateStreamingJob(_, _, _, _, _)
+            DdlCommand::CreateStreamingJob(_, _, _, _, _, _)
             | DdlCommand::CreateNonSharedSource(_)
             | DdlCommand::ReplaceStreamJob(_)
             | DdlCommand::AlterNonSharedSource(_)
@@ -299,7 +299,9 @@ impl DdlController {
                 DdlCommand::CreateDatabase(database) => ctrl.create_database(database).await,
                 DdlCommand::DropDatabase(database_id) => ctrl.drop_database(database_id).await,
                 DdlCommand::CreateSchema(schema) => ctrl.create_schema(schema).await,
-                DdlCommand::DropSchema(schema_id) => ctrl.drop_schema(schema_id).await,
+                DdlCommand::DropSchema(schema_id, drop_mode) => {
+                    ctrl.drop_schema(schema_id, drop_mode).await
+                }
                 DdlCommand::CreateNonSharedSource(source) => {
                     ctrl.create_non_shared_source(source).await
                 }
@@ -318,12 +320,14 @@ impl DdlController {
                     _create_type,
                     affected_table_replace_info,
                     dependencies,
+                    specific_resource_group,
                 ) => {
                     ctrl.create_streaming_job(
                         stream_job,
                         fragment_graph,
                         affected_table_replace_info,
                         dependencies,
+                        specific_resource_group,
                     )
                     .await
                 }
@@ -394,10 +398,10 @@ impl DdlController {
     }
 
     #[tracing::instrument(skip(self), level = "debug")]
-    pub async fn alter_parallelism(
+    pub async fn reschedule_streaming_job(
         &self,
         table_id: u32,
-        parallelism: PbTableParallelism,
+        target: JobRescheduleTarget,
         mut deferred: bool,
     ) -> MetaResult<()> {
         tracing::info!("alter parallelism");
@@ -419,7 +423,7 @@ impl DdlController {
         }
 
         self.stream_manager
-            .alter_table_parallelism(table_id, parallelism.into(), deferred)
+            .reschedule_streaming_job(table_id, target, deferred)
             .await
     }
 
@@ -440,8 +444,12 @@ impl DdlController {
             .await
     }
 
-    async fn drop_schema(&self, schema_id: SchemaId) -> MetaResult<NotificationVersion> {
-        self.drop_object(ObjectType::Schema, schema_id as _, DropMode::Restrict, None)
+    async fn drop_schema(
+        &self,
+        schema_id: SchemaId,
+        drop_mode: DropMode,
+    ) -> MetaResult<NotificationVersion> {
+        self.drop_object(ObjectType::Schema, schema_id as _, drop_mode, None)
             .await
     }
 
@@ -488,10 +496,13 @@ impl DdlController {
     }
 
     async fn drop_function(&self, function_id: FunctionId) -> MetaResult<NotificationVersion> {
-        self.metadata_manager
-            .catalog_controller
-            .drop_function(function_id as _)
-            .await
+        self.drop_object(
+            ObjectType::Function,
+            function_id as _,
+            DropMode::Restrict,
+            None,
+        )
+        .await
     }
 
     async fn create_view(&self, view: View) -> MetaResult<NotificationVersion> {
@@ -565,9 +576,7 @@ impl DdlController {
     }
 
     async fn drop_secret(&self, secret_id: SecretId) -> MetaResult<NotificationVersion> {
-        self.metadata_manager
-            .catalog_controller
-            .drop_secret(secret_id as _)
+        self.drop_object(ObjectType::Secret, secret_id as _, DropMode::Restrict, None)
             .await
     }
 
@@ -630,7 +639,7 @@ impl DdlController {
         let (_, version) = self
             .metadata_manager
             .catalog_controller
-            .drop_relation(ObjectType::Subscription, subscription_id as _, drop_mode)
+            .drop_object(ObjectType::Subscription, subscription_id as _, drop_mode)
             .await?;
         self.stream_manager
             .drop_subscription(database_id, subscription_id as _, table_id)
@@ -918,6 +927,7 @@ impl DdlController {
         fragment_graph: StreamFragmentGraphProto,
         affected_table_replace_info: Option<ReplaceStreamJobInfo>,
         dependencies: HashSet<ObjectId>,
+        specific_resource_group: Option<String>,
     ) -> MetaResult<NotificationVersion> {
         let ctx = StreamContext::from_protobuf(fragment_graph.get_ctx().unwrap());
         self.metadata_manager
@@ -928,6 +938,7 @@ impl DdlController {
                 &fragment_graph.parallelism,
                 fragment_graph.max_parallelism as _,
                 dependencies,
+                specific_resource_group.clone(),
             )
             .await?;
         let job_id = streaming_job.id();
@@ -960,6 +971,7 @@ impl DdlController {
                 streaming_job,
                 fragment_graph,
                 affected_table_replace_info,
+                specific_resource_group,
             )
             .await
         {
@@ -982,6 +994,7 @@ impl DdlController {
                     .await?;
                 if aborted {
                     tracing::warn!(id = job_id, "aborted streaming job");
+                    // FIXME: might also need other cleanup here
                     if let Some(source_id) = source_id {
                         self.source_manager
                             .apply_source_change(SourceChange::DropSource {
@@ -1001,6 +1014,7 @@ impl DdlController {
         mut streaming_job: StreamingJob,
         fragment_graph: StreamFragmentGraphProto,
         affected_table_replace_info: Option<ReplaceStreamJobInfo>,
+        specific_resource_group: Option<String>,
     ) -> MetaResult<NotificationVersion> {
         let mut fragment_graph =
             StreamFragmentGraph::new(&self.env, fragment_graph, &streaming_job)?;
@@ -1020,6 +1034,8 @@ impl DdlController {
 
         let affected_table_replace_info = match affected_table_replace_info {
             Some(replace_table_info) => {
+                assert!(specific_resource_group.is_none(), "specific_resource_group is not supported for replace table (alter column or sink into table)");
+
                 let ReplaceStreamJobInfo {
                     mut streaming_job,
                     fragment_graph,
@@ -1054,6 +1070,7 @@ impl DdlController {
                 streaming_job,
                 fragment_graph,
                 affected_table_replace_info,
+                specific_resource_group,
             )
             .await?;
 
@@ -1119,42 +1136,11 @@ impl DdlController {
         drop_mode: DropMode,
         target_replace_info: Option<ReplaceStreamJobInfo>,
     ) -> MetaResult<NotificationVersion> {
-        let (release_ctx, mut version) = match object_type {
-            ObjectType::Database => {
-                self.metadata_manager
-                    .catalog_controller
-                    .drop_database(object_id)
-                    .await?
-            }
-            ObjectType::Schema => {
-                return self
-                    .metadata_manager
-                    .catalog_controller
-                    .drop_schema(object_id, drop_mode)
-                    .await;
-            }
-            ObjectType::Function => {
-                return self
-                    .metadata_manager
-                    .catalog_controller
-                    .drop_function(object_id)
-                    .await;
-            }
-            ObjectType::Connection => {
-                let (version, _conn) = self
-                    .metadata_manager
-                    .catalog_controller
-                    .drop_connection(object_id)
-                    .await?;
-                return Ok(version);
-            }
-            _ => {
-                self.metadata_manager
-                    .catalog_controller
-                    .drop_relation(object_type, object_id, drop_mode)
-                    .await?
-            }
-        };
+        let (release_ctx, mut version) = self
+            .metadata_manager
+            .catalog_controller
+            .drop_object(object_type, object_id, drop_mode)
+            .await?;
 
         if let Some(replace_table_info) = target_replace_info {
             let stream_ctx =
@@ -1268,13 +1254,25 @@ impl DdlController {
             removed_streaming_job_ids,
             removed_state_table_ids,
             removed_source_ids,
+            removed_secret_ids: secret_ids,
             removed_source_fragments,
             removed_actors,
             removed_fragments,
-            ..
         } = release_ctx;
 
-        // unregister sources.
+        let _guard = self.source_manager.pause_tick().await;
+        self.stream_manager
+            .drop_streaming_jobs(
+                risingwave_common::catalog::DatabaseId::new(database_id as _),
+                removed_actors.iter().map(|id| *id as _).collect(),
+                removed_streaming_job_ids,
+                removed_state_table_ids,
+                removed_fragments.iter().map(|id| *id as _).collect(),
+            )
+            .await;
+
+        // clean up sources after dropping streaming jobs.
+        // Otherwise, e.g., Kafka consumer groups might be recreated after deleted.
         self.source_manager
             .apply_source_change(SourceChange::DropSource {
                 dropped_source_ids: removed_source_ids.into_iter().map(|id| id as _).collect(),
@@ -1300,16 +1298,10 @@ impl DdlController {
             })
             .await;
 
-        // drop streaming jobs.
-        self.stream_manager
-            .drop_streaming_jobs(
-                risingwave_common::catalog::DatabaseId::new(database_id as _),
-                removed_actors.into_iter().map(|id| id as _).collect(),
-                removed_streaming_job_ids,
-                removed_state_table_ids,
-                removed_fragments.iter().map(|id| *id as _).collect(),
-            )
-            .await;
+        // remove secrets.
+        for secret in secret_ids {
+            LocalSecretManager::global().remove_secret(secret as _);
+        }
         Ok(version)
     }
 
@@ -1484,6 +1476,8 @@ impl DdlController {
         drop_mode: DropMode,
         target_replace_info: Option<ReplaceStreamJobInfo>,
     ) -> MetaResult<NotificationVersion> {
+        let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
+
         let (object_id, object_type) = match job_id {
             StreamingJobId::MaterializedView(id) => (id as _, ObjectType::Table),
             StreamingJobId::Sink(id) => (id as _, ObjectType::Sink),
@@ -1506,8 +1500,9 @@ impl DdlController {
         specified: Option<NonZeroUsize>,
         max: NonZeroUsize,
         cluster_info: &StreamingClusterInfo,
+        resource_group: String,
     ) -> MetaResult<NonZeroUsize> {
-        let available = cluster_info.parallelism();
+        let available = cluster_info.parallelism(resource_group);
         let Some(available) = NonZeroUsize::new(available) else {
             bail_unavailable!("no available slots to schedule");
         };
@@ -1564,6 +1559,7 @@ impl DdlController {
         mut stream_job: StreamingJob,
         fragment_graph: StreamFragmentGraph,
         affected_table_replace_info: Option<(StreamingJob, StreamFragmentGraph)>,
+        specific_resource_group: Option<String>,
     ) -> MetaResult<(CreateStreamingJobContext, StreamJobFragments)> {
         let id = stream_job.id();
         let specified_parallelism = fragment_graph.specified_parallelism();
@@ -1612,14 +1608,32 @@ impl DdlController {
             (&stream_job).into(),
         )?;
 
+        let resource_group = match specific_resource_group {
+            None => {
+                self.metadata_manager
+                    .get_database_resource_group(stream_job.database_id() as ObjectId)
+                    .await?
+            }
+            Some(resource_group) => resource_group,
+        };
+
         // 2. Build the actor graph.
         let cluster_info = self.metadata_manager.get_streaming_cluster_info().await?;
 
-        let parallelism =
-            self.resolve_stream_parallelism(specified_parallelism, max_parallelism, &cluster_info)?;
+        let parallelism = self.resolve_stream_parallelism(
+            specified_parallelism,
+            max_parallelism,
+            &cluster_info,
+            resource_group.clone(),
+        )?;
 
-        let actor_graph_builder =
-            ActorGraphBuilder::new(id, complete_graph, cluster_info, parallelism)?;
+        let actor_graph_builder = ActorGraphBuilder::new(
+            id,
+            resource_group,
+            complete_graph,
+            cluster_info,
+            parallelism,
+        )?;
 
         let ActorGraphBuildResult {
             graph,
@@ -1834,6 +1848,11 @@ impl DdlController {
             _ => unreachable!(),
         };
 
+        let resource_group = self
+            .metadata_manager
+            .get_existing_job_resource_group(id as ObjectId)
+            .await?;
+
         // 2. Build the actor graph.
         let cluster_info = self.metadata_manager.get_streaming_cluster_info().await?;
 
@@ -1842,8 +1861,13 @@ impl DdlController {
         let parallelism = NonZeroUsize::new(original_root_fragment.get_actors().len())
             .expect("The number of actors in the original table fragment should be greater than 0");
 
-        let actor_graph_builder =
-            ActorGraphBuilder::new(id, complete_graph, cluster_info, parallelism)?;
+        let actor_graph_builder = ActorGraphBuilder::new(
+            id,
+            resource_group,
+            complete_graph,
+            cluster_info,
+            parallelism,
+        )?;
 
         let ActorGraphBuildResult {
             graph,

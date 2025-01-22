@@ -34,7 +34,9 @@ use risingwave_common::license::Feature;
 use risingwave_common::types::{DataType, Interval, ScalarImpl, Timestamptz};
 use risingwave_common::util::scan_range::{is_full_range, ScanRange};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
+use risingwave_connector::source::iceberg::IcebergTimeTravelInfo;
 use risingwave_expr::aggregate::PbAggKind;
+use risingwave_expr::bail;
 use risingwave_pb::plan_common::as_of::AsOfType;
 use risingwave_pb::plan_common::{as_of, PbAsOf};
 use risingwave_sqlparser::ast::AsOf;
@@ -490,6 +492,52 @@ pub fn to_pb_time_travel_as_of(a: &Option<AsOf>) -> Result<Option<PbAsOf>> {
     Ok(Some(PbAsOf {
         as_of_type: Some(as_of_type),
     }))
+}
+
+pub fn to_iceberg_time_travel_as_of(
+    a: &Option<AsOf>,
+    timezone: &String,
+) -> Result<Option<IcebergTimeTravelInfo>> {
+    Ok(match a {
+        Some(AsOf::VersionNum(v)) => Some(IcebergTimeTravelInfo::Version(*v)),
+        Some(AsOf::TimestampNum(ts)) => Some(IcebergTimeTravelInfo::TimestampMs(ts * 1000)),
+        Some(AsOf::VersionString(_)) => {
+            bail!("Unsupported version string in iceberg time travel")
+        }
+        Some(AsOf::TimestampString(ts)) => {
+            let date_time = speedate::DateTime::parse_str_rfc3339(ts)
+                .map_err(|_e| anyhow!("fail to parse timestamp"))?;
+            let timestamp = if date_time.time.tz_offset.is_none() {
+                // If the input does not specify a time zone, use the time zone set by the "SET TIME ZONE" command.
+                let tz = Timestamptz::lookup_time_zone(timezone).map_err(|e| anyhow!(e))?;
+                match tz.with_ymd_and_hms(
+                    date_time.date.year.into(),
+                    date_time.date.month.into(),
+                    date_time.date.day.into(),
+                    date_time.time.hour.into(),
+                    date_time.time.minute.into(),
+                    date_time.time.second.into(),
+                ) {
+                    MappedLocalTime::Single(d) => Ok(d.timestamp()),
+                    MappedLocalTime::Ambiguous(_, _) | MappedLocalTime::None => {
+                        Err(anyhow!(format!(
+                            "failed to parse the timestamp {ts} with the specified time zone {tz}"
+                        )))
+                    }
+                }?
+            } else {
+                date_time.timestamp_tz()
+            };
+
+            Some(IcebergTimeTravelInfo::TimestampMs(
+                timestamp * 1000 + date_time.time.microsecond as i64 / 1000,
+            ))
+        }
+        Some(AsOf::ProcessTime) | Some(AsOf::ProcessTimeWithInterval(_)) => {
+            unreachable!()
+        }
+        None => None,
+    })
 }
 
 pub fn scan_ranges_as_strs(order_names: Vec<String>, scan_ranges: &Vec<ScanRange>) -> Vec<String> {

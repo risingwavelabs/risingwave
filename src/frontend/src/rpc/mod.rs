@@ -22,6 +22,7 @@ use risingwave_sqlparser::ast::ObjectName;
 use tonic::{Request as RpcRequest, Response as RpcResponse, Status};
 
 use crate::error::RwError;
+use crate::handler::create_source::SqlColumnStrategy;
 use crate::handler::{get_new_table_definition_for_cdc_table, get_replace_table_plan};
 use crate::session::SESSION_MANAGER;
 
@@ -106,6 +107,7 @@ async fn get_new_table_plan(
         table_name,
         new_table_definition,
         &original_catalog,
+        SqlColumnStrategy::Follow, // not used
     )
     .await?;
 

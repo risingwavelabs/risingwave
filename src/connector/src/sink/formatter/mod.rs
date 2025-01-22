@@ -252,11 +252,13 @@ impl EncoderBuild for TextEncoder {
 
 impl EncoderBuild for AvroEncoder {
     async fn build(b: EncoderParams<'_>, pk_indices: Option<Vec<usize>>) -> Result<Self> {
-        let loader =
-            crate::schema::SchemaLoader::from_format_options(b.topic, &b.format_desc.options)
-                .map_err(|e| SinkError::Config(anyhow!(e)))?;
+        use crate::schema::{SchemaLoader, SchemaVersion};
 
-        let (schema_id, avro) = match pk_indices {
+        let loader = SchemaLoader::from_format_options(b.topic, &b.format_desc.options)
+            .await
+            .map_err(|e| SinkError::Config(anyhow!(e)))?;
+
+        let (schema_version, avro) = match pk_indices {
             Some(_) => loader
                 .load_key_schema()
                 .await
@@ -270,7 +272,10 @@ impl EncoderBuild for AvroEncoder {
             b.schema,
             pk_indices,
             std::sync::Arc::new(avro),
-            AvroHeader::ConfluentSchemaRegistry(schema_id),
+            match schema_version {
+                SchemaVersion::Confluent(x) => AvroHeader::ConfluentSchemaRegistry(x),
+                SchemaVersion::Glue(x) => AvroHeader::GlueSchemaRegistry(x),
+            },
         )
     }
 }

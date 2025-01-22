@@ -229,82 +229,20 @@ macro_rules! dispatch_split_impl {
 }
 
 #[macro_export]
-macro_rules! dispatch_connection_impl {
-    ($impl:expr, $inner_name:ident, $body:expr) => {
-        $crate::dispatch_connection_enum! { $impl, $inner_name, $body }
-    };
-}
-
-#[macro_export]
-macro_rules! dispatch_connection_enum {
-    ($impl:expr, $inner_name:ident, $body:expr) => {{
-        $crate::for_all_connections! {
-            $crate::dispatch_connection_impl_inner,
-            $impl,
-            $inner_name,
-            $body
-        }
-    }};
-}
-
-#[macro_export]
-macro_rules! dispatch_connection_impl_inner {
-    (
-        { $({$conn_variant_name:ident, $connection:ty, $pb_variant_type:ty }),* },
-        $impl:expr,
-        $inner_name:ident,
-        $body:expr
-    ) => {{
-        match $impl {
-            $(
-                ConnectionImpl::$conn_variant_name($inner_name) => {
-                    $body
-                }
-            ),*
-        }
-    }};
-}
-
-#[macro_export]
 macro_rules! impl_connection {
-    ({$({ $variant_name:ident, $connection:ty, $pb_connection_path:path }),*}) => {
-        #[derive(Debug, Clone, EnumAsInner, PartialEq)]
-        pub enum ConnectionImpl {
-            $(
-                $variant_name(Box<$connection>),
-            )*
-        }
-
-        $(
-            impl TryFrom<ConnectionImpl> for $connection {
-                type Error = $crate::error::ConnectorError;
-
-                fn try_from(connection: ConnectionImpl) -> std::result::Result<Self, Self::Error> {
-                    match connection {
-                        ConnectionImpl::$variant_name(inner) => Ok(Box::into_inner(inner)),
-                        other => risingwave_common::bail!("expect {} but get {:?}", stringify!($connection), other),
-                    }
-                }
-            }
-
-            impl From<$connection> for ConnectionImpl {
-                fn from(connection: $connection) -> ConnectionImpl {
-                    ConnectionImpl::$variant_name(Box::new(connection))
-                }
-            }
-
-        )*
-
-        impl ConnectionImpl {
-            pub fn from_proto(pb_connection_type: risingwave_pb::catalog::connection_params::PbConnectionType, value_secret_filled: std::collections::BTreeMap<String, String>) -> $crate::error::ConnectorResult<Self> {
-                match pb_connection_type {
-                    $(
-                        <$pb_connection_path>::$variant_name => {
-                            Ok(serde_json::from_value(json!(value_secret_filled)).map(ConnectionImpl::$variant_name).map_err($crate::error::ConnectorError::from)?)
-                        },
-                    )*
-                    risingwave_pb::catalog::connection_params::PbConnectionType::Unspecified => unreachable!(),
-                }
+    ({$({ $variant_name:ident, $connection_type:ty, $pb_connection_path:path }),*}) => {
+        pub fn build_connection(
+            pb_connection_type: risingwave_pb::catalog::connection_params::PbConnectionType,
+            value_secret_filled: std::collections::BTreeMap<String, String>
+        ) -> $crate::error::ConnectorResult<Box<dyn $crate::connector_common::Connection>> {
+            match pb_connection_type {
+                $(
+                    <$pb_connection_path>::$variant_name => {
+                        let c: Box<$connection_type> = serde_json::from_value(json!(value_secret_filled)).map_err($crate::error::ConnectorError::from)?;
+                        Ok(c)
+                    },
+                )*
+                risingwave_pb::catalog::connection_params::PbConnectionType::Unspecified => unreachable!(),
             }
         }
     }
