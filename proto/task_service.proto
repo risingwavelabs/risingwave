@@ -44,7 +44,6 @@ message CreateTaskRequest {
   plan_common.ExprContext expr_context = 5;
 }
 
-
 message CancelTaskRequest {
   batch_plan.TaskId task_id = 1;
 }
