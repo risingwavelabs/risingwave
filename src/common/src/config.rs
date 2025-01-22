@@ -2215,6 +2215,8 @@ pub mod default {
         const DEFAULT_MAX_LEVEL: u32 = 6;
         const DEFAULT_MAX_L0_COMPACT_LEVEL_COUNT: u32 = 42;
         const DEFAULT_SST_ALLOWED_TRIVIAL_MOVE_MIN_SIZE: u64 = 4 * MB;
+        const DEFAULT_EMERGENCY_LEVEL0_SST_FILE_COUNT: u32 = 2000; // > 50G / 32M = 1600
+        const DEFAULT_EMERGENCY_LEVEL0_SUB_LEVEL_PARTITION: u32 = 256;
 
         use crate::catalog::hummock::CompactionFilterFlag;
 
@@ -2296,6 +2298,14 @@ pub mod default {
 
         pub fn max_overlapping_level_size() -> u64 {
             256 * MB
+        }
+
+        pub fn emergency_level0_sst_file_count() -> u32 {
+            DEFAULT_EMERGENCY_LEVEL0_SST_FILE_COUNT
+        }
+
+        pub fn emergency_level0_sub_level_partition() -> u32 {
+            DEFAULT_EMERGENCY_LEVEL0_SUB_LEVEL_PARTITION
         }
     }
 

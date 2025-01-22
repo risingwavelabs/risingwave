@@ -72,6 +72,12 @@ impl CompactionConfigBuilder {
                     compaction_config::disable_auto_group_scheduling(),
                 ),
                 max_overlapping_level_size: Some(compaction_config::max_overlapping_level_size()),
+                emergency_level0_sst_file_count: Some(
+                    compaction_config::emergency_level0_sst_file_count(),
+                ),
+                emergency_level0_sub_level_partition: Some(
+                    compaction_config::emergency_level0_sub_level_partition(),
+                ),
             },
         }
     }
