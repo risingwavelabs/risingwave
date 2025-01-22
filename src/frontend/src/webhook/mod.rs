@@ -23,11 +23,13 @@ use axum::routing::post;
 use axum::Router;
 use pgwire::net::Address;
 use pgwire::pg_server::SessionManager;
+use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::array::{Array, ArrayBuilder, DataChunk};
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::{DataType, JsonbVal, Scalar};
 use risingwave_pb::batch_plan::FastInsertNode;
 use risingwave_pb::catalog::WebhookSourceInfo;
+use risingwave_pb::common::WorkerNode;
 use tokio::net::TcpListener;
 use tower::ServiceBuilder;
 use tower_http::add_extension::AddExtensionLayer;
@@ -47,6 +49,7 @@ const USER: &str = "root";
 pub struct FastInsertContext {
     pub webhook_source_info: WebhookSourceInfo,
     pub fast_insert_node: FastInsertNode,
+    pub worker_node: WorkerNode,
 }
 
 #[derive(Clone)]
@@ -194,6 +197,9 @@ pub(super) mod handlers {
             row_id_index: Some(1),
             session_id: session.id().0 as u32,
         };
+
+        let worker_node_manager =
+            WorkerNodeSelector::new(session.env().worker_node_manager_ref(), false);
 
         Ok(FastInsertContext {
             webhook_source_info,
