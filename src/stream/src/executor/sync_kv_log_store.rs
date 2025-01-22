@@ -121,7 +121,7 @@ struct SyncedKvLogStoreExecutor<S: StateStore, LS: LocalStateStore> {
 }
 // Stream interface
 impl<S: StateStore<Local = LS>, LS: LocalStateStore> SyncedKvLogStoreExecutor<S, LS> {
-    #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments, dead_code)]
     pub async fn new(
         table_id: u32,
         read_metrics: KvLogStoreReadMetrics,
