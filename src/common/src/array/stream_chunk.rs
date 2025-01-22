@@ -139,10 +139,19 @@ impl StreamChunk {
     ) -> Self {
         let ops = ops.into();
         for col in &columns {
-            assert_eq!(col.len(), ops.len());
+            assert_eq!(
+                col.len(),
+                ops.len(),
+                "column length mismatch column: {:#?}, ops: {:#?}, vis: {:#?}",
+                col,
+                ops,
+                visibility
+            );
         }
         let data = DataChunk::new(columns, visibility);
-        StreamChunk { ops, data }
+        let chunk = StreamChunk { ops, data };
+        chunk.check_consistency();
+        chunk
     }
 
     /// Build a `StreamChunk` from rows.
@@ -159,7 +168,9 @@ impl StreamChunk {
             debug_assert!(none.is_none());
         }
 
-        builder.take().expect("chunk should not be empty")
+        let chunk = builder.take().expect("chunk should not be empty");
+        chunk.check_consistency();
+        chunk
     }
 
     /// Get the reference of the underlying data chunk.
@@ -186,7 +197,9 @@ impl StreamChunk {
         for idx in visibility.iter_ones() {
             new_ops.push(ops[idx]);
         }
-        StreamChunk::new(new_ops, columns)
+        let chunk = StreamChunk::new(new_ops, columns);
+        chunk.check_consistency();
+        chunk
     }
 
     /// Split the `StreamChunk` into multiple chunks with the given size at most.
@@ -210,6 +223,9 @@ impl StreamChunk {
             outputs.push(output);
         }
 
+        for output in &outputs {
+            output.check_consistency();
+        }
         outputs
     }
 
@@ -248,7 +264,9 @@ impl StreamChunk {
         for column in prost.get_columns() {
             columns.push(ArrayImpl::from_protobuf(column, cardinality)?.into());
         }
-        Ok(StreamChunk::new(ops, columns))
+        let chunk = StreamChunk::new(ops, columns);
+        chunk.check_consistency();
+        Ok(chunk)
     }
 
     pub fn ops(&self) -> &[Op] {
@@ -313,10 +331,12 @@ impl StreamChunk {
     /// will be `[c, b, a]`. If `indices` is [2, 0], then the output will be `[c, a]`.
     /// If the input mapping is identity mapping, no reorder will be performed.
     pub fn project(&self, indices: &[usize]) -> Self {
-        Self {
+        let new = Self {
             ops: self.ops.clone(),
             data: self.data.project(indices),
-        }
+        };
+        new.check_consistency();
+        new
     }
 
     /// Remove the adjacent delete-insert if their row value are the same.
@@ -343,22 +363,34 @@ impl StreamChunk {
                 prev_r = Some(curr);
             }
         }
-        c.into()
+        let new = c.into();
+        new
     }
 
     /// Reorder columns and set visibility.
     pub fn project_with_vis(&self, indices: &[usize], vis: Bitmap) -> Self {
-        Self {
+        let new = Self {
             ops: self.ops.clone(),
             data: self.data.project_with_vis(indices, vis),
-        }
+        };
+        new.check_consistency();
+        new
     }
 
     /// Clone the `StreamChunk` with a new visibility.
     pub fn clone_with_vis(&self, vis: Bitmap) -> Self {
-        Self {
+        let new = Self {
             ops: self.ops.clone(),
             data: self.data.with_visibility(vis),
+        };
+        new.check_consistency();
+        new
+    }
+
+    pub fn check_consistency(&self) {
+        let ops_len = self.ops.len();
+        for col in self.data.columns() {
+            assert_eq!(col.len(), ops_len);
         }
     }
 }
