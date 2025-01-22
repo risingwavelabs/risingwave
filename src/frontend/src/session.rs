@@ -42,7 +42,6 @@ use risingwave_batch::worker_manager::worker_node_manager::{
     WorkerNodeManager, WorkerNodeManagerRef,
 };
 use risingwave_common::acl::AclMode;
-use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
 #[cfg(test)]
 use risingwave_common::catalog::{
     DEFAULT_DATABASE_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID,
@@ -1017,13 +1016,11 @@ impl SessionImpl {
         };
 
         check_schema_writable(&schema.name())?;
-        if schema.name() != DEFAULT_SCHEMA_NAME {
-            self.check_privileges(&[ObjectCheckItem::new(
-                schema.owner(),
-                AclMode::Create,
-                Object::SchemaId(schema.id()),
-            )])?;
-        }
+        self.check_privileges(&[ObjectCheckItem::new(
+            schema.owner(),
+            AclMode::Create,
+            Object::SchemaId(schema.id()),
+        )])?;
 
         let db_id = catalog_reader.get_database_by_name(db_name)?.id();
         Ok((db_id, schema.id()))

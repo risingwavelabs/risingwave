@@ -115,8 +115,8 @@ impl CompactTask {
 }
 
 impl From<PbCompactTask> for CompactTask {
-    #[expect(deprecated)]
     fn from(pb_compact_task: PbCompactTask) -> Self {
+        #[expect(deprecated)]
         Self {
             input_ssts: pb_compact_task
                 .input_ssts
@@ -168,8 +168,8 @@ impl From<PbCompactTask> for CompactTask {
 }
 
 impl From<&PbCompactTask> for CompactTask {
-    #[expect(deprecated)]
     fn from(pb_compact_task: &PbCompactTask) -> Self {
+        #[expect(deprecated)]
         Self {
             input_ssts: pb_compact_task
                 .input_ssts
@@ -221,8 +221,8 @@ impl From<&PbCompactTask> for CompactTask {
 }
 
 impl From<CompactTask> for PbCompactTask {
-    #[expect(deprecated)]
     fn from(compact_task: CompactTask) -> Self {
+        #[expect(deprecated)]
         Self {
             input_ssts: compact_task
                 .input_ssts
@@ -272,8 +272,8 @@ impl From<CompactTask> for PbCompactTask {
 }
 
 impl From<&CompactTask> for PbCompactTask {
-    #[expect(deprecated)]
     fn from(compact_task: &CompactTask) -> Self {
+        #[expect(deprecated)]
         Self {
             input_ssts: compact_task
                 .input_ssts

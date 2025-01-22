@@ -14,7 +14,6 @@
 
 use std::sync::Arc;
 
-use anyhow::Context;
 use either::Either;
 use itertools::Itertools;
 use pgwire::pg_response::StatementType;
@@ -28,7 +27,6 @@ use risingwave_sqlparser::ast::{
     CompatibleFormatEncode, CreateSourceStatement, Encode, Format, FormatEncodeOptions, ObjectName,
     SqlOption, Statement,
 };
-use risingwave_sqlparser::parser::Parser;
 
 use super::create_source::{
     generate_stream_graph_for_source, schema_has_schema_registry, validate_compatibility,
@@ -198,10 +196,7 @@ pub async fn refresh_sr_and_get_columns_diff(
 }
 
 fn get_format_encode_from_source(source: &SourceCatalog) -> Result<FormatEncodeOptions> {
-    let [stmt]: [_; 1] = Parser::parse_sql(&source.definition)
-        .context("unable to parse original source definition")?
-        .try_into()
-        .unwrap();
+    let stmt = source.create_sql_ast()?;
     let Statement::CreateSource {
         stmt: CreateSourceStatement { format_encode, .. },
     } = stmt
@@ -263,8 +258,10 @@ pub async fn handle_alter_source_with_sr(
 
     source.info = source_info;
     source.columns.extend(added_columns);
-    source.definition =
-        alter_definition_format_encode(&source.definition, format_encode.row_options.clone())?;
+    source.definition = alter_definition_format_encode(
+        source.create_sql_ast_purified()?,
+        format_encode.row_options.clone(),
+    )?;
 
     let (format_encode_options, format_encode_secret_ref) = resolve_secret_ref_in_with_options(
         WithOptions::try_from(format_encode.row_options())?,
@@ -313,15 +310,9 @@ pub async fn handle_alter_source_with_sr(
 
 /// Apply the new `format_encode_options` to the source/table definition.
 pub fn alter_definition_format_encode(
-    definition: &str,
+    mut stmt: Statement,
     format_encode_options: Vec<SqlOption>,
 ) -> Result<String> {
-    let ast = Parser::parse_sql(definition).expect("failed to parse relation definition");
-    let mut stmt = ast
-        .into_iter()
-        .exactly_one()
-        .expect("should contain only one statement");
-
     match &mut stmt {
         Statement::CreateSource {
             stmt: CreateSourceStatement { format_encode, .. },
@@ -391,6 +382,9 @@ pub mod tests {
                 .clone()
         };
 
+        let source = get_source();
+        expect_test::expect!["CREATE SOURCE src (id INT, country STRUCT<address CHARACTER VARYING, city STRUCT<address CHARACTER VARYING, zipcode CHARACTER VARYING>, zipcode CHARACTER VARYING>, zipcode BIGINT, rate REAL) WITH (connector = 'kafka', topic = 'test-topic', properties.bootstrap.server = 'localhost:29092') FORMAT PLAIN ENCODE PROTOBUF (message = '.test.TestRecord', schema.location = 'file://')"].assert_eq(&source.create_sql_purified().replace(proto_file.path().to_str().unwrap(), ""));
+
         let sql = format!(
             r#"ALTER SOURCE src FORMAT UPSERT ENCODE PROTOBUF (
                 message = '.test.TestRecord',
@@ -434,10 +428,6 @@ pub mod tests {
             .unwrap();
         assert_eq!(name_column.column_desc.data_type, DataType::Varchar);
 
-        let altered_sql = format!(
-            r#"CREATE SOURCE src WITH (connector = 'kafka', topic = 'test-topic', properties.bootstrap.server = 'localhost:29092') FORMAT PLAIN ENCODE PROTOBUF (message = '.test.TestRecordExt', schema.location = 'file://{}')"#,
-            proto_file.path().to_str().unwrap()
-        );
-        assert_eq!(altered_sql, altered_source.definition);
+        expect_test::expect!["CREATE SOURCE src (id INT, country STRUCT<address CHARACTER VARYING, city STRUCT<address CHARACTER VARYING, zipcode CHARACTER VARYING>, zipcode CHARACTER VARYING>, zipcode BIGINT, rate REAL, name CHARACTER VARYING) WITH (connector = 'kafka', topic = 'test-topic', properties.bootstrap.server = 'localhost:29092') FORMAT PLAIN ENCODE PROTOBUF (message = '.test.TestRecordExt', schema.location = 'file://')"].assert_eq(&altered_source.create_sql_purified().replace(proto_file.path().to_str().unwrap(), ""));
     }
 }
