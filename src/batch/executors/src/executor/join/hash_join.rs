@@ -1106,7 +1106,6 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 .enumerate()
                 .filter_by_bitmap(probe_chunk.visibility())
             {
-                non_equi_state.found_matched = false;
                 if let Some(first_matched_build_row_id) = hash_map.get(probe_key) {
                     non_equi_state
                         .first_output_row_id
@@ -2030,13 +2029,17 @@ impl DataChunkMutator {
                 break;
             }
         }
-        if ANTI_JOIN && !has_more_output_rows && !*found_matched {
-            new_visibility.set(start_row_id, true);
+        if !has_more_output_rows {
+            if ANTI_JOIN && !*found_matched {
+                new_visibility.set(start_row_id, true);
+            }
+            *found_matched = false;
         }
 
         first_output_row_ids.clear();
 
-        self.0.set_visibility(new_visibility.finish());
+        self.0
+            .set_visibility(new_visibility.finish() & self.0.visibility());
         self
     }
 
@@ -2058,7 +2061,8 @@ impl DataChunkMutator {
 
         build_row_ids.clear();
 
-        self.0.set_visibility(new_visibility.finish());
+        self.0
+            .set_visibility(new_visibility.finish() & self.0.visibility());
         self
     }
 
@@ -2135,7 +2139,8 @@ impl DataChunkMutator {
 
         build_row_ids.clear();
 
-        self.0.set_visibility(new_visibility.finish());
+        self.0
+            .set_visibility(new_visibility.finish() & self.0.visibility());
         self
     }
 
