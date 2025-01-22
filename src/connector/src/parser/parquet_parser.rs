@@ -187,6 +187,7 @@ impl ParquetParser {
         Ok(data_chunk.into())
     }
 
+    // Generate a special chunk to mark the end of reading. Its offset is usize::MAX and other fields are null.
     fn generate_eof_chunk(&mut self) -> Result<StreamChunk, crate::error::ConnectorError> {
         const MAX_HIDDEN_COLUMN_NUMS: usize = 3;
         let column_size = self.rw_columns.len();
