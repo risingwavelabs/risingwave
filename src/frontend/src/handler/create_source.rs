@@ -216,6 +216,7 @@ pub(crate) fn bind_all_columns(
             .cloned()
             .collect_vec();
 
+        #[allow(clippy::collapsible_else_if)]
         match sql_column_strategy {
             // Ignore `cols_from_source`, follow `cols_from_sql` without checking.
             SqlColumnStrategy::FollowUnchecked => {
