@@ -591,6 +591,15 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
             MutableConfig::DisableAutoGroupScheduling(c) => {
                 target.disable_auto_group_scheduling = Some(*c);
             }
+            MutableConfig::MaxOverlappingLevelSize(c) => {
+                target.max_overlapping_level_size = Some(*c);
+            }
+            MutableConfig::EmergencyLevel0SstFileCount(c) => {
+                target.emergency_level0_sst_file_count = Some(*c);
+            }
+            MutableConfig::EmergencyLevel0SubLevelPartition(c) => {
+                target.emergency_level0_sub_level_partition = Some(*c);
+            }
         }
     }
 }
