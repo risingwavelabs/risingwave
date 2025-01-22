@@ -1,5 +1,5 @@
 statement ok
-set sink_decouple = false;
+set sink_decouple = true;
 
 statement ok
 set streaming_parallelism=4;
