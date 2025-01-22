@@ -204,9 +204,7 @@ pub(super) mod handlers {
             session_id: session.id().0 as u32,
         };
 
-        let compute_client = choose_fast_insert_client(&table_id, &session)
-            .await
-            .unwrap();
+        let compute_client = choose_fast_insert_client(&table_id, session).await.unwrap();
 
         Ok(FastInsertContext {
             webhook_source_info,
