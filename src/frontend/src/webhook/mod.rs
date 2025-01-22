@@ -131,7 +131,7 @@ pub(super) mod handlers {
         }
 
         let mut builder = JsonbArrayBuilder::with_type(1, DataType::Jsonb);
-        let json_value = Value::from_text(&body.to_vec()).map_err(|e| {
+        let json_value = Value::from_text(&body).map_err(|e| {
             err(
                 anyhow!(e).context("Failed to parse body"),
                 StatusCode::UNPROCESSABLE_ENTITY,
@@ -172,7 +172,7 @@ pub(super) mod handlers {
 
         let reader = session.env().catalog_reader().read_guard();
         let (table_catalog, _schema) = reader
-            .get_any_table_by_name(database.as_str(), schema_path, &table)
+            .get_any_table_by_name(database.as_str(), schema_path, table)
             .map_err(|e| err(e, StatusCode::NOT_FOUND))?;
 
         let webhook_source_info = table_catalog
