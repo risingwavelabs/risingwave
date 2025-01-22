@@ -28,7 +28,6 @@ use petgraph::{Directed, Graph};
 use pgwire::pg_server::SessionId;
 use risingwave_batch::error::BatchError;
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
-use risingwave_common::bail;
 use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::{Schema, TableDesc};
 use risingwave_common::hash::table_distribution::TableDistribution;
@@ -38,7 +37,7 @@ use risingwave_connector::source::filesystem::opendal_source::opendal_enumerator
 use risingwave_connector::source::filesystem::opendal_source::{
     OpendalAzblob, OpendalGcs, OpendalS3,
 };
-use risingwave_connector::source::iceberg::{IcebergSplitEnumerator, IcebergTimeTravelInfo};
+use risingwave_connector::source::iceberg::IcebergSplitEnumerator;
 use risingwave_connector::source::kafka::KafkaSplitEnumerator;
 use risingwave_connector::source::reader::reader::build_opendal_fs_list_for_batch;
 use risingwave_connector::source::{
@@ -58,6 +57,7 @@ use crate::catalog::catalog_service::CatalogReader;
 use crate::catalog::TableId;
 use crate::error::RwError;
 use crate::optimizer::plan_node::generic::{GenericPlanRef, PhysicalPlanRef};
+use crate::optimizer::plan_node::utils::to_iceberg_time_travel_as_of;
 use crate::optimizer::plan_node::{
     BatchIcebergScan, BatchKafkaScan, BatchSource, PlanNodeId, PlanNodeType,
 };
@@ -145,6 +145,7 @@ pub struct BatchPlanFragmenter {
     catalog_reader: CatalogReader,
 
     batch_parallelism: usize,
+    timezone: String,
 
     stage_graph_builder: Option<StageGraphBuilder>,
     stage_graph: Option<StageGraph>,
@@ -163,6 +164,7 @@ impl BatchPlanFragmenter {
         worker_node_manager: WorkerNodeSelector,
         catalog_reader: CatalogReader,
         batch_parallelism: Option<NonZeroU64>,
+        timezone: String,
         batch_node: PlanRef,
     ) -> SchedulerResult<Self> {
         // if batch_parallelism is None, it means no limit, we will use the available nodes count as
@@ -186,6 +188,7 @@ impl BatchPlanFragmenter {
             worker_node_manager,
             catalog_reader,
             batch_parallelism,
+            timezone,
             stage_graph_builder: Some(StageGraphBuilder::new(batch_parallelism)),
             stage_graph: None,
         };
@@ -311,7 +314,11 @@ impl SourceScanInfo {
         Self::Incomplete(fetch_info)
     }
 
-    pub async fn complete(self, batch_parallelism: usize) -> SchedulerResult<Self> {
+    pub async fn complete(
+        self,
+        batch_parallelism: usize,
+        timezone: String,
+    ) -> SchedulerResult<Self> {
         let fetch_info = match self {
             SourceScanInfo::Incomplete(fetch_info) => fetch_info,
             SourceScanInfo::Complete(_) => {
@@ -374,28 +381,7 @@ impl SourceScanInfo {
                     IcebergSplitEnumerator::new(*prop, SourceEnumeratorContext::dummy().into())
                         .await?;
 
-                let time_travel_info = match fetch_info.as_of {
-                    Some(AsOf::VersionNum(v)) => Some(IcebergTimeTravelInfo::Version(v)),
-                    Some(AsOf::TimestampNum(ts)) => {
-                        Some(IcebergTimeTravelInfo::TimestampMs(ts * 1000))
-                    }
-                    Some(AsOf::VersionString(_)) => {
-                        bail!("Unsupported version string in iceberg time travel")
-                    }
-                    Some(AsOf::TimestampString(ts)) => Some(
-                        speedate::DateTime::parse_str_rfc3339(&ts)
-                            .map(|t| {
-                                IcebergTimeTravelInfo::TimestampMs(
-                                    t.timestamp_tz() * 1000 + t.time.microsecond as i64 / 1000,
-                                )
-                            })
-                            .map_err(|_e| anyhow!("fail to parse timestamp"))?,
-                    ),
-                    Some(AsOf::ProcessTime) | Some(AsOf::ProcessTimeWithInterval(_)) => {
-                        unreachable!()
-                    }
-                    None => None,
-                };
+                let time_travel_info = to_iceberg_time_travel_as_of(&fetch_info.as_of, &timezone)?;
 
                 let split_info = iceberg_enumerator
                     .list_splits_batch(
@@ -731,6 +717,7 @@ impl StageGraph {
         self,
         catalog_reader: &CatalogReader,
         worker_node_manager: &WorkerNodeSelector,
+        timezone: String,
     ) -> SchedulerResult<StageGraph> {
         let mut complete_stages = HashMap::new();
         self.complete_stage(
@@ -739,6 +726,7 @@ impl StageGraph {
             &mut complete_stages,
             catalog_reader,
             worker_node_manager,
+            timezone,
         )
         .await?;
         Ok(StageGraph {
@@ -758,6 +746,7 @@ impl StageGraph {
         complete_stages: &mut HashMap<StageId, QueryStageRef>,
         catalog_reader: &CatalogReader,
         worker_node_manager: &WorkerNodeSelector,
+        timezone: String,
     ) -> SchedulerResult<()> {
         let parallelism = if stage.parallelism.is_some() {
             // If the stage has parallelism, it means it's a complete stage.
@@ -772,7 +761,7 @@ impl StageGraph {
                 .as_ref()
                 .unwrap()
                 .clone()
-                .complete(self.batch_parallelism)
+                .complete(self.batch_parallelism, timezone.to_owned())
                 .await?;
 
             // For batch reading file source, the number of files involved is typically large.
@@ -842,6 +831,7 @@ impl StageGraph {
                 complete_stages,
                 catalog_reader,
                 worker_node_manager,
+                timezone.to_owned(),
             )
             .await?;
         }
@@ -935,7 +925,11 @@ impl BatchPlanFragmenter {
     pub async fn generate_complete_query(self) -> SchedulerResult<Query> {
         let stage_graph = self.stage_graph.unwrap();
         let new_stage_graph = stage_graph
-            .complete(&self.catalog_reader, &self.worker_node_manager)
+            .complete(
+                &self.catalog_reader,
+                &self.worker_node_manager,
+                self.timezone.to_owned(),
+            )
             .await?;
         Ok(Query {
             query_id: self.query_id,

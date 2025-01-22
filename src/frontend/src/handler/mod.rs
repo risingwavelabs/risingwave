@@ -43,6 +43,7 @@ use crate::utils::WithOptions;
 mod alter_owner;
 mod alter_parallelism;
 mod alter_rename;
+mod alter_resource_group;
 mod alter_secret;
 mod alter_set_schema;
 mod alter_source_column;
@@ -278,6 +279,7 @@ pub async fn handle(
         Statement::CreateFunction {
             or_replace,
             temporary,
+            if_not_exists,
             name,
             args,
             returns,
@@ -298,6 +300,7 @@ pub async fn handle(
                     handler_args,
                     or_replace,
                     temporary,
+                    if_not_exists,
                     name,
                     args,
                     returns,
@@ -310,6 +313,7 @@ pub async fn handle(
                     handler_args,
                     or_replace,
                     temporary,
+                    if_not_exists,
                     name,
                     args,
                     returns,
@@ -320,6 +324,7 @@ pub async fn handle(
         }
         Statement::CreateAggregate {
             or_replace,
+            if_not_exists,
             name,
             args,
             returns,
@@ -329,6 +334,7 @@ pub async fn handle(
             create_aggregate::handle_create_aggregate(
                 handler_args,
                 or_replace,
+                if_not_exists,
                 name,
                 args,
                 returns,
@@ -457,11 +463,11 @@ pub async fn handle(
                     | ObjectType::Source
                     | ObjectType::Subscription
                     | ObjectType::Index
-                    | ObjectType::Table => {
+                    | ObjectType::Table
+                    | ObjectType::Schema => {
                         cascade = true;
                     }
-                    ObjectType::Schema
-                    | ObjectType::Database
+                    ObjectType::Database
                     | ObjectType::User
                     | ObjectType::Connection
                     | ObjectType::Secret => {
@@ -840,6 +846,24 @@ pub async fn handle(
                 handler_args,
                 name,
                 parallelism,
+                StatementType::ALTER_MATERIALIZED_VIEW,
+                deferred,
+            )
+            .await
+        }
+        Statement::AlterView {
+            materialized,
+            name,
+            operation:
+                AlterViewOperation::SetResourceGroup {
+                    resource_group,
+                    deferred,
+                },
+        } if materialized => {
+            alter_resource_group::handle_alter_resource_group(
+                handler_args,
+                name,
+                resource_group,
                 StatementType::ALTER_MATERIALIZED_VIEW,
                 deferred,
             )
