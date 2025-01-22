@@ -23,22 +23,21 @@ use axum::routing::post;
 use axum::Router;
 use pgwire::net::Address;
 use pgwire::pg_server::SessionManager;
-use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::array::{Array, ArrayBuilder, DataChunk};
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::{DataType, JsonbVal, Scalar};
 use risingwave_pb::batch_plan::FastInsertNode;
 use risingwave_pb::catalog::WebhookSourceInfo;
-use risingwave_pb::common::WorkerNode;
+use risingwave_pb::task_service::{FastInsertRequest, FastInsertResponse};
 use tokio::net::TcpListener;
 use tower::ServiceBuilder;
 use tower_http::add_extension::AddExtensionLayer;
 use tower_http::compression::CompressionLayer;
 use tower_http::cors::{self, CorsLayer};
 
-use crate::scheduler::FastInsertExecution;
 use crate::webhook::utils::{err, Result};
 mod utils;
+use risingwave_rpc_client::ComputeClient;
 
 pub type Service = Arc<WebhookService>;
 
@@ -49,7 +48,7 @@ const USER: &str = "root";
 pub struct FastInsertContext {
     pub webhook_source_info: WebhookSourceInfo,
     pub fast_insert_node: FastInsertNode,
-    pub worker_node: WorkerNode,
+    pub compute_client: ComputeClient,
 }
 
 #[derive(Clone)]
@@ -70,6 +69,7 @@ pub(super) mod handlers {
 
     use super::*;
     use crate::catalog::root_catalog::SchemaPath;
+    use crate::scheduler::choose_fast_insert_client;
     use crate::session::{SessionImpl, SESSION_MANAGER};
 
     pub async fn handle_post_request(
@@ -102,7 +102,8 @@ pub(super) mod handlers {
         let FastInsertContext {
             webhook_source_info,
             mut fast_insert_node,
-        } = acquire_table_info(&session, &database, &schema, &table)?;
+            compute_client,
+        } = acquire_table_info(&session, &database, &schema, &table).await?;
 
         let WebhookSourceInfo {
             signature_expr,
@@ -146,14 +147,7 @@ pub(super) mod handlers {
         // Use builder to obtain a single (List) column DataChunk
         let data_chunk = DataChunk::new(vec![builder.finish().into_ref()], 1);
         fast_insert_node.data_chunk = Some(data_chunk.to_protobuf());
-
-        let execution = FastInsertExecution::new(
-            fast_insert_node,
-            wait_for_persistence,
-            session.env().clone(),
-            session.clone(),
-        );
-        let res = execution.execute().await.unwrap();
+        let res = execute(fast_insert_node, wait_for_persistence, compute_client).await?;
         if res.status == fast_insert_response::Status::Succeeded as i32 {
             Ok(())
         } else {
@@ -164,7 +158,7 @@ pub(super) mod handlers {
         }
     }
 
-    fn acquire_table_info(
+    async fn acquire_table_info(
         session: &Arc<SessionImpl>,
         database: &String,
         schema: &String,
@@ -173,38 +167,61 @@ pub(super) mod handlers {
         let search_path = session.config().search_path();
         let schema_path = SchemaPath::new(Some(schema.as_str()), &search_path, USER);
 
-        let reader = session.env().catalog_reader().read_guard();
-        let (table_catalog, _schema) = reader
-            .get_any_table_by_name(database.as_str(), schema_path, table)
-            .map_err(|e| err(e, StatusCode::NOT_FOUND))?;
+        let (webhook_source_info, table_id, version_id) = {
+            let reader = session.env().catalog_reader().read_guard();
+            let (table_catalog, _schema) = reader
+                .get_any_table_by_name(database.as_str(), schema_path, table)
+                .map_err(|e| err(e, StatusCode::NOT_FOUND))?;
 
-        let webhook_source_info = table_catalog
-            .webhook_info
-            .as_ref()
-            .ok_or_else(|| {
-                err(
-                    anyhow!("Table `{}` is not with webhook source", table),
-                    StatusCode::FORBIDDEN,
-                )
-            })?
-            .clone();
+            let webhook_source_info = table_catalog
+                .webhook_info
+                .as_ref()
+                .ok_or_else(|| {
+                    err(
+                        anyhow!("Table `{}` is not with webhook source", table),
+                        StatusCode::FORBIDDEN,
+                    )
+                })?
+                .clone();
+            (
+                webhook_source_info,
+                table_catalog.id(),
+                table_catalog.version_id().expect("table must be versioned"),
+            )
+        };
 
         let fast_insert_node = FastInsertNode {
-            table_id: table_catalog.id().table_id,
-            table_version_id: table_catalog.version_id().expect("table must be versioned"),
+            table_id: table_id.table_id,
+            table_version_id: version_id,
             column_indices: vec![0],
             data_chunk: None,
             row_id_index: Some(1),
             session_id: session.id().0 as u32,
         };
 
-        let worker_node_manager =
-            WorkerNodeSelector::new(session.env().worker_node_manager_ref(), false);
+        let compute_client = choose_fast_insert_client(&table_id, &session)
+            .await
+            .unwrap();
 
         Ok(FastInsertContext {
             webhook_source_info,
             fast_insert_node,
+            compute_client,
         })
+    }
+
+    async fn execute(
+        fast_insert_node: FastInsertNode,
+        wait_for_persistence: bool,
+        client: ComputeClient,
+    ) -> Result<FastInsertResponse> {
+        let request = FastInsertRequest {
+            fast_insert_node: Some(fast_insert_node),
+            wait_for_persistence,
+        };
+        // WKXTODO: handle error
+        let response = client.fast_insert(request).await.unwrap();
+        Ok(response)
     }
 }
 
