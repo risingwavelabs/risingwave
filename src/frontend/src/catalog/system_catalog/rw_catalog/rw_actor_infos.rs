@@ -33,7 +33,7 @@ struct RwActorInfo {
 async fn read_rw_actors(reader: &SysCatalogReaderImpl) -> Result<Vec<RwActorInfo>> {
     let table_ids = reader
         .meta_client
-        .list_table_fragment_states()
+        .list_streaming_job_states()
         .await?
         .into_iter()
         .map(|fragment| fragment.table_id)
