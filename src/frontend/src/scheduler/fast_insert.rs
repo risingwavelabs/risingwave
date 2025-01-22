@@ -17,96 +17,73 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use itertools::Itertools;
+use pgwire::pg_server::Session;
 use risingwave_batch::error::BatchError;
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::hash::WorkerSlotMapping;
-use risingwave_pb::batch_plan::FastInsertNode;
 use risingwave_pb::common::WorkerNode;
-use risingwave_pb::task_service::{FastInsertRequest, FastInsertResponse};
+use risingwave_rpc_client::ComputeClient;
 
 use crate::catalog::TableId;
 use crate::scheduler::{SchedulerError, SchedulerResult};
 use crate::session::{FrontendEnv, SessionImpl};
 
-pub struct FastInsertExecution {
-    fast_insert_node: FastInsertNode,
-    wait_for_persistence: bool,
-    front_env: FrontendEnv,
-    session: Arc<SessionImpl>,
-    worker_node_manager: WorkerNodeSelector,
+pub async fn choose_fast_insert_client(
+    table_id: &TableId,
+    // wait_for_persistence: bool,
+    session: &Arc<SessionImpl>,
+) -> SchedulerResult<ComputeClient> {
+    let worker = choose_worker(table_id, session)?;
+
+    let client = session.env().client_pool().get(&worker).await?;
+    return Ok(client);
+    //     let request = FastInsertRequest {
+    //         fast_insert_node: Some(fast_insert_node),
+    //         wait_for_persistence: wait_for_persistence,
+    //     };
+    //     let response = client.fast_insert(request).await?;
+    //     Ok(response)
 }
 
-impl FastInsertExecution {
-    pub fn new(
-        fast_insert_node: FastInsertNode,
-        wait_for_persistence: bool,
-        front_env: FrontendEnv,
-        session: Arc<SessionImpl>,
-    ) -> Self {
-        let worker_node_manager =
-            WorkerNodeSelector::new(front_env.worker_node_manager_ref(), false);
+fn get_table_dml_vnode_mapping(
+    table_id: &TableId,
+    frontend_env: &FrontendEnv,
+    worker_node_manager: &WorkerNodeSelector,
+) -> SchedulerResult<WorkerSlotMapping> {
+    let guard = frontend_env.catalog_reader().read_guard();
 
-        Self {
-            fast_insert_node,
-            wait_for_persistence,
-            front_env,
-            session,
-            worker_node_manager,
-        }
-    }
+    let table = guard
+        .get_any_table_by_id(table_id)
+        .map_err(|e| SchedulerError::Internal(anyhow!(e)))?;
 
-    pub async fn execute(self) -> SchedulerResult<FastInsertResponse> {
-        let worker = self.choose_worker(
-            &TableId::new(self.fast_insert_node.table_id),
-            self.fast_insert_node.session_id,
-        )?;
+    let fragment_id = match table.dml_fragment_id.as_ref() {
+        Some(dml_fragment_id) => dml_fragment_id,
+        // Backward compatibility for those table without `dml_fragment_id`.
+        None => &table.fragment_id,
+    };
 
-        let client = self.session.env().client_pool().get(&worker).await?;
-        let request = FastInsertRequest {
-            fast_insert_node: Some(self.fast_insert_node),
-            wait_for_persistence: self.wait_for_persistence,
-        };
-        let response = client.fast_insert(request).await?;
-        Ok(response)
-    }
+    worker_node_manager
+        .manager
+        .get_streaming_fragment_mapping(fragment_id)
+        .map_err(|e| e.into())
+}
 
-    #[inline(always)]
-    fn get_table_dml_vnode_mapping(
-        &self,
-        table_id: &TableId,
-    ) -> SchedulerResult<WorkerSlotMapping> {
-        let guard = self.front_env.catalog_reader().read_guard();
+fn choose_worker(table_id: &TableId, session: &Arc<SessionImpl>) -> SchedulerResult<WorkerNode> {
+    let worker_node_manager =
+        WorkerNodeSelector::new(session.env().worker_node_manager_ref(), false);
+    let session_id: u32 = session.id().0 as u32;
 
-        let table = guard
-            .get_any_table_by_id(table_id)
-            .map_err(|e| SchedulerError::Internal(anyhow!(e)))?;
-
-        let fragment_id = match table.dml_fragment_id.as_ref() {
-            Some(dml_fragment_id) => dml_fragment_id,
-            // Backward compatibility for those table without `dml_fragment_id`.
-            None => &table.fragment_id,
-        };
-
-        self.worker_node_manager
+    // dml should use streaming vnode mapping
+    let vnode_mapping = get_table_dml_vnode_mapping(table_id, session.env(), &worker_node_manager)?;
+    let worker_node = {
+        let worker_ids = vnode_mapping.iter_unique().collect_vec();
+        let candidates = worker_node_manager
             .manager
-            .get_streaming_fragment_mapping(fragment_id)
-            .map_err(|e| e.into())
-    }
-
-    fn choose_worker(&self, table_id: &TableId, session_id: u32) -> SchedulerResult<WorkerNode> {
-        // dml should use streaming vnode mapping
-        let vnode_mapping = self.get_table_dml_vnode_mapping(table_id)?;
-        let worker_node = {
-            let worker_ids = vnode_mapping.iter_unique().collect_vec();
-            let candidates = self
-                .worker_node_manager
-                .manager
-                .get_workers_by_worker_slot_ids(&worker_ids)?;
-            if candidates.is_empty() {
-                return Err(BatchError::EmptyWorkerNodes.into());
-            }
-            candidates[session_id as usize % candidates.len()].clone()
-        };
-        Ok(worker_node)
-    }
+            .get_workers_by_worker_slot_ids(&worker_ids)?;
+        if candidates.is_empty() {
+            return Err(BatchError::EmptyWorkerNodes.into());
+        }
+        candidates[session_id as usize % candidates.len()].clone()
+    };
+    Ok(worker_node)
 }
