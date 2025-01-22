@@ -719,6 +719,9 @@ impl<K: HashKey> HashJoinExecutor<K> {
                     JoinType::FullOuter => {
                         Self::do_full_outer_join_with_non_equi_condition(params, cond)
                     }
+                    JoinType::AsOfInner | JoinType::AsOfLeftOuter => {
+                        unreachable!("AsOf join should not reach here")
+                    }
                 };
                 // For non-equi join, we need an output chunk builder to align the output chunks.
                 let mut output_chunk_builder =
@@ -736,8 +739,10 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 }
             } else {
                 let stream = match self.join_type {
-                    JoinType::Inner => Self::do_inner_join(params),
-                    JoinType::LeftOuter => Self::do_left_outer_join(params),
+                    JoinType::Inner | JoinType::AsOfInner => Self::do_inner_join(params),
+                    JoinType::LeftOuter | JoinType::AsOfLeftOuter => {
+                        Self::do_left_outer_join(params)
+                    }
                     JoinType::LeftSemi => Self::do_left_semi_anti_join::<false>(params),
                     JoinType::LeftAnti => Self::do_left_semi_anti_join::<true>(params),
                     JoinType::RightOuter => Self::do_right_outer_join(params),

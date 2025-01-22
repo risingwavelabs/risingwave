@@ -198,7 +198,9 @@ impl<K: HashKey> LookupJoinBase<K> {
                     JoinType::RightOuter
                     | JoinType::RightSemi
                     | JoinType::RightAnti
-                    | JoinType::FullOuter => unimplemented!(),
+                    | JoinType::FullOuter
+                    | JoinType::AsOfInner
+                    | JoinType::AsOfLeftOuter => unimplemented!(),
                 };
                 // For non-equi join, we need an output chunk builder to align the output chunks.
                 let mut output_chunk_builder =
@@ -223,7 +225,9 @@ impl<K: HashKey> LookupJoinBase<K> {
                     JoinType::RightOuter
                     | JoinType::RightSemi
                     | JoinType::RightAnti
-                    | JoinType::FullOuter => unimplemented!(),
+                    | JoinType::FullOuter
+                    | JoinType::AsOfInner
+                    | JoinType::AsOfLeftOuter => unimplemented!(),
                 };
                 #[for_await]
                 for chunk in stream {

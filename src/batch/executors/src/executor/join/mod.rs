@@ -49,6 +49,8 @@ pub enum JoinType {
     /// Anti join when build side should output when matched
     RightAnti,
     FullOuter,
+    AsOfInner,
+    AsOfLeftOuter,
 }
 
 impl JoinType {
@@ -62,7 +64,9 @@ impl JoinType {
             PbJoinType::RightSemi => JoinType::RightSemi,
             PbJoinType::RightAnti => JoinType::RightAnti,
             PbJoinType::FullOuter => JoinType::FullOuter,
-            PbJoinType::AsofInner | PbJoinType::AsofLeftOuter | PbJoinType::Unspecified => {
+            PbJoinType::AsofInner => JoinType::AsOfInner,
+            PbJoinType::AsofLeftOuter => JoinType::AsOfLeftOuter,
+            PbJoinType::Unspecified => {
                 unreachable!()
             }
         }

@@ -1393,7 +1393,7 @@ impl LogicalJoin {
     /// Convert the logical `AsOf` join to a Hash join + a Group top 1.
     fn to_batch_asof_join(
         &self,
-        mut logical_join: generic::Join<PlanRef>,
+        logical_join: generic::Join<PlanRef>,
         predicate: EqJoinPredicate,
     ) -> Result<PlanRef> {
         use super::batch::prelude::*;
@@ -1404,12 +1404,6 @@ impl LogicalJoin {
             )
             .into());
         }
-
-        logical_join.join_type = match logical_join.join_type {
-            JoinType::AsofInner => JoinType::Inner,
-            JoinType::AsofLeftOuter => JoinType::LeftOuter,
-            _ => unreachable!(),
-        };
 
         let left_schema_len = logical_join.left.schema().len();
         let asof_desc =
