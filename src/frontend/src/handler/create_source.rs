@@ -268,6 +268,7 @@ pub(crate) fn bind_all_columns(
                                 ))));
                             }
                         }
+                        return Ok(cols_from_sql);
                     }
                 } else {
                     if wildcard_idx.is_some() {
