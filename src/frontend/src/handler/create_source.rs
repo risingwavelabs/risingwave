@@ -233,8 +233,8 @@ pub(crate) fn bind_all_columns(
                 let has_regular_cols_from_sql =
                     generated_cols_from_sql.len() != cols_from_sql.len();
 
-                if wildcard_idx.is_some() {
-                    if has_regular_cols_from_sql {
+                if has_regular_cols_from_sql {
+                    if wildcard_idx.is_some() {
                         // (*, normal_column INT)
                         return Err(RwError::from(NotSupported(
                             "When there's a wildcard (\"*\"), \
@@ -243,12 +243,6 @@ pub(crate) fn bind_all_columns(
                             "Remove the non-generated columns".to_owned(),
                         )));
                     } else {
-                        // (*)
-                        // (*, generated_column INT)
-                        // Good, expand the wildcard later.
-                    }
-                } else {
-                    if has_regular_cols_from_sql {
                         // (normal_column INT)
                         // Follow `cols_from_sql` with name & type checking.
                         for col in &cols_from_sql {
@@ -274,6 +268,12 @@ pub(crate) fn bind_all_columns(
                                 ))));
                             }
                         }
+                    }
+                } else {
+                    if wildcard_idx.is_some() {
+                        // (*)
+                        // (*, generated_column INT)
+                        // Good, expand the wildcard later.
                     } else {
                         // ()
                         // (generated_column INT)
@@ -284,7 +284,7 @@ pub(crate) fn bind_all_columns(
                         //       in the future.
                         notice_to_user("\
                             Neither wildcard (\"*\") nor regular (non-generated) columns appear in the user-defined schema from SQL. \
-                            For backward compatibility, all columns from the source will be included at the front. \
+                            For backward compatibility, all columns from the source will be included at the beginning. \
                             For clarity, consider adding a wildcard (\"*\") to indicate where the columns from the source should be included, \
                             or specifying the columns you want to include from the source.
                         ");
@@ -293,8 +293,10 @@ pub(crate) fn bind_all_columns(
             }
         }
 
-        // If we are planning based on a purified SQL, the wildcard may already be expanded thus absent.
-        // Default to 0 to leave the generated columns at the end.
+        // In some cases the wildcard may be absent:
+        // - plan based on a purified SQL
+        // - interpret `()` as `(*)` for backward compatibility (see notice above)
+        // Default to 0 to expand the wildcard at the beginning.
         let wildcard_idx = wildcard_idx.unwrap_or(0).min(generated_cols_from_sql.len());
 
         // Merge `generated_cols_from_sql` with `cols_from_source`.
