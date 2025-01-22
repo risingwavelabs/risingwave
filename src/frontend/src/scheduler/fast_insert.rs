@@ -35,7 +35,7 @@ pub async fn choose_fast_insert_client(
 ) -> SchedulerResult<ComputeClient> {
     let worker = choose_worker(table_id, session)?;
     let client = session.env().client_pool().get(&worker).await?;
-    return Ok(client);
+    Ok(client)
 }
 
 fn get_table_dml_vnode_mapping(
