@@ -132,11 +132,19 @@ impl<Src: OpendalSource> OpendalReader<Src> {
         let source_name = source_ctx.source_name.clone();
         let object_name = split.name.clone();
         let start_offset = split.offset;
-        let reader = op
-            .read_with(&object_name)
-            .range(start_offset as u64..)
-            .into_future() // Unlike `rustc`, `try_stream` seems require manual `into_future`.
-            .await?;
+        // After a recovery occurs, for gzip-compressed files, it is necessary to read from the beginning each time,
+        // other files can continue reading from the last read `start_offset`.
+        let reader = match object_name.ends_with(".gz") || object_name.ends_with(".gzip") {
+            true => op.read_with(&object_name).into_future().await?,
+
+            false => {
+                op.read_with(&object_name)
+                    .range(start_offset as u64..)
+                    .into_future()
+                    .await?
+            }
+        };
+
         let stream_reader = StreamReader::new(
             reader.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)),
         );
@@ -181,53 +189,14 @@ impl<Src: OpendalSource> OpendalReader<Src> {
             }
             // note that the buffer contains the newline character
             debug_assert_eq!(n_read, line_buf.len());
+            let msg_offset = (offset + n_read).to_string();
+            if (object_name.ends_with(".gz") || object_name.ends_with(".gzip"))
+                && offset + n_read <= start_offset
+            {
 
-            // The `offset` variable serves two main purposes:
-            // 1. It is used to check whether a file has been completely read. In the fetch executor,
-            //    when `offset >= split.size`, it indicates that the end of the file has been reached,
-            //    prompting the removal of the corresponding entry from the state table.
-            //
-            // 2. After recovery occurs, `offset` prevents the reading process from starting
-            //    over from the beginning of the file. Instead, it allows the reading to continue
-            //    directly from the last successfully read `offset`.
-            //
-            // Special handling is required for files compressed with gzip:
-            // - Gzip files must always be read from the beginning; they cannot be read from
-            //   a mid-point.
-            // - Additionally, the recorded `size` refers to the size of the file before
-            //   compression, while the actual size read by the reader is the compressed size.
-            //
-            // Therefore, for gzip-compressed files, the `offset` can only be either 0 or
-            // the size of the file. When reaching the end of the file, the last message
-            // should set `offset = split.size` to inform the fetch executor that the file
-            // has been completely read. In all other scenarios, `offset` should be set to 0.
-            if object_name.ends_with(".gz") || object_name.ends_with(".gzip") {
-                let remain_buf = buf_reader.fill_buf().await?;
-                if remain_buf.is_empty() {
-                    // read to the end, set the offset = `split.size` in the last Message.
-                    batch.push(SourceMessage {
-                        key: None,
-                        payload: Some(std::mem::take(&mut line_buf).into_bytes()),
-                        offset: split.size.to_string(),
-                        split_id: split.id(),
-                        meta: SourceMeta::Empty,
-                    });
-                } else {
-                    batch.push(SourceMessage {
-                        key: None,
-                        payload: Some(std::mem::take(&mut line_buf).into_bytes()),
-                        offset: "0".to_owned(),
-                        split_id: split.id(),
-                        meta: SourceMeta::Empty,
-                    });
-                }
+                // For gzip compressed files, the reader needs to read from the beginning each time,
+                // but it needs to skip the previously read part and start yielding chunks from a position greater than or equal to start_offset.
             } else {
-                // FIXME(rc): Here we have to use `offset + n_read`, i.e. the offset of the next line,
-                // as the *message offset*, because we check whether a file is finished by comparing the
-                // message offset with the file size in `FsFetchExecutor::into_stream`. However, we must
-                // understand that this message offset is not semantically consistent with the offset of
-                // other source connectors.
-                let msg_offset = (offset + n_read).to_string();
                 batch.push(SourceMessage {
                     key: None,
                     payload: Some(std::mem::take(&mut line_buf).into_bytes()),
@@ -235,9 +204,10 @@ impl<Src: OpendalSource> OpendalReader<Src> {
                     split_id: split.id(),
                     meta: SourceMeta::Empty,
                 });
-                offset += n_read;
-                partition_input_bytes_metrics.inc_by(n_read as _);
             }
+
+            offset += n_read;
+            partition_input_bytes_metrics.inc_by(n_read as _);
 
             partition_input_bytes_metrics.inc_by(n_read as _);
 
@@ -250,5 +220,18 @@ impl<Src: OpendalSource> OpendalReader<Src> {
             batch.shrink_to_fit();
             yield batch;
         }
+
+        // We no longer determine whether a file is finished by comparing `offset >= size`.
+        // The reader itself can sense whether it has reached the end.
+        // Therefore, after a file is read completely, we yield one more chunk marked as EOF, with its offset set to `usize::MAX` to indicate that it is finished.
+        // In fetch executor, if `offset = usize::MAX` is encountered, the corresponding file can be deleted from the state table.
+        let eof_batch = vec![SourceMessage {
+            key: None,
+            payload: None,
+            offset: usize::MAX.to_string(),
+            split_id: split.id(),
+            meta: SourceMeta::Empty,
+        }];
+        yield eof_batch;
     }
 }
