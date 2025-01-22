@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_batch::executor::AsOfDesc;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::HashJoinNode;
 use risingwave_pb::plan_common::{AsOfJoinDesc, JoinType};
@@ -21,7 +20,8 @@ use risingwave_pb::plan_common::{AsOfJoinDesc, JoinType};
 use super::batch::prelude::*;
 use super::utils::{childless_record, Distill};
 use super::{
-    generic, EqJoinPredicate, ExprRewritable, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, ToBatchPb, ToDistributedBatch
+    generic, EqJoinPredicate, ExprRewritable, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary,
+    ToBatchPb, ToDistributedBatch,
 };
 use crate::error::Result;
 use crate::expr::{Expr, ExprRewriter, ExprVisitor};
@@ -41,12 +41,16 @@ pub struct BatchHashJoin {
     /// The join condition must be equivalent to `logical.on`, but separated into equal and
     /// non-equal parts to facilitate execution later
     eq_join_predicate: EqJoinPredicate,
-    /// AsOf desc
+    /// `AsOf` desc
     asof_desc: Option<AsOfJoinDesc>,
 }
 
 impl BatchHashJoin {
-    pub fn new(core: generic::Join<PlanRef>, eq_join_predicate: EqJoinPredicate, asof_desc: Optioin<AsOfJoinDesc>) -> Self {
+    pub fn new(
+        core: generic::Join<PlanRef>,
+        eq_join_predicate: EqJoinPredicate,
+        asof_desc: Option<AsOfJoinDesc>,
+    ) -> Self {
         let dist = Self::derive_dist(core.left.distribution(), core.right.distribution(), &core);
         let base = PlanBase::new_batch_with_core(&core, dist, Order::any());
 
@@ -134,7 +138,7 @@ impl PlanTreeNodeBinary for BatchHashJoin {
         let mut core = self.core.clone();
         core.left = left;
         core.right = right;
-        Self::new(core, self.eq_join_predicate.clone(), self.asof_desc.clone())
+        Self::new(core, self.eq_join_predicate.clone(), self.asof_desc)
     }
 }
 
@@ -222,7 +226,7 @@ impl ToBatchPb for BatchHashJoin {
                 .as_expr_unless_true()
                 .map(|x| x.to_expr_proto()),
             output_indices: self.core.output_indices.iter().map(|&x| x as u32).collect(),
-            asof_desc: self.asof_desc.as_ref().map(|x| x.to_proto()),
+            asof_desc: self.asof_desc,
         })
     }
 }
@@ -247,11 +251,13 @@ impl ExprRewritable for BatchHashJoin {
         let mut core = self.core.clone();
         core.rewrite_exprs(r);
         let eq_join_predicate = self.eq_join_predicate.rewrite_exprs(r);
-        let desc = LogicalJoin::get_inequality_desc_from_predicate(
-            eq_join_predicate.other_cond().clone(),
-            core.left.schema().len(),
-        )
-        .unwrap();
+        let desc = self.asof_desc.map(|_| {
+            LogicalJoin::get_inequality_desc_from_predicate(
+                eq_join_predicate.other_cond().clone(),
+                core.left.schema().len(),
+            )
+            .unwrap()
+        });
         Self::new(core, eq_join_predicate, desc).into()
     }
 }

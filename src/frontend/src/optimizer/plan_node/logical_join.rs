@@ -38,10 +38,9 @@ use crate::optimizer::plan_node::generic::DynamicFilter;
 use crate::optimizer::plan_node::stream_asof_join::StreamAsOfJoin;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{
-    BatchGroupTopN, BatchHashJoin, BatchLookupJoin, BatchNestedLoopJoin, BatchProject,
-    ColumnPruningContext, EqJoinPredicate, LogicalFilter, LogicalScan, PredicatePushdownContext,
-    RewriteStreamContext, StreamDynamicFilter, StreamFilter, StreamTableScan, StreamTemporalJoin,
-    ToStreamContext,
+    BatchHashJoin, BatchLookupJoin, BatchNestedLoopJoin, ColumnPruningContext, EqJoinPredicate,
+    LogicalFilter, LogicalScan, PredicatePushdownContext, RewriteStreamContext,
+    StreamDynamicFilter, StreamFilter, StreamTableScan, StreamTemporalJoin, ToStreamContext,
 };
 use crate::optimizer::plan_visitor::LogicalCardinalityExt;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
@@ -1397,8 +1396,6 @@ impl LogicalJoin {
         mut logical_join: generic::Join<PlanRef>,
         predicate: EqJoinPredicate,
     ) -> Result<PlanRef> {
-        use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-
         use super::batch::prelude::*;
 
         if predicate.eq_keys().is_empty() {
@@ -1419,6 +1416,7 @@ impl LogicalJoin {
             Self::get_inequality_desc_from_predicate(predicate.non_eq_cond(), left_schema_len)?;
 
         let batch_join = BatchHashJoin::new(logical_join, predicate, Some(asof_desc));
+        Ok(batch_join.into())
     }
 
     pub fn get_inequality_desc_from_predicate(
