@@ -135,7 +135,7 @@ impl TaskService for BatchServiceImpl {
         match res {
             Ok(_) => Ok(Response::new(FastInsertResponse {
                 status: fast_insert_response::Status::Succeeded.into(),
-                error_message: "".to_string(),
+                error_message: "".to_owned(),
             })),
             Err(e) => match e {
                 BatchError::Dml(e) => Ok(Response::new(FastInsertResponse {
