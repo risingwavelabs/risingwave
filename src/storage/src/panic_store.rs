@@ -67,6 +67,10 @@ impl StateStoreRead for PanicStateStore {
 impl StateStoreReadLog for PanicStateStore {
     type ChangeLogIter = PanicStateStoreIter<StateStoreReadLogItem>;
 
+    async fn next_epoch(&self, _epoch: u64, _options: NextEpochOptions) -> StorageResult<u64> {
+        unimplemented!()
+    }
+
     async fn iter_log(
         &self,
         _epoch_range: (u64, u64),
@@ -78,6 +82,7 @@ impl StateStoreReadLog for PanicStateStore {
 }
 
 impl LocalStateStore for PanicStateStore {
+    type FlushedSnapshotReader = PanicStateStore;
     type Iter<'a> = PanicStateStoreIter<StateStoreKeyedRow>;
     type RevIter<'a> = PanicStateStoreIter<StateStoreKeyedRow>;
 
@@ -154,6 +159,10 @@ impl LocalStateStore for PanicStateStore {
 
     fn get_table_watermark(&self, _vnode: VirtualNode) -> Option<Bytes> {
         panic!("should not operate on the panic state store!");
+    }
+
+    fn new_flushed_snapshot_reader(&self) -> Self::FlushedSnapshotReader {
+        panic!()
     }
 }
 

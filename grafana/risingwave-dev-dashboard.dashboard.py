@@ -3967,12 +3967,12 @@ def section_iceberg_metrics(outer_panels):
         outer_panels.row_collapsed(
             "Iceberg Metrics",
             [
-                panels.timeseries_count(
+                panels.timeseries_ops(
                     "Write Qps Of Iceberg Writer",
                     "iceberg write qps",
                     [
                         panels.target(
-                            f"{metric('iceberg_write_qps')}",
+                            f"sum(rate({metric('iceberg_write_qps')}[$__rate_interval])) by (actor_id, sink_id, sink_name)",
                             "{{sink_id}} {{sink_name}} actor {{actor_id}}",
                         ),
                     ],

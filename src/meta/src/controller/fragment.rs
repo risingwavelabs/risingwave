@@ -26,10 +26,10 @@ use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::{Actor, Fragment, Sink, StreamingJob};
 use risingwave_meta_model::{
-    actor, actor_dispatcher, fragment, object, sink, source, streaming_job, table, ActorId,
-    ActorUpstreamActors, ConnectorSplits, DatabaseId, ExprContext, FragmentId, I32Array, JobStatus,
-    ObjectId, SchemaId, SinkId, SourceId, StreamNode, StreamingParallelism, TableId, VnodeBitmap,
-    WorkerId,
+    actor, actor_dispatcher, database, fragment, object, sink, source, streaming_job, table,
+    ActorId, ActorUpstreamActors, ConnectorSplits, DatabaseId, ExprContext, FragmentId, I32Array,
+    JobStatus, ObjectId, SchemaId, SinkId, SourceId, StreamNode, StreamingParallelism, TableId,
+    VnodeBitmap, WorkerId,
 };
 use risingwave_meta_model_migration::{Alias, SelectStatement};
 use risingwave_pb::common::PbActorLocation;
@@ -64,8 +64,8 @@ use crate::controller::utils::{
     FragmentDesc, PartialActorLocation, PartialFragmentStateTables,
 };
 use crate::manager::LocalNotification;
-use crate::model::TableParallelism;
-use crate::stream::SplitAssignment;
+use crate::model::{StreamContext, StreamJobFragments, TableParallelism};
+use crate::stream::{build_actor_split_impls, SplitAssignment};
 use crate::{MetaError, MetaResult};
 
 #[derive(Clone, Debug)]
@@ -90,6 +90,7 @@ pub struct StreamingJobInfo {
     pub job_status: JobStatus,
     pub parallelism: StreamingParallelism,
     pub max_parallelism: i32,
+    pub resource_group: String,
 }
 
 impl CatalogControllerInner {
@@ -344,10 +345,10 @@ impl CatalogController {
         )>,
         parallelism: StreamingParallelism,
         max_parallelism: usize,
-    ) -> MetaResult<PbTableFragments> {
-        let mut pb_fragments = HashMap::new();
+    ) -> MetaResult<StreamJobFragments> {
+        let mut pb_fragments = BTreeMap::new();
         let mut pb_actor_splits = HashMap::new();
-        let mut pb_actor_status = HashMap::new();
+        let mut pb_actor_status = BTreeMap::new();
 
         for (fragment, actors, actor_dispatcher) in fragments {
             let (fragment, fragment_actor_status, fragment_actor_splits) =
@@ -355,28 +356,26 @@ impl CatalogController {
 
             pb_fragments.insert(fragment.fragment_id, fragment);
 
-            pb_actor_splits.extend(fragment_actor_splits.into_iter());
+            pb_actor_splits.extend(build_actor_split_impls(&fragment_actor_splits));
             pb_actor_status.extend(fragment_actor_status.into_iter());
         }
 
-        let table_fragments = PbTableFragments {
-            table_id,
+        let table_fragments = StreamJobFragments {
+            stream_job_id: table_id.into(),
             state: state as _,
             fragments: pb_fragments,
             actor_status: pb_actor_status,
             actor_splits: pb_actor_splits,
-            ctx: Some(ctx.unwrap_or_default()),
-            parallelism: Some(
-                match parallelism {
-                    StreamingParallelism::Custom => TableParallelism::Custom,
-                    StreamingParallelism::Adaptive => TableParallelism::Adaptive,
-                    StreamingParallelism::Fixed(n) => TableParallelism::Fixed(n as _),
-                }
-                .into(),
-            ),
-            node_label: "".to_owned(),
-            backfill_done: true,
-            max_parallelism: Some(max_parallelism as _),
+            ctx: ctx
+                .as_ref()
+                .map(StreamContext::from_protobuf)
+                .unwrap_or_default(),
+            assigned_parallelism: match parallelism {
+                StreamingParallelism::Custom => TableParallelism::Custom,
+                StreamingParallelism::Adaptive => TableParallelism::Adaptive,
+                StreamingParallelism::Fixed(n) => TableParallelism::Fixed(n as _),
+            },
+            max_parallelism,
         };
 
         Ok(table_fragments)
@@ -680,7 +679,10 @@ impl CatalogController {
         Ok(select.into_tuple().all(&inner.db).await?)
     }
 
-    pub async fn get_job_fragments_by_id(&self, job_id: ObjectId) -> MetaResult<PbTableFragments> {
+    pub async fn get_job_fragments_by_id(
+        &self,
+        job_id: ObjectId,
+    ) -> MetaResult<StreamJobFragments> {
         let inner = self.inner.read().await;
         let fragment_actors = Fragment::find()
             .find_with_related(Actor)
@@ -727,6 +729,7 @@ impl CatalogController {
             .select_only()
             .column(streaming_job::Column::JobId)
             .join(JoinType::InnerJoin, streaming_job::Relation::Object.def())
+            .join(JoinType::InnerJoin, object::Relation::Database2.def())
             .column(object::Column::ObjType)
             .join(JoinType::LeftJoin, table::Relation::Object1.def().rev())
             .join(JoinType::LeftJoin, source::Relation::Object.def().rev())
@@ -749,6 +752,16 @@ impl CatalogController {
                 streaming_job::Column::Parallelism,
                 streaming_job::Column::MaxParallelism,
             ])
+            .column_as(
+                Expr::if_null(
+                    Expr::col((
+                        streaming_job::Entity,
+                        streaming_job::Column::SpecificResourceGroup,
+                    )),
+                    Expr::col((database::Entity, database::Column::ResourceGroup)),
+                ),
+                "resource_group",
+            )
             .into_model()
             .all(&inner.db)
             .await?;
@@ -832,7 +845,7 @@ impl CatalogController {
     }
 
     // TODO: This function is too heavy, we should avoid using it and implement others on demand.
-    pub async fn table_fragments(&self) -> MetaResult<BTreeMap<ObjectId, PbTableFragments>> {
+    pub async fn table_fragments(&self) -> MetaResult<BTreeMap<ObjectId, StreamJobFragments>> {
         let inner = self.inner.read().await;
         let jobs = StreamingJob::find().all(&inner.db).await?;
         let mut table_fragments = BTreeMap::new();

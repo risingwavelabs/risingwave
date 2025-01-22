@@ -107,7 +107,10 @@ async fn do_handle_explain(
             } => {
                 let cursor_manager = session.clone().get_cursor_manager();
                 let plan = cursor_manager
-                    .gen_batch_plan_with_subscription_cursor(cursor_name, handler_args)
+                    .gen_batch_plan_with_subscription_cursor(
+                        &cursor_name.real_value(),
+                        handler_args,
+                    )
                     .await
                     .map(|x| x.plan)?;
                 let context = plan.ctx();

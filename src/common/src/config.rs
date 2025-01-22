@@ -525,13 +525,26 @@ pub struct MetaDeveloperConfig {
     #[serde(default = "default::developer::actor_cnt_per_worker_parallelism_hard_limit")]
     pub actor_cnt_per_worker_parallelism_hard_limit: usize,
 
-    #[serde(default = "default::developer::hummock_time_travel_sst_info_fetch_batch_size")]
     /// Max number of SSTs fetched from meta store per SELECT, during time travel Hummock version replay.
+    #[serde(default = "default::developer::hummock_time_travel_sst_info_fetch_batch_size")]
     pub hummock_time_travel_sst_info_fetch_batch_size: usize,
 
-    #[serde(default = "default::developer::hummock_time_travel_sst_info_insert_batch_size")]
     /// Max number of SSTs inserted into meta store per INSERT, during time travel metadata writing.
+    #[serde(default = "default::developer::hummock_time_travel_sst_info_insert_batch_size")]
     pub hummock_time_travel_sst_info_insert_batch_size: usize,
+
+    #[serde(default = "default::developer::time_travel_vacuum_interval_sec")]
+    pub time_travel_vacuum_interval_sec: u64,
+
+    /// Max number of epoch-to-version inserted into meta store per INSERT, during time travel metadata writing.
+    #[serde(default = "default::developer::hummock_time_travel_epoch_version_insert_batch_size")]
+    pub hummock_time_travel_epoch_version_insert_batch_size: usize,
+
+    #[serde(default = "default::developer::hummock_gc_history_insert_batch_size")]
+    pub hummock_gc_history_insert_batch_size: usize,
+
+    #[serde(default = "default::developer::hummock_time_travel_filter_out_objects_batch_size")]
+    pub hummock_time_travel_filter_out_objects_batch_size: usize,
 }
 
 /// The section `[server]` in `risingwave.toml`.
@@ -1475,7 +1488,7 @@ pub mod default {
         }
 
         pub fn vacuum_spin_interval_ms() -> u64 {
-            200
+            100
         }
 
         pub fn hummock_version_checkpoint_interval_sec() -> u64 {
@@ -2052,6 +2065,21 @@ pub mod default {
 
         pub fn hummock_time_travel_sst_info_insert_batch_size() -> usize {
             100
+        }
+
+        pub fn time_travel_vacuum_interval_sec() -> u64 {
+            30
+        }
+        pub fn hummock_time_travel_epoch_version_insert_batch_size() -> usize {
+            1000
+        }
+
+        pub fn hummock_gc_history_insert_batch_size() -> usize {
+            1000
+        }
+
+        pub fn hummock_time_travel_filter_out_objects_batch_size() -> usize {
+            1000
         }
 
         pub fn memory_controller_threshold_aggressive() -> f64 {

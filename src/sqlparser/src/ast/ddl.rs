@@ -25,7 +25,6 @@ use crate::ast::{
     display_comma_separated, display_separated, DataType, Expr, Ident, ObjectName, SecretRefValue,
     SetVariableValue, Value,
 };
-use crate::parser::{SOURCE_RATE_LIMIT_PAUSED, SOURCE_RATE_LIMIT_RESUMED};
 use crate::tokenizer::Token;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -151,6 +150,12 @@ pub enum AlterViewOperation {
     /// `SET PARALLELISM TO <parallelism> [ DEFERRED ]`
     SetParallelism {
         parallelism: SetVariableValue,
+        deferred: bool,
+    },
+    /// `SET RESOURCE_GROUP TO 'RESOURCE GROUP' [ DEFERRED ]`
+    /// `RESET RESOURCE_GROUP [ DEFERRED ]`
+    SetResourceGroup {
+        resource_group: Option<SetVariableValue>,
         deferred: bool,
     },
     /// `SET BACKFILL_RATE_LIMIT TO <rate_limit>`
@@ -393,6 +398,18 @@ impl fmt::Display for AlterViewOperation {
             AlterViewOperation::SwapRenameView { target_view } => {
                 write!(f, "SWAP WITH {}", target_view)
             }
+            AlterViewOperation::SetResourceGroup {
+                resource_group,
+                deferred,
+            } => {
+                let deferred = if *deferred { " DEFERRED" } else { "" };
+
+                if let Some(resource_group) = resource_group {
+                    write!(f, "SET RESOURCE_GROUP TO {} {}", resource_group, deferred)
+                } else {
+                    write!(f, "RESET RESOURCE_GROUP {}", deferred)
+                }
+            }
         }
     }
 }
@@ -472,11 +489,9 @@ impl fmt::Display for AlterSourceOperation {
             AlterSourceOperation::RefreshSchema => {
                 write!(f, "REFRESH SCHEMA")
             }
-            AlterSourceOperation::SetSourceRateLimit { rate_limit } => match *rate_limit {
-                SOURCE_RATE_LIMIT_PAUSED => write!(f, "PAUSE"),
-                SOURCE_RATE_LIMIT_RESUMED => write!(f, "RESUME"),
-                _ => write!(f, "SET SOURCE_RATE_LIMIT TO {}", rate_limit),
-            },
+            AlterSourceOperation::SetSourceRateLimit { rate_limit } => {
+                write!(f, "SET SOURCE_RATE_LIMIT TO {}", rate_limit)
+            }
             AlterSourceOperation::SwapRenameSource { target_source } => {
                 write!(f, "SWAP WITH {}", target_source)
             }
@@ -738,7 +753,17 @@ pub enum ColumnOption {
     /// `NOT NULL`
     NotNull,
     /// `DEFAULT <restricted-expr>`
-    DefaultColumns(Expr),
+    DefaultValue(Expr),
+    /// Default value from previous bound `DefaultColumnDesc`. Used internally
+    /// for schema change and should not be specified by users.
+    DefaultValueInternal {
+        /// Protobuf encoded `DefaultColumnDesc`.
+        persisted: Box<[u8]>,
+        /// Optional AST for unparsing. If `None`, the default value will be
+        /// shown as `DEFAULT INTERNAL` which is for demonstrating and should
+        /// not be specified by users.
+        expr: Option<Expr>,
+    },
     /// `{ PRIMARY KEY | UNIQUE }`
     Unique { is_primary: bool },
     /// A referential integrity constraint (`[FOREIGN KEY REFERENCES
@@ -768,7 +793,14 @@ impl fmt::Display for ColumnOption {
         match self {
             Null => write!(f, "NULL"),
             NotNull => write!(f, "NOT NULL"),
-            DefaultColumns(expr) => write!(f, "DEFAULT {}", expr),
+            DefaultValue(expr) => write!(f, "DEFAULT {}", expr),
+            DefaultValueInternal { persisted: _, expr } => {
+                if let Some(expr) = expr {
+                    write!(f, "DEFAULT {}", expr)
+                } else {
+                    write!(f, "DEFAULT INTERNAL")
+                }
+            }
             Unique { is_primary } => {
                 write!(f, "{}", if *is_primary { "PRIMARY KEY" } else { "UNIQUE" })
             }

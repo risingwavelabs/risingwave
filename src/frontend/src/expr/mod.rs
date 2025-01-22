@@ -22,6 +22,7 @@ use risingwave_expr::aggregate::PbAggKind;
 use risingwave_expr::expr::build_from_prost;
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::{ExprNode, ProjectSetSelectItem};
+use user_defined_function::UserDefinedFunctionDisplay;
 
 use crate::error::{ErrorCode, Result as RwResult};
 
@@ -1138,7 +1139,16 @@ impl std::fmt::Debug for ExprDisplay<'_> {
                 // TODO: WindowFunctionCallVerboseDisplay
                 write!(f, "{:?}", x)
             }
-            ExprImpl::UserDefinedFunction(x) => write!(f, "{:?}", x),
+            ExprImpl::UserDefinedFunction(x) => {
+                write!(
+                    f,
+                    "{:?}",
+                    UserDefinedFunctionDisplay {
+                        func_call: x,
+                        input_schema: self.input_schema
+                    }
+                )
+            }
             ExprImpl::Parameter(x) => write!(f, "{:?}", x),
             ExprImpl::Now(x) => write!(f, "{:?}", x),
         }

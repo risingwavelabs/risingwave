@@ -221,6 +221,10 @@ impl<S: StateStoreRead> StateStoreRead for MonitoredStateStore<S> {
 impl<S: StateStoreReadLog> StateStoreReadLog for MonitoredStateStore<S> {
     type ChangeLogIter = impl StateStoreReadChangeLogIter;
 
+    fn next_epoch(&self, epoch: u64, options: NextEpochOptions) -> impl StorageFuture<'_, u64> {
+        self.inner.next_epoch(epoch, options)
+    }
+
     fn iter_log(
         &self,
         epoch_range: (u64, u64),
@@ -235,6 +239,8 @@ impl<S: StateStoreReadLog> StateStoreReadLog for MonitoredStateStore<S> {
 }
 
 impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
+    type FlushedSnapshotReader = MonitoredStateStore<S::FlushedSnapshotReader>;
+
     type Iter<'a> = impl StateStoreIter + 'a;
     type RevIter<'a> = impl StateStoreIter + 'a;
 
@@ -321,6 +327,13 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
 
     fn get_table_watermark(&self, vnode: VirtualNode) -> Option<Bytes> {
         self.inner.get_table_watermark(vnode)
+    }
+
+    fn new_flushed_snapshot_reader(&self) -> Self::FlushedSnapshotReader {
+        MonitoredStateStore::new(
+            self.inner.new_flushed_snapshot_reader(),
+            self.storage_metrics.clone(),
+        )
     }
 }
 
