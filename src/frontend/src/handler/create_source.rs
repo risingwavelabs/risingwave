@@ -698,25 +698,24 @@ pub fn bind_connector_props(
 /// how to handle the regular columns (i.e., non-generated) defined in SQL?
 pub enum SqlColumnStrategy {
     /// Follow all columns defined in SQL, ignore the columns from external system.
+    /// This ensures that no accidental side effect will change the schema.
     ///
-    /// This is the behavior when `SINK INTO` or `[ADD | DROP] COLUMN` atop the purified SQL,
-    /// ensuring that no accidental refresh will happen and the schema remains unchanged.
-    // TODO(purify): we may validate whether defined columns are valid against the resolved schema.
+    /// This is the behavior when re-planning the target table of `SINK INTO`.
     FollowUnchecked,
+
+    /// Follow all column defined in SQL, check the columns from external system with name & type.
+    /// This ensures that no accidental side effect will change the schema.
+    ///
+    /// This is the behavior when creating a new table or source with a resolvable schema;
+    /// adding, or dropping columns on that table.
+    // TODO(purify): `ALTER SOURCE` currently has its own code path and does not check.
+    FollowChecked,
 
     /// Merge the generated columns defined in SQL and columns from external system. If there
     /// are also regular columns defined in SQL, ignore silently.
     ///
     /// This is the behavior when `REFRESH SCHEMA` atop the purified SQL.
     Ignore,
-
-    /// Merge the generated columns defined in SQL and columns from external system. If there
-    /// are also regular columns defined in SQL, reject the request.
-    ///
-    /// This is the behavior when creating a new table or source with a resolvable schema.
-    // TODO(purify): we may accept this as there are some practical use cases, see
-    //               https://github.com/risingwavelabs/risingwave/issues/12199
-    FollowChecked,
 }
 
 #[allow(clippy::too_many_arguments)]
