@@ -150,7 +150,7 @@ pub(super) mod handlers {
             session.env().clone(),
             session.clone(),
         );
-        let res = execution.my_execute().await.unwrap();
+        let res = execution.execute().await.unwrap();
         if res.status == fast_insert_response::Status::Succeeded as i32 {
             Ok(())
         } else {
