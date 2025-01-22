@@ -95,6 +95,7 @@ use crate::handler::util::{
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::generic::SourceNodeKind;
 use crate::optimizer::plan_node::{LogicalSource, ToStream, ToStreamContext};
+use crate::session::current::notice_to_user;
 use crate::session::SessionImpl;
 use crate::utils::{
     resolve_connection_ref_and_secret_ref, resolve_privatelink_in_with_option,
@@ -242,6 +243,7 @@ pub(crate) fn bind_all_columns(
                             "Remove the non-generated columns".to_owned(),
                         )));
                     } else {
+                        // (*)
                         // (*, generated_column INT)
                         // Good, expand the wildcard later.
                     }
@@ -273,13 +275,19 @@ pub(crate) fn bind_all_columns(
                             }
                         }
                     } else {
+                        // ()
                         // (generated_column INT)
-                        return Err(RwError::from(ProtocolError(
-                            "Neither wildcard (\"*\") nor regular (non-generated) columns appear in the user-defined schema from SQL. \
-                             This will result in ingesting no columns from the source and is likely not what you intended. \
-                             Consider adding a wildcard (\"*\") to include all columns from the source, \
-                             or specifying the columns you want to include from the source."
-                        .to_owned())));
+                        // Interpreted as if there's a wildcard for backward compatibility.
+                        // TODO: the behavior is not that consistent, making it impossible to ingest no
+                        //       columns from the source (though not useful in practice). Currently we
+                        //       just notice the user but we may want to interpret it as empty columns
+                        //       in the future.
+                        notice_to_user("\
+                            Neither wildcard (\"*\") nor regular (non-generated) columns appear in the user-defined schema from SQL. \
+                            For backward compatibility, all columns from the source will be included at the front. \
+                            For clarity, consider adding a wildcard (\"*\") to indicate where the columns from the source should be included, \
+                            or specifying the columns you want to include from the source.
+                        ");
                     }
                 }
             }
