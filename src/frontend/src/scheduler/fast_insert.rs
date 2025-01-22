@@ -55,7 +55,7 @@ impl FastInsertExecution {
         }
     }
 
-    pub async fn my_execute(self) -> SchedulerResult<FastInsertResponse> {
+    pub async fn execute(self) -> SchedulerResult<FastInsertResponse> {
         let worker = self.choose_worker(
             &TableId::new(self.fast_insert_node.table_id),
             self.fast_insert_node.session_id,
