@@ -32,16 +32,17 @@ use with_options::WithOptions;
 use crate::connector_common::{
     AwsAuthProps, IcebergCommon, KafkaConnectionProps, KafkaPrivateLinkCommon,
 };
+use crate::deserialize_optional_bool_from_string;
 use crate::error::ConnectorResult;
 use crate::schema::schema_registry::Client as ConfluentSchemaRegistryClient;
+use crate::source::build_connection;
 use crate::source::kafka::{KafkaContextCommon, RwConsumerContext};
-use crate::{deserialize_optional_bool_from_string, dispatch_connection_impl, ConnectionImpl};
 
 pub const SCHEMA_REGISTRY_CONNECTION_TYPE: &str = "schema_registry";
 
 #[async_trait]
-pub trait Connection {
-    async fn test_connection(&self) -> ConnectorResult<()>;
+pub trait Connection: Send {
+    async fn validate_connection(&self) -> ConnectorResult<()>;
 }
 
 #[serde_as]
@@ -64,9 +65,8 @@ pub async fn validate_connection(connection: &PbConnection) -> ConnectorResult<(
                 let secret_refs = cp.secret_refs.clone().into_iter().collect();
                 let props_secret_resolved =
                     LocalSecretManager::global().fill_secrets(options, secret_refs)?;
-                let connection_impl =
-                    ConnectionImpl::from_proto(cp.connection_type(), props_secret_resolved)?;
-                dispatch_connection_impl!(connection_impl, inner, inner.test_connection().await?)
+                let connection = build_connection(cp.connection_type(), props_secret_resolved)?;
+                connection.validate_connection().await?
             }
             risingwave_pb::catalog::connection::Info::PrivateLinkService(_) => unreachable!(),
         }
@@ -76,7 +76,7 @@ pub async fn validate_connection(connection: &PbConnection) -> ConnectorResult<(
 
 #[async_trait]
 impl Connection for KafkaConnection {
-    async fn test_connection(&self) -> ConnectorResult<()> {
+    async fn validate_connection(&self) -> ConnectorResult<()> {
         let client = self.build_client().await?;
         // describe cluster here
         client.fetch_metadata(None, Duration::from_secs(10)).await?;
@@ -175,7 +175,7 @@ pub struct IcebergConnection {
 
 #[async_trait]
 impl Connection for IcebergConnection {
-    async fn test_connection(&self) -> ConnectorResult<()> {
+    async fn validate_connection(&self) -> ConnectorResult<()> {
         let info = match &self.warehouse_path {
             Some(warehouse_path) => {
                 let url = Url::parse(warehouse_path);
@@ -298,7 +298,7 @@ pub struct ConfluentSchemaRegistryConnection {
 
 #[async_trait]
 impl Connection for ConfluentSchemaRegistryConnection {
-    async fn test_connection(&self) -> ConnectorResult<()> {
+    async fn validate_connection(&self) -> ConnectorResult<()> {
         // GET /config to validate the connection
         let client = ConfluentSchemaRegistryClient::try_from(self)?;
         client.validate_connection().await?;
