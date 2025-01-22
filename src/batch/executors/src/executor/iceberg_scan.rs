@@ -16,8 +16,7 @@ use std::sync::Arc;
 
 use futures_async_stream::try_stream;
 use futures_util::stream::StreamExt;
-use iceberg::scan::FileScanTask;
-use iceberg::spec::TableMetadata;
+use iceberg::spec::TableMetadataRef;
 use itertools::Itertools;
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::{ArrayImpl, DataChunk, I64Array, Utf8Array};
@@ -26,9 +25,7 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common_estimate_size::EstimateSize;
-use risingwave_connector::source::iceberg::{
-    IcebergFileScanTaskJsonStrEnum, IcebergProperties, IcebergSplit,
-};
+use risingwave_connector::source::iceberg::{IcebergFileScanTask, IcebergProperties, IcebergSplit};
 use risingwave_connector::source::{ConnectorProperties, SplitImpl, SplitMetaData};
 use risingwave_connector::WithOptionsSecResolved;
 use risingwave_expr::expr::LiteralExpression;
@@ -40,58 +37,12 @@ use crate::executor::Executor;
 use crate::monitor::BatchMetrics;
 use crate::ValuesExecutor;
 
-pub enum IcebergFileScanTaskEnum {
-    // The scan task of the data file and the position delete file
-    Data(Vec<FileScanTask>),
-    // The scan task of the equality delete file
-    EqualityDelete(Vec<FileScanTask>),
-    // The scan task of the position delete file
-    PositionDelete(Vec<FileScanTask>),
-    CountStar(u64),
-}
-
-impl IcebergFileScanTaskEnum {
-    fn from_iceberg_file_scan_task_json_str_enum(
-        iceberg_file_scan_task_json_str_enum: IcebergFileScanTaskJsonStrEnum,
-    ) -> Self {
-        match iceberg_file_scan_task_json_str_enum {
-            IcebergFileScanTaskJsonStrEnum::Data(data_file_scan_tasks) => {
-                IcebergFileScanTaskEnum::Data(
-                    data_file_scan_tasks
-                        .into_iter()
-                        .map(|t| t.deserialize())
-                        .collect(),
-                )
-            }
-            IcebergFileScanTaskJsonStrEnum::EqualityDelete(equality_delete_file_scan_tasks) => {
-                IcebergFileScanTaskEnum::EqualityDelete(
-                    equality_delete_file_scan_tasks
-                        .into_iter()
-                        .map(|t| t.deserialize())
-                        .collect(),
-                )
-            }
-            IcebergFileScanTaskJsonStrEnum::PositionDelete(position_delete_file_scan_tasks) => {
-                IcebergFileScanTaskEnum::PositionDelete(
-                    position_delete_file_scan_tasks
-                        .into_iter()
-                        .map(|t| t.deserialize())
-                        .collect(),
-                )
-            }
-            IcebergFileScanTaskJsonStrEnum::CountStar(count) => {
-                IcebergFileScanTaskEnum::CountStar(count)
-            }
-        }
-    }
-}
-
 pub struct IcebergScanExecutor {
     iceberg_config: IcebergProperties,
     #[allow(dead_code)]
     snapshot_id: Option<i64>,
-    table_meta: TableMetadata,
-    file_scan_tasks: Option<IcebergFileScanTaskEnum>,
+    table_meta: TableMetadataRef,
+    file_scan_tasks: Option<IcebergFileScanTask>,
     batch_size: usize,
     schema: Schema,
     identity: String,
@@ -118,8 +69,8 @@ impl IcebergScanExecutor {
     pub fn new(
         iceberg_config: IcebergProperties,
         snapshot_id: Option<i64>,
-        table_meta: TableMetadata,
-        file_scan_tasks: IcebergFileScanTaskEnum,
+        table_meta: TableMetadataRef,
+        file_scan_tasks: IcebergFileScanTask,
         batch_size: usize,
         schema: Schema,
         identity: String,
@@ -151,14 +102,14 @@ impl IcebergScanExecutor {
         let table_name = table.identifier().name().to_owned();
 
         let data_file_scan_tasks = match Option::take(&mut self.file_scan_tasks) {
-            Some(IcebergFileScanTaskEnum::Data(data_file_scan_tasks)) => data_file_scan_tasks,
-            Some(IcebergFileScanTaskEnum::EqualityDelete(equality_delete_file_scan_tasks)) => {
+            Some(IcebergFileScanTask::Data(data_file_scan_tasks)) => data_file_scan_tasks,
+            Some(IcebergFileScanTask::EqualityDelete(equality_delete_file_scan_tasks)) => {
                 equality_delete_file_scan_tasks
             }
-            Some(IcebergFileScanTaskEnum::PositionDelete(position_delete_file_scan_tasks)) => {
+            Some(IcebergFileScanTask::PositionDelete(position_delete_file_scan_tasks)) => {
                 position_delete_file_scan_tasks
             }
-            Some(IcebergFileScanTaskEnum::CountStar(_)) => {
+            Some(IcebergFileScanTask::CountStar(_)) => {
                 bail!("iceberg scan executor does not support count star")
             }
             None => {
@@ -270,7 +221,7 @@ impl BoxedExecutorBuilder for IcebergScanExecutorBuilder {
         if let ConnectorProperties::Iceberg(iceberg_properties) = config
             && let SplitImpl::Iceberg(split) = &split_list[0]
         {
-            if let IcebergFileScanTaskJsonStrEnum::CountStar(count) = split.files {
+            if let IcebergFileScanTask::CountStar(count) = split.task {
                 return Ok(Box::new(ValuesExecutor::new(
                     vec![vec![Box::new(LiteralExpression::new(
                         DataType::Int64,
@@ -291,13 +242,13 @@ impl BoxedExecutorBuilder for IcebergScanExecutorBuilder {
                 .fields()
                 .iter()
                 .any(|f| f.name == ICEBERG_FILE_PATH_COLUMN_NAME)
-                && matches!(split.files, IcebergFileScanTaskJsonStrEnum::Data(_));
+                && matches!(split.task, IcebergFileScanTask::Data(_));
 
             Ok(Box::new(IcebergScanExecutor::new(
                 iceberg_properties,
                 Some(split.snapshot_id),
-                split.table_meta.deserialize(),
-                IcebergFileScanTaskEnum::from_iceberg_file_scan_task_json_str_enum(split.files),
+                split.table_meta.clone(),
+                split.task,
                 source.context().get_config().developer.chunk_size,
                 schema,
                 source.plan_node().get_identity().clone(),

@@ -233,7 +233,9 @@ drop table my_orders;
 statement ok
 create table orders_test (*) from mysql_source table 'testdb1.orders';
 
-statement error Not supported: alter a table with empty column definitions
+# Previously this was unsupported:
+# statement error Not supported: alter a table with empty column definitions
+statement error column "order_comment" of table "orders_test" already exists
 ALTER TABLE orders_test ADD COLUMN order_comment VARCHAR;
 
 statement ok

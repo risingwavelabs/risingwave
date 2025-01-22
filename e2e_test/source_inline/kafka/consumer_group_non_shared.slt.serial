@@ -52,7 +52,7 @@ c
 # (enable.auto.commit defaults to true, and auto.commit.interval.ms defaults to 5s)
 sleep 5s
 
-system ok
+system ok retry 3 backoff 5s
 ./e2e_test/source_inline/kafka/consumer_group.mjs --mv mv list-members
 ----
 0
