@@ -195,6 +195,7 @@ message InsertNode {
   uint32 session_id = 7;
 }
 
+// A special insert node for non-pgwire insert, not really a batch node.
 message FastInsertNode {
   // Id of the table to perform inserting.
   uint32 table_id = 1;

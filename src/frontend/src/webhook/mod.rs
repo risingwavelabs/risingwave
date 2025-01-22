@@ -78,15 +78,15 @@ pub(super) mod handlers {
         Path((database, schema, table)): Path<(String, String, String)>,
         body: Bytes,
     ) -> Result<()> {
-        let session_mgr = SESSION_MANAGER
-            .get()
-            .expect("session manager has been initialized");
-
         // Can be any address, we use the port of meta to indicate that it's a internal request.
         let dummy_addr = Address::Tcp(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 5691));
 
+        // FIXME(kexiang): the dummy_session can lead to memory leakage
         // TODO(kexiang): optimize this
         // get a session object for the corresponding database
+        let session_mgr = SESSION_MANAGER
+            .get()
+            .expect("session manager has been initialized");
         let session = session_mgr
             .connect(database.as_str(), USER, Arc::new(dummy_addr))
             .map_err(|e| {
@@ -109,7 +109,6 @@ pub(super) mod handlers {
             signature_expr,
             secret_ref,
             wait_for_persistence,
-            ..
         } = webhook_source_info;
 
         let secret_string = LocalSecretManager::global()
@@ -119,6 +118,7 @@ pub(super) mod handlers {
         // Once limitation here is that the key is no longer case-insensitive, users must user the lowercase key when defining the webhook source table.
         let headers_jsonb = header_map_to_json(&headers);
 
+        // verify the signature
         let is_valid = verify_signature(
             headers_jsonb,
             secret_string.as_str(),
@@ -134,6 +134,7 @@ pub(super) mod handlers {
             ));
         }
 
+        // Use builder to obtain a single column & single row DataChunk
         let mut builder = JsonbArrayBuilder::with_type(1, DataType::Jsonb);
         let json_value = Value::from_text(&body).map_err(|e| {
             err(
@@ -143,11 +144,14 @@ pub(super) mod handlers {
         })?;
         let jsonb_val = JsonbVal::from(json_value);
         builder.append(Some(jsonb_val.as_scalar_ref()));
-
-        // Use builder to obtain a single (List) column DataChunk
         let data_chunk = DataChunk::new(vec![builder.finish().into_ref()], 1);
+
+        // fill the data_chunk
         fast_insert_node.data_chunk = Some(data_chunk.to_protobuf());
+
+        // execute on the compute node
         let res = execute(fast_insert_node, wait_for_persistence, compute_client).await?;
+
         if res.status == fast_insert_response::Status::Succeeded as i32 {
             Ok(())
         } else {
@@ -194,6 +198,7 @@ pub(super) mod handlers {
             table_id: table_id.table_id,
             table_version_id: version_id,
             column_indices: vec![0],
+            // leave the data_chunk empty for now
             data_chunk: None,
             row_id_index: Some(1),
             session_id: session.id().0 as u32,
@@ -219,8 +224,13 @@ pub(super) mod handlers {
             fast_insert_node: Some(fast_insert_node),
             wait_for_persistence,
         };
-        // WKXTODO: handle error
-        let response = client.fast_insert(request).await.unwrap();
+
+        let response = client.fast_insert(request).await.map_err(|e| {
+            err(
+                anyhow!(e).context("Failed to execute on compute node"),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            )
+        })?;
         Ok(response)
     }
 }

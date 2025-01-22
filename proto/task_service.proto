@@ -89,6 +89,7 @@ service TaskService {
   // Cancel an already-died (self execution-failure, previous aborted, completed) task will still succeed.
   rpc CancelTask(CancelTaskRequest) returns (CancelTaskResponse);
   rpc Execute(ExecuteRequest) returns (stream GetDataResponse);
+  // A lightweight version insert, only for non-pgwire insert, such as inserts from webhooks and websockets.
   rpc FastInsert(FastInsertRequest) returns (FastInsertResponse);
 }
 
