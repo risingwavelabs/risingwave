@@ -63,7 +63,7 @@ use risingwave_sqlparser::ast::{
 use risingwave_sqlparser::parser::{IncludeOption, Parser};
 use thiserror_ext::AsReport;
 
-use super::create_source::{bind_columns_from_source, CreateSourceType};
+use super::create_source::{bind_columns_from_source, CreateSourceType, SqlColumnStrategy};
 use super::{create_sink, create_source, RwPgResponse};
 use crate::binder::{bind_data_type, bind_struct_field, Clause, SecureCompareContext};
 use crate::catalog::root_catalog::SchemaPath;
@@ -325,7 +325,14 @@ pub fn bind_sql_column_constraints(
     binder.bind_columns_to_context(table_name.clone(), column_catalogs)?;
 
     for column in columns {
-        let idx = binder.get_column_binding_index(table_name.clone(), &column.name.real_value())?;
+        let Some(idx) = column_catalogs
+            .iter()
+            .position(|c| c.name() == column.name.real_value())
+        else {
+            // It's possible that we don't follow the user defined columns in SQL but take the
+            // ones resolved from the source, thus missing some columns. Simply ignore them.
+            continue;
+        };
 
         for option_def in column.options {
             match option_def.option {
@@ -524,6 +531,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
     mut col_id_gen: ColumnIdGenerator,
     include_column_options: IncludeOption,
     props: CreateTableProps,
+    sql_column_strategy: SqlColumnStrategy,
 ) -> Result<(PlanRef, Option<PbSource>, PbTable)> {
     if props.append_only
         && format_encode.format != Format::Plain
@@ -542,6 +550,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
     let db_name: &str = &session.database();
     let (schema_name, _) = Binder::resolve_schema_qualified_name(db_name, table_name.clone())?;
 
+    // TODO: omit this step if `sql_column_strategy` is `Follow`.
     let (columns_from_resolve_source, source_info) = bind_columns_from_source(
         session,
         &format_encode,
@@ -567,6 +576,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
         &mut col_id_gen,
         CreateSourceType::Table,
         rate_limit,
+        sql_column_strategy,
     )
     .await?;
 
@@ -1086,6 +1096,7 @@ pub(super) async fn handle_create_table_plan(
                 col_id_gen,
                 include_column_options,
                 props,
+                SqlColumnStrategy::Reject,
             )
             .await?,
             TableJobType::General,
@@ -1116,6 +1127,8 @@ pub(super) async fn handle_create_table_plan(
 
             let session = &handler_args.session;
             let db_name = &session.database();
+            let user_name = &session.user_name();
+            let search_path = session.config().search_path();
             let (schema_name, resolved_table_name) =
                 Binder::resolve_schema_qualified_name(db_name, table_name.clone())?;
             let (database_id, schema_id) =
@@ -1127,12 +1140,12 @@ pub(super) async fn handle_create_table_plan(
 
             let source = {
                 let catalog_reader = session.env().catalog_reader().read_guard();
-                let schema_name = format_encode
-                    .clone()
-                    .unwrap_or(DEFAULT_SCHEMA_NAME.to_owned());
+                let schema_path =
+                    SchemaPath::new(format_encode.as_deref(), &search_path, user_name);
+
                 let (source, _) = catalog_reader.get_source_by_name(
                     db_name,
-                    SchemaPath::Name(schema_name.as_str()),
+                    schema_path,
                     source_name.as_str(),
                 )?;
                 source.clone()
@@ -1160,13 +1173,13 @@ pub(super) async fn handle_create_table_plan(
                     }
 
                     let (mut columns, pk_names) =
-                        bind_cdc_table_schema(&column_defs, &constraints, None)?;
+                        bind_cdc_table_schema(&column_defs, &constraints)?;
                     // read default value definition from external db
                     let (options, secret_refs) = cdc_with_options.clone().into_parts();
                     let config = ExternalTableConfig::try_from_btreemap(options, secret_refs)
                         .context("failed to extract external table config")?;
 
-                    let table = ExternalTableImpl::connect(config)
+                    let table: ExternalTableImpl = ExternalTableImpl::connect(config)
                         .await
                         .context("failed to auto derive table schema")?;
                     let external_columns: Vec<_> = table
@@ -1320,25 +1333,9 @@ async fn bind_cdc_table_schema_externally(
 fn bind_cdc_table_schema(
     column_defs: &Vec<ColumnDef>,
     constraints: &Vec<TableConstraint>,
-    new_version_columns: Option<Vec<ColumnCatalog>>,
 ) -> Result<(Vec<ColumnCatalog>, Vec<String>)> {
-    let mut columns = bind_sql_columns(column_defs)?;
-    // If new_version_columns is provided, we are in the process of auto schema change.
-    // update the default value column since the default value column is not set in the
-    // column sql definition.
-    if let Some(new_version_columns) = new_version_columns {
-        for (col, new_version_col) in columns
-            .iter_mut()
-            .zip_eq_fast(new_version_columns.into_iter())
-        {
-            assert_eq!(col.name(), new_version_col.name());
-            col.column_desc.generated_or_default_column =
-                new_version_col.column_desc.generated_or_default_column;
-        }
-    }
-
+    let columns = bind_sql_columns(column_defs)?;
     let pk_names = bind_sql_pk_names(column_defs, bind_table_constraints(constraints)?)?;
-
     Ok((columns, pk_names))
 }
 
@@ -1816,9 +1813,9 @@ pub async fn generate_stream_graph_for_replace_table(
     on_conflict: Option<OnConflict>,
     with_version_column: Option<String>,
     cdc_table_info: Option<CdcTableInfo>,
-    new_version_columns: Option<Vec<ColumnCatalog>>,
     include_column_options: IncludeOption,
     engine: Engine,
+    sql_column_strategy: SqlColumnStrategy,
 ) -> Result<(StreamFragmentGraph, Table, Option<PbSource>, TableJobType)> {
     use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 
@@ -1845,6 +1842,7 @@ pub async fn generate_stream_graph_for_replace_table(
                 col_id_gen,
                 include_column_options,
                 props,
+                sql_column_strategy,
             )
             .await?,
             TableJobType::General,
@@ -1872,8 +1870,7 @@ pub async fn generate_stream_graph_for_replace_table(
                 cdc_table.external_table_name.clone(),
             )?;
 
-            let (columns, pk_names) =
-                bind_cdc_table_schema(&column_defs, &constraints, new_version_columns)?;
+            let (columns, pk_names) = bind_cdc_table_schema(&column_defs, &constraints)?;
 
             let context: OptimizerContextRef =
                 OptimizerContext::new(handler_args, ExplainOptions::default()).into();

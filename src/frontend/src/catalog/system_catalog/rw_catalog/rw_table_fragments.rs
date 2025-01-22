@@ -31,7 +31,7 @@ struct RwTableFragment {
 async fn read_rw_table_fragments_info(
     reader: &SysCatalogReaderImpl,
 ) -> Result<Vec<RwTableFragment>> {
-    let states = reader.meta_client.list_table_fragment_states().await?;
+    let states = reader.meta_client.list_streaming_job_states().await?;
 
     Ok(states
         .into_iter()

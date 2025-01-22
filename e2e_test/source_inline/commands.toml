@@ -35,6 +35,11 @@ script = '''
 set -e
 
 if [ -n "${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}" ]; then
+    echo "Deleting all Kafka consumer groups..."
+    rpk group list | tail -n +2 | awk '{print $2}' | while read -r group; do
+        echo "Deleting Kafka consumer group: $group"
+        rpk group delete "$group"
+    done
     echo "Deleting all Kafka topics..."
     rpk topic delete -r "*"
     echo "Deleting all schema registry subjects"
