@@ -34,15 +34,8 @@ pub async fn choose_fast_insert_client(
     session: &Arc<SessionImpl>,
 ) -> SchedulerResult<ComputeClient> {
     let worker = choose_worker(table_id, session)?;
-
     let client = session.env().client_pool().get(&worker).await?;
     return Ok(client);
-    //     let request = FastInsertRequest {
-    //         fast_insert_node: Some(fast_insert_node),
-    //         wait_for_persistence: wait_for_persistence,
-    //     };
-    //     let response = client.fast_insert(request).await?;
-    //     Ok(response)
 }
 
 fn get_table_dml_vnode_mapping(
