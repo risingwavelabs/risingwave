@@ -169,9 +169,16 @@ impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStoreExecutor<S, LS> {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     pub async fn execute_inner(mut self) {
         let mut input = self.upstream.execute();
+        let Some(msg) = input.next().await else {
+            bail!("Expected a barrier message, got end of stream")
+        };
+        let barrier = match msg? {
+            Message::Barrier(barrier) => barrier,
+            other => bail!("Expected a barrier message, got {:?}", other),
+        };
         let mut state_store_stream = Some(
             Self::init(
-                &mut input,
+                &barrier,
                 &mut self.local_state_store,
                 &self.serde,
                 self.table_id,
@@ -180,6 +187,7 @@ impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStoreExecutor<S, LS> {
             )
             .await?,
         );
+        yield Message::Barrier(barrier);
         loop {
             if let Some(msg) = Self::next(
                 &mut input,
@@ -203,20 +211,14 @@ impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStoreExecutor<S, LS> {
     }
 
     async fn init(
-        input: &mut BoxedMessageStream,
+        barrier: &Barrier,
         local_state_store: &mut LS,
         serde: &LogStoreRowSerde,
         table_id: TableId,
         metrics: &KvLogStoreMetrics,
         state_store: S,
     ) -> StreamExecutorResult<StateStoreStream<S>> {
-        let Some(msg) = input.next().await else {
-            bail!("Expected a barrier message, got end of stream")
-        };
-        let barrier = match msg? {
-            Message::Barrier(barrier) => barrier,
-            other => bail!("Expected a barrier message, got {:?}", other),
-        };
+
         let init_epoch_pair = barrier.epoch;
         local_state_store
             .init(InitOptions::new(init_epoch_pair))
@@ -631,6 +633,7 @@ impl SyncedLogStoreBuffer {
             *prev_end_seq_id = end_seq_id;
             *vnode_bitmap |= new_vnode_bitmap;
         } else {
+            tracing::trace!("Adding flushed item to buffer: start_seq_id: {start_seq_id}, end_seq_id: {end_seq_id}, chunk_id: {chunk_id}");
             let chunk_id = self.next_chunk_id;
             self.next_chunk_id += 1;
             self.buffer.push_back((
@@ -732,9 +735,17 @@ mod tests {
     use crate::common::log_store_impl::kv_log_store::KV_LOG_STORE_V2_INFO;
     use crate::executor::test_utils::MockSource;
 
+    fn init_logger() {
+        let _ = tracing_subscriber::fmt()
+            .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+            .with_ansi(false)
+            .try_init();
+    }
+
     // test read/write buffer
     #[tokio::test]
     async fn test_read_write_buffer() {
+        init_logger();
         let schema = Schema {
             fields: vec![
                 Field::unnamed(DataType::Int64),
@@ -792,7 +803,7 @@ mod tests {
 
         match stream.next().await {
             Some(Ok(Message::Barrier(barrier))) => {
-                assert_eq!(barrier.epoch.curr, 1);
+                assert_eq!(barrier.epoch.curr, test_epoch(1));
             }
             other => panic!("Expected a barrier message, got {:?}", other),
         }
@@ -815,13 +826,196 @@ mod tests {
 
         match stream.next().await {
             Some(Ok(Message::Barrier(barrier))) => {
-                assert_eq!(barrier.epoch.curr, 2);
+                assert_eq!(barrier.epoch.curr, test_epoch(2));
             }
             other => panic!("Expected a barrier message, got {:?}", other),
         }
     }
 
-    // test persisted read
+    // test barrier persisted read
+    //
+    // sequence of events (earliest -> latest):
+    // barrier(1) -> chunk(1) -> chunk(2) -> poll(3) items -> barrier(2) -> poll(1) item
+    // * poll just means we read from the executor stream.
+    #[tokio::test]
+    async fn test_barrier_persisted_read() {
+        init_logger();
+        let schema = Schema {
+            fields: vec![
+                Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Int64),
+            ],
+        };
+        let pk_indices = vec![0];
+        let (mut tx, source) = MockSource::channel();
+        let source = source.into_executor(schema.clone(), pk_indices.clone());
 
-    // test flushed read
+        let state_store = MemoryStateStore::new();
+
+        let vnodes = Some(Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)));
+
+        let pk_info = &KV_LOG_STORE_V2_INFO;
+        let table = gen_test_log_store_table(pk_info);
+
+        let log_store_executor = SyncedKvLogStoreExecutor::new(
+            table.id,
+            KvLogStoreReadMetrics::for_test(),
+            KvLogStoreMetrics::for_test(),
+            LogStoreRowSerde::new(&table, vnodes, pk_info),
+            0,
+            MemoryStateStore::new(),
+            10,
+            source,
+        )
+            .await.boxed();
+
+        // Init
+        tx.push_barrier(test_epoch(1), false);
+
+        let chunk_1 = StreamChunk::from_pretty(
+            "  I   I
+            +  5  10
+            +  6  10
+            +  8  10
+            +  9  10
+            +  10 11",
+        );
+
+        let chunk_2 = StreamChunk::from_pretty(
+            "   I   I
+            -   5  10
+            -   6  10
+            -   8  10
+            U-  9  10
+            U+ 10  11",
+        );
+
+        tx.push_chunk(chunk_1.clone());
+        tx.push_chunk(chunk_2.clone());
+
+        tx.push_barrier(test_epoch(2), false);
+
+        let mut stream = log_store_executor.execute();
+
+        match stream.next().await {
+            Some(Ok(Message::Barrier(barrier))) => {
+                assert_eq!(barrier.epoch.curr, test_epoch(1));
+            }
+            other => panic!("Expected a barrier message, got {:?}", other),
+        }
+
+        match stream.next().await {
+            Some(Ok(Message::Chunk(chunk))) => {
+                assert_eq!(chunk, chunk_1);
+            }
+            other => panic!("Expected a chunk message, got {:?}", other),
+        }
+
+        match stream.next().await {
+            Some(Ok(Message::Chunk(chunk))) => {
+                assert_eq!(chunk, chunk_2);
+            }
+            other => panic!("Expected a chunk message, got {:?}", other),
+        }
+
+        match stream.next().await {
+            Some(Ok(Message::Barrier(barrier))) => {
+                assert_eq!(barrier.epoch.curr, test_epoch(2));
+            }
+            other => panic!("Expected a barrier message, got {:?}", other),
+        }
+    }
+
+    // When we hit buffer max_chunk, we only store placeholder `FlushedItem`.
+    // So we just let capacity = 0, and we will always flush incoming chunks to state store.
+    #[tokio::test]
+    async fn test_max_chunk_persisted_read() {
+        init_logger();
+        let schema = Schema {
+            fields: vec![
+                Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Int64),
+            ],
+        };
+        let pk_indices = vec![0];
+        let (mut tx, source) = MockSource::channel();
+        let source = source.into_executor(schema.clone(), pk_indices.clone());
+
+        let state_store = MemoryStateStore::new();
+
+        let vnodes = Some(Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)));
+
+        let pk_info = &KV_LOG_STORE_V2_INFO;
+        let table = gen_test_log_store_table(pk_info);
+
+        let log_store_executor = SyncedKvLogStoreExecutor::new(
+            table.id,
+            KvLogStoreReadMetrics::for_test(),
+            KvLogStoreMetrics::for_test(),
+            LogStoreRowSerde::new(&table, vnodes, pk_info),
+            0,
+            MemoryStateStore::new(),
+            0,
+            source,
+        )
+            .await.boxed();
+
+        // Init
+        tx.push_barrier(test_epoch(1), false);
+
+        let chunk_1 = StreamChunk::from_pretty(
+            "  I   I
+            +  5  10
+            +  6  10
+            +  8  10
+            +  9  10
+            +  10 11",
+        );
+
+        let chunk_2 = StreamChunk::from_pretty(
+            "   I   I
+            -   5  10
+            -   6  10
+            -   8  10
+            U-  9  10
+            U+ 10  11",
+        );
+
+        tx.push_chunk(chunk_1.clone());
+        tx.push_chunk(chunk_2.clone());
+
+        tx.push_barrier(test_epoch(2), false);
+
+        let mut stream = log_store_executor.execute();
+
+        match stream.next().await {
+            Some(Ok(Message::Barrier(barrier))) => {
+                assert_eq!(barrier.epoch.curr, test_epoch(1));
+            }
+            other => panic!("Expected a barrier message, got {:?}", other),
+        }
+
+        match stream.next().await {
+            Some(Ok(Message::Chunk(chunk))) => {
+                assert_eq!(chunk, chunk_1);
+            }
+            other => panic!("Expected a chunk message, got {:?}", other),
+        }
+
+        match stream.next().await {
+            Some(Ok(Message::Chunk(chunk))) => {
+                assert_eq!(chunk, chunk_2);
+            }
+            other => panic!("Expected a chunk message, got {:?}", other),
+        }
+
+        match stream.next().await {
+            Some(Ok(Message::Barrier(barrier))) => {
+                assert_eq!(barrier.epoch.curr, test_epoch(2));
+            }
+            other => panic!("Expected a barrier message, got {:?}", other),
+        }
+    }
+
+    // test max_chunk force flush + persisted read
 }
