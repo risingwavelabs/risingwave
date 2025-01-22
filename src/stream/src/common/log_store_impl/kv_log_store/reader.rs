@@ -610,6 +610,7 @@ pub(crate) async fn read_flushed_chunk(
     table_id: TableId,
     read_metrics: KvLogStoreReadMetrics,
 ) -> LogStoreResult<(ChunkId, StreamChunk, u64)> {
+    tracing::trace!("reading flushed chunk from buffer: start_seq_id: {start_seq_id}, end_seq_id: {end_seq_id}, chunk_id: {chunk_id}");
     let iters = try_join_all(vnode_bitmap.iter_vnodes().map(|vnode| {
         let range_start = serde.serialize_log_store_pk(vnode, item_epoch, Some(start_seq_id));
         let range_end = serde.serialize_log_store_pk(vnode, item_epoch, Some(end_seq_id));

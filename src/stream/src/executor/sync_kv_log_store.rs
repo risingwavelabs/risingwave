@@ -564,6 +564,7 @@ async fn flush_chunk(
     state_store: &mut impl LocalStateStore,
     chunk: StreamChunk,
 ) -> StreamExecutorResult<Bitmap> {
+    tracing::trace!("Flushing chunk: start_seq_id: {start_seq_id}, end_seq_id: {end_seq_id}");
     let epoch = state_store.epoch();
     let mut vnode_bitmap_builder = BitmapBuilder::zeroed(serde.vnodes().len());
     let mut flush_info = FlushInfo::new();
@@ -633,7 +634,6 @@ impl SyncedLogStoreBuffer {
             *prev_end_seq_id = end_seq_id;
             *vnode_bitmap |= new_vnode_bitmap;
         } else {
-            tracing::trace!("Adding flushed item to buffer: start_seq_id: {start_seq_id}, end_seq_id: {end_seq_id}, chunk_id: {chunk_id}");
             let chunk_id = self.next_chunk_id;
             self.next_chunk_id += 1;
             self.buffer.push_back((
@@ -645,6 +645,7 @@ impl SyncedLogStoreBuffer {
                     chunk_id,
                 },
             ));
+            tracing::trace!("Adding flushed item to buffer: start_seq_id: {start_seq_id}, end_seq_id: {end_seq_id}, chunk_id: {chunk_id}");
         }
         // FIXME(kwannoel): Seems these metrics are updated _after_ the flush info is reported.
         self.update_unconsumed_buffer_metrics();
@@ -886,8 +887,8 @@ mod tests {
             -   5  10
             -   6  10
             -   8  10
-            U-  9  10
-            U+ 10  11",
+            U- 10  11
+            U+ 10  10",
         );
 
         tx.push_chunk(chunk_1.clone());
@@ -977,8 +978,8 @@ mod tests {
             -   5  10
             -   6  10
             -   8  10
-            U-  9  10
-            U+ 10  11",
+            U- 10  11
+            U+ 10  10",
         );
 
         tx.push_chunk(chunk_1.clone());
