@@ -38,8 +38,6 @@ const FS_CONNECTORS: &[&str] = &["s3"];
 pub struct SourceExecutorBuilder;
 
 pub fn create_source_desc_builder(
-    source_type: &str, // "source" or "source backfill"
-    source_id: &TableId,
     mut source_columns: Vec<PbColumnCatalog>,
     params: &ExecutorParams,
     source_info: PbStreamSourceInfo,
@@ -110,8 +108,6 @@ pub fn create_source_desc_builder(
         });
     }
 
-    telemetry_source_build(source_type, source_id, &source_info, &with_properties);
-
     SourceDescBuilder::new(
         source_columns.clone(),
         params.env.source_metrics(),
@@ -169,8 +165,6 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 );
 
                 let source_desc_builder = create_source_desc_builder(
-                    "source",
-                    &source_id,
                     source.columns.clone(),
                     &params,
                     source_info,
