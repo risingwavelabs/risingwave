@@ -185,7 +185,7 @@ mod tests {
         let mut builder = JsonbArrayBuilder::with_type(1, DataType::Jsonb);
 
         let mut header_map = HashMap::new();
-        header_map.insert("data".to_string(), "value1".to_string());
+        header_map.insert("data".to_owned(), "value1".to_owned());
 
         let json_value = json!(header_map);
         let jsonb_val = JsonbVal::from(json_value);
@@ -235,7 +235,7 @@ mod tests {
         });
 
         assert_matches!(reader.next().await.unwrap()?, TxnMsg::End(_, Some(epoch_notifier)) => {
-            epoch_notifier.send(epoch.clone()).unwrap();
+            epoch_notifier.send(epoch).unwrap();
         });
         let epoch = u64::MAX;
         let full_range = (Bound::Unbounded, Bound::Unbounded);
