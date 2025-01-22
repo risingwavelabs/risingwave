@@ -12,11 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
+
 use risingwave_common::acl::AclMode;
 use risingwave_pb::user::grant_privilege::PbObject;
 
 use crate::binder::{BoundQuery, BoundStatement, Relation};
-use crate::catalog::OwnedByUserCatalog;
+use crate::catalog::{DatabaseId, OwnedByUserCatalog};
 use crate::error::ErrorCode::PermissionDenied;
 use crate::error::Result;
 use crate::session::SessionImpl;
@@ -41,10 +43,11 @@ impl ObjectCheckItem {
 }
 
 /// resolve privileges in `relation`
-pub(crate) fn resolve_relation_privileges(
+fn resolve_relation_privileges(
     relation: &Relation,
     mode: AclMode,
     objects: &mut Vec<ObjectCheckItem>,
+    databases: &mut HashSet<DatabaseId>,
 ) {
     match relation {
         Relation::Source(source) => {
@@ -54,6 +57,7 @@ pub(crate) fn resolve_relation_privileges(
                 object: PbObject::SourceId(source.catalog.id),
             };
             objects.push(item);
+            databases.insert(source.catalog.database_id);
         }
         Relation::BaseTable(table) => {
             let item = ObjectCheckItem {
@@ -62,79 +66,41 @@ pub(crate) fn resolve_relation_privileges(
                 object: PbObject::TableId(table.table_id.table_id),
             };
             objects.push(item);
+            databases.insert(table.table_catalog.database_id);
         }
         Relation::Subquery(query) => {
             if let crate::binder::BoundSetExpr::Select(select) = &query.query.body {
                 if let Some(sub_relation) = &select.from {
-                    resolve_relation_privileges(sub_relation, mode, objects);
+                    resolve_relation_privileges(sub_relation, mode, objects, databases);
                 }
             }
         }
         Relation::Join(join) => {
-            resolve_relation_privileges(&join.left, mode, objects);
-            resolve_relation_privileges(&join.right, mode, objects);
+            resolve_relation_privileges(&join.left, mode, objects, databases);
+            resolve_relation_privileges(&join.right, mode, objects, databases);
         }
         Relation::WindowTableFunction(table) => {
-            resolve_relation_privileges(&table.input, mode, objects)
+            resolve_relation_privileges(&table.input, mode, objects, databases);
         }
         _ => {}
     };
 }
 
-/// resolve privileges in `stmt`
-pub(crate) fn resolve_privileges(stmt: &BoundStatement) -> Vec<ObjectCheckItem> {
-    let mut objects = Vec::new();
-    match stmt {
-        BoundStatement::Insert(ref insert) => {
-            let object = ObjectCheckItem {
-                owner: insert.owner,
-                mode: AclMode::Insert,
-                object: PbObject::TableId(insert.table_id.table_id),
-            };
-            objects.push(object);
-            if let crate::binder::BoundSetExpr::Select(select) = &insert.source.body {
-                if let Some(sub_relation) = &select.from {
-                    resolve_relation_privileges(sub_relation, AclMode::Select, &mut objects);
-                }
-            }
-        }
-        BoundStatement::Delete(ref delete) => {
-            let object = ObjectCheckItem {
-                owner: delete.owner,
-                mode: AclMode::Delete,
-                object: PbObject::TableId(delete.table_id.table_id),
-            };
-            objects.push(object);
-        }
-        BoundStatement::Update(ref update) => {
-            let object = ObjectCheckItem {
-                owner: update.owner,
-                mode: AclMode::Update,
-                object: PbObject::TableId(update.table_id.table_id),
-            };
-            objects.push(object);
-        }
-        BoundStatement::Query(ref query) => objects.extend(resolve_query_privileges(query)),
-        BoundStatement::DeclareCursor(ref declare_cursor) => {
-            objects.extend(resolve_query_privileges(&declare_cursor.query))
-        }
-        BoundStatement::FetchCursor(_) => unimplemented!(),
-        BoundStatement::CreateView(ref create_view) => {
-            objects.extend(resolve_query_privileges(&create_view.query))
-        }
-    };
-    objects
-}
-
 /// resolve privileges in `query`
-pub(crate) fn resolve_query_privileges(query: &BoundQuery) -> Vec<ObjectCheckItem> {
+fn resolve_query_privileges(query: &BoundQuery) -> (Vec<ObjectCheckItem>, HashSet<DatabaseId>) {
     let mut objects = Vec::new();
+    let mut check_databases = HashSet::new();
     if let crate::binder::BoundSetExpr::Select(select) = &query.body {
         if let Some(sub_relation) = &select.from {
-            resolve_relation_privileges(sub_relation, AclMode::Select, &mut objects);
+            resolve_relation_privileges(
+                sub_relation,
+                AclMode::Select,
+                &mut objects,
+                &mut check_databases,
+            );
         }
     }
-    objects
+    (objects, check_databases)
 }
 
 impl SessionImpl {
@@ -158,6 +124,100 @@ impl SessionImpl {
             }
         } else {
             return Err(PermissionDenied("Session user is invalid".to_owned()).into());
+        }
+
+        Ok(())
+    }
+
+    pub fn check_privileges_for_query(&self, query: &BoundQuery) -> Result<()> {
+        self.check_privileges_for_stmt(&BoundStatement::Query(query.clone().into()))
+    }
+
+    pub fn check_privileges_for_stmt(&self, stmt: &BoundStatement) -> Result<()> {
+        let user_reader = self.env().user_info_reader();
+        let reader = user_reader.read_guard();
+        let user = reader
+            .get_user_by_name(&self.user_name())
+            .ok_or(PermissionDenied("Session user is invalid".to_owned()))?;
+        if user.is_super {
+            return Ok(());
+        }
+
+        let mut items = Vec::new();
+        let mut check_databases = HashSet::new();
+        match stmt {
+            BoundStatement::Insert(ref insert) => {
+                let item = ObjectCheckItem {
+                    owner: insert.owner,
+                    mode: AclMode::Insert,
+                    object: PbObject::TableId(insert.table_id.table_id),
+                };
+                items.push(item);
+                if let crate::binder::BoundSetExpr::Select(select) = &insert.source.body {
+                    if let Some(sub_relation) = &select.from {
+                        resolve_relation_privileges(
+                            sub_relation,
+                            AclMode::Select,
+                            &mut items,
+                            &mut check_databases,
+                        );
+                    }
+                }
+            }
+            BoundStatement::Delete(ref delete) => {
+                let item = ObjectCheckItem {
+                    owner: delete.owner,
+                    mode: AclMode::Delete,
+                    object: PbObject::TableId(delete.table_id.table_id),
+                };
+                items.push(item);
+            }
+            BoundStatement::Update(ref update) => {
+                let item = ObjectCheckItem {
+                    owner: update.owner,
+                    mode: AclMode::Update,
+                    object: PbObject::TableId(update.table_id.table_id),
+                };
+                items.push(item);
+            }
+            BoundStatement::Query(ref query) => {
+                let (objs, dbs) = resolve_query_privileges(query);
+                items.extend(objs);
+                check_databases.extend(dbs);
+            }
+            BoundStatement::DeclareCursor(ref declare_cursor) => {
+                let (objs, dbs) = resolve_query_privileges(&declare_cursor.query);
+                items.extend(objs);
+                check_databases.extend(dbs);
+            }
+            BoundStatement::FetchCursor(_) => unimplemented!(),
+            BoundStatement::CreateView(ref create_view) => {
+                let (objs, dbs) = resolve_query_privileges(&create_view.query);
+                items.extend(objs);
+                check_databases.extend(dbs);
+            }
+        };
+
+        for item in items {
+            if item.owner == user.id {
+                continue;
+            }
+            let has_privilege = user.check_privilege(&item.object, item.mode);
+            if !has_privilege {
+                return Err(PermissionDenied("Do not have the privilege".to_owned()).into());
+            }
+        }
+
+        let current_database = self.database_id();
+        for db_id in check_databases {
+            if db_id == current_database {
+                continue;
+            }
+            let has_privilege =
+                user.check_privilege(&PbObject::DatabaseId(db_id), AclMode::Connect);
+            if !has_privilege {
+                return Err(PermissionDenied("Do not have CONNECT privilege".to_owned()).into());
+            }
         }
 
         Ok(())

@@ -210,10 +210,17 @@ impl BuildingFragment {
 
         stream_graph_visitor::visit_fragment(fragment, |node_body| {
             let (table_id, column_ids) = match node_body {
-                NodeBody::StreamScan(stream_scan) => (
-                    stream_scan.table_id.into(),
-                    stream_scan.upstream_column_ids.clone(),
-                ),
+                NodeBody::StreamScan(stream_scan) => {
+                    if stream_scan.get_stream_scan_type().unwrap()
+                        == StreamScanType::CrossDbSnapshotBackfill
+                    {
+                        return;
+                    }
+                    (
+                        stream_scan.table_id.into(),
+                        stream_scan.upstream_column_ids.clone(),
+                    )
+                }
                 NodeBody::CdcFilter(cdc_filter) => (cdc_filter.upstream_source_id.into(), vec![]),
                 NodeBody::SourceBackfill(backfill) => (
                     backfill.upstream_source_id.into(),
@@ -230,13 +237,6 @@ impl BuildingFragment {
                 .try_insert(table_id, column_ids)
                 .expect("currently there should be no two same upstream tables in a fragment");
         });
-
-        assert_eq!(
-            table_columns.len(),
-            fragment.upstream_table_ids.len(),
-            "fragment type: {:b}",
-            fragment.fragment_type_mask
-        );
 
         table_columns
     }
@@ -680,7 +680,8 @@ pub fn fill_snapshot_backfill_epoch(
     let mut applied = false;
     visit_stream_node_cont_mut(node, |node| {
         if let Some(NodeBody::StreamScan(stream_scan)) = node.node_body.as_mut()
-            && stream_scan.stream_scan_type == StreamScanType::SnapshotBackfill as i32
+            && (stream_scan.stream_scan_type == StreamScanType::SnapshotBackfill as i32
+                || stream_scan.stream_scan_type == StreamScanType::CrossDbSnapshotBackfill as i32)
         {
             result = try {
                 let table_id = TableId::new(stream_scan.table_id);

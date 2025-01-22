@@ -206,16 +206,16 @@ impl CatalogController {
             .map(|obj| (obj.oid, obj))
             .collect();
 
-        // TODO: Remove this assertion when the cross-database query is supported.
-        removed_objects.values().for_each(|obj| {
+        // TODO: Support drop cascade for cross-database query.
+        for obj in removed_objects.values() {
             if let Some(obj_database_id) = obj.database_id {
-                assert_eq!(
-                    database_id, obj_database_id,
-                    "dropped objects not in the same database: {:?}",
-                    obj
-                );
+                if obj_database_id != database_id {
+                    return Err(MetaError::permission_denied(format!(
+                        "Referenced by other objects in database {obj_database_id}, please drop them manually"
+                    )));
+                }
             }
-        });
+        }
 
         let (removed_source_fragments, removed_actors, removed_fragments) =
             get_fragments_for_jobs(&txn, removed_streaming_job_ids.clone()).await?;

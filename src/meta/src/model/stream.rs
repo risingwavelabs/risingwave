@@ -349,6 +349,13 @@ impl StreamJobFragments {
                 // We don't track any fragments' progress.
                 return vec![];
             }
+            if fragment.fragment_type_mask
+                & FragmentTypeFlag::CrossDbSnapshotBackfillStreamScan as u32
+                != 0
+            {
+                // Note: CrossDbSnapshotBackfillStreamScan is a special case where we don't track any fragments' progress.
+                continue;
+            }
             if (fragment.fragment_type_mask
                 & (FragmentTypeFlag::Values as u32
                     | FragmentTypeFlag::StreamScan as u32
