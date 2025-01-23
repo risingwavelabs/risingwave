@@ -210,7 +210,7 @@ impl WorkerNodeManager {
             .streaming_fragment_vnode_mapping
             .insert(fragment_id, vnode_mapping)
         {
-            tracing::info!("Previous vnode mapping for fragment {fragment_id}, maybe offline scaling with background ddl");
+            tracing::info!("Previous vnode mapping not found for fragment {fragment_id}, maybe offline scaling with background ddl");
         }
     }
 

@@ -14,7 +14,7 @@
 
 use std::time::Duration;
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use risingwave_simulation::cluster::{Cluster, Configuration};
 use risingwave_simulation::ctl_ext::predicate::{identity_contains, no_identity_contains};
 use tokio::time::sleep;
@@ -33,13 +33,10 @@ async fn test_background_arrangement_backfill_offline_scaling() -> Result<()> {
         .run("SET STREAMING_USE_ARRANGEMENT_BACKFILL = true;")
         .await?;
     session.run("create table t (v int);").await?;
-
-    println!("0");
     session
         .run("insert into t select * from generate_series(1, 10000);")
         .await?;
 
-    println!("01");
     session.run("SET BACKGROUND_DDL=true;").await?;
     session.run("SET BACKFILL_RATE_LIMIT=1;").await?;
 
@@ -56,8 +53,6 @@ async fn test_background_arrangement_backfill_offline_scaling() -> Result<()> {
 
     assert_eq!(mat_fragment.inner.actors.len(), cores_per_node * node_count);
 
-    println!("1");
-
     sleep(Duration::from_secs(10)).await;
 
     cluster.simple_kill_nodes(["compute-2", "compute-3"]).await;
@@ -70,10 +65,6 @@ async fn test_background_arrangement_backfill_offline_scaling() -> Result<()> {
             no_identity_contains("union"),
         ])
         .await?;
-
-
-
-    println!("2");
 
     assert_eq!(mat_fragment.inner.actors.len(), cores_per_node);
 
