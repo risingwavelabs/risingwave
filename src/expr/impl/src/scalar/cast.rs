@@ -132,6 +132,8 @@ where
 #[function("cast(timestampnano) -> date")]
 #[function("cast(timestamp) -> time")]
 #[function("cast(timestampnano) -> time")]
+#[function("cast(timestampnano) -> timestamp")]
+#[function("cast(timestamp) -> timestampnano")]
 #[function("cast(interval) -> time")]
 #[function("cast(varchar) -> varchar")]
 #[function("cast(int256) -> float8")]

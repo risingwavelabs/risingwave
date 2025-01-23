@@ -126,6 +126,7 @@ impl Strong {
             | ExprType::TumbleStart
             | ExprType::MakeDate
             | ExprType::MakeTime
+            | ExprType::MakeTimestampnano
             | ExprType::MakeTimestamp
             | ExprType::SecToTimestamptz
             | ExprType::AtTimeZone

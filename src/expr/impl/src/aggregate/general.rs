@@ -115,6 +115,7 @@ fn min<T: Ord>(state: T, input: T) -> T {
 #[aggregate("max(time) -> auto", state = "ref")]
 #[aggregate("max(interval) -> auto", state = "ref")]
 #[aggregate("max(timestamp) -> auto", state = "ref")]
+#[aggregate("max(timestampnano) -> auto", state = "ref")]
 #[aggregate("max(timestamptz) -> auto", state = "ref")]
 #[aggregate("max(varchar) -> auto", state = "ref")]
 #[aggregate("max(bytea) -> auto", state = "ref")]

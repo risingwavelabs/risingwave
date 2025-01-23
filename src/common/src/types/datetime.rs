@@ -862,6 +862,19 @@ macro_rules! impl_timestamp {
 impl_timestamp!(Timestamp);
 impl_timestamp!(TimestampNano);
 
+impl From<Timestamp> for TimestampNano {
+    fn from(ts: Timestamp) -> Self {
+        TimestampNano::new(ts.0)
+    }
+}
+
+impl From<TimestampNano> for Timestamp {
+    fn from(ts: TimestampNano) -> Self {
+        let ts = ts.truncate_micros();
+        Timestamp::new(ts.0)
+    }
+}
+
 impl TimestampNano {
     pub fn from_protobuf(cur: &mut Cursor<&[u8]>) -> ArrayResult<TimestampNano> {
         let secs = cur
