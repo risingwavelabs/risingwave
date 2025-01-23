@@ -78,6 +78,12 @@ impl CompactionConfigBuilder {
                 emergency_level0_sub_level_partition: Some(
                     compaction_config::emergency_level0_sub_level_partition(),
                 ),
+                level0_stop_write_threshold_max_sst_count: Some(
+                    compaction_config::level0_stop_write_threshold_max_sst_count(),
+                ),
+                level0_stop_write_threshold_max_size: Some(
+                    compaction_config::level0_stop_write_threshold_max_size(),
+                ),
             },
         }
     }

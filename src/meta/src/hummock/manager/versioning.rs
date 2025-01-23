@@ -300,7 +300,7 @@ pub(super) fn calc_new_write_limits(
                         .iter()
                         .map(|table_id| table_id.table_id)
                         .collect(),
-                    reason: write_limit_type.as_str(),
+                    reason: write_limit_type.as_str().to_owned(),
                 },
             );
             continue;

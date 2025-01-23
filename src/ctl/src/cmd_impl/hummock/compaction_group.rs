@@ -71,6 +71,8 @@ pub fn build_compaction_config_vec(
     max_overlapping_level_size: Option<u64>,
     emergency_level0_sst_file_count: Option<u32>,
     emergency_level0_sub_level_partition: Option<u32>,
+    level0_stop_write_threshold_max_sst_count: Option<u32>,
+    level0_stop_write_threshold_max_size: Option<u64>,
 ) -> Vec<MutableConfig> {
     let mut configs = vec![];
     if let Some(c) = max_bytes_for_level_base {
@@ -138,6 +140,12 @@ pub fn build_compaction_config_vec(
     }
     if let Some(c) = emergency_level0_sub_level_partition {
         configs.push(MutableConfig::EmergencyLevel0SubLevelPartition(c))
+    }
+    if let Some(c) = level0_stop_write_threshold_max_sst_count {
+        configs.push(MutableConfig::Level0StopWriteThresholdMaxSstCount(c))
+    }
+    if let Some(c) = level0_stop_write_threshold_max_size {
+        configs.push(MutableConfig::Level0StopWriteThresholdMaxSize(c))
     }
 
     configs

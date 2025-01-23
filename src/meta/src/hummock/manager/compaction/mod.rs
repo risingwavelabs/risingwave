@@ -1588,8 +1588,46 @@ pub fn check_cg_write_limit(
 ) -> WriteLimitType {
     let threshold = compaction_config.level0_stop_write_threshold_sub_level_number as usize;
     let l0_sub_level_number = levels.l0.sub_levels.len();
+
+    // level count
     if threshold < l0_sub_level_number {
-        return WriteLimitType::WriteStop(l0_sub_level_number, threshold);
+        return WriteLimitType::WriteStop(format!(
+            "WriteStop(l0_sub_level_number: {}, threshold: {}) too many L0 sub levels",
+            l0_sub_level_number, threshold
+        ));
+    }
+
+    let threshold = compaction_config
+        .level0_stop_write_threshold_max_sst_count
+        .unwrap_or(compaction_config::level0_stop_write_threshold_max_sst_count())
+        as usize;
+    let l0_sst_count = levels
+        .l0
+        .sub_levels
+        .iter()
+        .map(|l| l.table_infos.len())
+        .sum();
+    if threshold < l0_sst_count {
+        return WriteLimitType::WriteStop(format!(
+            "WriteStop(l0_sst_count: {}, threshold: {}) too many L0 sst count",
+            l0_sst_count, threshold
+        ));
+    }
+
+    let threshold = compaction_config
+        .level0_stop_write_threshold_max_size
+        .unwrap_or(compaction_config::level0_stop_write_threshold_max_size());
+    let l0_size = levels
+        .l0
+        .sub_levels
+        .iter()
+        .map(|l| l.table_infos.iter().map(|t| t.sst_size).sum::<u64>())
+        .sum::<u64>();
+    if threshold < l0_size {
+        return WriteLimitType::WriteStop(format!(
+            "WriteStop(l0_size: {}, threshold: {}) too many L0 sst count",
+            l0_size, threshold
+        ));
     }
 
     WriteLimitType::Unlimited
@@ -1598,25 +1636,19 @@ pub fn check_cg_write_limit(
 pub enum WriteLimitType {
     Unlimited,
 
-    // (l0_level_count, threshold)
-    WriteStop(usize, usize),
+    WriteStop(String), // reason
 }
 
 impl WriteLimitType {
-    pub fn as_str(&self) -> String {
+    pub fn as_str(&self) -> &str {
         match self {
-            Self::Unlimited => "Unlimited".to_owned(),
-            Self::WriteStop(l0_level_count, threshold) => {
-                format!(
-                    "WriteStop(l0_level_count: {}, threshold: {}) too many L0 sub levels",
-                    l0_level_count, threshold
-                )
-            }
+            Self::Unlimited => "Unlimited",
+            Self::WriteStop(reason) => reason,
         }
     }
 
     pub fn is_write_stop(&self) -> bool {
-        matches!(self, Self::WriteStop(_, _))
+        matches!(self, Self::WriteStop(_))
     }
 }
 
