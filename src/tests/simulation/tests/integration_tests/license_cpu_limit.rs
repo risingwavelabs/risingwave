@@ -50,7 +50,7 @@ async fn test_license_cpu_limit() -> Result<()> {
     assert!(error.contains("feature TestPaid is only available for tier Paid and above, while the current tier is Free"), "{error}");
 
     set_license_key!(KEY_100);
-    test_paid_tier!().unwrap().assert_result_eq("true");
+    test_paid_tier!().unwrap().assert_result_eq("t");
 
     set_license_key!(KEY_20);
     let error = test_paid_tier!().unwrap_err().to_report_string();
@@ -61,7 +61,7 @@ async fn test_license_cpu_limit() -> Result<()> {
 
     cluster.simple_kill_nodes(["compute-2"]).await;
     tokio::time::sleep(std::time::Duration::from_secs(100)).await;
-    test_paid_tier!().unwrap().assert_result_eq("true");
+    test_paid_tier!().unwrap().assert_result_eq("t");
 
     Ok(())
 }
