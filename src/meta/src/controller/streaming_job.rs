@@ -910,6 +910,8 @@ impl CatalogController {
 
         let fragment_mapping = get_fragment_mappings(&txn, job_id).await?;
 
+        println!("mapping {:#?}", fragment_mapping);
+
         let replace_table_mapping_update = match replace_stream_job_info {
             Some(ReplaceStreamJobPlan {
                 streaming_job,

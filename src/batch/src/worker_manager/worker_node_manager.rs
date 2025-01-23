@@ -206,10 +206,12 @@ impl WorkerNodeManager {
         vnode_mapping: WorkerSlotMapping,
     ) {
         let mut guard = self.inner.write().unwrap();
-        guard
+        if let None = guard
             .streaming_fragment_vnode_mapping
             .insert(fragment_id, vnode_mapping)
-            .unwrap();
+        {
+            tracing::info!("Previous vnode mapping for fragment {fragment_id}, maybe offline scaling with background ddl");
+        }
     }
 
     pub fn remove_streaming_fragment_mapping(&self, fragment_id: &FragmentId) {

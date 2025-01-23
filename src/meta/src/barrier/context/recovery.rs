@@ -611,7 +611,7 @@ impl GlobalBarrierWorkerContextImpl {
         let reschedule_targets: HashMap<_, _> = {
             let streaming_parallelisms = mgr
                 .catalog_controller
-                .get_all_created_streaming_parallelisms()
+                .get_all_streaming_parallelisms()
                 .await?;
 
             let mut result = HashMap::new();
