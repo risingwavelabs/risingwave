@@ -51,7 +51,7 @@ fn parse_create_table_with_defaults() {
                         None,
                         vec![ColumnOptionDef {
                             name: None,
-                            option: ColumnOption::DefaultColumns(verified_expr(
+                            option: ColumnOption::DefaultValue(verified_expr(
                                 "nextval(public.customer_customer_id_seq)"
                             ))
                         }],
@@ -100,7 +100,7 @@ fn parse_create_table_with_defaults() {
                         vec![
                             ColumnOptionDef {
                                 name: None,
-                                option: ColumnOption::DefaultColumns(Expr::Value(Value::Boolean(
+                                option: ColumnOption::DefaultValue(Expr::Value(Value::Boolean(
                                     true
                                 ))),
                             },
@@ -117,7 +117,7 @@ fn parse_create_table_with_defaults() {
                         vec![
                             ColumnOptionDef {
                                 name: None,
-                                option: ColumnOption::DefaultColumns(verified_expr(
+                                option: ColumnOption::DefaultValue(verified_expr(
                                     "CAST(now() AS TEXT)"
                                 ))
                             },
@@ -134,7 +134,7 @@ fn parse_create_table_with_defaults() {
                         vec![
                             ColumnOptionDef {
                                 name: None,
-                                option: ColumnOption::DefaultColumns(verified_expr("now()")),
+                                option: ColumnOption::DefaultValue(verified_expr("now()")),
                             },
                             ColumnOptionDef {
                                 name: None,
