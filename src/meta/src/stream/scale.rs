@@ -2502,21 +2502,12 @@ impl GlobalStreamManager {
                 .catalog_controller
                 .get_all_created_streaming_parallelisms()
                 .await?;
+
             streaming_parallelisms
                 .into_iter()
                 .filter(|(table_id, _)| !skipped_jobs.contains(&TableId::new(*table_id as _)))
-                .map(|(table_id, parallelism)| {
-                    let table_parallelism = match parallelism {
-                        StreamingParallelism::Adaptive => TableParallelism::Adaptive,
-                        StreamingParallelism::Fixed(n) => TableParallelism::Fixed(n),
-                        StreamingParallelism::Custom => TableParallelism::Custom,
-                    };
-
-                    (table_id, table_parallelism)
-                })
+                .map(|(table_id, _)| table_id)
                 .collect()
-
-            streaming_parallelisms.into_keys().collect()
         };
 
         let workers = self

@@ -65,11 +65,9 @@ use crate::controller::utils::{
     FragmentDesc, PartialActorLocation, PartialFragmentStateTables,
 };
 use crate::manager::LocalNotification;
-use crate::model::TableParallelism;
-use crate::{model, MetaError, MetaResult};
 use crate::model::{StreamContext, StreamJobFragments, TableParallelism};
 use crate::stream::{build_actor_split_impls, SplitAssignment};
-
+use crate::{model, MetaError, MetaResult};
 
 #[derive(Clone, Debug)]
 pub struct InflightFragmentInfo {

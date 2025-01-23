@@ -630,7 +630,6 @@ impl GlobalStreamManager {
             resource_group: resource_group_change,
         } = target;
 
-
         let database_id = DatabaseId::new(
             self.metadata_manager
                 .catalog_controller
