@@ -1592,7 +1592,7 @@ pub fn check_cg_write_limit(
     // level count
     if threshold < l0_sub_level_number {
         return WriteLimitType::WriteStop(format!(
-            "WriteStop(l0_sub_level_number: {}, threshold: {}) too many L0 sub levels",
+            "WriteStop(l0_level_count: {}, threshold: {}) too many L0 sub levels",
             l0_sub_level_number, threshold
         ));
     }
