@@ -505,6 +505,42 @@ impl ServiceConfig {
             Self::SchemaRegistry(c) => c.user_managed,
         }
     }
+
+    pub fn task_group(&self) -> String {
+        match self {
+            ServiceConfig::ComputeNode(_) => "risingwave".to_owned(),
+            ServiceConfig::MetaNode(_) => "risingwave".to_owned(),
+            ServiceConfig::Frontend(_) => "risingwave".to_owned(),
+            ServiceConfig::Compactor(_) => "risingwave".to_owned(),
+            ServiceConfig::Minio(_) => "risingwave".to_owned(),
+            ServiceConfig::Sqlite(_) => "risingwave".to_owned(),
+            ServiceConfig::Prometheus(_) => "observability".to_owned(),
+            ServiceConfig::Grafana(_) => "observability".to_owned(),
+            ServiceConfig::Tempo(_) => "observability".to_owned(),
+            ServiceConfig::Opendal(_) => "risingwave".to_owned(),
+            ServiceConfig::AwsS3(_) => "risingwave".to_owned(),
+            ServiceConfig::Kafka(_) => "kafka".to_owned(),
+            ServiceConfig::SchemaRegistry(_) => "kafka".to_owned(),
+            ServiceConfig::Pubsub(_) => "pubsub".to_owned(),
+            ServiceConfig::Redis(_) => "redis".to_owned(),
+            ServiceConfig::RedPanda(_) => "kafka".to_owned(),
+            ServiceConfig::MySql(my_sql_config) => {
+                if matches!(my_sql_config.application, Application::Metastore) {
+                    "risingwave".to_owned()
+                } else {
+                    "mysql".to_owned()
+                }
+            }
+            ServiceConfig::Postgres(postgres_config) => {
+                if matches!(postgres_config.application, Application::Metastore) {
+                    "risingwave".to_owned()
+                } else {
+                    "postgres".to_owned()
+                }
+            }
+            ServiceConfig::SqlServer(_) => "sqlserver".to_owned(),
+        }
+    }
 }
 
 mod string {
