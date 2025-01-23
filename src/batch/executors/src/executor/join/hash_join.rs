@@ -2029,13 +2029,11 @@ impl DataChunkMutator {
                 break;
             }
         }
-        if !has_more_output_rows {
-            if ANTI_JOIN {
-                if !*found_matched {
-                    new_visibility.set(start_row_id, true);
-                }
-                *found_matched = false;
+        if !has_more_output_rows && ANTI_JOIN {
+            if !*found_matched {
+                new_visibility.set(start_row_id, true);
             }
+            *found_matched = false;
         }
 
         first_output_row_ids.clear();
