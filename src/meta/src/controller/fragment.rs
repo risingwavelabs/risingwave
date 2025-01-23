@@ -54,7 +54,7 @@ use sea_orm::{
     ColumnTrait, DbErr, EntityTrait, JoinType, ModelTrait, PaginatorTrait, QueryFilter,
     QuerySelect, RelationTrait, SelectGetableTuple, Selector, TransactionTrait, Value,
 };
-
+use tracing::info;
 use crate::controller::catalog::{CatalogController, CatalogControllerInner};
 use crate::controller::utils::{
     get_actor_dispatchers, get_fragment_mappings, rebuild_fragment_mapping_from_actors,
@@ -1033,6 +1033,7 @@ impl CatalogController {
         let mut actor_migration_plan = HashMap::new();
         for (worker, fragment) in actor_locations {
             if expired_workers.contains(&worker) {
+                info!("worker {} expired, migrating actors {:?}", worker, fragment);
                 for (_, actors) in fragment {
                     let worker_slot_to_actor: HashMap<_, _> = actors
                         .iter()
