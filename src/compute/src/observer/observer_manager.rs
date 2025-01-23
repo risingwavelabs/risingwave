@@ -61,7 +61,7 @@ impl ObserverState for ComputeObserverNode {
             unreachable!();
         };
         LocalSecretManager::global().init_secrets(snapshot.secrets);
-        LicenseManager::get().update_cpu_core_count(snapshot.cluster_cpu_core_count as _);
+        LicenseManager::get().update_cpu_core_count(snapshot.compute_node_total_cpu_count as _);
     }
 }
 
