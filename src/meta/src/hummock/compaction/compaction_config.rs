@@ -72,6 +72,9 @@ impl CompactionConfigBuilder {
                     compaction_config::disable_auto_group_scheduling(),
                 ),
                 max_overlapping_level_size: Some(compaction_config::max_overlapping_level_size()),
+                sst_allowed_trivial_move_max_count: Some(
+                    compaction_config::sst_allowed_trivial_move_max_count(),
+                ),
             },
         }
     }
