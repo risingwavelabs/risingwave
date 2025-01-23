@@ -417,6 +417,8 @@ impl GlobalBarrierManagerContext {
             .into_iter()
             .collect();
 
+        tracing::info!("all inused worker slots {:?}", all_inuse_worker_slots);
+
         let active_worker_slots: HashSet<_> = active_nodes
             .current()
             .values()
@@ -435,9 +437,11 @@ impl GlobalBarrierManagerContext {
             return self.resolve_graph_info().await;
         }
 
-        debug!("start migrate actors.");
+        info!("expired worker slots {:?}", expired_worker_slots);
+
+        info!("start migrating actors.");
         let mut to_migrate_worker_slots = expired_worker_slots.into_iter().rev().collect_vec();
-        debug!("got to migrate worker slots {:#?}", to_migrate_worker_slots);
+        info!("got to migrate worker slots {:#?}", to_migrate_worker_slots);
 
         let mut inuse_worker_slots: HashSet<_> = all_inuse_worker_slots
             .intersection(&active_worker_slots)
@@ -497,10 +501,10 @@ impl GlobalBarrierManagerContext {
             }
 
             if !new_worker_slots.is_empty() {
-                debug!("new worker slots found: {:#?}", new_worker_slots);
+                info!("new worker slots found: {:#?}", new_worker_slots);
                 for target_worker_slot in new_worker_slots {
                     if let Some(from) = to_migrate_worker_slots.pop() {
-                        debug!(
+                        info!(
                             "plan to migrate from worker slot {} to {}",
                             from, target_worker_slot
                         );
