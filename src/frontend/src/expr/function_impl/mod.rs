@@ -22,5 +22,6 @@ mod pg_get_viewdef;
 mod pg_index_column_has_property;
 mod pg_indexes_size;
 mod pg_relation_size;
+mod pg_table_is_visible;
 mod rw_epoch_to_ts;
 mod rw_recovery_status;

@@ -18,7 +18,9 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::Field;
 use risingwave_common::session_config::QueryMode;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_sqlparser::ast::{DeclareCursorStatement, ObjectName, Query, Since, Statement};
+use risingwave_sqlparser::ast::{
+    DeclareCursorStatement, Ident, ObjectName, Query, Since, Statement,
+};
 
 use super::query::{
     gen_batch_plan_by_statement, gen_batch_plan_fragmenter, BatchPlanFragmenterResult,
@@ -54,17 +56,15 @@ pub async fn handle_declare_cursor(
 async fn handle_declare_subscription_cursor(
     handle_args: HandlerArgs,
     sub_name: ObjectName,
-    cursor_name: ObjectName,
+    cursor_name: Ident,
     rw_timestamp: Since,
 ) -> Result<RwPgResponse> {
     let session = handle_args.session.clone();
-    let db_name = &session.database();
-    let (schema_name, cursor_name) =
-        Binder::resolve_schema_qualified_name(db_name, cursor_name.clone())?;
-
-    let cursor_from_subscription_name = sub_name.0.last().unwrap().real_value().clone();
-    let subscription =
-        session.get_subscription_by_name(schema_name, &cursor_from_subscription_name)?;
+    let subscription = {
+        let db_name = &session.database();
+        let (sub_schema_name, sub_name) = Binder::resolve_schema_qualified_name(db_name, sub_name)?;
+        session.get_subscription_by_name(sub_schema_name, &sub_name)?
+    };
     // Start the first query of cursor, which includes querying the table and querying the subscription's logstore
     let start_rw_timestamp = match rw_timestamp {
         risingwave_sqlparser::ast::Since::TimestampMsNum(start_rw_timestamp) => {
@@ -85,7 +85,7 @@ async fn handle_declare_subscription_cursor(
     if let Err(e) = session
         .get_cursor_manager()
         .add_subscription_cursor(
-            cursor_name.clone(),
+            cursor_name.real_value(),
             start_rw_timestamp,
             subscription.dependent_table_id,
             subscription,
@@ -123,7 +123,7 @@ fn check_cursor_unix_millis(unix_millis: u64, retention_seconds: u64) -> Result<
 
 async fn handle_declare_query_cursor(
     handle_args: HandlerArgs,
-    cursor_name: ObjectName,
+    cursor_name: Ident,
     query: Box<Query>,
 ) -> Result<RwPgResponse> {
     let (chunk_stream, fields) =
@@ -131,14 +131,14 @@ async fn handle_declare_query_cursor(
     handle_args
         .session
         .get_cursor_manager()
-        .add_query_cursor(cursor_name, chunk_stream, fields)
+        .add_query_cursor(cursor_name.real_value(), chunk_stream, fields)
         .await?;
     Ok(PgResponse::empty_result(StatementType::DECLARE_CURSOR))
 }
 
 pub async fn handle_bound_declare_query_cursor(
     handle_args: HandlerArgs,
-    cursor_name: ObjectName,
+    cursor_name: Ident,
     plan_fragmenter_result: BatchPlanFragmenterResult,
 ) -> Result<RwPgResponse> {
     let session = handle_args.session.clone();
@@ -148,7 +148,7 @@ pub async fn handle_bound_declare_query_cursor(
     handle_args
         .session
         .get_cursor_manager()
-        .add_query_cursor(cursor_name, chunk_stream, fields)
+        .add_query_cursor(cursor_name.real_value(), chunk_stream, fields)
         .await?;
     Ok(PgResponse::empty_result(StatementType::DECLARE_CURSOR))
 }

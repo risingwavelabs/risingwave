@@ -19,11 +19,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use ::iceberg::io::{S3_ACCESS_KEY_ID, S3_ENDPOINT, S3_REGION, S3_SECRET_ACCESS_KEY};
-use ::iceberg::spec::TableMetadata;
 use ::iceberg::table::Table;
 use ::iceberg::{Catalog, TableIdent};
 use anyhow::{anyhow, Context};
 use iceberg::io::{GCS_CREDENTIALS_JSON, GCS_DISABLE_CONFIG_LOAD, S3_DISABLE_CONFIG_LOAD};
+use iceberg::spec::TableMetadataRef;
 use iceberg_catalog_glue::{AWS_ACCESS_KEY_ID, AWS_REGION_NAME, AWS_SECRET_ACCESS_KEY};
 use risingwave_common::bail;
 use serde_derive::Deserialize;
@@ -479,7 +479,7 @@ impl IcebergCommon {
 
     pub async fn load_table_with_metadata(
         &self,
-        metadata: TableMetadata,
+        metadata: TableMetadataRef,
         java_catalog_props: &HashMap<String, String>,
     ) -> ConnectorResult<Table> {
         match self.catalog_type() {
