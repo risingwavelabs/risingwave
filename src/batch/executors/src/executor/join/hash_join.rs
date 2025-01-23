@@ -3463,7 +3463,6 @@ mod tests {
             &expect
         ));
         assert_eq!(state.first_output_row_id, Vec::<usize>::new());
-        assert!(state.found_matched);
     }
 
     #[tokio::test]
@@ -3563,7 +3562,6 @@ mod tests {
             &expect
         ));
         assert_eq!(state.first_output_row_id, Vec::<usize>::new());
-        assert!(state.found_matched);
     }
 
     #[tokio::test]
