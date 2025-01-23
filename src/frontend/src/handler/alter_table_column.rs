@@ -272,7 +272,24 @@ pub async fn handle_alter_table_column(
         ))?;
     }
 
-    match operation {
+    // The `sql_column_strategy` will be `FollowChecked` if the operation is `AddColumn`, and
+    // `FollowUnchecked` if the operation is `DropColumn`.
+    //
+    // Consider the following example:
+    // - There was a column `foo` and a generated column `gen` that references `foo`.
+    // - The external schema is updated to remove `foo`.
+    // - The user tries to drop `foo` from the table.
+    //
+    // Dropping `foo` directly will fail because `gen` references `foo`. However, dropping `gen`
+    // first will also be rejected because `foo` does not exist any more. Also, executing
+    // `REFRESH SCHEMA` will not help because it keeps the generated column. The user gets stuck.
+    //
+    // `FollowUnchecked` workarounds this issue. There are also some alternatives:
+    // - Allow dropping multiple columns at once.
+    // - Check against the persisted schema, instead of resolving again.
+    //
+    // Applied only to tables with schema registry.
+    let sql_column_strategy = match operation {
         AlterTableOperation::AddColumn {
             column_def: new_column,
         } => {
@@ -300,6 +317,8 @@ pub async fn handle_alter_table_column(
 
             // Add the new column to the table definition if it is not created by `create table (*)` syntax.
             columns.push(new_column);
+
+            SqlColumnStrategy::FollowChecked
         }
 
         AlterTableOperation::DropColumn {
@@ -352,6 +371,8 @@ pub async fn handle_alter_table_column(
                     column_name, table_name
                 )))?
             }
+
+            SqlColumnStrategy::FollowUnchecked
         }
 
         _ => unreachable!(),
@@ -361,7 +382,7 @@ pub async fn handle_alter_table_column(
         table_name,
         definition,
         &original_catalog,
-        SqlColumnStrategy::FollowChecked, // applied only to tables with schema registry
+        sql_column_strategy,
     )
     .await?;
 
