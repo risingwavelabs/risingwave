@@ -115,7 +115,7 @@ impl ObserverState for FrontendObserverNode {
             Info::Recovery(_) => {
                 self.compute_client_pool.invalidate_all();
             }
-            Info::ClusterCpuCoreCount(count) => {
+            Info::ComputeNodeTotalCpuCount(count) => {
                 LicenseManager::get().update_cpu_core_count(count as _);
             }
         }

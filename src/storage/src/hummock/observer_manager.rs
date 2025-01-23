@@ -92,7 +92,7 @@ impl ObserverState for HummockObserverNode {
                     .update_write_limits(write_limits.write_limits);
             }
 
-            Info::ClusterCpuCoreCount(count) => {
+            Info::ComputeNodeTotalCpuCount(count) => {
                 LicenseManager::get().update_cpu_core_count(count as _);
             }
 

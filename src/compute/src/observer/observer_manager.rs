@@ -46,7 +46,7 @@ impl ObserverState for ComputeObserverNode {
                         panic!("error type notification");
                     }
                 },
-                Info::ClusterCpuCoreCount(count) => {
+                Info::ComputeNodeTotalCpuCount(count) => {
                     LicenseManager::get().update_cpu_core_count(count as _);
                 }
                 _ => {

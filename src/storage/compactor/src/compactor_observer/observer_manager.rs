@@ -61,7 +61,7 @@ impl ObserverState for CompactorObserverNode {
             Info::SystemParams(p) => {
                 self.system_params_manager.try_set_params(p);
             }
-            Info::ClusterCpuCoreCount(count) => {
+            Info::ComputeNodeTotalCpuCount(count) => {
                 LicenseManager::get().update_cpu_core_count(count as _);
             }
             _ => {

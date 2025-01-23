@@ -131,7 +131,7 @@ impl ClusterController {
         // Notify all other nodes.
         self.env.notification_manager().notify_all_without_version(
             Operation::Update, // unused
-            Info::ClusterCpuCoreCount(total_cpu_cores as _),
+            Info::ComputeNodeTotalCpuCount(total_cpu_cores as _),
         );
 
         Ok(())
