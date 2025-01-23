@@ -26,7 +26,7 @@ use anyhow::{anyhow, Context, Result};
 use console::style;
 use fs_err::OpenOptions;
 use indicatif::{MultiProgress, ProgressBar};
-use risedev::util::{complete_spin, fail_spin};
+use risedev::util::{begin_spin, complete_spin, fail_spin};
 use risedev::{
     generate_risedev_env, preflight_check, CompactorService, ComputeNodeService, ConfigExpander,
     ConfigureTmuxTask, DummyService, EnsureStopService, ExecuteContext, FrontendService,
@@ -111,6 +111,18 @@ fn task_main(
     let mut tasks = TaskScheduler::new();
 
     for service in services {
+        if let ServiceConfig::Frontend(c) = service {
+            writeln!(
+                log_buffer,
+                "* Run {} to start Postgres interactive shell.",
+                style(format_args!(
+                    "psql -h localhost -p {} -d dev -U root",
+                    c.port
+                ))
+                .blue()
+                .bold()
+            )?;
+        }
         let service_ = service.clone();
         let progress_bar = manager.new_progress();
         progress_bar.set_prefix(service.id().to_owned());
@@ -193,17 +205,6 @@ fn task_main(
                     task.execute(&mut ctx)?;
                     ctx.pb
                         .set_message(format!("api postgres://{}:{}/", c.address, c.port));
-
-                    // writeln!(
-                    //     log_buffer,
-                    //     "* Run {} to start Postgres interactive shell.",
-                    //     style(format_args!(
-                    //         "psql -h localhost -p {} -d dev -U root",
-                    //         c.port
-                    //     ))
-                    //     .blue()
-                    //     .bold()
-                    // )?;
                 }
                 ServiceConfig::Compactor(c) => {
                     let mut service = CompactorService::new(c.clone())?;
@@ -432,11 +433,11 @@ fn main() -> Result<()> {
 
     preflight_check()?;
 
-    let task_name = std::env::args()
+    let profile = std::env::args()
         .nth(1)
         .unwrap_or_else(|| "default".to_owned());
 
-    let (config_path, env, risedev_config) = ConfigExpander::expand(".", &task_name)?;
+    let (config_path, env, risedev_config) = ConfigExpander::expand(".", &profile)?;
 
     if let Some(config_path) = &config_path {
         let target = Path::new(&env::var("PREFIX_CONFIG")?).join("risingwave.toml");
@@ -458,11 +459,12 @@ fn main() -> Result<()> {
     // Always create a progress before calling `task_main`. Otherwise the progress bar won't be
     // shown.
     let p = manager.new_progress();
+    begin_spin(&p);
     p.set_prefix("dev cluster");
     p.set_message(format!(
         "starting {} services for {}...",
         services.len(),
-        task_name
+        profile
     ));
     let task_result = task_main(&mut manager, &services, env);
 
@@ -470,14 +472,14 @@ fn main() -> Result<()> {
         Ok(_) => {
             p.set_message(format!(
                 "done bootstrapping with config {}",
-                style(task_name).bold()
+                style(profile).bold()
             ));
             complete_spin(&p);
         }
         Err(_) => {
             p.set_message(format!(
                 "failed to bootstrap with config {}",
-                style(task_name).bold()
+                style(profile).bold()
             ));
             fail_spin(&p);
         }
