@@ -26,10 +26,10 @@ import {
 } from "@chakra-ui/react"
 import Editor from "@monaco-editor/react"
 import base64url from "base64url"
-import { v4 as uuidv4 } from 'uuid';
 import Head from "next/head"
 import path from "path"
 import { Fragment, useEffect, useState } from "react"
+import { v4 as uuidv4 } from "uuid"
 import SpinnerOverlay from "../components/SpinnerOverlay"
 import Title from "../components/Title"
 import api from "../lib/api/api"
