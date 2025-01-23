@@ -156,6 +156,10 @@ impl MetaTelemetryInfoFetcher {
 #[async_trait::async_trait]
 impl TelemetryInfoFetcher for MetaTelemetryInfoFetcher {
     async fn fetch_telemetry_info(&self) -> TelemetryResult<Option<String>> {
+        // the err here means building cluster on test env, so we don't need to report telemetry
+        if telemetry_cluster_type_from_env_var().is_err() {
+            return Ok(None);
+        }
         Ok(Some(self.tracking_id.clone().into()))
     }
 }
@@ -224,7 +228,8 @@ impl TelemetryReportCreator for MetaReportCreator {
             streaming_job_count,
             meta_backend: MetaBackend::Sql,
             job_desc: stream_job_desc,
-            cluster_type: telemetry_cluster_type_from_env_var(),
+            // it blocks the report if the cluster type is not valid or leak from test env
+            cluster_type: telemetry_cluster_type_from_env_var()?,
             object_store_media_type: self.object_store_media_type,
         })
     }
