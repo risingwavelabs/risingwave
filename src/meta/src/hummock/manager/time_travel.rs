@@ -15,6 +15,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use anyhow::anyhow;
+use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::epoch::Epoch;
@@ -488,7 +489,8 @@ impl HummockManager {
             write_sstable_infos(
                 version
                     .get_sst_infos_from_groups(&select_groups)
-                    .filter(|s| !skip_sst_ids.contains(&s.sst_id)),
+                    .filter(|s| !skip_sst_ids.contains(&s.sst_id))
+                    .unique_by(|s| s.sst_id),
                 txn,
                 self.env.opts.hummock_time_travel_sst_info_insert_batch_size,
             )
@@ -515,7 +517,8 @@ impl HummockManager {
         let written = write_sstable_infos(
             delta
                 .newly_added_sst_infos(Some(&select_groups))
-                .filter(|s| !skip_sst_ids.contains(&s.sst_id)),
+                .filter(|s| !skip_sst_ids.contains(&s.sst_id))
+                .unique_by(|s| s.sst_id),
             txn,
             self.env.opts.hummock_time_travel_sst_info_insert_batch_size,
         )
