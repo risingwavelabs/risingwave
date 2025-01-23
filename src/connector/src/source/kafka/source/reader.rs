@@ -124,9 +124,9 @@ impl SplitReader for KafkaSplitReader {
                     properties.common.sync_call_timeout,
                 )
                 .await?;
-            tracing::debug!("fetch kafka watermarks: low: {low}, high: {high}, split: {split:?}");
-            // note: low is inclusive, high is exclusive
-            if low == high {
+            tracing::info!("fetch kafka watermarks: low: {low}, high: {high}, split: {split:?}");
+            // note: low is inclusive, high is exclusive, start_offset is exclusive
+            if low == high || split.start_offset.is_some_and(|offset| offset + 1 >= high) {
                 backfill_info.insert(split.id(), BackfillInfo::NoDataToBackfill);
             } else {
                 debug_assert!(high > 0);
@@ -138,7 +138,7 @@ impl SplitReader for KafkaSplitReader {
                 );
             }
         }
-        tracing::debug!("backfill_info: {:?}", backfill_info);
+        tracing::info!("backfill_info: {:?}", backfill_info);
 
         consumer.assign(&tpl)?;
 
