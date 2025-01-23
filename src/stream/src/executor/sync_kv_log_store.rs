@@ -737,7 +737,6 @@ mod tests {
         check_stream_chunk_eq, gen_test_log_store_table, test_payload_schema,
     };
     use crate::common::log_store_impl::kv_log_store::KV_LOG_STORE_V2_INFO;
-    use crate::executor::prelude::*;
     use crate::executor::test_utils::MockSource;
 
     fn init_logger() {
@@ -760,8 +759,6 @@ mod tests {
         let pk_indices = vec![0];
         let (mut tx, source) = MockSource::channel();
         let source = source.into_executor(schema.clone(), pk_indices.clone());
-
-        let state_store = MemoryStateStore::new();
 
         let vnodes = Some(Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)));
 
@@ -856,8 +853,6 @@ mod tests {
         let (mut tx, source) = MockSource::channel();
         let source = source.into_executor(schema.clone(), pk_indices.clone());
 
-        let state_store = MemoryStateStore::new();
-
         let vnodes = Some(Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)));
 
         let pk_info = &KV_LOG_STORE_V2_INFO;
@@ -940,7 +935,7 @@ mod tests {
         init_logger();
 
         let pk_info = &KV_LOG_STORE_V2_INFO;
-        let column_descs = test_payload_schema(&pk_info);
+        let column_descs = test_payload_schema(pk_info);
         let fields = column_descs
             .into_iter()
             .map(|desc| Field::new(desc.name.clone(), desc.data_type.clone()))
@@ -949,8 +944,6 @@ mod tests {
         let pk_indices = vec![0];
         let (mut tx, source) = MockSource::channel();
         let source = source.into_executor(schema.clone(), pk_indices.clone());
-
-        let state_store = MemoryStateStore::new();
 
         let vnodes = Some(Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)));
 
