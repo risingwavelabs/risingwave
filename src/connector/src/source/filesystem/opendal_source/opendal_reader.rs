@@ -14,13 +14,15 @@
 
 use std::future::IntoFuture;
 use std::pin::Pin;
+use std::sync::Arc;
 
 use async_compression::tokio::bufread::GzipDecoder;
 use async_trait::async_trait;
 use futures::TryStreamExt;
 use futures_async_stream::try_stream;
 use opendal::Operator;
-use risingwave_common::array::StreamChunk;
+use risingwave_common::array::{ArrayBuilderImpl, DataChunk, StreamChunk};
+use risingwave_common::types::{Datum, ScalarImpl};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, BufReader};
 use tokio_util::io::StreamReader;
 
@@ -33,8 +35,8 @@ use crate::source::filesystem::nd_streaming::need_nd_streaming;
 use crate::source::filesystem::OpendalFsSplit;
 use crate::source::iceberg::read_parquet_file;
 use crate::source::{
-    BoxSourceChunkStream, Column, SourceContextRef, SourceMessage, SourceMeta, SplitMetaData,
-    SplitReader,
+    BoxSourceChunkStream, Column, SourceColumnDesc, SourceContextRef, SourceMessage, SourceMeta,
+    SplitMetaData, SplitReader,
 };
 
 #[derive(Debug, Clone)]
@@ -86,7 +88,7 @@ impl<Src: OpendalSource> OpendalReader<Src> {
             if let EncodingProperties::Parquet = &self.parser_config.specific.encoding_config {
                 chunk_stream = read_parquet_file(
                     self.connector.op.clone(),
-                    object_name,
+                    object_name.clone(),
                     self.columns.clone(),
                     Some(self.parser_config.common.rw_columns.clone()),
                     self.source_ctx.source_ctrl_opts.chunk_size,
@@ -115,6 +117,19 @@ impl<Src: OpendalSource> OpendalReader<Src> {
             #[for_await]
             for chunk in chunk_stream {
                 yield chunk?;
+            }
+
+            if let EncodingProperties::Parquet = &self.parser_config.specific.encoding_config {
+                // We no longer determine whether a file is finished by comparing `offset >= size`, the reader itself can sense whether it has reached the end.
+                // Therefore, after a file is read completely, we yield one more chunk marked as EOF, with its offset set to `usize::MAX` to indicate that it is finished.
+                // In fetch executor, if `offset = usize::MAX` is encountered, the corresponding file can be deleted from the state table.
+
+                // FIXME(wcy-fdu): The order of hidden columns in parquet encode and other encodes is inconsistent, maybe we can yeild a common eof chunk for both parquet encode and other encodes.
+                let eof_chunk = Self::generate_eof_chunk_for_parquet_encode(
+                    self.parser_config.common.rw_columns.clone(),
+                    object_name.clone(),
+                )?;
+                yield eof_chunk;
             }
         }
     }
@@ -165,7 +180,10 @@ impl<Src: OpendalSource> OpendalReader<Src> {
             }
         };
 
-        let mut offset = start_offset;
+        let mut offset = match object_name.ends_with(".gz") || object_name.ends_with(".gzip") {
+            true => 0,
+            false => start_offset,
+        };
         let partition_input_bytes_metrics = source_ctx
             .metrics
             .partition_input_bytes
@@ -209,8 +227,6 @@ impl<Src: OpendalSource> OpendalReader<Src> {
             offset += n_read;
             partition_input_bytes_metrics.inc_by(n_read as _);
 
-            partition_input_bytes_metrics.inc_by(n_read as _);
-
             if batch.len() >= max_chunk_size {
                 yield std::mem::replace(&mut batch, Vec::with_capacity(max_chunk_size));
             }
@@ -221,10 +237,7 @@ impl<Src: OpendalSource> OpendalReader<Src> {
             yield batch;
         }
 
-        // We no longer determine whether a file is finished by comparing `offset >= size`.
-        // The reader itself can sense whether it has reached the end.
-        // Therefore, after a file is read completely, we yield one more chunk marked as EOF, with its offset set to `usize::MAX` to indicate that it is finished.
-        // In fetch executor, if `offset = usize::MAX` is encountered, the corresponding file can be deleted from the state table.
+        // For json and csv encodes, yield an eof message to mark the file has been read.
         let eof_batch = vec![SourceMessage {
             key: None,
             payload: None,
@@ -233,5 +246,80 @@ impl<Src: OpendalSource> OpendalReader<Src> {
             meta: SourceMeta::Empty,
         }];
         yield eof_batch;
+    }
+
+    // Generate a special chunk to mark the end of reading. Its offset is usize::MAX and other fields are null.
+    fn generate_eof_chunk_for_parquet_encode(
+        rw_columns: Vec<SourceColumnDesc>,
+        object_name: String,
+    ) -> Result<StreamChunk, crate::error::ConnectorError> {
+        const MAX_HIDDEN_COLUMN_NUMS: usize = 3;
+        let column_size = rw_columns.len();
+        let mut chunk_columns = Vec::with_capacity(rw_columns.len() + MAX_HIDDEN_COLUMN_NUMS);
+        for source_column in rw_columns.clone() {
+            match source_column.column_type {
+                crate::source::SourceColumnType::Normal => {
+                    match source_column.is_hidden_addition_col {
+                        false => {
+                            let rw_data_type: &risingwave_common::types::DataType =
+                                &source_column.data_type;
+                            let mut array_builder =
+                                ArrayBuilderImpl::with_type(column_size, rw_data_type.clone());
+
+                            array_builder.append_null();
+                            let res = array_builder.finish();
+                            let column = Arc::new(res);
+                            chunk_columns.push(column);
+                        }
+                        // handle hidden columns, for file source, the hidden columns are only `Offset` and `Filename`
+                        true => {
+                            if let Some(additional_column_type) =
+                                &source_column.additional_column.column_type
+                            {
+                                match additional_column_type{
+                                risingwave_pb::plan_common::additional_column::ColumnType::Offset(_) =>{
+                                    let mut array_builder =
+                                    ArrayBuilderImpl::with_type(column_size, source_column.data_type.clone());
+                                    // set the EOF chunk's offset to usize::MAX to mark the end of file.
+                                    let datum: Datum = Some(ScalarImpl::Utf8((usize::MAX).to_string().into()));
+                                    array_builder.append(datum);
+                                    let res = array_builder.finish();
+                                    let column = Arc::new(res);
+                                    chunk_columns.push(column);
+
+                                },
+                                risingwave_pb::plan_common::additional_column::ColumnType::Filename(_) => {
+                                    let mut array_builder =
+                                    ArrayBuilderImpl::with_type(column_size, source_column.data_type.clone());
+                                    let datum: Datum =  Some(ScalarImpl::Utf8(object_name.clone().into()));
+                                    array_builder.append( datum);
+                                    let res = array_builder.finish();
+                                    let column = Arc::new(res);
+                                    chunk_columns.push(column);
+                                },
+                                _ => unreachable!()
+                            }
+                            }
+                        }
+                    }
+                }
+                crate::source::SourceColumnType::RowId => {
+                    let mut array_builder =
+                        ArrayBuilderImpl::with_type(column_size, source_column.data_type.clone());
+                    let datum: Datum = None;
+                    array_builder.append(datum);
+                    let res = array_builder.finish();
+                    let column = Arc::new(res);
+                    chunk_columns.push(column);
+                }
+                // The following fields is only used in CDC source
+                crate::source::SourceColumnType::Offset | crate::source::SourceColumnType::Meta => {
+                    unreachable!()
+                }
+            }
+        }
+
+        let data_chunk = DataChunk::new(chunk_columns.clone(), 1_usize);
+        Ok(data_chunk.into())
     }
 }

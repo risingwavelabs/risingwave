@@ -65,12 +65,6 @@ impl ParquetParser {
 
             yield chunk;
         }
-        // We no longer determine whether a file is finished by comparing `offset >= size`.
-        // The reader itself can sense whether it has reached the end.
-        // Therefore, after a file is read completely, we yield one more chunk marked as EOF, with its offset set to `usize::MAX` to indicate that it is finished.
-        // In fetch executor, if `offset = usize::MAX` is encountered, the corresponding file can be deleted from the state table.
-        let eof_chunk = self.generate_eof_chunk()?;
-        yield eof_chunk;
     }
 
     fn inc_offset(&mut self) {
@@ -184,78 +178,6 @@ impl ParquetParser {
         }
 
         let data_chunk = DataChunk::new(chunk_columns.clone(), record_batch.num_rows());
-        Ok(data_chunk.into())
-    }
-
-    // Generate a special chunk to mark the end of reading. Its offset is usize::MAX and other fields are null.
-    fn generate_eof_chunk(&mut self) -> Result<StreamChunk, crate::error::ConnectorError> {
-        const MAX_HIDDEN_COLUMN_NUMS: usize = 3;
-        let column_size = self.rw_columns.len();
-        let mut chunk_columns = Vec::with_capacity(self.rw_columns.len() + MAX_HIDDEN_COLUMN_NUMS);
-        for source_column in self.rw_columns.clone() {
-            match source_column.column_type {
-                crate::source::SourceColumnType::Normal => {
-                    match source_column.is_hidden_addition_col {
-                        false => {
-                            let rw_data_type: &risingwave_common::types::DataType =
-                                &source_column.data_type;
-                            let mut array_builder =
-                                ArrayBuilderImpl::with_type(column_size, rw_data_type.clone());
-
-                            array_builder.append_null();
-                            let res = array_builder.finish();
-                            let column = Arc::new(res);
-                            chunk_columns.push(column);
-                        }
-                        // handle hidden columns, for file source, the hidden columns are only `Offset` and `Filename`
-                        true => {
-                            if let Some(additional_column_type) =
-                                &source_column.additional_column.column_type
-                            {
-                                match additional_column_type{
-                                risingwave_pb::plan_common::additional_column::ColumnType::Offset(_) =>{
-                                    let mut array_builder =
-                                    ArrayBuilderImpl::with_type(column_size, source_column.data_type.clone());
-                                    // set the EOF chunk's offset to usize::MAX to mark the end of file.
-                                    let datum: Datum = Some(ScalarImpl::Utf8((usize::MAX).to_string().into()));
-                                    array_builder.append(datum);
-                                    let res = array_builder.finish();
-                                    let column = Arc::new(res);
-                                    chunk_columns.push(column);
-
-                                },
-                                risingwave_pb::plan_common::additional_column::ColumnType::Filename(_) => {
-                                    let mut array_builder =
-                                    ArrayBuilderImpl::with_type(column_size, source_column.data_type.clone());
-                                    let datum: Datum =  Some(ScalarImpl::Utf8(self.file_name.clone().into()));
-                                    array_builder.append( datum);
-                                    let res = array_builder.finish();
-                                    let column = Arc::new(res);
-                                    chunk_columns.push(column);
-                                },
-                                _ => unreachable!()
-                            }
-                            }
-                        }
-                    }
-                }
-                crate::source::SourceColumnType::RowId => {
-                    let mut array_builder =
-                        ArrayBuilderImpl::with_type(column_size, source_column.data_type.clone());
-                    let datum: Datum = None;
-                    array_builder.append(datum);
-                    let res = array_builder.finish();
-                    let column = Arc::new(res);
-                    chunk_columns.push(column);
-                }
-                // The following fields is only used in CDC source
-                crate::source::SourceColumnType::Offset | crate::source::SourceColumnType::Meta => {
-                    unreachable!()
-                }
-            }
-        }
-
-        let data_chunk = DataChunk::new(chunk_columns.clone(), 1_usize);
         Ok(data_chunk.into())
     }
 }
