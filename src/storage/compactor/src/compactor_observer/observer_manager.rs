@@ -77,7 +77,7 @@ impl ObserverState for CompactorObserverNode {
         self.handle_catalog_snapshot(snapshot.tables);
         let snapshot_version = snapshot.version.unwrap();
         self.version = snapshot_version.catalog_version;
-        LicenseManager::get().update_cpu_core_count(snapshot.cluster_cpu_core_count as _);
+        LicenseManager::get().update_cpu_core_count(snapshot.compute_node_total_cpu_count as _);
     }
 }
 

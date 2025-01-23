@@ -151,7 +151,7 @@ impl ObserverState for FrontendObserverNode {
             session_params,
             version,
             secrets,
-            cluster_cpu_core_count,
+            compute_node_total_cpu_count,
         } = snapshot;
 
         for db in databases {
@@ -213,7 +213,7 @@ impl ObserverState for FrontendObserverNode {
         *self.session_params.write() =
             serde_json::from_str(&session_params.unwrap().params).unwrap();
         LocalSecretManager::global().init_secrets(secrets);
-        LicenseManager::get().update_cpu_core_count(cluster_cpu_core_count as _);
+        LicenseManager::get().update_cpu_core_count(compute_node_total_cpu_count as _);
     }
 }
 

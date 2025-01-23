@@ -224,7 +224,7 @@ impl NotificationServiceImpl {
                 catalog_version,
                 ..Default::default()
             }),
-            cluster_cpu_core_count: compute_node_total_cpu_count as _,
+            compute_node_total_cpu_count: compute_node_total_cpu_count as _,
             ..Default::default()
         })
     }
@@ -300,7 +300,7 @@ impl NotificationServiceImpl {
             serving_worker_slot_mappings,
             streaming_worker_slot_mappings,
             session_params,
-            cluster_cpu_core_count: compute_node_total_cpu_count as _,
+            compute_node_total_cpu_count: compute_node_total_cpu_count as _,
             ..Default::default()
         })
     }
@@ -328,7 +328,7 @@ impl NotificationServiceImpl {
             hummock_write_limits: Some(WriteLimits {
                 write_limits: hummock_write_limits,
             }),
-            cluster_cpu_core_count: compute_node_total_cpu_count as _,
+            compute_node_total_cpu_count: compute_node_total_cpu_count as _,
             ..Default::default()
         })
     }
@@ -343,7 +343,7 @@ impl NotificationServiceImpl {
                 catalog_version,
                 ..Default::default()
             }),
-            cluster_cpu_core_count: compute_node_total_cpu_count as _,
+            compute_node_total_cpu_count: compute_node_total_cpu_count as _,
             ..Default::default()
         })
     }
