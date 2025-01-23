@@ -55,6 +55,7 @@ use sea_orm::{
     QuerySelect, RelationTrait, SelectGetableTuple, Selector, TransactionTrait, Value,
 };
 use tracing::info;
+
 use crate::controller::catalog::{CatalogController, CatalogControllerInner};
 use crate::controller::utils::{
     get_actor_dispatchers, get_fragment_mappings, rebuild_fragment_mapping_from_actors,

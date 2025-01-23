@@ -894,7 +894,7 @@ impl IntraLevelDelta {
 pub enum GroupDeltaCommon<T> {
     NewL0SubLevel(Vec<T>),
     IntraLevel(IntraLevelDeltaCommon<T>),
-    GroupConstruct(PbGroupConstruct),
+    GroupConstruct(Box<PbGroupConstruct>),
     GroupDestroy(PbGroupDestroy),
     GroupMerge(PbGroupMerge),
 }
@@ -911,7 +911,7 @@ where
                 GroupDeltaCommon::IntraLevel(IntraLevelDeltaCommon::from(pb_intra_level_delta))
             }
             Some(PbDeltaType::GroupConstruct(pb_group_construct)) => {
-                GroupDeltaCommon::GroupConstruct(pb_group_construct)
+                GroupDeltaCommon::GroupConstruct(Box::new(pb_group_construct))
             }
             Some(PbDeltaType::GroupDestroy(pb_group_destroy)) => {
                 GroupDeltaCommon::GroupDestroy(pb_group_destroy)
@@ -941,7 +941,7 @@ where
                 delta_type: Some(PbDeltaType::IntraLevel(intra_level_delta.into())),
             },
             GroupDeltaCommon::GroupConstruct(pb_group_construct) => PbGroupDelta {
-                delta_type: Some(PbDeltaType::GroupConstruct(pb_group_construct)),
+                delta_type: Some(PbDeltaType::GroupConstruct(*pb_group_construct)),
             },
             GroupDeltaCommon::GroupDestroy(pb_group_destroy) => PbGroupDelta {
                 delta_type: Some(PbDeltaType::GroupDestroy(pb_group_destroy)),
@@ -971,7 +971,7 @@ where
                 delta_type: Some(PbDeltaType::IntraLevel(intra_level_delta.into())),
             },
             GroupDeltaCommon::GroupConstruct(pb_group_construct) => PbGroupDelta {
-                delta_type: Some(PbDeltaType::GroupConstruct(pb_group_construct.clone())),
+                delta_type: Some(PbDeltaType::GroupConstruct(*pb_group_construct.clone())),
             },
             GroupDeltaCommon::GroupDestroy(pb_group_destroy) => PbGroupDelta {
                 delta_type: Some(PbDeltaType::GroupDestroy(*pb_group_destroy)),
@@ -998,7 +998,7 @@ where
                 GroupDeltaCommon::IntraLevel(IntraLevelDeltaCommon::from(pb_intra_level_delta))
             }
             Some(PbDeltaType::GroupConstruct(pb_group_construct)) => {
-                GroupDeltaCommon::GroupConstruct(pb_group_construct.clone())
+                GroupDeltaCommon::GroupConstruct(Box::new(pb_group_construct.clone()))
             }
             Some(PbDeltaType::GroupDestroy(pb_group_destroy)) => {
                 GroupDeltaCommon::GroupDestroy(*pb_group_destroy)

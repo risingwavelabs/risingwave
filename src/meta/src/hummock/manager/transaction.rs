@@ -122,25 +122,22 @@ impl<'a> HummockVersionTransaction<'a> {
         new_version_delta.change_log_delta = change_log_delta;
 
         for (compaction_group_id, compaction_group_config) in new_compaction_groups {
-            {
-                let group_deltas = &mut new_version_delta
-                    .group_deltas
-                    .entry(compaction_group_id)
-                    .or_default()
-                    .group_deltas;
+            let group_deltas = &mut new_version_delta
+                .group_deltas
+                .entry(compaction_group_id)
+                .or_default()
+                .group_deltas;
 
-                #[expect(deprecated)]
-                group_deltas.push(GroupDelta::GroupConstruct(GroupConstruct {
-                    group_config: Some((*compaction_group_config).clone()),
-                    group_id: compaction_group_id,
-                    parent_group_id: StaticCompactionGroupId::NewCompactionGroup
-                        as CompactionGroupId,
-                    new_sst_start_id: 0, // No need to set it when `NewCompactionGroup`
-                    table_ids: vec![],
-                    version: CompatibilityVersion::SplitGroupByTableId as i32,
-                    split_key: None,
-                }));
-            }
+            #[expect(deprecated)]
+            group_deltas.push(GroupDelta::GroupConstruct(Box::new(GroupConstruct {
+                group_config: Some((*compaction_group_config).clone()),
+                group_id: compaction_group_id,
+                parent_group_id: StaticCompactionGroupId::NewCompactionGroup as CompactionGroupId,
+                new_sst_start_id: 0, // No need to set it when `NewCompactionGroup`
+                table_ids: vec![],
+                version: CompatibilityVersion::SplitGroupByTableId as i32,
+                split_key: None,
+            })));
         }
 
         // Append SSTs to a new version.

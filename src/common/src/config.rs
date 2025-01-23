@@ -2109,6 +2109,8 @@ pub mod default {
         const DEFAULT_SST_ALLOWED_TRIVIAL_MOVE_MIN_SIZE: u64 = 4 * MB;
         const DEFAULT_EMERGENCY_LEVEL0_SST_FILE_COUNT: u32 = 2000; // > 50G / 32M = 1600
         const DEFAULT_EMERGENCY_LEVEL0_SUB_LEVEL_PARTITION: u32 = 256;
+        const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_MAX_SST_COUNT: u32 = 10000; // 10000 * 32M = 320G
+        const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_MAX_SIZE: u64 = 300 * 1024 * MB; // 300GB
 
         use crate::catalog::hummock::CompactionFilterFlag;
 
@@ -2198,6 +2200,14 @@ pub mod default {
 
         pub fn emergency_level0_sub_level_partition() -> u32 {
             DEFAULT_EMERGENCY_LEVEL0_SUB_LEVEL_PARTITION
+        }
+
+        pub fn level0_stop_write_threshold_max_sst_count() -> u32 {
+            DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_MAX_SST_COUNT
+        }
+
+        pub fn level0_stop_write_threshold_max_size() -> u64 {
+            DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_MAX_SIZE
         }
     }
 
