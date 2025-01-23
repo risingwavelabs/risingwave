@@ -70,13 +70,23 @@ impl TrivialMovePicker {
             }
 
             // find the first sst that can be trivial moved.
-            if sst.sst_size < self.sst_allowed_trivial_move_min_size && result.is_empty() {
+            if sst.sst_size < self.sst_allowed_trivial_move_min_size {
                 skip_by_size = true;
+
+                if !result.is_empty() {
+                    break;
+                }
+
                 continue;
             }
 
             if level_handlers[self.level].is_pending_compact(&sst.sst_id) {
                 skip_by_pending = true;
+
+                if !result.is_empty() {
+                    break;
+                }
+
                 continue;
             }
             overlap_info.update(sst);
@@ -238,7 +248,7 @@ pub mod tests {
                 .sst_allowed_trivial_move_min_size(Some(50))
                 .build(),
         );
-        let levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
+        let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
         let overlap_strategy = create_overlap_strategy(config.compaction_mode());
         {
             let trivial_move_picker =
@@ -281,6 +291,21 @@ pub mod tests {
 
             assert!(trivial_move_task.is_some());
             assert_eq!(trivial_move_task.unwrap().len(), 2);
+        }
+
+        {
+            levels_handler[0].test_add_pending_sst(2, 1);
+            let trivial_move_picker =
+                super::TrivialMovePicker::new(0, 1, overlap_strategy.clone(), 50, 4);
+            let trivial_move_task = trivial_move_picker.pick_multi_trivial_move_ssts(
+                &[sst1.clone(), sst2.clone(), sst3.clone(), sst4.clone()],
+                &[],
+                &levels_handler,
+                &mut Default::default(),
+            );
+
+            assert!(trivial_move_task.is_some());
+            assert_eq!(trivial_move_task.unwrap().len(), 1);
         }
     }
 }
