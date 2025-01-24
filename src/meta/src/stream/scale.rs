@@ -42,7 +42,6 @@ use risingwave_pb::meta::FragmentWorkerSlotMappings;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     Dispatcher, DispatcherType, FragmentTypeFlag, PbDispatcher, PbStreamActor, StreamNode,
-    StreamScanType,
 };
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Receiver;
@@ -727,15 +726,18 @@ impl ScaleController {
                     let mut is_reschedulable = true;
                     visit_stream_node_cont(stream_node, |body| {
                         if let Some(NodeBody::StreamScan(node)) = &body.node_body {
-                            return match node.stream_scan_type() {
-                                // Question: Is it possible to have multiple stream scans in one fragment?
-                                StreamScanType::ArrangementBackfill => true,
-                                _ => {
-                                    is_reschedulable = false;
-                                    false
-                                }
-                            };
+                            if !node.stream_scan_type().is_reschedulable() {
+                                is_reschedulable = false;
+
+                                // fail fast
+                                return false;
+                            }
+
+                            // continue visiting
+                            return true;
                         }
+
+                        // continue visiting
                         true
                     });
 

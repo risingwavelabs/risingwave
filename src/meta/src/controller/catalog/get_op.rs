@@ -177,7 +177,6 @@ impl CatalogController {
         let inner = self.inner.read().await;
 
         let job_parallelisms = StreamingJob::find()
-            // .filter(streaming_job::Column::JobStatus.eq(JobStatus::Created))
             .select_only()
             .columns([
                 streaming_job::Column::JobId,
