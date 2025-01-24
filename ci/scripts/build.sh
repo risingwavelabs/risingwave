@@ -30,7 +30,7 @@ fi
 echo "--- Build Rust components"
 
 if [[ "$profile" == "ci-dev" ]]; then
-    RISINGWAVE_FEATURE_FLAGS=(--features rw-dynamic-link --no-default-features)
+    RISINGWAVE_FEATURE_FLAGS=(--features rw-dynamic-link --features fips --no-default-features)
 else
     RISINGWAVE_FEATURE_FLAGS=(--features rw-static-link)
     configure_static_openssl
