@@ -103,7 +103,7 @@ impl SplitEnumerator for S3SplitEnumerator {
         let (_, _) = self.get_next_page::<FsSplit>().await?;
 
         Ok(vec![FsSplit {
-            name: "empty_split".to_string(),
+            name: "empty_split".to_owned(),
             offset: 0,
             size: 0,
         }])
