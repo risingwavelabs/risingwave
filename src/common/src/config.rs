@@ -2681,6 +2681,10 @@ pub struct CompactionConfig {
     pub enable_emergency_picker: bool,
     #[serde(default = "default::compaction_config::max_level")]
     pub max_level: u32,
+    #[serde(default = "default::compaction_config::sst_allowed_trivial_move_min_size")]
+    pub sst_allowed_trivial_move_min_size: u64,
+    #[serde(default = "default::compaction_config::sst_allowed_trivial_move_max_count")]
+    pub sst_allowed_trivial_move_max_count: u32,
 }
 
 /// Note: only applies to meta store backends other than `SQLite`.
