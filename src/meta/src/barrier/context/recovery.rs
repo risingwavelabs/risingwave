@@ -292,6 +292,23 @@ impl GlobalBarrierWorkerContextImpl {
                         warn!(error = %err.as_report(), "update actors failed");
                     })?;
 
+                    let background_jobs = {
+                        let jobs = self
+                            .list_background_mv_progress()
+                            .await
+                            .context("recover mview progress should not fail")?;
+                        let mut background_jobs = HashMap::new();
+                        for (definition, stream_job_fragments) in jobs {
+                            background_jobs
+                                .try_insert(
+                                    stream_job_fragments.stream_job_id(),
+                                    (definition, stream_job_fragments),
+                                )
+                                .expect("non-duplicate");
+                        }
+                        background_jobs
+                    };
+
                     // get split assignments for all actors
                     let source_splits = self.source_manager.list_assignments().await;
                     Ok(BarrierWorkerRuntimeInfoSnapshot {

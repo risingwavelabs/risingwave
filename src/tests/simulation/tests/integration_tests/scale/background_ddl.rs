@@ -17,6 +17,7 @@ use std::time::Duration;
 use anyhow::Result;
 use risingwave_simulation::cluster::{Cluster, Configuration};
 use risingwave_simulation::ctl_ext::predicate::{identity_contains, no_identity_contains};
+use risingwave_simulation::utils::AssertResult;
 use tokio::time::sleep;
 
 #[tokio::test]
@@ -34,7 +35,7 @@ async fn test_background_arrangement_backfill_offline_scaling() -> Result<()> {
         .await?;
     session.run("create table t (v int);").await?;
     session
-        .run("insert into t select * from generate_series(1, 10000);")
+        .run("insert into t select * from generate_series(1, 1000);")
         .await?;
 
     session.run("SET BACKGROUND_DDL=true;").await?;
@@ -67,6 +68,11 @@ async fn test_background_arrangement_backfill_offline_scaling() -> Result<()> {
         .await?;
 
     assert_eq!(mat_fragment.inner.actors.len(), cores_per_node);
+
+    sleep(Duration::from_secs(2000)).await;
+
+    // job is finished
+    session.run("show jobs;").await?.assert_result_eq("");
 
     Ok(())
 }
