@@ -1609,7 +1609,7 @@ pub fn check_cg_write_limit(
         .sum();
     if threshold < l0_sst_count {
         return WriteLimitType::WriteStop(format!(
-            "WriteStop(l0_sst_count: {}, threshold: {}) too many L0 sst count",
+            "WriteStop(l0_sst_count: {}, threshold: {}) too many L0 sst files",
             l0_sst_count, threshold
         ));
     }
@@ -1625,7 +1625,7 @@ pub fn check_cg_write_limit(
         .sum::<u64>();
     if threshold < l0_size {
         return WriteLimitType::WriteStop(format!(
-            "WriteStop(l0_size: {}, threshold: {}) too many L0 sst count",
+            "WriteStop(l0_size: {}, threshold: {}) too large L0 size",
             l0_size, threshold
         ));
     }
