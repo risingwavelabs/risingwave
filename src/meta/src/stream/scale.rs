@@ -79,7 +79,6 @@ pub struct CustomActorInfo {
     pub actor_id: u32,
     pub fragment_id: u32,
     pub dispatcher: Vec<Dispatcher>,
-    pub upstream_actor_id: Vec<u32>,
     /// `None` if singleton.
     pub vnode_bitmap: Option<Bitmap>,
 }
@@ -90,7 +89,6 @@ impl From<&PbStreamActor> for CustomActorInfo {
             actor_id,
             fragment_id,
             dispatcher,
-            upstream_actor_id,
             vnode_bitmap,
             ..
         }: &PbStreamActor,
@@ -99,7 +97,6 @@ impl From<&PbStreamActor> for CustomActorInfo {
             actor_id: *actor_id,
             fragment_id: *fragment_id,
             dispatcher: dispatcher.clone(),
-            upstream_actor_id: upstream_actor_id.clone(),
             vnode_bitmap: vnode_bitmap.as_ref().map(Bitmap::from),
         }
     }
@@ -530,9 +527,9 @@ impl ScaleController {
                     status: _,
                     splits: _,
                     worker_id,
-                    upstream_actor_ids,
                     vnode_bitmap,
                     expr_context,
+                    ..
                 },
             ) in actors
             {
@@ -547,12 +544,6 @@ impl ScaleController {
                     actor_id: actor_id as _,
                     fragment_id: fragment_id as _,
                     dispatcher: dispatchers,
-                    upstream_actor_id: upstream_actor_ids
-                        .into_inner()
-                        .values()
-                        .flatten()
-                        .map(|id| *id as _)
-                        .collect(),
                     vnode_bitmap: vnode_bitmap.map(|b| Bitmap::from(&b.to_protobuf())),
                 };
 
@@ -590,13 +581,13 @@ impl ScaleController {
                     actor_id,
                     fragment_id,
                     dispatcher,
-                    upstream_actor_id,
                     vnode_bitmap,
                 } = actors.first().unwrap().clone();
 
                 let (related_job, job_definition) =
                     related_jobs.get(&job_id).expect("job not found");
 
+                #[expect(deprecated)]
                 let fragment = CustomFragmentInfo {
                     fragment_id: fragment_id as _,
                     fragment_type_mask: fragment_type_mask as _,
@@ -608,7 +599,7 @@ impl ScaleController {
                         actor_id,
                         fragment_id: fragment_id as _,
                         dispatcher,
-                        upstream_actor_id,
+                        upstream_actor_id: vec![],
                         vnode_bitmap: vnode_bitmap.map(|b| b.to_protobuf()),
                         mview_definition: job_definition.to_owned(),
                         expr_context: expr_contexts
@@ -1649,12 +1640,6 @@ impl ScaleController {
                 }
             }
         }
-
-        new_actor.upstream_actor_id = applied_upstream_fragment_actor_ids
-            .values()
-            .flatten()
-            .cloned()
-            .collect_vec();
 
         if let Some(node) = new_actor.nodes.as_mut() {
             visit_stream_node(node, |node_body| {

@@ -259,10 +259,10 @@ impl CatalogController {
                 fragment_id,
                 nodes: _,
                 dispatcher: pb_dispatcher,
-                upstream_actor_id: pb_upstream_actor_id,
                 vnode_bitmap: pb_vnode_bitmap,
                 mview_definition: _,
                 expr_context: pb_expr_context,
+                ..
             } = actor;
 
             let splits = actor_splits.get(actor_id).map(|splits| {
@@ -280,17 +280,6 @@ impl CatalogController {
 
             let worker_id = status.worker_id() as _;
 
-            assert_eq!(
-                pb_upstream_actor_id
-                    .iter()
-                    .cloned()
-                    .collect::<BTreeSet<_>>(),
-                upstream_actors
-                    .values()
-                    .flatten()
-                    .cloned()
-                    .collect::<BTreeSet<_>>()
-            );
             let pb_expr_context = pb_expr_context
                 .as_ref()
                 .expect("no expression context found");
@@ -467,12 +456,6 @@ impl CatalogController {
             let pb_vnode_bitmap = vnode_bitmap.map(|vnode_bitmap| vnode_bitmap.to_protobuf());
             let pb_expr_context = Some(expr_context.to_protobuf());
 
-            let pb_upstream_actor_id = upstream_fragment_actors
-                .values()
-                .flatten()
-                .map(|&id| id as _)
-                .collect();
-
             let pb_dispatcher = actor_dispatcher
                 .remove(&actor_id)
                 .unwrap_or_default()
@@ -492,12 +475,13 @@ impl CatalogController {
                 pb_actor_splits.insert(actor_id as _, splits.to_protobuf());
             }
 
+            #[expect(deprecated)]
             pb_actors.push(PbStreamActor {
                 actor_id: actor_id as _,
                 fragment_id: fragment_id as _,
                 nodes: pb_nodes,
                 dispatcher: pb_dispatcher,
-                upstream_actor_id: pb_upstream_actor_id,
+                upstream_actor_id: vec![],
                 vnode_bitmap: pb_vnode_bitmap,
                 mview_definition: "".to_owned(),
                 expr_context: pb_expr_context,
@@ -1788,11 +1772,6 @@ mod tests {
                     fragment_id: TEST_FRAGMENT_ID as _,
                     nodes: Some(stream_node),
                     dispatcher: generate_dispatchers_for_actor(actor_id),
-                    upstream_actor_id: actor_upstream_actor_ids
-                        .values()
-                        .flatten()
-                        .map(|id| *id as _)
-                        .collect(),
                     vnode_bitmap: actor_bitmaps
                         .get(&actor_id)
                         .cloned()
@@ -1802,6 +1781,7 @@ mod tests {
                         time_zone: String::from("America/New_York"),
                         strict_mode: false,
                     }),
+                    ..Default::default()
                 }
             })
             .collect_vec();
@@ -2014,25 +1994,16 @@ mod tests {
                 fragment_id: pb_fragment_id,
                 nodes: pb_nodes,
                 dispatcher: pb_dispatcher,
-                upstream_actor_id: pb_upstream_actor_id,
                 vnode_bitmap: pb_vnode_bitmap,
                 mview_definition,
                 expr_context: pb_expr_context,
+                ..
             },
         ) in actors.into_iter().zip_eq_debug(pb_actors.into_iter())
         {
             assert_eq!(actor_id, pb_actor_id as ActorId);
             assert_eq!(fragment_id, pb_fragment_id as FragmentId);
             let upstream_actor_ids = upstream_actor_ids.into_inner();
-
-            assert_eq!(
-                upstream_actor_ids
-                    .values()
-                    .flatten()
-                    .map(|id| *id as u32)
-                    .collect_vec(),
-                pb_upstream_actor_id
-            );
 
             let actor_dispatcher: Vec<PbDispatcher> = actor_dispatchers
                 .remove(&actor_id)
