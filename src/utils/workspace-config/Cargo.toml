@@ -19,6 +19,7 @@ ignored = [
     "static-sasl2-sys",
     "vendored-openssl-sys",
     "dynamic-zstd-sys",
+    "aws-lc-rs",
 ]
 
 [features]
@@ -57,7 +58,6 @@ dynamic-zstd-sys = { package = "zstd-sys", version = "2", optional = true, defau
 aws-lc-rs ={ version = "1.6", optional = true, default-features = false, features = [
     "fips",
 ] }
-
 # workspace-hack = { path = "../../workspace-hack" }
 # Don't add workspace-hack into this crate!
 
