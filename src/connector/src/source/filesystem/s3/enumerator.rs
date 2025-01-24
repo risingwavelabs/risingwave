@@ -99,15 +99,14 @@ impl SplitEnumerator for S3SplitEnumerator {
     }
 
     async fn list_splits(&mut self) -> crate::error::ConnectorResult<Vec<Self::Split>> {
-        let mut objects = Vec::new();
-        loop {
-            let (files, has_finished) = self.get_next_page::<FsSplit>().await?;
-            objects.extend(files);
-            if has_finished {
-                break;
-            }
-        }
-        Ok(objects)
+        // fetch one page as validation, no need to get all pages
+        let (_, _) = self.get_next_page::<FsSplit>().await?;
+
+        Ok(vec![FsSplit {
+            name: "empty_split".to_string(),
+            offset: 0,
+            size: 0,
+        }])
     }
 }
 
