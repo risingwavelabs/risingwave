@@ -398,5 +398,8 @@ select count(*) from mv_latest;
 ----
 0
 
+statement ok
+drop source s_latest cascade;
+
 system ok
 rpk topic delete shared_source;
