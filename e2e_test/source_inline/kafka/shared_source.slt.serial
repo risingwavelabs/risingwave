@@ -99,6 +99,10 @@ SET streaming_use_shared_source TO false;
 statement ok
 create materialized view mv_2 as select * from s0;
 
+statement ok
+SET streaming_use_shared_source TO true;
+
+
 sleep 2s
 
 query ?? rowsort
@@ -370,3 +374,32 @@ drop source s0 cascade;
 
 statement ok
 drop source s_before_produce cascade;
+
+# test: scan.startup.mode=latest should not be blocked when there's no data to backfill
+# https://github.com/risingwavelabs/risingwave/issues/20083#issuecomment-2609422824
+statement ok
+create source s_latest (v1 int, v2 varchar) with (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'shared_source',
+  scan.startup.mode = 'latest'
+) FORMAT PLAIN ENCODE JSON;
+
+# Note: batch kafka scan ignores scan.startup.mode
+query ? rowsort
+select count(*) from s_latest;
+----
+55
+
+statement ok
+create materialized view mv_latest as select * from s_latest;
+
+query ? rowsort
+select count(*) from mv_latest;
+----
+0
+
+statement ok
+drop source s_latest cascade;
+
+system ok
+rpk topic delete shared_source;
