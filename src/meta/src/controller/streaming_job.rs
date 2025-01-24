@@ -1632,7 +1632,6 @@ impl CatalogController {
                         actor_id,
                         fragment_id,
                         dispatcher,
-                        upstream_actor_id,
                         vnode_bitmap,
                         expr_context,
                         ..
@@ -1656,20 +1655,6 @@ impl CatalogController {
                     .into_iter()
                     .map(|(k, v)| (k, v.into_iter().collect()))
                     .collect();
-
-                debug_assert_eq!(
-                    actor_upstreams
-                        .values()
-                        .flatten()
-                        .cloned()
-                        .sorted()
-                        .collect_vec(),
-                    upstream_actor_id
-                        .iter()
-                        .map(|actor_id| *actor_id as i32)
-                        .sorted()
-                        .collect_vec()
-                );
 
                 let actor_upstreams = ActorUpstreamActors(actor_upstreams);
 

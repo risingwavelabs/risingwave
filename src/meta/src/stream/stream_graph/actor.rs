@@ -320,12 +320,6 @@ impl ActorBuilder {
     ) -> MetaResult<StreamActorWithUpstreams> {
         let (rewritten_nodes, actor_upstreams) = self.rewrite()?;
 
-        // TODO: store each upstream separately
-        let upstream_actor_id = self
-            .upstreams
-            .into_values()
-            .flat_map(|ActorUpstream { actors, .. }| actors.as_global_ids())
-            .collect();
         // Only fill the definition when debug assertions enabled, otherwise use name instead.
         #[cfg(not(debug_assertions))]
         let mview_definition = job.name();
@@ -333,12 +327,13 @@ impl ActorBuilder {
         let mview_definition = job.definition();
 
         Ok((
+            #[expect(deprecated)]
             StreamActor {
                 actor_id: self.actor_id.as_global_id(),
                 fragment_id: self.fragment_id.as_global_id(),
                 nodes: Some(rewritten_nodes),
                 dispatcher: self.downstreams.into_values().collect(),
-                upstream_actor_id,
+                upstream_actor_id: vec![],
                 vnode_bitmap: self.vnode_bitmap.map(|b| b.to_protobuf()),
                 mview_definition,
                 expr_context: Some(expr_context),
