@@ -44,12 +44,12 @@ mod tests {
         do_test(
             KEY,
             0,
-            expect!["feature TestPaid is not available: invalid license key: InvalidToken"],
+            expect!["feature TestPaid is not available due to license error: invalid license key: InvalidToken"],
         );
         do_test(
             KEY,
             114514,
-            expect!["feature TestPaid is not available: invalid license key: InvalidToken"],
+            expect!["feature TestPaid is not available due to license error: invalid license key: InvalidToken"],
         );
     }
 
