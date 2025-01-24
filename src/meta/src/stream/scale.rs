@@ -42,6 +42,7 @@ use risingwave_pb::meta::FragmentWorkerSlotMappings;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     Dispatcher, DispatcherType, FragmentTypeFlag, PbDispatcher, PbStreamActor, StreamNode,
+    StreamScanType,
 };
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Receiver;
@@ -139,6 +140,7 @@ impl CustomFragmentInfo {
 }
 
 use educe::Educe;
+use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 
 use super::SourceChange;
 use crate::controller::id::IdCategory;
@@ -706,18 +708,46 @@ impl ScaleController {
                 .get(fragment_id)
                 .ok_or_else(|| anyhow!("fragment {fragment_id} does not exist"))?;
 
-            // Check if the reschedule is supported.
-            // match fragment_state[fragment_id] {
-            //     table_fragments::State::Unspecified => unreachable!(),
-            //     state @ table_fragments::State::Initial
-            //     | state @ table_fragments::State::Creating => {
-            //         bail!(
-            //             "the materialized view of fragment {fragment_id} is in state {}",
-            //             state.as_str_name()
-            //         )
-            //     }
-            //     table_fragments::State::Created => {}
-            // }
+            // Check if the rescheduling is supported.
+            match fragment_state[fragment_id] {
+                table_fragments::State::Unspecified => unreachable!(),
+                state @ table_fragments::State::Initial => {
+                    bail!(
+                        "the materialized view of fragment {fragment_id} is in state {}",
+                        state.as_str_name()
+                    )
+                }
+                state @ table_fragments::State::Creating => {
+                    let stream_node = fragment
+                        .actor_template
+                        .nodes
+                        .as_ref()
+                        .expect("empty nodes in fragment actor template");
+
+                    let mut is_reschedulable = true;
+                    visit_stream_node_cont(stream_node, |body| {
+                        if let Some(NodeBody::StreamScan(node)) = &body.node_body {
+                            return match node.stream_scan_type() {
+                                // Question: Is it possible to have multiple stream scans in one fragment?
+                                StreamScanType::ArrangementBackfill => true,
+                                _ => {
+                                    is_reschedulable = false;
+                                    false
+                                }
+                            };
+                        }
+                        true
+                    });
+
+                    if !is_reschedulable {
+                        bail!(
+                            "the materialized view of fragment {fragment_id} is in state {}",
+                            state.as_str_name()
+                        )
+                    }
+                }
+                table_fragments::State::Created => {}
+            }
 
             if no_shuffle_target_fragment_ids.contains(fragment_id) {
                 bail!("rescheduling NoShuffle downstream fragment (maybe Chain fragment) is forbidden, please use NoShuffle upstream fragment (like Materialized fragment) to scale");
