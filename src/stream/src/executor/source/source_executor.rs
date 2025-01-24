@@ -13,13 +13,10 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::future::Future;
-use std::pin::Pin;
 use std::time::Duration;
 
 use anyhow::anyhow;
 use either::Either;
-use futures::stream::BoxStream;
 use futures::TryStreamExt;
 use itertools::Itertools;
 use risingwave_common::array::ArrayRef;
@@ -41,7 +38,6 @@ use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::Instant;
-use tracing::Instrument;
 
 use super::executor_core::StreamSourceCore;
 use super::{
@@ -50,7 +46,6 @@ use super::{
 };
 use crate::common::rate_limit::limited_chunk_size;
 use crate::executor::prelude::*;
-use crate::executor::source::get_infinite_backoff_strategy;
 use crate::executor::stream_reader::StreamReaderWithPause;
 use crate::executor::UpdateMutation;
 
@@ -155,15 +150,30 @@ impl StreamReaderBuilder {
         (column_ids, source_ctx)
     }
 
-    #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
-    async fn into_retry_stream(
-        self,
+    async fn fetch_latest_splits(
+        &self,
         state: ConnectorState,
         seek_to_latest: bool,
-        is_initial_build: bool,
-    ) {
+    ) -> StreamExecutorResult<ConnectorState> {
         let (column_ids, source_ctx) = self.prepare_source_stream_build();
-        let mut is_first_run = true;
+        let source_ctx_ref = Arc::new(source_ctx);
+        let (_, res) = self
+            .source_desc
+            .source
+            .build_stream(
+                state.clone(),
+                column_ids.clone(),
+                source_ctx_ref.clone(),
+                seek_to_latest,
+            )
+            .await
+            .map_err(StreamExecutorError::connector_error)?;
+        Ok(res.latest_splits)
+    }
+
+    #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
+    async fn into_retry_stream(self, state: ConnectorState, is_initial_build: bool) {
+        let (column_ids, source_ctx) = self.prepare_source_stream_build();
         let source_ctx_ref = Arc::new(source_ctx);
 
         'build_consume_loop: loop {
@@ -174,14 +184,14 @@ impl StreamReaderBuilder {
                     state.clone(),
                     column_ids.clone(),
                     source_ctx_ref.clone(),
-                    seek_to_latest,
+                    // just `seek_to_latest` for initial build
+                    is_initial_build,
                 )
                 .await;
             if let Err(e) = build_stream_result {
-                if is_first_run && is_initial_build {
+                if is_initial_build {
                     return Err(StreamExecutorError::connector_error(e));
                 } else {
-                    is_first_run = false;
                     continue 'build_consume_loop;
                 }
             }
@@ -193,16 +203,13 @@ impl StreamReaderBuilder {
                 match msg {
                     Ok(msg) => yield msg,
                     Err(e) => {
-                        if is_first_run && is_initial_build {
-                            return Err(StreamExecutorError::connector_error(e));
-                        } else {
-                            break 'consume;
-                        }
+                        tracing::warn!(error = ?e.as_report(), "stream source reader error");
+                        break 'consume;
                     }
                 }
             }
-
-            is_first_run = false;
+            tracing::info!("stream source reader error, retry in 5s");
+            tokio::time::sleep(Duration::from_secs(5)).await;
         }
     }
 }
@@ -532,11 +539,8 @@ impl<S: StateStore> SourceExecutor<S> {
 
         // Replace the source reader with a new one of the new state.
         let replace_stream_reader_builder = self.stream_reader_builder(source_desc.clone());
-        let reader_stream = replace_stream_reader_builder.into_retry_stream(
-            Some(target_state.clone()),
-            false,
-            false,
-        );
+        let reader_stream =
+            replace_stream_reader_builder.into_retry_stream(Some(target_state.clone()), false);
         let reader = reader_stream.map_err(StreamExecutorError::connector_error);
 
         stream.replace_data_stream(reader);
@@ -606,7 +610,7 @@ impl<S: StateStore> SourceExecutor<S> {
                 Vec::default()
             };
         let is_pause_on_startup = first_barrier.is_pause_on_startup();
-
+        let mut is_uninitialized = first_barrier.is_newly_added(self.actor_ctx.id);
         yield Message::Barrier(first_barrier);
 
         let mut core = self.stream_source_core.unwrap();
@@ -626,9 +630,6 @@ impl<S: StateStore> SourceExecutor<S> {
         };
 
         core.split_state_store.init_epoch(first_epoch).await?;
-        // initial_dispatch_num is 0 means the source executor doesn't have downstream jobs
-        // and is newly created
-        let mut is_uninitialized = self.actor_ctx.initial_dispatch_num == 0;
         for ele in &mut boot_state {
             if let Some(recover_state) = core
                 .split_state_store
@@ -655,11 +656,22 @@ impl<S: StateStore> SourceExecutor<S> {
         let recover_state: ConnectorState = (!boot_state.is_empty()).then_some(boot_state);
         tracing::debug!(state = ?recover_state, "start with state");
 
-        let mut received_resume_during_build = false;
-        let mut barrier_stream = barrier_to_message_stream(barrier_receiver).boxed();
+        let barrier_stream = barrier_to_message_stream(barrier_receiver).boxed();
 
         // Build the source stream reader.
         let init_reader_builder = self.stream_reader_builder(source_desc.clone());
+        let mut latest_splits = None;
+        if is_uninitialized {
+            // need to seek to latest for initial build && shared source
+            latest_splits = init_reader_builder
+                .fetch_latest_splits(
+                    recover_state.clone(),
+                    is_uninitialized && self.is_shared_non_cdc,
+                )
+                .await?;
+        }
+        let reader_stream =
+            init_reader_builder.into_retry_stream(recover_state.clone(), is_uninitialized);
 
         if let Some(latest_splits) = latest_splits {
             // make sure it is written to state table later.
@@ -673,11 +685,11 @@ impl<S: StateStore> SourceExecutor<S> {
         // Merge the chunks from source and the barriers into a single stream. We prioritize
         // barriers over source data chunks here.
         let mut stream =
-            StreamReaderWithPause::<true, StreamChunk>::new(barrier_stream, source_chunk_reader);
+            StreamReaderWithPause::<true, StreamChunk>::new(barrier_stream, reader_stream);
         let mut command_paused = false;
 
         // - If the first barrier requires us to pause on startup, pause the stream.
-        if is_pause_on_startup && !received_resume_during_build {
+        if is_pause_on_startup {
             tracing::info!("source paused on startup");
             stream.pause_stream();
             command_paused = true;
@@ -886,29 +898,6 @@ impl<S: StateStore> SourceExecutor<S> {
 
         while let Some(barrier) = barrier_receiver.recv().await {
             yield Message::Barrier(barrier);
-        }
-    }
-}
-
-async fn build_source_stream_and_poll_barrier(
-    barrier_stream: &mut BoxStream<'static, StreamExecutorResult<Message>>,
-    reader_and_splits: &mut Option<(BoxSourceChunkStream, Option<Vec<SplitImpl>>)>,
-    build_future: &mut Pin<
-        Box<impl Future<Output = (BoxSourceChunkStream, Option<Vec<SplitImpl>>)>>,
-    >,
-) -> StreamExecutorResult<Option<Message>> {
-    if reader_and_splits.is_some() {
-        return Ok(None);
-    }
-
-    tokio::select! {
-        biased;
-        build_ret = &mut *build_future => {
-            *reader_and_splits = Some(build_ret);
-            Ok(None)
-        }
-        msg = barrier_stream.next() => {
-            msg.transpose()
         }
     }
 }
