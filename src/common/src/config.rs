@@ -2696,6 +2696,22 @@ pub struct CompactionConfig {
     pub enable_emergency_picker: bool,
     #[serde(default = "default::compaction_config::max_level")]
     pub max_level: u32,
+    #[serde(default = "default::compaction_config::max_l0_compact_level_count")]
+    pub max_l0_compact_level_count: u32,
+    #[serde(default = "default::compaction_config::sst_allowed_trivial_move_min_size")]
+    pub sst_allowed_trivial_move_min_size: u64,
+    #[serde(default = "default::compaction_config::disable_auto_group_scheduling")]
+    pub disable_auto_group_scheduling: bool,
+    #[serde(default = "default::compaction_config::max_overlapping_level_size")]
+    pub max_overlapping_level_size: u64,
+    #[serde(default = "default::compaction_config::emergency_level0_sst_file_count")]
+    pub emergency_level0_sst_file_count: u32,
+    #[serde(default = "default::compaction_config::emergency_level0_sub_level_partition")]
+    pub emergency_level0_sub_level_partition: u32,
+    #[serde(default = "default::compaction_config::level0_stop_write_threshold_max_sst_count")]
+    pub level0_stop_write_threshold_max_sst_count: u32,
+    #[serde(default = "default::compaction_config::level0_stop_write_threshold_max_size")]
+    pub level0_stop_write_threshold_max_size: u64,
 }
 
 /// Note: only applies to meta store backends other than `SQLite`.
