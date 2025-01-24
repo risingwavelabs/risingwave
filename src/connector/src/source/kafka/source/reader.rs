@@ -138,7 +138,15 @@ impl SplitReader for KafkaSplitReader {
                 );
             }
         }
-        tracing::info!("backfill_info: {:?}", backfill_info);
+        tracing::info!(
+            topic = properties.common.topic,
+            source_name = source_ctx.source_name,
+            fragment_id = source_ctx.fragment_id,
+            source_id = source_ctx.source_id.table_id,
+            actor_id = source_ctx.actor_id,
+            "backfill_info: {:?}",
+            backfill_info
+        );
 
         consumer.assign(&tpl)?;
 
