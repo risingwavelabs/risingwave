@@ -44,6 +44,8 @@ use risingwave_connector::source::cdc::external::{
     ExternalTableConfig, ExternalTableImpl, DATABASE_NAME_KEY, SCHEMA_NAME_KEY, TABLE_NAME_KEY,
 };
 use risingwave_connector::{source, WithOptionsSecResolved};
+use risingwave_pb::catalog::connection::Info as ConnectionInfo;
+use risingwave_pb::catalog::connection_params::ConnectionType;
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::{PbSource, PbTable, PbWebhookSourceInfo, Table, WatermarkDesc};
 use risingwave_pb::ddl_service::TableJobType;
@@ -52,13 +54,13 @@ use risingwave_pb::plan_common::{
     AdditionalColumn, ColumnDescVersion, DefaultColumnDesc, GeneratedColumnDesc,
 };
 use risingwave_pb::secret::secret_ref::PbRefAsType;
-use risingwave_pb::secret::PbSecretRef;
+use risingwave_pb::secret::{secret_ref, PbSecretRef};
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_sqlparser::ast::{
     CdcTableInfo, ColumnDef, ColumnOption, CompatibleFormatEncode, CreateSink, CreateSinkStatement,
     CreateSourceStatement, DataType as AstDataType, ExplainOptions, Format, FormatEncodeOptions,
-    Ident, ObjectName, OnConflict, SecretRefAsType, SourceWatermark, Statement, TableConstraint,
-    WebhookSourceInfo, WithProperties,
+    Ident, ObjectName, OnConflict, SecretRefAsType, SecretRefValue, SourceWatermark, Statement,
+    TableConstraint, WebhookSourceInfo, WithProperties,
 };
 use risingwave_sqlparser::parser::{IncludeOption, Parser};
 use thiserror_ext::AsReport;
@@ -1448,7 +1450,7 @@ pub async fn create_iceberg_engine_table(
     constraints: Vec<TableConstraint>,
     table_name: ObjectName,
 ) -> Result<()> {
-    // 1. fetch iceberg engine options from the meta node.
+    // 1. fetch iceberg engine options from the meta node. Or use iceberg engine connection provided by users.
     // 2. create a hummock table
     // 3. create an iceberg sink
     // 4. create an iceberg source
@@ -1459,48 +1461,146 @@ pub async fn create_iceberg_engine_table(
     let data_directory = system_params.data_directory().to_owned();
     let meta_store_endpoint = meta_client.get_meta_store_endpoint().await?;
 
-    let (s3_region, s3_bucket, s3_endpoint, s3_ak, s3_sk) = match state_store_endpoint {
-        s3 if s3.starts_with("hummock+s3://") => {
-            let s3_region = if let Ok(s3_region) = std::env::var("AWS_REGION") {
-                s3_region
-            } else {
-                bail!("To create an iceberg engine table with s3 backend, AWS_REGION needed to be set");
-            };
-            (
-                s3_region,
-                s3.strip_prefix("hummock+s3://").unwrap().to_owned(),
-                None,
-                None,
-                None,
-            )
+    let rw_db_name = session
+        .env()
+        .catalog_reader()
+        .read_guard()
+        .get_database_by_id(&table.database_id)?
+        .name()
+        .to_owned();
+    let rw_schema_name = session
+        .env()
+        .catalog_reader()
+        .read_guard()
+        .get_schema_by_id(&table.database_id, &table.schema_id)?
+        .name()
+        .clone();
+    let iceberg_catalog_name = rw_db_name.clone();
+    let iceberg_database_name = rw_schema_name.clone();
+    let iceberg_table_name = table_name.0.last().unwrap().real_value();
+
+    let iceberg_engine_connection: String = session.config().iceberg_engine_connection();
+
+    let mut secret_refs = BTreeMap::new();
+
+    let (s3_region, s3_endpoint, s3_ak, s3_sk, warehouse_path) = if iceberg_engine_connection
+        .is_empty()
+    {
+        match state_store_endpoint {
+            s3 if s3.starts_with("hummock+s3://") => {
+                let s3_region = if let Ok(s3_region) = std::env::var("AWS_REGION") {
+                    s3_region
+                } else {
+                    bail!("To create an iceberg engine table with s3 backend, AWS_REGION needed to be set");
+                };
+                let s3_bucket = s3.strip_prefix("hummock+s3://").unwrap().to_owned();
+                (
+                    s3_region,
+                    None,
+                    None,
+                    None,
+                    format!(
+                        "s3://{}/{}/iceberg/{}",
+                        s3_bucket, data_directory, iceberg_catalog_name
+                    ),
+                )
+            }
+            minio if minio.starts_with("hummock+minio://") => {
+                let server = minio.strip_prefix("hummock+minio://").unwrap();
+                let (access_key_id, rest) = server.split_once(':').unwrap();
+                let (secret_access_key, mut rest) = rest.split_once('@').unwrap();
+                let endpoint_prefix = if let Some(rest_stripped) = rest.strip_prefix("https://") {
+                    rest = rest_stripped;
+                    "https://"
+                } else if let Some(rest_stripped) = rest.strip_prefix("http://") {
+                    rest = rest_stripped;
+                    "http://"
+                } else {
+                    "http://"
+                };
+                let (address, s3_bucket) = rest.split_once('/').unwrap();
+                (
+                    "us-east-1".to_owned(),
+                    Some(format!("{}{}", endpoint_prefix, address)),
+                    Some(access_key_id.to_owned()),
+                    Some(secret_access_key.to_owned()),
+                    format!(
+                        "s3://{}/{}/iceberg/{}",
+                        s3_bucket, data_directory, iceberg_catalog_name
+                    ),
+                )
+            }
+            _ => {
+                bail!(
+                    "iceberg engine can't operate with this state store endpoint: {}",
+                    state_store_endpoint
+                );
+            }
         }
-        minio if minio.starts_with("hummock+minio://") => {
-            let server = minio.strip_prefix("hummock+minio://").unwrap();
-            let (access_key_id, rest) = server.split_once(':').unwrap();
-            let (secret_access_key, mut rest) = rest.split_once('@').unwrap();
-            let endpoint_prefix = if let Some(rest_stripped) = rest.strip_prefix("https://") {
-                rest = rest_stripped;
-                "https://"
-            } else if let Some(rest_stripped) = rest.strip_prefix("http://") {
-                rest = rest_stripped;
-                "http://"
+    } else {
+        let parts: Vec<&str> = iceberg_engine_connection.split('.').collect();
+        assert_eq!(parts.len(), 2);
+        let connection_catalog =
+            session.get_connection_by_name(Some(parts[0].to_owned()), &parts[1])?;
+        if let ConnectionInfo::ConnectionParams(params) = &connection_catalog.info {
+            if params.connection_type == ConnectionType::Iceberg as i32 {
+                println!("options: {:?}", &params.properties);
+                println!("secret_refs: {:?}", &params.secret_refs);
+                let catalog_reader = session.env().catalog_reader().read_guard();
+                for (k, v) in params.secret_refs.iter() {
+                    let secret = catalog_reader.get_secret_by_id(&rw_db_name, v.secret_id)?;
+                    if secret.database_id != table.database_id {
+                        return Err(RwError::from(ErrorCode::InvalidParameterValue(
+                            "Secrets must be in the same database as the iceberg table".to_owned(),
+                        )));
+                    }
+                    let schema_name = session
+                        .env()
+                        .catalog_reader()
+                        .read_guard()
+                        .get_schema_by_id(&secret.database_id, &secret.schema_id)?
+                        .name();
+                    secret_refs.insert(
+                        k.to_owned(),
+                        SecretRefValue {
+                            secret_name: ObjectName::from(vec![
+                                Ident::from(schema_name.as_str()),
+                                Ident::from(secret.name.as_str()),
+                            ]),
+                            ref_as: match secret_ref::RefAsType::try_from(v.ref_as).unwrap() {
+                                secret_ref::RefAsType::Text => SecretRefAsType::Text,
+                                secret_ref::RefAsType::File => SecretRefAsType::File,
+                                secret_ref::RefAsType::Unspecified => unreachable!(),
+                            },
+                        },
+                    );
+                }
+                let s3_region = params
+                    .properties
+                    .get("s3.region")
+                    .ok_or_else(|| anyhow!("`s3.region` must be set in iceberg engine connection"))?
+                    .to_owned();
+                let s3_endpoint = params.properties.get("s3.endpoint").map(|s| s.to_owned());
+                let s3_ak = params.properties.get("s3.access.key").map(|s| s.to_owned());
+                let s3_sk = params.properties.get("s3.secret.key").map(|s| s.to_owned());
+                let warehouse_path = params
+                    .properties
+                    .get("warehouse.path")
+                    .map(|s| s.to_owned())
+                    .ok_or_else(|| {
+                        anyhow!("`warehouse.path` must be set in iceberg engine connection")
+                    })?;
+                (s3_region, s3_endpoint, s3_ak, s3_sk, warehouse_path)
             } else {
-                "http://"
-            };
-            let (address, bucket) = rest.split_once('/').unwrap();
-            (
-                "us-east-1".to_owned(),
-                bucket.to_owned(),
-                Some(format!("{}{}", endpoint_prefix, address)),
-                Some(access_key_id.to_owned()),
-                Some(secret_access_key.to_owned()),
-            )
-        }
-        _ => {
-            bail!(
-                "iceberg engine can't operate with this state store endpoint: {}",
-                state_store_endpoint
-            );
+                return Err(RwError::from(ErrorCode::InvalidParameterValue(
+                    "Only iceberg connection could be used in iceberg engine".to_owned(),
+                )));
+            }
+        } else {
+            return Err(RwError::from(ErrorCode::InvalidParameterValue(
+                "Private Link Service has been deprecated. Please create a new connection instead."
+                    .to_owned(),
+            )));
         }
     };
 
@@ -1532,24 +1632,6 @@ pub async fn create_iceberg_engine_table(
     let Ok(meta_backend) = MetaBackend::from_str(&meta_store_backend, true) else {
         bail!("failed to parse meta backend: {}", meta_store_backend);
     };
-
-    let rw_db_name = session
-        .env()
-        .catalog_reader()
-        .read_guard()
-        .get_database_by_id(&table.database_id)?
-        .name()
-        .to_owned();
-    let rw_schema_name = session
-        .env()
-        .catalog_reader()
-        .read_guard()
-        .get_schema_by_id(&table.database_id, &table.schema_id)?
-        .name()
-        .clone();
-    let iceberg_catalog_name = rw_db_name.clone();
-    let iceberg_database_name = rw_schema_name.clone();
-    let iceberg_table_name = table_name.0.last().unwrap().real_value();
 
     // Iceberg sinks require a primary key, if none is provided, we will use the _row_id column
     // Fetch primary key from columns
@@ -1646,11 +1728,6 @@ pub async fn create_iceberg_engine_table(
         }
     };
 
-    let warehouse_path = format!(
-        "s3://{}/{}/iceberg/{}",
-        s3_bucket, data_directory, iceberg_catalog_name
-    );
-
     let mut sink_handler_args = handler_args.clone();
     let mut with = BTreeMap::new();
     with.insert("connector".to_owned(), "iceberg".to_owned());
@@ -1710,7 +1787,8 @@ pub async fn create_iceberg_engine_table(
     );
     with.insert("create_table_if_not_exists".to_owned(), "true".to_owned());
     with.insert("enable_config_load".to_owned(), "true".to_owned());
-    sink_handler_args.with_options = WithOptions::new_with_options(with);
+    sink_handler_args.with_options =
+        WithOptions::new(with, secret_refs.clone(), Default::default());
 
     let mut source_name = table_name.clone();
     *source_name.0.last_mut().unwrap() = Ident::from(
@@ -1754,7 +1832,7 @@ pub async fn create_iceberg_engine_table(
     with.insert("database.name".to_owned(), iceberg_database_name.clone());
     with.insert("table.name".to_owned(), iceberg_table_name.clone());
     with.insert("enable_config_load".to_owned(), "true".to_owned());
-    source_handler_args.with_options = WithOptions::new_with_options(with);
+    source_handler_args.with_options = WithOptions::new(with, secret_refs, Default::default());
 
     // before we create the table, ensure the JVM is initialized as we use jdbc catalog right now.
     // If JVM isn't initialized successfully, current not atomic ddl will result in a partially created iceberg engine table.
