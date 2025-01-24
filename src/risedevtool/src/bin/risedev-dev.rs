@@ -32,7 +32,7 @@ use risedev::{
     ConfigureTmuxTask, DummyService, EnsureStopService, ExecuteContext, FrontendService,
     GrafanaService, KafkaService, MetaNodeService, MinioService, MySqlService, PostgresService,
     PrometheusService, PubsubService, RedisService, SchemaRegistryService, ServiceConfig,
-    SqlServerService, SqliteConfig, Task, TempoService, RISEDEV_NAME,
+    SqlServerService, SqliteConfig, Task, TaskGroup, TempoService, RISEDEV_NAME,
 };
 use tempfile::tempdir;
 use thiserror_ext::AsReport;
@@ -372,7 +372,7 @@ struct TaskResult {
 trait TaskFn = FnOnce() -> anyhow::Result<TaskResult> + Send + 'static;
 struct TaskScheduler {
     /// In each group, the tasks are executed in sequence.
-    task_groups: HashMap<String, Vec<Box<dyn TaskFn>>>,
+    task_groups: HashMap<TaskGroup, Vec<Box<dyn TaskFn>>>,
 }
 
 impl TaskScheduler {

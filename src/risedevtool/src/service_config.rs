@@ -432,6 +432,18 @@ pub enum ServiceConfig {
     SqlServer(SqlServerConfig),
 }
 
+#[derive(PartialEq, Eq, Hash)]
+pub enum TaskGroup {
+    RisingWave,
+    Observability,
+    Kafka,
+    Pubsub,
+    MySql,
+    Postgres,
+    SqlServer,
+    Redis,
+}
+
 impl ServiceConfig {
     pub fn id(&self) -> &str {
         match self {
@@ -506,39 +518,39 @@ impl ServiceConfig {
         }
     }
 
-    pub fn task_group(&self) -> String {
+    pub fn task_group(&self) -> TaskGroup {
+        use TaskGroup::*;
         match self {
-            ServiceConfig::ComputeNode(_) => "risingwave".to_owned(),
-            ServiceConfig::MetaNode(_) => "risingwave".to_owned(),
-            ServiceConfig::Frontend(_) => "risingwave".to_owned(),
-            ServiceConfig::Compactor(_) => "risingwave".to_owned(),
-            ServiceConfig::Minio(_) => "risingwave".to_owned(),
-            ServiceConfig::Sqlite(_) => "risingwave".to_owned(),
-            ServiceConfig::Prometheus(_) => "observability".to_owned(),
-            ServiceConfig::Grafana(_) => "observability".to_owned(),
-            ServiceConfig::Tempo(_) => "observability".to_owned(),
-            ServiceConfig::Opendal(_) => "risingwave".to_owned(),
-            ServiceConfig::AwsS3(_) => "risingwave".to_owned(),
-            ServiceConfig::Kafka(_) => "kafka".to_owned(),
-            ServiceConfig::SchemaRegistry(_) => "kafka".to_owned(),
-            ServiceConfig::Pubsub(_) => "pubsub".to_owned(),
-            ServiceConfig::Redis(_) => "redis".to_owned(),
-            ServiceConfig::RedPanda(_) => "kafka".to_owned(),
+            ServiceConfig::ComputeNode(_)
+            | ServiceConfig::MetaNode(_)
+            | ServiceConfig::Frontend(_)
+            | ServiceConfig::Compactor(_)
+            | ServiceConfig::Minio(_)
+            | ServiceConfig::Sqlite(_) => RisingWave,
+            ServiceConfig::Prometheus(_) | ServiceConfig::Grafana(_) | ServiceConfig::Tempo(_) => {
+                Observability
+            }
+            ServiceConfig::Opendal(_) | ServiceConfig::AwsS3(_) => RisingWave,
+            ServiceConfig::Kafka(_)
+            | ServiceConfig::SchemaRegistry(_)
+            | ServiceConfig::RedPanda(_) => Kafka,
+            ServiceConfig::Pubsub(_) => Pubsub,
+            ServiceConfig::Redis(_) => Redis,
             ServiceConfig::MySql(my_sql_config) => {
                 if matches!(my_sql_config.application, Application::Metastore) {
-                    "risingwave".to_owned()
+                    RisingWave
                 } else {
-                    "mysql".to_owned()
+                    MySql
                 }
             }
             ServiceConfig::Postgres(postgres_config) => {
                 if matches!(postgres_config.application, Application::Metastore) {
-                    "risingwave".to_owned()
+                    RisingWave
                 } else {
-                    "postgres".to_owned()
+                    Postgres
                 }
             }
-            ServiceConfig::SqlServer(_) => "sqlserver".to_owned(),
+            ServiceConfig::SqlServer(_) => SqlServer,
         }
     }
 }
