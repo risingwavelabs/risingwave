@@ -122,7 +122,7 @@ impl Component {
             Self::Frontend => frontend(parse_opts(matches)),
             Self::Compactor => compactor(parse_opts(matches)),
             Self::Ctl => ctl(parse_opts(matches)),
-            Self::Playground => single_node(SingleNodeOpts::new_for_playground()),
+            Self::Playground => playground(),
             Self::Standalone => standalone(parse_opts(matches)),
             Self::SingleNode => single_node(parse_opts(matches)),
         }
@@ -246,6 +246,10 @@ fn single_node(opts: SingleNodeOpts) -> ! {
         .with_thread_name(true);
     risingwave_rt::init_risingwave_logger(settings);
     risingwave_rt::main_okk(|shutdown| risingwave_cmd_all::standalone(opts, shutdown));
+}
+
+fn playground() -> ! {
+    single_node(SingleNodeOpts::new_for_playground());
 }
 
 #[cfg(test)]
