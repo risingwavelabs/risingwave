@@ -36,7 +36,7 @@ pub struct FastInsertExecutor {
 
     row_id_index: Option<usize>,
     txn_id: TxnId,
-    counter: u32,
+    request_id: u32,
 }
 
 impl FastInsertExecutor {
@@ -63,7 +63,7 @@ impl FastInsertExecutor {
                 dml_manager,
                 column_indices,
                 insert_req.row_id_index.as_ref().map(|index| *index as _),
-                insert_req.counter,
+                insert_req.request_id,
             ),
             DataChunk::from_protobuf(&data_chunk_pb)?,
         ))
@@ -76,7 +76,7 @@ impl FastInsertExecutor {
         dml_manager: DmlManagerRef,
         column_indices: Vec<usize>,
         row_id_index: Option<usize>,
-        counter: u32,
+        request_id: u32,
     ) -> Self {
         let txn_id = dml_manager.gen_txn_id();
         Self {
@@ -86,7 +86,7 @@ impl FastInsertExecutor {
             column_indices,
             row_id_index,
             txn_id,
-            counter,
+            request_id,
         }
     }
 }
@@ -100,7 +100,8 @@ impl FastInsertExecutor {
         let table_dml_handle = self
             .dml_manager
             .table_dml_handle(self.table_id, self.table_version_id)?;
-        let mut write_handle = table_dml_handle.write_handle(self.counter, self.txn_id)?;
+        // instead of session id, we use request id here to select a write handle.
+        let mut write_handle = table_dml_handle.write_handle(self.request_id, self.txn_id)?;
 
         write_handle.begin()?;
 
