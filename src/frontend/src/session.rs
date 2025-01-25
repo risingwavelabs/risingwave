@@ -1455,7 +1455,7 @@ impl SessionManagerImpl {
             };
 
             // Assign a session id and insert into sessions map (for cancel request).
-            let secret_key = self.generate_secret_key();
+            let secret_key = self.number.fetch_add(1, Ordering::Relaxed);
             // Use a trivial strategy: process_id and secret_key are equal.
             let id = (secret_key, secret_key);
             // Read session params snapshot from frontend env.
@@ -1479,10 +1479,6 @@ impl SessionManagerImpl {
                 format!("Role {} does not exist", user_name),
             )))
         }
-    }
-
-    pub fn generate_secret_key(&self) -> i32 {
-        self.number.fetch_add(1, Ordering::Relaxed)
     }
 }
 

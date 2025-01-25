@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::net::SocketAddr;
+use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
@@ -48,9 +49,9 @@ pub struct FastInsertContext {
     pub compute_client: ComputeClient,
 }
 
-#[derive(Clone)]
 pub struct WebhookService {
     webhook_addr: SocketAddr,
+    counter: AtomicU32,
 }
 
 pub(super) mod handlers {
@@ -64,28 +65,22 @@ pub(super) mod handlers {
     use super::*;
     use crate::catalog::root_catalog::SchemaPath;
     use crate::scheduler::choose_fast_insert_client;
-    use crate::session::{FrontendEnv, SESSION_MANAGER};
+    use crate::session::SESSION_MANAGER;
 
     pub async fn handle_post_request(
-        Extension(_srv): Extension<Service>,
+        Extension(srv): Extension<Service>,
         headers: HeaderMap,
         Path((database, schema, table)): Path<(String, String, String)>,
         body: Bytes,
     ) -> Result<()> {
-        // FIXME(kexiang): the dummy_session can lead to memory leakage
-        let session_mgr = SESSION_MANAGER
-            .get()
-            .expect("session manager has been initialized");
-
-        let frontend_env = session_mgr.env().clone();
-        // FIXME(kexiang): the session_id is i32, overflow is possible
-        let session_id = session_mgr.generate_secret_key();
-
+        let counter = srv
+            .counter
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let FastInsertContext {
             webhook_source_info,
             mut fast_insert_request,
             compute_client,
-        } = acquire_table_info(&frontend_env, session_id, &database, &schema, &table).await?;
+        } = acquire_table_info(counter, &database, &schema, &table).await?;
 
         let WebhookSourceInfo {
             signature_expr,
@@ -144,12 +139,17 @@ pub(super) mod handlers {
     }
 
     async fn acquire_table_info(
-        frontend_env: &FrontendEnv,
-        session_id: i32,
+        counter: u32,
         database: &String,
         schema: &String,
         table: &String,
     ) -> Result<FastInsertContext> {
+        let session_mgr = SESSION_MANAGER
+            .get()
+            .expect("session manager has been initialized");
+
+        let frontend_env = session_mgr.env();
+
         let search_path = SearchPath::default();
         let schema_path = SchemaPath::new(Some(schema.as_str()), &search_path, USER);
 
@@ -183,11 +183,11 @@ pub(super) mod handlers {
             // leave the data_chunk empty for now
             data_chunk: None,
             row_id_index: Some(1),
-            session_id: session_id as u32,
+            counter,
             wait_for_persistence: webhook_source_info.wait_for_persistence,
         };
 
-        let compute_client = choose_fast_insert_client(&table_id, &frontend_env, session_id)
+        let compute_client = choose_fast_insert_client(&table_id, frontend_env, counter)
             .await
             .unwrap();
 
@@ -214,7 +214,10 @@ pub(super) mod handlers {
 
 impl WebhookService {
     pub fn new(webhook_addr: SocketAddr) -> Self {
-        Self { webhook_addr }
+        Self {
+            webhook_addr,
+            counter: AtomicU32::new(0),
+        }
     }
 
     pub async fn serve(self) -> anyhow::Result<()> {
