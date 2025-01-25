@@ -12,12 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Local execution for batch query.
-use std::sync::Arc;
-
 use anyhow::anyhow;
 use itertools::Itertools;
-use pgwire::pg_server::Session;
 use risingwave_batch::error::BatchError;
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::hash::WorkerSlotMapping;
@@ -26,15 +22,15 @@ use risingwave_rpc_client::ComputeClient;
 
 use crate::catalog::TableId;
 use crate::scheduler::{SchedulerError, SchedulerResult};
-use crate::session::{FrontendEnv, SessionImpl};
+use crate::session::FrontendEnv;
 
 pub async fn choose_fast_insert_client(
     table_id: &TableId,
-    // wait_for_persistence: bool,
-    session: &Arc<SessionImpl>,
+    frontend_env: &FrontendEnv,
+    session_id: i32,
 ) -> SchedulerResult<ComputeClient> {
-    let worker = choose_worker(table_id, session)?;
-    let client = session.env().client_pool().get(&worker).await?;
+    let worker = choose_worker(table_id, frontend_env, session_id)?;
+    let client = frontend_env.client_pool().get(&worker).await?;
     Ok(client)
 }
 
@@ -61,13 +57,17 @@ fn get_table_dml_vnode_mapping(
         .map_err(|e| e.into())
 }
 
-fn choose_worker(table_id: &TableId, session: &Arc<SessionImpl>) -> SchedulerResult<WorkerNode> {
+fn choose_worker(
+    table_id: &TableId,
+    frontend_env: &FrontendEnv,
+    session_id: i32,
+) -> SchedulerResult<WorkerNode> {
     let worker_node_manager =
-        WorkerNodeSelector::new(session.env().worker_node_manager_ref(), false);
-    let session_id: u32 = session.id().0 as u32;
+        WorkerNodeSelector::new(frontend_env.worker_node_manager_ref(), false);
+    let session_id: u32 = session_id as u32;
 
     // dml should use streaming vnode mapping
-    let vnode_mapping = get_table_dml_vnode_mapping(table_id, session.env(), &worker_node_manager)?;
+    let vnode_mapping = get_table_dml_vnode_mapping(table_id, frontend_env, &worker_node_manager)?;
     let worker_node = {
         let worker_ids = vnode_mapping.iter_unique().collect_vec();
         let candidates = worker_node_manager
