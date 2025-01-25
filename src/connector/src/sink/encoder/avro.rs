@@ -52,6 +52,12 @@ pub enum AvroHeader {
     /// * 00
     /// * 4-byte big-endian schema ID
     ConfluentSchemaRegistry(i32),
+    /// <https://github.com/awslabs/aws-glue-schema-registry/blob/v1.1.20/common/src/main/java/com/amazonaws/services/schemaregistry/utils/AWSSchemaRegistryConstants.java#L59-L61>
+    ///
+    /// * 03
+    /// * 00
+    /// * 16-byte UUID identifying a specific schema version
+    GlueSchemaRegistry(uuid::Uuid),
 }
 
 impl AvroEncoder {
@@ -128,17 +134,32 @@ impl SerTo<Vec<u8>> for AvroEncoded {
     fn ser_to(self) -> SinkResult<Vec<u8>> {
         use bytes::BufMut as _;
 
-        let AvroHeader::ConfluentSchemaRegistry(schema_id) = self.header else {
-            return Err(crate::sink::SinkError::Encode(format!(
-                "{:?} unsupported yet",
-                self.header
-            )));
+        let header = match self.header {
+            AvroHeader::ConfluentSchemaRegistry(schema_id) => {
+                let mut buf = Vec::with_capacity(1 + 4);
+                buf.put_u8(0);
+                buf.put_i32(schema_id);
+                buf
+            }
+            AvroHeader::GlueSchemaRegistry(schema_version_id) => {
+                let mut buf = Vec::with_capacity(1 + 1 + 16);
+                buf.put_u8(3);
+                buf.put_u8(0);
+                buf.put_slice(schema_version_id.as_bytes());
+                buf
+            }
+            AvroHeader::None | AvroHeader::SingleObject | AvroHeader::ContainerFile => {
+                return Err(crate::sink::SinkError::Encode(format!(
+                    "{:?} unsupported yet",
+                    self.header
+                )))
+            }
         };
+
         let raw = apache_avro::to_avro_datum(&self.schema, self.value)
             .map_err(|e| crate::sink::SinkError::Encode(e.to_report_string()))?;
-        let mut buf = Vec::with_capacity(1 + 4 + raw.len());
-        buf.put_u8(0);
-        buf.put_i32(schema_id);
+        let mut buf = Vec::with_capacity(header.len() + raw.len());
+        buf.put_slice(&header);
         buf.put_slice(&raw);
 
         Ok(buf)

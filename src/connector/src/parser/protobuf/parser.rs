@@ -24,7 +24,7 @@ use crate::parser::unified::AccessImpl;
 use crate::parser::util::bytes_from_url;
 use crate::parser::{AccessBuilder, EncodingProperties};
 use crate::schema::schema_registry::{extract_schema_id, handle_sr_list, Client, WireFormatError};
-use crate::schema::SchemaLoader;
+use crate::schema::{ConfluentSchemaLoader, SchemaLoader};
 
 #[derive(Debug)]
 pub struct ProtobufAccessBuilder {
@@ -81,13 +81,13 @@ impl ProtobufParserConfig {
         }
         let pool = if protobuf_config.use_schema_registry {
             let client = Client::new(url, &protobuf_config.client_config)?;
-            let loader = SchemaLoader {
+            let loader = SchemaLoader::Confluent(ConfluentSchemaLoader {
                 client,
                 name_strategy: protobuf_config.name_strategy,
                 topic: protobuf_config.topic,
                 key_record_name: None,
                 val_record_name: Some(message_name.clone()),
-            };
+            });
             let (_schema_id, root_file_descriptor) = loader
                 .load_val_schema::<FileDescriptor>()
                 .await
