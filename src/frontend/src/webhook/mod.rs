@@ -73,14 +73,14 @@ pub(super) mod handlers {
         Path((database, schema, table)): Path<(String, String, String)>,
         body: Bytes,
     ) -> Result<()> {
-        let counter = srv
+        let request_id = srv
             .counter
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let FastInsertContext {
             webhook_source_info,
             mut fast_insert_request,
             compute_client,
-        } = acquire_table_info(counter, &database, &schema, &table).await?;
+        } = acquire_table_info(request_id, &database, &schema, &table).await?;
 
         let WebhookSourceInfo {
             signature_expr,
@@ -139,7 +139,7 @@ pub(super) mod handlers {
     }
 
     async fn acquire_table_info(
-        counter: u32,
+        request_id: u32,
         database: &String,
         schema: &String,
         table: &String,
@@ -183,11 +183,11 @@ pub(super) mod handlers {
             // leave the data_chunk empty for now
             data_chunk: None,
             row_id_index: Some(1),
-            counter,
+            request_id,
             wait_for_persistence: webhook_source_info.wait_for_persistence,
         };
 
-        let compute_client = choose_fast_insert_client(&table_id, frontend_env, counter)
+        let compute_client = choose_fast_insert_client(&table_id, frontend_env, request_id)
             .await
             .unwrap();
 

@@ -27,9 +27,9 @@ use crate::session::FrontendEnv;
 pub async fn choose_fast_insert_client(
     table_id: &TableId,
     frontend_env: &FrontendEnv,
-    counter: u32,
+    request_id: u32,
 ) -> SchedulerResult<ComputeClient> {
-    let worker = choose_worker(table_id, frontend_env, counter)?;
+    let worker = choose_worker(table_id, frontend_env, request_id)?;
     let client = frontend_env.client_pool().get(&worker).await?;
     Ok(client)
 }
@@ -60,7 +60,7 @@ fn get_table_dml_vnode_mapping(
 fn choose_worker(
     table_id: &TableId,
     frontend_env: &FrontendEnv,
-    counter: u32,
+    request_id: u32,
 ) -> SchedulerResult<WorkerNode> {
     let worker_node_manager =
         WorkerNodeSelector::new(frontend_env.worker_node_manager_ref(), false);
@@ -75,7 +75,7 @@ fn choose_worker(
         if candidates.is_empty() {
             return Err(BatchError::EmptyWorkerNodes.into());
         }
-        candidates[counter as usize % candidates.len()].clone()
+        candidates[request_id as usize % candidates.len()].clone()
     };
     Ok(worker_node)
 }

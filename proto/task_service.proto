@@ -73,8 +73,8 @@ message FastInsertRequest {
   // be filled in streaming.
   optional uint32 row_id_index = 5;
 
-  // Use this number to assign the insert to different fixed worker node and channel. 
-  uint32 counter = 6;
+  // Use this number to assign the insert req to different worker nodes and dml channels. 
+  uint32 request_id = 6;
   bool wait_for_persistence = 7;
   // TODO(kexiang): add support for default columns. plan_common.ExprContext expr_context is needed for it.
 }
