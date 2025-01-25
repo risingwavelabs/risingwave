@@ -78,7 +78,12 @@ pub struct ElasticSearchOpenSearchConfig {
     #[serde(default = "default_concurrent_requests")]
     pub concurrent_requests: usize,
 
+    #[serde(default = "default_type")]
     pub r#type: String,
+}
+
+fn default_type() -> String {
+    "upsert".to_owned()
 }
 
 fn default_retry_on_conflict() -> i32 {
