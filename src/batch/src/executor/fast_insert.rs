@@ -22,7 +22,7 @@ use risingwave_common::transaction::transaction_id::TxnId;
 use risingwave_common::types::DataType;
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_dml::dml_manager::DmlManagerRef;
-use risingwave_pb::batch_plan::FastInsertNode;
+use risingwave_pb::task_service::FastInsertRequest;
 
 use crate::error::Result;
 
@@ -42,28 +42,28 @@ pub struct FastInsertExecutor {
 impl FastInsertExecutor {
     pub fn build(
         dml_manager: DmlManagerRef,
-        insert_node: FastInsertNode,
+        insert_req: FastInsertRequest,
     ) -> Result<(FastInsertExecutor, DataChunk)> {
-        let table_id = TableId::new(insert_node.table_id);
-        let column_indices = insert_node
+        let table_id = TableId::new(insert_req.table_id);
+        let column_indices = insert_req
             .column_indices
             .iter()
             .map(|&i| i as usize)
             .collect();
         let mut schema = Schema::new(vec![Field::unnamed(DataType::Jsonb)]);
         schema.fields.push(Field::unnamed(DataType::Serial)); // row_id column
-        let data_chunk_pb = insert_node
+        let data_chunk_pb = insert_req
             .data_chunk
             .expect("no data_chunk found in fast insert node");
 
         Ok((
             FastInsertExecutor::new(
                 table_id,
-                insert_node.table_version_id,
+                insert_req.table_version_id,
                 dml_manager,
                 column_indices,
-                insert_node.row_id_index.as_ref().map(|index| *index as _),
-                insert_node.session_id,
+                insert_req.row_id_index.as_ref().map(|index| *index as _),
+                insert_req.session_id,
             ),
             DataChunk::from_protobuf(&data_chunk_pb)?,
         ))

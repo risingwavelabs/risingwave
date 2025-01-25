@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use risingwave_common::util::tracing::TracingContext;
-use risingwave_pb::batch_plan::{FastInsertNode, TaskOutputId};
+use risingwave_pb::batch_plan::TaskOutputId;
 use risingwave_pb::task_service::task_service_server::TaskService;
 use risingwave_pb::task_service::{
     fast_insert_response, CancelTaskRequest, CancelTaskResponse, CreateTaskRequest, ExecuteRequest,
@@ -128,10 +128,7 @@ impl TaskService for BatchServiceImpl {
         request: Request<FastInsertRequest>,
     ) -> Result<Response<FastInsertResponse>, Status> {
         let req = request.into_inner();
-        let insert_node = req.fast_insert_node.expect("no fast insert node found");
-        let res = self
-            .do_fast_insert(insert_node, req.wait_for_persistence)
-            .await;
+        let res = self.do_fast_insert(req).await;
         match res {
             Ok(_) => Ok(Response::new(FastInsertResponse {
                 status: fast_insert_response::Status::Succeeded.into(),
@@ -217,14 +214,11 @@ impl BatchServiceImpl {
         Ok(Response::new(ReceiverStream::new(rx)))
     }
 
-    async fn do_fast_insert(
-        &self,
-        insert_node: FastInsertNode,
-        wait_for_persistence: bool,
-    ) -> Result<(), BatchError> {
-        let table_id = insert_node.table_id;
+    async fn do_fast_insert(&self, insert_req: FastInsertRequest) -> Result<(), BatchError> {
+        let table_id = insert_req.table_id;
+        let wait_for_persistence = insert_req.wait_for_persistence;
         let (executor, data_chunk) =
-            FastInsertExecutor::build(self.env.dml_manager_ref(), insert_node)?;
+            FastInsertExecutor::build(self.env.dml_manager_ref(), insert_req)?;
         let epoch = executor
             .do_execute(data_chunk, wait_for_persistence)
             .await?;

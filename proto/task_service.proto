@@ -61,8 +61,21 @@ message GetDataResponse {
 }
 
 message FastInsertRequest {
-  bool wait_for_persistence = 1;
-  batch_plan.FastInsertNode fast_insert_node = 2;
+  // Id of the table to perform inserting.
+  uint32 table_id = 1;
+  // Version of the table.
+  uint64 table_version_id = 2;
+  repeated uint32 column_indices = 3;
+  data.DataChunk data_chunk = 4;
+
+  // An optional field and will be `None` for tables without user-defined pk.
+  // The `BatchInsertExecutor` should add a column with NULL value which will
+  // be filled in streaming.
+  optional uint32 row_id_index = 5;
+
+  // Use session id to assign the insert to different fixed worker node and channel. 
+  uint32 session_id = 6;
+  bool wait_for_persistence = 7;
   // TODO(kexiang): add support for default columns. plan_common.ExprContext expr_context is needed for it.
 }
 
