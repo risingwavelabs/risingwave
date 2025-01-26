@@ -906,6 +906,14 @@ impl HummockManager {
                 .compact_task_batch_count
                 .with_label_values(&["batch_trivial_move"])
                 .observe(trivial_tasks.len() as f64);
+
+            for trivial_task in &trivial_tasks {
+                self.metrics
+                    .compact_task_trivial_move_sst_count
+                    .with_label_values(&[&trivial_task.compaction_group_id.to_string()])
+                    .observe(trivial_task.input_ssts[0].table_infos.len() as _);
+            }
+
             drop(versioning_guard);
         } else {
             // We are using a single transaction to ensure that each task has progress when it is

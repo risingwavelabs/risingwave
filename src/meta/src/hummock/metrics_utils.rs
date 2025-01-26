@@ -696,13 +696,6 @@ pub fn trigger_compact_tasks_stat(
             .compact_frequency
             .with_label_values(&["normal", group_label, task_type_label, task_status_label])
             .inc();
-
-        if task.is_trivial_move_task() {
-            metrics
-                .compact_task_trivial_move_sst_count
-                .with_label_values(&[group_label])
-                .observe(task.input_ssts[0].table_infos.len() as _);
-        }
     }
 
     group_label_map.keys().for_each(|group_id| {
