@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use risingwave_common::config::default::compaction_config;
 use risingwave_hummock_sdk::level::{InputLevel, Levels, OverlappingLevel};
+use risingwave_hummock_sdk::KeyComparator;
 use risingwave_pb::hummock::{CompactionConfig, LevelType};
 
 use super::min_overlap_compaction_picker::NonOverlapSubLevelPicker;
@@ -284,34 +285,92 @@ impl IntraCompactionPicker {
                 level_handlers,
                 stats,
             ) {
-                let mut overlap = overlap_strategy.create_overlap_info();
-                select_ssts.iter().for_each(|ssts| overlap.update(ssts));
-
-                assert!(overlap
-                    .check_multiple_overlap(&l0.sub_levels[idx].table_infos)
-                    .is_empty());
-
                 let select_input_size = select_ssts.iter().map(|sst| sst.sst_size).sum();
-                let input_levels = vec![
-                    InputLevel {
-                        level_idx: 0,
-                        level_type: LevelType::Nonoverlapping,
-                        table_infos: select_ssts,
-                    },
-                    InputLevel {
-                        level_idx: 0,
-                        level_type: LevelType::Nonoverlapping,
-                        table_infos: vec![],
-                    },
-                ];
-                return Some(CompactionInput {
-                    input_levels,
-                    target_level: 0,
-                    target_sub_level_id: level.sub_level_id,
-                    select_input_size,
-                    total_file_count: 1,
-                    ..Default::default()
-                });
+                let total_file_count = select_ssts.len() as u64;
+                let mut target_sub_level_id = level.sub_level_id;
+                if select_ssts.last().unwrap().sst_id == level.table_infos.last().unwrap().sst_id {
+                    // optimize
+                    let left_bound = &select_ssts.first().unwrap().key_range.left;
+
+                    let mut now_level_idx = idx;
+                    while now_level_idx > 0 {
+                        let now_level = &l0.sub_levels[now_level_idx];
+                        let last_sst = now_level.table_infos.last().unwrap();
+                        let max_bound = &last_sst.key_range.right;
+
+                        if last_sst.key_range.right_exclusive {
+                            if !KeyComparator::compare_encoded_full_key(max_bound, left_bound)
+                                .is_le()
+                            {
+                                break;
+                            }
+                        } else {
+                            if !KeyComparator::compare_encoded_full_key(max_bound, left_bound)
+                                .is_lt()
+                            {
+                                break;
+                            }
+                        }
+
+                        target_sub_level_id = now_level.sub_level_id;
+                        now_level_idx -= 1;
+                    }
+
+                    tracing::info!(
+                        "LI)K optimize trivial move origin sub_level_id: {}, target_sub_level_id: {} sst_count: {}",
+                        level.sub_level_id, target_sub_level_id, select_ssts.len()
+                    );
+
+                    let select_input_size = select_ssts.iter().map(|sst| sst.sst_size).sum();
+                    let input_levels = vec![
+                        InputLevel {
+                            level_idx: 0,
+                            level_type: LevelType::Nonoverlapping,
+                            table_infos: select_ssts,
+                        },
+                        InputLevel {
+                            level_idx: 0,
+                            level_type: LevelType::Nonoverlapping,
+                            table_infos: vec![],
+                        },
+                    ];
+                    return Some(CompactionInput {
+                        input_levels,
+                        target_level: 0,
+                        target_sub_level_id,
+                        select_input_size,
+                        total_file_count,
+                        ..Default::default()
+                    });
+                } else {
+                    let mut overlap = overlap_strategy.create_overlap_info();
+                    select_ssts.iter().for_each(|ssts| overlap.update(ssts));
+
+                    assert!(overlap
+                        .check_multiple_overlap(&l0.sub_levels[idx].table_infos)
+                        .is_empty());
+
+                    let input_levels = vec![
+                        InputLevel {
+                            level_idx: 0,
+                            level_type: LevelType::Nonoverlapping,
+                            table_infos: select_ssts,
+                        },
+                        InputLevel {
+                            level_idx: 0,
+                            level_type: LevelType::Nonoverlapping,
+                            table_infos: vec![],
+                        },
+                    ];
+                    return Some(CompactionInput {
+                        input_levels,
+                        target_level: 0,
+                        target_sub_level_id: level.sub_level_id,
+                        select_input_size,
+                        total_file_count,
+                        ..Default::default()
+                    });
+                }
             }
         }
         None
