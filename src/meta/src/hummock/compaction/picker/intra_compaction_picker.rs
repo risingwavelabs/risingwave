@@ -288,14 +288,15 @@ impl IntraCompactionPicker {
                 let select_input_size = select_ssts.iter().map(|sst| sst.sst_size).sum();
                 let total_file_count = select_ssts.len() as u64;
                 let mut target_sub_level_id = level.sub_level_id;
-                if select_ssts.last().unwrap().sst_id == level.table_infos.last().unwrap().sst_id {
+                if select_ssts.last().unwrap().sst_id
+                    == l0.sub_levels[idx + 1].table_infos.last().unwrap().sst_id
+                    && idx > 0
+                {
                     // optimize
                     let left_bound = &select_ssts.first().unwrap().key_range.left;
 
-                    let mut now_level_idx = idx;
-                    while now_level_idx > 0 {
-                        let now_level = &l0.sub_levels[now_level_idx];
-                        let last_sst = now_level.table_infos.last().unwrap();
+                    for probe_level in l0.sub_levels[0..idx].iter().rev() {
+                        let last_sst = probe_level.table_infos.last().unwrap();
                         let max_bound = &last_sst.key_range.right;
 
                         if last_sst.key_range.right_exclusive {
@@ -312,8 +313,7 @@ impl IntraCompactionPicker {
                             }
                         }
 
-                        target_sub_level_id = now_level.sub_level_id;
-                        now_level_idx -= 1;
+                        target_sub_level_id = probe_level.sub_level_id;
                     }
 
                     tracing::info!(
@@ -928,5 +928,60 @@ pub mod tests {
             levels.l0.sub_levels[1].table_infos.len(),
             input.input_levels[1].table_infos.len()
         );
+    }
+
+    #[test]
+    fn test_trivial_move_multi_level() {
+        let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
+        let config = Arc::new(
+            CompactionConfigBuilder::new()
+                .level0_tier_compact_file_number(2)
+                .target_file_size_base(30)
+                .level0_sub_level_compact_level_count(20) // reject intra
+                .build(),
+        );
+        let mut picker =
+            IntraCompactionPicker::for_test(config, Arc::new(CompactionDeveloperConfig::default()));
+
+        // Cannot trivial move because there is only 1 sub-level.
+        let l0 = generate_l0_overlapping_sublevels(vec![vec![
+            generate_table(1, 1, 100, 110, 1),
+            generate_table(2, 1, 150, 250, 1),
+        ]]);
+        let levels = Levels {
+            l0,
+            levels: vec![generate_level(1, vec![generate_table(100, 1, 0, 1000, 1)])],
+            ..Default::default()
+        };
+        levels_handler[1].add_pending_task(100, 1, &levels.levels[0].table_infos);
+        let mut local_stats = LocalPickerStatistic::default();
+        let ret = picker.pick_compaction(&levels, &levels_handler, &mut local_stats);
+        assert!(ret.is_none());
+
+        // Cannot trivial move because sub-levels are overlapping
+        let l0: OverlappingLevel = generate_l0_overlapping_sublevels(vec![
+            vec![generate_table(1, 1, 100, 110, 1)],
+            vec![generate_table(3, 1, 10, 120, 1)],
+            vec![generate_table(4, 1, 10, 120, 1)],
+            vec![
+                generate_table(5, 1, 10, 120, 1),
+                generate_table(2, 1, 1500, 2500, 1),
+            ],
+        ]);
+        let mut levels = Levels {
+            l0,
+            levels: vec![generate_level(1, vec![generate_table(100, 1, 0, 1000, 1)])],
+            ..Default::default()
+        };
+        // trivial move
+        levels.l0.sub_levels[0].level_type = LevelType::Nonoverlapping;
+        levels.l0.sub_levels[1].level_type = LevelType::Nonoverlapping;
+        levels.l0.sub_levels[2].level_type = LevelType::Nonoverlapping;
+        levels.l0.sub_levels[3].level_type = LevelType::Nonoverlapping;
+        let input = picker
+            .pick_compaction(&levels, &levels_handler, &mut local_stats)
+            .unwrap();
+        assert!(is_l0_trivial_move(&input));
+        assert_eq!(input.target_sub_level_id, 0);
     }
 }
