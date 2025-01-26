@@ -73,6 +73,7 @@ impl TrivialMovePicker {
             if sst.sst_size < self.sst_allowed_trivial_move_min_size {
                 skip_by_size = true;
 
+                // Stop probing if we have already found some sst to move. And should avoid small sst move to target level.
                 if !result.is_empty() {
                     break;
                 }
