@@ -239,43 +239,36 @@ pub fn get_project_mask(
 ) -> ConnectorResult<ProjectionMask> {
     match columns {
         Some(rw_columns) => {
-            let parquet_column_names = metadata
+            let root_column_names = metadata
                 .schema_descr()
-                .columns()
+                .root_schema()
+                .get_fields()
                 .iter()
-                .map(|c| c.name())
+                .map(|field| field.name())
                 .collect_vec();
 
             let converted_arrow_schema =
                 parquet_to_arrow_schema(metadata.schema_descr(), metadata.key_value_metadata())
                     .map_err(anyhow::Error::from)?;
-            if parquet_column_names.len() != converted_arrow_schema.fields().len() {
-                // `parquet_column_names` contains all the flattened columns,
-                // while `converted_arrow_schema` includes columns that have not been flattened.
-                // If the lengths of these two collections are different, it indicates that the
-                // parquet file contains nested types(e.g. `Struct` data type). In this case, column pruning will not be performed.
-                return Ok(ProjectionMask::all());
-            }
-
             let valid_column_indices: Vec<usize> = rw_columns
-    .iter()
-    .filter_map(|column| {
-        parquet_column_names
-            .iter()
-            .position(|&name| name == column.name)
-            .and_then(|pos| {
-                let arrow_data_type: &risingwave_common::array::arrow::arrow_schema_udf::DataType = converted_arrow_schema.field_with_name(&column.name).ok()?.data_type();
-                let rw_data_type: &risingwave_common::types::DataType = &column.data_type;
+                .iter()
+                .filter_map(|column| {
+                    root_column_names
+                        .iter()
+                        .position(|&name| name == column.name)
+                        .and_then(|pos| {
+                            let arrow_data_type: &risingwave_common::array::arrow::arrow_schema_udf::DataType = converted_arrow_schema.field_with_name(&column.name).ok()?.data_type();
+                            let rw_data_type: &risingwave_common::types::DataType = &column.data_type;
+                            if is_parquet_schema_match_source_schema(arrow_data_type, rw_data_type) {
+                                Some(pos)
+                            } else {
+                                None
+                            }
+                        })
+                })
+                .collect();
 
-                if is_parquet_schema_match_source_schema(arrow_data_type, rw_data_type) {
-                    Some(pos)
-                } else {
-                    None
-                }
-            })
-    })
-    .collect();
-            Ok(ProjectionMask::leaves(
+            Ok(ProjectionMask::roots(
                 metadata.schema_descr(),
                 valid_column_indices,
             ))
