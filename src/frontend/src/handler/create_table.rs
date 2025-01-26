@@ -2025,17 +2025,24 @@ fn bind_webhook_info(
     } = webhook_info;
 
     // validate secret_ref
-    let db_name = &session.database();
-    let (schema_name, secret_name) =
-        Binder::resolve_schema_qualified_name(db_name, secret_ref.secret_name.clone())?;
-    let secret_catalog = session.get_secret_by_name(schema_name, &secret_name)?;
-    let pb_secret_ref = PbSecretRef {
-        secret_id: secret_catalog.id.secret_id(),
-        ref_as: match secret_ref.ref_as {
-            SecretRefAsType::Text => PbRefAsType::Text,
-            SecretRefAsType::File => PbRefAsType::File,
-        }
-        .into(),
+    let (pb_secret_ref, secret_name) = if let Some(secret_ref) = secret_ref {
+        let db_name = &session.database();
+        let (schema_name, secret_name) =
+            Binder::resolve_schema_qualified_name(db_name, secret_ref.secret_name.clone())?;
+        let secret_catalog = session.get_secret_by_name(schema_name, &secret_name)?;
+        (
+            Some(PbSecretRef {
+                secret_id: secret_catalog.id.secret_id(),
+                ref_as: match secret_ref.ref_as {
+                    SecretRefAsType::Text => PbRefAsType::Text,
+                    SecretRefAsType::File => PbRefAsType::File,
+                }
+                .into(),
+            }),
+            Some(secret_name),
+        )
+    } else {
+        (None, None)
     };
 
     let secure_compare_context = SecureCompareContext {
@@ -2057,7 +2064,7 @@ fn bind_webhook_info(
     }
 
     let pb_webhook_info = PbWebhookSourceInfo {
-        secret_ref: Some(pb_secret_ref),
+        secret_ref: pb_secret_ref,
         signature_expr: Some(expr.to_expr_proto()),
         wait_for_persistence,
     };
