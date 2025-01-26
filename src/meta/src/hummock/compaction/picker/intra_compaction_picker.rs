@@ -292,6 +292,7 @@ impl IntraCompactionPicker {
                     .is_empty());
 
                 let select_input_size = select_ssts.iter().map(|sst| sst.sst_size).sum();
+                let total_file_count = select_ssts.len() as u64;
                 let input_levels = vec![
                     InputLevel {
                         level_idx: 0,
@@ -309,7 +310,7 @@ impl IntraCompactionPicker {
                     target_level: 0,
                     target_sub_level_id: level.sub_level_id,
                     select_input_size,
-                    total_file_count: 1,
+                    total_file_count,
                     ..Default::default()
                 });
             }
