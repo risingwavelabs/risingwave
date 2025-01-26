@@ -173,7 +173,10 @@ fn get_catalog_config(config: &IcebergConfig) -> anyhow::Result<HashMap<String, 
                     .ok_or_else(|| anyhow!("uri unspecified for jdbc catalog"))?,
             );
             if let Some(region) = &config.common.region {
-                result.insert("client.region".to_owned(), region.to_owned());
+                result.insert(
+                    "s3.endpoint".to_owned(),
+                    format!("https://s3.{}.amazonaws.com", region),
+                );
             }
             if let Some(endpoint) = &config.common.endpoint {
                 result.insert("s3.endpoint".to_owned(), endpoint.to_owned());
@@ -190,6 +193,10 @@ fn get_catalog_config(config: &IcebergConfig) -> anyhow::Result<HashMap<String, 
                     path_style_access.to_string(),
                 );
             }
+            result.insert(
+                "io-impl".to_owned(),
+                "risingwave.shaded.org.apache.iceberg.aws.s3.S3FileIO".to_owned(),
+            );
             config
                 .java_catalog_props
                 .iter()
