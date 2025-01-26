@@ -1544,11 +1544,26 @@ pub async fn create_iceberg_engine_table(
             session.get_connection_by_name(Some(parts[0].to_owned()), parts[1])?;
         if let ConnectionInfo::ConnectionParams(params) = &connection_catalog.info {
             if params.connection_type == ConnectionType::Iceberg as i32 {
-                let _s3_region = params
-                    .properties
-                    .get("s3.region")
-                    .ok_or_else(|| anyhow!("`s3.region` must be set in iceberg engine connection"))?
-                    .to_owned();
+                if state_store_endpoint.starts_with("hummock+s3://") {
+                    // check s3 region for iceberg engine connection to avoid cross region bucket accessing.
+                    let connection_s3_region = params
+                        .properties
+                        .get("s3.region")
+                        .ok_or_else(|| {
+                            anyhow!("`s3.region` must be set in iceberg engine connection")
+                        })?
+                        .to_owned();
+                    let env_s3_region = if let Ok(s3_region) = std::env::var("AWS_REGION") {
+                        s3_region
+                    } else {
+                        bail!("To create an iceberg engine table with s3 backend, AWS_REGION needed to be set");
+                    };
+                    if connection_s3_region != env_s3_region {
+                        bail!(
+                        format!("iceberg engine connection `s3.region` should be the same as the cluster region, got {} expected {}", connection_s3_region, env_s3_region)
+                    );
+                    }
+                }
                 let _s3_endpoint = params.properties.get("s3.endpoint").map(|s| s.to_owned());
                 let _warehouse_path = params
                     .properties
