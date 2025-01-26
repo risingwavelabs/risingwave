@@ -2610,11 +2610,14 @@ impl Parser<'_> {
                 .find(|&opt| opt.name.real_value() == WEBHOOK_WAIT_FOR_PERSISTENCE)
                 .map(|opt| opt.value.to_string().eq_ignore_ascii_case("true"))
                 .unwrap_or(true);
-
-            self.expect_keyword(Keyword::SECRET)?;
-            let secret_ref = self.parse_secret_ref()?;
-            if secret_ref.ref_as == SecretRefAsType::File {
-                parser_err!("Secret for SECURE_COMPARE() does not support AS FILE");
+            let secret_ref = if self.parse_keyword(Keyword::SECRET) {
+                let secret_ref = self.parse_secret_ref()?;
+                if secret_ref.ref_as == SecretRefAsType::File {
+                    parser_err!("Secret for SECURE_COMPARE() does not support AS FILE");
+                };
+                Some(secret_ref)
+            } else {
+                None
             };
 
             self.expect_keyword(Keyword::AS)?;

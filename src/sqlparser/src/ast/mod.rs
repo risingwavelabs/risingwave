@@ -1916,7 +1916,11 @@ impl fmt::Display for Statement {
                     write!(f, " TABLE '{}'", info.external_table_name)?;
                 }
                 if let Some(info)= webhook_info {
-                    write!(f, " VALIDATE SECRET {}", info.secret_ref.secret_name)?;
+                    if let Some(secret) = &info.secret_ref {
+                        write!(f, " VALIDATE SECRET {}", secret.secret_name)?;
+                    } else {
+                        write!(f, " VALIDATE")?;
+                    }
                     write!(f, " AS {}", info.signature_expr)?;
                 }
                 match engine {

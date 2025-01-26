@@ -53,3 +53,12 @@ create table hubspot_sha256_v2 (
       , 'UTF8')
     ), 'hex')
 );
+
+create table validate_raw_string (
+  data JSONB
+) WITH (
+  connector = 'webhook',
+) VALIDATE AS secure_compare(
+  headers->>'x-hub-signature',
+  'sha1=' || encode(hmac('TEST_WEBHOOK', data, 'sha1'), 'hex')
+);

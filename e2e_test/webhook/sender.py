@@ -111,6 +111,22 @@ def send_segment_hmac_sha1(secret):
     send_webhook(url, headers, payload_json)
 
 
+def send_validate_raw_string(secret):
+    payload = message
+    payload['source'] = "github"
+    payload['auth_algo'] = "hmac_sha1"
+    url = SERVER_URL + "validate_raw_string"
+
+    payload_json = json.dumps(payload)
+    signature = generate_signature_hmac(secret, payload_json, 'sha1', "sha1=")
+    # Webhook message headers
+    headers = {
+        "Content-Type": "application/json",
+        "X-Hub-Signature": signature  # Custom signature header
+    }
+    send_webhook(url, headers, payload_json)
+
+
 def send_hubspot_sha256_v2(secret):
     payload = message
     payload['source'] = "hubspot"
@@ -143,3 +159,4 @@ if __name__ == "__main__":
     send_segment_hmac_sha1(secret)
     # hubspot
     send_hubspot_sha256_v2(secret)
+    send_validate_raw_string(secret)
