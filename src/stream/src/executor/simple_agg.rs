@@ -219,8 +219,11 @@ impl<S: StateStore> SimpleAggExecutor<S> {
         });
 
         // Commit all state tables.
-        futures::future::try_join_all(this.all_state_tables_mut().map(|table| table.commit(epoch)))
-            .await?;
+        futures::future::try_join_all(
+            this.all_state_tables_mut()
+                .map(|table| table.commit_assert_no_update_vnode_bitmap(epoch)),
+        )
+        .await?;
 
         vars.state_changed = false;
         Ok(chunk)

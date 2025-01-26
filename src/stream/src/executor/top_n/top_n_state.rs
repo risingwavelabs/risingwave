@@ -13,10 +13,8 @@
 // limitations under the License.
 
 use std::ops::Bound;
-use std::sync::Arc;
 
 use futures::{pin_mut, StreamExt};
-use risingwave_common::bitmap::Bitmap;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::epoch::EpochPair;
@@ -25,7 +23,7 @@ use risingwave_storage::StateStore;
 
 use super::top_n_cache::CacheKey;
 use super::{serialize_pk_to_cache_key, CacheKeySerde, GroupKey, TopNCache};
-use crate::common::table::state_table::StateTable;
+use crate::common::table::state_table::{StateTable, StateTablePostCommit};
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::top_n::top_n_cache::Cache;
 
@@ -70,11 +68,6 @@ impl<S: StateStore> ManagedTopNState<S> {
     /// Init epoch for the managed state table.
     pub async fn init_epoch(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         self.state_table.init_epoch(epoch).await
-    }
-
-    /// Update vnode bitmap of state table, returning `cache_may_stale`.
-    pub fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) -> bool {
-        self.state_table.update_vnode_bitmap(new_vnodes).1
     }
 
     /// Update watermark for the managed state table.
@@ -307,9 +300,11 @@ impl<S: StateStore> ManagedTopNState<S> {
         Ok(())
     }
 
-    pub async fn flush(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
-        self.state_table.commit(epoch).await?;
-        Ok(())
+    pub async fn flush(
+        &mut self,
+        epoch: EpochPair,
+    ) -> StreamExecutorResult<StateTablePostCommit<'_, S>> {
+        self.state_table.commit(epoch).await
     }
 
     pub async fn try_flush(&mut self) -> StreamExecutorResult<()> {

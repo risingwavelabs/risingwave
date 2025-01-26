@@ -488,20 +488,22 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
                         }
                     }
 
-                    self.left_table.commit(barrier.epoch).await?;
-                    self.right_table.commit(barrier.epoch).await?;
+                    let left_post_commit = self.left_table.commit(barrier.epoch).await?;
+                    self.right_table
+                        .commit_assert_no_update_vnode_bitmap(barrier.epoch)
+                        .await?;
 
                     // Update the last committed RHS row and value.
                     committed_rhs_row.clone_from(&staging_rhs_row);
                     committed_rhs_value = Some(curr);
 
-                    // Update the vnode bitmap for the left state table if asked.
-                    if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.ctx.id) {
-                        let (_previous_vnode_bitmap, _cache_may_stale) =
-                            self.left_table.update_vnode_bitmap(vnode_bitmap);
-                    }
-
+                    let update_vnode_bitmap = barrier.as_update_vnode_bitmap(self.ctx.id);
                     yield Message::Barrier(barrier);
+
+                    // Update the vnode bitmap for the left state table if asked.
+                    left_post_commit
+                        .post_yield_barrier(update_vnode_bitmap)
+                        .await?;
                 }
             }
         }

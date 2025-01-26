@@ -632,7 +632,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                     .await?;
                                 self.backfill_state_store
                                     .state_store
-                                    .commit(barrier.epoch)
+                                    .commit_assert_no_update_vnode_bitmap(barrier.epoch)
                                     .await?;
 
                                 if self.should_report_finished(&backfill_stage.states) {
@@ -782,7 +782,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                     }
                     self.backfill_state_store
                         .state_store
-                        .commit(barrier.epoch)
+                        .commit_assert_no_update_vnode_bitmap(barrier.epoch)
                         .await?;
                     yield Message::Barrier(barrier);
                 }
