@@ -232,16 +232,18 @@ message ListTableFragmentsResponse {
   map<uint32, TableFragmentInfo> table_fragments = 1;
 }
 
-message ListTableFragmentStatesRequest {}
+message ListStreamingJobStatesRequest {}
 
-message ListTableFragmentStatesResponse {
-  message TableFragmentState {
+message ListStreamingJobStatesResponse {
+  message StreamingJobState {
     uint32 table_id = 1;
     TableFragments.State state = 2;
     TableParallelism parallelism = 3;
     uint32 max_parallelism = 4;
+    string name = 5;
+    string resource_group = 6;
   }
-  repeated TableFragmentState states = 1;
+  repeated StreamingJobState states = 1;
 }
 
 message ListFragmentDistributionRequest {}
@@ -333,7 +335,7 @@ service StreamManagerService {
   rpc Resume(ResumeRequest) returns (ResumeResponse);
   rpc CancelCreatingJobs(CancelCreatingJobsRequest) returns (CancelCreatingJobsResponse);
   rpc ListTableFragments(ListTableFragmentsRequest) returns (ListTableFragmentsResponse);
-  rpc ListTableFragmentStates(ListTableFragmentStatesRequest) returns (ListTableFragmentStatesResponse);
+  rpc ListStreamingJobStates(ListStreamingJobStatesRequest) returns (ListStreamingJobStatesResponse);
   rpc ListFragmentDistribution(ListFragmentDistributionRequest) returns (ListFragmentDistributionResponse);
   rpc ListActorStates(ListActorStatesRequest) returns (ListActorStatesResponse);
   rpc ListActorSplits(ListActorSplitsRequest) returns (ListActorSplitsResponse);
@@ -483,19 +485,24 @@ message MetaSnapshot {
   SnapshotVersion version = 13;
 }
 
-message Relation {
-  oneof relation_info {
-    catalog.Table table = 1;
-    catalog.Source source = 2;
-    catalog.Sink sink = 3;
+message Object {
+  oneof object_info {
+    catalog.Database database = 1;
+    catalog.Schema schema = 2;
+    catalog.Table table = 3;
     catalog.Index index = 4;
-    catalog.View view = 5;
-    catalog.Subscription subscription = 6;
+    catalog.Source source = 5;
+    catalog.Sink sink = 6;
+    catalog.View view = 7;
+    catalog.Function function = 8;
+    catalog.Connection connection = 9;
+    catalog.Subscription subscription = 10;
+    catalog.Secret secret = 11;
   }
 }
 
-message RelationGroup {
-  repeated Relation relations = 1;
+message ObjectGroup {
+  repeated Object objects = 1;
 }
 
 message Recovery {}
@@ -526,7 +533,7 @@ message SubscribeResponse {
     backup_service.MetaBackupManifestId meta_backup_manifest_id = 17;
     SystemParams system_params = 19;
     hummock.WriteLimits hummock_write_limits = 20;
-    RelationGroup relation_group = 21;
+    ObjectGroup object_group = 21;
     catalog.Connection connection = 22;
     hummock.HummockVersionStats hummock_stats = 24;
     Recovery recovery = 25;

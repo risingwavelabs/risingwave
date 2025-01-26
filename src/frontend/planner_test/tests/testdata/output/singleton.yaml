@@ -10,10 +10,10 @@
     select v from mv;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchScan { table: mv, columns: [mv.v], distribution: Single }
+    └─BatchScan { table: mv, columns: [mv.v], distribution: UpstreamHashShard(mv.v) }
   batch_local_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchScan { table: mv, columns: [mv.v], distribution: SomeShard }
+    └─BatchScan { table: mv, columns: [mv.v], distribution: UpstreamHashShard(mv.v) }
 - id: select_from_singleton_mv_join
   before:
   - create_singleton_mv
@@ -21,17 +21,12 @@
     select mv1.v from mv mv1, mv mv2 where mv1.v = mv2.v;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchHashJoin { type: Inner, predicate: mv.v = mv.v, output: [mv.v] }
-      ├─BatchExchange { order: [], dist: HashShard(mv.v) }
-      │ └─BatchScan { table: mv, columns: [mv.v], distribution: Single }
-      └─BatchExchange { order: [], dist: HashShard(mv.v) }
-        └─BatchScan { table: mv, columns: [mv.v], distribution: Single }
+    └─BatchLookupJoin { type: Inner, predicate: mv.v = mv.v, output: [mv.v], lookup table: mv }
+      └─BatchScan { table: mv, columns: [mv.v], distribution: UpstreamHashShard(mv.v) }
   batch_local_plan: |-
-    BatchHashJoin { type: Inner, predicate: mv.v = mv.v, output: [mv.v] }
-    ├─BatchExchange { order: [], dist: Single }
-    │ └─BatchScan { table: mv, columns: [mv.v], distribution: SomeShard }
+    BatchLookupJoin { type: Inner, predicate: mv.v = mv.v, output: [mv.v], lookup table: mv }
     └─BatchExchange { order: [], dist: Single }
-      └─BatchScan { table: mv, columns: [mv.v], distribution: SomeShard }
+      └─BatchScan { table: mv, columns: [mv.v], distribution: UpstreamHashShard(mv.v) }
 - id: select_from_singleton_mv_join_top_n
   before:
   - create_singleton_mv
@@ -43,17 +38,12 @@
       └─BatchExchange { order: [], dist: Single }
         └─BatchTopN { order: [mv.v ASC], limit: 10, offset: 0 }
           └─BatchProject { exprs: [mv.v, mv.v] }
-            └─BatchHashJoin { type: Inner, predicate: mv.v = mv.v, output: [mv.v] }
-              ├─BatchExchange { order: [], dist: HashShard(mv.v) }
-              │ └─BatchScan { table: mv, columns: [mv.v], distribution: Single }
-              └─BatchExchange { order: [], dist: HashShard(mv.v) }
-                └─BatchScan { table: mv, columns: [mv.v], distribution: Single }
+            └─BatchLookupJoin { type: Inner, predicate: mv.v = mv.v, output: [mv.v], lookup table: mv }
+              └─BatchScan { table: mv, columns: [mv.v], distribution: UpstreamHashShard(mv.v) }
   batch_local_plan: |-
     BatchProject { exprs: [mv.v] }
     └─BatchTopN { order: [mv.v ASC], limit: 10, offset: 0 }
       └─BatchProject { exprs: [mv.v, mv.v] }
-        └─BatchHashJoin { type: Inner, predicate: mv.v = mv.v, output: [mv.v] }
-          ├─BatchExchange { order: [], dist: Single }
-          │ └─BatchScan { table: mv, columns: [mv.v], distribution: SomeShard }
+        └─BatchLookupJoin { type: Inner, predicate: mv.v = mv.v, output: [mv.v], lookup table: mv }
           └─BatchExchange { order: [], dist: Single }
-            └─BatchScan { table: mv, columns: [mv.v], distribution: SomeShard }
+            └─BatchScan { table: mv, columns: [mv.v], distribution: UpstreamHashShard(mv.v) }

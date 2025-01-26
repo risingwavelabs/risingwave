@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::telemetry::telemetry_cluster_type_from_env_var;
 use risingwave_meta::controller::SqlMetaStore;
 use risingwave_meta_model::prelude::Cluster;
 use risingwave_pb::meta::telemetry_info_service_server::TelemetryInfoService;
@@ -44,6 +45,9 @@ impl TelemetryInfoService for TelemetryInfoServiceImpl {
         &self,
         _request: Request<GetTelemetryInfoRequest>,
     ) -> Result<Response<TelemetryInfoResponse>, Status> {
+        if telemetry_cluster_type_from_env_var().is_err() {
+            return Ok(Response::new(TelemetryInfoResponse { tracking_id: None }));
+        }
         match self.get_tracking_id().await? {
             Some(tracking_id) => Ok(Response::new(TelemetryInfoResponse {
                 tracking_id: Some(tracking_id.into()),

@@ -78,7 +78,7 @@ use risingwave_pb::meta::list_actor_splits_response::ActorSplit;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
 use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistribution;
 use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
-use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
+use risingwave_pb::meta::list_streaming_job_states_response::StreamingJobState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::meta_member_service_client::MetaMemberServiceClient;
 use risingwave_pb::meta::notification_service_client::NotificationServiceClient;
@@ -396,12 +396,14 @@ impl MetaClient {
         table: PbTable,
         graph: StreamFragmentGraph,
         dependencies: HashSet<ObjectId>,
+        specific_resource_group: Option<String>,
     ) -> Result<WaitVersion> {
         let request = CreateMaterializedViewRequest {
             materialized_view: Some(table),
             fragment_graph: Some(graph),
             backfill: PbBackfillType::Regular as _,
             dependencies: dependencies.into_iter().collect(),
+            specific_resource_group,
         };
         let resp = self.inner.create_materialized_view(request).await?;
         // TODO: handle error in `resp.status` here
@@ -577,6 +579,22 @@ impl MetaClient {
         };
 
         self.inner.alter_parallelism(request).await?;
+        Ok(())
+    }
+
+    pub async fn alter_resource_group(
+        &self,
+        table_id: u32,
+        resource_group: Option<String>,
+        deferred: bool,
+    ) -> Result<()> {
+        let request = AlterResourceGroupRequest {
+            table_id,
+            resource_group,
+            deferred,
+        };
+
+        self.inner.alter_resource_group(request).await?;
         Ok(())
     }
 
@@ -766,8 +784,8 @@ impl MetaClient {
             .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
-    pub async fn drop_schema(&self, schema_id: SchemaId) -> Result<WaitVersion> {
-        let request = DropSchemaRequest { schema_id };
+    pub async fn drop_schema(&self, schema_id: SchemaId, cascade: bool) -> Result<WaitVersion> {
+        let request = DropSchemaRequest { schema_id, cascade };
         let resp = self.inner.drop_schema(request).await?;
         Ok(resp
             .version
@@ -979,10 +997,10 @@ impl MetaClient {
         Ok(resp.table_fragments)
     }
 
-    pub async fn list_table_fragment_states(&self) -> Result<Vec<TableFragmentState>> {
+    pub async fn list_streaming_job_states(&self) -> Result<Vec<StreamingJobState>> {
         let resp = self
             .inner
-            .list_table_fragment_states(ListTableFragmentStatesRequest {})
+            .list_streaming_job_states(ListStreamingJobStatesRequest {})
             .await?;
         Ok(resp.states)
     }
@@ -2079,7 +2097,7 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, apply_throttle, ApplyThrottleRequest, ApplyThrottleResponse }
             ,{ stream_client, cancel_creating_jobs, CancelCreatingJobsRequest, CancelCreatingJobsResponse }
             ,{ stream_client, list_table_fragments, ListTableFragmentsRequest, ListTableFragmentsResponse }
-            ,{ stream_client, list_table_fragment_states, ListTableFragmentStatesRequest, ListTableFragmentStatesResponse }
+            ,{ stream_client, list_streaming_job_states, ListStreamingJobStatesRequest, ListStreamingJobStatesResponse }
             ,{ stream_client, list_fragment_distribution, ListFragmentDistributionRequest, ListFragmentDistributionResponse }
             ,{ stream_client, list_actor_states, ListActorStatesRequest, ListActorStatesResponse }
             ,{ stream_client, list_actor_splits, ListActorSplitsRequest, ListActorSplitsResponse }
@@ -2091,6 +2109,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, alter_owner, AlterOwnerRequest, AlterOwnerResponse }
             ,{ ddl_client, alter_set_schema, AlterSetSchemaRequest, AlterSetSchemaResponse }
             ,{ ddl_client, alter_parallelism, AlterParallelismRequest, AlterParallelismResponse }
+            ,{ ddl_client, alter_resource_group, AlterResourceGroupRequest, AlterResourceGroupResponse }
             ,{ ddl_client, create_materialized_view, CreateMaterializedViewRequest, CreateMaterializedViewResponse }
             ,{ ddl_client, create_view, CreateViewRequest, CreateViewResponse }
             ,{ ddl_client, create_source, CreateSourceRequest, CreateSourceResponse }
