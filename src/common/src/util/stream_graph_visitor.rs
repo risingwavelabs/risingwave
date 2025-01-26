@@ -19,21 +19,11 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{agg_call_state, StreamNode};
 
 /// A utility for visiting and mutating the [`NodeBody`] of the [`StreamNode`]s recursively.
-pub fn visit_stream_node<F>(stream_node: &mut StreamNode, mut f: F)
-where
-    F: FnMut(&mut NodeBody),
-{
-    fn visit_inner<F>(stream_node: &mut StreamNode, f: &mut F)
-    where
-        F: FnMut(&mut NodeBody),
-    {
+pub fn visit_stream_node_mut(stream_node: &mut StreamNode, mut f: impl FnMut(&mut NodeBody)) {
+    visit_stream_node_cont_mut(stream_node, |stream_node| {
         f(stream_node.node_body.as_mut().unwrap());
-        for input in &mut stream_node.input {
-            visit_inner(input, f);
-        }
-    }
-
-    visit_inner(stream_node, &mut f)
+        true
+    })
 }
 
 /// A utility for to accessing the [`StreamNode`] mutably. The returned bool is used to determine whether the access needs to continue.
@@ -54,6 +44,14 @@ where
     }
 
     visit_inner(stream_node, &mut f)
+}
+
+/// A utility for visiting the [`NodeBody`] of the [`StreamNode`]s recursively.
+pub fn visit_stream_node(stream_node: &StreamNode, mut f: impl FnMut(&NodeBody)) {
+    visit_stream_node_cont(stream_node, |stream_node| {
+        f(stream_node.node_body.as_ref().unwrap());
+        true
+    })
 }
 
 /// A utility for to accessing the [`StreamNode`] immutably. The returned bool is used to determine whether the access needs to continue.
@@ -78,11 +76,14 @@ where
 
 /// A utility for visiting and mutating the [`NodeBody`] of the [`StreamNode`]s in a
 /// [`StreamFragment`] recursively.
-pub fn visit_fragment<F>(fragment: &mut StreamFragment, f: F)
-where
-    F: FnMut(&mut NodeBody),
-{
-    visit_stream_node(fragment.node.as_mut().unwrap(), f)
+pub fn visit_fragment_mut(fragment: &mut StreamFragment, f: impl FnMut(&mut NodeBody)) {
+    visit_stream_node_mut(fragment.node.as_mut().unwrap(), f)
+}
+
+/// A utility for visiting the [`NodeBody`] of the [`StreamNode`]s in a
+/// [`StreamFragment`] recursively.
+pub fn visit_fragment(fragment: &StreamFragment, f: impl FnMut(&NodeBody)) {
+    visit_stream_node(fragment.node.as_ref().unwrap(), f)
 }
 
 /// Visit the tables of a [`StreamNode`].
@@ -279,7 +280,7 @@ pub fn visit_stream_node_tables_inner<F>(
         }
     };
     if visit_child_recursively {
-        visit_stream_node(stream_node, visit_body)
+        visit_stream_node_mut(stream_node, visit_body)
     } else {
         visit_body(stream_node.node_body.as_mut().unwrap())
     }

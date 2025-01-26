@@ -20,7 +20,7 @@ use anyhow::Context;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::hash::{VnodeCount, VnodeCountCompat, WorkerSlotId};
-use risingwave_common::util::stream_graph_visitor::visit_stream_node;
+use risingwave_common::util::stream_graph_visitor::visit_stream_node_mut;
 use risingwave_meta_model::actor::ActorStatus;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::object::ObjectType;
@@ -228,7 +228,7 @@ impl CatalogController {
         let stream_node = {
             let actor_template = pb_actors.first().cloned().unwrap();
             let mut stream_node = actor_template.nodes.unwrap();
-            visit_stream_node(&mut stream_node, |body| {
+            visit_stream_node_mut(&mut stream_node, |body| {
                 if let NodeBody::Merge(m) = body {
                     m.upstream_actor_id = vec![];
                 }
@@ -245,7 +245,7 @@ impl CatalogController {
 
             let node = actor.nodes.as_mut().context("nodes are empty")?;
 
-            visit_stream_node(node, |body| {
+            visit_stream_node_mut(node, |body| {
                 if let NodeBody::Merge(m) = body {
                     let mut upstream_actor_ids = vec![];
                     swap(&mut m.upstream_actor_id, &mut upstream_actor_ids);
@@ -436,7 +436,7 @@ impl CatalogController {
             let pb_nodes = {
                 let mut nodes = stream_node_template.clone();
 
-                visit_stream_node(&mut nodes, |body| {
+                visit_stream_node_mut(&mut nodes, |body| {
                     if let NodeBody::Merge(m) = body
                         && let Some(upstream_actor_ids) =
                             upstream_fragment_actors.get(&(m.upstream_fragment_id as _))
@@ -1660,7 +1660,7 @@ mod tests {
     use itertools::Itertools;
     use risingwave_common::hash::{ActorMapping, VirtualNode, VnodeCount};
     use risingwave_common::util::iter_util::ZipEqDebug;
-    use risingwave_common::util::stream_graph_visitor::visit_stream_node;
+    use risingwave_common::util::stream_graph_visitor::{visit_stream_node, visit_stream_node_mut};
     use risingwave_meta_model::actor::ActorStatus;
     use risingwave_meta_model::fragment::DistributionType;
     use risingwave_meta_model::{
@@ -1835,7 +1835,7 @@ mod tests {
             let nodes = nodes.unwrap();
             let actor_upstream_actor_ids =
                 upstream_actor_ids.get(&(actor_id as _)).cloned().unwrap();
-            visit_stream_node(&mut template_node, |body| {
+            visit_stream_node_mut(&mut template_node, |body| {
                 if let NodeBody::Merge(m) = body {
                     m.upstream_actor_id = actor_upstream_actor_ids
                         .get(&(m.upstream_fragment_id as _))
@@ -2013,9 +2013,7 @@ mod tests {
 
             assert_eq!(mview_definition, "");
 
-            let mut pb_nodes = pb_nodes.unwrap();
-
-            visit_stream_node(&mut pb_nodes, |body| {
+            visit_stream_node(pb_nodes.as_ref().unwrap(), |body| {
                 if let PbNodeBody::Merge(m) = body {
                     let upstream_actor_ids = upstream_actor_ids
                         .get(&(m.upstream_fragment_id as _))
