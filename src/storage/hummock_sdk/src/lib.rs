@@ -318,19 +318,23 @@ pub fn full_key_can_concat(ssts: &[SstableInfo]) -> bool {
         let sst_2 = &ssts[i];
 
         if sst_1.key_range.right_exclusive {
-            if sst_1
-                .key_range
-                .compare_right_with(&sst_2.key_range.left)
-                .is_gt()
+            if KeyComparator::compare_encoded_full_key(
+                &sst_1.key_range.right,
+                &sst_2.key_range.left,
+            )
+            .is_gt()
             {
                 return false;
             }
-        } else if sst_1
-            .key_range
-            .compare_right_with(&sst_2.key_range.left)
+        } else {
+            if KeyComparator::compare_encoded_full_key(
+                &sst_1.key_range.right,
+                &sst_2.key_range.left,
+            )
             .is_ge()
-        {
-            return false;
+            {
+                return false;
+            }
         }
     }
     true
@@ -440,11 +444,51 @@ pub fn get_object_id_from_path(path: &str) -> HummockSstableObjectId {
 
 #[cfg(test)]
 mod tests {
+    use bytes::Bytes;
+    use sstable_info::SstableInfoInner;
+
     use super::*;
 
     #[test]
     fn test_object_id_decimal_max_length() {
         let len = HummockSstableObjectId::MAX.to_string().len();
         assert_eq!(len, HUMMOCK_SSTABLE_OBJECT_ID_MAX_DECIMAL_LENGTH)
+    }
+
+    #[test]
+    fn test_full_key_concat() {
+        let key1 = b"\0\0\0\x08\0\0\0\x0112-3\0\0\0\0\x04\0\x1c\x16l'\xe2\0\0";
+        let key2 = b"\0\0\0\x08\0\0\0\x0112-3\0\0\0\0\x04\0\x1c\x16l \x12\0\0";
+
+        let sst_1 = SstableInfoInner {
+            key_range: key_range::KeyRange {
+                left: Bytes::from(key1.to_vec()),
+                right: Bytes::from(key1.to_vec()),
+                right_exclusive: false,
+            },
+            ..Default::default()
+        };
+
+        let sst_2 = SstableInfoInner {
+            key_range: key_range::KeyRange {
+                left: Bytes::from(key2.to_vec()),
+                right: Bytes::from(key2.to_vec()),
+                right_exclusive: false,
+            },
+            ..Default::default()
+        };
+
+        let sst_3 = SstableInfoInner {
+            key_range: key_range::KeyRange {
+                left: Bytes::from(key1.to_vec()),
+                right: Bytes::from(key2.to_vec()),
+                right_exclusive: false,
+            },
+            ..Default::default()
+        };
+
+        assert!(full_key_can_concat(&[sst_1.clone().into(), sst_2.into()]));
+
+        assert!(!full_key_can_concat(&[sst_1.into(), sst_3.into()]));
     }
 }
