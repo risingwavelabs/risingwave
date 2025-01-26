@@ -1566,7 +1566,7 @@ pub async fn create_iceberg_engine_table(
                     "warehouse.path",
                     "s3.path.style.access",
                 ];
-                for (k, _) in &params.properties {
+                for k in params.properties.keys() {
                     if !allowed_properties.contains(&k.as_str()) {
                         return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
                             "`{}` is not allowed in iceberg engine connection",
@@ -1576,7 +1576,7 @@ pub async fn create_iceberg_engine_table(
                 }
 
                 let allowed_secrets = ["s3.access.key", "s3.secret.key"];
-                for (k, _) in &params.secret_refs {
+                for k in params.secret_refs.keys() {
                     if !allowed_secrets.contains(&k.as_str()) {
                         return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
                             "secret `{}` is not allowed in iceberg engine connection",
