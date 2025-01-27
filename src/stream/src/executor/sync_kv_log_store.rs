@@ -69,7 +69,6 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use parking_lot::Mutex;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::bail;
 use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::hash::VnodeBitmapExt;
