@@ -32,7 +32,7 @@ use crate::common::log_store_impl::kv_log_store::serde::LogStoreRowSerde;
 use crate::common::log_store_impl::kv_log_store::writer::KvLogStoreWriter;
 use crate::executor::monitor::StreamingMetrics;
 
-pub mod buffer;
+pub(crate) mod buffer;
 pub mod reader;
 pub(crate) mod serde;
 #[cfg(test)]

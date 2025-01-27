@@ -28,7 +28,7 @@ use crate::common::log_store_impl::kv_log_store::{
 };
 
 #[derive(Clone)]
-pub enum LogStoreBufferItem {
+pub(crate) enum LogStoreBufferItem {
     StreamChunk {
         chunk: StreamChunk,
         start_seq_id: SeqIdType,
