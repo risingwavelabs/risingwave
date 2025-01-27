@@ -268,6 +268,17 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                                     buffer,
                                     actor_id,
                                 ).await?;
+                                let should_update_vnode_bitmap = barrier.as_update_vnode_bitmap(actor_id).is_some();
+                                if should_update_vnode_bitmap {
+                                    *state_store_stream = Some(read_persisted_log_store(
+                                        serde,
+                                        table_id,
+                                        metrics,
+                                        state_store.clone(),
+                                        barrier.epoch.prev,
+                                        None,
+                                    ).await?);
+                                }
                                 Ok(Some(Message::Barrier(barrier)))
                             }
                             Message::Chunk(chunk) => {
