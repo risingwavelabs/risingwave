@@ -1998,24 +1998,24 @@ impl<K: HashKey> HashJoinExecutor<K> {
             for build_row_id in build_side_row_iter {
                 build_row_ref =
                     build_side[build_row_id.chunk_id()].row_at_unchecked_vis(build_row_id.row_id());
-                let build_inquality_value = build_row_ref.datum_at(asof_join_condition.right_idx);
-                if let Some(build_inquality_scalar) = build_inquality_value {
+                let build_inequality_value = build_row_ref.datum_at(asof_join_condition.right_idx);
+                if let Some(build_inequality_scalar) = build_inequality_value {
                     let mut pick_result = |compare: fn(Ordering) -> bool| {
                         if let Some(result_row_id_inner) = result_row_id {
                             let result_row_ref = build_side[result_row_id_inner.chunk_id()]
                                 .row_at_unchecked_vis(result_row_id_inner.row_id());
-                            let result_inquality_scalar = result_row_ref
+                            let result_inequality_scalar = result_row_ref
                                 .datum_at(asof_join_condition.right_idx)
                                 .unwrap();
-                            if compare(probe_inequality_scalar.default_cmp(&build_inquality_scalar))
-                                && compare(
-                                    probe_inequality_scalar.default_cmp(&result_inquality_scalar),
-                                )
-                            {
+                            if compare(
+                                probe_inequality_scalar.default_cmp(&build_inequality_scalar),
+                            ) && compare(
+                                probe_inequality_scalar.default_cmp(&result_inequality_scalar),
+                            ) {
                                 result_row_id = Some(build_row_id);
                             }
                         } else if compare(
-                            probe_inequality_scalar.default_cmp(&build_inquality_scalar),
+                            probe_inequality_scalar.default_cmp(&build_inequality_scalar),
                         ) {
                             result_row_id = Some(build_row_id);
                         }
