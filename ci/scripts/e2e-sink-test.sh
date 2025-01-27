@@ -73,7 +73,20 @@ echo "--- killing risingwave cluster: ci-1cn-1fe-switch-to-pg-native"
 risedev ci-kill
 
 echo "--- starting risingwave cluster"
-risedev ci-start ci-1cn-1fe
+# Use ci-inline-source-test since it will configure ports, db, host etc... env vars via risedev-env.
+# These are required for cli tools like psql have env vars correctly configured.
+risedev ci-start ci-inline-source-test
+
+echo "--- check connectivity for postgres"
+PGPASSWORD=postgres psql -h db -U postgres -d postgres -p 5432 -c "SELECT 1;"
+
+echo "--- dumping risedev-env"
+echo "risedev-env:"
+risedev show-risedev-env
+
+# MUST use risedev slt, not sqllogictest, else env var not loaded and test fails.
+echo "--- testing postgres_sink"
+risedev slt -p 4566 -d dev './e2e_test/sink/postgres_sink.slt'
 
 echo "--- testing common sinks"
 sqllogictest -p 4566 -d dev './e2e_test/sink/append_only_sink.slt'
