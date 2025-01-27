@@ -20,7 +20,7 @@ use anyhow::Context;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::hash::{VnodeCount, VnodeCountCompat, WorkerSlotId};
-use risingwave_common::util::stream_graph_visitor::visit_stream_node_mut;
+use risingwave_common::util::stream_graph_visitor::{visit_stream_node, visit_stream_node_mut};
 use risingwave_meta_model::actor::ActorStatus;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::object::ObjectType;
@@ -742,8 +742,8 @@ impl CatalogController {
             ..
         } in fragments
         {
-            let mut stream_node = stream_node.to_protobuf();
-            visit_stream_node(&mut stream_node, |body| {
+            let stream_node = stream_node.to_protobuf();
+            visit_stream_node(&stream_node, |body| {
                 if let NodeBody::StreamScan(node) = body {
                     match node.stream_scan_type() {
                         StreamScanType::Unspecified => {}
