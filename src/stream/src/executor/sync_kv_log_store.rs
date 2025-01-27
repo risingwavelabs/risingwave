@@ -169,13 +169,8 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     pub async fn execute_inner(mut self) {
         let mut input = self.upstream.execute();
-        let Some(msg) = input.next().await else {
-            bail!("Expected a barrier message, got end of stream")
-        };
-        let barrier = match msg? {
-            Message::Barrier(barrier) => barrier,
-            other => bail!("Expected a barrier message, got {:?}", other),
-        };
+        let barrier = expect_first_barrier(&mut input).await?;
+        yield Message::Barrier(barrier.clone());
         let mut state_store_stream = Some(
             Self::init(
                 &barrier,
@@ -187,7 +182,6 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
             )
             .await?,
         );
-        yield Message::Barrier(barrier);
         loop {
             if let Some(msg) = Self::next(
                 &mut input,
