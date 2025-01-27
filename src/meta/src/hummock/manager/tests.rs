@@ -29,7 +29,7 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::get_compactio
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::{gen_key_from_str, FullKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::sstable_info::SstableInfo;
+use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
 use risingwave_hummock_sdk::table_stats::{to_prost_table_stats_map, TableStats, TableStatsMap};
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{
@@ -76,6 +76,10 @@ fn pin_versions_sum(pin_versions: &[HummockPinnedVersion]) -> usize {
 }
 
 fn gen_sstable_info(sst_id: u64, table_ids: Vec<u32>, epoch: u64) -> SstableInfo {
+    gen_sstable_info_impl(sst_id, table_ids, epoch).into()
+}
+
+fn gen_sstable_info_impl(sst_id: u64, table_ids: Vec<u32>, epoch: u64) -> SstableInfoInner {
     let table_key_l = gen_key_from_str(VirtualNode::ZERO, "1");
     let table_key_r = gen_key_from_str(VirtualNode::MAX_FOR_TEST, "1");
     let full_key_l = FullKey::for_test(
@@ -87,7 +91,7 @@ fn gen_sstable_info(sst_id: u64, table_ids: Vec<u32>, epoch: u64) -> SstableInfo
     let full_key_r =
         FullKey::for_test(TableId::new(*table_ids.last().unwrap()), table_key_r, epoch).encode();
 
-    SstableInfo {
+    SstableInfoInner {
         sst_id,
         key_range: KeyRange {
             left: full_key_l.into(),
@@ -1278,7 +1282,7 @@ async fn test_version_stats() {
         .into_iter()
         .enumerate()
         .map(|(idx, table_ids)| LocalSstableInfo {
-            sst_info: SstableInfo {
+            sst_info: SstableInfoInner {
                 object_id: sst_ids[idx],
                 sst_id: sst_ids[idx],
                 key_range: KeyRange {
@@ -1290,7 +1294,8 @@ async fn test_version_stats() {
                 table_ids: table_ids.clone(),
                 sst_size: 1024 * 1024 * 1024,
                 ..Default::default()
-            },
+            }
+            .into(),
             table_stats: table_ids
                 .iter()
                 .map(|table_id| (*table_id, table_stats_change.clone()))
@@ -1664,12 +1669,24 @@ async fn test_move_state_tables_to_dedicated_compaction_group_trivial_expired() 
         table_stats: Default::default(),
         created_at: u64::MAX,
     };
-    let mut sst_3 = sst_2.clone();
-    let mut sst_4 = sst_1.clone();
-    sst_3.sst_info.sst_id = 8;
-    sst_3.sst_info.object_id = 8;
-    sst_4.sst_info.sst_id = 9;
-    sst_4.sst_info.object_id = 9;
+    let sst_3 = LocalSstableInfo {
+        sst_info: SstableInfoInner {
+            sst_id: 8,
+            object_id: 8,
+            ..sst_2.sst_info.get_inner()
+        }
+        .into(),
+        ..sst_2.clone()
+    };
+    let sst_4 = LocalSstableInfo {
+        sst_info: SstableInfoInner {
+            sst_id: 9,
+            object_id: 9,
+            ..sst_1.sst_info.get_inner()
+        }
+        .into(),
+        ..sst_1.clone()
+    };
     hummock_meta_client
         .commit_epoch(
             30,
@@ -1736,7 +1753,7 @@ async fn test_move_state_tables_to_dedicated_compaction_group_trivial_expired() 
         .report_compact_task(
             task2.task_id,
             TaskStatus::Success,
-            vec![SstableInfo {
+            vec![SstableInfoInner {
                 object_id: 12,
                 sst_id: 12,
                 key_range: KeyRange::default(),
@@ -1746,7 +1763,8 @@ async fn test_move_state_tables_to_dedicated_compaction_group_trivial_expired() 
                 file_size: 100,
                 sst_size: 100,
                 ..Default::default()
-            }],
+            }
+            .into()],
             None,
             HashMap::default(),
         )
@@ -2213,10 +2231,15 @@ async fn test_partition_level() {
     const MB: u64 = 1024 * 1024;
     let mut selector = default_compaction_selector();
     for epoch in 31..100 {
-        let mut sst = gen_local_sstable_info(global_sst_id, vec![100], test_epoch(epoch));
-        sst.sst_info.file_size = 10 * MB;
-        sst.sst_info.sst_size = 10 * MB;
-        sst.sst_info.uncompressed_file_size = 10 * MB;
+        let mut sst = gen_sstable_info_impl(global_sst_id, vec![100], test_epoch(epoch));
+        sst.file_size = 10 * MB;
+        sst.sst_size = 10 * MB;
+        sst.uncompressed_file_size = 10 * MB;
+        let sst = LocalSstableInfo {
+            sst_info: sst.into(),
+            table_stats: Default::default(),
+            created_at: u64::MAX,
+        };
 
         hummock_meta_client
             .commit_epoch(
@@ -2236,7 +2259,7 @@ async fn test_partition_level() {
             .await
             .unwrap()
         {
-            let mut sst = gen_sstable_info(global_sst_id, vec![100], test_epoch(epoch));
+            let mut sst = gen_sstable_info_impl(global_sst_id, vec![100], test_epoch(epoch));
             sst.file_size = task
                 .input_ssts
                 .iter()
@@ -2254,7 +2277,7 @@ async fn test_partition_level() {
                 .report_compact_task(
                     task.task_id,
                     TaskStatus::Success,
-                    vec![sst],
+                    vec![sst.into()],
                     None,
                     HashMap::default(),
                 )

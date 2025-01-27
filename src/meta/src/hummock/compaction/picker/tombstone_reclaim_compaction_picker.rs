@@ -135,7 +135,9 @@ pub mod tests {
     use super::*;
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use crate::hummock::compaction::create_overlap_strategy;
-    use crate::hummock::compaction::selector::tests::{generate_level, generate_table};
+    use crate::hummock::compaction::selector::tests::{
+        generate_level, generate_table, generate_table_impl,
+    };
 
     #[test]
     fn test_basic() {
@@ -165,21 +167,21 @@ pub mod tests {
         let picker = TombstoneReclaimCompactionPicker::new(strategy.clone(), 40, 20);
         let ret = picker.pick_compaction(&levels, &levels_handler, &mut state);
         assert!(ret.is_none());
-        let mut sst = generate_table(3, 1, 201, 300, 1);
+        let mut sst = generate_table_impl(3, 1, 201, 300, 1);
         sst.stale_key_count = 40;
         sst.total_key_count = 100;
-        levels.levels[1].table_infos.push(sst);
+        levels.levels[1].table_infos.push(sst.into());
 
         let ret = picker
             .pick_compaction(&levels, &levels_handler, &mut state)
             .unwrap();
         assert_eq!(2, ret.input_levels.len());
         assert_eq!(3, ret.input_levels[0].table_infos[0].sst_id);
-        let mut sst = generate_table(4, 1, 1, 100, 1);
+        let mut sst = generate_table_impl(4, 1, 1, 100, 1);
         sst.stale_key_count = 30;
         sst.range_tombstone_count = 30;
         sst.total_key_count = 100;
-        levels.levels[0].table_infos.push(sst);
+        levels.levels[0].table_infos.push(sst.into());
         let picker = TombstoneReclaimCompactionPicker::new(strategy, 50, 10);
         let mut state = TombstoneReclaimPickerState::default();
         let ret = picker

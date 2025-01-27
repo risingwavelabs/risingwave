@@ -29,7 +29,7 @@ use risingwave_common::util::value_encoding::{BasicSerde, EitherSerde, ValueRowD
 use risingwave_frontend::TableCatalog;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::level::Level;
-use risingwave_hummock_sdk::sstable_info::SstableInfo;
+use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_object_store::object::{ObjectMetadata, ObjectStoreImpl};
 use risingwave_rpc_client::MetaClient;
@@ -200,12 +200,13 @@ pub async fn sst_dump_via_sstable_store(
     table_data: &TableData,
     args: &SstDumpArgs,
 ) -> anyhow::Result<()> {
-    let sstable_info = SstableInfo {
+    let sstable_info = SstableInfoInner {
         object_id,
         file_size,
         meta_offset,
         ..Default::default()
-    };
+    }
+    .into();
     let sstable_cache = sstable_store
         .sstable(&sstable_info, &mut StoreLocalStatistic::default())
         .await?;
