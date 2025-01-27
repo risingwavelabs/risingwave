@@ -112,6 +112,19 @@ impl ElasticSearchOpenSearchConfig {
     }
 
     pub fn build_client(&self, connector: &str) -> Result<ElasticSearchOpenSearchClient> {
+        let check_username_password = || -> Result<()> {
+            if self.username.is_some() && self.password.is_none() {
+                return Err(SinkError::Config(anyhow!(
+                    "please set the password when the username is set."
+                )));
+            }
+            if self.username.is_none() && self.password.is_some() {
+                return Err(SinkError::Config(anyhow!(
+                    "please set the username when the password is set."
+                )));
+            }
+            Ok(())
+        };
         let url =
             Url::parse(&self.url).map_err(|e| SinkError::ElasticSearchOpenSearch(anyhow!(e)))?;
         if connector.eq(ES_SINK) {
@@ -125,6 +138,7 @@ impl ElasticSearchOpenSearchConfig {
                     elasticsearch::auth::Credentials::Basic(username.clone(), password.clone()),
                 );
             }
+            check_username_password()?;
             let transport = transport_builder
                 .build()
                 .map_err(|e| SinkError::ElasticSearchOpenSearch(anyhow!(e)))?;
@@ -142,6 +156,7 @@ impl ElasticSearchOpenSearchConfig {
                     password.clone(),
                 ));
             }
+            check_username_password()?;
             let transport = transport_builder
                 .build()
                 .map_err(|e| SinkError::ElasticSearchOpenSearch(anyhow!(e)))?;
