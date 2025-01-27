@@ -421,13 +421,13 @@ impl GlobalBarrierWorkerContextImpl {
             .collect();
 
         if expired_worker_slots.is_empty() {
-            debug!("no expired worker slots, skipping.");
+            info!("no expired worker slots, skipping.");
             return self.resolve_graph_info(None).await;
         }
 
-        debug!("start migrate actors.");
+        info!("start migrate actors.");
         let mut to_migrate_worker_slots = expired_worker_slots.into_iter().rev().collect_vec();
-        debug!("got to migrate worker slots {:#?}", to_migrate_worker_slots);
+        info!("got to migrate worker slots {:#?}", to_migrate_worker_slots);
 
         let mut inuse_worker_slots: HashSet<_> = all_inuse_worker_slots
             .intersection(&active_worker_slots)
@@ -528,6 +528,8 @@ impl GlobalBarrierWorkerContextImpl {
                 .await;
             warn!(?changed, "get worker changed or timed out. Retry migrate");
         }
+
+        info!("migration plan {:?}", plan);
 
         mgr.catalog_controller.migrate_actors(plan).await?;
 
