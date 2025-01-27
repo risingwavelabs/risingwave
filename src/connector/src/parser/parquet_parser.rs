@@ -26,6 +26,7 @@ use risingwave_common::util::tokio_util::compat::FuturesAsyncReadCompatExt;
 use crate::parser::ConnectorResult;
 use crate::source::filesystem::opendal_source::opendal_enumerator::OpendalEnumerator;
 use crate::source::filesystem::opendal_source::{OpendalGcs, OpendalPosixFs, OpendalS3};
+use crate::source::iceberg::is_parquet_schema_match_source_schema;
 use crate::source::reader::desc::SourceDesc;
 use crate::source::{ConnectorProperties, SourceColumnDesc};
 /// `ParquetParser` is responsible for converting the incoming `record_batch_stream`
@@ -110,6 +111,10 @@ impl ParquetParser {
 
                             if let Some(parquet_column) =
                                 record_batch.column_by_name(rw_column_name)
+                                && is_parquet_schema_match_source_schema(
+                                    parquet_column.data_type(),
+                                    rw_data_type,
+                                )
                             {
                                 let arrow_field = IcebergArrowConvert
                                     .to_arrow_field(rw_column_name, rw_data_type)?;
