@@ -16,7 +16,7 @@ use std::str::FromStr;
 
 use chrono::{Datelike, NaiveTime, Timelike};
 use risingwave_common::types::{
-    Date, Decimal, Interval, Time, Timestamp, TimestampNano, Timestamptz, F64,
+    Date, Decimal, Interval, Time, Timestamp, TimestampNanosecond, Timestamptz, F64,
 };
 use risingwave_expr::{function, ExprError, Result};
 
@@ -110,10 +110,10 @@ fn extract_from_timestamp(timestamp: Timestamp, unit: &Unit) -> Decimal {
 }
 
 #[function(
-    "extract(varchar, timestampnano) -> decimal",
+    "extract(varchar, timestamp_ns) -> decimal",
     prebuild = "Unit::from_str($0)?.ensure_timestamp()?"
 )]
-fn extract_from_timestamp_nano(timestamp_nano: TimestampNano, unit: &Unit) -> Decimal {
+fn extract_from_timestamp_ns(timestamp_nano: TimestampNanosecond, unit: &Unit) -> Decimal {
     match unit {
         Epoch => {
             if let Some(nanos) = timestamp_nano.0.and_utc().timestamp_nanos_opt() {

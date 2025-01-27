@@ -49,7 +49,7 @@ impl std::fmt::Debug for Literal {
                     | DataType::Bytea
                     | DataType::Date
                     | DataType::Timestamp
-                    | DataType::TimestampNano
+                    | DataType::TimestampNanosecond
                     | DataType::Timestamptz
                     | DataType::Time
                     | DataType::Interval

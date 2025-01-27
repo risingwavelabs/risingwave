@@ -47,7 +47,7 @@ impl ToSql for ScalarImpl {
             ScalarImpl::Int256(_)
             | ScalarImpl::Struct(_)
             | ScalarImpl::List(_)
-            | ScalarImpl::TimestampNano(_) => {
+            | ScalarImpl::TimestampNanosecond(_) => {
                 bail_not_implemented!("the postgres encoding for {ty} is unsupported")
             }
             ScalarImpl::Map(_) => todo!(),
@@ -90,7 +90,7 @@ impl ToSql for ScalarRefImpl<'_> {
             ScalarRefImpl::Int256(_)
             | ScalarRefImpl::Struct(_)
             | ScalarRefImpl::List(_)
-            | ScalarRefImpl::TimestampNano(_) => {
+            | ScalarRefImpl::TimestampNanosecond(_) => {
                 bail_not_implemented!("the postgres encoding for {ty} is unsupported")
             }
             ScalarRefImpl::Map(_) => todo!(),

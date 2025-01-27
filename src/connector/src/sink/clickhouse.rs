@@ -448,9 +448,11 @@ impl ClickHouseSink {
                 "clickhouse can not support Time".to_owned(),
             )),
             risingwave_common::types::DataType::Timestamp
-            | risingwave_common::types::DataType::TimestampNano => Err(SinkError::ClickHouse(
-                "clickhouse does not have a type corresponding to naive timestamp".to_owned(),
-            )),
+            | risingwave_common::types::DataType::TimestampNanosecond => {
+                Err(SinkError::ClickHouse(
+                    "clickhouse does not have a type corresponding to naive timestamp".to_owned(),
+                ))
+            }
             risingwave_common::types::DataType::Timestamptz => {
                 Ok(ck_column.r#type.contains("DateTime64"))
             }
@@ -946,7 +948,7 @@ impl ClickHouseFieldWithNull {
                     "clickhouse can not support Time".to_owned(),
                 ))
             }
-            ScalarRefImpl::Timestamp(_) | ScalarRefImpl::TimestampNano(_) => {
+            ScalarRefImpl::Timestamp(_) | ScalarRefImpl::TimestampNanosecond(_) => {
                 return Err(SinkError::ClickHouse(
                     "clickhouse does not have a type corresponding to naive timestamp".to_owned(),
                 ))

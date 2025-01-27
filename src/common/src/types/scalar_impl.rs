@@ -246,19 +246,19 @@ impl ScalarRef<'_> for Timestamp {
 }
 
 /// Implement `Scalar` for `Timestamp`.
-impl Scalar for TimestampNano {
-    type ScalarRefType<'a> = TimestampNano;
+impl Scalar for TimestampNanosecond {
+    type ScalarRefType<'a> = TimestampNanosecond;
 
-    fn as_scalar_ref(&self) -> TimestampNano {
+    fn as_scalar_ref(&self) -> TimestampNanosecond {
         *self
     }
 }
 
 /// Implement `ScalarRef` for `Timestamp`.
-impl ScalarRef<'_> for TimestampNano {
-    type ScalarType = TimestampNano;
+impl ScalarRef<'_> for TimestampNanosecond {
+    type ScalarType = TimestampNanosecond;
 
-    fn to_owned_scalar(&self) -> TimestampNano {
+    fn to_owned_scalar(&self) -> TimestampNanosecond {
         *self
     }
 

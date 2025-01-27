@@ -580,7 +580,7 @@ fn bind_params(
                 },
                 ScalarRefImpl::Date(v) => query.bind(v.0),
                 ScalarRefImpl::Timestamp(v) => query.bind(v.0),
-                ScalarRefImpl::TimestampNano(v) => query.bind(v.0),
+                ScalarRefImpl::TimestampNanosecond(v) => query.bind(v.0),
                 ScalarRefImpl::Timestamptz(v) => query.bind(v.timestamp_micros()),
                 ScalarRefImpl::Time(v) => query.bind(v.0),
                 ScalarRefImpl::Bytea(v) => query.bind(v.to_vec()),
@@ -620,7 +620,7 @@ fn bind_params(
                 DataType::Time => {
                     query.bind(None as Option<chrono::NaiveTime>);
                 }
-                DataType::Timestamp | DataType::TimestampNano => {
+                DataType::Timestamp | DataType::TimestampNanosecond => {
                     query.bind(None as Option<chrono::NaiveDateTime>);
                 }
                 DataType::Timestamptz => {
@@ -664,7 +664,7 @@ fn check_data_type_compatibility(data_type: &DataType) -> Result<()> {
         | DataType::Varchar
         | DataType::Time
         | DataType::Timestamp
-        | DataType::TimestampNano
+        | DataType::TimestampNanosecond
         | DataType::Timestamptz
         | DataType::Bytea => Ok(()),
         DataType::Interval => Err(data_type_not_supported("Interval")),

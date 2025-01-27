@@ -68,7 +68,7 @@ fn postgres_cell_to_scalar_impl(
         | DataType::Date
         | DataType::Time
         | DataType::Timestamp
-        | DataType::TimestampNano
+        | DataType::TimestampNanosecond
         | DataType::Timestamptz
         | DataType::Jsonb
         | DataType::Interval

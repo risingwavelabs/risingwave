@@ -106,7 +106,7 @@ macro_rules! impl_chrono_wrapper {
         }
     };
 }
-impl_chrono_wrapper_without_pgsql_type!(TimestampNano, NaiveDateTime);
+impl_chrono_wrapper_without_pgsql_type!(TimestampNanosecond, NaiveDateTime);
 
 impl_chrono_wrapper!(Date, NaiveDate, DATE);
 impl_chrono_wrapper!(Timestamp, NaiveDateTime, TIMESTAMP);
@@ -198,26 +198,26 @@ impl FromStr for Timestamp {
     }
 }
 
-/// Parse a timestampnano from varchar.
+/// Parse a timestampns from varchar.
 ///
 /// # Example
 /// ```
 /// use std::str::FromStr;
 ///
-/// use risingwave_common::types::TimestampNano;
+/// use risingwave_common::types::TimestampNanosecond;
 ///
-/// TimestampNano::from_str("1999-01-08 04:02").unwrap();
-/// TimestampNano::from_str("1999-01-08 04:05:06").unwrap();
-/// TimestampNano::from_str("1999-01-08T04:05:06").unwrap();
-/// TimestampNano::from_str("1999-01-08T04:05:06.123456789").unwrap();
+/// TimestampNanosecond::from_str("1999-01-08 04:02").unwrap();
+/// TimestampNanosecond::from_str("1999-01-08 04:05:06").unwrap();
+/// TimestampNanosecond::from_str("1999-01-08T04:05:06").unwrap();
+/// TimestampNanosecond::from_str("1999-01-08T04:05:06.123456789").unwrap();
 /// ```
-impl FromStr for TimestampNano {
+impl FromStr for TimestampNanosecond {
     type Err = InvalidParamsError;
 
     fn from_str(s: &str) -> Result<Self> {
         let dt = s
             .parse::<jiff::civil::DateTime>()
-            .map_err(|_| ErrorKind::ParseTimestampNano)?;
+            .map_err(|_| ErrorKind::ParseTimestampNanosecond)?;
         Ok(Self::new(
             Date::from_ymd_uncheck(dt.year() as i32, dt.month() as u32, dt.day() as u32)
                 .0
@@ -256,14 +256,14 @@ impl From<Timestamp> for Date {
 /// ```
 /// use std::str::FromStr;
 ///
-/// use risingwave_common::types::{Date, TimestampNano};
+/// use risingwave_common::types::{Date, TimestampNanosecond};
 ///
-/// let ts = TimestampNano::from_str("1999-01-08 04:02").unwrap();
+/// let ts = TimestampNanosecond::from_str("1999-01-08 04:02").unwrap();
 /// let date = Date::from(ts);
 /// assert_eq!(date, Date::from_str("1999-01-08").unwrap());
 /// ```
-impl From<TimestampNano> for Date {
-    fn from(ts: TimestampNano) -> Self {
+impl From<TimestampNanosecond> for Date {
+    fn from(ts: TimestampNanosecond) -> Self {
         Date::new(ts.0.date())
     }
 }
@@ -290,14 +290,14 @@ impl From<Timestamp> for Time {
 /// ```
 /// use std::str::FromStr;
 ///
-/// use risingwave_common::types::{Time, TimestampNano};
+/// use risingwave_common::types::{Time, TimestampNanosecond};
 ///
-/// let ts = TimestampNano::from_str("1999-01-08 04:02").unwrap();
+/// let ts = TimestampNanosecond::from_str("1999-01-08 04:02").unwrap();
 /// let time = Time::from(ts);
 /// assert_eq!(time, Time::from_str("04:02").unwrap());
 /// ```
-impl From<TimestampNano> for Time {
-    fn from(ts: TimestampNano) -> Self {
+impl From<TimestampNanosecond> for Time {
+    fn from(ts: TimestampNanosecond) -> Self {
         Time::new(ts.0.time())
     }
 }
@@ -341,8 +341,8 @@ enum ErrorKind {
     ParseTime,
     #[error("Can't cast string to timestamp (expected format is YYYY-MM-DD HH:MM:SS[.D+{{up to 6 digits}}] or YYYY-MM-DD HH:MM or YYYY-MM-DD or ISO 8601 format)")]
     ParseTimestamp,
-    #[error("Can't cast string to timestampnano (expected format is YYYY-MM-DD HH:MM:SS[.D+{{up to 9 digits}}] or YYYY-MM-DD HH:MM or YYYY-MM-DD or ISO 8601 format)")]
-    ParseTimestampNano,
+    #[error("Can't cast string to timestampns (expected format is YYYY-MM-DD HH:MM:SS[.D+{{up to 9 digits}}] or YYYY-MM-DD HH:MM or YYYY-MM-DD or ISO 8601 format)")]
+    ParseTimestampNanosecond,
 }
 
 #[derive(Debug, Error)]
@@ -615,7 +615,7 @@ macro_rules! impl_timestamp {
             ) -> std::fmt::Result {
                 match ty {
                     super::DataType::Timestamp => self.write(f),
-                    super::DataType::TimestampNano => self.write(f),
+                    super::DataType::TimestampNanosecond => self.write(f),
                     _ => unreachable!(),
                 }
             }
@@ -860,30 +860,30 @@ macro_rules! impl_timestamp {
     };
 }
 impl_timestamp!(Timestamp);
-impl_timestamp!(TimestampNano);
+impl_timestamp!(TimestampNanosecond);
 
-impl From<Timestamp> for TimestampNano {
+impl From<Timestamp> for TimestampNanosecond {
     fn from(ts: Timestamp) -> Self {
-        TimestampNano::new(ts.0)
+        TimestampNanosecond::new(ts.0)
     }
 }
 
-impl From<TimestampNano> for Timestamp {
-    fn from(ts: TimestampNano) -> Self {
+impl From<TimestampNanosecond> for Timestamp {
+    fn from(ts: TimestampNanosecond) -> Self {
         let ts = ts.truncate_micros();
         Timestamp::new(ts.0)
     }
 }
 
-impl TimestampNano {
-    pub fn from_protobuf(cur: &mut Cursor<&[u8]>) -> ArrayResult<TimestampNano> {
+impl TimestampNanosecond {
+    pub fn from_protobuf(cur: &mut Cursor<&[u8]>) -> ArrayResult<TimestampNanosecond> {
         let secs = cur
             .read_i64::<BigEndian>()
-            .context("failed to read i64 from TimestampNano buffer")?;
+            .context("failed to read i64 from TimestampNanosecond buffer")?;
         let nsecs = cur
             .read_u32::<BigEndian>()
-            .context("failed to read u32 from TimestampNano buffer")?;
-        Ok(TimestampNano::with_secs_nsecs(secs, nsecs)?)
+            .context("failed to read u32 from TimestampNanosecond buffer")?;
+        Ok(TimestampNanosecond::with_secs_nsecs(secs, nsecs)?)
     }
 
     pub fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {

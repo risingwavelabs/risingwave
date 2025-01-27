@@ -27,7 +27,7 @@ use rand::{Rng, SeedableRng};
 use crate::array::{Array, ArrayBuilder, ArrayRef, ListValue, MapValue, StructValue};
 use crate::types::{
     DataType, Date, Decimal, Int256, Interval, JsonbVal, MapType, NativeType, Scalar, Serial, Time,
-    Timestamp, TimestampNano, Timestamptz,
+    Timestamp, TimestampNanosecond, Timestamptz,
 };
 
 pub trait RandValue {
@@ -106,9 +106,9 @@ impl RandValue for Timestamp {
     }
 }
 
-impl RandValue for TimestampNano {
+impl RandValue for TimestampNanosecond {
     fn rand_value<R: Rng>(rand: &mut R) -> Self {
-        TimestampNano::new(Date::rand_value(rand).0.and_time(Time::rand_value(rand).0))
+        TimestampNanosecond::new(Date::rand_value(rand).0.and_time(Time::rand_value(rand).0))
     }
 }
 

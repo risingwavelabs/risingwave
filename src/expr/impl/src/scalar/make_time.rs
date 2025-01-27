@@ -13,7 +13,9 @@
 // limitations under the License.
 
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
-use risingwave_common::types::{Date, FloatExt, Time, Timestamp, TimestampNano, Timestamptz, F64};
+use risingwave_common::types::{
+    Date, FloatExt, Time, Timestamp, TimestampNanosecond, Timestamptz, F64,
+};
 use risingwave_expr::expr_context::TIME_ZONE;
 use risingwave_expr::{capture_context, function, ExprError, Result};
 
@@ -97,16 +99,16 @@ pub fn make_timestamp(
     )))
 }
 
-#[function("make_timestampnano(int4, int4, int4, int4, int4, float8) -> timestampnano")]
-pub fn make_timestamp_nano(
+#[function("make_timestamp_ns(int4, int4, int4, int4, int4, float8) -> timestamp_ns")]
+pub fn make_timestamp_ns(
     year: i32,
     month: i32,
     day: i32,
     hour: i32,
     min: i32,
     sec: F64,
-) -> Result<TimestampNano> {
-    Ok(TimestampNano(NaiveDateTime::new(
+) -> Result<TimestampNanosecond> {
+    Ok(TimestampNanosecond(NaiveDateTime::new(
         make_naive_date(year, month, day)?,
         make_naive_time_ns(hour, min, sec)?,
     )))

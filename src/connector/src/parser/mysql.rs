@@ -154,7 +154,7 @@ pub fn mysql_datum_to_rw_datum(
                 Timestamp
             )
         }
-        DataType::TimestampNano => {
+        DataType::TimestampNanosecond => {
             handle_data_type!(
                 mysql_row,
                 mysql_datum_index,

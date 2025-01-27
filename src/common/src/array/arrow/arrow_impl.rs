@@ -107,7 +107,7 @@ pub trait ToArrow {
             ArrayImpl::Date(array) => self.date_to_arrow(array),
             ArrayImpl::Time(array) => self.time_to_arrow(array),
             ArrayImpl::Timestamp(array) => self.timestamp_to_arrow(array),
-            ArrayImpl::TimestampNano(array) => self.timestampnano_to_arrow(array),
+            ArrayImpl::TimestampNanosecond(array) => self.timestampns_to_arrow(array),
             ArrayImpl::Timestamptz(array) => self.timestamptz_to_arrow(array),
             ArrayImpl::Interval(array) => self.interval_to_arrow(array),
             ArrayImpl::Utf8(array) => self.utf8_to_arrow(array),
@@ -182,9 +182,9 @@ pub trait ToArrow {
     }
 
     #[inline]
-    fn timestampnano_to_arrow(
+    fn timestampns_to_arrow(
         &self,
-        array: &TimestampNanoArray,
+        array: &TimestampNanosecondArray,
     ) -> Result<arrow_array::ArrayRef, ArrayError> {
         Ok(Arc::new(arrow_array::TimestampNanosecondArray::from(array)))
     }
@@ -328,7 +328,7 @@ pub trait ToArrow {
             DataType::Date => self.date_type_to_arrow(),
             DataType::Time => self.time_type_to_arrow(),
             DataType::Timestamp => self.timestamp_type_to_arrow(),
-            DataType::TimestampNano => self.timestampnano_type_to_arrow(),
+            DataType::TimestampNanosecond => self.timestampns_type_to_arrow(),
             DataType::Timestamptz => self.timestamptz_type_to_arrow(),
             DataType::Interval => self.interval_type_to_arrow(),
             DataType::Varchar => self.varchar_type_to_arrow(),
@@ -393,7 +393,7 @@ pub trait ToArrow {
         arrow_schema::DataType::Timestamp(arrow_schema::TimeUnit::Microsecond, None)
     }
     #[inline]
-    fn timestampnano_type_to_arrow(&self) -> arrow_schema::DataType {
+    fn timestampns_type_to_arrow(&self) -> arrow_schema::DataType {
         arrow_schema::DataType::Timestamp(arrow_schema::TimeUnit::Nanosecond, None)
     }
 
@@ -1060,10 +1060,10 @@ converts_with_timeunit!(TimestamptzArray, arrow_array::TimestampMillisecondArray
 converts_with_timeunit!(TimestamptzArray, arrow_array::TimestampMicrosecondArray, TimeUnit::Microsecond, @map);
 converts_with_timeunit!(TimestamptzArray, arrow_array::TimestampNanosecondArray, TimeUnit::Nanosecond, @map);
 
-converts_with_timeunit!(TimestampNanoArray, arrow_array::TimestampSecondArray, TimeUnit::Second, @map);
-converts_with_timeunit!(TimestampNanoArray, arrow_array::TimestampMillisecondArray, TimeUnit::Millisecond, @map);
-converts_with_timeunit!(TimestampNanoArray, arrow_array::TimestampMicrosecondArray, TimeUnit::Microsecond, @map);
-converts_with_timeunit!(TimestampNanoArray, arrow_array::TimestampNanosecondArray, TimeUnit::Nanosecond, @map);
+converts_with_timeunit!(TimestampNanosecondArray, arrow_array::TimestampSecondArray, TimeUnit::Second, @map);
+converts_with_timeunit!(TimestampNanosecondArray, arrow_array::TimestampMillisecondArray, TimeUnit::Millisecond, @map);
+converts_with_timeunit!(TimestampNanosecondArray, arrow_array::TimestampMicrosecondArray, TimeUnit::Microsecond, @map);
+converts_with_timeunit!(TimestampNanosecondArray, arrow_array::TimestampNanosecondArray, TimeUnit::Nanosecond, @map);
 
 /// Converts RisingWave value from and into Arrow value.
 trait FromIntoArrow {
@@ -1181,23 +1181,23 @@ impl FromIntoArrowWithUnit for Timestamp {
     }
 }
 
-impl FromIntoArrowWithUnit for TimestampNano {
+impl FromIntoArrowWithUnit for TimestampNanosecond {
     type ArrowType = i64;
     type TimestampType = TimeUnit;
 
     fn from_arrow_with_unit(value: Self::ArrowType, time_unit: Self::TimestampType) -> Self {
         match time_unit {
             TimeUnit::Second => {
-                TimestampNano(DateTime::from_timestamp(value as _, 0).unwrap().naive_utc())
+                TimestampNanosecond(DateTime::from_timestamp(value as _, 0).unwrap().naive_utc())
             }
             TimeUnit::Millisecond => {
-                TimestampNano(DateTime::from_timestamp_millis(value).unwrap().naive_utc())
+                TimestampNanosecond(DateTime::from_timestamp_millis(value).unwrap().naive_utc())
             }
             TimeUnit::Microsecond => {
-                TimestampNano(DateTime::from_timestamp_micros(value).unwrap().naive_utc())
+                TimestampNanosecond(DateTime::from_timestamp_micros(value).unwrap().naive_utc())
             }
             TimeUnit::Nanosecond => {
-                TimestampNano(DateTime::from_timestamp_nanos(value).naive_utc())
+                TimestampNanosecond(DateTime::from_timestamp_nanos(value).naive_utc())
             }
         }
     }
