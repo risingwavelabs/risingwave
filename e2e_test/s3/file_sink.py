@@ -69,8 +69,6 @@ def do_test(config, file_num, item_num_per_file, prefix):
     def _table():
         return 's3_test_parquet'
 
-<<<<<<< HEAD
-=======
     print("test table function file scan")
     cur.execute(f'''
     SELECT
@@ -115,7 +113,6 @@ def do_test(config, file_num, item_num_per_file, prefix):
         print(f"cur.fetchone() got ValueError: {e}")
 
     print("file scan test pass")
->>>>>>> 1384d4592b (fix(parquet): handle nested data types correctly (#20156))
     # Execute a SELECT statement
     cur.execute(f'''CREATE TABLE {_table()}(
         id bigint primary key,
@@ -549,6 +546,21 @@ if __name__ == "__main__":
             "hummock001",
             _s3(idx),
             _local(idx)
+        )
+    # put parquet file to test table function file scan
+    if data:
+        first_file_data = data[0]
+        first_table = pa.Table.from_pandas(pd.DataFrame(first_file_data))
+
+        first_file_name = f"test_file_scan.parquet"
+        first_file_path = f"test_file_scan/{first_file_name}"
+
+        pq.write_table(first_table, "data_0.parquet")
+
+        client.fput_object(
+            "hummock001",
+            first_file_path,
+            "data_0.parquet"
         )
 
     # do test
