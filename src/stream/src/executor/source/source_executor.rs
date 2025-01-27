@@ -17,7 +17,6 @@ use std::time::Duration;
 
 use anyhow::anyhow;
 use either::Either;
-use futures::TryStreamExt;
 use itertools::Itertools;
 use risingwave_common::array::ArrayRef;
 use risingwave_common::catalog::{ColumnId, TableId};
@@ -29,8 +28,8 @@ use risingwave_connector::parser::schema_change::SchemaChangeEnvelope;
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use risingwave_connector::source::reader::reader::SourceReader;
 use risingwave_connector::source::{
-    BoxSourceChunkStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitId, SplitImpl,
-    SplitMetaData, WaitCheckpointTask,
+    BoxSourceChunkStream, ConnectorState, CreateSplitReaderResult, SourceContext, SourceCtrlOpts,
+    SplitId, SplitImpl, SplitMetaData, WaitCheckpointTask,
 };
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::TryWaitEpochOptions;
@@ -74,7 +73,7 @@ pub struct SourceExecutor<S: StateStore> {
     is_shared_non_cdc: bool,
 }
 
-struct StreamReaderBuilder {
+pub(crate) struct StreamReaderBuilder {
     pub source_desc: SourceDesc,
     pub rate_limit: Option<u32>,
     pub source_id: TableId,
@@ -150,11 +149,11 @@ impl StreamReaderBuilder {
         (column_ids, source_ctx)
     }
 
-    async fn fetch_latest_splits(
+    pub(crate) async fn fetch_latest_splits(
         &self,
         state: ConnectorState,
         seek_to_latest: bool,
-    ) -> StreamExecutorResult<ConnectorState> {
+    ) -> StreamExecutorResult<CreateSplitReaderResult> {
         let (column_ids, source_ctx) = self.prepare_source_stream_build();
         let source_ctx_ref = Arc::new(source_ctx);
         let (_, res) = self
@@ -168,11 +167,11 @@ impl StreamReaderBuilder {
             )
             .await
             .map_err(StreamExecutorError::connector_error)?;
-        Ok(res.latest_splits)
+        Ok(res)
     }
 
     #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
-    async fn into_retry_stream(self, state: ConnectorState, is_initial_build: bool) {
+    pub(crate) async fn into_retry_stream(self, state: ConnectorState, is_initial_build: bool) {
         let (column_ids, source_ctx) = self.prepare_source_stream_build();
         let source_ctx_ref = Arc::new(source_ctx);
 
@@ -541,9 +540,8 @@ impl<S: StateStore> SourceExecutor<S> {
         let replace_stream_reader_builder = self.stream_reader_builder(source_desc.clone());
         let reader_stream =
             replace_stream_reader_builder.into_retry_stream(Some(target_state.clone()), false);
-        let reader = reader_stream.map_err(StreamExecutorError::connector_error);
 
-        stream.replace_data_stream(reader);
+        stream.replace_data_stream(reader_stream);
 
         Ok(())
     }
@@ -665,7 +663,8 @@ impl<S: StateStore> SourceExecutor<S> {
             // need to seek to latest for initial build && shared source
             latest_splits = init_reader_builder
                 .fetch_latest_splits(recover_state.clone(), self.is_shared_non_cdc)
-                .await?;
+                .await?
+                .latest_splits;
         }
         let reader_stream = init_reader_builder.into_retry_stream(
             recover_state.clone(),
