@@ -433,7 +433,7 @@ impl GlobalBarrierManagerContext {
             .collect();
 
         if expired_worker_slots.is_empty() {
-            debug!("no expired worker slots, skipping.");
+            info!("no expired worker slots, skipping.");
             return self.resolve_graph_info().await;
         }
 
@@ -541,6 +541,8 @@ impl GlobalBarrierManagerContext {
                 .await;
             warn!(?changed, "get worker changed or timed out. Retry migrate");
         }
+
+        info!("migration plan {:?}", plan);
 
         mgr.catalog_controller.migrate_actors(plan).await?;
 
