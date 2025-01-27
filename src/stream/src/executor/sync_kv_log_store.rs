@@ -102,7 +102,7 @@ use crate::executor::{
 type StateStoreStream<S> = Pin<Box<LogStoreItemMergeStream<TimeoutAutoRebuildIter<S>>>>;
 type ReadFlushedChunkFuture = BoxFuture<'static, LogStoreResult<(ChunkId, StreamChunk, u64)>>;
 
-struct SyncedKvLogStoreExecutor<S: StateStore, LS: LocalStateStore> {
+struct SyncedKvLogStoreExecutor<S: StateStore> {
     table_id: TableId,
     read_metrics: KvLogStoreReadMetrics,
     metrics: KvLogStoreMetrics,
@@ -116,11 +116,11 @@ struct SyncedKvLogStoreExecutor<S: StateStore, LS: LocalStateStore> {
     // Log store state
     flushed_chunk_future: Option<ReadFlushedChunkFuture>,
     state_store: S,
-    local_state_store: LS,
+    local_state_store: S::Local,
     buffer: Mutex<SyncedLogStoreBuffer>,
 }
 // Stream interface
-impl<S: StateStore<Local = LS>, LS: LocalStateStore> SyncedKvLogStoreExecutor<S, LS> {
+impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
     #[allow(clippy::too_many_arguments, dead_code)]
     pub async fn new(
         table_id: u32,
@@ -165,7 +165,7 @@ impl<S: StateStore<Local = LS>, LS: LocalStateStore> SyncedKvLogStoreExecutor<S,
 }
 
 // Stream interface
-impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStoreExecutor<S, LS> {
+impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     pub async fn execute_inner(mut self) {
         let mut input = self.upstream.execute();
@@ -212,7 +212,7 @@ impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStoreExecutor<S, LS> {
 
     async fn init(
         barrier: &Barrier,
-        local_state_store: &mut LS,
+        local_state_store: &mut S::Local,
         serde: &LogStoreRowSerde,
         table_id: TableId,
         metrics: &KvLogStoreMetrics,
@@ -246,7 +246,7 @@ impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStoreExecutor<S, LS> {
         state_store: &S,
         buffer: &mut Mutex<SyncedLogStoreBuffer>,
 
-        local_state_store: &mut LS,
+        local_state_store: &mut S::Local,
         metrics: &mut KvLogStoreMetrics,
         seq_id: &mut SeqIdType,
     ) -> StreamExecutorResult<Option<Message>> {
@@ -313,7 +313,7 @@ impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStoreExecutor<S, LS> {
 }
 
 // Read methods
-impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStoreExecutor<S, LS> {
+impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
     #[allow(clippy::too_many_arguments)]
     async fn try_next_item(
         table_id: TableId,
@@ -451,9 +451,9 @@ impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStoreExecutor<S, LS> {
 }
 
 // Write methods
-impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStoreExecutor<S, LS> {
+impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
     async fn write_barrier(
-        state_store: &mut LS,
+        state_store: &mut S::Local,
         serde: &LogStoreRowSerde,
         barrier: Barrier,
         metrics: &mut KvLogStoreMetrics,
@@ -517,7 +517,7 @@ impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStoreExecutor<S, LS> {
         end_seq_id: SeqIdType,
         buffer: &mut Mutex<SyncedLogStoreBuffer>,
         chunk: StreamChunk,
-        state_store: &mut LS,
+        state_store: &mut S::Local,
     ) -> StreamExecutorResult<()> {
         let chunk_to_flush = {
             let mut buffer = buffer.lock();
@@ -713,10 +713,9 @@ impl SyncedLogStoreBuffer {
     }
 }
 
-impl<S, LS> Execute for SyncedKvLogStoreExecutor<S, LS>
+impl<S> Execute for SyncedKvLogStoreExecutor<S>
 where
     S: StateStore,
-    LS: LocalStateStore,
 {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
