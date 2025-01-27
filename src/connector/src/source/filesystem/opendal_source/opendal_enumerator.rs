@@ -18,7 +18,7 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use futures::stream::{self, BoxStream};
-use futures::StreamExt;
+use futures::{StreamExt, TryStreamExt};
 use opendal::{Metakey, Operator};
 use risingwave_common::types::Timestamptz;
 
@@ -54,7 +54,9 @@ impl<Src: OpendalSource> SplitEnumerator for OpendalEnumerator<Src> {
         let empty_split: OpendalFsSplit<Src> = OpendalFsSplit::empty_split();
         let prefix = self.prefix.as_deref().unwrap_or("/");
 
-        match self.op.list(prefix).await {
+        let mut lister = self.op.lister(prefix).await?;
+        // fetch one item as validation, no need to get all
+        match lister.try_next().await {
             Ok(_) => return Ok(vec![empty_split]),
             Err(e) => {
                 return Err(anyhow!(e)
