@@ -102,6 +102,7 @@ type StateStoreStream<S> = Pin<Box<LogStoreItemMergeStream<TimeoutAutoRebuildIte
 type ReadFlushedChunkFuture = BoxFuture<'static, LogStoreResult<(ChunkId, StreamChunk, u64)>>;
 
 struct SyncedKvLogStoreExecutor<S: StateStore> {
+    actor_context: ActorContextRef,
     table_id: TableId,
     read_metrics: KvLogStoreReadMetrics,
     metrics: KvLogStoreMetrics,
@@ -122,6 +123,7 @@ struct SyncedKvLogStoreExecutor<S: StateStore> {
 impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
     #[allow(clippy::too_many_arguments, dead_code)]
     pub async fn new(
+        actor_context: ActorContextRef,
         table_id: u32,
         read_metrics: KvLogStoreReadMetrics,
         metrics: KvLogStoreMetrics,
@@ -143,6 +145,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
             })
             .await;
         Self {
+            actor_context,
             table_id: TableId::new(table_id),
             read_metrics,
             metrics: metrics.clone(),
@@ -183,10 +186,11 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
         );
         loop {
             if let Some(msg) = Self::next(
+                self.actor_context.id,
                 &mut input,
                 self.table_id,
                 &self.read_metrics,
-                &self.serde,
+                &mut self.serde,
                 &mut self.truncation_offset,
                 &mut state_store_stream,
                 &mut self.flushed_chunk_future,
@@ -229,10 +233,11 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
 
     #[allow(clippy::too_many_arguments)]
     async fn next(
+        actor_id: ActorId,
         input: &mut BoxedMessageStream,
         table_id: TableId,
         read_metrics: &KvLogStoreReadMetrics,
-        serde: &LogStoreRowSerde,
+        serde: &mut LogStoreRowSerde,
         truncation_offset: &mut Option<ReaderTruncationOffsetType>,
         state_store_stream: &mut Option<StateStoreStream<S>>,
         flushed_chunk_future: &mut Option<ReadFlushedChunkFuture>,
@@ -261,6 +266,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                                     *truncation_offset,
                                     seq_id,
                                     buffer,
+                                    actor_id,
                                 ).await?;
                                 Ok(Some(Message::Barrier(barrier)))
                             }
@@ -445,14 +451,16 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
 
 // Write methods
 impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
+    #[allow(clippy::too_many_arguments)]
     async fn write_barrier(
         state_store: &mut S::Local,
-        serde: &LogStoreRowSerde,
+        serde: &mut LogStoreRowSerde,
         barrier: Barrier,
         metrics: &mut KvLogStoreMetrics,
         truncation_offset: Option<ReaderTruncationOffsetType>,
         seq_id: &mut SeqIdType,
         buffer: &mut Mutex<SyncedLogStoreBuffer>,
+        actor_id: ActorId,
     ) -> StreamExecutorResult<()> {
         let epoch = state_store.epoch();
         let mut flush_info = FlushInfo::new();
@@ -498,6 +506,15 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
         ));
         buffer.next_chunk_id = 0;
         buffer.update_unconsumed_buffer_metrics();
+
+        // Apply Vnode Update
+        if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(actor_id) {
+            state_store.update_vnode_bitmap(vnode_bitmap.clone());
+            serde.update_vnode_bitmap(vnode_bitmap.clone());
+            buffer
+                .buffer
+                .push_back((epoch, LogStoreBufferItem::UpdateVnodes(vnode_bitmap)));
+        }
 
         *seq_id = FIRST_SEQ_ID;
         Ok(())
