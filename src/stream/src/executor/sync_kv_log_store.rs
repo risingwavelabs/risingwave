@@ -227,7 +227,7 @@ impl<S: StateStore, LS: LocalStateStore> SyncedKvLogStoreExecutor<S, LS> {
             table_id,
             metrics,
             state_store,
-            barrier.epoch.curr, // FIXME(kwannoel): Should this be curr or prev?
+            barrier.epoch.prev,
             None,
         )
         .await?;
