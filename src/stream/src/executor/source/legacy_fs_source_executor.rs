@@ -25,7 +25,7 @@ use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_connector::error::ConnectorError;
-use risingwave_connector::source::reader::desc::{FsSourceDesc, SourceDescBuilder};
+use risingwave_connector::source::reader::desc::{LegacyFsSourceDesc, SourceDescBuilder};
 use risingwave_connector::source::{
     BoxSourceChunkStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitId, SplitImpl,
     SplitMetaData,
@@ -89,7 +89,7 @@ impl<S: StateStore> LegacyFsSourceExecutor<S> {
 
     async fn build_stream_source_reader(
         &mut self,
-        source_desc: &FsSourceDesc,
+        source_desc: &LegacyFsSourceDesc,
         state: ConnectorState,
     ) -> StreamExecutorResult<BoxSourceChunkStream> {
         let column_ids = source_desc
@@ -121,7 +121,7 @@ impl<S: StateStore> LegacyFsSourceExecutor<S> {
 
     async fn rebuild_stream_reader<const BIASED: bool>(
         &mut self,
-        source_desc: &FsSourceDesc,
+        source_desc: &LegacyFsSourceDesc,
         stream: &mut StreamReaderWithPause<BIASED, StreamChunk>,
     ) -> StreamExecutorResult<()> {
         let target_state: Vec<SplitImpl> = self
@@ -141,7 +141,7 @@ impl<S: StateStore> LegacyFsSourceExecutor<S> {
 
     async fn apply_split_change<const BIASED: bool>(
         &mut self,
-        source_desc: &FsSourceDesc,
+        source_desc: &LegacyFsSourceDesc,
         stream: &mut StreamReaderWithPause<BIASED, StreamChunk>,
         mapping: &HashMap<ActorId, Vec<SplitImpl>>,
     ) -> StreamExecutorResult<()> {
@@ -207,7 +207,7 @@ impl<S: StateStore> LegacyFsSourceExecutor<S> {
 
     async fn replace_stream_reader_with_target_state<const BIASED: bool>(
         &mut self,
-        source_desc: &FsSourceDesc,
+        source_desc: &LegacyFsSourceDesc,
         stream: &mut StreamReaderWithPause<BIASED, StreamChunk>,
         target_state: Vec<SplitImpl>,
     ) -> StreamExecutorResult<()> {
