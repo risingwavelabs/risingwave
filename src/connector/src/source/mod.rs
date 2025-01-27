@@ -83,7 +83,7 @@ pub use util::fill_adaptive_split;
 pub use crate::source::filesystem::opendal_source::{
     AZBLOB_CONNECTOR, GCS_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR,
 };
-pub use crate::source::filesystem::S3_CONNECTOR;
+pub use crate::source::filesystem::LEGACY_S3_CONNECTOR;
 pub use crate::source::nexmark::NEXMARK_CONNECTOR;
 pub use crate::source::pulsar::PULSAR_CONNECTOR;
 

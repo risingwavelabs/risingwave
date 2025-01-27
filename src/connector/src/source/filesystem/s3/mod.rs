@@ -25,7 +25,7 @@ use crate::connector_common::AwsAuthProps;
 use crate::source::filesystem::FsSplit;
 use crate::source::{SourceProperties, UnknownFields};
 
-pub const S3_CONNECTOR: &str = "s3";
+pub const LEGACY_S3_CONNECTOR: &str = "s3";
 
 /// These are supported by both `s3` and `s3_v2` (opendal) sources.
 #[derive(Clone, Debug, Deserialize, PartialEq, with_options::WithOptions)]
@@ -69,7 +69,7 @@ impl SourceProperties for S3Properties {
     type SplitEnumerator = S3SplitEnumerator;
     type SplitReader = S3FileReader;
 
-    const SOURCE_NAME: &'static str = S3_CONNECTOR;
+    const SOURCE_NAME: &'static str = LEGACY_S3_CONNECTOR;
 }
 
 impl UnknownFields for S3Properties {

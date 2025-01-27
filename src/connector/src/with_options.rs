@@ -21,8 +21,8 @@ use crate::source::cdc::external::CdcTableType;
 use crate::source::cdc::MYSQL_CDC_CONNECTOR;
 use crate::source::iceberg::ICEBERG_CONNECTOR;
 use crate::source::{
-    AZBLOB_CONNECTOR, GCS_CONNECTOR, KAFKA_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR,
-    S3_CONNECTOR, UPSTREAM_SOURCE_KEY,
+    AZBLOB_CONNECTOR, GCS_CONNECTOR, KAFKA_CONNECTOR, LEGACY_S3_CONNECTOR, OPENDAL_S3_CONNECTOR,
+    POSIX_FS_CONNECTOR, UPSTREAM_SOURCE_KEY,
 };
 
 /// Marker trait for `WITH` options. Only for `#[derive(WithOptions)]`, should not be used manually.
@@ -155,7 +155,7 @@ pub trait WithPropertiesExt: Get + Sized {
 
     fn is_legacy_fs_connector(&self) -> bool {
         self.get(UPSTREAM_SOURCE_KEY)
-            .map(|s| s.eq_ignore_ascii_case(S3_CONNECTOR))
+            .map(|s| s.eq_ignore_ascii_case(LEGACY_S3_CONNECTOR))
             .unwrap_or(false)
     }
 
