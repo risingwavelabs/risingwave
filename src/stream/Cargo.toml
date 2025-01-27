@@ -72,7 +72,6 @@ tokio-retry = "0.3"
 tokio-stream = { workspace = true }
 tonic = { workspace = true }
 tracing = "0.1"
-tracing-subscriber = "0.3.17"
 url = "2"
 
 [target.'cfg(not(madsim))'.dependencies]
@@ -89,6 +88,7 @@ risingwave_hummock_test = { path = "../storage/hummock_test", features = [
   "test",
 ] }
 serde_yaml = "0.9"
+tracing-subscriber = "0.3.17"
 tracing-test = "0.2"
 
 [features]
