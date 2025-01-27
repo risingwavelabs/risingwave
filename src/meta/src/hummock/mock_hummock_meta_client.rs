@@ -34,7 +34,7 @@ use risingwave_hummock_sdk::{
     SyncResult,
 };
 use risingwave_pb::common::{HostAddress, WorkerType};
-use risingwave_pb::hummock::compact_task::TaskStatus;
+use risingwave_pb::hummock::compact_task::{TaskStatus, TaskType};
 use risingwave_pb::hummock::subscribe_compaction_event_request::{Event, ReportTask};
 use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
 use risingwave_pb::hummock::{
@@ -53,6 +53,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use crate::hummock::compaction::selector::{
     default_compaction_selector, CompactionSelector, SpaceReclaimCompactionSelector,
 };
+use crate::hummock::error::Error;
 use crate::hummock::{CommitEpochInfo, HummockManager, NewTableFragmentInfo};
 
 pub struct MockHummockMetaClient {
@@ -289,6 +290,22 @@ impl HummockMetaClient for MockHummockMetaClient {
                 }
 
                 let (group, task_type) = group_and_type.unwrap();
+
+                if let TaskType::Ttl = task_type {
+                    match hummock_manager_compact
+                        .metadata_manager_ref()
+                        .get_all_table_options()
+                        .await
+                        .map_err(|err| Error::MetaStore(err.into()))
+                    {
+                        Ok(table_options) => {
+                            hummock_manager_compact.update_table_id_to_table_option(table_options);
+                        }
+                        Err(e) => {
+                            tracing::error!(error = %e.as_report(), "get_all_table_options fail");
+                        }
+                    }
+                }
 
                 let mut selector: Box<dyn CompactionSelector> = match task_type {
                     compact_task::TaskType::Dynamic => default_compaction_selector(),

@@ -76,7 +76,7 @@ pub use self::task_pubsub_emu_ready_check::*;
 pub use self::task_redis_ready_check::*;
 pub use self::task_tcp_ready_check::*;
 pub use self::tempo_service::*;
-use crate::util::{complete_spin, get_program_args, get_program_name};
+use crate::util::{begin_spin, complete_spin, get_program_args, get_program_name};
 use crate::wait::{wait, wait_tcp_available};
 
 pub trait Task: 'static + Send {
@@ -134,6 +134,7 @@ where
     pub fn service(&mut self, task: &impl Task) {
         let id = task.id();
         if !id.is_empty() {
+            begin_spin(&self.pb);
             self.pb.set_prefix(id.clone());
             self.id = Some(id.clone());
             self.status_file = Some(self.status_dir.path().join(format!("{}.status", id)));

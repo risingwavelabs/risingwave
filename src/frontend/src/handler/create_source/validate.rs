@@ -71,7 +71,7 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                     Format::Native => vec![Encode::Native],
                     Format::Plain => vec![Encode::Bytes, Encode::Json],
                 ),
-                S3_CONNECTOR => hashmap!(
+                LEGACY_S3_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Csv, Encode::Json],
                 ),
                 OPENDAL_S3_CONNECTOR => hashmap!(
@@ -143,10 +143,10 @@ pub fn validate_compatibility(
         // reject s3_v2 creation
         return Err(RwError::from(Deprecated(
             OPENDAL_S3_CONNECTOR.to_owned(),
-            S3_CONNECTOR.to_owned(),
+            LEGACY_S3_CONNECTOR.to_owned(),
         )));
     }
-    if connector == S3_CONNECTOR {
+    if connector == LEGACY_S3_CONNECTOR {
         // S3 connector is deprecated, use OPENDAL_S3_CONNECTOR instead
         // do s3 -> s3_v2 migration
         let entry = props.get_mut(UPSTREAM_SOURCE_KEY).unwrap();

@@ -132,7 +132,7 @@ impl BuildingFragment {
         let fragment_id = fragment.fragment_id;
         let mut has_job = false;
 
-        stream_graph_visitor::visit_fragment(fragment, |node_body| match node_body {
+        stream_graph_visitor::visit_fragment_mut(fragment, |node_body| match node_body {
             NodeBody::Materialize(materialize_node) => {
                 materialize_node.table_id = job_id;
 
