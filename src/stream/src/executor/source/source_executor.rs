@@ -666,12 +666,12 @@ impl<S: StateStore> SourceExecutor<S> {
             latest_splits = init_reader_builder
                 .fetch_latest_splits(
                     recover_state.clone(),
-                    is_uninitialized && self.is_shared_non_cdc,
+                    self.is_shared_non_cdc,
                 )
                 .await?;
         }
         let reader_stream =
-            init_reader_builder.into_retry_stream(recover_state.clone(), is_uninitialized);
+            init_reader_builder.into_retry_stream(recover_state.clone(), is_uninitialized && self.is_shared_non_cdc);
 
         if let Some(latest_splits) = latest_splits {
             // make sure it is written to state table later.
