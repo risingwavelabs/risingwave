@@ -294,7 +294,6 @@ impl IntraCompactionPicker {
                 {
                     // optimize
                     let left_bound = &select_ssts.first().unwrap().key_range.left;
-
                     for probe_level in l0.sub_levels[0..idx].iter().rev() {
                         let last_sst = probe_level.table_infos.last().unwrap();
                         let max_bound = &last_sst.key_range.right;
@@ -305,12 +304,10 @@ impl IntraCompactionPicker {
                             {
                                 break;
                             }
-                        } else {
-                            if !KeyComparator::compare_encoded_full_key(max_bound, left_bound)
-                                .is_lt()
-                            {
-                                break;
-                            }
+                        } else if !KeyComparator::compare_encoded_full_key(max_bound, left_bound)
+                            .is_lt()
+                        {
+                            break;
                         }
 
                         target_sub_level_id = probe_level.sub_level_id;
