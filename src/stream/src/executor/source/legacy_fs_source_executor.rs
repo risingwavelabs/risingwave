@@ -47,9 +47,9 @@ use crate::executor::UpdateMutation;
 /// some latencies in network and cost in meta.
 const WAIT_BARRIER_MULTIPLE_TIMES: u128 = 5;
 
-/// [`FsSourceExecutor`] is a streaming source, fir external file systems
+/// [`LegacyFsSourceExecutor`] is a streaming source, fir external file systems
 /// such as s3.
-pub struct FsSourceExecutor<S: StateStore> {
+pub struct LegacyFsSourceExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
 
     /// Streaming source  for external
@@ -68,7 +68,7 @@ pub struct FsSourceExecutor<S: StateStore> {
     rate_limit_rps: Option<u32>,
 }
 
-impl<S: StateStore> FsSourceExecutor<S> {
+impl<S: StateStore> LegacyFsSourceExecutor<S> {
     pub fn new(
         actor_ctx: ActorContextRef,
         stream_source_core: StreamSourceCore<S>,
@@ -506,15 +506,15 @@ impl<S: StateStore> FsSourceExecutor<S> {
     }
 }
 
-impl<S: StateStore> Execute for FsSourceExecutor<S> {
+impl<S: StateStore> Execute for LegacyFsSourceExecutor<S> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.into_stream().boxed()
     }
 }
 
-impl<S: StateStore> Debug for FsSourceExecutor<S> {
+impl<S: StateStore> Debug for LegacyFsSourceExecutor<S> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("FsSourceExecutor")
+        f.debug_struct("LegacyFsSourceExecutor")
             .field("source_id", &self.stream_source_core.source_id)
             .field("column_ids", &self.stream_source_core.column_ids)
             .finish()
