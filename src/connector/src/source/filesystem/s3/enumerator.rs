@@ -15,12 +15,14 @@
 use anyhow::Context;
 use async_trait::async_trait;
 use aws_sdk_s3::client::Client;
+use itertools::Itertools;
 
 use crate::aws_utils::{default_conn_config, s3_client};
 use crate::connector_common::AwsAuthProps;
-use crate::source::filesystem::file_common::FsSplit;
-use crate::source::filesystem::s3::S3Properties;
-use crate::source::{FsListInner, SourceEnumeratorContextRef, SplitEnumerator};
+use crate::error::ConnectorResult;
+use crate::source::filesystem::file_common::LegacyFsSplit;
+use crate::source::filesystem::s3::LegacyS3Properties;
+use crate::source::{SourceEnumeratorContextRef, SplitEnumerator};
 
 /// Get the prefix from a glob
 pub fn get_prefix(glob: &str) -> String {
@@ -56,7 +58,7 @@ pub fn get_prefix(glob: &str) -> String {
 }
 
 #[derive(Debug, Clone)]
-pub struct S3SplitEnumerator {
+pub struct LegacyS3SplitEnumerator {
     pub(crate) bucket_name: String,
     // prefix is used to reduce the number of objects to be listed
     pub(crate) prefix: Option<String>,
@@ -68,9 +70,9 @@ pub struct S3SplitEnumerator {
 }
 
 #[async_trait]
-impl SplitEnumerator for S3SplitEnumerator {
-    type Properties = S3Properties;
-    type Split = FsSplit;
+impl SplitEnumerator for LegacyS3SplitEnumerator {
+    type Properties = LegacyS3Properties;
+    type Split = LegacyFsSplit;
 
     async fn new(
         properties: Self::Properties,
@@ -89,7 +91,7 @@ impl SplitEnumerator for S3SplitEnumerator {
             (None, None)
         };
 
-        Ok(S3SplitEnumerator {
+        Ok(LegacyS3SplitEnumerator {
             bucket_name: properties.bucket_name,
             matcher,
             prefix,
@@ -100,13 +102,62 @@ impl SplitEnumerator for S3SplitEnumerator {
 
     async fn list_splits(&mut self) -> crate::error::ConnectorResult<Vec<Self::Split>> {
         // fetch one page as validation, no need to get all pages
-        let (_, _) = self.get_next_page::<FsSplit>().await?;
+        let (_, _) = self.get_next_page::<LegacyFsSplit>().await?;
 
-        Ok(vec![FsSplit {
+        Ok(vec![LegacyFsSplit {
             name: "empty_split".to_owned(),
             offset: 0,
             size: 0,
         }])
+    }
+}
+
+#[async_trait]
+pub trait FsListInner: Sized {
+    // fixme: better to implement as an Iterator, but the last page still have some contents
+    async fn get_next_page<T: for<'a> From<&'a aws_sdk_s3::types::Object>>(
+        &mut self,
+    ) -> ConnectorResult<(Vec<T>, bool)>;
+}
+
+#[async_trait]
+impl FsListInner for LegacyS3SplitEnumerator {
+    async fn get_next_page<T: for<'a> From<&'a aws_sdk_s3::types::Object>>(
+        &mut self,
+    ) -> ConnectorResult<(Vec<T>, bool)> {
+        let mut has_finished = false;
+        let mut req = self
+            .client
+            .list_objects_v2()
+            .bucket(&self.bucket_name)
+            .set_prefix(self.prefix.clone());
+        if let Some(continuation_token) = self.next_continuation_token.take() {
+            req = req.continuation_token(continuation_token);
+        }
+        let mut res = req
+            .send()
+            .await
+            .with_context(|| format!("failed to list objects in bucket `{}`", self.bucket_name))?;
+        if res.is_truncated().unwrap_or_default() {
+            self.next_continuation_token
+                .clone_from(&res.next_continuation_token);
+        } else {
+            has_finished = true;
+            self.next_continuation_token = None;
+        }
+        let objects = res.contents.take().unwrap_or_default();
+        let matched_objs: Vec<T> = objects
+            .iter()
+            .filter(|obj| obj.key().is_some())
+            .filter(|obj| {
+                self.matcher
+                    .as_ref()
+                    .map(|m| m.matches(obj.key().unwrap()))
+                    .unwrap_or(true)
+            })
+            .map(T::from)
+            .collect_vec();
+        Ok((matched_objs, has_finished))
     }
 }
 
@@ -141,7 +192,7 @@ mod tests {
             compression_format: CompressionFormat::None,
         };
         let mut enumerator =
-            S3SplitEnumerator::new(props.into(), SourceEnumeratorContext::dummy().into())
+            LegacyS3SplitEnumerator::new(props.into(), SourceEnumeratorContext::dummy().into())
                 .await
                 .unwrap();
         let splits = enumerator.list_splits().await.unwrap();
