@@ -237,7 +237,12 @@ pub fn bind_sql_columns(
             }
         }
 
-        check_valid_column_name(&name.real_value(), is_for_replace_plan)?;
+        if !is_for_replace_plan {
+            // additional column name may have prefix _rw
+            // When converting dropping the connector from table, the additional columns are converted to normal columns and keep the original name.
+            // Under this case, we loosen the check for _rw prefix.
+            check_valid_column_name(&name.real_value())?;
+        }
 
         let field_descs: Vec<ColumnDesc> = if let AstDataType::Struct(fields) = &data_type {
             fields
