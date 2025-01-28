@@ -696,7 +696,7 @@ impl DdlController {
             let sink_fragment = creating_sink_table_fragments.sink_fragment().unwrap();
             let sink = sink.expect("sink not found");
             Self::inject_replace_table_plan_for_sink(
-                Some(sink.id),
+                sink.id,
                 &sink_fragment,
                 target_table,
                 &mut replace_table_ctx,
@@ -734,7 +734,7 @@ impl DdlController {
                 let sink_fragment = sink_table_fragments.sink_fragment().unwrap();
 
                 Self::inject_replace_table_plan_for_sink(
-                    Some(sink_id),
+                    sink_id,
                     &sink_fragment,
                     target_table,
                     &mut replace_table_ctx,
@@ -771,7 +771,7 @@ impl DdlController {
     }
 
     pub(crate) fn inject_replace_table_plan_for_sink(
-        sink_id: Option<u32>,
+        sink_id: u32,
         sink_fragment: &PbFragment,
         table: &Table,
         replace_table_ctx: &mut ReplaceStreamJobContext,
@@ -866,30 +866,24 @@ impl DdlController {
 
                                 if let Some(NodeBody::Merge(merge_node)) =
                                     &mut merge_stream_node.node_body
-                                    && union_fragment.actors.iter().any(|actor| {
+                                {
+                                    assert!(union_fragment.actors.iter().all(|actor| {
                                         union_fragment_actor_upstreams
                                             .get(&actor.actor_id)
                                             .and_then(|actor_upstream| {
                                                 actor_upstream.get(&merge_node.upstream_fragment_id)
                                             })
-                                            .map(|upstream_actor_ids| upstream_actor_ids.is_empty())
+                                            .map(|upstream_actor_ids| {
+                                                upstream_actor_ids.is_empty()
+                                            })
                                             .unwrap_or(true)
-                                    })
-                                {
-                                    if cfg!(debug_assertions) {
-                                        union_fragment.actors.iter().for_each(|actor| {
-                                            assert!(union_fragment_actor_upstreams
-                                                .get(&actor.actor_id)
-                                                .and_then(|actor_upstream| {
-                                                    actor_upstream
-                                                        .get(&merge_node.upstream_fragment_id)
-                                                })
-                                                .map(|upstream_actor_ids| upstream_actor_ids
-                                                    .is_empty())
-                                                .unwrap_or(true), "inconsistent replace table plan for sink. upstreams: {:?} actor_id: {} upstream_fragment_id: {}", union_fragment_actor_upstreams, actor.actor_id, merge_node.upstream_fragment_id)
-                                        });
-                                    }
-                                    if let Some(sink_id) = sink_id {
+                                    }),
+                                            "replace table plan for sink has set upstream. upstreams: {:?} actors: {:?}",
+                                            union_fragment_actor_upstreams,
+                                            union_fragment.actors
+                                    );
+
+                                    {
                                         merge_stream_node.identity =
                                             format!("MergeExecutor(from sink {})", sink_id);
 
@@ -1451,7 +1445,7 @@ impl DdlController {
                     let sink_fragment = sink_table_fragments.sink_fragment().unwrap();
 
                     Self::inject_replace_table_plan_for_sink(
-                        Some(*sink_id),
+                        *sink_id,
                         &sink_fragment,
                         table,
                         &mut ctx,
