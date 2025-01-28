@@ -457,9 +457,9 @@ impl StreamJobFragments {
     /// Panics if not found.
     pub fn union_fragment_for_table(&mut self) -> &mut Fragment {
         let mut union_fragment_id = None;
-        for (fragment_id, fragment) in &mut self.fragments {
-            for actor in &mut fragment.actors {
-                if let Some(node) = &mut actor.nodes {
+        for (fragment_id, fragment) in &self.fragments {
+            for actor in &fragment.actors {
+                if let Some(node) = &actor.nodes {
                     visit_stream_node(node, |body| {
                         if let NodeBody::Union(_) = body {
                             if let Some(union_fragment_id) = union_fragment_id.as_mut() {

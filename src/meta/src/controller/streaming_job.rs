@@ -20,7 +20,7 @@ use itertools::Itertools;
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
-use risingwave_common::util::stream_graph_visitor::visit_stream_node;
+use risingwave_common::util::stream_graph_visitor::{visit_stream_node, visit_stream_node_mut};
 use risingwave_common::{bail, current_cluster_version};
 use risingwave_connector::WithPropertiesExt;
 use risingwave_meta_model::actor::ActorStatus;
@@ -1199,7 +1199,7 @@ impl CatalogController {
                     .await?
                     .map(|(id, node, upstream)| (id, node.to_protobuf(), upstream))
                     .ok_or_else(|| MetaError::catalog_id_not_found("fragment", fragment_id))?;
-            visit_stream_node(&mut stream_node, |body| {
+            visit_stream_node_mut(&mut stream_node, |body| {
                 if let PbNodeBody::Merge(m) = body
                     && let Some((new_fragment_id, new_actor_ids)) =
                         fragment_replace_map.get(&m.upstream_fragment_id)
@@ -1372,7 +1372,7 @@ impl CatalogController {
         fragments.retain_mut(|(_, fragment_type_mask, stream_node)| {
             let mut found = false;
             if *fragment_type_mask & PbFragmentTypeFlag::Source as i32 != 0 {
-                visit_stream_node(stream_node, |node| {
+                visit_stream_node_mut(stream_node, |node| {
                     if let PbNodeBody::Source(node) = node {
                         if let Some(node_inner) = &mut node.source_inner
                             && node_inner.source_id == source_id as u32
@@ -1386,7 +1386,7 @@ impl CatalogController {
             if is_fs_source {
                 // in older versions, there's no fragment type flag for `FsFetch` node,
                 // so we just scan all fragments for StreamFsFetch node if using fs connector
-                visit_stream_node(stream_node, |node| {
+                visit_stream_node_mut(stream_node, |node| {
                     if let PbNodeBody::StreamFsFetch(node) = node {
                         *fragment_type_mask |= PbFragmentTypeFlag::FsFetch as i32;
                         if let Some(node_inner) = &mut node.node_inner
@@ -1502,7 +1502,7 @@ impl CatalogController {
             |fragment_type_mask: &mut i32, stream_node: &mut PbStreamNode| {
                 let mut found = false;
                 if *fragment_type_mask & PbFragmentTypeFlag::backfill_rate_limit_fragments() != 0 {
-                    visit_stream_node(stream_node, |node| match node {
+                    visit_stream_node_mut(stream_node, |node| match node {
                         PbNodeBody::StreamCdcScan(node) => {
                             node.rate_limit = rate_limit;
                             found = true;
@@ -1544,7 +1544,7 @@ impl CatalogController {
             |fragment_type_mask: &mut i32, stream_node: &mut PbStreamNode| {
                 let mut found = false;
                 if *fragment_type_mask & PbFragmentTypeFlag::sink_rate_limit_fragments() != 0 {
-                    visit_stream_node(stream_node, |node| {
+                    visit_stream_node_mut(stream_node, |node| {
                         if let PbNodeBody::Sink(node) = node {
                             node.rate_limit = rate_limit;
                             found = true;
@@ -1567,7 +1567,7 @@ impl CatalogController {
             |fragment_type_mask: &mut i32, stream_node: &mut PbStreamNode| {
                 let mut found = false;
                 if *fragment_type_mask & PbFragmentTypeFlag::dml_rate_limit_fragments() != 0 {
-                    visit_stream_node(stream_node, |node| {
+                    visit_stream_node_mut(stream_node, |node| {
                         if let PbNodeBody::Dml(node) = node {
                             node.rate_limit = rate_limit;
                             found = true;
@@ -1651,7 +1651,7 @@ impl CatalogController {
                 PbStreamActor {
                     actor_id,
                     fragment_id,
-                    mut nodes,
+                    nodes,
                     dispatcher,
                     upstream_actor_id,
                     vnode_bitmap,
@@ -1664,7 +1664,7 @@ impl CatalogController {
                 let mut actor_upstreams = BTreeMap::<FragmentId, BTreeSet<ActorId>>::new();
                 let mut new_actor_dispatchers = vec![];
 
-                if let Some(nodes) = &mut nodes {
+                if let Some(nodes) = &nodes {
                     visit_stream_node(nodes, |node| {
                         if let PbNodeBody::Merge(node) = node {
                             actor_upstreams
@@ -1938,15 +1938,15 @@ impl CatalogController {
 
         let mut rate_limits = Vec::new();
         for (fragment_id, job_id, fragment_type_mask, stream_node) in fragments {
-            let mut stream_node = stream_node.to_protobuf();
+            let stream_node = stream_node.to_protobuf();
             let mut rate_limit = None;
             let mut node_name = None;
 
-            visit_stream_node(&mut stream_node, |node| {
+            visit_stream_node(&stream_node, |node| {
                 match node {
                     // source rate limit
                     PbNodeBody::Source(node) => {
-                        if let Some(node_inner) = &mut node.source_inner {
+                        if let Some(node_inner) = &node.source_inner {
                             debug_assert!(
                                 rate_limit.is_none(),
                                 "one fragment should only have 1 rate limit node"
@@ -1956,7 +1956,7 @@ impl CatalogController {
                         }
                     }
                     PbNodeBody::StreamFsFetch(node) => {
-                        if let Some(node_inner) = &mut node.node_inner {
+                        if let Some(node_inner) = &node.node_inner {
                             debug_assert!(
                                 rate_limit.is_none(),
                                 "one fragment should only have 1 rate limit node"
