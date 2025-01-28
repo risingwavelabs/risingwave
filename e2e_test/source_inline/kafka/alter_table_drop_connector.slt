@@ -88,7 +88,7 @@ FORMAT PLAIN ENCODE AVRO (
     schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}'
 );
 
-sleeps 1s
+sleep 1s
 
 query ??
 select * from avro_drop_table_connector_test_table
