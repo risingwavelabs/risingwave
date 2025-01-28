@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
@@ -69,7 +69,9 @@ use crate::manager::{
     LocalNotification, MetaSrvEnv, MetadataManager, NotificationVersion, StreamingJob,
     StreamingJobType, IGNORED_NOTIFICATION_VERSION,
 };
-use crate::model::{FragmentActorUpstreams, StreamContext, StreamJobFragments, TableParallelism};
+use crate::model::{
+    FragmentActorUpstreams, FragmentId, StreamContext, StreamJobFragments, TableParallelism,
+};
 use crate::stream::{
     create_source_worker, validate_sink, ActorGraphBuildResult, ActorGraphBuilder,
     CompleteStreamFragmentGraph, CreateStreamingJobContext, CreateStreamingJobOption,
@@ -1199,7 +1201,7 @@ impl DdlController {
                 )
                 .await?;
 
-            let result: MetaResult<Vec<PbMergeUpdate>> = try {
+            let result: MetaResult<BTreeMap<FragmentId, Vec<PbMergeUpdate>>> = try {
                 let merge_updates = ctx.merge_updates.clone();
 
                 self.metadata_manager
@@ -1356,7 +1358,7 @@ impl DdlController {
         tracing::debug!(id = job_id, "building replace streaming job");
         let mut updated_sink_catalogs = vec![];
 
-        let result: MetaResult<Vec<PbMergeUpdate>> = try {
+        let result: MetaResult<_> = try {
             let (mut ctx, mut stream_job_fragments) = self
                 .build_replace_job(
                     ctx,
