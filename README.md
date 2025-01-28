@@ -9,25 +9,18 @@
 
 <div align="center">
 
-### 🌊 Reimagine real-time data engineering.
+### 🌊 Ride the Wave of Real-Time Data.
 
 </div>
-
-<p align="center">&nbsp;&nbsp;&nbsp;📚&nbsp;
-  <a
-    href="https://docs.risingwave.com/"
-    target="_blank"
-  ><b>Documentation</b></a>&nbsp;&nbsp;&nbsp;🚀&nbsp;
-  <a
-    href="https://risingwave.com/slack"
-    target="_blank"
-  >
-    <b>Slack Community</b>
-  </a>
+<p align="center">
+  <a href="https://docs.risingwave.com/">Docs</a> | <a href="https://docs.risingwave.com/get-started/rw-benchmarks-stream-processing">Benchmarks</a> | <a href="https://docs.risingwave.com/demos/overview">Demos</a>
 </p>
+
+<p align="center">
+
 <div align="center">
   <a
-    href="https://risingwave.com/slack"
+    href="https://go.risingwave.com/slack"
     target="_blank"
   >
     <img alt="Slack" src="https://badgen.net/badge/Slack/Join%20RisingWave/0abd59?icon=slack" />
@@ -46,11 +39,11 @@
   </a>
 </div>
 
-RisingWave is a Postgres-compatible SQL database engineered to provide the <i><b>simplest</b></i> and <i><b>most cost-efficient</b></i> approach for <b>processing</b>, <b>analyzing</b>, and <b>managing</b> real-time event streaming data.
+RisingWave is the world's most advanced streaming database engineered to provide the <i><b>simplest</b></i> and <i><b>most cost-efficient</b></i> approach for <b>processing</b>, <b>analyzing</b>, and <b>managing</b> real-time event streaming data. It provides both a Postgres-compatible [SQL interface](https://docs.risingwave.com/sql/overview) and a DataFrame-style [Python interface](https://docs.risingwave.com/python-sdk/intro).
 
-RisingWave can <b>ingest</b> millions of events per second, continuously <b>join and analyze</b> live data streams with historical tables, <b>serve</b> ad-hoc queries in real-time, and <b>deliver</b> fresh, consistent results wherever needed.
+RisingWave can <b>ingest</b> millions of events per second, continuously <b>join and analyze</b> live data streams with historical tables, <b>serve</b> ad-hoc queries at low latency, and <b>deliver</b> fresh, consistent results wherever needed.
 
-![RisingWave](./docs/dev/src/images/architecture_20240908.png)
+![RisingWave](./docs/dev/src/images/architecture_20250127.png)
 
 ## Try it out in 60 seconds
 
