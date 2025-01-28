@@ -313,7 +313,6 @@ profile:
         port: 5689
         exporter-port: 1224
         enable-tiered-cache: true
-        # default resource group 
       - use: frontend
 
 
