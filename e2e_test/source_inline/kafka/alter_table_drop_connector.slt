@@ -91,7 +91,7 @@ FORMAT PLAIN ENCODE AVRO (
 sleep 1s
 
 query ??
-select * from avro_drop_table_connector_test_table
+select foo, bar from avro_drop_table_connector_test_table
 ----
 ABC	1
 
@@ -99,7 +99,7 @@ statement ok
 alter table avro_drop_table_connector_test_table drop connector;
 
 query ??
-select * from avro_drop_table_connector_test_table
+select foo, bar from avro_drop_table_connector_test_table
 ----
 ABC	1
 
@@ -111,7 +111,7 @@ sleep 1s
 
 # the new message is not ingested
 query ??
-select * from avro_drop_table_connector_test_table
+select foo, bar from avro_drop_table_connector_test_table
 ----
 ABC	1
 
