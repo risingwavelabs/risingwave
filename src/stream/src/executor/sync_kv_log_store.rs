@@ -781,6 +781,7 @@ mod tests {
         let table = gen_test_log_store_table(pk_info);
 
         let log_store_executor = SyncedKvLogStoreExecutor::new(
+            ActorContext::for_test(123),
             table.id,
             KvLogStoreReadMetrics::for_test(),
             KvLogStoreMetrics::for_test(),
@@ -874,6 +875,7 @@ mod tests {
         let table = gen_test_log_store_table(pk_info);
 
         let log_store_executor = SyncedKvLogStoreExecutor::new(
+            ActorContext::for_test(123),
             table.id,
             KvLogStoreReadMetrics::for_test(),
             KvLogStoreMetrics::for_test(),
@@ -965,6 +967,7 @@ mod tests {
         let table = gen_test_log_store_table(pk_info);
 
         let log_store_executor = SyncedKvLogStoreExecutor::new(
+            ActorContext::for_test(123),
             table.id,
             KvLogStoreReadMetrics::for_test(),
             KvLogStoreMetrics::for_test(),
