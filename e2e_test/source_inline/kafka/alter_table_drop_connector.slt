@@ -55,6 +55,8 @@ cat <<EOF | rpk topic produce 'test_alter_table_drop_connector' -f "%k^%v\n"
 {"ID": 8}^{"ID": 8, "firstName": "Ava", "lastName": "Garcia", "age": 21, "height": 5.2, "weight": 115}
 EOF
 
+sleep 1s
+
 # the streaming job does not intake new data
 query I
 SELECT count(*) FROM plain_students;

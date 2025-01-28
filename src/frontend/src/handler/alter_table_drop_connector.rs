@@ -15,13 +15,11 @@
 use std::collections::HashSet;
 use std::sync::{Arc, LazyLock};
 
-use anyhow::Context;
 use risingwave_common::error::{NotImplemented, TrackingIssue};
 use risingwave_connector::parser::additional_columns::gen_default_addition_col_name;
 use risingwave_connector::sink::decouple_checkpoint_log_sink::COMMIT_CHECKPOINT_INTERVAL;
 use risingwave_connector::WithPropertiesExt;
 use risingwave_sqlparser::ast::{ColumnDef, Ident};
-use risingwave_sqlparser::parser::Parser;
 
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
@@ -66,13 +64,6 @@ fn fetch_schema_info(
     };
     let (source_def, _) =
         reader.get_any_source_by_id(db_name.as_str(), schema_path, &source_id.table_id())?;
-    if source_def.info.use_schema_registry {
-        return Err(ErrorCode::ProtocolError(format!(
-            "Table {} is associated with a source that uses schema registry, cannot drop connector for now.",
-            real_table_name
-        ))
-        .into());
-    }
     Ok((table_def.clone(), source_def.clone()))
 }
 
@@ -176,10 +167,7 @@ pub async fn handle_alter_table_drop_connector(
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
     let (table_def, source_def) = fetch_schema_info(&session, table_name.clone())?;
-    let [original_definition]: [_; 1] = Parser::parse_sql(&table_def.definition)
-        .context("unable to parse original table definition")?
-        .try_into()
-        .unwrap();
+    let original_definition = table_def.create_sql_ast_purified()?;
 
     let new_statement = rewrite_table_definition(&table_def, &source_def, original_definition)?;
     let (_, table, graph, col_index_mapping, _) = get_replace_table_plan(
