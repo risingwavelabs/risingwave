@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::Formatter;
 
 use risingwave_common::bitmap::Bitmap;
@@ -100,7 +100,7 @@ pub struct ReplaceStreamJobPlan {
     pub new_fragments: StreamJobFragments,
     /// Downstream jobs of the replaced job need to update their `Merge` node to
     /// connect to the new fragment.
-    pub merge_updates: Vec<MergeUpdate>,
+    pub merge_updates: BTreeMap<FragmentId, Vec<MergeUpdate>>,
     pub dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
     /// For a table with connector, the `SourceExecutor` actor will also be rebuilt with new actor ids.
     /// We need to reassign splits for it.
@@ -157,7 +157,7 @@ impl ReplaceStreamJobPlan {
     /// `old_fragment_id` -> `new_fragment_id`
     pub fn fragment_replacements(&self) -> HashMap<FragmentId, FragmentId> {
         let mut fragment_replacements = HashMap::new();
-        for merge_update in &self.merge_updates {
+        for merge_update in self.merge_updates.values().flatten() {
             if let Some(new_upstream_fragment_id) = merge_update.new_upstream_fragment_id {
                 let r = fragment_replacements
                     .insert(merge_update.upstream_fragment_id, new_upstream_fragment_id);
@@ -174,7 +174,8 @@ impl ReplaceStreamJobPlan {
 
     pub fn dropped_actors(&self) -> HashSet<ActorId> {
         self.merge_updates
-            .iter()
+            .values()
+            .flatten()
             .flat_map(|merge_update| merge_update.removed_upstream_actor_id.clone())
             .collect()
     }
@@ -992,7 +993,7 @@ impl Command {
 
     fn generate_update_mutation_for_replace_table(
         old_fragments: &StreamJobFragments,
-        merge_updates: &[MergeUpdate],
+        merge_updates: &BTreeMap<FragmentId, Vec<MergeUpdate>>,
         dispatchers: &HashMap<ActorId, Vec<Dispatcher>>,
         init_split_assignment: &SplitAssignment,
     ) -> Option<Mutation> {
@@ -1017,7 +1018,7 @@ impl Command {
 
         Some(Mutation::Update(UpdateMutation {
             actor_new_dispatchers,
-            merge_update: merge_updates.to_owned(),
+            merge_update: merge_updates.values().flatten().cloned().collect(),
             dropped_actors,
             actor_splits,
             ..Default::default()

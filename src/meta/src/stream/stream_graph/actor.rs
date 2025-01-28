@@ -334,22 +334,27 @@ impl ActorBuilder {
 /// For example, when we're creating an mview on an existing mview, we need to add new downstreams
 /// to the upstream actors, by adding new dispatchers.
 #[derive(Default)]
-struct ExternalChange {
+struct UpstreamFragmentChange {
     /// The new downstreams to be added, indexed by the dispatcher ID.
     new_downstreams: HashMap<DispatcherId, Dispatcher>,
+}
 
+#[derive(Default)]
+struct DownstreamFragmentChange {
     /// The new upstreams to be added (replaced), indexed by the upstream fragment ID.
     new_upstreams: HashMap<DownstreamExternalEdgeId, ActorUpstream>,
 }
 
-impl ExternalChange {
+impl UpstreamFragmentChange {
     /// Add a dispatcher to the external actor.
     fn add_dispatcher(&mut self, dispatcher: Dispatcher) {
         self.new_downstreams
             .try_insert(dispatcher.dispatcher_id, dispatcher)
             .unwrap();
     }
+}
 
+impl DownstreamFragmentChange {
     /// Add an upstream to the external actor.
     fn add_upstream(&mut self, edge_id: DownstreamExternalEdgeId, upstream: ActorUpstream) {
         self.new_upstreams.try_insert(edge_id, upstream).unwrap();
@@ -392,8 +397,13 @@ struct ActorGraphBuildStateInner {
     /// The scheduled locations of the actors to be built.
     building_locations: ActorLocations,
 
-    /// The required changes to the external actors. See [`ExternalChange`].
-    external_changes: BTreeMap<GlobalActorId, ExternalChange>,
+    /// The required changes to the external actors in downstream fragment. See [`DownstreamFragmentChange`].
+    downstream_fragment_changes:
+        BTreeMap<GlobalFragmentId, BTreeMap<GlobalActorId, DownstreamFragmentChange>>,
+
+    /// The required changes to the external actors in upstream fragment. See [`UpstreamFragmentChange`].
+    upstream_fragment_changes:
+        BTreeMap<GlobalFragmentId, BTreeMap<GlobalActorId, UpstreamFragmentChange>>,
 
     /// The actual locations of the external actors.
     external_locations: ActorLocations,
@@ -492,7 +502,9 @@ impl ActorGraphBuildStateInner {
                 .expect("should be added previously")
                 .add_dispatcher(dispatcher);
         } else {
-            self.external_changes
+            self.upstream_fragment_changes
+                .entry(fragment_id)
+                .or_default()
                 .entry(actor_id)
                 .or_default()
                 .add_dispatcher(dispatcher);
@@ -527,7 +539,9 @@ impl ActorGraphBuildStateInner {
             let EdgeId::DownstreamExternal(edge_id) = edge_id else {
                 unreachable!("edge from internal to external must be `DownstreamExternal`")
             };
-            self.external_changes
+            self.downstream_fragment_changes
+                .entry(fragment_id)
+                .or_default()
                 .entry(actor_id)
                 .or_default()
                 .add_upstream(edge_id, upstream);
@@ -714,7 +728,7 @@ pub struct ActorGraphBuildResult {
 
     /// The updates to be applied to the downstream chain actors. Used for schema change (replace
     /// table plan).
-    pub merge_updates: Vec<MergeUpdate>,
+    pub merge_updates: BTreeMap<FragmentId, Vec<MergeUpdate>>,
 }
 
 /// [`ActorGraphBuilder`] builds the actor graph for the given complete fragment graph, based on the
@@ -838,7 +852,8 @@ impl ActorGraphBuilder {
         let ActorGraphBuildStateInner {
             fragment_actor_builders,
             building_locations,
-            external_changes,
+            downstream_fragment_changes,
+            upstream_fragment_changes,
             external_locations,
         } = self.build_actor_graph(id_gen)?;
 
@@ -899,39 +914,52 @@ impl ActorGraphBuilder {
         let existing_locations = self.build_locations(external_locations);
 
         // Extract the new dispatchers from the external changes.
-        let dispatchers = external_changes
-            .iter()
+        let dispatchers = upstream_fragment_changes
+            .into_values()
+            .flatten()
             .map(|(actor_id, change)| {
                 (
                     actor_id.as_global_id(),
-                    change.new_downstreams.values().cloned().collect_vec(),
+                    change.new_downstreams.into_values().collect_vec(),
                 )
             })
             .filter(|(_, v)| !v.is_empty())
             .collect();
 
         // Extract the updates for merge executors from the external changes.
-        let merge_updates = external_changes
-            .iter()
-            .flat_map(|(actor_id, change)| {
-                change
-                    .new_upstreams
-                    .iter()
-                    .map(move |(&edge_id, upstream)| {
-                        let DownstreamExternalEdgeId {
-                            original_upstream_fragment_id,
-                            ..
-                        } = edge_id;
+        let merge_updates = downstream_fragment_changes
+            .into_iter()
+            .map(|(fragment_id, changes)| {
+                (
+                    fragment_id.as_global_id(),
+                    changes
+                        .into_iter()
+                        .flat_map(|(actor_id, change)| {
+                            change
+                                .new_upstreams
+                                .into_iter()
+                                .map(move |(edge_id, upstream)| {
+                                    let DownstreamExternalEdgeId {
+                                        original_upstream_fragment_id,
+                                        ..
+                                    } = edge_id;
 
-                        MergeUpdate {
-                            actor_id: actor_id.as_global_id(),
-                            upstream_fragment_id: original_upstream_fragment_id.as_global_id(),
-                            new_upstream_fragment_id: Some(upstream.fragment_id.as_global_id()),
-                            added_upstream_actor_id: upstream.actors.as_global_ids(),
-                            removed_upstream_actor_id: vec![],
-                        }
-                    })
+                                    MergeUpdate {
+                                        actor_id: actor_id.as_global_id(),
+                                        upstream_fragment_id: original_upstream_fragment_id
+                                            .as_global_id(),
+                                        new_upstream_fragment_id: Some(
+                                            upstream.fragment_id.as_global_id(),
+                                        ),
+                                        added_upstream_actor_id: upstream.actors.as_global_ids(),
+                                        removed_upstream_actor_id: vec![],
+                                    }
+                                })
+                        })
+                        .collect(),
+                )
             })
+            .filter(|(_, fragment_changes): &(_, Vec<_>)| !fragment_changes.is_empty())
             .collect();
 
         Ok(ActorGraphBuildResult {
