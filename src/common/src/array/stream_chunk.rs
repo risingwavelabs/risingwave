@@ -401,6 +401,7 @@ impl StreamChunk {
                     has_trailing_update_delete = true;
                 }
                 Op::UpdateInsert => {
+                    assert!(has_trailing_update_delete, "unmatched update insert");
                     has_trailing_update_delete = false;
                 }
                 _ => {}
