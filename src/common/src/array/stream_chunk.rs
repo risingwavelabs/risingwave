@@ -25,6 +25,7 @@ use rand::prelude::SmallRng;
 use rand::{Rng, SeedableRng};
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::data::{PbOp, PbStreamChunk};
+use rw_iter_util::ZipEqFast;
 
 use super::stream_chunk_builder::StreamChunkBuilder;
 use super::{ArrayImpl, ArrayRef, ArrayResult, DataChunkTestExt, RowRef};
@@ -363,7 +364,8 @@ impl StreamChunk {
                 prev_r = Some(curr);
             }
         }
-        let new = c.into();
+        let new: StreamChunk = c.into();
+        new.check_consistency();
         new
     }
 
@@ -392,6 +394,18 @@ impl StreamChunk {
         for col in self.data.columns() {
             assert_eq!(col.len(), ops_len);
         }
+        let mut has_hanging_update_delete = false;
+        for (op, vis) in self.ops.iter().zip_eq_fast(self.data.visibility().iter()) {
+            if vis {
+                if matches!(op, Op::UpdateDelete) {
+                    has_hanging_update_delete = true;
+                } else if matches!(op, Op::UpdateInsert) {
+                    assert!(has_hanging_update_delete, "unmatched update insert");
+                    has_hanging_update_delete = false;
+                }
+            }
+        }
+        assert!(!has_hanging_update_delete, "unmatched update delete");
     }
 }
 
