@@ -158,7 +158,6 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> JoinChunkBuilder
     }
 
     pub fn post_process(c: StreamChunk) -> StreamChunk {
-        c.check_consistency();
         let mut c = StreamChunkMut::from(c);
 
         // NOTE(st1page): remove the pattern `UpdateDel(k, old), UpdateIns(k, NULL), UpdateDel(k, NULL),  UpdateIns(k, new)`
