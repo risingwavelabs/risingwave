@@ -1111,7 +1111,44 @@ impl CatalogController {
             .exec(txn)
             .await?;
 
-        // 2 update downstream fragment's Merge node, and upstream_fragment_id
+        // 2. update merges.
+        // 2.1 update downstream actor's upstream_actor_ids
+        for merge_update in merge_updates.values().flatten() {
+            assert!(merge_update.removed_upstream_actor_id.is_empty());
+            assert!(merge_update.new_upstream_fragment_id.is_some());
+            let (actor_id, mut upstream_actors) =
+                Actor::find_by_id(merge_update.actor_id as ActorId)
+                    .select_only()
+                    .columns([actor::Column::ActorId, actor::Column::UpstreamActorIds])
+                    .into_tuple::<(ActorId, ActorUpstreamActors)>()
+                    .one(txn)
+                    .await?
+                    .ok_or_else(|| {
+                        MetaError::catalog_id_not_found("actor", merge_update.actor_id)
+                    })?;
+
+            assert!(upstream_actors
+                .0
+                .remove(&(merge_update.upstream_fragment_id as FragmentId))
+                .is_some());
+            upstream_actors.0.insert(
+                merge_update.new_upstream_fragment_id.unwrap() as _,
+                merge_update
+                    .added_upstream_actor_id
+                    .iter()
+                    .map(|id| *id as _)
+                    .collect(),
+            );
+            actor::ActiveModel {
+                actor_id: Set(actor_id),
+                upstream_actor_ids: Set(upstream_actors),
+                ..Default::default()
+            }
+            .update(txn)
+            .await?;
+        }
+
+        // 2.2 update downstream fragment's Merge node, and upstream_fragment_id
         for (fragment_id, merge_updates) in merge_updates {
             let (fragment_id, mut stream_node, mut upstream_fragment_id) =
                 Fragment::find_by_id(fragment_id as FragmentId)
