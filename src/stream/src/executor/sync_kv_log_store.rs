@@ -100,7 +100,7 @@ use crate::executor::{
 type StateStoreStream<S> = Pin<Box<LogStoreItemMergeStream<TimeoutAutoRebuildIter<S>>>>;
 type ReadFlushedChunkFuture = BoxFuture<'static, LogStoreResult<(ChunkId, StreamChunk, u64)>>;
 
-struct SyncedKvLogStoreExecutor<S: StateStore> {
+pub struct SyncedKvLogStoreExecutor<S: StateStore> {
     actor_context: ActorContextRef,
     table_id: TableId,
     metrics: KvLogStoreMetrics,

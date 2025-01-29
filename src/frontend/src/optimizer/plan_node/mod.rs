@@ -985,6 +985,7 @@ mod stream_table_scan;
 mod stream_topn;
 mod stream_values;
 mod stream_watermark_filter;
+mod stream_sync_log_store;
 
 mod batch_file_scan;
 mod batch_iceberg_scan;
@@ -1112,6 +1113,7 @@ pub use stream_topn::StreamTopN;
 pub use stream_union::StreamUnion;
 pub use stream_values::StreamValues;
 pub use stream_watermark_filter::StreamWatermarkFilter;
+pub use stream_sync_log_store::StreamSyncLogStore;
 
 use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor, InputRef, Literal};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
@@ -1245,6 +1247,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, LocalApproxPercentile }
             , { Stream, RowMerge }
             , { Stream, AsOfJoin }
+            , { Stream, SyncLogStore }
         }
     };
 }
@@ -1379,6 +1382,7 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, LocalApproxPercentile }
             , { Stream, RowMerge }
             , { Stream, AsOfJoin }
+            , { Stream, SyncLogStore }
         }
     };
 }
