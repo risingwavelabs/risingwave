@@ -116,6 +116,9 @@ impl NestedLoopJoinExecutor {
             JoinType::RightSemi => Self::do_right_semi_anti_join::<false>,
             JoinType::RightAnti => Self::do_right_semi_anti_join::<true>,
             JoinType::FullOuter => Self::do_full_outer_join,
+            JoinType::AsOfInner | JoinType::AsOfLeftOuter => {
+                unimplemented!("AsOf join is not supported in NestedLoopJoinExecutor")
+            }
         };
 
         #[for_await]
