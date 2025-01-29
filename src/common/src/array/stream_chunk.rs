@@ -363,7 +363,8 @@ impl StreamChunk {
                 prev_r = Some(curr);
             }
         }
-        let new = c.into();
+        let new: StreamChunk = c.into();
+        new.check_consistency();
         new
     }
 
@@ -392,6 +393,20 @@ impl StreamChunk {
         for col in self.data.columns() {
             assert_eq!(col.len(), ops_len);
         }
+        // we should not have unmatched update delete.
+        let mut has_trailing_update_delete = false;
+        for op in self.ops.iter() {
+            match op {
+                Op::UpdateDelete => {
+                    has_trailing_update_delete = true;
+                }
+                Op::UpdateInsert => {
+                    has_trailing_update_delete = false;
+                }
+                _ => {}
+            }
+        }
+        assert!(!has_trailing_update_delete, "unmatched update delete");
     }
 }
 
