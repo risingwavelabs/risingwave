@@ -182,6 +182,7 @@ impl StreamChunk {
     /// compact the `StreamChunk` with its visibility map
     pub fn compact(self) -> Self {
         if self.is_compacted() {
+            self.check_consistency();
             return self;
         }
 
