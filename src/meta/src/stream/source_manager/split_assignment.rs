@@ -236,7 +236,7 @@ impl SourceManager {
         &self,
         table_id: &TableId,
         // dispatchers from SourceExecutor to SourceBackfillExecutor
-        dispatchers: &HashMap<ActorId, Vec<Dispatcher>>,
+        dispatchers: &HashMap<FragmentId, HashMap<ActorId, Vec<Dispatcher>>>,
     ) -> MetaResult<SplitAssignment> {
         let core = self.core.lock().await;
         let table_fragments = core
@@ -250,13 +250,16 @@ impl SourceManager {
 
         for (_source_id, fragments) in source_backfill_fragments {
             for (fragment_id, upstream_source_fragment_id) in fragments {
+                let fragment_dispatchers = dispatchers.get(&fragment_id);
                 let upstream_actors = core
                     .metadata_manager
                     .get_running_actors_of_fragment(upstream_source_fragment_id)
                     .await?;
                 let mut backfill_actors = vec![];
                 for upstream_actor in upstream_actors {
-                    if let Some(dispatchers) = dispatchers.get(&upstream_actor) {
+                    if let Some(dispatchers) = fragment_dispatchers
+                        .and_then(|dispatchers| dispatchers.get(&upstream_actor))
+                    {
                         let err = || {
                             anyhow::anyhow!(
                             "source backfill fragment's upstream fragment should have one dispatcher, fragment_id: {fragment_id}, upstream_fragment_id: {upstream_source_fragment_id}, upstream_actor: {upstream_actor}, dispatchers: {dispatchers:?}",
