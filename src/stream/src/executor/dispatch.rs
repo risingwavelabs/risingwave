@@ -749,6 +749,9 @@ impl Dispatcher for HashDataDispatcher {
     }
 
     async fn dispatch_data(&mut self, chunk: StreamChunk) -> StreamResult<()> {
+        // Check chunk consistency.
+        chunk.check_consistency();
+
         // A chunk can be shuffled into multiple output chunks that to be sent to downstreams.
         // In these output chunks, the only difference are visibility map, which is calculated
         // by the hash value of each line in the input chunk.
@@ -774,6 +777,9 @@ impl Dispatcher for HashDataDispatcher {
         } else {
             chunk.project(&self.output_indices)
         };
+
+        // Check chunk consistency.
+        chunk.check_consistency();
 
         for ((vnode, &op), visible) in vnodes
             .iter()

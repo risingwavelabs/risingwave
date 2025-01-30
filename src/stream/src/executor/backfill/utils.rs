@@ -383,6 +383,7 @@ fn mark_chunk_inner(
     pk_in_output_indices: PkIndicesRef<'_>,
     pk_order: &[OrderType],
 ) -> StreamChunk {
+    chunk.check_consistency();
     let (data, ops) = chunk.into_parts();
     let mut new_visibility = BitmapBuilder::with_capacity(ops.len());
     // Use project to avoid allocation.
