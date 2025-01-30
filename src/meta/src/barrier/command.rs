@@ -101,7 +101,7 @@ pub struct ReplaceStreamJobPlan {
     /// Downstream jobs of the replaced job need to update their `Merge` node to
     /// connect to the new fragment.
     pub merge_updates: BTreeMap<FragmentId, Vec<MergeUpdate>>,
-    pub dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
+    pub dispatchers: HashMap<FragmentId, HashMap<ActorId, Vec<Dispatcher>>>,
     /// For a table with connector, the `SourceExecutor` actor will also be rebuilt with new actor ids.
     /// We need to reassign splits for it.
     ///
@@ -188,7 +188,7 @@ pub struct CreateStreamingJobCommandInfo {
     pub stream_job_fragments: StreamJobFragments,
     /// Refer to the doc on [`crate::manager::MetadataManager::get_upstream_root_fragments`] for the meaning of "root".
     pub upstream_root_actors: HashMap<TableId, Vec<ActorId>>,
-    pub dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
+    pub dispatchers: HashMap<FragmentId, HashMap<ActorId, Vec<Dispatcher>>>,
     pub init_split_assignment: SplitAssignment,
     pub definition: String,
     pub job_type: StreamingJobType,
@@ -690,7 +690,8 @@ impl Command {
                     job_type,
                 } => {
                     let actor_dispatchers = dispatchers
-                        .iter()
+                        .values()
+                        .flatten()
                         .map(|(&actor_id, dispatchers)| {
                             (
                                 actor_id,
@@ -994,13 +995,14 @@ impl Command {
     fn generate_update_mutation_for_replace_table(
         old_fragments: &StreamJobFragments,
         merge_updates: &BTreeMap<FragmentId, Vec<MergeUpdate>>,
-        dispatchers: &HashMap<ActorId, Vec<Dispatcher>>,
+        dispatchers: &HashMap<FragmentId, HashMap<ActorId, Vec<Dispatcher>>>,
         init_split_assignment: &SplitAssignment,
     ) -> Option<Mutation> {
         let dropped_actors = old_fragments.actor_ids();
 
         let actor_new_dispatchers = dispatchers
-            .iter()
+            .values()
+            .flatten()
             .map(|(&actor_id, dispatchers)| {
                 (
                     actor_id,

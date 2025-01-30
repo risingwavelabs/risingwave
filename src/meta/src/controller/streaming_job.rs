@@ -626,7 +626,10 @@ impl CatalogController {
         &self,
         job_id: ObjectId,
         actor_ids: Vec<crate::model::ActorId>,
-        new_actor_dispatchers: HashMap<crate::model::ActorId, Vec<PbDispatcher>>,
+        new_actor_dispatchers: &HashMap<
+            crate::model::FragmentId,
+            HashMap<crate::model::ActorId, Vec<PbDispatcher>>,
+        >,
         split_assignment: &SplitAssignment,
     ) -> MetaResult<()> {
         let inner = self.inner.write().await;
@@ -659,10 +662,11 @@ impl CatalogController {
         }
 
         let mut actor_dispatchers = vec![];
-        for (actor_id, dispatchers) in new_actor_dispatchers {
+        for (actor_id, dispatchers) in new_actor_dispatchers.values().flatten() {
             for dispatcher in dispatchers {
                 let mut actor_dispatcher =
-                    actor_dispatcher::Model::from((actor_id, dispatcher)).into_active_model();
+                    actor_dispatcher::Model::from((*actor_id, dispatcher.clone()))
+                        .into_active_model();
                 actor_dispatcher.id = NotSet;
                 actor_dispatchers.push(actor_dispatcher);
             }
