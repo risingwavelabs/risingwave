@@ -724,7 +724,7 @@ pub struct ActorGraphBuildResult {
     pub existing_locations: Locations,
 
     /// The new dispatchers to be added to the upstream mview actors. Used for MV on MV.
-    pub dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
+    pub dispatchers: HashMap<FragmentId, HashMap<ActorId, Vec<Dispatcher>>>,
 
     /// The updates to be applied to the downstream chain actors. Used for schema change (replace
     /// table plan).
@@ -915,15 +915,23 @@ impl ActorGraphBuilder {
 
         // Extract the new dispatchers from the external changes.
         let dispatchers = upstream_fragment_changes
-            .into_values()
-            .flatten()
-            .map(|(actor_id, change)| {
+            .into_iter()
+            .map(|(fragment_id, changes)| {
                 (
-                    actor_id.as_global_id(),
-                    change.new_downstreams.into_values().collect_vec(),
+                    fragment_id.as_global_id(),
+                    changes
+                        .into_iter()
+                        .map(|(actor_id, change)| {
+                            (
+                                actor_id.as_global_id(),
+                                change.new_downstreams.into_values().collect_vec(),
+                            )
+                        })
+                        .filter(|(_, v)| !v.is_empty())
+                        .collect::<HashMap<_, _>>(),
                 )
             })
-            .filter(|(_, v)| !v.is_empty())
+            .filter(|(_, m)| !m.is_empty())
             .collect();
 
         // Extract the updates for merge executors from the external changes.
