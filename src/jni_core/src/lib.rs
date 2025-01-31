@@ -151,6 +151,10 @@ impl<T> From<T> for Pointer<'static, T> {
 }
 
 impl<'a, T> Pointer<'a, T> {
+    pub fn pointer(&self) -> jlong {
+        self.pointer
+    }
+
     fn as_ref(&self) -> &'a T {
         debug_assert!(self.pointer != 0);
         unsafe { &*(self.pointer as *const T) }
