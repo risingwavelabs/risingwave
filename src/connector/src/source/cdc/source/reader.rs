@@ -138,7 +138,7 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
                     {com.risingwave.connector.source.core.JniDbzSourceHandler},
                     {void runJniDbzSourceThread(byte[] getEventStreamRequestBytes, long channelPtr)},
                     &get_event_stream_request_bytes,
-                    tx.pointer()
+                    tx.into_pointer()
                 );
 
                 match result {
