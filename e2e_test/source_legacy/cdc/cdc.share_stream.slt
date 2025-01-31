@@ -207,6 +207,9 @@ select * from test_my_default_value;
 ----
 2 jack Shanghai
 
+statement ok
+INSERT INTO test_my_default_value_disorderd (id) VALUES (2);
+
 query II
 select * from test_my_default_value_disorderd;
 ----
@@ -678,6 +681,9 @@ query II
 select * from test_pg_default_value;
 ----
 1 noris Shanghai
+
+statement ok
+INSERT INTO test_pg_default_value_disorderd (id) VALUES (1);
 
 query II
 select * from test_pg_default_value_disorderd;
