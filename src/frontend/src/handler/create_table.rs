@@ -1196,10 +1196,13 @@ pub(super) async fn handle_create_table_plan(
                         .collect();
 
                     for col in &mut columns {
-                        if let Some(external_col) = external_columns.get(col.name()) {
-                            col.column_desc.generated_or_default_column =
-                                external_col.column_desc.generated_or_default_column.clone();
-                        }
+                        let external_col = external_columns.get(col.name()).ok_or_else(|| {
+                            ErrorCode::ConnectorError(
+                                format!("Column {} not found in external table", col.name()).into(),
+                            )
+                        })?;
+                        col.column_desc.generated_or_default_column =
+                            external_col.column_desc.generated_or_default_column.clone();
                     }
                     (columns, pk_names)
                 }
