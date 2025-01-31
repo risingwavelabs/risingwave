@@ -18,16 +18,18 @@ import java.lang.ref.Cleaner;
 
 public class CdcSourceChannel {
     private final long pointer;
-
-    private static final Cleaner cleaner = Cleaner.create();
+    private final Cleaner.Cleanable cleanable;
 
     CdcSourceChannel(long pointer) {
         this.pointer = pointer;
-        cleaner.register(
-                this,
-                () -> {
-                    Binding.cdcSourceSenderClose(pointer);
-                });
+
+        var cleaner = Cleaner.create();
+        this.cleanable =
+                cleaner.register(
+                        this,
+                        () -> {
+                            Binding.cdcSourceSenderClose(pointer);
+                        });
     }
 
     public static CdcSourceChannel fromOwnedPointer(long pointer) {

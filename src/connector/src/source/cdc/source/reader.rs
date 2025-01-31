@@ -130,7 +130,7 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
                 };
 
                 // `runJniDbzSourceThread` will take ownership of `tx`, and release it later in
-                // `Java_com_risingwave_java_binding_Binding_cdcSourceSenderClose` via `AutoClosable`.
+                // `Java_com_risingwave_java_binding_Binding_cdcSourceSenderClose` via ref cleaner.
                 let tx: OwnedPointer<_> = tx.into();
 
                 let result = call_static_method!(
