@@ -94,6 +94,8 @@ public class Binding {
 
     public static native boolean sendCdcSourceErrorToChannel(long channelPtr, String errorMsg);
 
+    public static native void cdcSourceSenderClose(long channelPtr);
+
     public static native com.risingwave.java.binding.JniSinkWriterStreamRequest
             recvSinkWriterRequestFromChannel(long channelPtr);
 
