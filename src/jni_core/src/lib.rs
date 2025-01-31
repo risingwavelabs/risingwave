@@ -151,26 +151,32 @@ impl<T> From<T> for Pointer<'static, T> {
 }
 
 impl<'a, T> Pointer<'a, T> {
-    pub fn pointer(&self) -> jlong {
-        self.pointer
-    }
-
     fn as_ref(&self) -> &'a T {
-        debug_assert!(self.pointer != 0);
+        assert!(self.pointer != 0);
         unsafe { &*(self.pointer as *const T) }
     }
 
     fn as_mut(&mut self) -> &'a mut T {
-        debug_assert!(self.pointer != 0);
+        assert!(self.pointer != 0);
         unsafe { &mut *(self.pointer as *mut T) }
     }
 }
 
+/// A pointer that owns the object it points to.
+///
+/// Note that dropping an `OwnedPointer` does not release the object.
+/// Instead, you should call [`OwnedPointer::release`] manually.
 pub type OwnedPointer<T> = Pointer<'static, T>;
 
 impl<T> OwnedPointer<T> {
-    fn drop(self) {
-        debug_assert!(self.pointer != 0);
+    /// Consume `self` and return the pointer value. Used for passing to JNI.
+    pub fn into_pointer(self) -> jlong {
+        self.pointer
+    }
+
+    /// Release the object behind the pointer.
+    fn release(self) {
+        assert!(self.pointer != 0);
         unsafe { drop(Box::from_raw(self.pointer as *mut T)) }
     }
 }
@@ -393,7 +399,7 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorClose<'a>(
     _env: EnvParam<'a>,
     pointer: OwnedPointer<JavaBindingIterator<'a>>,
 ) {
-    pointer.drop()
+    pointer.release()
 }
 
 #[no_mangle]
@@ -423,7 +429,7 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_streamChunkClose(
     _env: EnvParam<'_>,
     chunk: OwnedPointer<StreamChunk>,
 ) {
-    chunk.drop()
+    chunk.release()
 }
 
 #[no_mangle]
@@ -1061,7 +1067,7 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_cdcSourceSenderClose
     _env: EnvParam<'a>,
     channel: OwnedPointer<JniSenderType<GetEventStreamResponse>>,
 ) {
-    drop(channel);
+    channel.release();
 }
 
 pub enum JniSinkWriterStreamRequest {
