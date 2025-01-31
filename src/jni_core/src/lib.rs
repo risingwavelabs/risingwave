@@ -1052,6 +1052,14 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_sendCdcSourceErrorTo
     })
 }
 
+#[no_mangle]
+extern "system" fn Java_com_risingwave_java_binding_Binding_cdcSourceSenderClose<'a>(
+    _env: EnvParam<'a>,
+    channel: OwnedPointer<JniSenderType<GetEventStreamResponse>>,
+) {
+    drop(channel);
+}
+
 pub enum JniSinkWriterStreamRequest {
     PbRequest(SinkWriterStreamRequest),
     Chunk {
