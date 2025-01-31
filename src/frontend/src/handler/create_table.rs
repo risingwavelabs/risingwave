@@ -33,7 +33,6 @@ use risingwave_common::license::Feature;
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::types::DataType;
-use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_common::{bail, bail_not_implemented};
@@ -1182,20 +1181,25 @@ pub(super) async fn handle_create_table_plan(
                     let table: ExternalTableImpl = ExternalTableImpl::connect(config)
                         .await
                         .context("failed to auto derive table schema")?;
-                    let external_columns: Vec<_> = table
+                    let external_columns: HashMap<&str, ColumnCatalog> = table
                         .column_descs()
                         .iter()
-                        .cloned()
-                        .map(|column_desc| ColumnCatalog {
-                            column_desc,
-                            is_hidden: false,
+                        .map(|column_desc| {
+                            (
+                                column_desc.name(),
+                                ColumnCatalog {
+                                    column_desc: column_desc.clone(),
+                                    is_hidden: false,
+                                },
+                            )
                         })
                         .collect();
-                    for (col, external_col) in
-                        columns.iter_mut().zip_eq_fast(external_columns.into_iter())
-                    {
-                        col.column_desc.generated_or_default_column =
-                            external_col.column_desc.generated_or_default_column;
+
+                    for col in columns.iter_mut() {
+                        if let Some(external_col) = external_columns.get(col.name()) {
+                            col.column_desc.generated_or_default_column =
+                                external_col.column_desc.generated_or_default_column.clone();
+                        }
                     }
                     (columns, pk_names)
                 }
