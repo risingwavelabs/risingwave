@@ -1181,28 +1181,25 @@ pub(super) async fn handle_create_table_plan(
                     let table: ExternalTableImpl = ExternalTableImpl::connect(config)
                         .await
                         .context("failed to auto derive table schema")?;
-                    let external_columns: HashMap<&str, ColumnCatalog> = table
+                    let external_columns: HashMap<&str, &ColumnDesc> = table
                         .column_descs()
                         .iter()
-                        .map(|column_desc| {
-                            (
-                                column_desc.name(),
-                                ColumnCatalog {
-                                    column_desc: column_desc.clone(),
-                                    is_hidden: false,
-                                },
-                            )
-                        })
+                        .map(|column_desc| (column_desc.name.as_str(), column_desc))
                         .collect();
 
                     for col in &mut columns {
-                        let external_col = external_columns.get(col.name()).ok_or_else(|| {
-                            ErrorCode::ConnectorError(
-                                format!("Column {} not found in external table", col.name()).into(),
-                            )
-                        })?;
+                        let external_column_desc =
+                            *external_columns.get(col.name()).ok_or_else(|| {
+                                ErrorCode::ConnectorError(
+                                    format!(
+                                        "Column '{}' not found in the upstream database",
+                                        col.name()
+                                    )
+                                    .into(),
+                                )
+                            })?;
                         col.column_desc.generated_or_default_column =
-                            external_col.column_desc.generated_or_default_column.clone();
+                            external_column_desc.generated_or_default_column.clone();
                     }
                     (columns, pk_names)
                 }
