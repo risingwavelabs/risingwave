@@ -23,7 +23,7 @@ use risingwave_common::bail;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_jni_core::jvm_runtime::{execute_with_jni_env, JVM};
-use risingwave_jni_core::{call_static_method, JniReceiverType};
+use risingwave_jni_core::{call_static_method, JniReceiverType, OwnedPointer};
 use risingwave_pb::connector_service::{GetEventStreamRequest, GetEventStreamResponse};
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc;
@@ -130,15 +130,15 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
                 };
 
                 // `runJniDbzSourceThread` will take ownership of `tx`, and release it later in
-                // `Java_com_risingwave_java_binding_Binding_cdcSourceSenderClose` with `AutoClosable`.
-                let tx = Box::into_raw(Box::new(tx));
+                // `Java_com_risingwave_java_binding_Binding_cdcSourceSenderClose` via `AutoClosable`.
+                let tx: OwnedPointer<_> = tx.into();
 
                 let result = call_static_method!(
                     env,
                     {com.risingwave.connector.source.core.JniDbzSourceHandler},
                     {void runJniDbzSourceThread(byte[] getEventStreamRequestBytes, long channelPtr)},
                     &get_event_stream_request_bytes,
-                    tx
+                    tx.pointer()
                 );
 
                 match result {
