@@ -250,7 +250,7 @@ impl SourceManager {
 
         for (_source_id, fragments) in source_backfill_fragments {
             for (fragment_id, upstream_source_fragment_id) in fragments {
-                let fragment_dispatchers = dispatchers.get(&fragment_id);
+                let fragment_dispatchers = dispatchers.get(&upstream_source_fragment_id);
                 let upstream_actors = core
                     .metadata_manager
                     .get_running_actors_of_fragment(upstream_source_fragment_id)
