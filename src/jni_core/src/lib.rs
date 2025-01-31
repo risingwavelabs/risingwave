@@ -176,6 +176,11 @@ impl<T> OwnedPointer<T> {
 
     /// Release the object behind the pointer.
     fn release(self) {
+        tracing::debug!(
+            type_name = std::any::type_name::<T>(),
+            address = self.pointer,
+            "release jni OwnedPointer"
+        );
         assert!(self.pointer != 0);
         unsafe { drop(Box::from_raw(self.pointer as *mut T)) }
     }
