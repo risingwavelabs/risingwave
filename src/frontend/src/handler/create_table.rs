@@ -1195,7 +1195,7 @@ pub(super) async fn handle_create_table_plan(
                         })
                         .collect();
 
-                    for col in columns.iter_mut() {
+                    for col in &mut columns {
                         if let Some(external_col) = external_columns.get(col.name()) {
                             col.column_desc.generated_or_default_column =
                                 external_col.column_desc.generated_or_default_column.clone();
