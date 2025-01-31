@@ -535,7 +535,8 @@ impl CreateMviewProgressTracker {
             for (table_id, actors) in upstream_root_actors {
                 assert!(!actors.is_empty());
                 let dispatch_count: usize = dispatchers
-                    .iter()
+                    .values()
+                    .flatten()
                     .filter(|(upstream_actor_id, _)| actors.contains(upstream_actor_id))
                     .map(|(_, v)| v.len())
                     .sum();
