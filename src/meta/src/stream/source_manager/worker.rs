@@ -12,12 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#[cfg(not(debug_assertions))]
+use risingwave_connector::error::ConnectorError;
 use risingwave_connector::source::AnySplitEnumerator;
 
 use super::*;
 
 const MAX_FAIL_CNT: u32 = 10;
 const DEFAULT_SOURCE_TICK_TIMEOUT: Duration = Duration::from_secs(10);
+
+// use in debug mode only
+#[cfg(debug_assertions)]
+const DEBUG_SPLITS_KEY: &str = "debug_splits";
 
 pub struct SharedSplitMap {
     pub splits: Option<BTreeMap<SplitId, SplitImpl>>,
@@ -38,6 +44,9 @@ pub struct ConnectorSourceWorker {
     connector_properties: ConnectorProperties,
     fail_cnt: u32,
     source_is_up: LabelGuardedIntGauge<2>,
+
+    #[cfg(debug_assertions)]
+    debug_splits: Option<Vec<SplitImpl>>,
 }
 
 fn extract_prop_from_existing_source(source: &Source) -> ConnectorResult<ConnectorProperties> {
@@ -48,8 +57,26 @@ fn extract_prop_from_existing_source(source: &Source) -> ConnectorResult<Connect
     Ok(properties)
 }
 fn extract_prop_from_new_source(source: &Source) -> ConnectorResult<ConnectorProperties> {
-    let options_with_secret =
-        WithOptionsSecResolved::new(source.with_properties.clone(), source.secret_refs.clone());
+    let options_with_secret = WithOptionsSecResolved::new(
+        {
+            #[cfg(debug_assertions)]
+            {
+                let mut with_properties = source.with_properties.clone();
+                with_properties.remove(DEBUG_SPLITS_KEY);
+                with_properties
+            }
+            #[cfg(not(debug_assertions))]
+            {
+                if source.with_properties.contains_key(DEBUG_SPLITS_KEY) {
+                    return Err(ConnectorError::from(anyhow::anyhow!(
+                        "debug_splits is not allowed in release mode"
+                    )));
+                }
+                source.with_properties.clone()
+            }
+        },
+        source.secret_refs.clone(),
+    );
     let mut properties = ConnectorProperties::extract(options_with_secret, true)?;
     properties.init_from_pb_source(source);
     Ok(properties)
@@ -220,6 +247,21 @@ impl ConnectorSourceWorker {
             connector_properties,
             fail_cnt: 0,
             source_is_up,
+            #[cfg(debug_assertions)]
+            debug_splits: {
+                use risingwave_common::types::JsonbVal;
+                if let Some(debug_splits) = source.with_properties.get(DEBUG_SPLITS_KEY) {
+                    let mut splits = Vec::new();
+                    for split_impl_str in debug_splits.split(",") {
+                        splits.push(SplitImpl::restore_from_json(JsonbVal::from(
+                            jsonbb::json!(split_impl_str),
+                        ))?);
+                    }
+                    Some(splits)
+                } else {
+                    None
+                }
+            },
         })
     }
 
@@ -272,10 +314,28 @@ impl ConnectorSourceWorker {
         let source_is_up = |res: i64| {
             self.source_is_up.set(res);
         };
-        let splits = self.enumerator.list_splits().await.inspect_err(|_| {
-            source_is_up(0);
-            self.fail_cnt += 1;
-        })?;
+
+        let splits = {
+            #[cfg(debug_assertions)]
+            {
+                if let Some(debug_splits) = &self.debug_splits {
+                    debug_splits.clone()
+                } else {
+                    self.enumerator.list_splits().await.inspect_err(|_| {
+                        source_is_up(0);
+                        self.fail_cnt += 1;
+                    })?
+                }
+            }
+            #[cfg(not(debug_assertions))]
+            {
+                self.enumerator.list_splits().await.inspect_err(|_| {
+                    source_is_up(0);
+                    self.fail_cnt += 1;
+                })?
+            }
+        };
+
         source_is_up(1);
         self.fail_cnt = 0;
         let mut current_splits = self.current_splits.lock().await;
