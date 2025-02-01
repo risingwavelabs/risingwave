@@ -102,6 +102,28 @@ public class SourceTestClient {
             ConnectorServiceProto.TableSchema tableSchema,
             String databaseName,
             String tableName) {
+        return validateSource(
+                jdbcUrl,
+                host,
+                username,
+                password,
+                sourceType,
+                tableSchema,
+                databaseName,
+                tableName,
+                false);
+    }
+
+    protected ConnectorServiceProto.ValidateSourceResponse validateSource(
+            String jdbcUrl,
+            String host,
+            String username,
+            String password,
+            ConnectorServiceProto.SourceType sourceType,
+            ConnectorServiceProto.TableSchema tableSchema,
+            String databaseName,
+            String tableName,
+            boolean forceRds) {
         String port = String.valueOf(URI.create(jdbcUrl.substring(5)).getPort());
         ConnectorServiceProto.ValidateSourceRequest req =
                 ConnectorServiceProto.ValidateSourceRequest.newBuilder()
@@ -119,6 +141,8 @@ public class SourceTestClient {
                         .putProperties("server.id", "1") // mysql only
                         .putProperties("publication.name", "rw_publication") // pg only
                         .putProperties("publication.create.enable", "true") // pg only
+                        .putProperties(
+                                "test.only.force.rds", forceRds ? "true" : "false") // pg only
                         .build();
         return blockingStub.validateSource(req);
     }
