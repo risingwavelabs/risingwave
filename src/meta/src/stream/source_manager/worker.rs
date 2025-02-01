@@ -254,7 +254,8 @@ impl ConnectorSourceWorker {
                     let mut splits = Vec::new();
                     for split_impl_str in debug_splits.split(",") {
                         splits.push(SplitImpl::restore_from_json(JsonbVal::from(
-                            jsonbb::json!(split_impl_str),
+                            jsonbb::serde_json::from_str::<serde_json::Value>(split_impl_str)
+                                .context("failed to parse split impl")?,
                         ))?);
                     }
                     Some(splits)
