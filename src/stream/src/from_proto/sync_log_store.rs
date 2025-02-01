@@ -14,6 +14,7 @@
 
 use risingwave_pb::stream_plan::SyncLogStoreNode;
 use risingwave_storage::StateStore;
+
 use crate::error::StreamResult;
 use crate::executor::Executor;
 use crate::from_proto::ExecutorBuilder;

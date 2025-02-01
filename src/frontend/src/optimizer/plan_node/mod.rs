@@ -981,11 +981,11 @@ mod stream_sort;
 mod stream_source;
 mod stream_source_scan;
 mod stream_stateless_simple_agg;
+mod stream_sync_log_store;
 mod stream_table_scan;
 mod stream_topn;
 mod stream_values;
 mod stream_watermark_filter;
-mod stream_sync_log_store;
 
 mod batch_file_scan;
 mod batch_iceberg_scan;
@@ -1107,13 +1107,13 @@ pub use stream_sort::StreamEowcSort;
 pub use stream_source::StreamSource;
 pub use stream_source_scan::StreamSourceScan;
 pub use stream_stateless_simple_agg::StreamStatelessSimpleAgg;
+pub use stream_sync_log_store::StreamSyncLogStore;
 pub use stream_table_scan::StreamTableScan;
 pub use stream_temporal_join::StreamTemporalJoin;
 pub use stream_topn::StreamTopN;
 pub use stream_union::StreamUnion;
 pub use stream_values::StreamValues;
 pub use stream_watermark_filter::StreamWatermarkFilter;
-pub use stream_sync_log_store::StreamSyncLogStore;
 
 use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor, InputRef, Literal};
 use crate::optimizer::optimizer_context::OptimizerContextRef;

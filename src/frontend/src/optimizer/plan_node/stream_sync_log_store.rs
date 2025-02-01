@@ -12,15 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::optimizer::plan_node::stream::StreamPlanRef;
-use crate::optimizer::plan_node::generic::PhysicalPlanRef;
 use pretty_xmlish::XmlNode;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use crate::optimizer::plan_node::{ExprRewritable, PlanBase, PlanTreeNodeUnary, Stream, StreamExchange, StreamNode};
-use crate::optimizer::plan_node::utils::{childless_record, Distill};
-use crate::stream_fragmenter::BuildFragmentGraphState;
 use risingwave_pb::stream_plan::SyncLogStoreNode;
+
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
+use crate::optimizer::plan_node::generic::PhysicalPlanRef;
+use crate::optimizer::plan_node::stream::StreamPlanRef;
+use crate::optimizer::plan_node::utils::{childless_record, Distill};
+use crate::optimizer::plan_node::{
+    ExprRewritable, PlanBase, PlanTreeNodeUnary, Stream, StreamExchange, StreamNode,
+};
+use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::PlanRef;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -40,12 +43,9 @@ impl StreamSyncLogStore {
             input.append_only(),
             input.emit_on_window_close(),
             input.watermark_columns().clone(),
-            input.columns_monotonicity().clone()
+            input.columns_monotonicity().clone(),
         );
-        Self {
-            base,
-            input,
-        }
+        Self { base, input }
     }
 }
 
