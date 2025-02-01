@@ -429,7 +429,7 @@ CREATE TABLE partitioned_timestamp_table_2023_shared(
 statement ok
 CREATE MATERIALIZED VIEW person_new_cnt AS SELECT COUNT(*) AS cnt FROM person_new;
 
-sleep 3s
+sleep 5s
 
 query TTTTTTT
 SELECT c_boolean,c_date,c_time,c_timestamp,c_jsonb,c_smallint_array,c_timestamp_array,c_uuid FROM postgres_all_types where c_bigint=-9223372036854775807
@@ -445,7 +445,7 @@ INSERT INTO person VALUES (1101, 'white', 'myc@xpmpe.com', '8157 6974', 'se');
 INSERT INTO person VALUES (1102, 'spencer', 'wip@dkaap.com', '9481 6270', 'angeles');
 "
 
-sleep 3s
+sleep 5s
 
 # 3 history, 3 new rows
 query I
@@ -565,7 +565,7 @@ insert into numeric_list values(3, '{3.14, 6, 5789604461865809771178549250434395
 INSERT INTO numeric_list values(4, '{nan, infinity, 524596}');
 "
 
-sleep 3s
+sleep 5s
 
 query II
 select * from numeric_to_varchar_shared order by id;
