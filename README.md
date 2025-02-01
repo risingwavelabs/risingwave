@@ -37,6 +37,12 @@
   >
     <img alt="YouTube" src="https://img.shields.io/youtube/channel/views/UCsHwdyBRxBpmkA5RRd0YNEA" />
   </a>
+  <a
+    href="https://gurubase.io/g/risingwave"
+    target="_blank"
+  >
+    <img alt="Gurubase" src="https://img.shields.io/badge/Gurubase-Ask%20RisingWave%20Guru-006BFF" />
+  </a>
 </div>
 
 RisingWave is the world's most advanced event stream processing platform engineered to provide the <i><b>simplest</b></i> and <i><b>most cost-efficient</b></i> approach for <b>processing</b>, <b>analyzing</b>, and <b>managing</b> real-time event streaming data. It provides both a Postgres-compatible [SQL interface](https://docs.risingwave.com/sql/overview) and a DataFrame-style [Python interface](https://docs.risingwave.com/python-sdk/intro).
