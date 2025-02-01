@@ -67,7 +67,7 @@ fn extract_prop_from_new_source(source: &Source) -> ConnectorResult<ConnectorPro
             }
             #[cfg(not(debug_assertions))]
             {
-                if source.with_properties.contains_key(DEBUG_SPLITS_KEY) {
+                if source.with_properties.contains_key("debug_splits") {
                     return Err(ConnectorError::from(anyhow::anyhow!(
                         "debug_splits is not allowed in release mode"
                     )));
@@ -252,10 +252,12 @@ impl ConnectorSourceWorker {
                 use risingwave_common::types::JsonbVal;
                 if let Some(debug_splits) = source.with_properties.get(DEBUG_SPLITS_KEY) {
                     let mut splits = Vec::new();
-                    for split_impl_str in debug_splits.split(",") {
+                    let debug_splits_value =
+                        jsonbb::serde_json::from_str::<serde_json::Value>(debug_splits)
+                            .context("failed to parse split impl")?;
+                    for split_impl_value in debug_splits_value.as_array().unwrap() {
                         splits.push(SplitImpl::restore_from_json(JsonbVal::from(
-                            jsonbb::serde_json::from_str::<serde_json::Value>(split_impl_str)
-                                .context("failed to parse split impl")?,
+                            split_impl_value.clone(),
                         ))?);
                     }
                     Some(splits)
