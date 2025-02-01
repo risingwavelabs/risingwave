@@ -26,6 +26,7 @@ CREATE SINK sink1 AS select * from mv1 WITH (
     s3.secret.key = 'hummockadmin',
     create_table_if_not_exists = 'true',
     primary_key = 'i1,i2',
+    partition_by = 'i1'
 );
 
 statement ok
@@ -122,6 +123,7 @@ CREATE SINK sink2 AS select * from s2 WITH (
     s3.secret.key = 'hummockadmin',
     create_table_if_not_exists = 'true',
     primary_key = 'i2,i1',
+    partition_by = 'i1'
 );
 
 statement ok
