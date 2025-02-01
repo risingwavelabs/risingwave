@@ -29,7 +29,7 @@ use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqDebug;
-use risingwave_common::util::sort_util::{cmp_datum_iter_le, OrderType};
+use risingwave_common::util::sort_util::{cmp_datum_iter, OrderType};
 use risingwave_common::util::value_encoding::BasicSerde;
 use risingwave_common_rate_limit::RateLimit;
 use risingwave_connector::error::ConnectorError;
@@ -354,7 +354,7 @@ pub(crate) fn mark_chunk_ref_by_vnode<S: StateStore, SD: ValueRowSerde>(
             BackfillProgressPerVnode::NotStarted => false,
             // If in progress, we need to check row <= current_pos.
             BackfillProgressPerVnode::InProgress { current_pos, .. } => {
-                cmp_datum_iter_le(pk.iter(), current_pos.iter(), pk_order.iter().copied())
+                cmp_datum_iter(pk.iter(), current_pos.iter(), pk_order.iter().copied()).is_le()
             }
         };
         new_visibility.append(visible);
@@ -394,7 +394,7 @@ fn mark_chunk_inner(
     for (i, (op, row)) in ops.iter().zip_eq_debug(data.rows()).enumerate() {
         let lhs = row.project(pk_in_output_indices);
         let rhs = current_pos;
-        let visible = cmp_datum_iter_le(lhs.iter(), rhs.iter(), pk_order.iter().copied());
+        let visible = cmp_datum_iter(lhs.iter(), rhs.iter(), pk_order.iter().copied()).is_le();
         new_visibility.append(visible);
 
         normalize_unmatched_updates(
@@ -504,7 +504,7 @@ fn mark_cdc_chunk_inner(
             if in_binlog_range {
                 let lhs = row.project(pk_in_output_indices);
                 let rhs = current_pos;
-                cmp_datum_iter_le(lhs.iter(), rhs.iter(), pk_order.iter().copied())
+                cmp_datum_iter(lhs.iter(), rhs.iter(), pk_order.iter().copied()).is_le()
             } else {
                 false
             }

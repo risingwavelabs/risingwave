@@ -535,14 +535,6 @@ pub fn cmp_datum_iter(
     })
 }
 
-pub fn cmp_datum_iter_le(
-    lhs: impl IntoIterator<Item = impl ToDatumRef>,
-    rhs: impl IntoIterator<Item = impl ToDatumRef>,
-    order_type: impl IntoIterator<Item = OrderType>,
-) -> bool {
-    cmp_datum_iter(lhs, rhs, order_type) != Ordering::Greater
-}
-
 /// Partial compare two `Row`s with specified order types.
 ///
 /// NOTE: This function returns `None` if two rows have different schema.
