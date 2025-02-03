@@ -16,9 +16,11 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 use std::time::Instant;
 
 use bytes::Bytes;
+use futures::StreamExt;
 use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
 use parking_lot::Mutex;
 use risingwave_common::types::DataType;
@@ -98,6 +100,8 @@ pub trait Session: Send + Sync {
     // TODO: maybe this function should be async and return the notice more timely
     /// try to take the current notices from the session
     fn take_notices(self: Arc<Self>) -> Vec<String>;
+
+    fn poll_next_notice(self: Arc<Self>, ctx: &mut Context<'_>) -> Poll<Option<String>>;
 
     fn bind(
         self: Arc<Self>,
@@ -341,16 +345,49 @@ pub async fn handle_connection<S, SM>(
         peer_addr,
         redact_sql_option_keywords,
     );
+
+    let mut pg_stream = pg_proto.stream.clone();
+
     loop {
-        let msg = match pg_proto.read_message().await {
-            Ok(msg) => msg,
-            Err(e) => {
-                tracing::error!(error = %e.as_report(), "error when reading message");
-                break;
+        let session = pg_proto.session.clone();
+
+        let mut process = std::pin::pin!(async {
+            let msg = match pg_proto.read_message().await {
+                Ok(msg) => msg,
+                Err(e) => {
+                    tracing::error!(error = %e.as_report(), "error when reading message");
+                    return false;
+                }
+            };
+            tracing::trace!(?msg, "received message");
+            pg_proto.process(msg).await
+        });
+
+        let ret = if let Some(session) = session {
+            let mut notice_stream =
+                futures::stream::poll_fn(move |ctx| session.clone().poll_next_notice(ctx))
+                    .ready_chunks(16);
+
+            loop {
+                tokio::select! {
+                    notices = notice_stream.next() => {
+                        if let Some(notices) = notices {
+                            for notice in notices {
+                                pg_stream.write_no_flush(&crate::pg_message::BeMessage::NoticeResponse(&notice)).ok();
+                            }
+                            pg_stream.flush().await.ok();
+                        }
+                    }
+
+                    ret = &mut process => {
+                        break ret;
+                    }
+                }
             }
+        } else {
+            process.await
         };
-        tracing::trace!("Received message: {:?}", msg);
-        let ret = pg_proto.process(msg).await;
+
         if ret {
             break;
         }
@@ -361,6 +398,7 @@ pub async fn handle_connection<S, SM>(
 mod tests {
     use std::error::Error;
     use std::sync::Arc;
+    use std::task::{Context, Poll};
     use std::time::Instant;
 
     use bytes::Bytes;
@@ -507,6 +545,10 @@ mod tests {
 
         fn take_notices(self: Arc<Self>) -> Vec<String> {
             vec![]
+        }
+
+        fn poll_next_notice(self: Arc<Self>, _ctx: &mut Context<'_>) -> Poll<Option<String>> {
+            Poll::Pending
         }
 
         fn transaction_status(&self) -> TransactionStatus {
