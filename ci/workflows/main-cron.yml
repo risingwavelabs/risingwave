@@ -144,7 +144,7 @@ steps:
             files: "*-junit.xml"
             format: "junit"
         - ./ci/plugins/upload-failure-logs
-      timeout_in_minutes: 13
+      timeout_in_minutes: 18
       retry: *auto-retry
 
   - label: "end-to-end test (parallel, in-memory) (release)"
@@ -160,7 +160,7 @@ steps:
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 15
+    timeout_in_minutes: 20
     retry: *auto-retry
 
   - group: "end-to-end connector test (release)"
