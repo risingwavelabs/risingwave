@@ -17,9 +17,11 @@ insert into t select x as v1, x as v2 from generate_series(1, 10000) t(x);
 statement ok
 flush;
 
+skipif madsim
 statement ok
 set backfill_rate_limit=1;
 
+skipif madsim
 statement ok
 set background_ddl=true;
 
@@ -89,6 +91,7 @@ set streaming_use_arrangement_backfill=true;
 statement ok
 alter materialized view m2 set backfill_rate_limit=default;
 
+skipif madsim
 statement ok
 wait;
 
