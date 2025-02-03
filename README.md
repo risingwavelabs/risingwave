@@ -71,7 +71,7 @@ RisingWave stands apart from traditional stream processing systems due to its:
 * **Expressive SQL**: Supports structured, semi-structured, and unstructured data using a rich, familiar SQL dialect.
 * **No manual state tuning**: Eliminates the need for complex state management configurations.
 
-### S3 as Primary Storage
+### Decoupled Compute and Storage
 * **Optimized for complex queries**: Ensures high performance, especially for complex operations like joins and time windowing.
 * **Fast failure recovery**: Recovers from system crashes within seconds.
 * **Dynamic scaling**: Adjusts resources instantly to handle workload spikes.
