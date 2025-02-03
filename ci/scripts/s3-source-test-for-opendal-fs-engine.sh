@@ -29,7 +29,7 @@ echo "--- starting risingwave cluster with connector node"
 risedev ci-start ci-3cn-3fe-opendal-fs-backend
 
 echo "--- Run test"
-python3 -m pip install --break-system-packages minio psycopg2-binary
+python3 -m pip install --break-system-packages minio==7.2.15 psycopg2-binary==2.9.10
 python3 e2e_test/s3/"$script"
 
 echo "--- Kill cluster"

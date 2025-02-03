@@ -45,7 +45,7 @@ echo "--- starting risingwave cluster with connector node"
 risedev ci-start ci-1cn-1fe
 
 echo "--- Run test"
-python3 -m pip install --break-system-packages psycopg2-binary
+python3 -m pip install --break-system-packages psycopg2-binary==2.9.10
 python3 e2e_test/source_legacy/pulsar/astra-streaming.py
 # python3 e2e_test/source_legacy/pulsar/streamnative-cloud.py
 
