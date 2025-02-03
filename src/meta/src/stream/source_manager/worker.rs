@@ -21,8 +21,6 @@ use super::*;
 const MAX_FAIL_CNT: u32 = 10;
 const DEFAULT_SOURCE_TICK_TIMEOUT: Duration = Duration::from_secs(10);
 
-// use in debug mode only
-#[cfg(debug_assertions)]
 const DEBUG_SPLITS_KEY: &str = "debug_splits";
 
 pub struct SharedSplitMap {
@@ -45,7 +43,6 @@ pub struct ConnectorSourceWorker {
     fail_cnt: u32,
     source_is_up: LabelGuardedIntGauge<2>,
 
-    #[cfg(debug_assertions)]
     debug_splits: Option<Vec<SplitImpl>>,
 }
 
@@ -59,21 +56,19 @@ fn extract_prop_from_existing_source(source: &Source) -> ConnectorResult<Connect
 fn extract_prop_from_new_source(source: &Source) -> ConnectorResult<ConnectorProperties> {
     let options_with_secret = WithOptionsSecResolved::new(
         {
-            #[cfg(debug_assertions)]
-            {
-                let mut with_properties = source.with_properties.clone();
-                with_properties.remove(DEBUG_SPLITS_KEY);
-                with_properties
-            }
+            let mut with_properties = source.with_properties.clone();
+            let _removed = with_properties.remove(DEBUG_SPLITS_KEY);
+
             #[cfg(not(debug_assertions))]
             {
-                if source.with_properties.contains_key("debug_splits") {
+                if _removed.is_some() {
                     return Err(ConnectorError::from(anyhow::anyhow!(
-                        "debug_splits is not allowed in release mode"
+                        "`debug_splits` is not allowed in release mode"
                     )));
                 }
-                source.with_properties.clone()
             }
+
+            with_properties
         },
         source.secret_refs.clone(),
     );
@@ -247,22 +242,36 @@ impl ConnectorSourceWorker {
             connector_properties,
             fail_cnt: 0,
             source_is_up,
-            #[cfg(debug_assertions)]
             debug_splits: {
-                use risingwave_common::types::JsonbVal;
-                if let Some(debug_splits) = source.with_properties.get(DEBUG_SPLITS_KEY) {
-                    let mut splits = Vec::new();
-                    let debug_splits_value =
-                        jsonbb::serde_json::from_str::<serde_json::Value>(debug_splits)
-                            .context("failed to parse split impl")?;
-                    for split_impl_value in debug_splits_value.as_array().unwrap() {
-                        splits.push(SplitImpl::restore_from_json(JsonbVal::from(
-                            split_impl_value.clone(),
-                        ))?);
+                let debug_splits = source.with_properties.get(DEBUG_SPLITS_KEY);
+                #[cfg(not(debug_assertions))]
+                {
+                    if debug_splits.is_some() {
+                        return Err(ConnectorError::from(anyhow::anyhow!(
+                            "`debug_splits` is not allowed in release mode"
+                        ))
+                        .into());
                     }
-                    Some(splits)
-                } else {
                     None
+                }
+
+                #[cfg(debug_assertions)]
+                {
+                    use risingwave_common::types::JsonbVal;
+                    if let Some(debug_splits) = debug_splits {
+                        let mut splits = Vec::new();
+                        let debug_splits_value =
+                            jsonbb::serde_json::from_str::<serde_json::Value>(debug_splits)
+                                .context("failed to parse split impl")?;
+                        for split_impl_value in debug_splits_value.as_array().unwrap() {
+                            splits.push(SplitImpl::restore_from_json(JsonbVal::from(
+                                split_impl_value.clone(),
+                            ))?);
+                        }
+                        Some(splits)
+                    } else {
+                        None
+                    }
                 }
             },
         })
@@ -319,19 +328,9 @@ impl ConnectorSourceWorker {
         };
 
         let splits = {
-            #[cfg(debug_assertions)]
-            {
-                if let Some(debug_splits) = &self.debug_splits {
-                    debug_splits.clone()
-                } else {
-                    self.enumerator.list_splits().await.inspect_err(|_| {
-                        source_is_up(0);
-                        self.fail_cnt += 1;
-                    })?
-                }
-            }
-            #[cfg(not(debug_assertions))]
-            {
+            if let Some(debug_splits) = &self.debug_splits {
+                debug_splits.clone()
+            } else {
                 self.enumerator.list_splits().await.inspect_err(|_| {
                     source_is_up(0);
                     self.fail_cnt += 1;
