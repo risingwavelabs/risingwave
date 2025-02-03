@@ -298,7 +298,6 @@ fn task_main(
                         MySqlConnectOptions::new()
                             .host(&c.address)
                             .port(c.port)
-                            .database(&c.database)
                             .username(&c.user)
                             .password(&c.password),
                     );
@@ -312,7 +311,7 @@ fn task_main(
                         PgConnectOptions::new()
                             .host(&c.address)
                             .port(c.port)
-                            .database(&c.database)
+                            .database("template1")
                             .username(&c.user)
                             .password(&c.password),
                     );
