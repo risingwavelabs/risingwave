@@ -533,6 +533,11 @@ impl plan_common::ColumnDescVersion {
     pub const LATEST: Self = Self::Pr13707;
 }
 
+impl hummock::CompatibilityVersion {
+    /// The latest version of `CompatibilityVersion` proto message.
+    pub const LATEST: Self = Self::SplitGroupByTableId;
+}
+
 #[cfg(test)]
 mod tests {
     use crate::data::{data_type, DataType};
