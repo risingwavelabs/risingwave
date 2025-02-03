@@ -1000,7 +1000,7 @@ pub fn bind_struct_field(column_def: &StructField) -> Result<ColumnDesc> {
         generated_or_default_column: None,
         description: None,
         additional_column: AdditionalColumn { column_type: None },
-        version: ColumnDescVersion::Pr13707,
+        version: ColumnDescVersion::LATEST,
         system_column: None,
     })
 }

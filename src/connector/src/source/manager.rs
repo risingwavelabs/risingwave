@@ -185,7 +185,7 @@ impl From<&SourceColumnDesc> for ColumnDesc {
             type_name: "".to_owned(),
             generated_or_default_column: None,
             description: None,
-            version: ColumnDescVersion::Pr13707,
+            version: ColumnDescVersion::LATEST,
             system_column: None,
         }
     }

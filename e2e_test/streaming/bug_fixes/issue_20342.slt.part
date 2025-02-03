@@ -1,0 +1,99 @@
+statement ok
+set streaming_parallelism=1;
+
+# pk: [v1]
+# stream key: [v1]
+statement ok
+create table t(v1 int primary key, v2 int);
+
+# pk: [v2, v1]
+# stream key: [v1]
+statement ok
+create materialized view m1 as select * from t order by v2;
+
+statement ok
+insert into t select x as v1, x as v2 from generate_series(1, 10000) t(x);
+
+statement ok
+flush;
+
+skipif madsim
+statement ok
+set backfill_rate_limit=1;
+
+skipif madsim
+statement ok
+set background_ddl=true;
+
+statement ok
+create materialized view m2 as select count(*) from m1;
+
+skipif madsim
+sleep 2s
+
+statement ok
+update t set v2 = 100000 where v1 = 1;
+
+statement ok
+flush;
+
+statement ok
+update t set v2 = 100001 where v1 = 2;
+
+statement ok
+flush;
+
+statement ok
+update t set v2 = 100002 where v1 = 3;
+
+statement ok
+flush;
+
+statement ok
+update t set v2 = 100003 where v1 = 4;
+
+statement ok
+flush;
+
+statement ok
+update t set v2 = 100004 where v1 = 5;
+
+statement ok
+flush;
+
+statement ok
+update t set v2 = 100005 where v1 = 6;
+
+statement ok
+flush;
+
+statement ok
+update t set v2 = 100006 where v1 = 7;
+
+statement ok
+flush;
+
+statement ok
+update t set v2 = 100007 where v1 = 8;
+
+statement ok
+flush;
+
+statement ok
+set backfill_rate_limit=default;
+
+statement ok
+set background_ddl=false;
+
+statement ok
+set streaming_use_arrangement_backfill=true;
+
+statement ok
+alter materialized view m2 set backfill_rate_limit=default;
+
+skipif madsim
+statement ok
+wait;
+
+statement ok
+drop table t cascade;

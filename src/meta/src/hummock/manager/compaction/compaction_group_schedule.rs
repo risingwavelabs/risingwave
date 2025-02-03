@@ -458,7 +458,7 @@ impl HummockManager {
                         parent_group_id,
                         new_sst_start_id,
                         table_ids: vec![],
-                        version: CompatibilityVersion::SplitGroupByTableId as i32, // for compatibility
+                        version: CompatibilityVersion::LATEST as _, // for compatibility
                         split_key: Some(split_key.into()),
                     })],
                 },

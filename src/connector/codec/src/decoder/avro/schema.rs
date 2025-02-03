@@ -152,7 +152,7 @@ fn avro_field_to_column_desc(
                 description: None,
                 additional_column_type: 0, // deprecated
                 additional_column: Some(AdditionalColumn { column_type: None }),
-                version: ColumnDescVersion::Pr13707 as i32,
+                version: ColumnDescVersion::LATEST as _,
             })
         }
         _ => {
@@ -162,7 +162,7 @@ fn avro_field_to_column_desc(
                 column_id: *index,
                 name: name.to_owned(),
                 additional_column: Some(AdditionalColumn { column_type: None }),
-                version: ColumnDescVersion::Pr13707 as i32,
+                version: ColumnDescVersion::LATEST as _,
                 ..Default::default()
             })
         }

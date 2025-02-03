@@ -36,7 +36,7 @@ impl ColumnDescTestExt for ColumnDesc {
             column_id,
             name: name.to_owned(),
             additional_column: Some(AdditionalColumn { column_type: None }),
-            version: ColumnDescVersion::Pr13707 as i32,
+            version: ColumnDescVersion::LATEST as _,
             ..Default::default()
         }
     }
@@ -62,7 +62,7 @@ impl ColumnDescTestExt for ColumnDesc {
             description: None,
             additional_column_type: 0, // deprecated
             additional_column: Some(AdditionalColumn { column_type: None }),
-            version: ColumnDescVersion::Pr13707 as i32,
+            version: ColumnDescVersion::LATEST as _,
         }
     }
 }
