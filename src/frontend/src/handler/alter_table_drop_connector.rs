@@ -93,15 +93,6 @@ fn rewrite_table_definition(
         panic!("unexpected statement: {:?}", original_statement);
     };
 
-    // find if altering a cdc table
-    if original_source_def.with_properties.is_cdc_connector() {
-        return Err(ErrorCode::NotImplemented(NotImplemented {
-            feature: "Dropping connector from a cdc table".to_owned(),
-            issue: TrackingIssue::none(),
-        })
-        .into());
-    }
-
     // identical logic with func `handle_addition_columns`, reverse the order to keep the original order of additional columns
     for item in include_column_options.iter().rev() {
         let col_name = if let Some(col_alias) = &item.column_alias {
