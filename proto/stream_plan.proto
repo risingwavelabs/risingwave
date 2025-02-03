@@ -360,9 +360,6 @@ enum AggNodeVersion {
   // IMPORTANT:
   // Don't forget to change `AggNodeVersion::LATEST` in `prost/src/lib.rs` to the latest version
   // when adding new versions to this enum.
-
-  // Used for test only.
-  AGG_NODE_VERSION_MAX = 2147483647;
 }
 
 message SimpleAggNode {
