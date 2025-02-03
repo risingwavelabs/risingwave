@@ -528,6 +528,11 @@ impl stream_plan::AggNodeVersion {
     pub const LATEST: Self = Self::Issue13465;
 }
 
+impl plan_common::ColumnDescVersion {
+    /// The latest version of `ColumnDesc` proto message.
+    pub const LATEST: Self = Self::Pr13707;
+}
+
 #[cfg(test)]
 mod tests {
     use crate::data::{data_type, DataType};
