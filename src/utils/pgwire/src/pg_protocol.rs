@@ -485,7 +485,7 @@ where
             // If got and ssl context, say yes for ssl connection.
             // Construct ssl stream and replace with current one.
             self.stream.write(&BeMessage::EncryptionResponseSsl).await?;
-            self.stream.to_ssl(context).await?;
+            self.stream.upgrade_to_ssl(context).await?;
         } else {
             // If no, say no for encryption.
             self.stream.write(&BeMessage::EncryptionResponseNo).await?;
@@ -1120,7 +1120,7 @@ where
     S: AsyncWrite + AsyncRead + Unpin,
 {
     /// Convert the underlying stream to ssl stream based on the given context.
-    async fn to_ssl(&mut self, ssl_ctx: &SslContextRef) -> PsqlResult<()> {
+    async fn upgrade_to_ssl(&mut self, ssl_ctx: &SslContextRef) -> PsqlResult<()> {
         let mut stream = self.stream.lock().await;
 
         match std::mem::replace(&mut *stream, PgStreamInner::Placeholder) {
