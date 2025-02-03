@@ -523,21 +523,6 @@ impl std::fmt::Debug for plan_common::ColumnDesc {
     }
 }
 
-impl stream_plan::AggNodeVersion {
-    /// The latest version of Agg node proto message.
-    pub const LATEST: Self = Self::Issue13465;
-}
-
-impl plan_common::ColumnDescVersion {
-    /// The latest version of `ColumnDesc` proto message.
-    pub const LATEST: Self = Self::Pr13707;
-}
-
-impl hummock::CompatibilityVersion {
-    /// The latest version of `CompatibilityVersion` proto message.
-    pub const LATEST: Self = Self::SplitGroupByTableId;
-}
-
 #[cfg(test)]
 mod tests {
     use crate::data::{data_type, DataType};

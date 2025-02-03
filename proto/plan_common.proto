@@ -21,10 +21,6 @@ enum ColumnDescVersion {
   // Introduced in https://github.com/risingwavelabs/risingwave/pull/13707#discussion_r1429947537,
   // in case DEFAULT_KEY_COLUMN_NAME changes
   COLUMN_DESC_VERSION_PR_13707 = 1;
-
-  // IMPORTANT:
-  // Don't forget to change `ColumnDescVersion::LATEST` in `prost/src/lib.rs` to the latest version
-  // when adding new versions to this enum.
 }
 
 message ColumnDesc {

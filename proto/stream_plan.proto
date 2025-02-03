@@ -356,10 +356,6 @@ enum AggNodeVersion {
 
   // https://github.com/risingwavelabs/risingwave/issues/13465#issuecomment-1821016508
   AGG_NODE_VERSION_ISSUE_13465 = 2;
-
-  // IMPORTANT:
-  // Don't forget to change `AggNodeVersion::LATEST` in `prost/src/lib.rs` to the latest version
-  // when adding new versions to this enum.
 }
 
 message SimpleAggNode {

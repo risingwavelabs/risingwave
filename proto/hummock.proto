@@ -80,10 +80,6 @@ enum CompatibilityVersion {
   NO_TRIVIAL_SPLIT = 1;
   NO_MEMBER_TABLE_IDS = 2;
   SPLIT_GROUP_BY_TABLE_ID = 3;
-
-  // IMPORTANT:
-  // Don't forget to change `CompatibilityVersion::LATEST` in `prost/src/lib.rs` to the latest version
-  // when adding new versions to this enum.
 }
 
 message GroupConstruct {
