@@ -14,11 +14,20 @@
 
 package com.risingwave.java.binding;
 
-public class CdcSourceChannel implements AutoCloseable {
+import java.lang.ref.Cleaner;
+
+public class CdcSourceChannel {
     private final long pointer;
+
+    private static final Cleaner cleaner = Cleaner.create();
 
     CdcSourceChannel(long pointer) {
         this.pointer = pointer;
+        cleaner.register(
+                this,
+                () -> {
+                    Binding.cdcSourceSenderClose(pointer);
+                });
     }
 
     public static CdcSourceChannel fromOwnedPointer(long pointer) {
@@ -31,10 +40,5 @@ public class CdcSourceChannel implements AutoCloseable {
 
     public boolean sendError(String errorMsg) {
         return Binding.sendCdcSourceErrorToChannel(pointer, errorMsg);
-    }
-
-    @Override
-    public void close() {
-        Binding.cdcSourceSenderClose(pointer);
     }
 }
