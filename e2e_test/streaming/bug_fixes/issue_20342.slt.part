@@ -26,6 +26,7 @@ set background_ddl=true;
 statement ok
 create materialized view m2 as select count(*) from m1;
 
+skipif madsim
 sleep 2s
 
 statement ok
