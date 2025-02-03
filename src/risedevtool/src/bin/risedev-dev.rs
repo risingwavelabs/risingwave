@@ -34,6 +34,8 @@ use risedev::{
     PrometheusService, PubsubService, RedisService, SchemaRegistryService, ServiceConfig,
     SqlServerService, SqliteConfig, Task, TaskGroup, TempoService, RISEDEV_NAME,
 };
+use sqlx::mysql::MySqlConnectOptions;
+use sqlx::postgres::PgConnectOptions;
 use tempfile::tempdir;
 use thiserror_ext::AsReport;
 use tracing::level_filters::LevelFilter;
@@ -292,39 +294,29 @@ fn task_main(
                 }
                 ServiceConfig::MySql(c) => {
                     MySqlService::new(c.clone()).execute(&mut ctx)?;
-                    if c.user_managed {
-                        let mut task = risedev::TcpReadyCheckTask::new(
-                            c.address.clone(),
-                            c.port,
-                            c.user_managed,
-                        )?;
-                        task.execute(&mut ctx)?;
-                    } else {
-                        // When starting a MySQL container, the MySQL process is set as the main process.
-                        // Since the first process in a container always gets PID 1, the MySQL log always shows
-                        // "starting as process 1".
-                        let mut task = risedev::LogReadyCheckTask::new("starting as process 1\n")?;
-                        task.execute(&mut ctx)?;
-                    }
+                    let mut task = risedev::DbReadyCheckTask::new(
+                        MySqlConnectOptions::new()
+                            .host(&c.address)
+                            .port(c.port)
+                            .database(&c.database)
+                            .username(&c.user)
+                            .password(&c.password),
+                    );
+                    task.execute(&mut ctx)?;
                     ctx.pb
                         .set_message(format!("mysql {}:{}", c.address, c.port));
                 }
                 ServiceConfig::Postgres(c) => {
                     PostgresService::new(c.clone()).execute(&mut ctx)?;
-                    if c.user_managed {
-                        let mut task = risedev::TcpReadyCheckTask::new(
-                            c.address.clone(),
-                            c.port,
-                            c.user_managed,
-                        )?;
-                        task.execute(&mut ctx)?;
-                    } else {
-                        let mut task = risedev::LogReadyCheckTask::new_all([
-                            "ready to accept connections", // also appears in init process
-                            "listening on IPv4 address",   // only appears when ready
-                        ])?;
-                        task.execute(&mut ctx)?;
-                    }
+                    let mut task = risedev::DbReadyCheckTask::new(
+                        PgConnectOptions::new()
+                            .host(&c.address)
+                            .port(c.port)
+                            .database(&c.database)
+                            .username(&c.user)
+                            .password(&c.password),
+                    );
+                    task.execute(&mut ctx)?;
                     ctx.pb
                         .set_message(format!("postgres {}:{}", c.address, c.port));
                 }
