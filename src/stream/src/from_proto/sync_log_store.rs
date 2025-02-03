@@ -14,6 +14,7 @@
 
 use risingwave_pb::stream_plan::SyncLogStoreNode;
 use risingwave_storage::StateStore;
+use crate::common::log_store_impl::kv_log_store::KvLogStoreMetrics;
 
 use crate::error::StreamResult;
 use crate::executor::Executor;
@@ -30,6 +31,11 @@ impl ExecutorBuilder for SyncLogStoreExecutorBuilder {
         node: &Self::Node,
         store: impl StateStore,
     ) -> StreamResult<Executor> {
+        let actor_context = params.actor_context.clone();
+        let actor_id = actor_context.id;
+        let table_id = 1;
+        let streaming_metrics = actor_context.streaming_metrics.as_ref();
+
         todo!()
         // let table = node.get_table()?;
         // let table = table.clone();
