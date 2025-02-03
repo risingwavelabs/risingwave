@@ -74,14 +74,14 @@ where
     SM: SessionManager,
 {
     /// Used for write/read pg messages.
-    stream: PgStream<S>,
+    pub stream: PgStream<S>,
     /// Current states of pg connection.
     state: PgProtocolState,
     /// Whether the connection is terminated.
     is_terminate: bool,
 
     session_mgr: Arc<SM>,
-    session: Option<Arc<SM::Session>>,
+    pub session: Option<Arc<SM::Session>>,
 
     result_cache: HashMap<String, ResultCache<<SM::Session as Session>::ValuesStream>>,
     unnamed_prepare_statement: Option<<SM::Session as Session>::PreparedStatement>,
@@ -1097,7 +1097,7 @@ where
         Ok(())
     }
 
-    async fn flush(&mut self) -> io::Result<()> {
+    pub async fn flush(&mut self) -> io::Result<()> {
         let mut stream = self.stream.lock().await;
         match &mut *stream {
             PgStreamInner::Placeholder => unreachable!(),

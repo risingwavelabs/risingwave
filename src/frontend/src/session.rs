@@ -17,6 +17,7 @@ use std::io::{Error, ErrorKind};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Arc, Weak};
+use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
 use anyhow::anyhow;
@@ -79,6 +80,7 @@ use risingwave_sqlparser::ast::{ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
 use thiserror::Error;
 use tokio::runtime::Builder;
+use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot::Sender;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
@@ -647,7 +649,11 @@ pub struct SessionImpl {
     /// Stores the value of configurations.
     config_map: Arc<RwLock<SessionConfig>>,
     /// buffer the Notices to users,
+    #[deprecated]
     notices: RwLock<Vec<String>>,
+
+    notice_tx: UnboundedSender<String>,
+    notice_rx: Mutex<UnboundedReceiver<String>>,
 
     /// Identified by `process_id`, `secret_key`. Corresponds to `SessionManager`.
     id: (i32, i32),
@@ -741,6 +747,8 @@ impl SessionImpl {
         session_config: SessionConfig,
     ) -> Self {
         let cursor_metrics = env.cursor_metrics.clone();
+        let (notice_tx, notice_rx) = mpsc::unbounded_channel();
+
         Self {
             env,
             auth_context: Arc::new(RwLock::new(auth_context)),
@@ -751,6 +759,8 @@ impl SessionImpl {
             txn: Default::default(),
             current_query_cancel_flag: Mutex::new(None),
             notices: Default::default(),
+            notice_tx,
+            notice_rx: Mutex::new(notice_rx),
             exec_context: Mutex::new(None),
             last_idle_instant: Default::default(),
             cursor_manager: Arc::new(CursorManager::new(cursor_metrics)),
@@ -761,6 +771,8 @@ impl SessionImpl {
     #[cfg(test)]
     pub fn mock() -> Self {
         let env = FrontendEnv::mock();
+        let (notice_tx, notice_rx) = mpsc::unbounded_channel();
+
         Self {
             env: FrontendEnv::mock(),
             auth_context: Arc::new(RwLock::new(AuthContext::new(
@@ -775,6 +787,8 @@ impl SessionImpl {
             txn: Default::default(),
             current_query_cancel_flag: Mutex::new(None),
             notices: Default::default(),
+            notice_tx,
+            notice_rx: Mutex::new(notice_rx),
             exec_context: Mutex::new(None),
             peer_addr: Address::Tcp(SocketAddr::new(
                 IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
@@ -1589,6 +1603,10 @@ impl Session for SessionImpl {
     fn take_notices(self: Arc<Self>) -> Vec<String> {
         let inner = &mut (*self.notices.write());
         std::mem::take(inner)
+    }
+
+    fn poll_next_notice(self: Arc<Self>, ctx: &mut Context<'_>) -> Poll<Option<String>> {
+        self.notice_rx.lock().poll_recv(ctx)
     }
 
     fn transaction_status(&self) -> TransactionStatus {
