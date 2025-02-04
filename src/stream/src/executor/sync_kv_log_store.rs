@@ -103,7 +103,6 @@ type ReadFlushedChunkFuture = BoxFuture<'static, LogStoreResult<(ChunkId, Stream
 struct SyncedKvLogStoreExecutor<S: StateStore> {
     actor_context: ActorContextRef,
     table_id: TableId,
-    read_metrics: KvLogStoreReadMetrics,
     metrics: KvLogStoreMetrics,
     serde: LogStoreRowSerde,
     seq_id: SeqIdType,
@@ -124,7 +123,6 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
     pub async fn new(
         actor_context: ActorContextRef,
         table_id: u32,
-        read_metrics: KvLogStoreReadMetrics,
         metrics: KvLogStoreMetrics,
         serde: LogStoreRowSerde,
         seq_id: SeqIdType,
@@ -146,7 +144,6 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
         Self {
             actor_context,
             table_id: TableId::new(table_id),
-            read_metrics,
             metrics: metrics.clone(),
             serde,
             seq_id,
@@ -188,7 +185,6 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                 self.actor_context.id,
                 &mut input,
                 self.table_id,
-                &self.read_metrics,
                 &mut self.serde,
                 &mut self.truncation_offset,
                 &mut state_store_stream,
@@ -235,7 +231,6 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
         actor_id: ActorId,
         input: &mut BoxedMessageStream,
         table_id: TableId,
-        read_metrics: &KvLogStoreReadMetrics,
         serde: &mut LogStoreRowSerde,
         truncation_offset: &mut Option<ReaderTruncationOffsetType>,
         state_store_stream: &mut Option<StateStoreStream<S>>,
@@ -306,7 +301,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
             // read from log store
             logstore_item = Self::try_next_item(
                 table_id,
-                read_metrics,
+                metrics,
                 serde,
                 truncation_offset,
                 state_store_stream,
@@ -326,7 +321,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
     #[allow(clippy::too_many_arguments)]
     async fn try_next_item(
         table_id: TableId,
-        read_metrics: &KvLogStoreReadMetrics,
+        metrics: &KvLogStoreMetrics,
         serde: &LogStoreRowSerde,
         truncation_offset: &mut Option<ReaderTruncationOffsetType>,
 
@@ -354,7 +349,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
             state_store,
             buffer,
             table_id,
-            read_metrics,
+            &metrics.flushed_buffer_read_metrics,
         )
         .await?
         {
