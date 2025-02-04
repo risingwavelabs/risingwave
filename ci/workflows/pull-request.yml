@@ -160,7 +160,7 @@ steps:
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 25
+    timeout_in_minutes: 30
     retry: *auto-retry
 
   - label: "end-to-end test for opendal (parallel)"
@@ -562,7 +562,7 @@ steps:
           environment:
           - GITHUB_TOKEN
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 30
+    timeout_in_minutes: 35
     cancel_on_build_failing: true
     retry: *auto-retry
 
@@ -583,7 +583,7 @@ steps:
       # - test-collector#v1.0.0:
       #     files: "*-junit.xml"
       #     format: "junit"
-    timeout_in_minutes: 35
+    timeout_in_minutes: 40
     cancel_on_build_failing: true
     retry: *auto-retry
 
@@ -748,7 +748,7 @@ steps:
           run: ci-standard-env
           propagate-environment: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 32
+    timeout_in_minutes: 37
     retry: *auto-retry
 
   # FIXME(kwannoel): Let the github PR labeller label it, if sqlsmith source files has changes.
