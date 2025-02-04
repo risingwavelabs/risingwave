@@ -19,9 +19,11 @@ use risingwave_pb::stream_plan::SyncLogStoreNode;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::PhysicalPlanRef;
 use crate::optimizer::plan_node::stream::StreamPlanRef;
-use crate::optimizer::plan_node::utils::{childless_record, Distill};
+use crate::optimizer::plan_node::utils::{
+    childless_record, infer_kv_log_store_table_catalog_inner, Distill,
+};
 use crate::optimizer::plan_node::{
-    ExprRewritable, PlanBase, PlanTreeNodeUnary, Stream, StreamExchange, StreamNode,
+    ExprRewritable, PlanBase, PlanTreeNodeUnary, Stream, StreamNode,
 };
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::PlanRef;
@@ -69,7 +71,13 @@ impl_plan_tree_node_for_unary! { StreamSyncLogStore }
 
 impl StreamNode for StreamSyncLogStore {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> NodeBody {
-        NodeBody::SyncLogStore(SyncLogStoreNode {})
+        // FIXME
+        let columns = vec![];
+        let log_store_table = infer_kv_log_store_table_catalog_inner(&self.input, &columns)
+            .with_id(state.gen_table_id_wrapped())
+            .to_internal_table_prost()
+            .into();
+        NodeBody::SyncLogStore(SyncLogStoreNode { log_store_table })
     }
 }
 

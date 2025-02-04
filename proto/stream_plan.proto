@@ -853,7 +853,9 @@ message RowMergeNode {
   catalog.ColIndexMapping rhs_mapping = 2;
 }
 
-message SyncLogStoreNode {}
+message SyncLogStoreNode {
+  catalog.Table log_store_table = 1;
+}
 
 message StreamNode {
   oneof node_body {
