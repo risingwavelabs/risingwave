@@ -95,6 +95,9 @@ pub trait Session: Send + Sync {
         params_types: Vec<Option<DataType>>,
     ) -> impl Future<Output = Result<Self::PreparedStatement, BoxedError>> + Send;
 
+    /// Receive the next notice message to send to the client.
+    ///
+    /// This function should be cancellation-safe.
     fn next_notice(self: &Arc<Self>) -> impl Future<Output = String> + Send;
 
     fn bind(
