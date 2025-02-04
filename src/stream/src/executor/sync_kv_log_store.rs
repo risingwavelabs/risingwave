@@ -120,7 +120,7 @@ struct SyncedKvLogStoreExecutor<S: StateStore> {
 // Stream interface
 impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
     #[allow(clippy::too_many_arguments, dead_code)]
-    pub async fn new(
+    pub(crate) async fn new(
         actor_context: ActorContextRef,
         table_id: u32,
         metrics: KvLogStoreMetrics,
