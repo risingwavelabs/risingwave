@@ -1068,8 +1068,8 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_sendCdcSourceErrorTo
 }
 
 #[no_mangle]
-extern "system" fn Java_com_risingwave_java_binding_Binding_cdcSourceSenderClose<'a>(
-    _env: EnvParam<'a>,
+extern "system" fn Java_com_risingwave_java_binding_Binding_cdcSourceSenderClose(
+    _env: EnvParam<'_>,
     channel: OwnedPointer<JniSenderType<GetEventStreamResponse>>,
 ) {
     channel.release();
