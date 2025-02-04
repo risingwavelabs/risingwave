@@ -648,7 +648,9 @@ pub struct SessionImpl {
     /// Stores the value of configurations.
     config_map: Arc<RwLock<SessionConfig>>,
 
+    /// Channel sender for frontend handler to send notices.
     notice_tx: UnboundedSender<String>,
+    /// Channel receiver for pgwire to take notices and send to clients.
     notice_rx: Mutex<UnboundedReceiver<String>>,
 
     /// Identified by `process_id`, `secret_key`. Corresponds to `SessionManager`.

@@ -1140,7 +1140,7 @@ where
         BeMessage::write(&mut self.write_buf, message)
     }
 
-    pub async fn write(&mut self, message: &BeMessage<'_>) -> io::Result<()> {
+    async fn write(&mut self, message: &BeMessage<'_>) -> io::Result<()> {
         self.write_no_flush(message)?;
         self.flush().await?;
         Ok(())
