@@ -17,7 +17,6 @@ use std::io::{Error, ErrorKind};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Arc, Weak};
-use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
 use anyhow::anyhow;
@@ -648,9 +647,6 @@ pub struct SessionImpl {
     user_authenticator: UserAuthenticator,
     /// Stores the value of configurations.
     config_map: Arc<RwLock<SessionConfig>>,
-    /// buffer the Notices to users,
-    #[deprecated]
-    notices: RwLock<Vec<String>>,
 
     notice_tx: UnboundedSender<String>,
     notice_rx: Mutex<UnboundedReceiver<String>>,
@@ -758,7 +754,6 @@ impl SessionImpl {
             peer_addr,
             txn: Default::default(),
             current_query_cancel_flag: Mutex::new(None),
-            notices: Default::default(),
             notice_tx,
             notice_rx: Mutex::new(notice_rx),
             exec_context: Mutex::new(None),
@@ -786,7 +781,6 @@ impl SessionImpl {
             id: (0, 0),
             txn: Default::default(),
             current_query_cancel_flag: Mutex::new(None),
-            notices: Default::default(),
             notice_tx,
             notice_rx: Mutex::new(notice_rx),
             exec_context: Mutex::new(None),
@@ -1157,10 +1151,6 @@ impl SessionImpl {
         shutdown_rx
     }
 
-    fn clear_notices(&self) {
-        *self.notices.write() = vec![];
-    }
-
     pub fn cancel_current_query(&self) {
         let mut flag_guard = self.current_query_cancel_flag.lock();
         if let Some(sender) = flag_guard.take() {
@@ -1172,12 +1162,10 @@ impl SessionImpl {
             info!("Trying to cancel query in distributed mode.");
             self.env.query_manager().cancel_queries_in_session(self.id)
         }
-        self.clear_notices()
     }
 
     pub fn cancel_current_creating_job(&self) {
         self.env.creating_streaming_job_tracker.abort_jobs(self.id);
-        self.clear_notices()
     }
 
     /// This function only used for test now.
@@ -1209,7 +1197,9 @@ impl SessionImpl {
     pub fn notice_to_user(&self, str: impl Into<String>) {
         let notice = str.into();
         tracing::trace!(notice, "notice to user");
-        self.notices.write().push(notice);
+        self.notice_tx
+            .send(notice)
+            .expect("notice channel should not be closed");
     }
 
     pub fn is_barrier_read(&self) -> bool {
@@ -1600,13 +1590,10 @@ impl Session for SessionImpl {
         Self::set_config(self, key, value).map_err(Into::into)
     }
 
-    fn take_notices(self: Arc<Self>) -> Vec<String> {
-        let inner = &mut (*self.notices.write());
-        std::mem::take(inner)
-    }
-
-    fn poll_next_notice(self: Arc<Self>, ctx: &mut Context<'_>) -> Poll<Option<String>> {
-        self.notice_rx.lock().poll_recv(ctx)
+    async fn next_notice(self: &Arc<Self>) -> String {
+        std::future::poll_fn(|cx| self.clone().notice_rx.lock().poll_recv(cx))
+            .await
+            .expect("notice channel should not be closed")
     }
 
     fn transaction_status(&self) -> TransactionStatus {
