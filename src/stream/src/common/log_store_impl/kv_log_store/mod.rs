@@ -101,12 +101,12 @@ impl KvLogStoreMetrics {
         actor_id: ActorId,
         id: u32,
         name: &str,
-        connector: &'static str,
+        upstream: &'static str,
     ) -> Self {
         let actor_id_str = actor_id.to_string();
         let id_str = id.to_string();
 
-        let labels = &[&actor_id_str, connector, &id_str, name];
+        let labels = &[&actor_id_str, upstream, &id_str, name];
         let storage_write_size = metrics
             .kv_log_store_storage_write_size
             .with_guarded_label_values(labels);
@@ -121,7 +121,7 @@ impl KvLogStoreMetrics {
             .kv_log_store_storage_read_size
             .with_guarded_label_values(&[
                 &actor_id_str,
-                connector,
+                upstream,
                 &id_str,
                 name,
                 READ_PERSISTENT_LOG,
@@ -130,7 +130,7 @@ impl KvLogStoreMetrics {
             .kv_log_store_storage_read_count
             .with_guarded_label_values(&[
                 &actor_id_str,
-                connector,
+                upstream,
                 &id_str,
                 name,
                 READ_PERSISTENT_LOG,
@@ -140,7 +140,7 @@ impl KvLogStoreMetrics {
             .kv_log_store_storage_read_size
             .with_guarded_label_values(&[
                 &actor_id_str,
-                connector,
+                upstream,
                 &id_str,
                 name,
                 READ_FLUSHED_BUFFER,
@@ -149,7 +149,7 @@ impl KvLogStoreMetrics {
             .kv_log_store_storage_read_count
             .with_guarded_label_values(&[
                 &actor_id_str,
-                connector,
+                upstream,
                 &id_str,
                 name,
                 READ_FLUSHED_BUFFER,
