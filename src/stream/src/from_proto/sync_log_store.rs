@@ -46,7 +46,7 @@ impl ExecutorBuilder for SyncLogStoreExecutorBuilder {
                 join_fragment_id,
                 name,
                 target,
-            );
+            )
         };
         todo!()
 
