@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::license::LicenseManager;
 use risingwave_common_service::ObserverState;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_trace::TraceSpan;
@@ -91,6 +92,10 @@ impl ObserverState for HummockObserverNode {
                     .update_write_limits(write_limits.write_limits);
             }
 
+            Info::ComputeNodeTotalCpuCount(count) => {
+                LicenseManager::get().update_cpu_core_count(count as _);
+            }
+
             _ => {
                 panic!("error type notification");
             }
@@ -132,6 +137,7 @@ impl ObserverState for HummockObserverNode {
             });
         let snapshot_version = snapshot.version.unwrap();
         self.version = snapshot_version.catalog_version;
+        LicenseManager::get().update_cpu_core_count(snapshot.compute_node_total_cpu_count as _);
     }
 }
 

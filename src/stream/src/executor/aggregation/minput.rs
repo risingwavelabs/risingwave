@@ -399,7 +399,7 @@ mod tests {
             ColumnOrder::new(3, OrderType::ascending()), // _row_id
         ];
         let mut state = MaterializedInputState::new(
-            PbAggNodeVersion::Max,
+            PbAggNodeVersion::LATEST,
             &agg_call,
             &PkIndices::new(), // unused
             &order_columns,
@@ -457,7 +457,7 @@ mod tests {
         {
             // test recovery (cold start)
             let mut state = MaterializedInputState::new(
-                PbAggNodeVersion::Max,
+                PbAggNodeVersion::LATEST,
                 &agg_call,
                 &PkIndices::new(), // unused
                 &order_columns,
@@ -505,7 +505,7 @@ mod tests {
             ColumnOrder::new(3, OrderType::ascending()),  // _row_id
         ];
         let mut state = MaterializedInputState::new(
-            PbAggNodeVersion::Max,
+            PbAggNodeVersion::LATEST,
             &agg_call,
             &PkIndices::new(), // unused
             &order_columns,
@@ -563,7 +563,7 @@ mod tests {
         {
             // test recovery (cold start)
             let mut state = MaterializedInputState::new(
-                PbAggNodeVersion::Max,
+                PbAggNodeVersion::LATEST,
                 &agg_call,
                 &PkIndices::new(), // unused
                 &order_columns,
@@ -627,7 +627,7 @@ mod tests {
             ColumnOrder::new(3, OrderType::ascending()), // _row_id
         ];
         let mut state_1 = MaterializedInputState::new(
-            PbAggNodeVersion::Max,
+            PbAggNodeVersion::LATEST,
             &agg_call_1,
             &PkIndices::new(), // unused
             &order_columns_1,
@@ -642,7 +642,7 @@ mod tests {
             ColumnOrder::new(3, OrderType::ascending()),  // _row_id
         ];
         let mut state_2 = MaterializedInputState::new(
-            PbAggNodeVersion::Max,
+            PbAggNodeVersion::LATEST,
             &agg_call_2,
             &PkIndices::new(), // unused
             &order_columns_2,
@@ -730,7 +730,7 @@ mod tests {
             ColumnOrder::new(3, OrderType::ascending()),  // _row_id
         ];
         let mut state = MaterializedInputState::new(
-            PbAggNodeVersion::Max,
+            PbAggNodeVersion::LATEST,
             &agg_call,
             &PkIndices::new(), // unused
             &order_columns,
@@ -787,7 +787,7 @@ mod tests {
         {
             // test recovery (cold start)
             let mut state = MaterializedInputState::new(
-                PbAggNodeVersion::Max,
+                PbAggNodeVersion::LATEST,
                 &agg_call,
                 &PkIndices::new(), // unused
                 &order_columns,
@@ -837,7 +837,7 @@ mod tests {
             ColumnOrder::new(1, OrderType::ascending()), // _row_id
         ];
         let mut state = MaterializedInputState::new(
-            PbAggNodeVersion::Max,
+            PbAggNodeVersion::LATEST,
             &agg_call,
             &PkIndices::new(), // unused
             &order_columns,
@@ -945,7 +945,7 @@ mod tests {
             ColumnOrder::new(1, OrderType::ascending()), // _row_id
         ];
         let mut state = MaterializedInputState::new(
-            PbAggNodeVersion::Max,
+            PbAggNodeVersion::LATEST,
             &agg_call,
             &PkIndices::new(), // unused
             &order_columns,
@@ -1064,7 +1064,7 @@ mod tests {
             ColumnOrder::new(4, OrderType::ascending()),  // _row_id ASC
         ];
         let mut state = MaterializedInputState::new(
-            PbAggNodeVersion::Max,
+            PbAggNodeVersion::LATEST,
             &agg_call,
             &PkIndices::new(), // unused
             &order_columns,
@@ -1153,7 +1153,7 @@ mod tests {
             ColumnOrder::new(3, OrderType::ascending()),  // _row_id ASC
         ];
         let mut state = MaterializedInputState::new(
-            PbAggNodeVersion::Max,
+            PbAggNodeVersion::LATEST,
             &agg_call,
             &PkIndices::new(), // unused
             &order_columns,
