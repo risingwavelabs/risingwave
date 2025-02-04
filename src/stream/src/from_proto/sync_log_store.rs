@@ -36,7 +36,17 @@ impl ExecutorBuilder for SyncLogStoreExecutorBuilder {
         let table_id = 1;
         let streaming_metrics = actor_context.streaming_metrics.as_ref();
 
-        todo!()
+        let join_fragment_id = 0;
+        let name = "sync_log_store";
+        let target = "unaligned_hash_join";
+        let metrics = KvLogStoreMetrics::new_inner(
+            streaming_metrics,
+            actor_id,
+            join_fragment_id,
+            name,
+            target,
+        );
+
         // let table = node.get_table()?;
         // let table = table.clone();
         // let table = table.into_sync_log_store();
