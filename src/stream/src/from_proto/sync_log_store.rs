@@ -32,20 +32,22 @@ impl ExecutorBuilder for SyncLogStoreExecutorBuilder {
         store: impl StateStore,
     ) -> StreamResult<Executor> {
         let actor_context = params.actor_context.clone();
-        let actor_id = actor_context.id;
         let table_id = 1;
-        let streaming_metrics = actor_context.streaming_metrics.as_ref();
 
-        let join_fragment_id = 0;
-        let name = "sync_log_store";
-        let target = "unaligned_hash_join";
-        let metrics = KvLogStoreMetrics::new_inner(
-            streaming_metrics,
-            actor_id,
-            join_fragment_id,
-            name,
-            target,
-        );
+        let metrics = {
+            let streaming_metrics = actor_context.streaming_metrics.as_ref();
+            let actor_id = actor_context.id;
+            let join_fragment_id = 0;
+            let name = "sync_log_store";
+            let target = "unaligned_hash_join";
+            KvLogStoreMetrics::new_inner(
+                streaming_metrics,
+                actor_id,
+                join_fragment_id,
+                name,
+                target,
+            );
+        };
 
         // let table = node.get_table()?;
         // let table = table.clone();
