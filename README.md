@@ -54,7 +54,7 @@ curl -L https://risingwave.com/sh | sh
 
 To learn about other installation options, such as using a Docker image, see [Quick Start](https://docs.risingwave.com/docs/current/get-started/).
 
-## What Is RisingWave Optimized For?
+## What is RisingWave optimized for?
 RisingWave simplifies the development of real-time data pipelines and applications. It is purpose-built to:
 
 * **Ingestion**: Ingest millions of events per second from both streaming and batch data sources.
@@ -63,16 +63,18 @@ RisingWave simplifies the development of real-time data pipelines and applicatio
 * **Delivery**: Deliver fresh, consistent results to data lakes (e.g., Apache Iceberg) or any destination.
 
 
-## Why Is RisingWave Special?
+## Why is RisingWave special?
 RisingWave stands apart from traditional stream processing systems due to its:
 
-### PostgreSQL Compatibility
+### PostgreSQL compatibility
+Connect via the PostgreSQL wire protocol - using psql, JDBC, or any Postgres tool.
 * **Seamless integration**: Works with a wide range of tools in the PostgreSQL ecosystem.
 * **Expressive SQL**: Supports structured, semi-structured, and unstructured data using a rich, familiar SQL dialect.
 * **No manual state tuning**: Eliminates the need for complex state management configurations.
 
-### Decoupled Compute and Storage
-* **Optimized for complex queries**: Ensures high performance, especially for complex operations like joins and time windowing.
+### Zero disk architecture
+All data lives in S3 (or equivalent), with local disk used only as a cache.
+* **Optimized for complex queries**: Ensures high performance for stateful operations like joins and time windowing.
 * **Fast failure recovery**: Recovers from system crashes within seconds.
 * **Dynamic scaling**: Adjusts resources instantly to handle workload spikes.
 
