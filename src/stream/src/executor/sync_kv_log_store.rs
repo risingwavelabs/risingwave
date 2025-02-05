@@ -206,21 +206,18 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                 )
                 .await?
                 {
-                    match msg {
-                        Message::Barrier(ref barrier) => {
-                            // Apply Vnode Update
-                            if let Some(vnode_bitmap) =
+                    if let Message::Barrier(ref barrier) = msg
+                    && let Some(vnode_bitmap) =
                                 barrier.as_update_vnode_bitmap(self.actor_context.id)
-                            {
-                                local_state_store.update_vnode_bitmap(vnode_bitmap.clone());
-                                self.serde.update_vnode_bitmap(vnode_bitmap.clone());
-                                first_write_epoch = barrier.epoch;
-                            }
-                            yield msg;
-                            continue 'recreate_consume_stream;
-                        }
-                        _ => yield msg,
+                    {
+                        // Apply Vnode Update
+                        local_state_store.update_vnode_bitmap(vnode_bitmap.clone());
+                        self.serde.update_vnode_bitmap(vnode_bitmap.clone());
+                        first_write_epoch = barrier.epoch;
+                        yield msg;
+                        continue 'recreate_consume_stream;
                     }
+                    yield msg;
                 }
             }
         }
