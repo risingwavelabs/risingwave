@@ -531,8 +531,8 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
         chunk: StreamChunk,
         state_store: &mut S::Local,
     ) -> StreamExecutorResult<()> {
-        let chunk_to_flush =
-            { buffer.add_or_flush_chunk(start_seq_id, end_seq_id, chunk, state_store) };
+        let epoch = state_store.epoch();
+        let chunk_to_flush = buffer.add_or_flush_chunk(start_seq_id, end_seq_id, chunk, epoch);
         match chunk_to_flush {
             None => {}
             Some(chunk_to_flush) => {
@@ -550,7 +550,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                         start_seq_id,
                         end_seq_id,
                         new_vnode_bitmap,
-                        state_store.epoch(),
+                        epoch,
                     );
                 }
             }
@@ -598,11 +598,10 @@ impl SyncedLogStoreBuffer {
         start_seq_id: SeqIdType,
         end_seq_id: SeqIdType,
         chunk: StreamChunk,
-        state_store: &mut impl LocalStateStore,
+        epoch: u64,
     ) -> Option<StreamChunk> {
         let current_size = self.buffer.len();
         let chunk_size = chunk.cardinality();
-        let epoch = state_store.epoch();
 
         let should_flush_chunk = current_size + chunk_size >= self.max_size;
         if should_flush_chunk {
