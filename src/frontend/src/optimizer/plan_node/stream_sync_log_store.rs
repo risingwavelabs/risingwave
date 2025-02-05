@@ -76,7 +76,7 @@ impl StreamNode for StreamSyncLogStore {
             .with_id(state.gen_table_id_wrapped())
             .to_internal_table_prost()
             .into();
-        NodeBody::SyncLogStore(SyncLogStoreNode { log_store_table })
+        NodeBody::SyncLogStore(Box::new(SyncLogStoreNode { log_store_table }))
     }
 }
 

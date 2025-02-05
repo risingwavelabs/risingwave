@@ -62,19 +62,15 @@ impl ExecutorBuilder for SyncLogStoreExecutorBuilder {
         let buffer_max_size = 1000;
         let [upstream] = params.input.try_into().unwrap();
 
-        let seq_id = FIRST_SEQ_ID;
-
         let executor = SyncedKvLogStoreExecutor::new(
             actor_context,
             table_id,
             metrics,
             serde,
-            seq_id,
             store,
             buffer_max_size,
             upstream,
-        )
-        .await;
+        );
         Ok((params.info, executor).into())
     }
 }
