@@ -54,6 +54,7 @@ use sea_orm::{
     ColumnTrait, DbErr, EntityTrait, JoinType, ModelTrait, PaginatorTrait, QueryFilter,
     QuerySelect, RelationTrait, SelectGetableTuple, Selector, TransactionTrait, Value,
 };
+use tracing::debug;
 
 use crate::controller::catalog::{CatalogController, CatalogControllerInner};
 use crate::controller::utils::{
@@ -1028,12 +1029,17 @@ impl CatalogController {
                 .insert(*actor_id);
         }
 
-        let expired_workers: HashSet<_> = plan.keys().map(|k| k.worker_id() as WorkerId).collect();
+        let expired_or_changed_workers: HashSet<_> =
+            plan.keys().map(|k| k.worker_id() as WorkerId).collect();
 
         let mut actor_migration_plan = HashMap::new();
         for (worker, fragment) in actor_locations {
-            if expired_workers.contains(&worker) {
-                for (_, actors) in fragment {
+            if expired_or_changed_workers.contains(&worker) {
+                for (fragment_id, actors) in fragment {
+                    debug!(
+                        "worker {} expired or changed, migrating fragment {}",
+                        worker, fragment_id
+                    );
                     let worker_slot_to_actor: HashMap<_, _> = actors
                         .iter()
                         .enumerate()
@@ -1043,8 +1049,9 @@ impl CatalogController {
                         .collect();
 
                     for (worker_slot, actor) in worker_slot_to_actor {
-                        actor_migration_plan
-                            .insert(actor, plan[&worker_slot].worker_id() as WorkerId);
+                        if let Some(target) = plan.get(&worker_slot) {
+                            actor_migration_plan.insert(actor, target.worker_id() as WorkerId);
+                        }
                     }
                 }
             }
