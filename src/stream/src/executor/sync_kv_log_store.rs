@@ -207,8 +207,8 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                 .await?
                 {
                     if let Message::Barrier(ref barrier) = msg
-                    && let Some(vnode_bitmap) =
-                                barrier.as_update_vnode_bitmap(self.actor_context.id)
+                        && let Some(vnode_bitmap) =
+                            barrier.as_update_vnode_bitmap(self.actor_context.id)
                     {
                         // Apply Vnode Update
                         local_state_store.update_vnode_bitmap(vnode_bitmap.clone());
