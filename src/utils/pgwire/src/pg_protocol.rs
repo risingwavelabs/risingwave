@@ -237,12 +237,16 @@ where
                 // If a session is present, subscribe and send notices asynchronously
                 // while processing the message.
                 loop {
+                    let next_notice = async {
+                        let notice = session.next_notice().await;
+                        notice_stream.write(&BeMessage::NoticeResponse(&notice)).await.inspect_err(|e| {
+                            tracing::error!(error = %e.as_report(), notice, "failed to send notice");
+                        }).ok();
+                    };
+
                     tokio::select! {
-                        notice = session.next_notice() => {
-                            notice_stream.write(&BeMessage::NoticeResponse(&notice)).await.inspect_err(|e| {
-                                tracing::error!(error = %e.as_report(), notice, "failed to send notice");
-                            }).ok();
-                        }
+                        _ = next_notice => {}
+
                         terminated = &mut process => {
                             break terminated;
                         }
