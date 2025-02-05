@@ -77,6 +77,8 @@ pub struct ElasticSearchOpenSearchConfig {
     #[serde_as(as = "DisplayFromStr")]
     #[serde(default = "default_concurrent_requests")]
     pub concurrent_requests: usize,
+
+    pub r#type: String,
 }
 
 fn default_retry_on_conflict() -> i32 {
