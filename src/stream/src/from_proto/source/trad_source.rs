@@ -34,7 +34,6 @@ use crate::executor::source::{
 };
 use crate::executor::TroublemakerExecutor;
 
-const FS_CONNECTORS: &[&str] = &["s3"];
 pub struct SourceExecutorBuilder;
 
 pub fn create_source_desc_builder(
@@ -191,13 +190,12 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     state_table_handler,
                 );
 
-                let connector = get_connector_name(&source.with_properties);
-                let is_fs_connector = FS_CONNECTORS.contains(&connector.as_str());
+                let is_fs_connector = source.with_properties.is_legacy_fs_connector();
                 let is_fs_v2_connector = source.with_properties.is_new_fs_connector();
 
                 if is_fs_connector {
                     #[expect(deprecated)]
-                    crate::executor::source::FsSourceExecutor::new(
+                    crate::executor::source::LegacyFsSourceExecutor::new(
                         params.actor_context.clone(),
                         stream_source_core,
                         params.executor_stats,
