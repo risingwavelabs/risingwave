@@ -105,17 +105,14 @@ struct SyncedKvLogStoreExecutor<S: StateStore> {
     table_id: TableId,
     metrics: KvLogStoreMetrics,
     serde: LogStoreRowSerde,
-    seq_id: SeqIdType,
-    truncation_offset: Option<ReaderTruncationOffsetType>,
 
     // Upstream
     upstream: Executor,
 
     // Log store state
-    flushed_chunk_future: Option<ReadFlushedChunkFuture>,
     state_store: S,
     local_state_store: S::Local,
-    buffer: SyncedLogStoreBuffer,
+    buffer_max_size: usize,
 }
 // Stream interface
 impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
@@ -125,7 +122,6 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
         table_id: u32,
         metrics: KvLogStoreMetrics,
         serde: LogStoreRowSerde,
-        seq_id: SeqIdType,
         state_store: S,
         buffer_max_size: usize,
         upstream: Executor,
@@ -144,20 +140,12 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
         Self {
             actor_context,
             table_id: TableId::new(table_id),
-            metrics: metrics.clone(),
+            metrics,
             serde,
-            seq_id,
-            truncation_offset: None,
-            flushed_chunk_future: None,
             state_store,
             local_state_store,
-            buffer: SyncedLogStoreBuffer {
-                buffer: VecDeque::new(),
-                max_size: buffer_max_size,
-                next_chunk_id: 0,
-                metrics,
-            },
             upstream,
+            buffer_max_size,
         }
     }
 }
@@ -166,6 +154,16 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
 impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     pub async fn execute_inner(mut self) {
+        let mut seq_id = FIRST_SEQ_ID;
+        let mut truncation_offset = None;
+        let mut flushed_chunk_future = None;
+        let mut buffer = SyncedLogStoreBuffer {
+            buffer: VecDeque::new(),
+            max_size: self.buffer_max_size,
+            next_chunk_id: 0,
+            metrics: self.metrics.clone(),
+        };
+
         let mut input = self.upstream.execute();
         let barrier = expect_first_barrier(&mut input).await?;
         yield Message::Barrier(barrier.clone());
@@ -186,14 +184,14 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                 &mut input,
                 self.table_id,
                 &mut self.serde,
-                &mut self.truncation_offset,
+                &mut truncation_offset,
                 &mut state_store_stream,
-                &mut self.flushed_chunk_future,
+                &mut flushed_chunk_future,
                 &self.state_store,
-                &mut self.buffer,
+                &mut buffer,
                 &mut self.local_state_store,
                 &mut self.metrics,
-                &mut self.seq_id,
+                &mut seq_id,
             )
             .await?
             {
