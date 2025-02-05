@@ -330,10 +330,6 @@ def section_memory(outer_panels):
                     "",
                     [
                         panels.target(
-                            "rate(actor_memory_usage[$__rate_interval])",
-                            "streaming actor - {{actor_id}}",
-                        ),
-                        panels.target(
                             f"sum({metric('state_store_meta_cache_size')}) by ({COMPONENT_LABEL},{NODE_LABEL})",
                             "storage meta cache - {{%s}} @ {{%s}}"
                             % (COMPONENT_LABEL, NODE_LABEL),

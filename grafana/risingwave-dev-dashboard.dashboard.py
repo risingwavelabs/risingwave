@@ -1315,7 +1315,7 @@ def section_streaming_actors(outer_panels: Panels):
                             f"sum(rate({metric('stream_actor_out_record_cnt')}[$__rate_interval])) by (fragment_id)",
                             "fragment total {{fragment_id}}",
                         ),
-                        panels.target(
+                        panels.target_hidden(
                             f"rate({metric('stream_actor_out_record_cnt', actor_level_filter)}[$__rate_interval])",
                             "actor {{actor_id}}",
                         ),
@@ -1329,7 +1329,7 @@ def section_streaming_actors(outer_panels: Panels):
                             f"sum({metric('stream_memory_usage')}) by (table_id, desc)",
                             "table total {{table_id}}: {{desc}}",
                         ),
-                        panels.target(
+                        panels.target_hidden(
                             f"{metric('stream_memory_usage', actor_level_filter)}",
                             "actor {{actor_id}} table {{table_id}}: {{desc}}",
                         ),
@@ -1371,11 +1371,11 @@ def section_streaming_actors(outer_panels: Panels):
                             f"sum(rate({table_metric('stream_materialize_cache_total_count')}[$__rate_interval])) by (table_id, fragment_id)",
                             "total cached count - table {{table_id}} fragment {{fragment_id}}",
                         ),
-                        panels.target(
+                        panels.target_hidden(
                             f"rate({table_metric('stream_materialize_cache_hit_count', actor_level_filter)}[$__rate_interval])",
                             "cache hit count - actor {{actor_id}} table {{table_id}} fragment {{fragment_id}}",
                         ),
-                        panels.target(
+                        panels.target_hidden(
                             f"rate({table_metric('stream_materialize_cache_total_count', actor_level_filter)}[$__rate_interval])",
                             "total cached count - actor {{actor_id}} table {{table_id}} fragment {{fragment_id}}",
                         ),
@@ -1499,7 +1499,7 @@ def section_streaming_actors(outer_panels: Panels):
                             / ignoring (wait_side, executor) group_left sum({metric('stream_actor_count')}) by (fragment_id)",
                             "fragment avg {{fragment_id}} {{wait_side}} {{executor}}",
                         ),
-                        panels.target(
+                        panels.target_hidden(
                             f"rate({metric('stream_barrier_align_duration_ns', actor_level_filter)}[$__rate_interval]) / 1000000000",
                             "actor {{actor_id}} fragment {{fragment_id}} {{wait_side}} {{executor}}",
                         ),
@@ -1731,7 +1731,7 @@ def section_streaming_actors(outer_panels: Panels):
                             f"sum(rate({metric('stream_executor_row_count')}[$__rate_interval])) by (executor_identity, fragment_id)",
                             "{{executor_identity}} fragment total {{fragment_id}}",
                         ),
-                        panels.target(
+                        panels.target_hidden(
                             f"rate({metric('stream_executor_row_count', actor_level_filter)}[$__rate_interval])",
                             "{{executor_identity}} actor {{actor_id}}",
                         ),
@@ -4170,8 +4170,8 @@ def section_sink_metrics(outer_panels):
                     "The rows sent by remote sink to the Java connector process",
                     [
                         panels.target(
-                            f"rate({metric('connector_sink_rows_received')}[$__rate_interval])",
-                            "{{sink_id}} {{sink_name}} @ actor {{actor_id}}",
+                            f"sum(rate({metric('connector_sink_rows_received')}[$__rate_interval])) by (sink_id, sink_name)",
+                            "{{sink_id}} {{sink_name}}",
                         ),
                     ],
                 ),
