@@ -21,6 +21,10 @@ use super::*;
 const MAX_FAIL_CNT: u32 = 10;
 const DEFAULT_SOURCE_TICK_TIMEOUT: Duration = Duration::from_secs(10);
 
+// The key used to load `SplitImpl` directly from source properties.
+// When this key is present, the enumerator will only return the given ones
+// instead of fetching them from the external source.
+// Only valid in debug builds - will return an error in release builds.
 const DEBUG_SPLITS_KEY: &str = "debug_splits";
 
 pub struct SharedSplitMap {
