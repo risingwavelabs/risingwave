@@ -53,6 +53,11 @@ impl CatalogController {
                 ObjectType::Table => {
                     ensure_object_not_refer(object_type, object_id, &txn).await?;
                     let indexes = get_referring_objects(object_id, &txn).await?;
+                    for obj in indexes.iter().filter(|object| {
+                        object.obj_type == ObjectType::Source || object.obj_type == ObjectType::Sink
+                    }) {
+                        report_drop_object(obj.obj_type, obj.oid, &txn).await;
+                    }
                     assert!(
                         indexes.iter().all(|obj| obj.obj_type == ObjectType::Index),
                         "only index could be dropped in restrict mode"
