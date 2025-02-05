@@ -23,6 +23,7 @@ use std::{io, str};
 
 use bytes::{Bytes, BytesMut};
 use futures::stream::StreamExt;
+use futures::FutureExt;
 use itertools::Itertools;
 use openssl::ssl::{SslAcceptor, SslContext, SslContextRef, SslMethod};
 use risingwave_common::types::DataType;
@@ -210,6 +211,55 @@ where
             ignore_util_sync: false,
             peer_addr,
             redact_sql_option_keywords,
+        }
+    }
+
+    /// Run the protocol to serve the connection.
+    pub async fn run(mut self) {
+        let mut notice_stream = self.stream.clone();
+
+        loop {
+            let session = self.session.clone();
+
+            let mut process = std::pin::pin!(async {
+                let msg = match self.read_message().await {
+                    Ok(msg) => msg,
+                    Err(e) => {
+                        tracing::error!(error = %e.as_report(), "error when reading message");
+                        return true; // terminate the connection
+                    }
+                };
+                tracing::trace!(?msg, "received message");
+                self.process(msg).await
+            });
+
+            let terminated = if let Some(session) = session {
+                // If a session is present, subscribe and send notices asynchronously
+                // while processing the message.
+                loop {
+                    let next_notice = async {
+                        let notice = session.next_notice().await;
+                        notice_stream.write(&BeMessage::NoticeResponse(&notice)).await.inspect_err(|e| {
+                            tracing::error!(error = %e.as_report(), notice, "failed to send notice");
+                        }).ok();
+                    };
+
+                    tokio::select! {
+                        _ = next_notice => {}
+
+                        terminated = &mut process => {
+                            break terminated;
+                        }
+                    }
+                }
+            } else {
+                // Otherwise, just process the message.
+                process.await
+            };
+
+            if terminated {
+                break;
+            }
         }
     }
 
@@ -615,10 +665,13 @@ where
             .clone()
             .run_one_query(stmt.clone(), Format::Text)
             .await;
-        for notice in session.take_notices() {
+
+        // Take all remaining notices (if any) and send them before `CommandComplete`.
+        while let Some(notice) = session.next_notice().now_or_never() {
             self.stream
                 .write_no_flush(&BeMessage::NoticeResponse(&notice))?;
         }
+
         let mut res = res.map_err(PsqlError::SimpleQueryError)?;
 
         for notice in res.notices() {

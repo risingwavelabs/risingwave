@@ -95,9 +95,10 @@ pub trait Session: Send + Sync {
         params_types: Vec<Option<DataType>>,
     ) -> impl Future<Output = Result<Self::PreparedStatement, BoxedError>> + Send;
 
-    // TODO: maybe this function should be async and return the notice more timely
-    /// try to take the current notices from the session
-    fn take_notices(self: Arc<Self>) -> Vec<String>;
+    /// Receive the next notice message to send to the client.
+    ///
+    /// This function should be cancellation-safe.
+    fn next_notice(self: &Arc<Self>) -> impl Future<Output = String> + Send;
 
     fn bind(
         self: Arc<Self>,
@@ -334,29 +335,16 @@ pub async fn handle_connection<S, SM>(
     S: AsyncWrite + AsyncRead + Unpin,
     SM: SessionManager,
 {
-    let mut pg_proto = PgProtocol::new(
+    PgProtocol::new(
         stream,
         session_mgr,
         tls_config,
         peer_addr,
         redact_sql_option_keywords,
-    );
-    loop {
-        let msg = match pg_proto.read_message().await {
-            Ok(msg) => msg,
-            Err(e) => {
-                tracing::error!(error = %e.as_report(), "error when reading message");
-                break;
-            }
-        };
-        tracing::trace!("Received message: {:?}", msg);
-        let ret = pg_proto.process(msg).await;
-        if ret {
-            break;
-        }
-    }
+    )
+    .run()
+    .await;
 }
-
 #[cfg(test)]
 mod tests {
     use std::error::Error;
@@ -505,8 +493,8 @@ mod tests {
             Ok("".to_owned())
         }
 
-        fn take_notices(self: Arc<Self>) -> Vec<String> {
-            vec![]
+        async fn next_notice(self: &Arc<Self>) -> String {
+            std::future::pending().await
         }
 
         fn transaction_status(&self) -> TransactionStatus {
