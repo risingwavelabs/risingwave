@@ -543,7 +543,7 @@ impl ControlStreamManager {
                                             .flatten()
                                             .map(|(actor, upstreams)| BuildActorInfo {
                                                 actor: Some(actor),
-                                                upstreams: upstreams
+                                                fragment_upstreams: upstreams
                                                     .into_iter()
                                                     .map(|(fragment_id, upstreams)| {
                                                         (

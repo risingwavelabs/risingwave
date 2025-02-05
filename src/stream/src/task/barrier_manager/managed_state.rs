@@ -762,7 +762,7 @@ impl DatabaseManagedBarrierState {
         let subscriptions =
             LazyCell::new(|| Arc::new(graph_state.mv_depended_subscriptions.clone()));
         for actor in request.actors_to_build {
-            let upstream = actor.upstreams;
+            let upstream = actor.fragment_upstreams;
             let actor = actor.actor.unwrap();
             let actor_id = actor.actor_id;
             assert!(!is_stop_actor(actor_id));

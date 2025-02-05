@@ -127,7 +127,7 @@ impl ActorBuilder {
     /// During this process, the following things will be done:
     /// 1. Replace the logical `Exchange` in node's input with `Merge`, which can be executed on the
     ///    compute nodes.
-    /// 2. Fill the upstream mview info of the `Merge` node under the other "leaf" nodes.
+    /// 2. Collect the upstream actor ids of each actor for the `Merge` node to create upstream connection.
     fn rewrite(&self) -> MetaResult<(StreamNode, ActorUpstreams)> {
         let mut actor_upstreams = ActorUpstreams::new();
         let node = self.rewrite_inner(&self.nodes, &mut actor_upstreams, 0)?;
