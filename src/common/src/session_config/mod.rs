@@ -337,6 +337,10 @@ pub struct SessionConfig {
     // a.k.a. vnode count
     #[parameter(default = VirtualNode::COUNT_FOR_COMPAT, check_hook = check_streaming_max_parallelism)]
     streaming_max_parallelism: usize,
+
+    /// Whether the streaming join should be unaligned or not.
+    #[parameter(default = false)]
+    streaming_unaligned_join: bool,
 }
 
 fn check_timezone(val: &str) -> Result<(), String> {
