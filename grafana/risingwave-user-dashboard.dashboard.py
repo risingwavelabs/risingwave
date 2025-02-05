@@ -350,114 +350,57 @@ def section_memory(outer_panels):
                         ),
                     ],
                 ),
-                panels.timeseries_actor_ops(
-                    "Executor Cache",
-                    "Executor cache statistics",
-                    [
-                        panels.target(
-                            f"rate({metric('stream_join_lookup_miss_count')}[$__rate_interval])",
-                            "Join - cache miss - {{side}} side, join_table_id {{join_table_id}} degree_table_id {{degree_table_id}} actor {{actor_id}}",
-                        ),
-                        panels.target(
-                            f"rate({metric('stream_join_lookup_total_count')}[$__rate_interval])",
-                            "Join - total lookups - {{side}} side, join_table_id {{join_table_id}} degree_table_id {{degree_table_id}} actor {{actor_id}}",
-                        ),
-                        panels.target(
-                            f"rate({metric('stream_agg_lookup_miss_count')}[$__rate_interval])",
-                            "Agg - cache miss - table {{table_id}} actor {{actor_id}}",
-                        ),
-                        panels.target(
-                            f"rate({metric('stream_agg_lookup_total_count')}[$__rate_interval])",
-                            "Agg - total lookups - table {{table_id}} actor {{actor_id}}",
-                        ),
-                        panels.target(
-                            f"rate({metric('stream_agg_distinct_cache_miss_count')}[$__rate_interval])",
-                            "Distinct agg - cache miss - table {{table_id}} actor {{actor_id}}",
-                        ),
-                        panels.target(
-                            f"rate({metric('stream_agg_distinct_total_cache_count')}[$__rate_interval])",
-                            "Distinct agg - total lookups - table {{table_id}} actor {{actor_id}}",
-                        ),
-                        panels.target(
-                            f"rate({metric('stream_group_top_n_cache_miss_count')}[$__rate_interval])",
-                            "Group top n - cache miss - table {{table_id}} actor {{actor_id}}",
-                        ),
-                        panels.target(
-                            f"rate({metric('stream_group_top_n_total_query_cache_count')}[$__rate_interval])",
-                            "Group top n - total lookups - table {{table_id}} actor {{actor_id}}",
-                        ),
-                        panels.target(
-                            f"rate({metric('stream_group_top_n_appendonly_cache_miss_count')}[$__rate_interval])",
-                            "Group top n appendonly - cache miss - table {{table_id}} actor {{actor_id}}",
-                        ),
-                        panels.target(
-                            f"rate({metric('stream_group_top_n_appendonly_total_query_cache_count')}[$__rate_interval])",
-                            "Group top n appendonly - total lookups - table {{table_id}} actor {{actor_id}}",
-                        ),
-                        panels.target(
-                            f"rate({metric('stream_lookup_cache_miss_count')}[$__rate_interval])",
-                            "Lookup executor - cache miss - table {{table_id}} actor {{actor_id}}",
-                        ),
-                        panels.target(
-                            f"rate({metric('stream_lookup_total_query_cache_count')}[$__rate_interval])",
-                            "Lookup executor - total lookups - table {{table_id}} actor {{actor_id}}",
-                        ),
-                        panels.target(
-                            f"rate({metric('stream_temporal_join_cache_miss_count')}[$__rate_interval])",
-                            "Temporal join - cache miss - table_id {{table_id}} actor {{actor_id}}",
-                        ),
-                        panels.target(
-                            f"rate({metric('stream_temporal_join_total_query_cache_count')}[$__rate_interval])",
-                            "Temporal join - total lookups - table_id {{table_id}} actor {{actor_id}}",
-                        ),
-                        panels.target(
-                            f"rate({metric('stream_materialize_cache_hit_count')}[$__rate_interval])",
-                            "Materialize - cache hit count - table {{table_id}} - actor {{actor_id}}  {{%s}}"
-                            % NODE_LABEL,
-                        ),
-                        panels.target(
-                            f"rate({metric('stream_materialize_cache_total_count')}[$__rate_interval])",
-                            "Materialize - total cache count - table {{table_id}} - actor {{actor_id}}  {{%s}}"
-                            % NODE_LABEL,
-                        ),
-                    ],
-                ),
                 panels.timeseries_percentage(
                     "Executor Cache Miss Ratio",
                     "",
                     [
                         panels.target(
-                            f"(sum(rate({metric('stream_join_lookup_miss_count')}[$__rate_interval])) by (side, join_table_id, degree_table_id, actor_id) ) / (sum(rate({metric('stream_join_lookup_total_count')}[$__rate_interval])) by (side, join_table_id, degree_table_id, actor_id)) >=0 ",
-                            "join executor cache miss ratio - - {{side}} side, join_table_id {{join_table_id}} degree_table_id {{degree_table_id}} actor {{actor_id}}",
+                            f"(sum(rate({metric('stream_join_lookup_miss_count')}[$__rate_interval])) by (side, join_table_id, degree_table_id, fragment_id) ) / (sum(rate({metric('stream_join_lookup_total_count')}[$__rate_interval])) by (side, join_table_id, degree_table_id, fragment_id)) >= 0",
+                            "Join executor cache miss ratio - - {{side}} side, join_table_id {{join_table_id}} degree_table_id {{degree_table_id}} fragment {{fragment_id}}",
                         ),
                         panels.target(
-                            f"(sum(rate({metric('stream_agg_lookup_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_agg_lookup_total_count')}[$__rate_interval])) by (table_id, actor_id)) >=0 ",
-                            "Agg cache miss ratio - table {{table_id}} actor {{actor_id}} ",
+                            f"(sum(rate({metric('stream_agg_lookup_miss_count')}[$__rate_interval])) by (table_id, fragment_id) ) / (sum(rate({metric('stream_agg_lookup_total_count')}[$__rate_interval])) by (table_id, fragment_id)) >= 0",
+                            "Agg cache miss ratio - table {{table_id}} fragment {{fragment_id}} ",
                         ),
                         panels.target(
-                            f"(sum(rate({metric('stream_agg_distinct_cache_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_agg_distinct_total_cache_count')}[$__rate_interval])) by (table_id, actor_id)) >=0",
-                            "Distinct agg cache miss ratio - table {{table_id}} actor {{actor_id}} ",
+                            f"(sum(rate({metric('stream_agg_state_cache_miss_count')}[$__rate_interval])) by (table_id, fragment_id) ) / (sum(rate({metric('stream_agg_state_cache_lookup_count')}[$__rate_interval])) by (table_id, fragment_id)) >= 0",
+                            "Agg state cache miss ratio - table {{table_id}} fragment {{fragment_id}} ",
                         ),
                         panels.target(
-                            f"(sum(rate({metric('stream_group_top_n_cache_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_group_top_n_total_query_cache_count')}[$__rate_interval])) by (table_id, actor_id)) >=0",
-                            "Stream group top n cache miss ratio - table {{table_id}} actor {{actor_id}} ",
+                            f"(sum(rate({metric('stream_agg_distinct_cache_miss_count')}[$__rate_interval])) by (table_id, fragment_id) ) / (sum(rate({metric('stream_agg_distinct_total_cache_count')}[$__rate_interval])) by (table_id, fragment_id)) >= 0",
+                            "Distinct agg cache miss ratio - table {{table_id}} fragment {{fragment_id}} ",
                         ),
                         panels.target(
-                            f"(sum(rate({metric('stream_group_top_n_appendonly_cache_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_group_top_n_appendonly_total_query_cache_count')}[$__rate_interval])) by (table_id, actor_id)) >=0",
-                            "Stream group top n appendonly cache miss ratio - table {{table_id}} actor {{actor_id}} ",
+                            f"(sum(rate({metric('stream_group_top_n_cache_miss_count')}[$__rate_interval])) by (table_id, fragment_id) ) / (sum(rate({metric('stream_group_top_n_total_query_cache_count')}[$__rate_interval])) by (table_id, fragment_id)) >= 0",
+                            "Stream group top n cache miss ratio - table {{table_id}} fragment {{fragment_id}} ",
                         ),
                         panels.target(
-                            f"(sum(rate({metric('stream_lookup_cache_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_lookup_total_query_cache_count')}[$__rate_interval])) by (table_id, actor_id)) >=0",
-                            "Stream lookup cache miss ratio - table {{table_id}} actor {{actor_id}} ",
+                            f"(sum(rate({metric('stream_group_top_n_appendonly_cache_miss_count')}[$__rate_interval])) by (table_id, fragment_id) ) / (sum(rate({metric('stream_group_top_n_appendonly_total_query_cache_count')}[$__rate_interval])) by (table_id, fragment_id)) >= 0",
+                            "Stream group top n appendonly cache miss ratio - table {{table_id}} fragment {{fragment_id}} ",
                         ),
                         panels.target(
-                            f"(sum(rate({metric('stream_temporal_join_cache_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_temporal_join_total_query_cache_count')}[$__rate_interval])) by (table_id, actor_id)) >=0",
-                            "Stream temporal join cache miss ratio - table {{table_id}} actor {{actor_id}} ",
+                            f"(sum(rate({metric('stream_lookup_cache_miss_count')}[$__rate_interval])) by (table_id, fragment_id) ) / (sum(rate({metric('stream_lookup_total_query_cache_count')}[$__rate_interval])) by (table_id, fragment_id)) >= 0",
+                            "Stream lookup cache miss ratio - table {{table_id}} fragment {{fragment_id}} ",
                         ),
                         panels.target(
-                            f"1 - (sum(rate({metric('stream_materialize_cache_hit_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_materialize_cache_total_count')}[$__rate_interval])) by (table_id, actor_id)) >=0",
-                            "materialize executor cache miss ratio - table {{table_id}} - actor {{actor_id}}  {{%s}}"
-                            % NODE_LABEL,
+                            f"(sum(rate({metric('stream_temporal_join_cache_miss_count')}[$__rate_interval])) by (table_id, fragment_id) ) / (sum(rate({metric('stream_temporal_join_total_query_cache_count')}[$__rate_interval])) by (table_id, fragment_id)) >= 0",
+                            "Stream temporal join cache miss ratio - table {{table_id}} fragment {{fragment_id}} ",
+                        ),
+                        panels.target(
+                            f"1 - (sum(rate({metric('stream_materialize_cache_hit_count')}[$__rate_interval])) by (table_id, fragment_id) ) / (sum(rate({metric('stream_materialize_cache_total_count')}[$__rate_interval])) by (table_id, fragment_id)) >= 0",
+                            "Materialize executor cache miss ratio - table {{table_id}} fragment {{fragment_id}}"
+                        ),
+                        panels.target(
+                            f"(sum(rate({metric('stream_over_window_cache_miss_count')}[$__rate_interval])) by (table_id, fragment_id) ) / (sum(rate({metric('stream_over_window_cache_lookup_count')}[$__rate_interval])) by (table_id, fragment_id)) >= 0",
+                            "Over window cache miss ratio - table {{table_id}} fragment {{fragment_id}} ",
+                        ),
+                        panels.target(
+                            f"(sum(rate({metric('stream_over_window_range_cache_left_miss_count')}[$__rate_interval])) by (table_id, fragment_id) ) / (sum(rate({metric('stream_over_window_range_cache_lookup_count')}[$__rate_interval])) by (table_id, fragment_id)) >= 0",
+                            "Over window partition range cache left miss ratio - table {{table_id}} fragment {{fragment_id}} ",
+                        ),
+                        panels.target(
+                            f"(sum(rate({metric('stream_over_window_range_cache_right_miss_count')}[$__rate_interval])) by (table_id, fragment_id) ) / (sum(rate({metric('stream_over_window_range_cache_lookup_count')}[$__rate_interval])) by (table_id, fragment_id)) >= 0",
+                            "Over window partition range cache right miss ratio - table {{table_id}} fragment {{fragment_id}} ",
                         ),
                     ],
                 ),
@@ -691,9 +634,8 @@ def section_streaming(outer_panels):
                     "The figure shows the number of rows read by each source per second.",
                     [
                         panels.target(
-                            f"rate({metric('stream_source_output_rows_counts')}[$__rate_interval])",
-                            "source={{source_name}} actor={{actor_id}} @ {{%s}}"
-                            % NODE_LABEL,
+                            f"sum(rate({metric('stream_source_output_rows_counts')}[$__rate_interval])) by (source_id, source_name, fragment_id)",
+                            "{{source_id}} {{source_name}} (fragment {{fragment_id}})",
                         ),
                     ],
                 ),

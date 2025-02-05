@@ -1471,8 +1471,7 @@ def section_streaming_actors(outer_panels: Panels):
                         ),
                         panels.target(
                             f"1 - (sum(rate({metric('stream_materialize_cache_hit_count')}[$__rate_interval])) by (table_id, fragment_id) ) / (sum(rate({metric('stream_materialize_cache_total_count')}[$__rate_interval])) by (table_id, fragment_id)) >= 0",
-                            "Materialize executor cache miss ratio - table {{table_id}} fragment {{fragment_id}}  {{%s}}"
-                            % NODE_LABEL,
+                            "Materialize executor cache miss ratio - table {{table_id}} fragment {{fragment_id}}"
                         ),
                         panels.target(
                             f"(sum(rate({metric('stream_over_window_cache_miss_count')}[$__rate_interval])) by (table_id, fragment_id) ) / (sum(rate({metric('stream_over_window_cache_lookup_count')}[$__rate_interval])) by (table_id, fragment_id)) >= 0",
