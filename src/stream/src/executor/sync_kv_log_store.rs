@@ -111,7 +111,6 @@ struct SyncedKvLogStoreExecutor<S: StateStore> {
 
     // Log store state
     state_store: S,
-    local_state_store: S::Local,
     buffer_max_size: usize,
 }
 // Stream interface
@@ -126,24 +125,13 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
         buffer_max_size: usize,
         upstream: Executor,
     ) -> Self {
-        let local_state_store = state_store
-            .new_local(NewLocalOptions {
-                table_id: TableId { table_id },
-                op_consistency_level: OpConsistencyLevel::Inconsistent,
-                table_option: TableOption {
-                    retention_seconds: None,
-                },
-                is_replicated: false,
-                vnodes: serde.vnodes().clone(),
-            })
-            .await;
+
         Self {
             actor_context,
             table_id: TableId::new(table_id),
             metrics,
             serde,
             state_store,
-            local_state_store,
             upstream,
             buffer_max_size,
         }
@@ -154,79 +142,90 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
 impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     pub async fn execute_inner(mut self) {
-        let mut seq_id = FIRST_SEQ_ID;
-        let mut truncation_offset = None;
-        let mut flushed_chunk_future = None;
-        let mut buffer = SyncedLogStoreBuffer {
-            buffer: VecDeque::new(),
-            max_size: self.buffer_max_size,
-            next_chunk_id: 0,
-            metrics: self.metrics.clone(),
-        };
-
         let mut input = self.upstream.execute();
-        let barrier = expect_first_barrier(&mut input).await?;
-        yield Message::Barrier(barrier.clone());
-        let mut state_store_stream = Some(
-            Self::init(
-                &barrier,
-                &mut self.local_state_store,
-                &self.serde,
-                self.table_id,
-                &self.metrics,
-                self.state_store.clone(),
-            )
-            .await?,
-        );
-        loop {
-            if let Some(msg) = Self::next(
-                self.actor_context.id,
-                &mut input,
-                self.table_id,
-                &mut self.serde,
-                &mut truncation_offset,
-                &mut state_store_stream,
-                &mut flushed_chunk_future,
-                &self.state_store,
-                &mut buffer,
-                &mut self.local_state_store,
-                &mut self.metrics,
-                &mut seq_id,
-            )
-            .await?
-            {
-                yield msg;
+
+        // init first epoch + local state store
+        let first_barrier = expect_first_barrier(&mut input).await?;
+        let mut first_write_epoch = first_barrier.epoch;
+        yield Message::Barrier(first_barrier.clone());
+
+        let mut local_state_store = self.state_store
+            .new_local(NewLocalOptions {
+                table_id: self.table_id,
+                op_consistency_level: OpConsistencyLevel::Inconsistent,
+                table_option: TableOption {
+                    retention_seconds: None,
+                },
+                is_replicated: false,
+                vnodes: self.serde.vnodes().clone(),
+            })
+            .await;
+        local_state_store
+            .init(InitOptions::new(first_write_epoch))
+            .await?;
+
+        // We only recreate the consume stream when:
+        // 1. On bootstrap
+        // 2. On vnode update
+        'recreate_consume_stream: loop {
+            let mut seq_id = FIRST_SEQ_ID;
+            let mut truncation_offset = None;
+            let mut flushed_chunk_future = None;
+            let mut buffer = SyncedLogStoreBuffer {
+                buffer: VecDeque::new(),
+                max_size: self.buffer_max_size,
+                next_chunk_id: 0,
+                metrics: self.metrics.clone(),
+            };
+            let mut state_store_stream = Some(
+                read_persisted_log_store(
+                    &self.serde,
+                    self.table_id,
+                    &self.metrics,
+                    self.state_store.clone(),
+                    first_write_epoch.prev,
+                    None,
+                )
+                .await?,
+            );
+
+            // Our stream message loop, which polls upstream and log store.
+            loop {
+                if let Some(msg) = Self::next(
+                    &mut input,
+                    self.table_id,
+                    &mut self.serde,
+                    &mut truncation_offset,
+                    &mut state_store_stream,
+                    &mut flushed_chunk_future,
+                    &self.state_store,
+                    &mut buffer,
+                    &mut local_state_store,
+                    &mut self.metrics,
+                    &mut seq_id,
+                )
+                .await?
+                {
+                    match msg {
+                        Message::Barrier(ref barrier) => {
+                            // Apply Vnode Update
+                            if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.actor_context.id) {
+                                local_state_store.update_vnode_bitmap(vnode_bitmap.clone());
+                                self.serde.update_vnode_bitmap(vnode_bitmap.clone());
+                                first_write_epoch = barrier.epoch;
+                            }
+                            yield msg;
+                            continue 'recreate_consume_stream;
+                        }
+                        _ => yield msg,
+                    }
+                }
             }
         }
     }
 
-    async fn init(
-        barrier: &Barrier,
-        local_state_store: &mut S::Local,
-        serde: &LogStoreRowSerde,
-        table_id: TableId,
-        metrics: &KvLogStoreMetrics,
-        state_store: S,
-    ) -> StreamExecutorResult<StateStoreStream<S>> {
-        let init_epoch_pair = barrier.epoch;
-        local_state_store
-            .init(InitOptions::new(init_epoch_pair))
-            .await?;
-        let state_store_stream = read_persisted_log_store(
-            serde,
-            table_id,
-            metrics,
-            state_store,
-            barrier.epoch.prev,
-            None,
-        )
-        .await?;
-        Ok(state_store_stream)
-    }
-
     #[allow(clippy::too_many_arguments)]
     async fn next(
-        actor_id: ActorId,
         input: &mut BoxedMessageStream,
         table_id: TableId,
         serde: &mut LogStoreRowSerde,
@@ -258,19 +257,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                                     *truncation_offset,
                                     seq_id,
                                     buffer,
-                                    actor_id,
                                 ).await?;
-                                let should_update_vnode_bitmap = barrier.as_update_vnode_bitmap(actor_id).is_some();
-                                if should_update_vnode_bitmap {
-                                    *state_store_stream = Some(read_persisted_log_store(
-                                        serde,
-                                        table_id,
-                                        metrics,
-                                        state_store.clone(),
-                                        barrier.epoch.prev,
-                                        None,
-                                    ).await?);
-                                }
                                 Ok(Some(Message::Barrier(barrier)))
                             }
                             Message::Chunk(chunk) => {
@@ -288,7 +275,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                                 ).await?;
                                 Ok(None)
                             }
-                            // FIXME(kwannoel): This should be written to the logstore,
+                            // FIXME(kwannoel): This should truncate the logstore,
                             // it will not bypass like barrier.
                             Message::Watermark(_watermark) => Ok(None),
                         }
@@ -465,7 +452,6 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
         truncation_offset: Option<ReaderTruncationOffsetType>,
         seq_id: &mut SeqIdType,
         buffer: &mut SyncedLogStoreBuffer,
-        actor_id: ActorId,
     ) -> StreamExecutorResult<()> {
         let epoch = state_store.epoch();
         let mut flush_info = FlushInfo::new();
@@ -510,12 +496,6 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
         ));
         buffer.next_chunk_id = 0;
         buffer.update_unconsumed_buffer_metrics();
-
-        // Apply Vnode Update
-        if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(actor_id) {
-            state_store.update_vnode_bitmap(vnode_bitmap.clone());
-            serde.update_vnode_bitmap(vnode_bitmap.clone());
-        }
 
         *seq_id = FIRST_SEQ_ID;
         Ok(())
