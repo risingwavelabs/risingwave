@@ -116,7 +116,7 @@ struct SyncedKvLogStoreExecutor<S: StateStore> {
 // Stream interface
 impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
     #[allow(clippy::too_many_arguments, dead_code)]
-    pub(crate) async fn new(
+    pub(crate) fn new(
         actor_context: ActorContextRef,
         table_id: u32,
         metrics: KvLogStoreMetrics,
@@ -125,7 +125,6 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
         buffer_max_size: usize,
         upstream: Executor,
     ) -> Self {
-
         Self {
             actor_context,
             table_id: TableId::new(table_id),
@@ -149,7 +148,8 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
         let mut first_write_epoch = first_barrier.epoch;
         yield Message::Barrier(first_barrier.clone());
 
-        let mut local_state_store = self.state_store
+        let mut local_state_store = self
+            .state_store
             .new_local(NewLocalOptions {
                 table_id: self.table_id,
                 op_consistency_level: OpConsistencyLevel::Inconsistent,
@@ -209,7 +209,9 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                     match msg {
                         Message::Barrier(ref barrier) => {
                             // Apply Vnode Update
-                            if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.actor_context.id) {
+                            if let Some(vnode_bitmap) =
+                                barrier.as_update_vnode_bitmap(self.actor_context.id)
+                            {
                                 local_state_store.update_vnode_bitmap(vnode_bitmap.clone());
                                 self.serde.update_vnode_bitmap(vnode_bitmap.clone());
                                 first_write_epoch = barrier.epoch;
