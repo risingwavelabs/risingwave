@@ -762,7 +762,6 @@ mod tests {
             10,
             source,
         )
-        .await
         .boxed();
 
         // Init
@@ -854,7 +853,6 @@ mod tests {
             10,
             source,
         )
-        .await
         .boxed();
 
         // Init
@@ -944,7 +942,6 @@ mod tests {
             0,
             source,
         )
-        .await
         .boxed();
 
         // Init
