@@ -778,7 +778,6 @@ mod tests {
         let log_store_executor = SyncedKvLogStoreExecutor::new(
             ActorContext::for_test(123),
             table.id,
-            KvLogStoreReadMetrics::for_test(),
             KvLogStoreMetrics::for_test(),
             LogStoreRowSerde::new(&table, vnodes, pk_info),
             0,
@@ -872,7 +871,6 @@ mod tests {
         let log_store_executor = SyncedKvLogStoreExecutor::new(
             ActorContext::for_test(123),
             table.id,
-            KvLogStoreReadMetrics::for_test(),
             KvLogStoreMetrics::for_test(),
             LogStoreRowSerde::new(&table, vnodes, pk_info),
             0,
@@ -964,7 +962,6 @@ mod tests {
         let log_store_executor = SyncedKvLogStoreExecutor::new(
             ActorContext::for_test(123),
             table.id,
-            KvLogStoreReadMetrics::for_test(),
             KvLogStoreMetrics::for_test(),
             LogStoreRowSerde::new(&table, vnodes, pk_info),
             0,
