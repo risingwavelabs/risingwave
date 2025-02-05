@@ -306,11 +306,11 @@ ElasticSearchOpenSearchConfig:
   - name: username
     field_type: String
     comments: The username of elasticsearch or openserach
-    required: true
+    required: false
   - name: password
     field_type: String
     comments: The username of elasticsearch or openserach
-    required: true
+    required: false
   - name: index_column
     field_type: String
     comments: It is used for dynamic index, if it is be set, the value of this column will be used as the index. It and `index` can only set one
@@ -333,7 +333,8 @@ ElasticSearchOpenSearchConfig:
     required: true
   - name: r#type
     field_type: String
-    required: true
+    required: false
+    default: '"upsert" . to_owned ()'
 FsConfig:
   fields:
   - name: fs.path
@@ -446,6 +447,12 @@ IcebergConfig:
   - name: warehouse.path
     field_type: String
     comments: Path of iceberg warehouse, only applicable in storage catalog.
+    required: false
+  - name: glue.id
+    field_type: String
+    comments: |-
+      AWS Client id, can be omitted for storage catalog or when
+      caller's AWS account ID matches glue id
     required: false
   - name: catalog.name
     field_type: String

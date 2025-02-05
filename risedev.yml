@@ -1489,8 +1489,7 @@ template:
     #   * If the user is "root", the password will be used as the root password.
     #   * Otherwise, a regular user will be created with the given password. The root password will be empty.
     #   Note that this only applies to fresh instances, i.e., the data directory is empty.
-    # - In user-managed mode, these configs are not validated by risedev.
-    #   They are passed as-is to risedev-env default user for MySQL operations.
+    # - These configs will be passed as-is to risedev-env default user for MySQL operations.
     # - This is not used in RISEDEV_MYSQL_WITH_OPTIONS_COMMON.
     user: root
     password: ""
@@ -1522,8 +1521,7 @@ template:
 
     # Note:
     # - This will be used to initialize the PostgreSQL instance if it's fresh.
-    # - In user-managed mode, these configs are not validated by risedev.
-    #   They are passed as-is to risedev-env default user for PostgreSQL operations.
+    # - These configs will be passed as-is to risedev-env default user for PostgreSQL operations.
     user: postgres
     password: ""
     database: "postgres"
