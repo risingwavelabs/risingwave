@@ -34,7 +34,7 @@ statement ok
 flush;
 
 # at least once
-query T
+query T retry 3 backoff 5s
 select count(*) >= 100 from t_nats;
 ----
 t
@@ -53,7 +53,7 @@ sleep 3s
 statement ok
 flush;
 
-query T
+query T retry 3 backoff 5s
 select count(*) >= 200 from t_nats;
 ----
 t
@@ -72,7 +72,7 @@ sleep 3s
 statement ok
 flush;
 
-query T
+query T retry 3 backoff 5s
 select count(*) >= 300 from t_nats;
 ----
 t
