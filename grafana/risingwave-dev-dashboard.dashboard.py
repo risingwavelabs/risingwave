@@ -951,83 +951,49 @@ def section_streaming(outer_panels):
                 # TODO: These 2 metrics should be deprecated because they are unaware of Log Store
                 # Let's remove them when all sinks are migrated to Log Store
                 panels.timeseries_rowsps(
-                    "Sink Throughput(rows/s)",
-                    "The number of rows streamed into each sink per second. For sinks with 'sink_decouple = true', please refer to the 'Sink Metrics' section",
+                    "Sink Executor Throughput (rows/s)",
+                    "The number of rows streamed into the SinkExecutor per second. For sinks with 'sink_decouple = true', please refer to the 'Sink Metrics' section",
                     [
                         panels.target(
                             f"sum(rate({metric('stream_sink_input_row_count')}[$__rate_interval])) by (sink_id) * on(sink_id) group_left(sink_name) group({metric('sink_info')}) by (sink_id, sink_name)",
                             "sink {{sink_id}} {{sink_name}}",
                         ),
-                    ],
-                ),
-                panels.timeseries_rowsps(
-                    "Sink Throughput(rows/s) per Partition",
-                    "The number of rows streamed into each sink per second. For sinks with 'sink_decouple = true', please refer to the 'Sink Metrics' section",
-                    [
-                        panels.target(
+                        panels.target_hidden(
                             f"sum(rate({metric('stream_sink_input_row_count')}[$__rate_interval])) by (sink_id, actor_id) * on(actor_id) group_left(sink_name) {metric('sink_info')}",
                             "sink {{sink_id}} {{sink_name}} - actor {{actor_id}}",
                         ),
                     ],
                 ),
                 panels.timeseries_bytesps(
-                    "Sink Throughput(MB/s)",
-                    "The figure shows the number of bytes written each sink per second. For sinks with 'sink_decouple = true', please refer to the 'Sink Metrics' section",
+                    "Sink Executor Throughput (MB/s)",
+                    "The figure shows the number of bytes written SinkExecutor per second. For sinks with 'sink_decouple = true', please refer to the 'Sink Metrics' section",
                     [
                         panels.target(
                             f"(sum(rate({metric('stream_sink_input_bytes')}[$__rate_interval])) by (sink_id) * on(sink_id) group_left(sink_name) group({metric('sink_info')}) by (sink_id, sink_name)) / (1000*1000)",
                             "sink {{sink_id}} {{sink_name}}",
                         ),
-                    ],
-                ),
-                panels.timeseries_bytesps(
-                    "Sink Throughput(MB/s) per Partition",
-                    "The number of bytes streamed into each sink per second. For sinks with 'sink_decouple = true', please refer to the 'Sink Metrics' section",
-                    [
-                        panels.target(
+                        panels.target_hidden(
                             f"(sum(rate({metric('stream_sink_input_bytes')}[$__rate_interval])) by (sink_id, actor_id) * on(actor_id) group_left(sink_name) {metric('sink_info')}) / (1000*1000)",
                             "sink {{sink_id}} {{sink_name}} - actor {{actor_id}}",
                         ),
                     ],
                 ),
                 panels.timeseries_rowsps(
-                    "Materialized View Throughput(rows/s)",
+                    "Materialized View Throughput (rows/s)",
                     "The figure shows the number of rows written into each materialized view per second.",
                     [
                         panels.target(
                             f"sum(rate({table_metric('stream_mview_input_row_count')}[$__rate_interval])) by (table_id) * on(table_id) group_left(table_name) group({metric('table_info')}) by (table_id, table_name)",
                             "mview {{table_id}} {{table_name}}",
                         ),
-                    ],
-                ),
-                panels.timeseries_rowsps(
-                    "Materialized View Throughput(rows/s) per Partition",
-                    "The figure shows the number of rows written into each materialized view per second.",
-                    [
-                        panels.target(
+                        panels.target_hidden(
                             f"rate({table_metric('stream_mview_input_row_count')}[$__rate_interval]) * on(fragment_id, table_id) group_left(table_name) {metric('table_info')}",
                             "mview {{table_id}} {{table_name}} - actor {{actor_id}} fragment_id {{fragment_id}}",
                         ),
                     ],
                 ),
                 panels.timeseries_rowsps(
-                    "Backfill Snapshot Read Throughput(rows)",
-                    "Rows/sec that we read from the backfill snapshot",
-                    [
-                        panels.target(
-                            f"rate({table_metric('stream_backfill_snapshot_read_row_count')}[$__rate_interval])",
-                            "table_id={{table_id}} actor={{actor_id}} @ {{%s}}"
-                            % NODE_LABEL,
-                        ),
-                        panels.target(
-                            f"rate({table_metric('stream_snapshot_backfill_consume_snapshot_row_count')}[$__rate_interval])",
-                            "table_id={{table_id}} actor={{actor_id}} {{stage}} @ {{%s}}"
-                            % NODE_LABEL,
-                        ),
-                    ],
-                ),
-                panels.timeseries_rowsps(
-                    "Backfill Snapshot Read Throughput(rows) by MV",
+                    "Backfill Snapshot-Read Throughput (rows/s)",
                     "Rows/sec that we read from the backfill snapshot by materialized view",
                     [
                         panels.target(
@@ -1040,14 +1006,35 @@ def section_streaming(outer_panels):
                                 )
                             """,
                             "table_name={{table_name}} table_id={{table_id}}",
-                        )
+                        ),
+                        panels.target_hidden(
+                            f"rate({table_metric('stream_backfill_snapshot_read_row_count')}[$__rate_interval])",
+                            "table_id={{table_id}} actor={{actor_id}} @ {{%s}}"
+                            % NODE_LABEL,
+                        ),
+                        panels.target_hidden(
+                            f"rate({table_metric('stream_snapshot_backfill_consume_snapshot_row_count')}[$__rate_interval])",
+                            "table_id={{table_id}} actor={{actor_id}} {{stage}} @ {{%s}}"
+                            % NODE_LABEL,
+                        ),
                     ],
                 ),
                 panels.timeseries_rowsps(
-                    "Backfill Upstream Throughput(rows)",
+                    "Backfill Upstream Throughput (rows/s)",
                     "Total number of rows that have been output from the backfill upstream",
                     [
                         panels.target(
+                            f"""
+                                sum by (table_id) (
+                                  rate({metric('stream_backfill_upstream_output_row_count', node_filter_enabled=False, table_id_filter_enabled=True)}[$__rate_interval])
+                                )
+                                * on(table_id) group_left(table_name) (
+                                  group({metric('table_info', node_filter_enabled=False)}) by (table_name, table_id)
+                                )
+                            """,
+                            "table_name={{table_name}} table_id={{table_id}}",
+                        ),
+                        panels.target_hidden(
                             f"rate({table_metric('stream_backfill_upstream_output_row_count')}[$__rate_interval])",
                             "table_id={{table_id}} actor={{actor_id}} @ {{%s}}"
                             % NODE_LABEL,

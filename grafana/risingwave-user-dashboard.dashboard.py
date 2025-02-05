@@ -691,7 +691,7 @@ def section_streaming(outer_panels):
             "Streaming",
             [
                 panels.timeseries_rowsps(
-                    "Source Throughput(rows/s)",
+                    "Source Throughput (rows/s)",
                     "The figure shows the number of rows read by each source per second.",
                     [
                         panels.target(
@@ -702,7 +702,7 @@ def section_streaming(outer_panels):
                     ],
                 ),
                 panels.timeseries_bytesps(
-                    "Source Throughput(MB/s)",
+                    "Source Throughput (MB/s)",
                     "The figure shows the number of bytes read by each source per second.",
                     [
                         panels.target(
@@ -712,7 +712,7 @@ def section_streaming(outer_panels):
                     ],
                 ),
                 panels.timeseries_rowsps(
-                    "Source Backfill Throughput(rows/s)",
+                    "Source Backfill Throughput (rows/s)",
                     "The figure shows the number of rows read by each source per second.",
                     [
                         panels.target(
@@ -722,7 +722,7 @@ def section_streaming(outer_panels):
                     ],
                 ),
                 panels.timeseries_rowsps(
-                    "Materialized View Throughput(rows/s)",
+                    "Materialized View Throughput (rows/s)",
                     "The figure shows the number of rows written into each materialized executor actor per second.",
                     [
                         panels.target(
@@ -732,18 +732,30 @@ def section_streaming(outer_panels):
                     ],
                 ),
                 panels.timeseries_rowsps(
-                    "Backfill Throughput(rows)",
+                    "Backfill Throughput (rows/s)",
                     "Total number of rows that have been read from the backfill operator used by MV on MV",
                     [
                         panels.target(
-                            f"rate({metric('stream_backfill_snapshot_read_row_count')}[$__rate_interval])",
-                            "Read Snapshot - table_id={{table_id}} actor={{actor_id}} @ {{%s}}"
-                            % NODE_LABEL,
+                            f"""
+                                sum by (table_id) (
+                                  rate({metric('stream_backfill_snapshot_read_row_count', node_filter_enabled=False, table_id_filter_enabled=True)}[$__rate_interval])
+                                )
+                                * on(table_id) group_left(table_name) (
+                                  group({metric('table_info', node_filter_enabled=False)}) by (table_name, table_id)
+                                )
+                            """,
+                            "{{table_id}}: {{table_name}} snapshot-read",
                         ),
                         panels.target(
-                            f"rate({metric('stream_backfill_upstream_output_row_count')}[$__rate_interval])",
-                            "Upstream - table_id={{table_id}} actor={{actor_id}} @ {{%s}}"
-                            % NODE_LABEL,
+                            f"""
+                                sum by (table_id) (
+                                  rate({metric('stream_backfill_upstream_output_row_count', node_filter_enabled=False, table_id_filter_enabled=True)}[$__rate_interval])
+                                )
+                                * on(table_id) group_left(table_name) (
+                                  group({metric('table_info', node_filter_enabled=False)}) by (table_name, table_id)
+                                )
+                            """,
+                            "{{table_id}}: {{table_name}} upstream",
                         ),
                     ],
                 ),
