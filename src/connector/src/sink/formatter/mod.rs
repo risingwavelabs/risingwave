@@ -291,7 +291,7 @@ impl EncoderBuild for TemplateEncoder {
                 "Cannot find '{option_name}',please set it or use JSON"
             ))
         })?;
-        Ok(TemplateEncoder::new(b.schema, pk_indices, template.clone()))
+        Ok(TemplateEncoder::new_string(b.schema, pk_indices, template.clone()))
     }
 }
 

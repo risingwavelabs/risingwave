@@ -27,7 +27,7 @@ use serde_with::serde_as;
 use with_options::WithOptions;
 
 use super::catalog::SinkFormatDesc;
-use super::encoder::template::TemplateEncoder;
+use super::encoder::template::{TemplateEncoder, TemplateStringEncoder};
 use super::formatter::SinkFormatterImpl;
 use super::writer::FormattedSink;
 use super::{SinkError, SinkParam};
@@ -241,8 +241,8 @@ impl Sink for RedisSink {
                     "Cannot find 'value_format', please set it or use JSON"
                 ))
             })?;
-            TemplateEncoder::check_string_format(key_format, &pk_set)?;
-            TemplateEncoder::check_string_format(value_format, &all_set)?;
+            TemplateStringEncoder::check_string_format(key_format, &pk_set)?;
+            TemplateStringEncoder::check_string_format(value_format, &all_set)?;
         }
         Ok(())
     }
