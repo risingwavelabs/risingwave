@@ -447,7 +447,9 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                 truncation_offset.replace((next_epoch, None));
                 Ok(None)
             }
-            LogStoreBufferItem::UpdateVnodes(_) => Ok(None),
+            LogStoreBufferItem::UpdateVnodes(_) => {
+                unreachable!("UpdateVnodes should not be in buffer")
+            }
         }
     }
 }
@@ -513,9 +515,6 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
         if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(actor_id) {
             state_store.update_vnode_bitmap(vnode_bitmap.clone());
             serde.update_vnode_bitmap(vnode_bitmap.clone());
-            buffer
-                .buffer
-                .push_back((epoch, LogStoreBufferItem::UpdateVnodes(vnode_bitmap)));
         }
 
         *seq_id = FIRST_SEQ_ID;
