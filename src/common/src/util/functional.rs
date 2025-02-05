@@ -12,6 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod client;
-
-pub use client::*;
+#[easy_ext::ext(SameOrElseExt)]
+pub impl<T: Eq> T {
+    /// Check if `self` and `other` are equal, if so, return `self`, otherwise return the result of `f()`.
+    fn same_or_else(self, other: T, f: impl FnOnce() -> T) -> T {
+        if self == other {
+            self
+        } else {
+            f()
+        }
+    }
+}

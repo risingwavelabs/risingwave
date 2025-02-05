@@ -131,6 +131,9 @@ impl<S> TracedStateStore<S> {
 }
 
 impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
+    // Not trace the FlushedSnapshotReader
+    type FlushedSnapshotReader = S::FlushedSnapshotReader;
+
     type Iter<'a> = impl StateStoreIter + 'a;
     type RevIter<'a> = impl StateStoreIter + 'a;
 
@@ -260,6 +263,10 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
     fn get_table_watermark(&self, vnode: VirtualNode) -> Option<Bytes> {
         self.inner.get_table_watermark(vnode)
     }
+
+    fn new_flushed_snapshot_reader(&self) -> Self::FlushedSnapshotReader {
+        self.inner.new_flushed_snapshot_reader()
+    }
 }
 
 impl<S: StateStore> StateStore for TracedStateStore<S> {
@@ -285,7 +292,6 @@ impl<S: StateStore> StateStore for TracedStateStore<S> {
 }
 
 impl<S: StateStoreRead> StateStoreRead for TracedStateStore<S> {
-    type ChangeLogIter = impl StateStoreReadChangeLogIter;
     type Iter = impl StateStoreReadIter;
     type RevIter = impl StateStoreReadIter;
 
@@ -335,6 +341,14 @@ impl<S: StateStoreRead> StateStoreRead for TracedStateStore<S> {
             self.storage_type,
         );
         self.traced_iter(self.inner.rev_iter(key_range, epoch, read_options), span)
+    }
+}
+
+impl<S: StateStoreReadLog> StateStoreReadLog for TracedStateStore<S> {
+    type ChangeLogIter = impl StateStoreReadChangeLogIter;
+
+    fn next_epoch(&self, epoch: u64, options: NextEpochOptions) -> impl StorageFuture<'_, u64> {
+        self.inner.next_epoch(epoch, options)
     }
 
     fn iter_log(

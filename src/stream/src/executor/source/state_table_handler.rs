@@ -86,7 +86,7 @@ impl<S: StateStore> SourceStateTableHandler<S> {
             .map_err(StreamExecutorError::from)
     }
 
-    /// this method should only be used by [`FsSourceExecutor`](super::FsSourceExecutor)
+    /// this method should only be used by [`LegacyFsSourceExecutor`](super::LegacyFsSourceExecutor)
     pub(crate) async fn get_all_completed(&self) -> StreamExecutorResult<HashSet<SplitId>> {
         let start = Bound::Excluded(row::once(Some(Self::string_to_scalar(
             COMPLETE_SPLIT_PREFIX,
@@ -137,7 +137,7 @@ impl<S: StateStore> SourceStateTableHandler<S> {
     }
 
     /// set all complete
-    /// can only used by [`FsSourceExecutor`](super::FsSourceExecutor)
+    /// can only used by [`LegacyFsSourceExecutor`](super::LegacyFsSourceExecutor)
     pub(crate) async fn set_all_complete(
         &mut self,
         states: Vec<SplitImpl>,

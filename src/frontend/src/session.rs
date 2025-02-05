@@ -22,6 +22,7 @@ use std::time::{Duration, Instant};
 use anyhow::anyhow;
 use bytes::Bytes;
 use either::Either;
+use itertools::Itertools;
 use parking_lot::{Mutex, RwLock, RwLockReadGuard};
 use pgwire::error::{PsqlError, PsqlResult};
 use pgwire::net::{Address, AddressRef};
@@ -41,7 +42,6 @@ use risingwave_batch::worker_manager::worker_node_manager::{
     WorkerNodeManager, WorkerNodeManagerRef,
 };
 use risingwave_common::acl::AclMode;
-use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
 #[cfg(test)]
 use risingwave_common::catalog::{
     DEFAULT_DATABASE_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID,
@@ -961,6 +961,44 @@ impl SessionImpl {
             .map_err(RwError::from)
     }
 
+    pub fn check_function_name_duplicated(
+        &self,
+        stmt_type: StatementType,
+        name: ObjectName,
+        arg_types: &[DataType],
+        if_not_exists: bool,
+    ) -> Result<Either<(), RwPgResponse>> {
+        let db_name = &self.database();
+        let (schema_name, function_name) = Binder::resolve_schema_qualified_name(db_name, name)?;
+        let (database_id, schema_id) = self.get_database_and_schema_id_for_create(schema_name)?;
+
+        let catalog_reader = self.env().catalog_reader().read_guard();
+        if catalog_reader
+            .get_schema_by_id(&database_id, &schema_id)?
+            .get_function_by_name_args(&function_name, arg_types)
+            .is_some()
+        {
+            let full_name = format!(
+                "{function_name}({})",
+                arg_types.iter().map(|t| t.to_string()).join(",")
+            );
+            if if_not_exists {
+                Ok(Either::Right(
+                    PgResponse::builder(stmt_type)
+                        .notice(format!(
+                            "function \"{}\" already exists, skipping",
+                            full_name
+                        ))
+                        .into(),
+                ))
+            } else {
+                Err(CatalogError::Duplicated("function", full_name).into())
+            }
+        } else {
+            Ok(Either::Left(()))
+        }
+    }
+
     /// Also check if the user has the privilege to create in the schema.
     pub fn get_database_and_schema_id_for_create(
         &self,
@@ -978,13 +1016,11 @@ impl SessionImpl {
         };
 
         check_schema_writable(&schema.name())?;
-        if schema.name() != DEFAULT_SCHEMA_NAME {
-            self.check_privileges(&[ObjectCheckItem::new(
-                schema.owner(),
-                AclMode::Create,
-                Object::SchemaId(schema.id()),
-            )])?;
-        }
+        self.check_privileges(&[ObjectCheckItem::new(
+            schema.owner(),
+            AclMode::Create,
+            Object::SchemaId(schema.id()),
+        )])?;
 
         let db_id = catalog_reader.get_database_by_name(db_name)?.id();
         Ok((db_id, schema.id()))

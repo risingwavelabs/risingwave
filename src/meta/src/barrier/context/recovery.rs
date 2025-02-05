@@ -22,7 +22,7 @@ use risingwave_common::bail;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::WorkerSlotId;
-use risingwave_meta_model::{StreamingParallelism, WorkerId};
+use risingwave_meta_model::StreamingParallelism;
 use risingwave_pb::stream_plan::StreamActor;
 use thiserror_ext::AsReport;
 use tokio::time::Instant;
@@ -35,7 +35,10 @@ use crate::barrier::{DatabaseRuntimeInfoSnapshot, InflightSubscriptionInfo};
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::manager::ActiveStreamingWorkerNodes;
 use crate::model::{ActorId, StreamJobFragments, TableParallelism};
-use crate::stream::{RescheduleOptions, TableResizePolicy};
+use crate::stream::{
+    JobParallelismTarget, JobReschedulePolicy, JobRescheduleTarget, JobResourceGroupTarget,
+    RescheduleOptions, SourceChange,
+};
 use crate::{model, MetaResult};
 
 impl GlobalBarrierWorkerContextImpl {
@@ -46,14 +49,18 @@ impl GlobalBarrierWorkerContextImpl {
             .catalog_controller
             .clean_dirty_subscription(database_id)
             .await?;
-        let source_ids = self
+        let dirty_associated_source_ids = self
             .metadata_manager
             .catalog_controller
             .clean_dirty_creating_jobs(database_id)
             .await?;
 
         // unregister cleaned sources.
-        self.source_manager.unregister_sources(source_ids).await;
+        self.source_manager
+            .apply_source_change(SourceChange::DropSource {
+                dropped_source_ids: dirty_associated_source_ids,
+            })
+            .await;
 
         Ok(())
     }
@@ -75,11 +82,10 @@ impl GlobalBarrierWorkerContextImpl {
 
         try_join_all(mviews.into_iter().map(|mview| async move {
             let table_id = TableId::new(mview.table_id as _);
-            let table_fragments = mgr
+            let stream_job_fragments = mgr
                 .catalog_controller
                 .get_job_fragments_by_id(mview.table_id)
                 .await?;
-            let stream_job_fragments = StreamJobFragments::from_protobuf(table_fragments);
             assert_eq!(stream_job_fragments.stream_job_id(), table_id);
             Ok((mview.definition, stream_job_fragments))
         }))
@@ -421,13 +427,13 @@ impl GlobalBarrierWorkerContextImpl {
             .collect();
 
         if expired_worker_slots.is_empty() {
-            debug!("no expired worker slots, skipping.");
+            info!("no expired worker slots, skipping.");
             return self.resolve_graph_info(None).await;
         }
 
-        debug!("start migrate actors.");
+        info!("start migrate actors.");
         let mut to_migrate_worker_slots = expired_worker_slots.into_iter().rev().collect_vec();
-        debug!("got to migrate worker slots {:#?}", to_migrate_worker_slots);
+        info!("got to migrate worker slots {:#?}", to_migrate_worker_slots);
 
         let mut inuse_worker_slots: HashSet<_> = all_inuse_worker_slots
             .intersection(&active_worker_slots)
@@ -529,6 +535,8 @@ impl GlobalBarrierWorkerContextImpl {
             warn!(?changed, "get worker changed or timed out. Retry migrate");
         }
 
+        info!("migration plan {:?}", plan);
+
         mgr.catalog_controller.migrate_actors(plan).await?;
 
         info!("migrate actors succeed.");
@@ -554,13 +562,27 @@ impl GlobalBarrierWorkerContextImpl {
 
         debug!("start resetting actors distribution");
 
+        let available_workers: HashMap<_, _> = active_nodes
+            .current()
+            .values()
+            .filter(|worker| worker.is_streaming_schedulable())
+            .map(|worker| (worker.id, worker.clone()))
+            .collect();
+
+        info!(
+            "target worker ids for offline scaling: {:?}",
+            available_workers
+        );
+
         let available_parallelism = active_nodes
             .current()
             .values()
             .map(|worker_node| worker_node.compute_node_parallelism())
             .sum();
 
-        let table_parallelisms: HashMap<_, _> = {
+        let mut table_parallelisms = HashMap::new();
+
+        let reschedule_targets: HashMap<_, _> = {
             let streaming_parallelisms = mgr
                 .catalog_controller
                 .get_all_created_streaming_parallelisms()
@@ -596,7 +618,17 @@ impl GlobalBarrierWorkerContextImpl {
                     );
                 }
 
-                result.insert(object_id as u32, target_parallelism);
+                table_parallelisms.insert(TableId::new(object_id as u32), target_parallelism);
+
+                let parallelism_change = JobParallelismTarget::Update(target_parallelism);
+
+                result.insert(
+                    object_id as u32,
+                    JobRescheduleTarget {
+                        parallelism: parallelism_change,
+                        resource_group: JobResourceGroupTarget::Keep,
+                    },
+                );
             }
 
             result
@@ -604,57 +636,30 @@ impl GlobalBarrierWorkerContextImpl {
 
         info!(
             "target table parallelisms for offline scaling: {:?}",
-            table_parallelisms
-        );
-
-        let schedulable_worker_ids = active_nodes
-            .current()
-            .values()
-            .filter(|worker| {
-                !worker
-                    .property
-                    .as_ref()
-                    .map(|p| p.is_unschedulable)
-                    .unwrap_or(false)
-            })
-            .map(|worker| worker.id as WorkerId)
-            .collect();
-
-        info!(
-            "target worker ids for offline scaling: {:?}",
-            schedulable_worker_ids
+            reschedule_targets
         );
 
         let plan = self
             .scale_controller
-            .generate_table_resize_plan(TableResizePolicy {
-                worker_ids: schedulable_worker_ids,
-                table_parallelisms: table_parallelisms.clone(),
+            .generate_job_reschedule_plan(JobReschedulePolicy {
+                targets: reschedule_targets,
             })
             .await?;
-
-        let table_parallelisms: HashMap<_, _> = table_parallelisms
-            .into_iter()
-            .map(|(table_id, parallelism)| {
-                debug_assert_ne!(parallelism, TableParallelism::Custom);
-                (TableId::new(table_id), parallelism)
-            })
-            .collect();
 
         let mut compared_table_parallelisms = table_parallelisms.clone();
 
         // skip reschedule if no reschedule is generated.
-        let reschedule_fragment = if plan.is_empty() {
+        let reschedule_fragment = if plan.reschedules.is_empty() {
             HashMap::new()
         } else {
             self.scale_controller
                 .analyze_reschedule_plan(
-                    plan,
+                    plan.reschedules,
                     RescheduleOptions {
                         resolve_no_shuffle_upstream: true,
                         skip_create_new_actors: true,
                     },
-                    Some(&mut compared_table_parallelisms),
+                    &mut compared_table_parallelisms,
                 )
                 .await?
         };
@@ -666,7 +671,7 @@ impl GlobalBarrierWorkerContextImpl {
 
         if let Err(e) = self
             .scale_controller
-            .post_apply_reschedule(&reschedule_fragment, &table_parallelisms)
+            .post_apply_reschedule(&reschedule_fragment, &plan.post_updates)
             .await
         {
             tracing::error!(

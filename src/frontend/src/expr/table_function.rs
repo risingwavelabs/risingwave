@@ -21,7 +21,8 @@ use mysql_async::prelude::*;
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::types::{DataType, ScalarImpl, StructType};
 use risingwave_connector::source::iceberg::{
-    extract_bucket_and_file_name, get_parquet_fields, list_s3_directory, new_s3_operator,
+    extract_bucket_and_file_name, get_parquet_fields, list_data_directory, new_azblob_operator,
+    new_gcs_operator, new_s3_operator, FileScanBackend,
 };
 pub use risingwave_pb::expr::table_function::PbType as TableFunctionType;
 use risingwave_pb::expr::PbTableFunction;
@@ -79,14 +80,10 @@ impl TableFunction {
         let return_type = {
             // arguments:
             // file format e.g. parquet
-            // storage type e.g. s3
-            // s3 region
-            // s3 access key
-            // s3 secret key
-            // file location
-            if args.len() != 6 {
-                return Err(BindError("file_scan function only accepts 6 arguments: file_scan('parquet', 's3', s3 region, s3 access key, s3 secret key, file location)".to_owned()).into());
-            }
+            // storage type e.g. s3, gcs, azblob
+            // For s3: file_scan('parquet', 's3', s3_region, s3_access_key, s3_secret_key, file_location_or_directory)
+            // For gcs: file_scan('parquet', 'gcs', credential, file_location_or_directory)
+            // For azblob: file_scan('parquet', 'azblob', endpoint, account_name, account_key, file_location)
             let mut eval_args: Vec<String> = vec![];
             for arg in &args {
                 if arg.return_type() != DataType::Varchar {
@@ -126,6 +123,22 @@ impl TableFunction {
                     }
                 }
             }
+
+            if (eval_args.len() != 4 && eval_args.len() != 6)
+                || (eval_args.len() == 4 && !"gcs".eq_ignore_ascii_case(&eval_args[1]))
+                || (eval_args.len() == 6
+                    && !"s3".eq_ignore_ascii_case(&eval_args[1])
+                    && !"azblob".eq_ignore_ascii_case(&eval_args[1]))
+            {
+                return Err(BindError(
+                "file_scan function supports three backends: s3, gcs, and azblob. Their formats are as follows: \n
+                    file_scan('parquet', 's3', s3_region, s3_access_key, s3_secret_key, file_location) \n
+                    file_scan('parquet', 'gcs', credential, service_account, file_location) \n
+                    file_scan('parquet', 'azblob', endpoint, account_name, account_key, file_location)"
+                        .to_owned(),
+                )
+                .into());
+            }
             if !"parquet".eq_ignore_ascii_case(&eval_args[0]) {
                 return Err(BindError(
                     "file_scan function only accepts 'parquet' as file format".to_owned(),
@@ -133,9 +146,13 @@ impl TableFunction {
                 .into());
             }
 
-            if !"s3".eq_ignore_ascii_case(&eval_args[1]) {
+            if !"s3".eq_ignore_ascii_case(&eval_args[1])
+                && !"gcs".eq_ignore_ascii_case(&eval_args[1])
+                && !"azblob".eq_ignore_ascii_case(&eval_args[1])
+            {
                 return Err(BindError(
-                    "file_scan function only accepts 's3' as storage type".to_owned(),
+                    "file_scan function only accepts 's3', 'gcs' or 'azblob' as storage type"
+                        .to_owned(),
                 )
                 .into());
             }
@@ -148,21 +165,69 @@ impl TableFunction {
 
             #[cfg(not(madsim))]
             {
-                let files = if eval_args[5].ends_with('/') {
+                let (file_scan_backend, input_file_location) =
+                    if "s3".eq_ignore_ascii_case(&eval_args[1]) {
+                        (FileScanBackend::S3, eval_args[5].clone())
+                    } else if "gcs".eq_ignore_ascii_case(&eval_args[1]) {
+                        (FileScanBackend::Gcs, eval_args[3].clone())
+                    } else if "azblob".eq_ignore_ascii_case(&eval_args[1]) {
+                        (FileScanBackend::Azblob, eval_args[5].clone())
+                    } else {
+                        unreachable!();
+                    };
+                let op = match file_scan_backend {
+                    FileScanBackend::S3 => {
+                        let (bucket, _) = extract_bucket_and_file_name(
+                            &eval_args[5].clone(),
+                            &file_scan_backend,
+                        )?;
+
+                        let (s3_region, s3_endpoint) = match eval_args[2].starts_with("http") {
+                            true => ("us-east-1".to_owned(), eval_args[2].clone()), /* for minio, hard code region as not used but needed. */
+                            false => (
+                                eval_args[2].clone(),
+                                format!("https://{}.s3.{}.amazonaws.com", bucket, eval_args[2],),
+                            ),
+                        };
+                        new_s3_operator(
+                            s3_region.clone(),
+                            eval_args[3].clone(),
+                            eval_args[4].clone(),
+                            bucket.clone(),
+                            s3_endpoint.clone(),
+                        )?
+                    }
+                    FileScanBackend::Gcs => {
+                        let (bucket, _) =
+                            extract_bucket_and_file_name(&input_file_location, &file_scan_backend)?;
+
+                        new_gcs_operator(eval_args[2].clone(), bucket.clone())?
+                    }
+                    FileScanBackend::Azblob => {
+                        let (bucket, _) =
+                            extract_bucket_and_file_name(&input_file_location, &file_scan_backend)?;
+
+                        new_azblob_operator(
+                            eval_args[2].clone(),
+                            eval_args[3].clone(),
+                            eval_args[4].clone(),
+                            bucket.clone(),
+                        )?
+                    }
+                };
+                let files = if input_file_location.ends_with('/') {
                     let files = tokio::task::block_in_place(|| {
                         FRONTEND_RUNTIME.block_on(async {
-                            let files = list_s3_directory(
-                                eval_args[2].clone(),
-                                eval_args[3].clone(),
-                                eval_args[4].clone(),
-                                eval_args[5].clone(),
+                            let files = list_data_directory(
+                                op.clone(),
+                                input_file_location.clone(),
+                                &file_scan_backend,
                             )
                             .await?;
 
                             Ok::<Vec<String>, anyhow::Error>(files)
                         })
                     })?;
-
                     if files.is_empty() {
                         return Err(BindError(
                             "file_scan function only accepts non-empty directory".to_owned(),
@@ -174,20 +239,14 @@ impl TableFunction {
                 } else {
                     None
                 };
-
                 let schema = tokio::task::block_in_place(|| {
                     FRONTEND_RUNTIME.block_on(async {
                         let location = match files.as_ref() {
                             Some(files) => files[0].clone(),
-                            None => eval_args[5].clone(),
+                            None => input_file_location.clone(),
                         };
-                        let (bucket, file_name) = extract_bucket_and_file_name(&location)?;
-                        let op = new_s3_operator(
-                            eval_args[2].clone(),
-                            eval_args[3].clone(),
-                            eval_args[4].clone(),
-                            bucket.clone(),
-                        )?;
+                        let (_, file_name) =
+                            extract_bucket_and_file_name(&location, &file_scan_backend)?;
 
                         let fields = get_parquet_fields(op, file_name).await?;
 
@@ -207,7 +266,11 @@ impl TableFunction {
 
                 if let Some(files) = files {
                     // if the file location is a directory, we need to remove the last argument and add all files in the directory as arguments
-                    args.remove(5);
+                    match file_scan_backend {
+                        FileScanBackend::S3 => args.remove(5),
+                        FileScanBackend::Gcs => args.remove(3),
+                        FileScanBackend::Azblob => args.remove(5),
+                    };
                     for file in files {
                         args.push(ExprImpl::Literal(Box::new(Literal::new(
                             Some(ScalarImpl::Utf8(file.into())),

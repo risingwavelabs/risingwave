@@ -20,7 +20,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::hash::{VirtualNode, WorkerSlotId};
 use risingwave_common::util::stream_graph_visitor::{self, visit_stream_node};
 use risingwave_connector::source::SplitImpl;
-use risingwave_meta_model::{SourceId, WorkerId};
+use risingwave_meta_model::{SourceId, StreamingParallelism, WorkerId};
 use risingwave_pb::catalog::Table;
 use risingwave_pb::common::PbActorLocation;
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
@@ -36,7 +36,7 @@ use risingwave_pb::stream_plan::{FragmentTypeFlag, PbStreamContext, StreamActor,
 
 use super::{ActorId, FragmentId};
 use crate::model::MetadataModelResult;
-use crate::stream::{build_actor_connector_splits, build_actor_split_impls, SplitAssignment};
+use crate::stream::{build_actor_connector_splits, SplitAssignment};
 
 /// The parallelism for a `TableFragments`.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -85,6 +85,26 @@ impl From<TableParallelism> for PbTableParallelism {
     }
 }
 
+impl From<StreamingParallelism> for TableParallelism {
+    fn from(value: StreamingParallelism) -> Self {
+        match value {
+            StreamingParallelism::Adaptive => TableParallelism::Adaptive,
+            StreamingParallelism::Fixed(n) => TableParallelism::Fixed(n),
+            StreamingParallelism::Custom => TableParallelism::Custom,
+        }
+    }
+}
+
+impl From<TableParallelism> for StreamingParallelism {
+    fn from(value: TableParallelism) -> Self {
+        match value {
+            TableParallelism::Adaptive => StreamingParallelism::Adaptive,
+            TableParallelism::Fixed(n) => StreamingParallelism::Fixed(n),
+            TableParallelism::Custom => StreamingParallelism::Custom,
+        }
+    }
+}
+
 /// Fragments of a streaming job. Corresponds to [`PbTableFragments`].
 /// (It was previously called `TableFragments` due to historical reasons.)
 ///
@@ -93,10 +113,10 @@ impl From<TableParallelism> for PbTableParallelism {
 #[derive(Debug, Clone)]
 pub struct StreamJobFragments {
     /// The table id.
-    stream_job_id: TableId,
+    pub stream_job_id: TableId,
 
     /// The state of the table fragments.
-    state: State,
+    pub state: State,
 
     /// The table fragments.
     pub fragments: BTreeMap<FragmentId, Fragment>,
@@ -172,29 +192,6 @@ impl StreamJobFragments {
             node_label: "".to_owned(),
             backfill_done: true,
             max_parallelism: Some(self.max_parallelism as _),
-        }
-    }
-
-    pub fn from_protobuf(prost: PbTableFragments) -> Self {
-        let ctx = StreamContext::from_protobuf(prost.get_ctx().unwrap());
-
-        let default_parallelism = PbTableParallelism {
-            parallelism: Some(Parallelism::Custom(PbCustomParallelism {})),
-        };
-
-        let state = prost.state();
-
-        Self {
-            stream_job_id: TableId::new(prost.table_id),
-            state,
-            fragments: prost.fragments.into_iter().collect(),
-            actor_status: prost.actor_status.into_iter().collect(),
-            actor_splits: build_actor_split_impls(&prost.actor_splits),
-            ctx,
-            assigned_parallelism: prost.parallelism.unwrap_or(default_parallelism).into(),
-            max_parallelism: prost
-                .max_parallelism
-                .map_or(VirtualNode::COUNT_FOR_COMPAT, |v| v as _),
         }
     }
 }
@@ -460,9 +457,9 @@ impl StreamJobFragments {
     /// Panics if not found.
     pub fn union_fragment_for_table(&mut self) -> &mut Fragment {
         let mut union_fragment_id = None;
-        for (fragment_id, fragment) in &mut self.fragments {
-            for actor in &mut fragment.actors {
-                if let Some(node) = &mut actor.nodes {
+        for (fragment_id, fragment) in &self.fragments {
+            for actor in &fragment.actors {
+                if let Some(node) = &actor.nodes {
                     visit_stream_node(node, |body| {
                         if let NodeBody::Union(_) = body {
                             if let Some(union_fragment_id) = union_fragment_id.as_mut() {

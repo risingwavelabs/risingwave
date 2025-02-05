@@ -29,8 +29,8 @@ use risingwave_common::array::arrow::{arrow_schema_iceberg, IcebergArrowConvert}
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{
     debug_assert_column_ids_distinct, ColumnCatalog, ColumnDesc, ColumnId, Schema, TableId,
-    ICEBERG_SEQUENCE_NUM_COLUMN_NAME, INITIAL_SOURCE_VERSION_ID, KAFKA_TIMESTAMP_COLUMN_NAME,
-    ROWID_PREFIX,
+    ICEBERG_FILE_PATH_COLUMN_NAME, ICEBERG_FILE_POS_COLUMN_NAME, ICEBERG_SEQUENCE_NUM_COLUMN_NAME,
+    INITIAL_SOURCE_VERSION_ID, KAFKA_TIMESTAMP_COLUMN_NAME, ROWID_PREFIX,
 };
 use risingwave_common::license::Feature;
 use risingwave_common::secret::LocalSecretManager;
@@ -60,8 +60,8 @@ use risingwave_connector::source::nexmark::source::{get_event_data_types_with_na
 use risingwave_connector::source::test_source::TEST_CONNECTOR;
 use risingwave_connector::source::{
     ConnectorProperties, AZBLOB_CONNECTOR, GCS_CONNECTOR, GOOGLE_PUBSUB_CONNECTOR, KAFKA_CONNECTOR,
-    KINESIS_CONNECTOR, MQTT_CONNECTOR, NATS_CONNECTOR, NEXMARK_CONNECTOR, OPENDAL_S3_CONNECTOR,
-    POSIX_FS_CONNECTOR, PULSAR_CONNECTOR, S3_CONNECTOR,
+    KINESIS_CONNECTOR, LEGACY_S3_CONNECTOR, MQTT_CONNECTOR, NATS_CONNECTOR, NEXMARK_CONNECTOR,
+    OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR, PULSAR_CONNECTOR,
 };
 pub use risingwave_connector::source::{UPSTREAM_SOURCE_KEY, WEBHOOK_CONNECTOR};
 use risingwave_connector::WithPropertiesExt;
@@ -198,31 +198,71 @@ pub(crate) fn bind_all_columns(
     cols_from_sql: Vec<ColumnCatalog>,
     col_defs_from_sql: &[ColumnDef],
     wildcard_idx: Option<usize>,
+    sql_column_strategy: SqlColumnStrategy,
 ) -> Result<Vec<ColumnCatalog>> {
     if let Some(cols_from_source) = cols_from_source {
-        if cols_from_sql.is_empty() {
-            Ok(cols_from_source)
-        } else if let Some(wildcard_idx) = wildcard_idx {
-            if col_defs_from_sql.iter().any(|c| !c.is_generated()) {
-                Err(RwError::from(NotSupported(
-                    "Only generated columns are allowed in user-defined schema from SQL".to_owned(),
-                    "Remove the non-generated columns".to_owned(),
-                )))
-            } else {
-                // Replace `*` with `cols_from_source`
-                let mut cols_from_sql = cols_from_sql;
-                let mut cols_from_source = cols_from_source;
-                let mut cols_from_sql_r = cols_from_sql.split_off(wildcard_idx);
-                cols_from_sql.append(&mut cols_from_source);
-                cols_from_sql.append(&mut cols_from_sql_r);
-                Ok(cols_from_sql)
+        // Need to check `col_defs` to see if a column is generated, as we haven't bind the
+        // `GeneratedColumnDesc` in `ColumnCatalog` yet.
+        let generated_cols_from_sql = cols_from_sql
+            .iter()
+            .filter(|c| {
+                col_defs_from_sql
+                    .iter()
+                    .find(|d| d.name.real_value() == c.name())
+                    .unwrap()
+                    .is_generated()
+            })
+            .cloned()
+            .collect_vec();
+
+        match sql_column_strategy {
+            // Ignore `cols_from_source`, follow `cols_from_sql` without checking.
+            SqlColumnStrategy::Follow => {
+                assert!(
+                    wildcard_idx.is_none(),
+                    "wildcard still exists while strategy is Follows, not correctly purified?"
+                );
+                return Ok(cols_from_sql);
             }
-        } else {
-            // TODO(yuhao): https://github.com/risingwavelabs/risingwave/issues/12209
-            Err(RwError::from(ProtocolError(
-                    format!("User-defined schema from SQL is not allowed with FORMAT {} ENCODE {}. \
-                    Please refer to https://www.risingwave.dev/docs/current/sql-create-source/ for more information.", format_encode.format, format_encode.row_encode))))
+
+            // Will merge generated columns from `cols_from_sql` into `cols_from_source`.
+            SqlColumnStrategy::Ignore => {}
+            SqlColumnStrategy::Reject => {
+                // Perform extra check to see if there are non-generated columns in `cols_from_sql`
+                // and reject the request if there are. Based on different input, guess the user's
+                // intention and provide a more specific error message.
+                if generated_cols_from_sql.len() != cols_from_sql.len() {
+                    if wildcard_idx.is_some() {
+                        // (*, normal_column INT)
+                        return Err(RwError::from(NotSupported(
+                            "Only generated columns are allowed in user-defined schema from SQL"
+                                .to_owned(),
+                            "Remove the non-generated columns".to_owned(),
+                        )));
+                    } else {
+                        // (normal_column INT)
+                        return Err(RwError::from(ProtocolError(format!(
+                            "User-defined schema from SQL is not allowed with FORMAT {} ENCODE {}. \
+                            Please refer to https://www.risingwave.dev/docs/current/sql-create-source/ \
+                            for more information.",
+                            format_encode.format, format_encode.row_encode
+                        ))));
+                    }
+                }
+            }
         }
+
+        // If we are planning based on a purified SQL, the wildcard may already be expanded thus absent.
+        // Default to 0 to leave the generated columns at the end.
+        let wildcard_idx = wildcard_idx.unwrap_or(0).min(generated_cols_from_sql.len());
+
+        // Merge `generated_cols_from_sql` with `cols_from_source`.
+        let mut merged_cols = generated_cols_from_sql;
+        let merged_cols_r = merged_cols.split_off(wildcard_idx);
+        merged_cols.extend(cols_from_source);
+        merged_cols.extend(merged_cols_r);
+
+        Ok(merged_cols)
     } else {
         if wildcard_idx.is_some() {
             return Err(RwError::from(NotSupported(
@@ -610,6 +650,31 @@ pub fn bind_connector_props(
     Ok(with_properties)
 }
 
+/// When the schema can be inferred from external system (like schema registry),
+/// how to handle the regular columns (i.e., non-generated) defined in SQL?
+pub enum SqlColumnStrategy {
+    /// Follow all columns defined in SQL, ignore the columns from external system.
+    ///
+    /// This is the behavior when `SINK INTO` or `[ADD | DROP] COLUMN` atop the purified SQL,
+    /// ensuring that no accidental refresh will happen and the schema remains unchanged.
+    // TODO(purify): we may validate whether defined columns are valid against the resolved schema.
+    Follow,
+
+    /// Merge the generated columns defined in SQL and columns from external system. If there
+    /// are also regular columns defined in SQL, ignore silently.
+    ///
+    /// This is the behavior when `REFRESH SCHEMA` atop the purified SQL.
+    Ignore,
+
+    /// Merge the generated columns defined in SQL and columns from external system. If there
+    /// are also regular columns defined in SQL, reject the request.
+    ///
+    /// This is the behavior when creating a new table or source with a resolvable schema.
+    // TODO(purify): we may accept this as there are some practical use cases, see
+    //               https://github.com/risingwavelabs/risingwave/issues/12199
+    Reject,
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn bind_create_source_or_table_with_connector(
     handler_args: HandlerArgs,
@@ -626,6 +691,7 @@ pub async fn bind_create_source_or_table_with_connector(
     col_id_gen: &mut ColumnIdGenerator,
     create_source_type: CreateSourceType,
     source_rate_limit: Option<u32>,
+    sql_column_strategy: SqlColumnStrategy,
 ) -> Result<(SourceCatalog, DatabaseId, SchemaId)> {
     let session = &handler_args.session;
     let db_name: &str = &session.database();
@@ -666,6 +732,7 @@ pub async fn bind_create_source_or_table_with_connector(
         columns_from_sql,
         sql_columns_defs,
         wildcard_idx,
+        sql_column_strategy,
     )?;
 
     // add additional columns before bind pk, because `format upsert` requires the key column
@@ -854,6 +921,7 @@ pub async fn handle_create_source(
         &mut col_id_gen,
         create_source_type,
         overwrite_options.source_rate_limit,
+        SqlColumnStrategy::Reject,
     )
     .await?;
 

@@ -26,6 +26,7 @@ use thiserror::Error;
 
 use crate::error::{ErrorCode, Result, RwError};
 pub(crate) mod catalog_service;
+pub mod purify;
 
 pub(crate) mod connection_catalog;
 pub(crate) mod database_catalog;

@@ -259,6 +259,22 @@ impl HummockManager {
         assert_ne!(0, pull_task_count);
         if let Some(compactor) = self.compactor_manager.get_compactor(context_id) {
             let (groups, task_type) = self.auto_pick_compaction_groups_and_type().await;
+            if let TaskType::Ttl = task_type {
+                match self
+                    .metadata_manager
+                    .get_all_table_options()
+                    .await
+                    .map_err(|err| Error::MetaStore(err.into()))
+                {
+                    Ok(table_options) => {
+                        self.update_table_id_to_table_option(table_options);
+                    }
+                    Err(err) => {
+                        warn!(error = %err.as_report(), "Failed to get table options");
+                    }
+                }
+            }
+
             if !groups.is_empty() {
                 let selector: &mut Box<dyn CompactionSelector> =
                     compaction_selectors.get_mut(&task_type).unwrap();
@@ -615,15 +631,7 @@ impl HummockManager {
         max_select_count: usize,
         selector: &mut Box<dyn CompactionSelector>,
     ) -> Result<(Vec<CompactTask>, Vec<CompactionGroupId>)> {
-        // TODO: `get_all_table_options` will hold catalog_manager async lock, to avoid holding the
-        // lock in compaction_guard, take out all table_options in advance there may be a
-        // waste of resources here, need to add a more efficient filter in catalog_manager
         let deterministic_mode = self.env.opts.compaction_deterministic_test;
-        let all_table_id_to_option = self
-            .metadata_manager
-            .get_all_table_options()
-            .await
-            .map_err(|err| Error::MetaStore(err.into()))?;
 
         let mut compaction_guard = self.compaction.write().await;
         let compaction: &mut Compaction = &mut compaction_guard;
@@ -722,9 +730,12 @@ impl HummockManager {
 
             let mut table_id_to_option: HashMap<u32, _> = HashMap::default();
 
-            for table_id in &member_table_ids {
-                if let Some(opts) = all_table_id_to_option.get(table_id) {
-                    table_id_to_option.insert(*table_id, *opts);
+            {
+                let guard = self.table_id_to_table_option.read();
+                for table_id in &member_table_ids {
+                    if let Some(opts) = guard.get(table_id) {
+                        table_id_to_option.insert(*table_id, *opts);
+                    }
                 }
             }
 

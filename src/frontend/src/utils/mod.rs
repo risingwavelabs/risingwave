@@ -21,6 +21,7 @@ use std::sync::LazyLock;
 
 pub use column_index_mapping::*;
 mod condition;
+pub mod data_type;
 pub use condition::*;
 mod connected_components;
 pub(crate) use connected_components::*;

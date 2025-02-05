@@ -1,23 +1,30 @@
-auto-retry: &auto-retry
-  automatic:
-    # Agent terminated because the AWS EC2 spot instance killed by AWS.
-    - signal_reason: agent_stop
-      limit: 3
-
-cargo-cache: &cargo-cache
-  id: cargo
-  key: "v1-cache-{{ id }}-{{ runner.os }}-{{ checksum 'Cargo.lock' }}"
-  restore-keys:
-    - "v1-cache-{{ id }}-{{ runner.os }}-"
-    - "v1-cache-{{ id }}-"
-  backend: s3
-  s3:
-    bucket: rw-ci-cache-bucket
-    args: "--no-progress"
-  paths:
-    - ".cargo/registry/index"
-    - ".cargo/registry/cache"
-    - ".cargo/git"
+anchors:
+  - auto-retry: &auto-retry
+      automatic:
+        # Agent terminated because the AWS EC2 spot instance killed by AWS.
+        - signal_reason: agent_stop
+          limit: 3
+  - plugins:
+    - cargo-cache: &cargo-cache
+        nienbo/cache#v2.4.20:
+          id: cargo
+          key: "v1-cache-{{ id }}-{{ runner.os }}-{{ checksum 'Cargo.lock' }}"
+          restore-keys:
+            - "v1-cache-{{ id }}-{{ runner.os }}-"
+            - "v1-cache-{{ id }}-"
+          backend: s3
+          s3:
+            bucket: rw-ci-cache-bucket
+            args: "--no-progress"
+          paths:
+            - ".cargo/registry/index"
+            - ".cargo/registry/cache"
+            - ".cargo/git"
+    # we need to override args, so didn't include image here in the anchor
+    - docker-compose: &docker-compose
+        run: rw-build-env
+        config: ci/docker-compose.yml
+        mount-buildkite-agent: true
 
 other-sql-backend: &other-sql-backend
   matrix:
@@ -40,11 +47,6 @@ other-sql-backend: &other-sql-backend
   env:
     RISEDEV_SQL_ENDPOINT: "{{matrix.endpoint}}"
 
-docker-compose-common: &docker-compose-common
-    config: ci/docker-compose.yml
-    mount-buildkite-agent: true
-    propagate-environment: true
-    run: ci-standard-env
 
 steps:
   - label: "check ci image rebuild"
@@ -62,11 +64,8 @@ steps:
     command: "ci/scripts/build.sh -p ci-dev"
     key: "build"
     plugins:
-      - nienbo/cache#v2.4.20: *cargo-cache
-      - docker-compose#v5.5.0:
-          run: rw-build-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
+      - *cargo-cache
+      - docker-compose#v5.5.0: *docker-compose
     timeout_in_minutes: 15
     retry: *auto-retry
 
@@ -74,16 +73,14 @@ steps:
     command: "ci/scripts/build-other.sh"
     key: "build-other"
     plugins:
-      - nienbo/cache#v2.4.20: *cargo-cache
+      - *cargo-cache
       - seek-oss/aws-sm#v2.3.2:
           env:
             GITHUB_TOKEN: github-token
       - docker-compose#v5.5.0:
-          run: rw-build-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
+          <<: *docker-compose
           environment:
-            - GITHUB_TOKEN
+          - GITHUB_TOKEN
     timeout_in_minutes: 14
     retry: *auto-retry
 
@@ -91,22 +88,16 @@ steps:
     command: "ci/scripts/build-simulation.sh"
     key: "build-simulation"
     plugins:
-      - nienbo/cache#v2.4.20: *cargo-cache
-      - docker-compose#v5.5.0:
-          run: rw-build-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
+      - *cargo-cache
+      - docker-compose#v5.5.0: *docker-compose
     retry: *auto-retry
 
   - label: "docslt"
     command: "ci/scripts/docslt.sh"
     key: "docslt"
     plugins:
-      - nienbo/cache#v2.4.20: *cargo-cache
-      - docker-compose#v5.5.0:
-          run: rw-build-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
+      - *cargo-cache
+      - docker-compose#v5.5.0: *docker-compose
     timeout_in_minutes: 10
     retry: *auto-retry
 
@@ -121,10 +112,7 @@ steps:
       - "build-other"
       - "docslt"
     plugins:
-      - docker-compose#v5.5.0:
-          run: rw-build-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
+      - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 30
     retry: *auto-retry
@@ -140,10 +128,7 @@ steps:
       - "build"
       - "build-other"
     plugins:
-      - docker-compose#v5.5.0:
-          run: rw-build-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
+      - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 8
     retry: *auto-retry
@@ -158,10 +143,7 @@ steps:
       - "build-other"
       - "docslt"
     plugins:
-      - docker-compose#v5.5.0:
-          run: rw-build-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
+      - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 45
     retry: *auto-retry
@@ -176,12 +158,9 @@ steps:
       - "build"
       - "docslt"
     plugins:
-      - docker-compose#v5.5.0:
-          run: rw-build-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
+      - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 25
+    timeout_in_minutes: 30
     retry: *auto-retry
 
   - label: "end-to-end test for opendal (parallel)"
@@ -191,10 +170,7 @@ steps:
       - "build"
       - "docslt"
     plugins:
-      - docker-compose#v5.5.0:
-          run: rw-build-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
+      - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 14
     retry: *auto-retry
@@ -204,10 +180,7 @@ steps:
     command: "ci/scripts/e2e-test-parallel-in-memory.sh -p ci-dev"
     depends_on: "build"
     plugins:
-      - docker-compose#v5.5.0:
-          run: rw-build-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
+      - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 12
     retry: *auto-retry
@@ -223,9 +196,8 @@ steps:
       - "build-other"
     plugins:
       - docker-compose#v5.5.0:
+          <<: *docker-compose
           run: source-test-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
           upload-container-logs: always
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 20
@@ -242,9 +214,8 @@ steps:
       - "build-other"
     plugins:
       - docker-compose#v5.5.0:
+          <<: *docker-compose
           run: sink-test-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 20
     cancel_on_build_failing: true
@@ -257,10 +228,7 @@ steps:
       - "build"
       - "build-other"
     plugins:
-      - docker-compose#v5.5.0:
-          run: rw-build-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
+      - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
     matrix:
       setup:
@@ -278,9 +246,8 @@ steps:
       - "build-other"
     plugins:
       - docker-compose#v5.5.0:
-          run: rw-build-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
+          <<: *docker-compose
+          run: sink-test-env
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 15
     retry: *auto-retry
@@ -293,11 +260,10 @@ steps:
       - "build-other"
     plugins:
       - docker-compose#v5.5.0:
+          <<: *docker-compose
           run: sink-test-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 17
+    timeout_in_minutes: 19
     retry: *auto-retry
 
   - label: "end-to-end iceberg cdc test"
@@ -308,9 +274,8 @@ steps:
       - "build-other"
     plugins:
       - docker-compose#v5.5.0:
+          <<: *docker-compose
           run: sink-test-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 15
     retry: *auto-retry
@@ -323,9 +288,8 @@ steps:
       - "build-other"
     plugins:
       - docker-compose#v5.5.0:
+          <<: *docker-compose
           run: iceberg-engine-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 15
     retry: *auto-retry
@@ -338,9 +302,8 @@ steps:
       - "build-other"
     plugins:
       - docker-compose#v5.5.0:
+          <<: *docker-compose
           run: sink-test-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
     retry: *auto-retry
@@ -353,9 +316,8 @@ steps:
       - "build-other"
     plugins:
       - docker-compose#v5.5.0:
+          <<: *docker-compose
           run: sink-test-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
     retry: *auto-retry
@@ -368,9 +330,8 @@ steps:
       - "build-other"
     plugins:
       - docker-compose#v5.5.0:
+          <<: *docker-compose
           run: sink-test-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
     retry: *auto-retry
@@ -384,10 +345,7 @@ steps:
       - "build-other"
       - "docslt"
     plugins:
-      - docker-compose#v5.5.0:
-          run: rw-build-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
+      - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 15
     retry: *auto-retry
@@ -400,9 +358,8 @@ steps:
       - "build-other"
     plugins:
       - docker-compose#v5.5.0:
+          <<: *docker-compose
           run: sink-test-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
     retry: *auto-retry
@@ -415,9 +372,8 @@ steps:
       - "build-other"
     plugins:
       - docker-compose#v5.5.0:
+          <<: *docker-compose
           run: sink-test-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
     retry: *auto-retry
@@ -430,9 +386,8 @@ steps:
       - "build-other"
     plugins:
       - docker-compose#v5.5.0:
+          <<: *docker-compose
           run: sink-test-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
     retry: *auto-retry
@@ -445,9 +400,8 @@ steps:
       - "build-other"
     plugins:
       - docker-compose#v5.5.0:
+          <<: *docker-compose
           run: sink-test-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
     retry: *auto-retry
@@ -460,9 +414,8 @@ steps:
       - "build-other"
     plugins:
       - docker-compose#v5.5.0:
+          <<: *docker-compose
           run: sink-test-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
     retry: *auto-retry
@@ -475,9 +428,8 @@ steps:
       - "build-other"
     plugins:
       - docker-compose#v5.5.0:
+          <<: *docker-compose
           run: sink-test-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
     retry: *auto-retry
@@ -490,9 +442,8 @@ steps:
       - "build-other"
     plugins:
       - docker-compose#v5.5.0:
+          <<: *docker-compose
           run: sink-test-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
     retry: *auto-retry
@@ -504,10 +455,7 @@ steps:
       - "build"
       - "build-other"
     plugins:
-      - docker-compose#v5.5.0:
-          run: rw-build-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
+      - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
     retry: *auto-retry
@@ -521,9 +469,8 @@ steps:
     depends_on: "build"
     plugins:
       - docker-compose#v5.5.0:
+          <<: *docker-compose
           run: regress-test-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 5
     retry: *auto-retry
@@ -538,16 +485,15 @@ steps:
       || build.pull_request.labels includes "ci/run-unit-test"
       || build.env("CI_STEPS") =~ /(^|,)unit-tests?(,|$$)/
     plugins:
-      - nienbo/cache#v2.4.20: *cargo-cache
+      - *cargo-cache
       - ./ci/plugins/swapfile
       - seek-oss/aws-sm#v2.3.2:
           env:
             CODECOV_TOKEN: my-codecov-token
       - docker-compose#v5.5.0:
-          run: rw-build-env
-          config: ci/docker-compose.yml
+          <<: *docker-compose
           environment:
-            - CODECOV_TOKEN
+          - CODECOV_TOKEN
     timeout_in_minutes: 22
     retry: *auto-retry
 
@@ -558,10 +504,8 @@ steps:
       || build.pull_request.labels includes "ci/run-check"
       || build.env("CI_STEPS") =~ /(^|,)check(,|$$)/
     plugins:
-      - nienbo/cache#v2.4.20: *cargo-cache
-      - docker-compose#v5.5.0:
-          run: rw-build-env
-          config: ci/docker-compose.yml
+      - *cargo-cache
+      - docker-compose#v5.5.0: *docker-compose
     timeout_in_minutes: 25
     retry: *auto-retry
 
@@ -572,10 +516,8 @@ steps:
       || build.pull_request.labels includes "ci/run-check"
       || build.env("CI_STEPS") =~ /(^|,)check(,|$$)/
     plugins:
-      - nienbo/cache#v2.4.20: *cargo-cache
-      - docker-compose#v5.5.0:
-          run: rw-build-env
-          config: ci/docker-compose.yml
+      - *cargo-cache
+      - docker-compose#v5.5.0: *docker-compose
     timeout_in_minutes: 25
     retry: *auto-retry
 
@@ -586,10 +528,7 @@ steps:
       || build.pull_request.labels includes "ci/run-unit-test-deterministic-simulation"
       || build.env("CI_STEPS") =~ /(^|,)unit-tests?-deterministic-simulation(,|$$)/
     plugins:
-      - docker-compose#v5.5.0:
-          run: rw-build-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
+      - docker-compose#v5.5.0: *docker-compose
     timeout_in_minutes: 12
     cancel_on_build_failing: true
     retry: *auto-retry
@@ -602,10 +541,7 @@ steps:
       || build.env("CI_STEPS") =~ /(^|,)integration-tests?-deterministic-simulation(,|$$)/
     depends_on: "build-simulation"
     plugins:
-      - docker-compose#v5.5.0:
-          run: rw-build-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
+      - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 22
     retry: *auto-retry
@@ -622,13 +558,11 @@ steps:
           env:
             GITHUB_TOKEN: github-token
       - docker-compose#v5.5.0:
-          run: rw-build-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
+          <<: *docker-compose
           environment:
-            - GITHUB_TOKEN
+          - GITHUB_TOKEN
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 30
+    timeout_in_minutes: 35
     cancel_on_build_failing: true
     retry: *auto-retry
 
@@ -643,32 +577,14 @@ steps:
       # - seek-oss/aws-sm#v2.3.2:
       #     env:
       #       BUILDKITE_ANALYTICS_TOKEN: buildkite-build-analytics-deterministic-token
-      - docker-compose#v5.5.0:
-          run: rw-build-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
+      - docker-compose#v5.5.0: *docker-compose
       # Only upload zipped files, otherwise the logs is too much.
       - ./ci/plugins/upload-failure-logs-zipped
       # - test-collector#v1.0.0:
       #     files: "*-junit.xml"
       #     format: "junit"
-    timeout_in_minutes: 35
+    timeout_in_minutes: 40
     cancel_on_build_failing: true
-    retry: *auto-retry
-
-  - label: "misc check"
-    command: "ci/scripts/misc-check.sh"
-    if: |
-      !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-misc-check"
-      || build.env("CI_STEPS") =~ /(^|,)misc-check(,|$$)/
-    plugins:
-      - docker-compose#v5.5.0:
-          run: rw-build-env
-          config: ci/docker-compose.yml
-      - shellcheck#v1.2.0:
-          files: ./**/*.sh
-    timeout_in_minutes: 5
     retry: *auto-retry
 
   # The following jobs are triggered only when PR has corresponding labels.
@@ -688,11 +604,9 @@ steps:
           env:
             GITHUB_TOKEN: github-token
       - docker-compose#v5.5.0:
-          run: rw-build-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
+          <<: *docker-compose
           environment:
-            - GITHUB_TOKEN
+          - GITHUB_TOKEN
     timeout_in_minutes: 20
 
   # Generates cpu flamegraph if label `cpu_flamegraph` is added to PR.
@@ -705,11 +619,10 @@ steps:
           env:
             GITHUB_TOKEN: github-token
       - docker-compose#v5.5.0:
+          <<: *docker-compose
           run: ci-flamegraph-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
           environment:
-            - GITHUB_TOKEN
+          - GITHUB_TOKEN
     # TODO(kwannoel): Here are the areas that can be further optimized:
     # - Nexmark event generation: ~3min for 100mil records.
     # - Generate Flamegraph: ~15min (see https://github.com/koute/not-perf/issues/30 on optimizing)
@@ -728,11 +641,10 @@ steps:
           env:
             GITHUB_TOKEN: github-token
       - docker-compose#v5.5.0:
+          <<: *docker-compose
           run: ci-flamegraph-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
           environment:
-            - GITHUB_TOKEN
+          - GITHUB_TOKEN
     # TODO(kwannoel): Here are the areas that can be further optimized:
     # - Nexmark event generation: ~3min for 100mil records.
     # - Generate Flamegraph: ~15min (see https://github.com/koute/not-perf/issues/30 on optimizing)
@@ -750,11 +662,10 @@ steps:
       - "build"
     plugins:
       - docker-compose#v5.5.0:
+          <<: *docker-compose
           run: source-test-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
           environment:
-            - BUILDKITE_BRANCH
+          - BUILDKITE_BRANCH
       - ./ci/plugins/upload-failure-logs
     matrix:
       setup:
@@ -781,9 +692,8 @@ steps:
       - "build"
     plugins:
       - docker-compose#v5.5.0:
+          <<: *docker-compose
           run: ci-flamegraph-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
     timeout_in_minutes: 40
 
   - label: "Backfill tests"
@@ -793,9 +703,8 @@ steps:
       - "build"
     plugins:
       - docker-compose#v5.5.0:
+          <<: *docker-compose
           run: source-test-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 30
 
@@ -807,10 +716,7 @@ steps:
       - "build-other"
       - "docslt"
     plugins:
-      - docker-compose#v5.5.0:
-          run: rw-build-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
+      - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 40
     retry: *auto-retry
@@ -823,10 +729,7 @@ steps:
       - "build-other"
       - "docslt"
     plugins:
-      - docker-compose#v4.9.0:
-          run: rw-build-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
+      - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 30
     retry: *auto-retry
@@ -840,9 +743,12 @@ steps:
       - "build-other"
       - "docslt"
     plugins:
-      - docker-compose#v5.5.0: *docker-compose-common
+      - docker-compose#v5.5.0:
+          <<: *docker-compose
+          run: ci-standard-env
+          propagate-environment: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 32
+    timeout_in_minutes: 37
     retry: *auto-retry
 
   # FIXME(kwannoel): Let the github PR labeller label it, if sqlsmith source files has changes.
@@ -854,10 +760,7 @@ steps:
       - "build-simulation"
     plugins:
       - ./ci/plugins/swapfile
-      - docker-compose#v5.5.0:
-          run: rw-build-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
+      - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 15
     retry: *auto-retry
@@ -869,10 +772,7 @@ steps:
       - "build-simulation"
     plugins:
       - ./ci/plugins/swapfile
-      - docker-compose#v5.5.0:
-          run: rw-build-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
+      - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 15
     retry: *auto-retry
@@ -888,10 +788,7 @@ steps:
     key: "run-micro-benchmarks"
     if: build.pull_request.labels includes "ci/run-micro-benchmarks" || build.env("CI_STEPS") =~ /(^|,)micro-benchmarks?(,|$$)/
     plugins:
-      - docker-compose#v5.5.0:
-          run: rw-build-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
+      - docker-compose#v5.5.0: *docker-compose
     timeout_in_minutes: 60
     retry: *auto-retry
 
@@ -906,10 +803,8 @@ steps:
             BUILDKITE_TOKEN: buildkite_token
             GITHUB_TOKEN: github-token
       - docker-compose#v5.5.0:
-          run: rw-build-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
+          <<: *docker-compose
           environment:
-            - BUILDKITE_TOKEN
-            - GITHUB_TOKEN
+          - BUILDKITE_TOKEN
+          - GITHUB_TOKEN
     timeout_in_minutes: 5

@@ -12,11 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::license::LicenseManager;
 use risingwave_common_service::ObserverState;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_trace::TraceSpan;
 use risingwave_pb::catalog::Table;
-use risingwave_pb::meta::relation::RelationInfo;
+use risingwave_pb::meta::object::PbObjectInfo;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::SubscribeResponse;
 use tokio::sync::mpsc::UnboundedSender;
@@ -48,10 +49,10 @@ impl ObserverState for HummockObserverNode {
             TraceSpan::new_meta_message_span(resp.clone());
 
         match info.to_owned() {
-            Info::RelationGroup(relation_group) => {
-                for relation in relation_group.relations {
-                    match relation.relation_info.unwrap() {
-                        RelationInfo::Table(table_catalog) => {
+            Info::ObjectGroup(object_group) => {
+                for object in object_group.objects {
+                    match object.object_info.unwrap() {
+                        PbObjectInfo::Table(table_catalog) => {
                             self.handle_catalog_notification(resp.operation(), table_catalog);
                         }
                         _ => panic!("error type notification"),
@@ -87,6 +88,10 @@ impl ObserverState for HummockObserverNode {
             Info::HummockWriteLimits(write_limits) => {
                 self.write_limiter
                     .update_write_limits(write_limits.write_limits);
+            }
+
+            Info::ComputeNodeTotalCpuCount(count) => {
+                LicenseManager::get().update_cpu_core_count(count as _);
             }
 
             _ => {
@@ -130,6 +135,7 @@ impl ObserverState for HummockObserverNode {
             });
         let snapshot_version = snapshot.version.unwrap();
         self.version = snapshot_version.catalog_version;
+        LicenseManager::get().update_cpu_core_count(snapshot.compute_node_total_cpu_count as _);
     }
 }
 

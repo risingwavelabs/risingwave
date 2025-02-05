@@ -688,6 +688,10 @@ if [[ $ENABLE_COREDUMP == "true" ]]; then
   ulimit -c unlimited
 fi
 
+if [[ $ENABLE_BUILD_RW_CONNECTOR == "true" ]]; then
+  export CONNECTOR_LIBS_PATH="${PREFIX_BIN}/connector-node/libs/"
+fi
+
 set -x
 target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave playground $@
 '''
@@ -1355,7 +1359,7 @@ echo "All processes has exited."
 
 [tasks.slt]
 category = "RiseDev - Test - SQLLogicTest"
-install_crate = { min_version = "0.24.0", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
+install_crate = { min_version = "0.26.3", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
     "--help",
 ], install_command = "binstall" }
 dependencies = ["check-and-load-risedev-env-file"]

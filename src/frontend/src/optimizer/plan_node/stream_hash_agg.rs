@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::XmlNode;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
@@ -21,10 +20,10 @@ use super::generic::{self, PlanAggCall};
 use super::stream::prelude::*;
 use super::utils::{childless_record, plan_node_name, watermark_pretty, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
-use crate::error::{ErrorCode, Result};
+use crate::error::Result;
 use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::property::MonotonicityMap;
+use crate::optimizer::property::{MonotonicityMap, WatermarkColumns};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, IndexSet};
 
@@ -70,19 +69,24 @@ impl StreamHashAgg {
             .i2o_col_mapping()
             .rewrite_provided_distribution(input_dist);
 
-        let mut watermark_columns = FixedBitSet::with_capacity(core.output_len());
+        let mut watermark_columns = WatermarkColumns::new();
         let mut window_col_idx = None;
         let mapping = core.i2o_col_mapping();
         if emit_on_window_close {
-            let wtmk_group_key = core.watermark_group_key(input.watermark_columns());
-            assert!(wtmk_group_key.len() == 1); // checked in `to_eowc_version`
-            window_col_idx = Some(wtmk_group_key[0]);
-            // EOWC HashAgg only produce one watermark column, i.e. the window column
-            watermark_columns.insert(mapping.map(wtmk_group_key[0]));
+            let window_col = core
+                .eowc_window_column(input.watermark_columns())
+                .expect("checked in `to_eowc_version`");
+            // EOWC HashAgg only propagate one watermark column, the window column.
+            watermark_columns.insert(
+                mapping.map(window_col),
+                input.watermark_columns().get_group(window_col).unwrap(),
+            );
+            window_col_idx = Some(window_col);
         } else {
             for idx in core.group_key.indices() {
-                if input.watermark_columns().contains(idx) {
-                    watermark_columns.insert(mapping.map(idx));
+                if let Some(wtmk_group) = input.watermark_columns().get_group(idx) {
+                    // Non-EOWC `StreamHashAgg` simply forwards the watermark messages from the input.
+                    watermark_columns.insert(mapping.map(idx), wtmk_group);
                 }
             }
         }
@@ -122,16 +126,9 @@ impl StreamHashAgg {
     // optimize for 2-phase EOWC aggregation later.
     pub fn to_eowc_version(&self) -> Result<PlanRef> {
         let input = self.input();
-        let wtmk_group_key = self.core.watermark_group_key(input.watermark_columns());
 
-        if wtmk_group_key.is_empty() || wtmk_group_key.len() > 1 {
-            return Err(ErrorCode::NotSupported(
-                "The query cannot be executed in Emit-On-Window-Close mode.".to_owned(),
-                "Please make sure there is one and only one watermark column in GROUP BY"
-                    .to_owned(),
-            )
-            .into());
-        }
+        // check whether the group by columns are valid
+        let _ = self.core.eowc_window_column(input.watermark_columns())?;
 
         Ok(Self::new_with_eowc(
             self.core.clone(),
@@ -219,7 +216,7 @@ impl StreamNode for StreamHashAgg {
                 .collect(),
             row_count_index: self.row_count_idx as u32,
             emit_on_window_close: self.base.emit_on_window_close(),
-            version: PbAggNodeVersion::Issue13465 as _,
+            version: PbAggNodeVersion::LATEST as _,
         }))
     }
 }

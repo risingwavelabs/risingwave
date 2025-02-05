@@ -15,9 +15,11 @@
 pub use risingwave_batch::executor::*;
 
 pub mod aggregation;
+mod azblob_file_scan;
 mod delete;
 mod expand;
 mod filter;
+mod gcs_file_scan;
 mod generic_exchange;
 mod group_top_n;
 mod hash_agg;
@@ -49,9 +51,11 @@ mod update;
 mod utils;
 mod values;
 
+use azblob_file_scan::AzblobFileScanExecutorBuilder;
 pub use delete::*;
 pub use expand::*;
 pub use filter::*;
+use gcs_file_scan::GcsFileScanExecutorBuilder;
 pub use generic_exchange::*;
 pub use group_top_n::*;
 pub use hash_agg::*;
@@ -112,6 +116,8 @@ register_executor!(Source, SourceExecutor);
 register_executor!(SortOverWindow, SortOverWindowExecutor);
 register_executor!(MaxOneRow, MaxOneRowExecutor);
 register_executor!(FileScan, FileScanExecutorBuilder);
+register_executor!(GcsFileScan, GcsFileScanExecutorBuilder);
+register_executor!(AzblobFileScan, AzblobFileScanExecutorBuilder);
 register_executor!(IcebergScan, IcebergScanExecutorBuilder);
 register_executor!(PostgresQuery, PostgresQueryExecutorBuilder);
 register_executor!(MysqlQuery, MySqlQueryExecutorBuilder);
