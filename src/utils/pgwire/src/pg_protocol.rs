@@ -226,7 +226,7 @@ where
                     Ok(msg) => msg,
                     Err(e) => {
                         tracing::error!(error = %e.as_report(), "error when reading message");
-                        return false;
+                        return true; // terminate the connection
                     }
                 };
                 tracing::trace!(?msg, "received message");
