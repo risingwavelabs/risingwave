@@ -15,10 +15,8 @@
 use std::collections::HashSet;
 use std::sync::{Arc, LazyLock};
 
-use risingwave_common::error::{NotImplemented, TrackingIssue};
 use risingwave_connector::parser::additional_columns::gen_default_addition_col_name;
 use risingwave_connector::sink::decouple_checkpoint_log_sink::COMMIT_CHECKPOINT_INTERVAL;
-use risingwave_connector::WithPropertiesExt;
 use risingwave_sqlparser::ast::{ColumnDef, Ident};
 
 use crate::catalog::root_catalog::SchemaPath;
