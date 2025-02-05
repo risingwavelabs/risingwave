@@ -1982,6 +1982,7 @@ fn bind_webhook_info(
     let WebhookSourceInfo {
         secret_ref,
         signature_expr,
+        wait_for_persistence,
     } = webhook_info;
 
     // validate secret_ref
@@ -2019,6 +2020,7 @@ fn bind_webhook_info(
     let pb_webhook_info = PbWebhookSourceInfo {
         secret_ref: Some(pb_secret_ref),
         signature_expr: Some(expr.to_expr_proto()),
+        wait_for_persistence,
     };
 
     Ok(pb_webhook_info)
