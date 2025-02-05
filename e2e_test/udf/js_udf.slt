@@ -1,6 +1,8 @@
 statement ok
 create function int_42() returns int language javascript as $$
+export function int_42() {
     return 42;
+}
 $$;
 
 query I
@@ -14,6 +16,7 @@ drop function int_42;
 
 statement ok
 create function gcd(a int, b int) returns int language javascript as $$
+export function gcd(a, b) {
     // required before we support `RETURNS NULL ON NULL INPUT`
     if(a == null || b == null) {
         return null;
@@ -24,6 +27,7 @@ create function gcd(a int, b int) returns int language javascript as $$
         a = t;
     }
     return a;
+}
 $$;
 
 query I
@@ -37,7 +41,9 @@ drop function gcd;
 
 statement ok
 create function decimal_add(a decimal, b decimal) returns decimal language javascript as $$
+export function decimal_add(a, b) {
     return a + b;
+}
 $$;
 
 query R
@@ -51,7 +57,9 @@ drop function decimal_add;
 
 statement ok
 create function to_string(a boolean, b smallint, c int, d bigint, e real, f float, g decimal, h varchar, i bytea, j jsonb) returns varchar language javascript as $$
+export function to_string(a, b, c, d, e, f, g, h, i, j) {
     return a.toString() + b.toString() + c.toString() + d.toString() + e.toString() + f.toString() + g.toString() + h.toString() + i.toString() + JSON.stringify(j);
+}
 $$;
 
 query T
@@ -66,6 +74,7 @@ drop function to_string;
 # show data types in javascript
 statement ok
 create function js_typeof(a boolean, b smallint, c int, d bigint, e real, f float, g decimal, h varchar, i bytea, j jsonb) returns jsonb language javascript as $$
+export function js_typeof(a, b, c, d, e, f, g, h, i, j) {
     return {
         boolean: typeof a,
         smallint: typeof b,
@@ -78,6 +87,7 @@ create function js_typeof(a boolean, b smallint, c int, d bigint, e real, f floa
         bytea: typeof i,
         jsonb: typeof j,
     };
+}
 $$;
 
 query T
@@ -93,7 +103,9 @@ statement ok
 create function return_all(a boolean, b smallint, c int, d bigint, e real, f float, g decimal, h varchar, i bytea, j jsonb, s struct<f1 int, f2 int>)
 returns struct<a boolean, b smallint, c int, d bigint, e real, f float, g decimal, h varchar, i bytea, j jsonb, s struct<f1 int, f2 int>>
 language javascript as $$
+export function return_all(a, b, c, d, e, f, g, h, i, j, s) {
     return {a,b,c,d,e,f,g,h,i,j,s};
+}
 $$;
 
 query T
@@ -119,9 +131,11 @@ drop function return_all;
 
 statement ok
 create function series(n int) returns table (x int) language javascript as $$
+export function series(n) {
     for(let i = 0; i < n; i++) {
         yield i;
     }
+}
 $$;
 
 query I
@@ -139,9 +153,11 @@ drop function series;
 
 statement ok
 create function split(s varchar) returns table (word varchar, length int) language javascript as $$
+export function split(s) {
     for(let word of s.split(' ')) {
         yield { word: word, length: word.length };
     }
+}
 $$;
 
 query IT
@@ -235,3 +251,16 @@ drop function weighted_avg;
 
 statement ok
 drop aggregate weighted_avg;
+
+statement ok
+create function int_42_legacy() returns int language javascript as $$
+    return 42;
+$$;
+
+query I
+select int_42_legacy();
+----
+42
+
+statement ok
+drop function int_42_legacy;

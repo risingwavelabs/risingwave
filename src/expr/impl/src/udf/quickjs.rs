@@ -44,19 +44,30 @@ static QUICKJS: UdfImplDescriptor = UdfImplDescriptor {
                 opts.body.context("body is required")?,
             )?;
         } else {
-            let body = format!(
-                "export function{} {}({}) {{ {} }}",
-                if opts.kind.is_table() { "*" } else { "" },
-                opts.identifier,
-                opts.arg_names.join(","),
-                opts.body.context("body is required")?,
-            );
-            runtime.add_function(
+            let res = runtime.add_function(
                 opts.identifier,
                 UdfArrowConvert::default().to_arrow_field("", opts.return_type)?,
                 CallMode::CalledOnNullInput,
-                &body,
-            )?;
+                opts.body.context("body is required")?,
+            );
+
+            if res.is_err() {
+                // COMPATIBILITY: This is for keeping compatible with the legacy syntax that
+                // only function body is provided by users.
+                let body = format!(
+                    "export function{} {}({}) {{ {} }}",
+                    if opts.kind.is_table() { "*" } else { "" },
+                    opts.identifier,
+                    opts.arg_names.join(","),
+                    opts.body.context("body is required")?,
+                );
+                runtime.add_function(
+                    opts.identifier,
+                    UdfArrowConvert::default().to_arrow_field("", opts.return_type)?,
+                    CallMode::CalledOnNullInput,
+                    &body,
+                )?;
+            }
         }
         Ok(Box::new(QuickJsFunction {
             runtime,
