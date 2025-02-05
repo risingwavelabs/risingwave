@@ -38,20 +38,27 @@ pub const TELEMETRY_CLUSTER_TYPE_HOSTED: &str = "hosted"; // hosted on RisingWav
 pub const TELEMETRY_CLUSTER_TYPE_KUBERNETES: &str = "kubernetes";
 pub const TELEMETRY_CLUSTER_TYPE_SINGLE_NODE: &str = "single-node";
 pub const TELEMETRY_CLUSTER_TYPE_DOCKER_COMPOSE: &str = "docker-compose";
+const TELEMETRY_CLUSTER_TYPE_TEST: &str = "test";
 
 pub use risingwave_telemetry_event::get_telemetry_risingwave_cloud_uuid;
 
-pub fn telemetry_cluster_type_from_env_var() -> PbTelemetryClusterType {
+pub fn telemetry_cluster_type_from_env_var() -> TelemetryResult<PbTelemetryClusterType> {
     let cluster_type = match env::var(TELEMETRY_CLUSTER_TYPE) {
         Ok(cluster_type) => cluster_type,
-        Err(_) => return PbTelemetryClusterType::Unspecified,
+        Err(_) => return Ok(PbTelemetryClusterType::Unspecified),
     };
     match cluster_type.as_str() {
-        TELEMETRY_CLUSTER_TYPE_HOSTED => PbTelemetryClusterType::CloudHosted,
-        TELEMETRY_CLUSTER_TYPE_DOCKER_COMPOSE => PbTelemetryClusterType::DockerCompose,
-        TELEMETRY_CLUSTER_TYPE_KUBERNETES => PbTelemetryClusterType::Kubernetes,
-        TELEMETRY_CLUSTER_TYPE_SINGLE_NODE => PbTelemetryClusterType::SingleNode,
-        _ => PbTelemetryClusterType::Unspecified,
+        TELEMETRY_CLUSTER_TYPE_HOSTED => Ok(PbTelemetryClusterType::CloudHosted),
+        TELEMETRY_CLUSTER_TYPE_DOCKER_COMPOSE => Ok(PbTelemetryClusterType::DockerCompose),
+        TELEMETRY_CLUSTER_TYPE_KUBERNETES => Ok(PbTelemetryClusterType::Kubernetes),
+        TELEMETRY_CLUSTER_TYPE_SINGLE_NODE => Ok(PbTelemetryClusterType::SingleNode),
+
+        // block the report if the cluster is in test env
+        // but it only blocks the report from meta node, not other nodes
+        TELEMETRY_CLUSTER_TYPE_TEST => Err(TelemetryError::from(
+            "test cluster type should not send telemetry report",
+        )),
+        _ => Err(TelemetryError::from("invalid cluster type")),
     }
 }
 
@@ -156,7 +163,7 @@ pub fn report_scarf_enabled() -> bool {
     telemetry_env_enabled()
         && !matches!(
             telemetry_cluster_type_from_env_var(),
-            PbTelemetryClusterType::CloudHosted
+            Ok(PbTelemetryClusterType::CloudHosted)
         )
 }
 

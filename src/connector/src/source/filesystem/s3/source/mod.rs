@@ -14,4 +14,4 @@
 
 mod reader;
 mod split_stream;
-pub use reader::S3FileReader;
+pub use reader::LegacyS3FileReader;

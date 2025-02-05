@@ -824,6 +824,17 @@ impl SchemaCatalog {
         }
     }
 
+    pub fn contains_object(&self, oid: u32) -> bool {
+        self.table_by_id.contains_key(&TableId::new(oid))
+            || self.index_by_id.contains_key(&IndexId::new(oid))
+            || self.source_by_id.contains_key(&oid)
+            || self.sink_by_id.contains_key(&oid)
+            || self.view_by_id.contains_key(&oid)
+            || self.function_by_id.contains_key(&FunctionId::new(oid))
+            || self.subscription_by_id.contains_key(&oid)
+            || self.connection_by_id.contains_key(&oid)
+    }
+
     pub fn id(&self) -> SchemaId {
         self.id
     }

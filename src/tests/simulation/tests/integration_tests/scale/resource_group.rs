@@ -20,6 +20,7 @@ use risingwave_common::config::default;
 use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 use risingwave_simulation::cluster::{Cluster, Configuration};
 use risingwave_simulation::ctl_ext::predicate::{identity_contains, no_identity_contains};
+use risingwave_simulation::utils::AssertResult;
 use tokio::time::sleep;
 
 #[tokio::test]
@@ -106,6 +107,34 @@ async fn test_resource_group() -> Result<()> {
 
     assert_eq!(union_fragment.inner.actors.len(), 2);
     assert_eq!(mat_fragment.inner.actors.len(), 4);
+
+    session
+        .run("select resource_group from rw_streaming_jobs where name = 'm'")
+        .await?
+        .assert_result_eq("test");
+
+    let _ = session
+        .run("alter materialized view m reset resource_group;")
+        .await?;
+
+    session
+        .run("select resource_group from rw_streaming_jobs where name = 'm'")
+        .await?
+        .assert_result_eq(DEFAULT_RESOURCE_GROUP);
+
+    let union_fragment = cluster
+        .locate_one_fragment([identity_contains("union")])
+        .await?;
+
+    let mat_fragment = cluster
+        .locate_one_fragment([
+            identity_contains("materialize"),
+            no_identity_contains("union"),
+        ])
+        .await?;
+
+    assert_eq!(union_fragment.inner.actors.len(), 2);
+    assert_eq!(mat_fragment.inner.actors.len(), 2);
 
     Ok(())
 }

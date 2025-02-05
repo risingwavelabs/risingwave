@@ -81,7 +81,7 @@ pub async fn list_prometheus_cluster(
         // assume job_name is one of compute, meta, frontend
         let now = SystemTime::now();
         let cpu_query =
-            format!("sum(rate(process_cpu_seconds_total{{job=~\"compute|meta|frontend\",{}}}[60s])) by (job,instance)", srv.prometheus_selector);
+            format!("sum(rate(process_cpu_seconds_total{{job=~\"standalone|compute|meta|frontend\", {}}}[60s]) or label_replace(rate(process_cpu_seconds_total{{component=~\"standalone|compute|meta|frontend\", {}}}[60s]), \"job\", \"$1\", \"component\", \"(.*)\")) by (job,instance)", srv.prometheus_selector, srv.prometheus_selector);
         let result = client
             .query_range(
                 cpu_query,
@@ -105,7 +105,7 @@ pub async fn list_prometheus_cluster(
             .map(PrometheusVector::from)
             .collect();
         let memory_query =
-            format!("avg(process_resident_memory_bytes{{job=~\"compute|meta|frontend\",{}}}) by (job,instance)", srv.prometheus_selector);
+            format!("avg(process_resident_memory_bytes{{job=~\"standalone|compute|meta|frontend\", {}}} or label_replace(process_resident_memory_bytes{{component=~\"standalone|compute|meta|frontend\", {}}}, \"job\", \"$1\", \"component\", \"(.*)\")) by (job,instance)", srv.prometheus_selector, srv.prometheus_selector);
         let result = client
             .query_range(
                 memory_query,

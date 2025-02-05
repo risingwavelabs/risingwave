@@ -752,9 +752,9 @@ impl DdlController {
         }
 
         // check if the union fragment is fully assigned.
-        for fragment in stream_job_fragments.fragments.values_mut() {
-            for actor in &mut fragment.actors {
-                if let Some(node) = &mut actor.nodes {
+        for fragment in stream_job_fragments.fragments.values() {
+            for actor in &fragment.actors {
+                if let Some(node) = &actor.nodes {
                     visit_stream_node(node, |node| {
                         if let NodeBody::Merge(merge_node) = node {
                             assert!(!merge_node.upstream_actor_id.is_empty(), "All the mergers for the union should have been fully assigned beforehand.");
@@ -1435,6 +1435,8 @@ impl DdlController {
         drop_mode: DropMode,
         target_replace_info: Option<ReplaceStreamJobInfo>,
     ) -> MetaResult<NotificationVersion> {
+        let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
+
         let (object_id, object_type) = match job_id {
             StreamingJobId::MaterializedView(id) => (id as _, ObjectType::Table),
             StreamingJobId::Sink(id) => (id as _, ObjectType::Sink),
