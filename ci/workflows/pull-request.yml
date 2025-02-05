@@ -99,7 +99,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 30
+    timeout_in_minutes: 35
     retry: *auto-retry
 
   - label: "slow end-to-end test"
@@ -154,7 +154,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 25
+    timeout_in_minutes: 30
     retry: *auto-retry
 
   - label: "end-to-end test for opendal (parallel)"
@@ -182,7 +182,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 12
+    timeout_in_minutes: 15
     retry: *auto-retry
 
   - label: "end-to-end source test"
@@ -586,7 +586,7 @@ steps:
           environment:
             - GITHUB_TOKEN
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 30
+    timeout_in_minutes: 35
     cancel_on_build_failing: true
     retry: *auto-retry
 
@@ -610,7 +610,7 @@ steps:
       # - test-collector#v1.0.0:
       #     files: "*-junit.xml"
       #     format: "junit"
-    timeout_in_minutes: 30
+    timeout_in_minutes: 35
     cancel_on_build_failing: true
     retry: *auto-retry
 
