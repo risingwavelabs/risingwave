@@ -190,6 +190,13 @@ CREATE TABLE test_my_default_value (
 ) FROM mysql_mytest TABLE 'mytest.test_my_default_value';
 
 statement ok
+CREATE TABLE test_my_default_value_disorderd (
+    city varchar,
+    id int,
+    PRIMARY KEY (id)
+) FROM mysql_mytest TABLE 'mytest.test_my_default_value';
+
+statement ok
 SET RW_IMPLICIT_FLUSH=true;
 
 statement ok
@@ -200,6 +207,13 @@ select * from test_my_default_value;
 ----
 2 jack Shanghai
 
+statement ok
+INSERT INTO test_my_default_value_disorderd (id) VALUES (2);
+
+query II
+select * from test_my_default_value_disorderd;
+----
+Shanghai 2
 
 statement ok
 create table kt1 (*) from mysql_source table 'kdb.kt1';
@@ -651,6 +665,13 @@ CREATE TABLE test_pg_default_value (
 ) FROM pg_source TABLE 'public.test_default_value';
 
 statement ok
+CREATE TABLE test_pg_default_value_disorderd (
+    city varchar,
+    id int,
+    PRIMARY KEY (id)
+) FROM pg_source TABLE 'public.test_default_value';
+
+statement ok
 SET RW_IMPLICIT_FLUSH=true;
 
 statement ok
@@ -660,6 +681,14 @@ query II
 select * from test_pg_default_value;
 ----
 1 noris Shanghai
+
+statement ok
+INSERT INTO test_pg_default_value_disorderd (id) VALUES (1);
+
+query II
+select * from test_pg_default_value_disorderd;
+----
+Shanghai 1
 
 ### BEGIN reset the password to the original one
 onlyif can-use-recover
