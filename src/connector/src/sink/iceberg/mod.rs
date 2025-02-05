@@ -18,12 +18,15 @@ mod prometheus;
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::Debug;
 use std::num::NonZeroU64;
+use std::str::FromStr;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
 use async_trait::async_trait;
 use iceberg::arrow::{arrow_schema_to_schema, schema_to_arrow_schema};
-use iceberg::spec::{DataFile, SerializedDataFile};
+use iceberg::spec::{
+    DataFile, SerializedDataFile, Transform, UnboundPartitionField, UnboundPartitionSpec,
+};
 use iceberg::table::Table;
 use iceberg::transaction::Transaction;
 use iceberg::writer::base_writer::data_file_writer::DataFileWriterBuilder;
@@ -47,6 +50,7 @@ use itertools::Itertools;
 use parquet::file::properties::WriterProperties;
 use prometheus::monitored_general_writer::MonitoredGeneralWriterBuilder;
 use prometheus::monitored_position_delete_writer::MonitoredPositionDeleteWriterBuilder;
+use regex::Regex;
 use risingwave_common::array::arrow::arrow_array_iceberg::{Int32Array, RecordBatch};
 use risingwave_common::array::arrow::arrow_schema_iceberg::{
     self, DataType as ArrowDataType, Field as ArrowField, Schema as ArrowSchema, SchemaRef,
@@ -108,6 +112,13 @@ pub struct IcebergConfig {
     // Props for java catalog props.
     #[serde(skip)]
     pub java_catalog_props: HashMap<String, String>,
+
+    #[serde(
+        rename = "partition_by",
+        default,
+        deserialize_with = "deserialize_optional_string_seq_from_string"
+    )]
+    pub partition_by: Option<Vec<String>>,
 
     /// Commit every n(>0) checkpoints, default is 10.
     #[serde(default = "default_commit_checkpoint_interval")]
@@ -311,9 +322,53 @@ impl IcebergSink {
                 }
             };
 
+            let partition_fields = match &self.config.partition_by {
+                Some(partition_by) => {
+                    let mut partition_fields =
+                        Vec::<UnboundPartitionField>::with_capacity(partition_by.len());
+                    for partition_field in partition_by {
+                        let re = Regex::new(r"\w+(\(\w+\))?").unwrap();
+                        if !re.is_match(partition_field) {
+                            bail!(format!("Invalid partition field: {}", partition_field))
+                        }
+                        let (_, [field1, field2]) = re.captures(partition_field).unwrap().extract();
+                        let mut func = field1.to_owned();
+                        let mut column = field2.to_owned();
+                        if column.is_empty() {
+                            column.replace_range(.., &func);
+                            func.replace_range(.., "identity");
+                        }
+                        let transform = Transform::from_str(&func).unwrap();
+                        if transform == Transform::Unknown {
+                            bail!(format!("Invalid partition field: {}", partition_field))
+                        }
+                        for (pos, col) in self.param.columns.iter().enumerate() {
+                            if col.name == column {
+                                partition_fields.push(
+                                    UnboundPartitionField::builder()
+                                        .source_id(pos as i32)
+                                        .transform(transform)
+                                        .name(column.to_owned())
+                                        .build(),
+                                );
+                                break;
+                            }
+                        }
+                    }
+                    partition_fields
+                }
+                None => Vec::<UnboundPartitionField>::new(),
+            };
+
             let table_creation_builder = TableCreation::builder()
                 .name(self.config.common.table_name.clone())
-                .schema(iceberg_schema);
+                .schema(iceberg_schema)
+                .partition_spec(
+                    UnboundPartitionSpec::builder()
+                        .add_partition_fields(partition_fields)
+                        .unwrap()
+                        .build(),
+                );
 
             let table_creation = match location {
                 Some(location) => table_creation_builder.location(location).build(),
@@ -1402,6 +1457,7 @@ mod test {
             ("connector", "iceberg"),
             ("type", "upsert"),
             ("primary_key", "v1"),
+            ("partition_by", "v1,identity(v2)"),
             ("warehouse.path", "s3://iceberg"),
             ("s3.endpoint", "http://127.0.0.1:9301"),
             ("s3.access.key", "hummockadmin"),
@@ -1446,6 +1502,7 @@ mod test {
             r#type: "upsert".to_owned(),
             force_append_only: false,
             primary_key: Some(vec!["v1".to_owned()]),
+            partition_by: Some(vec!["v1".to_owned(), "identity(v2)".to_owned()]),
             java_catalog_props: [("jdbc.user", "admin"), ("jdbc.password", "123456")]
                 .into_iter()
                 .map(|(k, v)| (k.to_owned(), v.to_owned()))
