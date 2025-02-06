@@ -69,6 +69,7 @@ pub fn build_compaction_config_vec(
     sst_allowed_trivial_move_min_size: Option<u64>,
     disable_auto_group_scheduling: Option<bool>,
     max_overlapping_level_size: Option<u64>,
+    sst_allowed_trivial_move_max_count: Option<u32>,
     emergency_level0_sst_file_count: Option<u32>,
     emergency_level0_sub_level_partition: Option<u32>,
     level0_stop_write_threshold_max_sst_count: Option<u32>,
@@ -134,6 +135,9 @@ pub fn build_compaction_config_vec(
     }
     if let Some(c) = max_overlapping_level_size {
         configs.push(MutableConfig::MaxOverlappingLevelSize(c))
+    }
+    if let Some(c) = sst_allowed_trivial_move_max_count {
+        configs.push(MutableConfig::SstAllowedTrivialMoveMaxCount(c))
     }
     if let Some(c) = emergency_level0_sst_file_count {
         configs.push(MutableConfig::EmergencyLevel0SstFileCount(c))
