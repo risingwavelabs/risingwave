@@ -121,9 +121,6 @@ struct ExecutorInner<K: HashKey, S: StateStore, const EOWC: bool> {
 
     /// The maximum heap size of dirty groups. If exceeds, the executor should flush dirty groups.
     max_dirty_groups_heap_size: usize,
-
-    /// Should emit on window close according to watermark?
-    emit_on_window_close: bool,
 }
 
 impl<K: HashKey, S: StateStore, const EOWC: bool> ExecutorInner<K, S, EOWC> {
@@ -224,7 +221,6 @@ impl<K: HashKey, S: StateStore, const EOWC: bool> HashAggExecutor<K, S, EOWC> {
                 extreme_cache_size: args.extreme_cache_size,
                 chunk_size: args.extra.chunk_size,
                 max_dirty_groups_heap_size: args.extra.max_dirty_groups_heap_size,
-                emit_on_window_close: EOWC, // TODO(): remove
             },
         })
     }
@@ -414,7 +410,7 @@ impl<K: HashKey, S: StateStore, const EOWC: bool> HashAggExecutor<K, S, EOWC> {
         // flush changed states into intermediate state table
         for agg_group in vars.dirty_groups.values() {
             let encoded_states = agg_group.encode_states(&this.agg_funcs)?;
-            if this.emit_on_window_close {
+            if EOWC {
                 vars.buffer
                     .update_without_old_value(encoded_states, &mut this.intermediate_state_table);
             } else {
@@ -423,7 +419,7 @@ impl<K: HashKey, S: StateStore, const EOWC: bool> HashAggExecutor<K, S, EOWC> {
             }
         }
 
-        if this.emit_on_window_close {
+        if EOWC {
             // remove all groups under watermark and emit their results
             if let Some(watermark) = window_watermark.as_ref() {
                 #[for_await]
@@ -439,7 +435,7 @@ impl<K: HashKey, S: StateStore, const EOWC: bool> HashAggExecutor<K, S, EOWC> {
                         .collect();
                     let states = row.into_iter().skip(this.group_key_indices.len()).collect();
 
-                    // TODO(): no need to re-create
+                    // TODO(rc): Will use the `EOWC` flag to get rid of this special constructor in the next PR.
                     let mut agg_group = AggGroup::<S, EOWC>::create_eowc(
                         this.version,
                         Some(GroupKey::new(
@@ -651,7 +647,7 @@ impl<K: HashKey, S: StateStore, const EOWC: bool> HashAggExecutor<K, S, EOWC> {
                     Self::flush_metrics(&this, &mut vars);
                     Self::commit_state_tables(&mut this, barrier.epoch).await?;
 
-                    if this.emit_on_window_close {
+                    if EOWC {
                         // ignore watermarks on other columns
                         if let Some(watermark) =
                             vars.buffered_watermarks[window_col_idx_in_group_key].take()
