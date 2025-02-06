@@ -260,11 +260,11 @@ ElasticSearchOpenSearchConfig:
   - name: username
     field_type: String
     comments: The username of elasticsearch or openserach
-    required: true
+    required: false
   - name: password
     field_type: String
     comments: The username of elasticsearch or openserach
-    required: true
+    required: false
   - name: index_column
     field_type: String
     comments: It is used for dynamic index, if it is be set, the value of this column will be used as the index. It and `index` can only set one
@@ -285,6 +285,10 @@ ElasticSearchOpenSearchConfig:
   - name: concurrent_requests
     field_type: usize
     required: true
+  - name: r#type
+    field_type: String
+    required: false
+    default: '"upsert" . to_owned ()'
 FsConfig:
   fields:
   - name: fs.path
