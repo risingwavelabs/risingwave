@@ -484,7 +484,7 @@ pub mod agg_executor {
         };
 
         let exec = HashAggExecutor::<SerializedKey, S>::new(AggExecutorArgs {
-            version: PbAggNodeVersion::Max,
+            version: PbAggNodeVersion::LATEST,
 
             input,
             actor_ctx: ActorContext::for_test(123),
@@ -552,7 +552,7 @@ pub mod agg_executor {
         };
 
         let exec = SimpleAggExecutor::new(AggExecutorArgs {
-            version: PbAggNodeVersion::Max,
+            version: PbAggNodeVersion::LATEST,
 
             input,
             actor_ctx,
