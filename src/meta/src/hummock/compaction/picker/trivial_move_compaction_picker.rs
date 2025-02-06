@@ -102,7 +102,7 @@ impl TrivialMovePicker {
                 }
 
                 // reset overlap_info
-                overlap_info.clear();
+                overlap_info = self.overlap_strategy.create_overlap_info();
             }
         }
 
