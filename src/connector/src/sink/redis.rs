@@ -100,7 +100,7 @@ impl RedisPipe {
                     RedisSinkPayloadWriterInput::RedisGeoKey((key, member)),
                     RedisSinkPayloadWriterInput::RedisGeoValue((lat, lon)),
                 ) => {
-                    pipe.set(key, (lon, lat, member));
+                    pipe.geo_add(key, (lon, lat, member));
                 }
                 _ => return Err(SinkError::Redis("RedisPipe set not match".to_owned()).into()),
             },
@@ -115,7 +115,7 @@ impl RedisPipe {
                     RedisSinkPayloadWriterInput::RedisGeoKey((key, member)),
                     RedisSinkPayloadWriterInput::RedisGeoValue((lat, lon)),
                 ) => {
-                    pipe.set(key, (lon, lat, member));
+                    pipe.geo_add(key, (lon, lat, member));
                 }
                 _ => return Err(SinkError::Redis("RedisPipe set not match".to_owned()).into()),
             },
@@ -141,7 +141,7 @@ impl RedisPipe {
                 RedisSinkPayloadWriterInput::RedisGeoKey((key, member)) => {
                     pipe.zrem(key, member);
                 }
-                _ => return Err(SinkError::Redis("RedisPipe del not match".to_owned()).into()),
+                _ => return Err(SinkError::Redis("RedisPipe del not match".to_owned())),
             },
         };
         Ok(())
@@ -270,7 +270,7 @@ impl Sink for RedisSink {
             .iter()
             .map(|f| (f.name.clone(), f.data_type.clone()))
             .collect();
-        let pk_set: HashMap<String, DataType> = self
+        let pk_map: HashMap<String, DataType> = self
             .schema
             .fields()
             .iter()
@@ -287,7 +287,7 @@ impl Sink for RedisSink {
                     "Cannot find 'key_format', please set it or use JSON"
                 ))
             })?;
-            TemplateStringEncoder::check_string_format(key_format, &pk_set)?;
+            TemplateStringEncoder::check_string_format(key_format, &pk_map)?;
             match self
                 .format_desc
                 .options
@@ -341,13 +341,13 @@ impl Sink for RedisSink {
                             "`lat` must be set to `float64` or `float32` or `varchar`"
                         )));
                     }
-                    if let Some(member_type) = all_map.get(member_name)
+                    if let Some(member_type) = pk_map.get(member_name)
                         && member_type == &DataType::Varchar
                     {
                         // do nothing
                     } else {
                         return Err(SinkError::Config(anyhow!(
-                            "`member` must be set to `varchar`"
+                            "`member` must be set to `varchar` and `primary_key`"
                         )));
                     }
                 }
