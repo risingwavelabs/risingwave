@@ -27,7 +27,7 @@ use serde_with::serde_as;
 use with_options::WithOptions;
 
 use super::catalog::SinkFormatDesc;
-use super::encoder::template::{TemplateEncoder, TemplateStringEncoder};
+use super::encoder::template::{RedisEncoderOutput, TemplateEncoder, TemplateStringEncoder};
 use super::formatter::SinkFormatterImpl;
 use super::writer::FormattedSink;
 use super::{SinkError, SinkParam};
@@ -42,6 +42,12 @@ use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkWriterParam};
 pub const REDIS_SINK: &str = "redis";
 pub const KEY_FORMAT: &str = "key_format";
 pub const VALUE_FORMAT: &str = "value_format";
+pub const REDIS_VALUE_TYPE: &str = "redis_value_type";
+pub const REDIS_VALUE_TYPE_STRING: &str = "string";
+pub const REDIS_VALUE_TYPE_GEO: &str = "geospatial";
+pub const LON_NAME: &str = "lon";
+pub const LAT_NAME: &str = "lat";
+pub const MEMBER_NAME: &str = "member";
 
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct RedisCommon {
@@ -74,13 +80,27 @@ impl RedisPipe {
         }
     }
 
-    pub fn set(&mut self, k: String, v: Vec<u8>) {
+    pub fn set(&mut self, k: String, v: RedisEncoderOutput) {
         match self {
             RedisPipe::Cluster(pipe) => {
-                pipe.set(k, v);
+                match v {
+                    RedisEncoderOutput::String(s) => {
+                        pipe.set(k, s);
+                    }
+                    RedisEncoderOutput::RedisGeo(geo) => {
+                        pipe.geo_add(k, geo);
+                    }
+                }
             }
             RedisPipe::Single(pipe) => {
-                pipe.set(k, v);
+                match v {
+                    RedisEncoderOutput::String(s) => {
+                        pipe.set(k, s);
+                    }
+                    RedisEncoderOutput::RedisGeo(geo) => {
+                        pipe.geo_add(k, geo);
+                    }
+                }
             }
         };
     }
@@ -231,18 +251,26 @@ impl Sink for RedisSink {
             self.format_desc.encode,
             super::catalog::SinkEncode::Template
         ) {
-            let key_format = self.format_desc.options.get(KEY_FORMAT).ok_or_else(|| {
-                SinkError::Config(anyhow!(
-                    "Cannot find 'key_format', please set it or use JSON"
-                ))
-            })?;
-            let value_format = self.format_desc.options.get(VALUE_FORMAT).ok_or_else(|| {
-                SinkError::Config(anyhow!(
-                    "Cannot find 'value_format', please set it or use JSON"
-                ))
-            })?;
-            TemplateStringEncoder::check_string_format(key_format, &pk_set)?;
-            TemplateStringEncoder::check_string_format(value_format, &all_set)?;
+            match self.format_desc.options.get(REDIS_VALUE_TYPE).map(|s| s.as_str()) {
+                Some(REDIS_VALUE_TYPE_STRING) => {
+                    let key_format = self.format_desc.options.get(KEY_FORMAT).ok_or_else(|| {
+                        SinkError::Config(anyhow!(
+                            "Cannot find 'key_format', please set it or use JSON"
+                        ))
+                    })?;
+                    let value_format = self.format_desc.options.get(VALUE_FORMAT).ok_or_else(|| {
+                        SinkError::Config(anyhow!(
+                            "Cannot find 'value_format', please set it or use JSON"
+                        ))
+                    })?;
+                    TemplateStringEncoder::check_string_format(key_format, &pk_set)?;
+                    TemplateStringEncoder::check_string_format(value_format, &all_set)?;
+                }
+                Some(REDIS_VALUE_TYPE_GEO) => {}
+                _ => return Err(SinkError::Config(anyhow!(
+                    "'redis_value_type' must be set to 'string' or 'geospatial'"
+                ))),
+            }
         }
         Ok(())
     }
@@ -296,7 +324,7 @@ impl RedisSinkPayloadWriter {
 
 impl FormattedSink for RedisSinkPayloadWriter {
     type K = String;
-    type V = Vec<u8>;
+    type V = RedisEncoderOutput;
 
     async fn write_one(&mut self, k: Option<Self::K>, v: Option<Self::V>) -> Result<()> {
         let k = k.ok_or_else(|| SinkError::Redis("The redis key cannot be null".to_owned()))?;

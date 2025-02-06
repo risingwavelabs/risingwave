@@ -32,6 +32,10 @@ impl TemplateEncoder {
     pub fn new_string(schema: Schema, col_indices: Option<Vec<usize>>, template: String) -> Self {
         TemplateEncoder::String(TemplateStringEncoder::new(schema, col_indices, template))
     }
+
+    pub fn new_geo(schema: Schema, col_indices: Option<Vec<usize>>, lat_name: &str, lon_name: &str, member_name: &str) -> Result<Self> {
+        Ok(TemplateEncoder::RedisGeo(TemplateRedisGeoEncoder::new(schema, col_indices, lat_name, lon_name, member_name)?))
+    }
 }
 impl RowEncoder for TemplateEncoder {
     type Output = TemplateEncoderOutput;
@@ -128,18 +132,33 @@ pub struct  TemplateRedisGeoEncoder {
     col_indices: Option<Vec<usize>>,
     lat_col: usize,
     lon_col: usize,
-    mem_col: usize,
+    member_col: usize,
 }
 
 impl TemplateRedisGeoEncoder {
-    pub fn new(schema: Schema, col_indices: Option<Vec<usize>>, lat_col: usize, lon_col: usize, mem_col: usize) -> Self {
-        Self {
+    pub fn new(schema: Schema, col_indices: Option<Vec<usize>>, lat_name: &str, lon_name: &str, member_name: &str) -> Result<Self> {
+        let lat_col = schema
+            .names_str()
+            .iter()
+            .position(|name| name == &lat_name)
+            .ok_or_else(|| SinkError::Redis(format!("Can't find lat column({}) in schema", lat_name)))?;
+        let lon_col = schema
+            .names_str()
+            .iter()
+            .position(|name| name == &lon_name)
+            .ok_or_else(|| SinkError::Redis(format!("Can't find lon column({}) in schema", lon_name)))?;
+        let member_col = schema
+            .names_str()
+            .iter()
+            .position(|name| name == &member_name)
+            .ok_or_else(|| SinkError::Redis(format!("Can't find member column({}) in schema", member_name)))?;
+        Ok(Self {
             schema,
             col_indices,
             lat_col,
             lon_col,
-            mem_col,
-        }
+            member_col,
+        })
     }
 
     pub fn encode_cols(
@@ -147,32 +166,31 @@ impl TemplateRedisGeoEncoder {
         row: impl Row,
         _col_indices: impl Iterator<Item = usize>,
     ) -> Result<TemplateEncoderOutput> {
-        let lat = into_f64_from_scalar(row.datum_at(self.lat_col).ok_or_else(|| SinkError::Redis("lat is null".to_owned()))?)?;
-        let lon = into_f64_from_scalar(row.datum_at(self.lon_col).ok_or_else(|| SinkError::Redis("lon is null".to_owned()))?)?;
-        let member = row.datum_at(self.mem_col).ok_or_else(|| SinkError::Redis("member is null".to_owned()))?.to_text();
-        let redis_geo = redis::geo::Coord::lon_lat(lon,lat);
-        Ok(TemplateEncoderOutput::RedisGeo((redis_geo , member)))
+        let lat = into_string_from_scalar(row.datum_at(self.lat_col).ok_or_else(|| SinkError::Redis("lat is null".to_owned()))?)?;
+        let lon = into_string_from_scalar(row.datum_at(self.lon_col).ok_or_else(|| SinkError::Redis("lon is null".to_owned()))?)?;
+        let member = row.datum_at(self.member_col).ok_or_else(|| SinkError::Redis("member is null".to_owned()))?.to_text();
+        Ok(TemplateEncoderOutput::RedisGeo((lat, lon , member)))
     }
 }
 
-fn into_f64_from_scalar(scalar: ScalarRefImpl<'_>) -> Result<f64> {
+fn into_string_from_scalar(scalar: ScalarRefImpl<'_>) -> Result<String> {
     match scalar {
-        ScalarRefImpl::Float32(ordered_float) => Ok(Into::<f32>::into(ordered_float) as f64),
-        ScalarRefImpl::Float64(ordered_float) => Ok(ordered_float.into()),
+        ScalarRefImpl::Float32(ordered_float) => Ok(Into::<f32>::into(ordered_float).to_string()),
+        ScalarRefImpl::Float64(ordered_float) => Ok(Into::<f64>::into(ordered_float).to_string()),
         _ => Err(SinkError::Encode("Only f32 and f64 can convert to redis geo".to_owned())),
     }
 }
 
 pub enum TemplateEncoderOutput {
     String(String),
-    RedisGeo((redis::geo::Coord<f64>,String)),
+    RedisGeo((String,String,String)),
 }
 
 impl TemplateEncoderOutput {
     pub fn into_string(self) -> Result<String> {
         match self {
             TemplateEncoderOutput::String(s) => Ok(s),
-            TemplateEncoderOutput::RedisGeo((_, _)) => Err(SinkError::Encode("RedisGeo can't convert to string".to_owned())),
+            TemplateEncoderOutput::RedisGeo((_, _,_)) => Err(SinkError::Encode("RedisGeo can't convert to string".to_owned())),
         }
     }
 }
@@ -181,21 +199,21 @@ impl SerTo<String> for TemplateEncoderOutput {
     fn ser_to(self) -> Result<String> {
         match self {
             TemplateEncoderOutput::String(s) => Ok(s),
-            TemplateEncoderOutput::RedisGeo((_, _)) => Err(SinkError::Encode("RedisGeo can't convert to string".to_owned())),
+            TemplateEncoderOutput::RedisGeo((_, _,_)) => Err(SinkError::Encode("RedisGeo can't convert to string".to_owned())),
         }
     }
 }
 
 pub enum RedisEncoderOutput {
     String(String),
-    RedisGeo((redis::geo::Coord<f64>,String)),
+    RedisGeo((String,String,String)),
 }
 
 impl SerTo<RedisEncoderOutput> for TemplateEncoderOutput {
     fn ser_to(self) -> Result<RedisEncoderOutput> {
         match self {
             TemplateEncoderOutput::String(s) => Ok(RedisEncoderOutput::String(s)),
-            TemplateEncoderOutput::RedisGeo((lat, lon)) => Ok(RedisEncoderOutput::RedisGeo((lat, lon))),
+            TemplateEncoderOutput::RedisGeo((lat, lon, member)) => Ok(RedisEncoderOutput::RedisGeo((lat, lon, member))),
         }
     }
 }
