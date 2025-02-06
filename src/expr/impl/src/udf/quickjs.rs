@@ -22,7 +22,8 @@ use super::*;
 #[linkme::distributed_slice(UDF_IMPLS)]
 static QUICKJS: UdfImplDescriptor = UdfImplDescriptor {
     match_fn: |language, runtime, _link| {
-        language == "javascript" && matches!(runtime, None | Some("quickjs"))
+        (language == "javascript" || language == "javascript_async")
+            && matches!(runtime, None | Some("quickjs"))
     },
     create_fn: |opts| {
         Ok(CreateFunctionOutput {
@@ -38,6 +39,10 @@ static QUICKJS: UdfImplDescriptor = UdfImplDescriptor {
             let mut runtime = Runtime::new()
                 .await
                 .context("failed to create QuickJS Runtime")?;
+            let is_async = opts.language == "javascript_async";
+            if is_async {
+                runtime.enable_fetch().await?;
+            }
             if opts.kind.is_aggregate() {
                 runtime
                     .add_aggregate(
@@ -48,7 +53,7 @@ static QUICKJS: UdfImplDescriptor = UdfImplDescriptor {
                         UdfArrowConvert::default().to_arrow_field("", opts.return_type)?,
                         CallMode::CalledOnNullInput,
                         opts.body.context("body is required")?,
-                        false,
+                        is_async,
                     )
                     .await
                     .context("failed to add_aggregate")?;
@@ -59,7 +64,7 @@ static QUICKJS: UdfImplDescriptor = UdfImplDescriptor {
                         UdfArrowConvert::default().to_arrow_field("", opts.return_type)?,
                         CallMode::CalledOnNullInput,
                         opts.body.context("body is required")?,
-                        false,
+                        is_async,
                     )
                     .await;
 
