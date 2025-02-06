@@ -322,13 +322,17 @@ impl IcebergSink {
                 Some(partition_field) => {
                     let mut partition_fields = Vec::<UnboundPartitionField>::new();
                     // captures column, transform(column), transform(n,column), transform(n, column)
-                    let re = Regex::new(r"(?<transform>\w+)(\(((?<n>\d+)?(?:,|(,\s)))?(?<field>\w+)\))?").unwrap();
+                    let re = Regex::new(
+                        r"(?<transform>\w+)(\(((?<n>\d+)?(?:,|(,\s)))?(?<field>\w+)\))?",
+                    )
+                    .unwrap();
                     if !re.is_match(partition_field) {
                         bail!(format!("Invalid partition fields: {}", partition_field))
                     }
                     let caps = re.captures_iter(partition_field);
                     for mat in caps {
-                        let (column, transform) = if &mat["n"] == "" && &mat["field"] == "" {
+                        let (column, transform) = if mat["n"].is_empty() && mat["field"].is_empty()
+                        {
                             (&mat["func"], Transform::Identity)
                         } else {
                             let mut func = mat["func"].to_owned();
@@ -347,7 +351,7 @@ impl IcebergSink {
                                         .source_id(pos as i32)
                                         .transform(transform)
                                         .name(column.to_owned())
-                                        .build()
+                                        .build(),
                                 );
                                 exists = true;
                                 break;
