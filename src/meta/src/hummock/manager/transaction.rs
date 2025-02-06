@@ -130,7 +130,7 @@ impl<'a> HummockVersionTransaction<'a> {
                     .group_deltas;
 
                 #[expect(deprecated)]
-                group_deltas.push(GroupDelta::GroupConstruct(GroupConstruct {
+                group_deltas.push(GroupDelta::GroupConstruct(Box::new(GroupConstruct {
                     group_config: Some((*compaction_group_config).clone()),
                     group_id: compaction_group_id,
                     parent_group_id: StaticCompactionGroupId::NewCompactionGroup
@@ -139,7 +139,7 @@ impl<'a> HummockVersionTransaction<'a> {
                     table_ids: vec![],
                     version: CompatibilityVersion::SplitGroupByTableId as i32,
                     split_key: None,
-                }));
+                })));
             }
         }
 
