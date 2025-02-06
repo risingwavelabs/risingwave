@@ -60,6 +60,7 @@
 //! - [] Handle paused stream
 
 use std::collections::VecDeque;
+use std::future::pending;
 use std::pin::Pin;
 
 use await_tree::InstrumentAwait;
@@ -294,7 +295,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                 buffer
             ) => {
                 let logstore_item = logstore_item?;
-                Ok(logstore_item.map(Message::Chunk))
+                Ok(Some(Message::Chunk(logstore_item)))
             }
         }
     }
@@ -314,15 +315,15 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
         read_flushed_chunk_future: &mut Option<ReadFlushedChunkFuture>,
         state_store: &S,
         buffer: &mut SyncedLogStoreBuffer,
-    ) -> StreamExecutorResult<Option<StreamChunk>> {
+    ) -> StreamExecutorResult<StreamChunk> {
         // 1. read state store
         if let Some(chunk) = Self::try_next_state_store_item(log_store_state).await? {
-            return Ok(Some(chunk));
+            return Ok(chunk);
         }
 
         // 2. read existing flushed chunk future
         if let Some(chunk) = Self::try_next_flushed_chunk_future(read_flushed_chunk_future).await? {
-            return Ok(Some(chunk));
+            return Ok(chunk);
         }
 
         // 3. read buffer
@@ -337,9 +338,9 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
         )
         .await?
         {
-            return Ok(Some(chunk));
+            return Ok(chunk);
         }
-        Ok(None)
+        pending().await
     }
 
     async fn try_next_state_store_item(
