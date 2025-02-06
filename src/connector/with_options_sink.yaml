@@ -512,7 +512,7 @@ IcebergConfig:
     field_type: HashMap<String,String>
     required: false
   - name: partition_by
-    field_type: Vec<String>
+    field_type: String
     required: false
     default: Default::default
   - name: commit_checkpoint_interval
