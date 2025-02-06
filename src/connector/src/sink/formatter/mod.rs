@@ -308,10 +308,10 @@ impl EncoderBuild for TemplateEncoder {
             REDIS_VALUE_TYPE_GEO => match pk_indices {
                 Some(_) => {
                     let member_name = b.format_desc.options.get(MEMBER_NAME).ok_or_else(|| {
-                        SinkError::Config(anyhow!("Cannot find 'member',please set it."))
+                        SinkError::Config(anyhow!("Cannot find `{MEMBER_NAME}`,please set it."))
                     })?;
                     let template = b.format_desc.options.get(KEY_FORMAT).ok_or_else(|| {
-                        SinkError::Config(anyhow!("Cannot find '{KEY_FORMAT}',please set it."))
+                        SinkError::Config(anyhow!("Cannot find `{KEY_FORMAT}`,please set it."))
                     })?;
                     TemplateEncoder::new_geo_key(
                         b.schema,
@@ -322,10 +322,10 @@ impl EncoderBuild for TemplateEncoder {
                 }
                 None => {
                     let lat_name = b.format_desc.options.get(LAT_NAME).ok_or_else(|| {
-                        SinkError::Config(anyhow!("Cannot find 'lat',please set it."))
+                        SinkError::Config(anyhow!("Cannot find `{LAT_NAME}`, please set it."))
                     })?;
                     let lon_name = b.format_desc.options.get(LON_NAME).ok_or_else(|| {
-                        SinkError::Config(anyhow!("Cannot find 'lon',please set it."))
+                        SinkError::Config(anyhow!("Cannot find `{LON_NAME}`,please set it."))
                     })?;
                     TemplateEncoder::new_geo_value(b.schema, pk_indices, lat_name, lon_name)
                 }

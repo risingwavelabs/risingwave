@@ -48,8 +48,8 @@ pub const VALUE_FORMAT: &str = "value_format";
 pub const REDIS_VALUE_TYPE: &str = "redis_value_type";
 pub const REDIS_VALUE_TYPE_STRING: &str = "string";
 pub const REDIS_VALUE_TYPE_GEO: &str = "geospatial";
-pub const LON_NAME: &str = "lon";
-pub const LAT_NAME: &str = "lat";
+pub const LON_NAME: &str = "longitude";
+pub const LAT_NAME: &str = "latitude";
 pub const MEMBER_NAME: &str = "member";
 
 #[derive(Deserialize, Debug, Clone, WithOptions)]
@@ -284,7 +284,7 @@ impl Sink for RedisSink {
         ) {
             let key_format = self.format_desc.options.get(KEY_FORMAT).ok_or_else(|| {
                 SinkError::Config(anyhow!(
-                    "Cannot find 'key_format', please set it or use JSON"
+                    "Cannot find '{KEY_FORMAT}', please set it or use JSON"
                 ))
             })?;
             TemplateStringEncoder::check_string_format(key_format, &pk_map)?;
@@ -298,7 +298,7 @@ impl Sink for RedisSink {
                     let value_format =
                         self.format_desc.options.get(VALUE_FORMAT).ok_or_else(|| {
                             SinkError::Config(anyhow!(
-                                "Cannot find 'value_format', please set it or use JSON"
+                                "Cannot find `{VALUE_FORMAT}`, please set it or use JSON"
                             ))
                         })?;
                     TemplateStringEncoder::check_string_format(value_format, &all_map)?;
@@ -306,17 +306,17 @@ impl Sink for RedisSink {
                 Some(REDIS_VALUE_TYPE_GEO) => {
                     let lon_name = self.format_desc.options.get(LON_NAME).ok_or_else(|| {
                         SinkError::Config(anyhow!(
-                            "Cannot find `lon`, please set it or use JSON or set `redis_value_type` to `string`"
+                            "Cannot find `{LON_NAME}`, please set it or use JSON or set `{REDIS_VALUE_TYPE}` to `{REDIS_VALUE_TYPE_STRING}`"
                         ))
                     })?;
                     let lat_name = self.format_desc.options.get(LAT_NAME).ok_or_else(|| {
                         SinkError::Config(anyhow!(
-                            "Cannot find `lat`, please set it or use JSON or set `redis_value_type` to `string`"
+                            "Cannot find `{LAT_NAME}`, please set it or use JSON or set `{REDIS_VALUE_TYPE}` to `{REDIS_VALUE_TYPE_STRING}`"
                         ))
                     })?;
                     let member_name = self.format_desc.options.get(MEMBER_NAME).ok_or_else(|| {
                         SinkError::Config(anyhow!(
-                            "Cannot find `member`, please set it or use JSON or set `redis_value_type` to `string`"
+                            "Cannot find `{MEMBER_NAME}`, please set it or use JSON or set `{REDIS_VALUE_TYPE}` to `{REDIS_VALUE_TYPE_STRING}`"
                         ))
                     })?;
                     if let Some(lon_type) = all_map.get(lon_name)
@@ -327,7 +327,7 @@ impl Sink for RedisSink {
                         // do nothing
                     } else {
                         return Err(SinkError::Config(anyhow!(
-                            "`lon` must be set to `float64` or `float32` or `varchar`"
+                            "`{LON_NAME}` must be set to `float64` or `float32` or `varchar`"
                         )));
                     }
                     if let Some(lat_type) = all_map.get(lat_name)
@@ -338,7 +338,7 @@ impl Sink for RedisSink {
                         // do nothing
                     } else {
                         return Err(SinkError::Config(anyhow!(
-                            "`lat` must be set to `float64` or `float32` or `varchar`"
+                            "`{LAT_NAME}` must be set to `float64` or `float32` or `varchar`"
                         )));
                     }
                     if let Some(member_type) = pk_map.get(member_name)
@@ -347,13 +347,13 @@ impl Sink for RedisSink {
                         // do nothing
                     } else {
                         return Err(SinkError::Config(anyhow!(
-                            "`member` must be set to `varchar` and `primary_key`"
+                            "`{MEMBER_NAME}` must be set to `varchar` and `primary_key`"
                         )));
                     }
                 }
                 _ => {
                     return Err(SinkError::Config(anyhow!(
-                        "`redis_value_type` must be set to `string` or `geospatial`"
+                        "`{REDIS_VALUE_TYPE}` must be set to `{REDIS_VALUE_TYPE_STRING}` or `{REDIS_VALUE_TYPE_GEO}`"
                     )))
                 }
             }
