@@ -38,16 +38,17 @@ use crate::common::metrics::MetricsInfo;
 use crate::executor::aggregation::AggGroup as GenericAggGroup;
 use crate::executor::prelude::*;
 
-type AggGroup<S> = GenericAggGroup<S, OnlyOutputIfHasInput>;
-type BoxedAggGroup<S> = Box<AggGroup<S>>;
+type AggGroup<S, const EOWC: bool> = GenericAggGroup<S, OnlyOutputIfHasInput, EOWC>;
+type BoxedAggGroup<S, const EOWC: bool> = Box<AggGroup<S, EOWC>>;
 
-impl<S: StateStore> EstimateSize for BoxedAggGroup<S> {
+impl<S: StateStore, const EOWC: bool> EstimateSize for BoxedAggGroup<S, EOWC> {
     fn estimated_heap_size(&self) -> usize {
         self.as_ref().estimated_size()
     }
 }
 
-type AggGroupCache<K, S> = ManagedLruCache<K, Option<BoxedAggGroup<S>>, PrecomputedBuildHasher>;
+type AggGroupCache<K, S, const EOWC: bool> =
+    ManagedLruCache<K, Option<BoxedAggGroup<S, EOWC>>, PrecomputedBuildHasher>;
 
 /// [`HashAggExecutor`] could process large amounts of data using a state backend. It works as
 /// follows:
@@ -59,12 +60,12 @@ type AggGroupCache<K, S> = ManagedLruCache<K, Option<BoxedAggGroup<S>>, Precompu
 /// * Upon a barrier is received, the executor will call `.flush` on the storage backend, so that
 ///   all modifications will be flushed to the storage backend. Meanwhile, the executor will go
 ///   through `group_change_set`, and produce a stream chunk based on the state changes.
-pub struct HashAggExecutor<K: HashKey, S: StateStore> {
+pub struct HashAggExecutor<K: HashKey, S: StateStore, const EOWC: bool> {
     input: Executor,
-    inner: ExecutorInner<K, S>,
+    inner: ExecutorInner<K, S, EOWC>,
 }
 
-struct ExecutorInner<K: HashKey, S: StateStore> {
+struct ExecutorInner<K: HashKey, S: StateStore, const EOWC: bool> {
     _phantom: PhantomData<K>,
 
     /// Version of aggregation executors.
@@ -125,7 +126,7 @@ struct ExecutorInner<K: HashKey, S: StateStore> {
     emit_on_window_close: bool,
 }
 
-impl<K: HashKey, S: StateStore> ExecutorInner<K, S> {
+impl<K: HashKey, S: StateStore, const EOWC: bool> ExecutorInner<K, S, EOWC> {
     fn all_state_tables_mut(&mut self) -> impl Iterator<Item = &mut StateTable<S>> {
         iter_table_storage(&mut self.storages)
             .chain(self.distinct_dedup_tables.values_mut())
@@ -133,17 +134,17 @@ impl<K: HashKey, S: StateStore> ExecutorInner<K, S> {
     }
 }
 
-struct ExecutionVars<K: HashKey, S: StateStore> {
+struct ExecutionVars<K: HashKey, S: StateStore, const EOWC: bool> {
     metrics: HashAggMetrics,
 
     // Stats collected during execution, will be flushed to metrics at the end of each barrier.
     stats: ExecutionStats,
 
     /// Cache for [`AggGroup`]s. `HashKey` -> `AggGroup`.
-    agg_group_cache: AggGroupCache<K, S>,
+    agg_group_cache: AggGroupCache<K, S, EOWC>,
 
     /// Changed [`AggGroup`]s in the current epoch (before next flush).
-    dirty_groups: EstimatedHashMap<K, BoxedAggGroup<S>>,
+    dirty_groups: EstimatedHashMap<K, BoxedAggGroup<S, EOWC>>,
 
     /// Distinct deduplicater to deduplicate input rows for each distinct agg call.
     distinct_dedup: DistinctDeduplicater<S>,
@@ -182,13 +183,13 @@ impl ExecutionStats {
     }
 }
 
-impl<K: HashKey, S: StateStore> Execute for HashAggExecutor<K, S> {
+impl<K: HashKey, S: StateStore, const EOWC: bool> Execute for HashAggExecutor<K, S, EOWC> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
     }
 }
 
-impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
+impl<K: HashKey, S: StateStore, const EOWC: bool> HashAggExecutor<K, S, EOWC> {
     pub fn new(args: AggExecutorArgs<S, HashAggExecutorExtraArgs>) -> StreamResult<Self> {
         let input_info = args.input.info().clone();
 
@@ -223,7 +224,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 extreme_cache_size: args.extreme_cache_size,
                 chunk_size: args.extra.chunk_size,
                 max_dirty_groups_heap_size: args.extra.max_dirty_groups_heap_size,
-                emit_on_window_close: args.extra.emit_on_window_close,
+                emit_on_window_close: EOWC, // TODO(): remove
             },
         })
     }
@@ -256,8 +257,8 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
     /// Touch the [`AggGroup`]s for the given keys, which means move them from cache to the `dirty_groups` map.
     /// If the [`AggGroup`] doesn't exist in the cache before, it will be created or recovered from state table.
     async fn touch_agg_groups(
-        this: &ExecutorInner<K, S>,
-        vars: &mut ExecutionVars<K, S>,
+        this: &ExecutorInner<K, S, EOWC>,
+        vars: &mut ExecutionVars<K, S, EOWC>,
         keys: impl IntoIterator<Item = &K>,
     ) -> StreamExecutorResult<()> {
         let group_key_types = &this.info.schema.data_types()[..this.group_key_indices.len()];
@@ -324,8 +325,8 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
     }
 
     async fn apply_chunk(
-        this: &mut ExecutorInner<K, S>,
-        vars: &mut ExecutionVars<K, S>,
+        this: &mut ExecutorInner<K, S, EOWC>,
+        vars: &mut ExecutionVars<K, S, EOWC>,
         chunk: StreamChunk,
     ) -> StreamExecutorResult<()> {
         // Find groups in this chunk and generate visibility for each group key.
@@ -358,7 +359,8 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
         // Apply chunk to each of the state (per agg_call), for each group.
         for (key, visibility) in group_visibilities {
-            let agg_group: &mut BoxedAggGroup<_> = &mut vars.dirty_groups.get_mut(&key).unwrap();
+            let agg_group: &mut BoxedAggGroup<S, EOWC> =
+                &mut vars.dirty_groups.get_mut(&key).unwrap();
 
             let visibilities = call_visibilities
                 .iter()
@@ -403,7 +405,10 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
     }
 
     #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
-    async fn flush_data<'a>(this: &'a mut ExecutorInner<K, S>, vars: &'a mut ExecutionVars<K, S>) {
+    async fn flush_data<'a>(
+        this: &'a mut ExecutorInner<K, S, EOWC>,
+        vars: &'a mut ExecutionVars<K, S, EOWC>,
+    ) {
         let window_watermark = vars.window_watermark.take();
 
         // flush changed states into intermediate state table
@@ -434,7 +439,8 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         .collect();
                     let states = row.into_iter().skip(this.group_key_indices.len()).collect();
 
-                    let mut agg_group = AggGroup::create_eowc(
+                    // TODO(): no need to re-create
+                    let mut agg_group = AggGroup::<S, EOWC>::create_eowc(
                         this.version,
                         Some(GroupKey::new(
                             group_key,
@@ -503,7 +509,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         vars.agg_group_cache.evict();
     }
 
-    fn flush_metrics(_this: &ExecutorInner<K, S>, vars: &mut ExecutionVars<K, S>) {
+    fn flush_metrics(_this: &ExecutorInner<K, S, EOWC>, vars: &mut ExecutionVars<K, S, EOWC>) {
         vars.metrics
             .agg_lookup_miss_count
             .inc_by(std::mem::take(&mut vars.stats.lookup_miss_count));
@@ -528,7 +534,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
     }
 
     async fn commit_state_tables(
-        this: &mut ExecutorInner<K, S>,
+        this: &mut ExecutorInner<K, S, EOWC>,
         epoch: EpochPair,
     ) -> StreamExecutorResult<()> {
         futures::future::try_join_all(
@@ -539,7 +545,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         Ok(())
     }
 
-    async fn try_flush_data(this: &mut ExecutorInner<K, S>) -> StreamExecutorResult<()> {
+    async fn try_flush_data(this: &mut ExecutorInner<K, S, EOWC>) -> StreamExecutorResult<()> {
         futures::future::try_join_all(
             this.all_state_tables_mut()
                 .map(|table| async { table.try_flush().await }),

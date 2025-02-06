@@ -483,31 +483,58 @@ pub mod agg_executor {
             identity: format!("HashAggExecutor {:X}", executor_id),
         };
 
-        let exec = HashAggExecutor::<SerializedKey, S>::new(AggExecutorArgs {
-            version: PbAggNodeVersion::LATEST,
+        if emit_on_window_close {
+            let exec = HashAggExecutor::<SerializedKey, S, /* EOWC */ true>::new(AggExecutorArgs {
+                version: PbAggNodeVersion::LATEST,
 
-            input,
-            actor_ctx: ActorContext::for_test(123),
-            info: info.clone(),
+                input,
+                actor_ctx: ActorContext::for_test(123),
+                info: info.clone(),
 
-            extreme_cache_size,
+                extreme_cache_size,
 
-            agg_calls,
-            row_count_index,
-            storages,
-            intermediate_state_table,
-            distinct_dedup_tables: Default::default(),
-            watermark_epoch: Arc::new(AtomicU64::new(0)),
+                agg_calls,
+                row_count_index,
+                storages,
+                intermediate_state_table,
+                distinct_dedup_tables: Default::default(),
+                watermark_epoch: Arc::new(AtomicU64::new(0)),
 
-            extra: HashAggExecutorExtraArgs {
-                group_key_indices,
-                chunk_size: 1024,
-                max_dirty_groups_heap_size: 64 << 20,
-                emit_on_window_close,
-            },
-        })
-        .unwrap();
-        (info, exec).into()
+                extra: HashAggExecutorExtraArgs {
+                    group_key_indices,
+                    chunk_size: 1024,
+                    max_dirty_groups_heap_size: 64 << 20,
+                },
+            })
+            .unwrap();
+            (info, exec).into()
+        } else {
+            let exec =
+                HashAggExecutor::<SerializedKey, S, /* EOWC */ false>::new(AggExecutorArgs {
+                    version: PbAggNodeVersion::LATEST,
+
+                    input,
+                    actor_ctx: ActorContext::for_test(123),
+                    info: info.clone(),
+
+                    extreme_cache_size,
+
+                    agg_calls,
+                    row_count_index,
+                    storages,
+                    intermediate_state_table,
+                    distinct_dedup_tables: Default::default(),
+                    watermark_epoch: Arc::new(AtomicU64::new(0)),
+
+                    extra: HashAggExecutorExtraArgs {
+                        group_key_indices,
+                        chunk_size: 1024,
+                        max_dirty_groups_heap_size: 64 << 20,
+                    },
+                })
+                .unwrap();
+            (info, exec).into()
+        }
     }
 
     #[allow(clippy::too_many_arguments)]

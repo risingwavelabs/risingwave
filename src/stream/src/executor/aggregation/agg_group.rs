@@ -158,7 +158,7 @@ impl GroupKey {
 }
 
 /// [`AggGroup`] manages agg states of all agg calls for one `group_key`.
-pub struct AggGroup<S: StateStore, Strtg: Strategy> {
+pub struct AggGroup<S: StateStore, Strtg: Strategy, const EOWC: bool> {
     /// Group key.
     group_key: Option<GroupKey>,
 
@@ -174,7 +174,7 @@ pub struct AggGroup<S: StateStore, Strtg: Strategy> {
     _phantom: PhantomData<(S, Strtg)>,
 }
 
-impl<S: StateStore, Strtg: Strategy> Debug for AggGroup<S, Strtg> {
+impl<S: StateStore, Strtg: Strategy, const EOWC: bool> Debug for AggGroup<S, Strtg, EOWC> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AggGroup")
             .field("group_key", &self.group_key)
@@ -183,7 +183,7 @@ impl<S: StateStore, Strtg: Strategy> Debug for AggGroup<S, Strtg> {
     }
 }
 
-impl<S: StateStore, Strtg: Strategy> EstimateSize for AggGroup<S, Strtg> {
+impl<S: StateStore, Strtg: Strategy, const EOWC: bool> EstimateSize for AggGroup<S, Strtg, EOWC> {
     fn estimated_heap_size(&self) -> usize {
         self.states
             .iter()
@@ -192,7 +192,7 @@ impl<S: StateStore, Strtg: Strategy> EstimateSize for AggGroup<S, Strtg> {
     }
 }
 
-impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
+impl<S: StateStore, Strtg: Strategy, const EOWC: bool> AggGroup<S, Strtg, EOWC> {
     /// Create [`AggGroup`] for the given [`AggCall`]s and `group_key`.
     /// For [`crate::executor::SimpleAggExecutor`], the `group_key` should be `None`.
     #[allow(clippy::too_many_arguments)]

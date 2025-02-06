@@ -100,7 +100,7 @@ impl<S: StateStore> ExecutorInner<S> {
 
 struct ExecutionVars<S: StateStore> {
     /// The single [`AggGroup`].
-    agg_group: AggGroup<S, AlwaysOutput>,
+    agg_group: AggGroup<S, AlwaysOutput, /* EOWC */ false>,
 
     /// Distinct deduplicater to deduplicate input rows for each distinct agg call.
     distinct_dedup: DistinctDeduplicater<S>,

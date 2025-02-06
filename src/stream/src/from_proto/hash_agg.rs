@@ -32,13 +32,18 @@ use crate::executor::HashAggExecutor;
 pub struct HashAggExecutorDispatcherArgs<S: StateStore> {
     args: AggExecutorArgs<S, HashAggExecutorExtraArgs>,
     group_key_types: Vec<DataType>,
+    emit_on_window_close: bool,
 }
 
 impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcherArgs<S> {
     type Output = StreamResult<Box<dyn Execute>>;
 
     fn dispatch_impl<K: HashKey>(self) -> Self::Output {
-        Ok(HashAggExecutor::<K, S>::new(self.args)?.boxed())
+        if self.emit_on_window_close {
+            Ok(HashAggExecutor::<K, S, /* EOWC */ true>::new(self.args)?.boxed())
+        } else {
+            Ok(HashAggExecutor::<K, S, /* EOWC */ false>::new(self.args)?.boxed())
+        }
     }
 
     fn data_types(&self) -> &[DataType] {
@@ -117,10 +122,10 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
                         .config()
                         .developer
                         .hash_agg_max_dirty_groups_heap_size,
-                    emit_on_window_close: node.get_emit_on_window_close(),
                 },
             },
             group_key_types,
+            emit_on_window_close: node.get_emit_on_window_close(),
         }
         .dispatch()?;
         Ok((params.info, exec).into())
