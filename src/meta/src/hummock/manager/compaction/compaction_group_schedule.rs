@@ -930,7 +930,7 @@ impl HummockManager {
         }
 
         {
-            // TODO: check emergency state
+            // Avoid merge when the group is in emergency state
             let versioning_guard = self.versioning.read().await;
             if let EmergencyState::Emergency = check_emergency_state(
                 versioning_guard
