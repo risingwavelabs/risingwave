@@ -131,7 +131,7 @@ drop function return_all;
 
 statement ok
 create function series(n int) returns table (x int) language javascript as $$
-export function series(n) {
+export function* series(n) {
     for(let i = 0; i < n; i++) {
         yield i;
     }
@@ -153,7 +153,7 @@ drop function series;
 
 statement ok
 create function split(s varchar) returns table (word varchar, length int) language javascript as $$
-export function split(s) {
+export function* split(s) {
     for(let word of s.split(' ')) {
         yield { word: word, length: word.length };
     }
@@ -264,3 +264,22 @@ select int_42_legacy();
 
 statement ok
 drop function int_42_legacy;
+
+statement ok
+create function series_legacy(n int) returns table (x int) language javascript as $$
+    for(let i = 0; i < n; i++) {
+        yield i;
+    }
+$$;
+
+query I
+select series_legacy(5);
+----
+0
+1
+2
+3
+4
+
+statement ok
+drop function series_legacy;
