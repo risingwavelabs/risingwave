@@ -115,7 +115,7 @@ impl UserDefinedFunction {
         // update memory usage
         self.metrics
             .memory_usage_bytes
-            .set(self.runtime.memory_usage() as i64);
+            .set(self.runtime.memory_usage().await as i64);
 
         let arrow_output = arrow_output_result?;
 

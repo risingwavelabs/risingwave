@@ -127,12 +127,12 @@ pub trait UdfImpl: std::fmt::Debug + Send + Sync {
     ) -> Result<BoxStream<'a, Result<RecordBatch>>>;
 
     /// For aggregate function, create the initial state.
-    fn call_agg_create_state(&self) -> Result<ArrayRef> {
+    async fn call_agg_create_state(&self) -> Result<ArrayRef> {
         bail!("aggregate function is not supported");
     }
 
     /// For aggregate function, accumulate or retract the state.
-    fn call_agg_accumulate_or_retract(
+    async fn call_agg_accumulate_or_retract(
         &self,
         _state: &ArrayRef,
         _ops: &BooleanArray,
@@ -142,7 +142,7 @@ pub trait UdfImpl: std::fmt::Debug + Send + Sync {
     }
 
     /// For aggregate function, get aggregate result from the state.
-    fn call_agg_finish(&self, _state: &ArrayRef) -> Result<ArrayRef> {
+    async fn call_agg_finish(&self, _state: &ArrayRef) -> Result<ArrayRef> {
         bail!("aggregate function is not supported");
     }
 
@@ -158,7 +158,7 @@ pub trait UdfImpl: std::fmt::Debug + Send + Sync {
     /// Return the memory size consumed by UDF runtime in bytes.
     ///
     /// If not available, return 0.
-    fn memory_usage(&self) -> usize {
+    async fn memory_usage(&self) -> usize {
         0
     }
 }

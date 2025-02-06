@@ -39,6 +39,7 @@ educe = "0.6"
 fancy-regex = "0.14"
 futures-async-stream = { workspace = true }
 futures-util = "0.3"
+futures = { version = "0.3", default-features = false, features = ["alloc"] }
 ginepro = { version = "0.8", optional = true }
 hex = "0.4"
 hmac = "0.12"

@@ -42,8 +42,11 @@ impl AggregateFunction for UserDefinedAggregateFunction {
 
     /// Creates an initial state of the aggregate function.
     fn create_state(&self) -> Result<AggregateState> {
-        let state = self.runtime.call_agg_create_state()?;
-        Ok(AggregateState::Any(Box::new(State(state))))
+        // FIXME(eric): This is bad. Let's make `create_state` async later
+        futures::executor::block_on(async {
+            let state = self.runtime.call_agg_create_state().await?;
+            Ok(AggregateState::Any(Box::new(State(state))))
+        })
     }
 
     /// Update the state with multiple rows.
@@ -59,7 +62,8 @@ impl AggregateFunction for UserDefinedAggregateFunction {
             .to_record_batch(self.arg_schema.clone(), input.data_chunk())?;
         let new_state = self
             .runtime
-            .call_agg_accumulate_or_retract(state, &ops, &arrow_input)?;
+            .call_agg_accumulate_or_retract(state, &ops, &arrow_input)
+            .await?;
         *state = new_state;
         Ok(())
     }
@@ -80,7 +84,7 @@ impl AggregateFunction for UserDefinedAggregateFunction {
     /// Get aggregate result from the state.
     async fn get_result(&self, state: &AggregateState) -> Result<Datum> {
         let state = &state.downcast_ref::<State>().0;
-        let arrow_output = self.runtime.call_agg_finish(state)?;
+        let arrow_output = self.runtime.call_agg_finish(state).await?;
         let output = UdfArrowConvert::default().from_array(&self.return_field, &arrow_output)?;
         Ok(output.datum_at(0))
     }
