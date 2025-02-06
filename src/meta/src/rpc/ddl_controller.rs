@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
@@ -50,7 +50,6 @@ use risingwave_pb::ddl_service::{
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::PbFragment;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::update_mutation::PbMergeUpdate;
 use risingwave_pb::stream_plan::{
     Dispatcher, DispatcherType, FragmentTypeFlag, MergeNode, PbStreamFragmentGraph,
     StreamFragmentGraph as StreamFragmentGraphProto,
@@ -69,9 +68,7 @@ use crate::manager::{
     LocalNotification, MetaSrvEnv, MetadataManager, NotificationVersion, StreamingJob,
     StreamingJobType, IGNORED_NOTIFICATION_VERSION,
 };
-use crate::model::{
-    FragmentActorUpstreams, FragmentId, StreamContext, StreamJobFragments, TableParallelism,
-};
+use crate::model::{FragmentActorUpstreams, StreamContext, StreamJobFragments, TableParallelism};
 use crate::stream::{
     create_source_worker, validate_sink, ActorGraphBuildResult, ActorGraphBuilder,
     CompleteStreamFragmentGraph, CreateStreamingJobContext, CreateStreamingJobOption,
@@ -1207,7 +1204,7 @@ impl DdlController {
                 )
                 .await?;
 
-            let result: MetaResult<BTreeMap<FragmentId, Vec<PbMergeUpdate>>> = try {
+            let result: MetaResult<_> = try {
                 let merge_updates = ctx.merge_updates.clone();
 
                 self.metadata_manager

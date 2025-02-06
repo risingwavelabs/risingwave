@@ -147,7 +147,7 @@ impl SourceManager {
     pub async fn allocate_splits_for_replace_source(
         &self,
         job_id: &TableId,
-        merge_updates: &BTreeMap<FragmentId, Vec<MergeUpdate>>,
+        merge_updates: &HashMap<FragmentId, Vec<MergeUpdate>>,
     ) -> MetaResult<SplitAssignment> {
         tracing::debug!(?merge_updates, "allocate_splits_for_replace_source");
         if merge_updates.is_empty() {

@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::hash_map::Entry;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::fmt::Formatter;
 
 use risingwave_common::bitmap::Bitmap;
@@ -100,7 +100,7 @@ pub struct ReplaceStreamJobPlan {
     pub new_fragments: StreamJobFragments,
     /// Downstream jobs of the replaced job need to update their `Merge` node to
     /// connect to the new fragment.
-    pub merge_updates: BTreeMap<FragmentId, Vec<MergeUpdate>>,
+    pub merge_updates: HashMap<FragmentId, Vec<MergeUpdate>>,
     pub dispatchers: HashMap<FragmentId, HashMap<ActorId, Vec<Dispatcher>>>,
     /// For a table with connector, the `SourceExecutor` actor will also be rebuilt with new actor ids.
     /// We need to reassign splits for it.
@@ -994,7 +994,7 @@ impl Command {
 
     fn generate_update_mutation_for_replace_table(
         old_fragments: &StreamJobFragments,
-        merge_updates: &BTreeMap<FragmentId, Vec<MergeUpdate>>,
+        merge_updates: &HashMap<FragmentId, Vec<MergeUpdate>>,
         dispatchers: &HashMap<FragmentId, HashMap<ActorId, Vec<Dispatcher>>>,
         init_split_assignment: &SplitAssignment,
     ) -> Option<Mutation> {

@@ -977,7 +977,7 @@ impl CatalogController {
         &self,
         tmp_id: ObjectId,
         streaming_job: StreamingJob,
-        merge_updates: BTreeMap<crate::model::FragmentId, Vec<MergeUpdate>>,
+        merge_updates: HashMap<crate::model::FragmentId, Vec<MergeUpdate>>,
         col_index_mapping: Option<ColIndexMapping>,
         sink_into_table_context: SinkIntoTableContext,
     ) -> MetaResult<NotificationVersion> {
@@ -1015,7 +1015,7 @@ impl CatalogController {
 
     pub async fn finish_replace_streaming_job_inner(
         tmp_id: ObjectId,
-        merge_updates: BTreeMap<crate::model::FragmentId, Vec<MergeUpdate>>,
+        merge_updates: HashMap<crate::model::FragmentId, Vec<MergeUpdate>>,
         col_index_mapping: Option<ColIndexMapping>,
         SinkIntoTableContext {
             creating_sink_id,

@@ -728,7 +728,7 @@ pub struct ActorGraphBuildResult {
 
     /// The updates to be applied to the downstream chain actors. Used for schema change (replace
     /// table plan).
-    pub merge_updates: BTreeMap<FragmentId, Vec<MergeUpdate>>,
+    pub merge_updates: HashMap<FragmentId, Vec<MergeUpdate>>,
 }
 
 /// [`ActorGraphBuilder`] builds the actor graph for the given complete fragment graph, based on the
