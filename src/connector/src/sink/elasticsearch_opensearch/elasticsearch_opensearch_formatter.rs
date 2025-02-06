@@ -102,7 +102,8 @@ impl ElasticSearchOpenSearchFormatter {
         } else {
             None
         };
-        let key_encoder = TemplateEncoder::new_string(schema.clone(), col_indices.clone(), key_format);
+        let key_encoder =
+            TemplateEncoder::new_string(schema.clone(), col_indices.clone(), key_format);
         let value_encoder = JsonEncoder::new_with_es(schema.clone(), col_indices.clone());
         Ok(Self {
             key_encoder,
