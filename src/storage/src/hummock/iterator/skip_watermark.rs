@@ -28,6 +28,7 @@ use risingwave_hummock_sdk::table_watermark::{
     ReadTableWatermark, TableWatermarks, WatermarkDirection,
 };
 
+use super::SkipWatermarkState;
 use crate::compaction_catalog_manager::CompactionCatalogAgentRef;
 use crate::hummock::iterator::{Forward, HummockIterator, ValueMeta};
 use crate::hummock::value::HummockValue;
@@ -165,18 +166,6 @@ impl<I: HummockIterator<Direction = Forward>, S: SkipWatermarkState> HummockIter
         self.inner.value_meta()
     }
 }
-
-pub trait SkipWatermarkState: Send {
-    fn has_watermark(&self) -> bool;
-    fn should_delete(&mut self, key: &FullKey<&[u8]>) -> bool;
-    fn reset_watermark(&mut self);
-
-    // fn new(watermarks: BTreeMap<TableId, ReadTableWatermark>) -> Self;
-    // fn from_safe_epoch_watermarks(safe_epoch_watermarks: BTreeMap<u32, TableWatermarks>) -> Self;
-
-    fn advance_watermark(&mut self, key: &FullKey<&[u8]>) -> bool;
-}
-
 pub struct PkPrefixSkipWatermarkState {
     watermarks: BTreeMap<TableId, ReadTableWatermark>,
     remain_watermarks: VecDeque<(TableId, VirtualNode, WatermarkDirection, Bytes)>,
@@ -316,6 +305,7 @@ pub struct NonPkPrefixSkipWatermarkState {
     compaction_catalog_agent_ref: CompactionCatalogAgentRef,
 
     last_serde: Option<(OrderedRowSerde, OrderedRowSerde, usize)>,
+    last_table_id: Option<u32>,
 }
 
 impl NonPkPrefixSkipWatermarkState {
@@ -328,6 +318,7 @@ impl NonPkPrefixSkipWatermarkState {
             watermarks,
             compaction_catalog_agent_ref,
             last_serde: None,
+            last_table_id: None,
         }
     }
 
@@ -349,6 +340,17 @@ impl SkipWatermarkState for NonPkPrefixSkipWatermarkState {
     fn should_delete(&mut self, key: &FullKey<&[u8]>) -> bool {
         if let Some((table_id, vnode, direction, watermark)) = self.remain_watermarks.front() {
             let key_table_id = key.user_key.table_id;
+            {
+                if self.last_table_id.map_or(true, |last_table_id| {
+                    last_table_id != key_table_id.table_id()
+                }) {
+                    self.last_table_id = Some(key_table_id.table_id());
+                    self.last_serde = self
+                        .compaction_catalog_agent_ref
+                        .watermark_serde(table_id.table_id());
+                }
+            }
+
             let (key_vnode, inner_key) = key.user_key.table_key.split_vnode();
             match (&key_table_id, &key_vnode).cmp(&(table_id, vnode)) {
                 Ordering::Less => {
@@ -356,15 +358,7 @@ impl SkipWatermarkState for NonPkPrefixSkipWatermarkState {
                 }
                 Ordering::Equal => {
                     let (pk_prefix_serde, watermark_col_serde, watermark_col_idx_in_pk) =
-                        match self.last_serde.as_ref() {
-                            Some(serde) => serde,
-                            None => {
-                                self.last_serde = self
-                                    .compaction_catalog_agent_ref
-                                    .watermark_serde(table_id.table_id());
-                                self.last_serde.as_ref().unwrap()
-                            }
-                        };
+                        self.last_serde.as_ref().unwrap();
                     let row = pk_prefix_serde
                         .deserialize(inner_key)
                         .unwrap_or_else(|_| {
@@ -426,19 +420,8 @@ impl SkipWatermarkState for NonPkPrefixSkipWatermarkState {
                     continue;
                 }
                 Ordering::Equal => {
-                    self.last_serde = self
-                        .compaction_catalog_agent_ref
-                        .watermark_serde(table_id.table_id());
                     let (pk_prefix_serde, watermark_col_serde, watermark_col_idx_in_pk) =
-                        match self.last_serde.as_ref() {
-                            Some(serde) => serde,
-                            None => {
-                                self.last_serde = self
-                                    .compaction_catalog_agent_ref
-                                    .watermark_serde(table_id.table_id());
-                                self.last_serde.as_ref().unwrap()
-                            }
-                        };
+                        self.last_serde.as_ref().unwrap();
 
                     let row = pk_prefix_serde
                         .deserialize(inner_key)
