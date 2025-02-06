@@ -170,6 +170,17 @@ impl NotificationManager {
         )
     }
 
+    pub fn notify_all_without_version(&self, operation: Operation, info: Info) {
+        for subscribe_type in [
+            SubscribeType::Frontend,
+            SubscribeType::Hummock,
+            SubscribeType::Compactor,
+            SubscribeType::Compute,
+        ] {
+            self.notify_without_version(subscribe_type.into(), operation, info.clone());
+        }
+    }
+
     pub async fn notify_frontend(&self, operation: Operation, info: Info) -> NotificationVersion {
         self.notify_with_version(SubscribeType::Frontend.into(), operation, info)
             .await

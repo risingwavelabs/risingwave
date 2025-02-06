@@ -12,13 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use bytes::Bytes;
 use itertools::Itertools;
+use parking_lot::lock_api::RwLock;
+use risingwave_common::catalog::TableOption;
 use risingwave_common::monitor::MonitoredRwLock;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
@@ -112,6 +114,8 @@ pub struct HummockManager {
     now: Mutex<u64>,
     inflight_time_travel_query: Semaphore,
     gc_manager: GcManager,
+
+    table_id_to_table_option: parking_lot::RwLock<HashMap<u32, TableOption>>,
 }
 
 pub type HummockManagerRef = Arc<HummockManager>;
@@ -294,6 +298,7 @@ impl HummockManager {
             now: Mutex::new(0),
             inflight_time_travel_query: Semaphore::new(inflight_time_travel_query as usize),
             gc_manager,
+            table_id_to_table_option: RwLock::new(HashMap::new()),
         };
         let instance = Arc::new(instance);
         instance.init_time_travel_state().await?;
@@ -486,6 +491,17 @@ impl HummockManager {
 
     pub fn object_store_media_type(&self) -> &'static str {
         self.object_store.media_type()
+    }
+
+    pub fn update_table_id_to_table_option(
+        &self,
+        new_table_id_to_table_option: HashMap<u32, TableOption>,
+    ) {
+        *self.table_id_to_table_option.write() = new_table_id_to_table_option;
+    }
+
+    pub fn metadata_manager_ref(&self) -> &MetadataManager {
+        &self.metadata_manager
     }
 }
 

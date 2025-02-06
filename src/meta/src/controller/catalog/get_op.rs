@@ -171,13 +171,12 @@ impl CatalogController {
             .collect())
     }
 
-    pub async fn get_all_created_streaming_parallelisms(
+    pub async fn get_all_streaming_parallelisms(
         &self,
     ) -> MetaResult<HashMap<ObjectId, StreamingParallelism>> {
         let inner = self.inner.read().await;
 
         let job_parallelisms = StreamingJob::find()
-            .filter(streaming_job::Column::JobStatus.eq(JobStatus::Created))
             .select_only()
             .columns([
                 streaming_job::Column::JobId,
@@ -300,12 +299,9 @@ impl CatalogController {
         streaming_job_ids: Vec<ObjectId>,
     ) -> MetaResult<HashMap<ObjectId, String>> {
         let inner = self.inner.read().await;
-        let txn = inner.db.begin().await?;
-
         let mut resource_groups = HashMap::new();
-
         for job_id in streaming_job_ids {
-            let resource_group = get_existing_job_resource_group(&txn, job_id).await?;
+            let resource_group = get_existing_job_resource_group(&inner.db, job_id).await?;
             resource_groups.insert(job_id, resource_group);
         }
 
@@ -317,14 +313,12 @@ impl CatalogController {
         streaming_job_id: ObjectId,
     ) -> MetaResult<String> {
         let inner = self.inner.read().await;
-        let txn = inner.db.begin().await?;
-
         let database_id: ObjectId = StreamingJob::find_by_id(streaming_job_id)
             .select_only()
             .join(JoinType::InnerJoin, streaming_job::Relation::Object.def())
             .column(object::Column::DatabaseId)
             .into_tuple()
-            .one(&txn)
+            .one(&inner.db)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("streaming job", streaming_job_id))?;
 

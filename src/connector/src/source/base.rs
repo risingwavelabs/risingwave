@@ -17,7 +17,6 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
-use aws_sdk_s3::types::Object;
 use bytes::Bytes;
 use enum_as_inner::EnumAsInner;
 use futures::future::try_join_all;
@@ -49,7 +48,6 @@ use super::{AZBLOB_CONNECTOR, GCS_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONN
 use crate::error::ConnectorResult as Result;
 use crate::parser::schema_change::SchemaChangeEnvelope;
 use crate::parser::ParserConfig;
-use crate::source::filesystem::FsPageItem;
 use crate::source::monitor::EnumeratorMetrics;
 use crate::source::SplitImpl::{CitusCdc, MongodbCdc, MysqlCdc, PostgresCdc, SqlServerCdc};
 use crate::with_options::WithOptions;
@@ -823,17 +821,6 @@ pub trait SplitMetaData: Sized {
 /// split readers) [`SplitImpl`]. If no split is assigned to source executor, `ConnectorState` is
 /// [`None`] and the created source stream will be a pending stream.
 pub type ConnectorState = Option<Vec<SplitImpl>>;
-
-#[derive(Debug, Clone, Default)]
-pub struct FsFilterCtrlCtx;
-pub type FsFilterCtrlCtxRef = Arc<FsFilterCtrlCtx>;
-
-#[async_trait]
-pub trait FsListInner: Sized {
-    // fixme: better to implement as an Iterator, but the last page still have some contents
-    async fn get_next_page<T: for<'a> From<&'a Object>>(&mut self) -> Result<(Vec<T>, bool)>;
-    fn filter_policy(&self, ctx: &FsFilterCtrlCtx, page_num: usize, item: &FsPageItem) -> bool;
-}
 
 #[cfg(test)]
 mod tests {
