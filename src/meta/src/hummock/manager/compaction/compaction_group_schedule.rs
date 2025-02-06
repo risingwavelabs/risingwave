@@ -33,7 +33,7 @@ use risingwave_pb::hummock::{
 };
 use thiserror_ext::AsReport;
 
-use super::{check_cg_write_limit, CompactionGroupStatistic};
+use super::{check_emergency_state, CompactionGroupStatistic, EmergencyState};
 use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::transaction::HummockVersionTransaction;
 use crate::hummock::manager::{commit_multi_var, HummockManager};
@@ -932,21 +932,19 @@ impl HummockManager {
         {
             // TODO: check emergency state
             let versioning_guard = self.versioning.read().await;
-            if check_cg_write_limit(
+            if let EmergencyState::Emergency = check_emergency_state(
                 versioning_guard
                     .current_version
                     .get_compaction_group_levels(group.group_id),
                 group.compaction_group_config.compaction_config().deref(),
-            )
-            .is_write_stop()
-            {
+            ) {
                 return Err(Error::CompactionGroup(format!(
                     "Not Merge write limit group {} next group {}",
                     group.group_id, next_group.group_id
                 )));
             }
 
-            if check_cg_write_limit(
+            if let EmergencyState::Emergency = check_emergency_state(
                 versioning_guard
                     .current_version
                     .get_compaction_group_levels(next_group.group_id),
@@ -954,9 +952,7 @@ impl HummockManager {
                     .compaction_group_config
                     .compaction_config()
                     .deref(),
-            )
-            .is_write_stop()
-            {
+            ) {
                 return Err(Error::CompactionGroup(format!(
                     "Not Merge write limit next group {} group {}",
                     next_group.group_id, group.group_id
