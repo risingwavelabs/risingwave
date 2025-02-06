@@ -293,7 +293,7 @@ impl Scheduler {
         // Vnode count requirements: if a fragment is going to look up an existing table,
         // it must have the same vnode count as that table.
         for (&id, fragment) in graph.building_fragments() {
-            visit_fragment(&mut (*fragment).clone(), |node| {
+            visit_fragment(fragment, |node| {
                 use risingwave_pb::stream_plan::stream_node::NodeBody;
                 let vnode_count = match node {
                     NodeBody::StreamScan(node) => {

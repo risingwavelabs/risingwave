@@ -135,7 +135,7 @@ impl<'a> HummockVersionTransaction<'a> {
                 parent_group_id: StaticCompactionGroupId::NewCompactionGroup as CompactionGroupId,
                 new_sst_start_id: 0, // No need to set it when `NewCompactionGroup`
                 table_ids: vec![],
-                version: CompatibilityVersion::SplitGroupByTableId as i32,
+                version: CompatibilityVersion::LATEST as _,
                 split_key: None,
             })));
         }
