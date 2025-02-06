@@ -662,6 +662,14 @@ message RiseCtlUpdateCompactionConfigRequest {
       bool disable_auto_group_scheduling = 21;
       uint64 max_overlapping_level_size = 22;
       uint32 sst_allowed_trivial_move_max_count = 23;
+      // The emergency compaction limitations for the level0 sstables file count
+      uint32 emergency_level0_sst_file_count = 24;
+      // The emergency compaction limitations for the level0 sub level partition
+      uint32 emergency_level0_sub_level_partition = 25;
+      // The limitation of the max sst size of the level0 to trigger the write stop
+      uint32 level0_stop_write_threshold_max_sst_count = 26;
+      // The limitation of the max sst size of the level0 to trigger the write stop
+      uint64 level0_stop_write_threshold_max_size = 27;
     }
   }
   repeated uint64 compaction_group_ids = 1;
@@ -867,6 +875,16 @@ message CompactionConfig {
 
   // The limitation of the max sst count of the trivial move task
   optional uint32 sst_allowed_trivial_move_max_count = 25;
+  // The emergency compaction limitations for the level0 sstables file count
+  optional uint32 emergency_level0_sst_file_count = 26;
+
+  // The emergency compaction limitations for the level0 sub level partition
+  optional uint32 emergency_level0_sub_level_partition = 27;
+
+  // The limitation of the max sst count of the level0 to trigger the write stop
+  optional uint32 level0_stop_write_threshold_max_sst_count = 28;
+  // The limitation of the max sst size of the level0 to trigger the write stop
+  optional uint64 level0_stop_write_threshold_max_size = 29;
 }
 
 message TableStats {
