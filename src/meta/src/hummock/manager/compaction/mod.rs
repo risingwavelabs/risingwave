@@ -49,6 +49,7 @@ use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::{
     add_prost_table_stats_map, purge_prost_table_stats, PbTableStatsMap,
 };
+use risingwave_hummock_sdk::table_watermark::WatermarkSerdeType;
 use risingwave_hummock_sdk::version::{GroupDelta, IntraLevelDelta};
 use risingwave_hummock_sdk::{
     compact_task_to_string, statistics_compact_task, CompactionGroupId, HummockCompactionTaskId,
@@ -851,9 +852,20 @@ impl HummockManager {
                         &mut compact_task,
                         group_config.compaction_config.as_ref(),
                     );
-                    compact_task.table_watermarks = version
+                    let (pk_prefix_table_watermarks, non_pk_prefix_table_watermarks) = version
                         .latest_version()
-                        .safe_epoch_table_watermarks(&compact_task.existing_table_ids);
+                        .safe_epoch_table_watermarks(&compact_task.existing_table_ids)
+                        .into_iter()
+                        .partition(|(_table_id, table_watermarke)| {
+                            matches!(
+                                table_watermarke.watermark_type,
+                                WatermarkSerdeType::PkPrefix
+                            )
+                        });
+
+                    compact_task.pk_prefix_table_watermarks = pk_prefix_table_watermarks;
+                    compact_task.non_pk_prefix_table_watermarks = non_pk_prefix_table_watermarks;
+
                     compact_task.table_schemas = compact_task
                         .existing_table_ids
                         .iter()
