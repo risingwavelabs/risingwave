@@ -452,7 +452,7 @@ impl HummockManager {
             new_version_delta.group_deltas.insert(
                 new_compaction_group_id,
                 GroupDeltas {
-                    group_deltas: vec![GroupDelta::GroupConstruct(PbGroupConstruct {
+                    group_deltas: vec![GroupDelta::GroupConstruct(Box::new(PbGroupConstruct {
                         group_config: Some(config.clone()),
                         group_id: new_compaction_group_id,
                         parent_group_id,
@@ -460,7 +460,7 @@ impl HummockManager {
                         table_ids: vec![],
                         version: CompatibilityVersion::LATEST as _, // for compatibility
                         split_key: Some(split_key.into()),
-                    })],
+                    }))],
                 },
             );
             (new_compaction_group_id, config)
