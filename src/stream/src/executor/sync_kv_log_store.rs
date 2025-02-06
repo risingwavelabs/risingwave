@@ -74,7 +74,9 @@ use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_connector::sink::log_store::{ChunkId, LogStoreResult};
-use risingwave_hummock_sdk::table_watermark::{VnodeWatermark, WatermarkDirection};
+use risingwave_hummock_sdk::table_watermark::{
+    VnodeWatermark, WatermarkDirection, WatermarkSerdeType,
+};
 use risingwave_storage::store::{
     InitOptions, LocalStateStore, NewLocalOptions, OpConsistencyLevel, SealCurrentEpochOptions,
 };
@@ -481,7 +483,11 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
         state_store.seal_current_epoch(
             barrier.epoch.curr,
             SealCurrentEpochOptions {
-                table_watermarks: Some((WatermarkDirection::Ascending, watermark)),
+                table_watermarks: Some((
+                    WatermarkDirection::Ascending,
+                    watermark,
+                    WatermarkSerdeType::PkPrefix,
+                )),
                 switch_op_consistency_level: None,
             },
         );
