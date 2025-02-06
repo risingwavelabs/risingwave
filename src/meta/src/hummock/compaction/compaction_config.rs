@@ -72,6 +72,9 @@ impl CompactionConfigBuilder {
                     compaction_config::disable_auto_group_scheduling(),
                 ),
                 max_overlapping_level_size: Some(compaction_config::max_overlapping_level_size()),
+                sst_allowed_trivial_move_max_count: Some(
+                    compaction_config::sst_allowed_trivial_move_max_count(),
+                ),
                 emergency_level0_sst_file_count: Some(
                     compaction_config::emergency_level0_sst_file_count(),
                 ),
@@ -114,6 +117,7 @@ impl CompactionConfigBuilder {
             .tombstone_reclaim_ratio(opt.tombstone_reclaim_ratio)
             .max_level(opt.max_level as u64)
             .sst_allowed_trivial_move_min_size(Some(opt.sst_allowed_trivial_move_min_size))
+            .sst_allowed_trivial_move_max_count(Some(opt.sst_allowed_trivial_move_max_count))
             .max_overlapping_level_size(Some(opt.max_overlapping_level_size))
             .emergency_level0_sst_file_count(Some(opt.emergency_level0_sst_file_count))
             .emergency_level0_sub_level_partition(Some(opt.emergency_level0_sub_level_partition))
@@ -182,6 +186,7 @@ builder_field! {
     level0_overlapping_sub_level_compact_level_count: u32,
     tombstone_reclaim_ratio: u32,
     sst_allowed_trivial_move_min_size: Option<u64>,
+    sst_allowed_trivial_move_max_count: Option<u32>,
     disable_auto_group_scheduling: Option<bool>,
     max_overlapping_level_size: Option<u64>,
     emergency_level0_sst_file_count: Option<u32>,

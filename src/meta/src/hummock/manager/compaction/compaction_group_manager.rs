@@ -605,6 +605,9 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
             MutableConfig::MaxOverlappingLevelSize(c) => {
                 target.max_overlapping_level_size = Some(*c);
             }
+            MutableConfig::SstAllowedTrivialMoveMaxCount(c) => {
+                target.sst_allowed_trivial_move_max_count = Some(*c);
+            }
             MutableConfig::EmergencyLevel0SstFileCount(c) => {
                 target.emergency_level0_sst_file_count = Some(*c);
             }

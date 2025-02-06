@@ -2191,6 +2191,7 @@ pub mod default {
         const DEFAULT_MAX_LEVEL: u32 = 6;
         const DEFAULT_MAX_L0_COMPACT_LEVEL_COUNT: u32 = 42;
         const DEFAULT_SST_ALLOWED_TRIVIAL_MOVE_MIN_SIZE: u64 = 4 * MB;
+        const DEFAULT_SST_ALLOWED_TRIVIAL_MOVE_MAX_COUNT: u32 = 64;
         const DEFAULT_EMERGENCY_LEVEL0_SST_FILE_COUNT: u32 = 2000; // > 50G / 32M = 1600
         const DEFAULT_EMERGENCY_LEVEL0_SUB_LEVEL_PARTITION: u32 = 256;
         const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_MAX_SST_COUNT: u32 = 10000; // 10000 * 32M = 320G
@@ -2276,6 +2277,10 @@ pub mod default {
 
         pub fn max_overlapping_level_size() -> u64 {
             256 * MB
+        }
+
+        pub fn sst_allowed_trivial_move_max_count() -> u32 {
+            DEFAULT_SST_ALLOWED_TRIVIAL_MOVE_MAX_COUNT
         }
 
         pub fn emergency_level0_sst_file_count() -> u32 {
@@ -2672,10 +2677,12 @@ pub struct CompactionConfig {
     pub enable_emergency_picker: bool,
     #[serde(default = "default::compaction_config::max_level")]
     pub max_level: u32,
-    #[serde(default = "default::compaction_config::max_l0_compact_level_count")]
-    pub max_l0_compact_level_count: u32,
     #[serde(default = "default::compaction_config::sst_allowed_trivial_move_min_size")]
     pub sst_allowed_trivial_move_min_size: u64,
+    #[serde(default = "default::compaction_config::sst_allowed_trivial_move_max_count")]
+    pub sst_allowed_trivial_move_max_count: u32,
+    #[serde(default = "default::compaction_config::max_l0_compact_level_count")]
+    pub max_l0_compact_level_count: u32,
     #[serde(default = "default::compaction_config::disable_auto_group_scheduling")]
     pub disable_auto_group_scheduling: bool,
     #[serde(default = "default::compaction_config::max_overlapping_level_size")]
