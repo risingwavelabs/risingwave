@@ -298,6 +298,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                                 &this.intermediate_state_table,
                                 &this.input_pk_indices,
                                 this.row_count_index,
+                                this.emit_on_window_close,
                                 this.extreme_cache_size,
                                 &this.input_schema,
                             )
@@ -432,9 +433,9 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         .into_iter()
                         .take(this.group_key_indices.len())
                         .collect();
-                    let states = row.into_iter().skip(this.group_key_indices.len()).collect();
+                    let inter_states = row.into_iter().skip(this.group_key_indices.len()).collect();
 
-                    let mut agg_group = AggGroup::create_eowc(
+                    let mut agg_group = AggGroup::<S>::for_eowc_output(
                         this.version,
                         Some(GroupKey::new(
                             group_key,
@@ -443,9 +444,10 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         &this.agg_calls,
                         &this.agg_funcs,
                         &this.storages,
-                        &states,
+                        &inter_states,
                         &this.input_pk_indices,
                         this.row_count_index,
+                        this.emit_on_window_close,
                         this.extreme_cache_size,
                         &this.input_schema,
                     )?;
