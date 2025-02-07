@@ -341,7 +341,7 @@ struct UpstreamFragmentChange {
 
 #[derive(Default)]
 struct DownstreamFragmentChange {
-    /// The new upstreams to be added (replaced), indexed by the upstream fragment ID.
+    /// The new upstreams to be added (replaced), indexed by the edge id to upstream fragment.
     new_upstreams: HashMap<DownstreamExternalEdgeId, ActorUpstream>,
 }
 
