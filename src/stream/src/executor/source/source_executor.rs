@@ -13,6 +13,8 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
 use std::time::Duration;
 
 use anyhow::anyhow;
@@ -48,6 +50,12 @@ use crate::executor::prelude::*;
 use crate::executor::stream_reader::StreamReaderWithPause;
 use crate::executor::UpdateMutation;
 
+pub(crate) type GetLatestSplitInfoFn = Arc<
+    dyn Fn() -> Pin<Box<dyn Future<Output = Result<Vec<SplitImpl>, StreamExecutorError>> + Send>>
+        + Send
+        + Sync,
+>;
+
 /// A constant to multiply when calculating the maximum time to wait for a barrier. This is due to
 /// some latencies in network and cost in meta.
 pub const WAIT_BARRIER_MULTIPLE_TIMES: u128 = 5;
@@ -82,6 +90,8 @@ pub(crate) struct StreamReaderBuilder {
     // cdc related
     pub is_auto_schema_change_enable: bool,
     pub actor_ctx: ActorContextRef,
+
+    pub get_latest_split_info_fn: GetLatestSplitInfoFn,
 }
 
 impl StreamReaderBuilder {
@@ -171,11 +181,12 @@ impl StreamReaderBuilder {
     }
 
     #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
-    pub(crate) async fn into_retry_stream(self, state: ConnectorState, is_initial_build: bool) {
+    pub(crate) async fn into_retry_stream(self, mut state: ConnectorState, is_initial_build: bool) {
         let (column_ids, source_ctx) = self.prepare_source_stream_build();
         let source_ctx_ref = Arc::new(source_ctx);
 
         'build_consume_loop: loop {
+            tracing::debug!("build stream source reader with state: {:?}", state);
             let build_stream_result = self
                 .source_desc
                 .source
@@ -211,6 +222,8 @@ impl StreamReaderBuilder {
             }
             tracing::info!("stream source reader error, retry in 5s");
             tokio::time::sleep(Duration::from_secs(5)).await;
+
+            state = Some((self.get_latest_split_info_fn)().await?);
         }
     }
 }
@@ -237,6 +250,22 @@ impl<S: StateStore> SourceExecutor<S> {
     }
 
     fn stream_reader_builder(&self, source_desc: SourceDesc) -> StreamReaderBuilder {
+        let latest_split_info_weak =
+            Arc::downgrade(&self.stream_source_core.as_ref().unwrap().latest_split_info);
+
+        let get_latest_split_info_fn: GetLatestSplitInfoFn = Arc::new(move || {
+            let weak = latest_split_info_weak.clone();
+            Box::pin(async move {
+                let Some(latest_split_info_ref) = weak.upgrade() else {
+                    return Err(StreamExecutorError::connector_error(anyhow!(
+                        "latest_split_info_weak is already dropped, retry later"
+                    )));
+                };
+                let read_guard = latest_split_info_ref.read().await;
+                Ok(read_guard.values().cloned().collect())
+            })
+        });
+
         StreamReaderBuilder {
             source_desc,
             rate_limit: self.rate_limit_rps,
@@ -249,6 +278,7 @@ impl<S: StateStore> SourceExecutor<S> {
                 .clone(),
             is_auto_schema_change_enable: self.is_auto_schema_change_enable(),
             actor_ctx: self.actor_ctx.clone(),
+            get_latest_split_info_fn,
         }
     }
 
@@ -412,7 +442,7 @@ impl<S: StateStore> SourceExecutor<S> {
                 .update_state_if_changed(target_splits, should_trim_state)
                 .await?
             {
-                self.rebuild_stream_reader(source_desc, stream)?;
+                self.rebuild_stream_reader(source_desc, stream).await?;
             }
         }
 
@@ -439,7 +469,7 @@ impl<S: StateStore> SourceExecutor<S> {
 
         // Checks added splits
         for (split_id, split) in target_splits {
-            if let Some(s) = core.latest_split_info.get(&split_id) {
+            if let Some(s) = core.latest_split_info.read().await.get(&split_id) {
                 // For existing splits, we should use the latest offset from the cache.
                 // `target_splits` is from meta and contains the initial offset.
                 target_state.insert(split_id, s.clone());
@@ -466,7 +496,7 @@ impl<S: StateStore> SourceExecutor<S> {
         }
 
         // Checks dropped splits
-        for existing_split_id in core.latest_split_info.keys() {
+        for existing_split_id in core.latest_split_info.read().await.keys() {
             if !target_state.contains_key(existing_split_id) {
                 tracing::info!("split dropping detected: {}", existing_split_id);
                 split_changed = true;
@@ -485,6 +515,8 @@ impl<S: StateStore> SourceExecutor<S> {
 
             let dropped_splits = core
                 .latest_split_info
+                .write()
+                .await
                 .extract_if(|split_id, _| !target_state.contains_key(split_id))
                 .map(|(_, split)| split)
                 .collect_vec();
@@ -494,14 +526,14 @@ impl<S: StateStore> SourceExecutor<S> {
                 core.split_state_store.trim_state(&dropped_splits).await?;
             }
 
-            core.latest_split_info = target_state;
+            *core.latest_split_info.write().await = target_state;
         }
 
         Ok(split_changed)
     }
 
     /// Rebuild stream if there is a err in stream
-    fn rebuild_stream_reader_from_error<const BIASED: bool>(
+    async fn rebuild_stream_reader_from_error<const BIASED: bool>(
         &mut self,
         source_desc: &SourceDesc,
         stream: &mut StreamReaderWithPause<BIASED, StreamChunk>,
@@ -521,16 +553,22 @@ impl<S: StateStore> SourceExecutor<S> {
             self.actor_ctx.fragment_id.to_string(),
         ]);
 
-        self.rebuild_stream_reader(source_desc, stream)
+        self.rebuild_stream_reader(source_desc, stream).await
     }
 
-    fn rebuild_stream_reader<const BIASED: bool>(
+    async fn rebuild_stream_reader<const BIASED: bool>(
         &mut self,
         source_desc: &SourceDesc,
         stream: &mut StreamReaderWithPause<BIASED, StreamChunk>,
     ) -> StreamExecutorResult<()> {
         let core = self.stream_source_core.as_mut().unwrap();
-        let target_state: Vec<SplitImpl> = core.latest_split_info.values().cloned().collect();
+        let target_state: Vec<SplitImpl> = core
+            .latest_split_info
+            .read()
+            .await
+            .values()
+            .cloned()
+            .collect();
 
         tracing::info!(
             "actor {:?} apply source split change to {:?}",
@@ -648,7 +686,7 @@ impl<S: StateStore> SourceExecutor<S> {
         }
 
         // init in-memory split states with persisted state if any
-        core.init_split_state(boot_state.clone());
+        core.init_split_state(boot_state.clone()).await;
 
         // Return the ownership of `stream_source_core` to the source executor.
         self.stream_source_core = Some(core);
@@ -715,7 +753,8 @@ impl<S: StateStore> SourceExecutor<S> {
         while let Some(msg) = stream.next().await {
             let Ok(msg) = msg else {
                 tokio::time::sleep(Duration::from_millis(1000)).await;
-                self.rebuild_stream_reader_from_error(&source_desc, &mut stream, msg.unwrap_err())?;
+                self.rebuild_stream_reader_from_error(&source_desc, &mut stream, msg.unwrap_err())
+                    .await?;
                 continue;
             };
 
@@ -782,7 +821,8 @@ impl<S: StateStore> SourceExecutor<S> {
                                     );
                                     self.rate_limit_rps = *new_rate_limit;
                                     // recreate from latest_split_info
-                                    self.rebuild_stream_reader(&source_desc, &mut stream)?;
+                                    self.rebuild_stream_reader(&source_desc, &mut stream)
+                                        .await?;
                                 }
                             }
                             _ => {}
@@ -838,23 +878,28 @@ impl<S: StateStore> SourceExecutor<S> {
                             * WAIT_BARRIER_MULTIPLE_TIMES;
                     }
                     if let Some(mapping) = split_offset_mapping {
+                        let mut latest_split_info_guard = self
+                            .stream_source_core
+                            .as_ref()
+                            .unwrap()
+                            .latest_split_info
+                            .write()
+                            .await;
                         let state: HashMap<_, _> = mapping
                             .iter()
                             .flat_map(|(split_id, offset)| {
-                                self.stream_source_core
-                                    .as_mut()
-                                    .unwrap()
-                                    .latest_split_info
-                                    .get_mut(split_id)
-                                    .map(|original_split_impl| {
+                                latest_split_info_guard.get_mut(split_id).map(
+                                    |original_split_impl| {
                                         original_split_impl.update_in_place(offset.clone())?;
                                         Ok::<_, anyhow::Error>((
                                             split_id.clone(),
                                             original_split_impl.clone(),
                                         ))
-                                    })
+                                    },
+                                )
                             })
                             .try_collect()?;
+                        drop(latest_split_info_guard);
 
                         self.stream_source_core
                             .as_mut()
@@ -1052,6 +1097,7 @@ impl<S: StateStore> WaitCheckpointWorker<S> {
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
+    use std::sync::Arc;
 
     use maplit::{btreemap, convert_args, hashmap};
     use risingwave_common::catalog::{ColumnId, Field, TableId};
@@ -1064,6 +1110,7 @@ mod tests {
     use risingwave_pb::plan_common::PbRowFormatType;
     use risingwave_storage::memory::MemoryStateStore;
     use tokio::sync::mpsc::unbounded_channel;
+    use tokio::sync::RwLock;
     use tracing_test::traced_test;
 
     use super::*;
@@ -1105,7 +1152,7 @@ mod tests {
             source_id: table_id,
             column_ids,
             source_desc_builder: Some(source_desc_builder),
-            latest_split_info: HashMap::new(),
+            latest_split_info: Arc::new(RwLock::new(HashMap::new())),
             split_state_store,
             updated_splits_in_epoch: HashMap::new(),
             source_name: MOCK_SOURCE_NAME.to_owned(),
@@ -1195,7 +1242,7 @@ mod tests {
             source_id: table_id,
             column_ids: column_ids.clone(),
             source_desc_builder: Some(source_desc_builder),
-            latest_split_info: HashMap::new(),
+            latest_split_info: Arc::new(RwLock::new(HashMap::new())),
             split_state_store,
             updated_splits_in_epoch: HashMap::new(),
             source_name: MOCK_SOURCE_NAME.to_owned(),
