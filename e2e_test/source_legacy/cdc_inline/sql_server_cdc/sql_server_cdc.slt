@@ -207,7 +207,7 @@ CREATE TABLE shared_orders (
 )  from mssql_source table 'mydb.dbo.orders';
 
 # column name mismatch
-statement error INVALID_ARGUMENT: Column 'wrong_order_date' not found in the upstream database
+statement error Column 'wrong_order_date' not found in the upstream database
 CREATE TABLE shared_orders (
     order_id INT,
     wrong_order_date BIGINT,
