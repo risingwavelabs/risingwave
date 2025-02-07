@@ -496,7 +496,7 @@ async fn try_batch_barriers(
         if barrier.mutation.is_some() {
             break;
         }
-        let msg: Message = input.next().await.unwrap()?;
+        let msg: Message = input.next().now_or_never().unwrap().unwrap()?;
         let Message::Barrier(ref barrier) = msg else {
             unreachable!("must be a barrier");
         };
