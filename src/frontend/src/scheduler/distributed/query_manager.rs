@@ -230,14 +230,13 @@ impl QueryManager {
                 self.query_metrics.clone(),
             )
             .await
-            .map_err(|err| {
+            .inspect_err(|_| {
                 // Clean up query execution on error.
                 context
                     .session()
                     .env()
                     .query_manager()
                     .delete_query(&query_id);
-                err
             })?;
         Ok(query_result_fetcher.stream_from_channel())
     }

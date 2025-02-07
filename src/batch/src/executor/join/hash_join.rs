@@ -162,9 +162,8 @@ impl<'a> Iterator for RowIdIter<'a> {
     type Item = RowId;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.current_row_id.map(|row_id| {
-            self.current_row_id = self.next_row_id[row_id];
-            row_id
+        self.current_row_id.inspect(|row_id| {
+            self.current_row_id = self.next_row_id[*row_id];
         })
     }
 }

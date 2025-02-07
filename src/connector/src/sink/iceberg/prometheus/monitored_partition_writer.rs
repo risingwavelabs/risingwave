@@ -27,7 +27,6 @@ pub struct MonitoredFanoutPartitionedWriterBuilder<B: IcebergWriterBuilder> {
 }
 
 impl<B: IcebergWriterBuilder> MonitoredFanoutPartitionedWriterBuilder<B> {
-    #[expect(dead_code)]
     pub fn new(
         inner: FanoutPartitionedWriterBuilder<B>,
         partition_num: LabelGuardedIntGauge<2>,

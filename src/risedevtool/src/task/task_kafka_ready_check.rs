@@ -42,7 +42,7 @@ impl Task for KafkaReadyCheckTask {
         let mut config = ClientConfig::new();
         config.set(
             "bootstrap.servers",
-            &format!("{}:{}", self.config.address, self.config.port),
+            format!("{}:{}", self.config.address, self.config.port),
         );
 
         let rt = tokio::runtime::Builder::new_current_thread()

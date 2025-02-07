@@ -31,7 +31,7 @@ use clap::Parser;
 use foyer::HybridCacheBuilder;
 use replay_impl::{get_replay_notification_client, GlobalReplayImpl};
 use risingwave_common::config::{
-    extract_storage_memory_config, load_config, NoOverride, ObjectStoreConfig, StorageConfig,
+    extract_storage_memory_config, load_config, NoOverride, ObjectStoreConfig,
 };
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_hummock_trace::{
@@ -46,7 +46,6 @@ use risingwave_storage::filter_key_extractor::{
 use risingwave_storage::hummock::{HummockStorage, SstableStore, SstableStoreConfig};
 use risingwave_storage::monitor::{CompactorMetrics, HummockStateStoreMetrics, ObjectStoreMetrics};
 use risingwave_storage::opts::StorageOpts;
-use serde::{Deserialize, Serialize};
 
 // use a large offset to avoid collision with real sstables
 const SST_OFFSET: u64 = 2147383647000;
@@ -182,9 +181,4 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalRepl
     let replay_interface = GlobalReplayImpl::new(storage, notifier);
 
     Ok(replay_interface)
-}
-
-#[derive(Serialize, Deserialize, Default)]
-struct ReplayConfig {
-    storage: StorageConfig,
 }

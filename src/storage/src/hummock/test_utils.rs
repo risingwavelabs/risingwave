@@ -495,7 +495,7 @@ pub mod delete_range {
     /// The core idea contains two parts:
     /// 1) we only need to keep the smallest epoch of the overlapping
     ///    range tomstone intervals since the key covered by the range tombstone in lower level must have
-    ///    smaller epoches;
+    ///    smaller epochs;
     /// 2) due to 1), we lose the information to delete a key by tombstone in a single
     ///    SST so we add a tombstone key in the data block.
     ///    We leverage `events` to calculate the epoch information mentioned above.

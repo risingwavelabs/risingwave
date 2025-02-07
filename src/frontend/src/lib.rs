@@ -23,7 +23,6 @@
 #![feature(if_let_guard)]
 #![feature(let_chains)]
 #![feature(assert_matches)]
-#![feature(lint_reasons)]
 #![feature(box_patterns)]
 #![feature(macro_metavar_expr)]
 #![feature(min_specialization)]

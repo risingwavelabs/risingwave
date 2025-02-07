@@ -17,7 +17,6 @@
 #![feature(trait_alias)]
 #![feature(type_alias_impl_trait)]
 #![feature(more_qualified_paths)]
-#![feature(lint_reasons)]
 #![feature(let_chains)]
 #![feature(hash_extract_if)]
 #![feature(extract_if)]
