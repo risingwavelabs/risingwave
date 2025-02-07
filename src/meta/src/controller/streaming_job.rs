@@ -49,7 +49,7 @@ use risingwave_pb::meta::{PbFragmentWorkerSlotMapping, PbObject, PbObjectGroup};
 use risingwave_pb::source::{PbConnectorSplit, PbConnectorSplits};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
-use risingwave_pb::stream_plan::update_mutation::PbMergeUpdate;
+use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use risingwave_pb::stream_plan::{
     PbDispatcher, PbDispatcherType, PbFragmentTypeFlag, PbStreamActor, PbStreamNode,
 };
@@ -626,7 +626,10 @@ impl CatalogController {
         &self,
         job_id: ObjectId,
         actor_ids: Vec<crate::model::ActorId>,
-        new_actor_dispatchers: HashMap<crate::model::ActorId, Vec<PbDispatcher>>,
+        new_actor_dispatchers: &HashMap<
+            crate::model::FragmentId,
+            HashMap<crate::model::ActorId, Vec<PbDispatcher>>,
+        >,
         split_assignment: &SplitAssignment,
     ) -> MetaResult<()> {
         let inner = self.inner.write().await;
@@ -659,10 +662,11 @@ impl CatalogController {
         }
 
         let mut actor_dispatchers = vec![];
-        for (actor_id, dispatchers) in new_actor_dispatchers {
+        for (actor_id, dispatchers) in new_actor_dispatchers.values().flatten() {
             for dispatcher in dispatchers {
                 let mut actor_dispatcher =
-                    actor_dispatcher::Model::from((actor_id, dispatcher)).into_active_model();
+                    actor_dispatcher::Model::from((*actor_id, dispatcher.clone()))
+                        .into_active_model();
                 actor_dispatcher.id = NotSet;
                 actor_dispatchers.push(actor_dispatcher);
             }
@@ -973,7 +977,7 @@ impl CatalogController {
         &self,
         tmp_id: ObjectId,
         streaming_job: StreamingJob,
-        merge_updates: Vec<PbMergeUpdate>,
+        merge_updates: HashMap<crate::model::FragmentId, Vec<MergeUpdate>>,
         col_index_mapping: Option<ColIndexMapping>,
         sink_into_table_context: SinkIntoTableContext,
     ) -> MetaResult<NotificationVersion> {
@@ -1011,7 +1015,7 @@ impl CatalogController {
 
     pub async fn finish_replace_streaming_job_inner(
         tmp_id: ObjectId,
-        merge_updates: Vec<PbMergeUpdate>,
+        merge_updates: HashMap<crate::model::FragmentId, Vec<MergeUpdate>>,
         col_index_mapping: Option<ColIndexMapping>,
         SinkIntoTableContext {
             creating_sink_id,
@@ -1112,31 +1116,15 @@ impl CatalogController {
             .await?;
 
         // 2. update merges.
-        let fragment_replace_map: HashMap<_, _> = merge_updates
-            .iter()
-            .map(|update| {
-                (
-                    update.upstream_fragment_id,
-                    update.new_upstream_fragment_id.unwrap(),
-                )
-            })
-            .collect();
-
-        // TODO: remove cache upstream fragment/actor ids and derive them from `actor_dispatcher` table.
-        let mut to_update_fragment_ids = HashSet::new();
         // 2.1 update downstream actor's upstream_actor_ids
-        for merge_update in merge_updates {
+        for merge_update in merge_updates.values().flatten() {
             assert!(merge_update.removed_upstream_actor_id.is_empty());
             assert!(merge_update.new_upstream_fragment_id.is_some());
-            let (actor_id, fragment_id, mut upstream_actors) =
+            let (actor_id, mut upstream_actors) =
                 Actor::find_by_id(merge_update.actor_id as ActorId)
                     .select_only()
-                    .columns([
-                        actor::Column::ActorId,
-                        actor::Column::FragmentId,
-                        actor::Column::UpstreamActorIds,
-                    ])
-                    .into_tuple::<(ActorId, FragmentId, ActorUpstreamActors)>()
+                    .columns([actor::Column::ActorId, actor::Column::UpstreamActorIds])
+                    .into_tuple::<(ActorId, ActorUpstreamActors)>()
                     .one(txn)
                     .await?
                     .ok_or_else(|| {
@@ -1162,13 +1150,12 @@ impl CatalogController {
             }
             .update(txn)
             .await?;
-
-            to_update_fragment_ids.insert(fragment_id);
         }
+
         // 2.2 update downstream fragment's Merge node, and upstream_fragment_id
-        for fragment_id in to_update_fragment_ids {
+        for (fragment_id, merge_updates) in merge_updates {
             let (fragment_id, mut stream_node, mut upstream_fragment_id) =
-                Fragment::find_by_id(fragment_id)
+                Fragment::find_by_id(fragment_id as FragmentId)
                     .select_only()
                     .columns([
                         fragment::Column::FragmentId,
@@ -1180,6 +1167,16 @@ impl CatalogController {
                     .await?
                     .map(|(id, node, upstream)| (id, node.to_protobuf(), upstream))
                     .ok_or_else(|| MetaError::catalog_id_not_found("fragment", fragment_id))?;
+            let fragment_replace_map: HashMap<_, _> = merge_updates
+                .iter()
+                .map(|update| {
+                    (
+                        update.upstream_fragment_id,
+                        update.new_upstream_fragment_id.unwrap(),
+                    )
+                })
+                .collect();
+
             visit_stream_node_mut(&mut stream_node, |body| {
                 if let PbNodeBody::Merge(m) = body
                     && let Some(new_fragment_id) = fragment_replace_map.get(&m.upstream_fragment_id)
