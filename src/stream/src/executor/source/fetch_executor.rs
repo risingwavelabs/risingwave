@@ -21,8 +21,6 @@ use futures_async_stream::try_stream;
 use risingwave_common::catalog::{ColumnId, TableId};
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::types::ScalarRef;
-use risingwave_connector::parser::parquet_parser::get_total_row_nums_for_parquet_file;
-use risingwave_connector::parser::EncodingProperties;
 use risingwave_connector::source::filesystem::opendal_source::{
     OpendalAzblob, OpendalGcs, OpendalPosixFs, OpendalS3, OpendalSource,
 };
@@ -317,50 +315,20 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                     // For Parquet encoding, the offset indicates the current row being read.
                                     // Therefore, to determine if the end of a Parquet file has been reached, we need to compare its offset with the total number of rows.
                                     // We directly obtain the total row count and set the size in `OpendalFsSplit` to this value.
-                                    let file_assignment = if let EncodingProperties::Parquet =
-                                        source_desc.source.parser_config.encoding_config
-                                    {
-                                        let filename_list: Vec<_> = chunk
-                                            .data_chunk()
-                                            .rows()
-                                            .map(|row| {
-                                                let filename = row.datum_at(0).unwrap().into_utf8();
-                                                filename.to_owned()
-                                            })
-                                            .collect();
-                                        let mut parquet_file_assignment = vec![];
-                                        for filename in &filename_list {
-                                            let total_row_num =
-                                                get_total_row_nums_for_parquet_file(
-                                                    filename,
-                                                    source_desc.clone(),
-                                                )
-                                                .await?;
-                                            parquet_file_assignment.push(
-                                                OpendalFsSplit::<Src>::new(
-                                                    filename.to_owned(),
-                                                    0,
-                                                    total_row_num - 1, // -1 because offset start from 0.
-                                                ),
-                                            )
-                                        }
-                                        parquet_file_assignment
-                                    } else {
-                                        chunk
-                                            .data_chunk()
-                                            .rows()
-                                            .map(|row| {
-                                                let filename = row.datum_at(0).unwrap().into_utf8();
+                                    let file_assignment = chunk
+                                        .data_chunk()
+                                        .rows()
+                                        .map(|row| {
+                                            let filename = row.datum_at(0).unwrap().into_utf8();
 
-                                                let size = row.datum_at(2).unwrap().into_int64();
-                                                OpendalFsSplit::<Src>::new(
-                                                    filename.to_owned(),
-                                                    0,
-                                                    size as usize,
-                                                )
-                                            })
-                                            .collect()
-                                    };
+                                            let size = row.datum_at(2).unwrap().into_int64();
+                                            OpendalFsSplit::<Src>::new(
+                                                filename.to_owned(),
+                                                0,
+                                                size as usize,
+                                            )
+                                        })
+                                        .collect();
                                     state_store_handler.set_states(file_assignment).await?;
                                     state_store_handler.state_table.try_flush().await?;
                                 }
