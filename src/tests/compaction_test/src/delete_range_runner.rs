@@ -19,7 +19,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use bytes::Bytes;
-use foyer::{CacheContext, HybridCacheBuilder};
+use foyer::{CacheHint, HybridCacheBuilder};
 use rand::rngs::StdRng;
 use rand::{RngCore, SeedableRng};
 use risingwave_common::catalog::TableId;
@@ -212,13 +212,13 @@ async fn compaction_test(
     let meta_cache = HybridCacheBuilder::new()
         .memory(storage_memory_config.meta_cache_capacity_mb * (1 << 20))
         .with_shards(storage_memory_config.meta_cache_shard_num)
-        .storage()
+        .storage(foyer::Engine::Large)
         .build()
         .await?;
     let block_cache = HybridCacheBuilder::new()
         .memory(storage_memory_config.block_cache_capacity_mb * (1 << 20))
         .with_shards(storage_memory_config.block_cache_shard_num)
-        .storage()
+        .storage(foyer::Engine::Large)
         .build()
         .await?;
     let sstable_store = Arc::new(SstableStore::new(SstableStoreConfig {
@@ -451,7 +451,7 @@ impl NormalState {
                 ReadOptions {
                     ignore_range_tombstone,
                     table_id: self.table_id,
-                    cache_policy: CachePolicy::Fill(CacheContext::Default),
+                    cache_policy: CachePolicy::Fill(CacheHint::Normal),
                     ..Default::default()
                 },
             )
@@ -477,7 +477,7 @@ impl NormalState {
                     table_id: self.table_id,
                     read_version_from_backup: false,
                     prefetch_options: PrefetchOptions::default(),
-                    cache_policy: CachePolicy::Fill(CacheContext::Default),
+                    cache_policy: CachePolicy::Fill(CacheHint::Normal),
                     ..Default::default()
                 },
             )
@@ -508,7 +508,7 @@ impl CheckState for NormalState {
                     table_id: self.table_id,
                     read_version_from_backup: false,
                     prefetch_options: PrefetchOptions::default(),
-                    cache_policy: CachePolicy::Fill(CacheContext::Default),
+                    cache_policy: CachePolicy::Fill(CacheHint::Normal),
                     ..Default::default()
                 },
             )

@@ -182,13 +182,13 @@ impl HummockServiceOpts {
         let meta_cache = HybridCacheBuilder::new()
             .memory(opts.meta_cache_capacity_mb * (1 << 20))
             .with_shards(opts.meta_cache_shard_num)
-            .storage()
+            .storage(foyer::Engine::Large)
             .build()
             .await?;
         let block_cache = HybridCacheBuilder::new()
             .memory(opts.block_cache_capacity_mb * (1 << 20))
             .with_shards(opts.block_cache_shard_num)
-            .storage()
+            .storage(foyer::Engine::Large)
             .build()
             .await?;
 

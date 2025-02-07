@@ -93,7 +93,7 @@ pub fn default_writer_opts() -> SstableWriterOptions {
     SstableWriterOptions {
         capacity_hint: None,
         tracker: None,
-        policy: CachePolicy::Fill(CacheContext::Default),
+        policy: CachePolicy::Fill(CacheHint::Normal),
     }
 }
 
@@ -130,7 +130,7 @@ async fn build_table(
         SstableWriterOptions {
             capacity_hint: None,
             tracker: None,
-            policy: CachePolicy::Fill(CacheContext::Default),
+            policy: CachePolicy::Fill(CacheHint::Normal),
         },
     );
     let mut builder =
@@ -174,7 +174,7 @@ async fn build_table_2(
         SstableWriterOptions {
             capacity_hint: None,
             tracker: None,
-            policy: CachePolicy::Fill(CacheContext::Default),
+            policy: CachePolicy::Fill(CacheHint::Normal),
         },
     );
     let mut builder =
@@ -330,7 +330,7 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
     });
     let level2 = vec![info1, info2];
     let read_options = Arc::new(SstableIteratorReadOptions {
-        cache_policy: CachePolicy::Fill(CacheContext::Default),
+        cache_policy: CachePolicy::Fill(CacheHint::Normal),
         prefetch_for_large_query: false,
         must_iterated_end_user_key: None,
         max_preload_retry_times: 0,
