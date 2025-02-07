@@ -130,14 +130,14 @@ async fn generate_sstable_store(object_store: Arc<ObjectStoreImpl>) -> Arc<Sstab
     let meta_cache = HybridCacheBuilder::new()
         .memory(64 << 20)
         .with_shards(2)
-        .storage()
+        .storage(foyer::Engine::Large)
         .build()
         .await
         .unwrap();
     let block_cache = HybridCacheBuilder::new()
         .memory(128 << 20)
         .with_shards(2)
-        .storage()
+        .storage(foyer::Engine::Large)
         .build()
         .await
         .unwrap();
