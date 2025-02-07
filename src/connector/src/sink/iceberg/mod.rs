@@ -336,31 +336,26 @@ impl IcebergSink {
                             (&mat["func"], Transform::Identity)
                         } else {
                             let mut func = mat["func"].to_owned();
-                            let n = &mat["n"];
                             if func == "bucket" || func == "truncate" {
+                                let n = &mat["n"];
                                 func = format!("{func}({n})");
                             }
                             (&mat["field"], Transform::from_str(&func).unwrap())
                         };
 
-                        let mut exists = false;
-                        for (pos, col) in self.param.columns.iter().enumerate() {
-                            if col.name == column {
-                                partition_fields.push(
-                                    UnboundPartitionField::builder()
-                                        .source_id(pos as i32)
-                                        .transform(transform)
-                                        .name(column.to_owned())
-                                        .build(),
-                                );
-                                exists = true;
-                                break;
-                            }
-                        }
-                        // safety check
-                        if !exists {
-                            bail!(format!("Invalid partition column: {}", column))
-                        }
+                        match iceberg_schema.field_id_by_name(column) {
+                            Some(id) => partition_fields.push(
+                                UnboundPartitionField::builder()
+                                    .source_id(id)
+                                    .transform(transform)
+                                    .name(column.to_owned())
+                                    .build(),
+                            ),
+                            None => bail!(format!(
+                                "Partition column does not exist in schema: {}",
+                                column
+                            )),
+                        };
                     }
                     partition_fields
                 }
@@ -373,7 +368,8 @@ impl IcebergSink {
                 .partition_spec(
                     UnboundPartitionSpec::builder()
                         .add_partition_fields(partition_fields)
-                        .unwrap()
+                        .map_err(|e| SinkError::Iceberg(anyhow!(e)))
+                        .context("failed to add partition columns")?
                         .build(),
                 );
 
