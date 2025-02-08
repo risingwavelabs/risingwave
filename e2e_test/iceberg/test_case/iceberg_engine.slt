@@ -120,6 +120,7 @@ create secret my_secret with (
   backend = 'meta'
 ) as 'hummockadmin';
 
+# connection (storage info only)
 statement ok
 create connection my_conn
 with (
@@ -129,6 +130,19 @@ with (
     s3.secret.key = secret my_secret,
     s3.endpoint = 'http://127.0.0.1:9301',
     s3.region = 'us-west-2',
+);
+
+# connection (storage info + catalog info)
+statement ok
+create connection my_conn2
+with (
+    type = 'iceberg',
+    warehouse.path = 's3://hummock001/iceberg_connection',
+    s3.access.key = secret my_secret,
+    s3.secret.key = secret my_secret,
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-west-2',
+    catalog.type = 'storage',
 );
 
 statement ok
@@ -149,10 +163,33 @@ select * from t1;
 1
 
 statement ok
+set iceberg_engine_connection = 'public.my_conn2';
+
+statement ok
+create table t2(i int) with(commit_checkpoint_interval = 1) engine = iceberg;
+
+statement ok
+insert into t2 values(1);
+
+statement ok
+FLUSH;
+
+query ?
+select * from t2;
+----
+1
+
+statement ok
 DROP TABLE t1;
 
 statement ok
+DROP TABLE t2;
+
+statement ok
 DROP CONNECTION my_conn;
+
+statement ok
+DROP CONNECTION my_conn2;
 
 statement ok
 DROP SECRET my_secret;

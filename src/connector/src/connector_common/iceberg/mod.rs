@@ -96,9 +96,12 @@ pub struct IcebergCommon {
         deserialize_with = "deserialize_optional_bool_from_string"
     )]
     pub path_style_access: Option<bool>,
-    /// enable config load currently is used by iceberg engine, so it only support jdbc catalog.
+    /// enable config load currently is used by iceberg engine.
     #[serde(default, deserialize_with = "deserialize_optional_bool_from_string")]
     pub enable_config_load: Option<bool>,
+    /// enable compaction currently is used by iceberg engine.
+    #[serde(default, deserialize_with = "deserialize_optional_bool_from_string")]
+    pub enable_compaction: Option<bool>,
 }
 
 impl IcebergCommon {

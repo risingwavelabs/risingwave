@@ -501,7 +501,12 @@ IcebergConfig:
     default: Default::default
   - name: enable_config_load
     field_type: bool
-    comments: enable config load currently is used by iceberg engine, so it only support jdbc catalog.
+    comments: enable config load currently is used by iceberg engine.
+    required: false
+    default: Default::default
+  - name: enable_compaction
+    field_type: bool
+    comments: enable compaction currently is used by iceberg engine.
     required: false
     default: Default::default
   - name: primary_key

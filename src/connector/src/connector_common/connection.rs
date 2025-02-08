@@ -276,6 +276,7 @@ impl Connection for IcebergConnection {
             database_name: Some("test_database".to_owned()),
             table_name: "test_table".to_owned(),
             enable_config_load: Some(false),
+            enable_compaction: None,
         };
 
         let mut java_map = HashMap::new();
