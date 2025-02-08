@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 
 use anyhow::anyhow;
 use async_trait::async_trait;
 use redis::aio::MultiplexedConnection;
 use redis::cluster::{ClusterClient, ClusterConnection, ClusterPipeline};
-use redis::{Client as RedisClient, Pipeline, ToRedisArgs};
+use redis::{Client as RedisClient, Pipeline};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
@@ -28,9 +28,7 @@ use serde_with::serde_as;
 use with_options::WithOptions;
 
 use super::catalog::SinkFormatDesc;
-use super::encoder::template::{
-    RedisSinkPayloadWriterInput, TemplateEncoder, TemplateStringEncoder,
-};
+use super::encoder::template::{RedisSinkPayloadWriterInput, TemplateStringEncoder};
 use super::formatter::SinkFormatterImpl;
 use super::writer::FormattedSink;
 use super::{SinkError, SinkParam};
@@ -102,7 +100,7 @@ impl RedisPipe {
                 ) => {
                     pipe.geo_add(key, (lon, lat, member));
                 }
-                _ => return Err(SinkError::Redis("RedisPipe set not match".to_owned()).into()),
+                _ => return Err(SinkError::Redis("RedisPipe set not match".to_owned())),
             },
             RedisPipe::Single(pipe) => match (k, v) {
                 (
@@ -117,7 +115,7 @@ impl RedisPipe {
                 ) => {
                     pipe.geo_add(key, (lon, lat, member));
                 }
-                _ => return Err(SinkError::Redis("RedisPipe set not match".to_owned()).into()),
+                _ => return Err(SinkError::Redis("RedisPipe set not match".to_owned())),
             },
         };
         Ok(())
@@ -132,7 +130,7 @@ impl RedisPipe {
                 RedisSinkPayloadWriterInput::RedisGeoKey((key, member)) => {
                     pipe.zrem(key, member);
                 }
-                _ => return Err(SinkError::Redis("RedisPipe del not match".to_owned()).into()),
+                _ => return Err(SinkError::Redis("RedisPipe del not match".to_owned())),
             },
             RedisPipe::Single(pipe) => match k {
                 RedisSinkPayloadWriterInput::String(k) => {

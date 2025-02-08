@@ -12,8 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use core::any::Any;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use regex::Regex;
 use risingwave_common::catalog::Schema;

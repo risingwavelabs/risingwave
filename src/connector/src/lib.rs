@@ -35,7 +35,7 @@
 #![feature(never_type)]
 #![register_tool(rw)]
 #![recursion_limit = "256"]
-#![feature(specialization)]
+#![feature(min_specialization)]
 
 use std::time::Duration;
 
