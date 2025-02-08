@@ -419,8 +419,7 @@ impl Sink for IcebergSink {
     async fn new_coordinator(&self) -> Result<Self::Coordinator> {
         let catalog = self.config.create_catalog().await?;
         let table = self.create_and_validate_table().await?;
-        // Only iceberg engine table will enable config load and need compaction.
-        let (commit_tx, finish_tx) = if self.config.common.enable_config_load.unwrap_or(false) {
+        let (commit_tx, finish_tx) = if self.config.common.enable_compaction.unwrap_or(false) {
             let (commit_tx, finish_tx) = spawn_compaction_client(&self.config)?;
             (Some(commit_tx), Some(finish_tx))
         } else {
@@ -1432,6 +1431,7 @@ mod test {
                 secret_key: Some("hummockadmin".to_owned()),
                 gcs_credential: None,
                 catalog_type: Some("jdbc".to_owned()),
+                glue_id: None,
                 catalog_name: Some("demo".to_owned()),
                 database_name: Some("demo_db".to_owned()),
                 table_name: "demo_table".to_owned(),
@@ -1441,6 +1441,7 @@ mod test {
                 scope: None,
                 token: None,
                 enable_config_load: None,
+                enable_compaction: None,
             },
             r#type: "upsert".to_owned(),
             force_append_only: false,

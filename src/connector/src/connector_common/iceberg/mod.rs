@@ -57,6 +57,10 @@ pub struct IcebergCommon {
     /// Path of iceberg warehouse, only applicable in storage catalog.
     #[serde(rename = "warehouse.path")]
     pub warehouse_path: Option<String>,
+    /// AWS Client id, can be omitted for storage catalog or when
+    /// caller's AWS account ID matches glue id
+    #[serde(rename = "glue.id")]
+    pub glue_id: Option<String>,
     /// Catalog name, can be omitted for storage catalog, but
     /// must be set for other catalogs.
     #[serde(rename = "catalog.name")]
@@ -92,9 +96,12 @@ pub struct IcebergCommon {
         deserialize_with = "deserialize_optional_bool_from_string"
     )]
     pub path_style_access: Option<bool>,
-    /// enable config load currently is used by iceberg engine, so it only support jdbc catalog.
+    /// enable config load currently is used by iceberg engine.
     #[serde(default, deserialize_with = "deserialize_optional_bool_from_string")]
     pub enable_config_load: Option<bool>,
+    /// enable compaction currently is used by iceberg engine.
+    #[serde(default, deserialize_with = "deserialize_optional_bool_from_string")]
+    pub enable_compaction: Option<bool>,
 }
 
 impl IcebergCommon {
@@ -273,6 +280,10 @@ impl IcebergCommon {
                             "glue.endpoint".to_owned(),
                             format!("https://glue.{}.amazonaws.com", region),
                         );
+                    }
+
+                    if let Some(glue_id) = self.glue_id.as_deref() {
+                        java_catalog_configs.insert("glue.id".to_owned(), glue_id.to_owned());
                     }
                 }
                 _ => {}

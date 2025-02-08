@@ -21,9 +21,6 @@ enum ColumnDescVersion {
   // Introduced in https://github.com/risingwavelabs/risingwave/pull/13707#discussion_r1429947537,
   // in case DEFAULT_KEY_COLUMN_NAME changes
   COLUMN_DESC_VERSION_PR_13707 = 1;
-
-  // for test only
-  COLUMN_DESC_VERSION_MAX = 2147483647;
 }
 
 message ColumnDesc {

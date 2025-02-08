@@ -33,7 +33,6 @@ use risingwave_common::license::Feature;
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::types::DataType;
-use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_common::{bail, bail_not_implemented};
@@ -64,6 +63,7 @@ use risingwave_sqlparser::ast::{
 };
 use risingwave_sqlparser::parser::{IncludeOption, Parser};
 use thiserror_ext::AsReport;
+use url::Url;
 
 use super::create_source::{bind_columns_from_source, CreateSourceType, SqlColumnStrategy};
 use super::{create_sink, create_source, RwPgResponse};
@@ -255,7 +255,7 @@ pub fn bind_sql_columns(column_defs: &[ColumnDef]) -> Result<Vec<ColumnCatalog>>
                 generated_or_default_column: None,
                 description: None,
                 additional_column: AdditionalColumn { column_type: None },
-                version: ColumnDescVersion::Pr13707,
+                version: ColumnDescVersion::LATEST,
                 system_column: None,
             },
             is_hidden: false,
@@ -1184,20 +1184,25 @@ pub(super) async fn handle_create_table_plan(
                     let table: ExternalTableImpl = ExternalTableImpl::connect(config)
                         .await
                         .context("failed to auto derive table schema")?;
-                    let external_columns: Vec<_> = table
+                    let external_columns: HashMap<&str, &ColumnDesc> = table
                         .column_descs()
                         .iter()
-                        .cloned()
-                        .map(|column_desc| ColumnCatalog {
-                            column_desc,
-                            is_hidden: false,
-                        })
+                        .map(|column_desc| (column_desc.name.as_str(), column_desc))
                         .collect();
-                    for (col, external_col) in
-                        columns.iter_mut().zip_eq_fast(external_columns.into_iter())
-                    {
+
+                    for col in &mut columns {
+                        let external_column_desc =
+                            *external_columns.get(col.name()).ok_or_else(|| {
+                                ErrorCode::ConnectorError(
+                                    format!(
+                                        "Column '{}' not found in the upstream database",
+                                        col.name()
+                                    )
+                                    .into(),
+                                )
+                            })?;
                         col.column_desc.generated_or_default_column =
-                            external_col.column_desc.generated_or_default_column;
+                            external_column_desc.generated_or_default_column.clone();
                     }
                     (columns, pk_names)
                 }
@@ -1461,6 +1466,60 @@ pub async fn create_iceberg_engine_table(
     let data_directory = system_params.data_directory().to_owned();
     let meta_store_endpoint = meta_client.get_meta_store_endpoint().await?;
 
+    let meta_store_endpoint = url::Url::parse(&meta_store_endpoint).map_err(|_| {
+        ErrorCode::InternalError("failed to parse the meta store endpoint".to_owned())
+    })?;
+    let meta_store_backend = meta_store_endpoint.scheme().to_owned();
+    let meta_store_user = meta_store_endpoint.username().to_owned();
+    let meta_store_password = meta_store_endpoint
+        .password()
+        .ok_or_else(|| {
+            ErrorCode::InternalError("failed to parse password from meta store endpoint".to_owned())
+        })?
+        .to_owned();
+    let meta_store_host = meta_store_endpoint
+        .host_str()
+        .ok_or_else(|| {
+            ErrorCode::InternalError("failed to parse host from meta store endpoint".to_owned())
+        })?
+        .to_owned();
+    let meta_store_port = meta_store_endpoint.port().ok_or_else(|| {
+        ErrorCode::InternalError("failed to parse port from meta store endpoint".to_owned())
+    })?;
+    let meta_store_database = meta_store_endpoint
+        .path()
+        .trim_start_matches('/')
+        .to_owned();
+
+    let Ok(meta_backend) = MetaBackend::from_str(&meta_store_backend, true) else {
+        bail!("failed to parse meta backend: {}", meta_store_backend);
+    };
+
+    let catalog_uri = match meta_backend {
+        MetaBackend::Postgres => {
+            format!(
+                "jdbc:postgresql://{}:{}/{}",
+                meta_store_host.clone(),
+                meta_store_port.clone(),
+                meta_store_database.clone()
+            )
+        }
+        MetaBackend::Mysql => {
+            format!(
+                "jdbc:mysql://{}:{}/{}",
+                meta_store_host.clone(),
+                meta_store_port.clone(),
+                meta_store_database.clone()
+            )
+        }
+        MetaBackend::Sqlite | MetaBackend::Sql | MetaBackend::Mem => {
+            bail!(
+                "Unsupported meta backend for iceberg engine table: {}",
+                meta_store_backend
+            );
+        }
+    };
+
     let rw_db_name = session
         .env()
         .catalog_reader()
@@ -1482,11 +1541,9 @@ pub async fn create_iceberg_engine_table(
     let iceberg_engine_connection: String = session.config().iceberg_engine_connection();
 
     let mut connection_ref = BTreeMap::new();
-
-    let (s3_region, s3_endpoint, s3_ak, s3_sk, warehouse_path) = if iceberg_engine_connection
-        .is_empty()
-    {
-        match state_store_endpoint {
+    let with_common = if iceberg_engine_connection.is_empty() {
+        // No iceberg engine connection --> use risingwave s3 bucket and meta store as catalog and enable compaction.
+        let (s3_region, s3_endpoint, s3_ak, s3_sk, warehouse_path) = match state_store_endpoint {
             s3 if s3.starts_with("hummock+s3://") => {
                 let s3_region = if let Ok(s3_region) = std::env::var("AWS_REGION") {
                     s3_region
@@ -1536,7 +1593,39 @@ pub async fn create_iceberg_engine_table(
                     state_store_endpoint
                 );
             }
+        };
+
+        let mut with_common = BTreeMap::new();
+        with_common.insert("enable_config_load".to_owned(), "true".to_owned());
+        with_common.insert("enable_compaction".to_owned(), "true".to_owned());
+        with_common.insert("connector".to_owned(), "iceberg".to_owned());
+        with_common.insert("catalog.type".to_owned(), "jdbc".to_owned());
+        if let Some(warehouse_path) = warehouse_path.clone() {
+            with_common.insert("warehouse.path".to_owned(), warehouse_path.to_owned());
         }
+        if let Some(s3_endpoint) = s3_endpoint.clone() {
+            with_common.insert("s3.endpoint".to_owned(), s3_endpoint);
+        }
+        if let Some(s3_ak) = s3_ak.clone() {
+            with_common.insert("s3.access.key".to_owned(), s3_ak.to_owned());
+        }
+        if let Some(s3_sk) = s3_sk.clone() {
+            with_common.insert("s3.secret.key".to_owned(), s3_sk.to_owned());
+        }
+        if let Some(s3_region) = s3_region.clone() {
+            with_common.insert("s3.region".to_owned(), s3_region.to_owned());
+        }
+        with_common.insert("catalog.uri".to_owned(), catalog_uri.to_owned());
+        with_common.insert("catalog.jdbc.user".to_owned(), meta_store_user.to_owned());
+        with_common.insert(
+            "catalog.jdbc.password".to_owned(),
+            meta_store_password.clone(),
+        );
+        with_common.insert("catalog.name".to_owned(), iceberg_catalog_name.to_owned());
+        with_common.insert("database.name".to_owned(), iceberg_database_name.to_owned());
+        with_common.insert("table.name".to_owned(), iceberg_table_name.to_owned());
+
+        with_common
     } else {
         let parts: Vec<&str> = iceberg_engine_connection.split('.').collect();
         assert_eq!(parts.len(), 2);
@@ -1544,61 +1633,40 @@ pub async fn create_iceberg_engine_table(
             session.get_connection_by_name(Some(parts[0].to_owned()), parts[1])?;
         if let ConnectionInfo::ConnectionParams(params) = &connection_catalog.info {
             if params.connection_type == ConnectionType::Iceberg as i32 {
-                if state_store_endpoint.starts_with("hummock+s3://") {
-                    // check s3 region for iceberg engine connection to avoid cross region bucket accessing.
-                    let connection_s3_region = params
-                        .properties
-                        .get("s3.region")
-                        .ok_or_else(|| {
-                            anyhow!("`s3.region` must be set in iceberg engine connection")
-                        })?
-                        .to_owned();
-                    let env_s3_region = if let Ok(s3_region) = std::env::var("AWS_REGION") {
-                        s3_region
-                    } else {
-                        bail!("To create an iceberg engine table with s3 backend, AWS_REGION needed to be set");
-                    };
-                    if connection_s3_region != env_s3_region {
-                        bail!(
-                        format!("iceberg engine connection `s3.region` should be the same as the cluster region, got {} expected {}", connection_s3_region, env_s3_region)
-                    );
-                    }
-                }
-                let _s3_endpoint = params.properties.get("s3.endpoint").map(|s| s.to_owned());
-                let _warehouse_path = params
-                    .properties
-                    .get("warehouse.path")
-                    .map(|s| s.to_owned())
-                    .ok_or_else(|| {
-                        anyhow!("`warehouse.path` must be set in iceberg engine connection")
-                    })?;
+                // With iceberg engine connection:
+                // 1. the connection contains storage info only --> use risingwave meta store as catalog.
+                //    - if storage info is s3, ensure it is in the same region as risingwave and enable compaction.
+                // 2. the connection contains storage info and catalog info
+                //    - disable compaction.
 
-                let allowed_properties = [
-                    "s3.region",
-                    "s3.endpoint",
-                    "s3.access.key",
-                    "s3.secret.key",
-                    "warehouse.path",
-                    "s3.path.style.access",
-                ];
-                for k in params.properties.keys() {
-                    if !allowed_properties.contains(&k.as_str()) {
-                        return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
-                            "`{}` is not allowed in iceberg engine connection",
-                            k
-                        ))));
+                let catalog_type = params.properties.get("catalog.type").map(|x| x.to_owned());
+                let scheme = match params.properties.get("warehouse.path") {
+                    Some(warehouse_path) => {
+                        let url = Url::parse(warehouse_path);
+                        if url.is_err()
+                            && let Some(catalog_type) = &catalog_type
+                            && catalog_type == "rest"
+                        {
+                            // If the warehouse path is not a valid URL, it could be a warehouse name in rest catalog,
+                            // so we allow it to pass here.
+                            None
+                        } else {
+                            let url = url.with_context(|| {
+                                format!("Invalid warehouse path: {}", warehouse_path)
+                            })?;
+                            Some(url.scheme().to_owned())
+                        }
                     }
-                }
-
-                let allowed_secrets = ["s3.access.key", "s3.secret.key"];
-                for k in params.secret_refs.keys() {
-                    if !allowed_secrets.contains(&k.as_str()) {
-                        return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
-                            "secret `{}` is not allowed in iceberg engine connection",
-                            k
-                        ))));
+                    None => {
+                        if let Some(catalog_type) = &catalog_type
+                            && catalog_type == "rest"
+                        {
+                            None
+                        } else {
+                            bail!("`warehouse.path` must be set");
+                        }
                     }
-                }
+                };
 
                 connection_ref.insert(
                     "connection".to_owned(),
@@ -1610,7 +1678,65 @@ pub async fn create_iceberg_engine_table(
                     },
                 );
 
-                (None, None, None, None, None)
+                let enable_compaction = if let Some(scheme) = scheme {
+                    match scheme.as_str() {
+                        "s3" | "s3a" => {
+                            if state_store_endpoint.starts_with("hummock+s3://") {
+                                // check s3 region for iceberg engine connection to avoid cross region bucket accessing.
+                                let connection_s3_region = params
+                                    .properties
+                                    .get("s3.region")
+                                    .ok_or_else(|| {
+                                        anyhow!(
+                                            "`s3.region` must be set in iceberg engine connection"
+                                        )
+                                    })?
+                                    .to_owned();
+                                let env_s3_region = if let Ok(s3_region) =
+                                    std::env::var("AWS_REGION")
+                                {
+                                    s3_region
+                                } else {
+                                    bail!("To create an iceberg engine table with s3 backend, AWS_REGION needed to be set");
+                                };
+                                if connection_s3_region != env_s3_region {
+                                    bail!(format!("iceberg engine connection `s3.region` should be the same as the cluster region, got {} expected {}", connection_s3_region, env_s3_region));
+                                }
+                                true
+                            } else {
+                                false
+                            }
+                        }
+                        "gs" | "gcs" => false,
+                        _ => {
+                            bail!("Unsupported scheme: {}", scheme);
+                        }
+                    }
+                } else {
+                    false
+                };
+
+                let mut with_common = BTreeMap::new();
+                with_common.insert("connector".to_owned(), "iceberg".to_owned());
+                with_common.insert("database.name".to_owned(), iceberg_database_name.to_owned());
+                with_common.insert("table.name".to_owned(), iceberg_table_name.to_owned());
+                if catalog_type.is_some() {
+                    with_common.insert("enable_compaction".to_owned(), "false".to_owned());
+                } else {
+                    with_common.insert("catalog.type".to_owned(), "jdbc".to_owned());
+                    with_common.insert("catalog.uri".to_owned(), catalog_uri.to_owned());
+                    with_common.insert("catalog.jdbc.user".to_owned(), meta_store_user.to_owned());
+                    with_common.insert(
+                        "catalog.jdbc.password".to_owned(),
+                        meta_store_password.to_owned(),
+                    );
+                    with_common.insert("catalog.name".to_owned(), iceberg_catalog_name.to_owned());
+                    with_common.insert(
+                        "enable_compaction".to_owned(),
+                        enable_compaction.to_string(),
+                    );
+                }
+                with_common
             } else {
                 return Err(RwError::from(ErrorCode::InvalidParameterValue(
                     "Only iceberg connection could be used in iceberg engine".to_owned(),
@@ -1622,35 +1748,6 @@ pub async fn create_iceberg_engine_table(
                     .to_owned(),
             )));
         }
-    };
-
-    let meta_store_endpoint = url::Url::parse(&meta_store_endpoint).map_err(|_| {
-        ErrorCode::InternalError("failed to parse the meta store endpoint".to_owned())
-    })?;
-    let meta_store_backend = meta_store_endpoint.scheme().to_owned();
-    let meta_store_user = meta_store_endpoint.username().to_owned();
-    let meta_store_password = meta_store_endpoint
-        .password()
-        .ok_or_else(|| {
-            ErrorCode::InternalError("failed to parse password from meta store endpoint".to_owned())
-        })?
-        .to_owned();
-    let meta_store_host = meta_store_endpoint
-        .host_str()
-        .ok_or_else(|| {
-            ErrorCode::InternalError("failed to parse host from meta store endpoint".to_owned())
-        })?
-        .to_owned();
-    let meta_store_port = meta_store_endpoint.port().ok_or_else(|| {
-        ErrorCode::InternalError("failed to parse port from meta store endpoint".to_owned())
-    })?;
-    let meta_store_database = meta_store_endpoint
-        .path()
-        .trim_start_matches('/')
-        .to_owned();
-
-    let Ok(meta_backend) = MetaBackend::from_str(&meta_store_backend, true) else {
-        bail!("failed to parse meta backend: {}", meta_store_backend);
     };
 
     // Iceberg sinks require a primary key, if none is provided, we will use the _row_id column
@@ -1707,7 +1804,6 @@ pub async fn create_iceberg_engine_table(
         CreateSink::From(table_name.clone())
     };
 
-    let with_properties = WithProperties(vec![]);
     let mut sink_name = table_name.clone();
     *sink_name.0.last_mut().unwrap() = Ident::from(
         (ICEBERG_SINK_PREFIX.to_owned() + &sink_name.0.last().unwrap().real_value()).as_str(),
@@ -1715,7 +1811,7 @@ pub async fn create_iceberg_engine_table(
     let create_sink_stmt = CreateSinkStatement {
         if_not_exists: false,
         sink_name,
-        with_properties,
+        with_properties: WithProperties(vec![]),
         sink_from,
         columns: vec![],
         emit_mode: None,
@@ -1723,62 +1819,13 @@ pub async fn create_iceberg_engine_table(
         into_table_name: None,
     };
 
-    let catalog_uri = match meta_backend {
-        MetaBackend::Postgres => {
-            format!(
-                "jdbc:postgresql://{}:{}/{}",
-                meta_store_host.clone(),
-                meta_store_port.clone(),
-                meta_store_database.clone()
-            )
-        }
-        MetaBackend::Mysql => {
-            format!(
-                "jdbc:mysql://{}:{}/{}",
-                meta_store_host.clone(),
-                meta_store_port.clone(),
-                meta_store_database.clone()
-            )
-        }
-        MetaBackend::Sqlite | MetaBackend::Sql | MetaBackend::Mem => {
-            bail!(
-                "Unsupported meta backend for iceberg engine table: {}",
-                meta_store_backend
-            );
-        }
-    };
-
     let mut sink_handler_args = handler_args.clone();
-    let mut with = BTreeMap::new();
-    with.insert("connector".to_owned(), "iceberg".to_owned());
 
-    with.insert("primary_key".to_owned(), pks.join(","));
-    with.insert("type".to_owned(), "upsert".to_owned());
-    with.insert("catalog.type".to_owned(), "jdbc".to_owned());
-    if let Some(warehouse_path) = warehouse_path.clone() {
-        with.insert("warehouse.path".to_owned(), warehouse_path.clone());
-    }
-    if let Some(s3_endpoint) = s3_endpoint.clone() {
-        with.insert("s3.endpoint".to_owned(), s3_endpoint);
-    }
-    if let Some(s3_ak) = s3_ak.clone() {
-        with.insert("s3.access.key".to_owned(), s3_ak.clone());
-    }
-    if let Some(s3_sk) = s3_sk.clone() {
-        with.insert("s3.secret.key".to_owned(), s3_sk.clone());
-    }
-    if let Some(s3_region) = s3_region.clone() {
-        with.insert("s3.region".to_owned(), s3_region.clone());
-    }
-    with.insert("catalog.uri".to_owned(), catalog_uri.clone());
-    with.insert("catalog.jdbc.user".to_owned(), meta_store_user.clone());
-    with.insert(
-        "catalog.jdbc.password".to_owned(),
-        meta_store_password.clone(),
-    );
-    with.insert("catalog.name".to_owned(), iceberg_catalog_name.clone());
-    with.insert("database.name".to_owned(), iceberg_database_name.clone());
-    with.insert("table.name".to_owned(), iceberg_table_name.clone());
+    let mut sink_with = with_common.clone();
+
+    sink_with.insert("primary_key".to_owned(), pks.join(","));
+    sink_with.insert("type".to_owned(), "upsert".to_owned());
+
     let commit_checkpoint_interval = handler_args
         .with_options
         .get(COMMIT_CHECKPOINT_INTERVAL)
@@ -1805,14 +1852,14 @@ pub async fn create_iceberg_engine_table(
         bail!("config conflict: `commit_checkpoint_interval` larger than 1 means that sink decouple must be enabled, but session config sink_decouple is disabled")
     }
 
-    with.insert(
+    sink_with.insert(
         COMMIT_CHECKPOINT_INTERVAL.to_owned(),
         commit_checkpoint_interval.to_string(),
     );
-    with.insert("create_table_if_not_exists".to_owned(), "true".to_owned());
-    with.insert("enable_config_load".to_owned(), "true".to_owned());
+    sink_with.insert("create_table_if_not_exists".to_owned(), "true".to_owned());
+
     sink_handler_args.with_options =
-        WithOptions::new(with, Default::default(), connection_ref.clone());
+        WithOptions::new(sink_with, Default::default(), connection_ref.clone());
 
     let mut source_name = table_name.clone();
     *source_name.0.last_mut().unwrap() = Ident::from(
@@ -1832,35 +1879,9 @@ pub async fn create_iceberg_engine_table(
     };
 
     let mut source_handler_args = handler_args.clone();
-    let mut with = BTreeMap::new();
-    with.insert("connector".to_owned(), "iceberg".to_owned());
-    with.insert("catalog.type".to_owned(), "jdbc".to_owned());
-    if let Some(warehouse_path) = warehouse_path.clone() {
-        with.insert("warehouse.path".to_owned(), warehouse_path.clone());
-    }
-    if let Some(s3_endpoint) = s3_endpoint {
-        with.insert("s3.endpoint".to_owned(), s3_endpoint.clone());
-    }
-    if let Some(s3_ak) = s3_ak.clone() {
-        with.insert("s3.access.key".to_owned(), s3_ak.clone());
-    }
-    if let Some(s3_sk) = s3_sk.clone() {
-        with.insert("s3.secret.key".to_owned(), s3_sk.clone());
-    }
-    if let Some(s3_region) = s3_region.clone() {
-        with.insert("s3.region".to_owned(), s3_region.clone());
-    }
-    with.insert("catalog.uri".to_owned(), catalog_uri.clone());
-    with.insert("catalog.jdbc.user".to_owned(), meta_store_user.clone());
-    with.insert(
-        "catalog.jdbc.password".to_owned(),
-        meta_store_password.clone(),
-    );
-    with.insert("catalog.name".to_owned(), iceberg_catalog_name.clone());
-    with.insert("database.name".to_owned(), iceberg_database_name.clone());
-    with.insert("table.name".to_owned(), iceberg_table_name.clone());
-    with.insert("enable_config_load".to_owned(), "true".to_owned());
-    source_handler_args.with_options = WithOptions::new(with, Default::default(), connection_ref);
+    let source_with = with_common;
+    source_handler_args.with_options =
+        WithOptions::new(source_with, Default::default(), connection_ref);
 
     // before we create the table, ensure the JVM is initialized as we use jdbc catalog right now.
     // If JVM isn't initialized successfully, current not atomic ddl will result in a partially created iceberg engine table.

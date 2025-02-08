@@ -56,7 +56,7 @@ pub struct CreateStreamingJobOption {
 /// Note: for better readability, keep this struct complete and immutable once created.
 pub struct CreateStreamingJobContext {
     /// New dispatchers to add from upstream actors to downstream actors.
-    pub dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
+    pub dispatchers: HashMap<FragmentId, HashMap<ActorId, Vec<Dispatcher>>>,
 
     /// Upstream root fragments' actor ids grouped by table id.
     ///
@@ -177,10 +177,10 @@ pub struct ReplaceStreamJobContext {
     pub old_fragments: StreamJobFragments,
 
     /// The updates to be applied to the downstream chain actors. Used for schema change.
-    pub merge_updates: Vec<MergeUpdate>,
+    pub merge_updates: HashMap<FragmentId, Vec<MergeUpdate>>,
 
     /// New dispatchers to add from upstream actors to downstream actors.
-    pub dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
+    pub dispatchers: HashMap<FragmentId, HashMap<ActorId, Vec<Dispatcher>>>,
 
     /// The locations of the actors to build in the new job to replace.
     pub building_locations: Locations,
@@ -607,6 +607,23 @@ impl GlobalStreamManager {
         deferred: bool,
     ) -> MetaResult<()> {
         let _reschedule_job_lock = self.reschedule_lock_write_guard().await;
+        let background_jobs = self
+            .metadata_manager
+            .list_background_creating_jobs()
+            .await?;
+
+        if !background_jobs.is_empty() {
+            let related_jobs = self
+                .scale_controller
+                .resolve_related_no_shuffle_jobs(&background_jobs)
+                .await?;
+
+            for job in background_jobs {
+                if related_jobs.contains(&job) {
+                    bail!("Cannot alter the job {} because the related job {} is currently being created", table_id, job.table_id);
+                }
+            }
+        }
 
         let JobRescheduleTarget {
             parallelism: parallelism_change,
