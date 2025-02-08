@@ -2724,9 +2724,9 @@ dependencies = [
 
 [[package]]
 name = "const-str"
-version = "0.5.6"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aca749d3d3f5b87a0d6100509879f9cf486ab510803a4a4e1001da1ff61c2bd6"
+checksum = "671927c085eb5827d30b95df08f6c6a2301eafe2274c368bb2c16f42e03547eb"
 
 [[package]]
 name = "constant_time_eq"
@@ -12005,6 +12005,7 @@ dependencies = [
  "tokio-retry",
  "tokio-stream 0.1.15",
  "tracing",
+ "tracing-subscriber",
  "tracing-test",
  "url",
  "workspace-hack",

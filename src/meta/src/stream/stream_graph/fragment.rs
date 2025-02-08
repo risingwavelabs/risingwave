@@ -132,7 +132,7 @@ impl BuildingFragment {
         let fragment_id = fragment.fragment_id;
         let mut has_job = false;
 
-        stream_graph_visitor::visit_fragment(fragment, |node_body| match node_body {
+        stream_graph_visitor::visit_fragment_mut(fragment, |node_body| match node_body {
             NodeBody::Materialize(materialize_node) => {
                 materialize_node.table_id = job_id;
 
@@ -304,12 +304,15 @@ pub(super) enum EdgeId {
 
     /// The edge between an upstream building fragment and downstream external fragment. Used for
     /// schema change (replace table plan).
-    DownstreamExternal {
-        /// The ID of the original upstream fragment (`Materialize`).
-        original_upstream_fragment_id: GlobalFragmentId,
-        /// The ID of the downstream fragment.
-        downstream_fragment_id: GlobalFragmentId,
-    },
+    DownstreamExternal(DownstreamExternalEdgeId),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(super) struct DownstreamExternalEdgeId {
+    /// The ID of the original upstream fragment (`Materialize`).
+    pub(super) original_upstream_fragment_id: GlobalFragmentId,
+    /// The ID of the downstream fragment.
+    pub(super) downstream_fragment_id: GlobalFragmentId,
 }
 
 /// The edge in the fragment graph.
@@ -343,7 +346,7 @@ impl StreamFragmentEdge {
 /// This only includes nodes and edges of the current job itself. It will be converted to [`CompleteStreamFragmentGraph`] later,
 /// that contains the additional information of pre-existing
 /// fragments, which are connected to the graph's top-most or bottom-most fragments.
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct StreamFragmentGraph {
     /// stores all the fragments in the graph.
     fragments: HashMap<GlobalFragmentId, BuildingFragment>,
@@ -704,6 +707,7 @@ pub(super) enum EitherFragment {
 ///   `Materialize` node will be included in this structure.
 /// - if we're going to replace the plan of a table with downstream mviews, the downstream fragments
 ///   containing the `StreamScan` nodes will be included in this structure.
+#[derive(Debug)]
 pub struct CompleteStreamFragmentGraph {
     /// The fragment graph of the streaming job being built.
     building_graph: StreamFragmentGraph,
@@ -1013,10 +1017,10 @@ impl CompleteStreamFragmentGraph {
                 let id = GlobalFragmentId::new(fragment.fragment_id);
 
                 let edge = StreamFragmentEdge {
-                    id: EdgeId::DownstreamExternal {
+                    id: EdgeId::DownstreamExternal(DownstreamExternalEdgeId {
                         original_upstream_fragment_id: original_table_fragment_id,
                         downstream_fragment_id: id,
-                    },
+                    }),
                     dispatch_strategy: dispatch_strategy.clone(),
                 };
 

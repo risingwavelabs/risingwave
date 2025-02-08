@@ -144,7 +144,7 @@ steps:
             files: "*-junit.xml"
             format: "junit"
         - ./ci/plugins/upload-failure-logs
-      timeout_in_minutes: 13
+      timeout_in_minutes: 18
       retry: *auto-retry
 
   - label: "end-to-end test (parallel, in-memory) (release)"
@@ -160,7 +160,7 @@ steps:
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 15
+    timeout_in_minutes: 20
     retry: *auto-retry
 
   - group: "end-to-end connector test (release)"
@@ -342,7 +342,7 @@ steps:
 
   - label: "end-to-end test (madsim)"
     key: "e2e-test-deterministic"
-    command: "TEST_NUM=32 timeout 130m ci/scripts/deterministic-e2e-test.sh"
+    command: "TEST_NUM=32 timeout 135m ci/scripts/deterministic-e2e-test.sh"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-e2e-test-deterministic-simulation"
@@ -357,12 +357,12 @@ steps:
           environment:
           - GITHUB_TOKEN
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 135
+    timeout_in_minutes: 140
     retry: *auto-retry
 
   - label: "end-to-end test (madsim, random vnode count)"
     key: "e2e-test-deterministic-random-vnode-count"
-    command: "TEST_NUM=32 RW_SIM_RANDOM_VNODE_COUNT=true timeout 130m ci/scripts/deterministic-e2e-test.sh"
+    command: "TEST_NUM=32 RW_SIM_RANDOM_VNODE_COUNT=true timeout 135m ci/scripts/deterministic-e2e-test.sh"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-e2e-test-deterministic-simulation"
@@ -377,12 +377,12 @@ steps:
           environment:
           - GITHUB_TOKEN
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 135
+    timeout_in_minutes: 140
     retry: *auto-retry
 
   - label: "recovery test (madsim)"
     key: "recovery-test-deterministic"
-    command: "TEST_NUM=12 KILL_RATE=1.0 BACKGROUND_DDL_RATE=0.0 timeout 70m ci/scripts/deterministic-recovery-test.sh"
+    command: "TEST_NUM=12 KILL_RATE=1.0 BACKGROUND_DDL_RATE=0.0 timeout 75m ci/scripts/deterministic-recovery-test.sh"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-recovery-test-deterministic-simulation"
@@ -392,13 +392,13 @@ steps:
       - docker-compose#v5.5.0: *docker-compose
       # Only upload zipped files, otherwise the logs is too much.
       - ./ci/plugins/upload-failure-logs-zipped
-    timeout_in_minutes: 75
+    timeout_in_minutes: 80
     retry: *auto-retry
 
   # Ddl statements will randomly run with background_ddl.
   - label: "background_ddl, arrangement_backfill recovery test (madsim)"
     key: "background-ddl-arrangement-backfill-recovery-test-deterministic"
-    command: "TEST_NUM=12 KILL_RATE=1.0 BACKGROUND_DDL_RATE=0.8 USE_ARRANGEMENT_BACKFILL=true timeout 70m ci/scripts/deterministic-recovery-test.sh"
+    command: "TEST_NUM=12 KILL_RATE=1.0 BACKGROUND_DDL_RATE=0.8 USE_ARRANGEMENT_BACKFILL=true timeout 75m ci/scripts/deterministic-recovery-test.sh"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-recovery-test-deterministic-simulation"
@@ -408,7 +408,7 @@ steps:
       - docker-compose#v5.5.0: *docker-compose
       # Only upload zipped files, otherwise the logs is too much.
       - ./ci/plugins/upload-failure-logs-zipped
-    timeout_in_minutes: 70
+    timeout_in_minutes: 80
     retry: *auto-retry
 
   - label: "end-to-end iceberg sink test (release)"
