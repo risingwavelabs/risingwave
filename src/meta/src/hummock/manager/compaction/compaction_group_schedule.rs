@@ -293,6 +293,20 @@ impl HummockManager {
                 );
             }
 
+            // clear `partition_vnode_count` for the hybrid group
+            {
+                if let Err(err) = compaction_groups_txn.update_compaction_config(
+                    &[left_group_id],
+                    &[MutableConfig::SplitWeightByVnode(0)], // default
+                ) {
+                    tracing::error!(
+                        error = %err.as_report(),
+                        "failed to update compaction config for group-{}",
+                        left_group_id
+                    );
+                }
+            }
+
             new_version_delta.pre_apply();
 
             // remove right_group_id
