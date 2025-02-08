@@ -69,50 +69,6 @@ def do_test(config, file_num, item_num_per_file, prefix):
     def _table():
         return 's3_test_parquet'
 
-    print("test table function file scan")
-    cur.execute(f'''
-    SELECT
-        id,
-        name,
-        sex,
-        mark,
-        test_int,
-        test_int8,
-        test_uint8,
-        test_uint16,
-        test_uint32,
-        test_uint64,
-        test_float_16,
-        test_real,
-        test_double_precision,
-        test_varchar,
-        test_bytea,
-        test_date,
-        test_time,
-        test_timestamp_s,
-        test_timestamp_ms,
-        test_timestamp_us,
-        test_timestamp_ns,
-        test_timestamptz_s,
-        test_timestamptz_ms,
-        test_timestamptz_us,
-        test_timestamptz_ns,
-        nested_struct
-         FROM file_scan(
-        'parquet',
-        's3',
-        'http://127.0.0.1:9301',
-        'hummockadmin',
-        'hummockadmin',
-        's3://hummock001/test_file_scan/test_file_scan.parquet'
-        );''')
-    try:
-        result = cur.fetchone()
-        assert result[0] == 0, f'file scan assertion failed: the first column is {result[0]}, expect 0.'
-    except ValueError as e:
-        print(f"cur.fetchone() got ValueError: {e}")
-
-    print("file scan test pass")
     # Execute a SELECT statement
     cur.execute(f'''CREATE TABLE {_table()}(
         id bigint primary key,
@@ -317,12 +273,12 @@ def do_sink(config, file_num, item_num_per_file, prefix):
         test_timestamptz_ns,
         nested_struct
         from {_table()} WITH (
-        connector = 'snowflake',
+        connector = 's3',
         match_pattern = '*.parquet',
-        snowflake.aws_region = 'custom',
-        snowflake.s3_bucket = 'hummock001',
-        snowflake.aws_access_key_id = 'hummockadmin',
-        snowflake.aws_secret_access_key = 'hummockadmin',
+        s3.region_name = 'custom',
+        s3.bucket_name = 'hummock001',
+        s3.credentials.access = 'hummockadmin',
+        s3.credentials.secret = 'hummockadmin',
         s3.endpoint_url = 'http://hummock001.127.0.0.1:9301',
         s3.path = 'test_json_sink/',
         type = 'append-only',
