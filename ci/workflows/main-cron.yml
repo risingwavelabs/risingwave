@@ -151,7 +151,7 @@ steps:
             files: "*-junit.xml"
             format: "junit"
         - ./ci/plugins/upload-failure-logs
-      timeout_in_minutes: 13
+      timeout_in_minutes: 18
       retry: *auto-retry
 
   - label: "end-to-end test (parallel, in-memory) (release)"
@@ -191,7 +191,7 @@ steps:
             <<: *docker-compose-common
             run: source-test-env
         - ./ci/plugins/upload-failure-logs
-      timeout_in_minutes: 15
+      timeout_in_minutes: 16
       retry: *auto-retry
 
     - label: "end-to-end sink test ({{matrix.backend}} backend)"
@@ -771,7 +771,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 14
+    timeout_in_minutes: 16
     retry: *auto-retry
 
   - label: "end-to-end deltalake sink test"
