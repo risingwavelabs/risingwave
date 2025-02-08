@@ -14,6 +14,7 @@
 
 use std::sync::Arc;
 
+use risingwave_common::config::default::compaction_config;
 use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_pb::hummock::CompactionConfig;
 
@@ -37,6 +38,29 @@ impl CompactionGroup {
 
     pub fn compaction_config(&self) -> Arc<CompactionConfig> {
         self.compaction_config.clone()
+    }
+
+    pub fn compaction_config_for_emergency(&self) -> Arc<CompactionConfig> {
+        let mut emergency_config = self.compaction_config.as_ref().clone();
+
+        // TODO(li0k): remove magic numbers
+        emergency_config.level0_max_compact_file_number =
+            std::cmp::min(1024, emergency_config.level0_max_compact_file_number * 4);
+
+        emergency_config.max_compaction_bytes = std::cmp::min(
+            16 * 1024 * 1024 * 1024,
+            emergency_config.max_compaction_bytes * 4,
+        );
+
+        emergency_config.max_l0_compact_level_count = Some(std::cmp::min(
+            128,
+            emergency_config
+                .max_l0_compact_level_count
+                .unwrap_or(compaction_config::max_l0_compact_level_count())
+                * 2,
+        ));
+
+        Arc::new(emergency_config)
     }
 }
 
