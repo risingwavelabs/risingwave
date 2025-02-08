@@ -790,8 +790,11 @@ pub trait AsHummock: Send + Sync {
         sync_table_epochs: Vec<(HummockEpoch, HashSet<TableId>)>,
     ) -> BoxFuture<'_, StorageResult<SyncResult>> {
         async move {
-            let hummock = self.as_hummock().expect("should be hummock");
-            hummock.sync(sync_table_epochs).await
+            if let Some(hummock) = self.as_hummock() {
+                hummock.sync(sync_table_epochs).await
+            } else {
+                Ok(SyncResult::default())
+            }
         }
         .boxed()
     }
