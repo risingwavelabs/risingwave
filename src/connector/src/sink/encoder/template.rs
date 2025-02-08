@@ -18,6 +18,7 @@ use regex::Regex;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, ScalarRefImpl, ToText};
+use thiserror_ext::AsReport;
 
 use super::{Result, RowEncoder};
 use crate::sink::encoder::SerTo;
@@ -323,7 +324,7 @@ impl<T: SerTo<Vec<u8>>> SerTo<RedisSinkPayloadWriterInput> for T {
     default fn ser_to(self) -> Result<RedisSinkPayloadWriterInput> {
         let bytes = self.ser_to()?;
         Ok(RedisSinkPayloadWriterInput::String(
-            String::from_utf8(bytes).map_err(|e| SinkError::Redis(e.to_string()))?,
+            String::from_utf8(bytes).map_err(|e| SinkError::Redis(e.to_report_string()))?,
         ))
     }
 }
