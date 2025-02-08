@@ -56,7 +56,7 @@ pub struct CreateStreamingJobOption {
 /// Note: for better readability, keep this struct complete and immutable once created.
 pub struct CreateStreamingJobContext {
     /// New dispatchers to add from upstream actors to downstream actors.
-    pub dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
+    pub dispatchers: HashMap<FragmentId, HashMap<ActorId, Vec<Dispatcher>>>,
 
     /// Upstream root fragments' actor ids grouped by table id.
     ///
@@ -177,10 +177,10 @@ pub struct ReplaceStreamJobContext {
     pub old_fragments: StreamJobFragments,
 
     /// The updates to be applied to the downstream chain actors. Used for schema change.
-    pub merge_updates: Vec<MergeUpdate>,
+    pub merge_updates: HashMap<FragmentId, Vec<MergeUpdate>>,
 
     /// New dispatchers to add from upstream actors to downstream actors.
-    pub dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
+    pub dispatchers: HashMap<FragmentId, HashMap<ActorId, Vec<Dispatcher>>>,
 
     /// The locations of the actors to build in the new job to replace.
     pub building_locations: Locations,
