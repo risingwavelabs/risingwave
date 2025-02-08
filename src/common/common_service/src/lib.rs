@@ -14,7 +14,6 @@
 
 // This is a stub lib.rs.
 
-#![feature(lint_reasons)]
 #![feature(impl_trait_in_assoc_type)]
 #![feature(error_generic_member_access)]
 

@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(lint_reasons)]
-
 pub trait ZipEqFast<B: IntoIterator>: ExactSizeIterator + Sized
 where
     B::IntoIter: ExactSizeIterator,

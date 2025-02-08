@@ -14,6 +14,7 @@ mosquitto = "mosquitto" # This is a MQTT broker.
 abd = "abd"
 iy = "iy"
 Pn = "Pn"
+Divy = "Divy"
 
 [default.extend-identifiers]
 TABLE_SCHEM = "TABLE_SCHEM"

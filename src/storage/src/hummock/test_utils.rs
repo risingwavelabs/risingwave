@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use foyer::{
-    CacheContext, HybridCache, HybridCacheBuilder, StorageKey as HybridKey,
+    CacheHint, Engine, HybridCache, HybridCacheBuilder, StorageKey as HybridKey,
     StorageValue as HybridValue,
 };
 use itertools::Itertools;
@@ -297,7 +297,7 @@ pub async fn gen_test_sstable_with_range_tombstone(
         object_id,
         kv_iter,
         sstable_store.clone(),
-        CachePolicy::Fill(CacheContext::Default),
+        CachePolicy::Fill(CacheHint::Normal),
     )
     .await
 }
@@ -369,7 +369,7 @@ where
 {
     HybridCacheBuilder::new()
         .memory(10)
-        .storage()
+        .storage(Engine::Large)
         .build()
         .await
         .unwrap()
@@ -495,7 +495,7 @@ pub mod delete_range {
     /// The core idea contains two parts:
     /// 1) we only need to keep the smallest epoch of the overlapping
     ///    range tomstone intervals since the key covered by the range tombstone in lower level must have
-    ///    smaller epoches;
+    ///    smaller epochs;
     /// 2) due to 1), we lose the information to delete a key by tombstone in a single
     ///    SST so we add a tombstone key in the data block.
     ///    We leverage `events` to calculate the epoch information mentioned above.

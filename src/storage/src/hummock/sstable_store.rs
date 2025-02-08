@@ -21,7 +21,7 @@ use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use fail::fail_point;
 use foyer::{
-    CacheContext, EventListener, FetchState, HybridCache, HybridCacheBuilder, HybridCacheEntry,
+    CacheHint, Engine, EventListener, FetchState, HybridCache, HybridCacheBuilder, HybridCacheEntry,
 };
 use futures::{future, StreamExt};
 use itertools::Itertools;
@@ -69,7 +69,7 @@ impl EventListener for BlockCacheEventListener {
     type Key = SstableBlockIndex;
     type Value = Box<Block>;
 
-    fn on_memory_release(&self, _key: Self::Key, value: Self::Value)
+    fn on_leave(&self, _reason: foyer::Event, _key: &Self::Key, value: &Self::Value)
     where
         Self::Key: foyer::Key,
         Self::Value: foyer::Value,
@@ -86,14 +86,14 @@ pub enum CachePolicy {
     /// Disable read cache and not fill the cache afterwards.
     Disable,
     /// Try reading the cache and fill the cache afterwards.
-    Fill(CacheContext),
+    Fill(CacheHint),
     /// Read the cache but not fill the cache afterwards.
     NotFill,
 }
 
 impl Default for CachePolicy {
     fn default() -> Self {
-        CachePolicy::Fill(CacheContext::Default)
+        CachePolicy::Fill(CacheHint::Normal)
     }
 }
 
@@ -192,7 +192,7 @@ impl SstableStore {
             .with_weighter(|_: &HummockSstableObjectId, value: &Box<Sstable>| {
                 u64::BITS as usize / 8 + value.estimate_size()
             })
-            .storage()
+            .storage(Engine::Large)
             .build()
             .await
             .map_err(HummockError::foyer_error)?;
@@ -204,7 +204,7 @@ impl SstableStore {
                 // FIXME(MrCroxx): Calculate block weight more accurately.
                 u64::BITS as usize * 2 / 8 + value.raw().len()
             })
-            .storage()
+            .storage(Engine::Large)
             .build()
             .await
             .map_err(HummockError::foyer_error)?;
@@ -377,9 +377,9 @@ impl SstableStore {
                 let cache_priority = if idx == block_index {
                     priority
                 } else {
-                    CacheContext::LowPriority
+                    CacheHint::Low
                 };
-                let entry = self.block_cache.insert_with_context(
+                let entry = self.block_cache.insert_with_hint(
                     SstableBlockIndex {
                         sst_id: object_id,
                         block_idx: idx as _,
@@ -463,7 +463,7 @@ impl SstableStore {
 
         match policy {
             CachePolicy::Fill(context) => {
-                let entry = self.block_cache.fetch_with_context(
+                let entry = self.block_cache.fetch_with_hint(
                     SstableBlockIndex {
                         sst_id: object_id,
                         block_idx: block_index as _,
@@ -883,7 +883,7 @@ impl SstableWriter for BatchUploadWriter {
                 // The `block_info` may be empty when there is only range-tombstones, because we
                 //  store them in meta-block.
                 for (block_idx, block) in self.block_info.into_iter().enumerate() {
-                    self.sstable_store.block_cache.insert_with_context(
+                    self.sstable_store.block_cache.insert_with_hint(
                         SstableBlockIndex {
                             sst_id: self.object_id,
                             block_idx: block_idx as _,
@@ -994,7 +994,7 @@ impl SstableWriter for StreamingUploadWriter {
                 && !self.blocks.is_empty()
             {
                 for (block_idx, block) in self.blocks.into_iter().enumerate() {
-                    self.sstable_store.block_cache.insert_with_context(
+                    self.sstable_store.block_cache.insert_with_hint(
                         SstableBlockIndex {
                             sst_id: self.object_id,
                             block_idx: block_idx as _,

@@ -13,14 +13,15 @@
 // limitations under the License.
 
 use std::fmt::Debug;
-use std::ops::Deref;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 use enum_as_inner::EnumAsInner;
 use foyer::{
-    DirectFsDeviceOptionsBuilder, HybridCacheBuilder, RateLimitPicker, RuntimeConfigBuilder,
+    DirectFsDeviceOptions, Engine, HybridCacheBuilder, LargeEngineOptions, RateLimitPicker,
+    RuntimeOptions, TokioRuntimeOptions,
 };
+use mixtrics::registry::prometheus::PrometheusMetricsRegistry;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common_service::RpcNotificationClient;
 use risingwave_hummock_sdk::HummockSstableObjectId;
@@ -41,6 +42,12 @@ use crate::monitor::{
 };
 use crate::opts::StorageOpts;
 use crate::StateStore;
+
+static FOYER_METRICS_REGISTRY: LazyLock<Box<PrometheusMetricsRegistry>> = LazyLock::new(|| {
+    Box::new(PrometheusMetricsRegistry::new(
+        GLOBAL_METRICS_REGISTRY.clone(),
+    ))
+});
 
 mod opaque_type {
     use super::*;
@@ -636,51 +643,40 @@ impl StateStoreImpl {
     ) -> StorageResult<Self> {
         const MB: usize = 1 << 20;
 
-        if cfg!(not(madsim)) {
-            metrics_prometheus::Recorder::builder()
-                .with_registry(GLOBAL_METRICS_REGISTRY.deref().clone())
-                .build_and_install();
-        }
-
         let meta_cache = {
             let mut builder = HybridCacheBuilder::new()
                 .with_name("foyer.meta")
+                .with_metrics_registry(FOYER_METRICS_REGISTRY.clone())
                 .memory(opts.meta_cache_capacity_mb * MB)
                 .with_shards(opts.meta_cache_shard_num)
                 .with_eviction_config(opts.meta_cache_eviction_config.clone())
-                .with_object_pool_capacity(1024 * opts.meta_cache_shard_num)
                 .with_weighter(|_: &HummockSstableObjectId, value: &Box<Sstable>| {
                     u64::BITS as usize / 8 + value.estimate_size()
                 })
-                .storage();
+                .storage(Engine::Large);
 
             if !opts.meta_file_cache_dir.is_empty() {
                 builder = builder
-                    .with_device_config(
-                        DirectFsDeviceOptionsBuilder::new(&opts.meta_file_cache_dir)
+                    .with_device_options(
+                        DirectFsDeviceOptions::new(&opts.meta_file_cache_dir)
                             .with_capacity(opts.meta_file_cache_capacity_mb * MB)
-                            .with_file_size(opts.meta_file_cache_file_capacity_mb * MB)
-                            .build(),
-                    )
-                    .with_indexer_shards(opts.meta_file_cache_indexer_shards)
-                    .with_flushers(opts.meta_file_cache_flushers)
-                    .with_reclaimers(opts.meta_file_cache_reclaimers)
-                    .with_buffer_threshold(opts.meta_file_cache_flush_buffer_threshold_mb * MB) // 128 MiB
-                    .with_clean_region_threshold(
-                        opts.meta_file_cache_reclaimers + opts.meta_file_cache_reclaimers / 2,
+                            .with_file_size(opts.meta_file_cache_file_capacity_mb * MB),
                     )
                     .with_recover_mode(opts.meta_file_cache_recover_mode)
-                    .with_recover_concurrency(opts.meta_file_cache_recover_concurrency)
-                    .with_compression(
-                        opts.meta_file_cache_compression
-                            .as_str()
-                            .try_into()
-                            .map_err(HummockError::foyer_error)?,
-                    )
-                    .with_runtime_config(
-                        RuntimeConfigBuilder::new()
-                            .with_thread_name("foyer.meta.runtime")
-                            .build(),
+                    .with_runtime_options(RuntimeOptions::Unified(TokioRuntimeOptions::default()))
+                    .with_large_object_disk_cache_options(
+                        LargeEngineOptions::new()
+                            .with_indexer_shards(opts.meta_file_cache_indexer_shards)
+                            .with_flushers(opts.meta_file_cache_flushers)
+                            .with_reclaimers(opts.meta_file_cache_reclaimers)
+                            .with_buffer_pool_size(
+                                opts.meta_file_cache_flush_buffer_threshold_mb * MB,
+                            ) // 128 MiB
+                            .with_clean_region_threshold(
+                                opts.meta_file_cache_reclaimers
+                                    + opts.meta_file_cache_reclaimers / 2,
+                            )
+                            .with_recover_concurrency(opts.meta_file_cache_recover_concurrency),
                     );
                 if opts.meta_file_cache_insert_rate_limit_mb > 0 {
                     builder = builder.with_admission_picker(Arc::new(RateLimitPicker::new(
@@ -695,46 +691,41 @@ impl StateStoreImpl {
         let block_cache = {
             let mut builder = HybridCacheBuilder::new()
                 .with_name("foyer.data")
+                .with_metrics_registry(FOYER_METRICS_REGISTRY.clone())
                 .with_event_listener(Arc::new(BlockCacheEventListener::new(
                     state_store_metrics.clone(),
                 )))
                 .memory(opts.block_cache_capacity_mb * MB)
                 .with_shards(opts.block_cache_shard_num)
                 .with_eviction_config(opts.block_cache_eviction_config.clone())
-                .with_object_pool_capacity(1024 * opts.block_cache_shard_num)
                 .with_weighter(|_: &SstableBlockIndex, value: &Box<Block>| {
                     // FIXME(MrCroxx): Calculate block weight more accurately.
                     u64::BITS as usize * 2 / 8 + value.raw().len()
                 })
-                .storage();
+                .storage(Engine::Large);
 
             if !opts.data_file_cache_dir.is_empty() {
                 builder = builder
-                    .with_device_config(
-                        DirectFsDeviceOptionsBuilder::new(&opts.data_file_cache_dir)
+                    .with_device_options(
+                        DirectFsDeviceOptions::new(&opts.data_file_cache_dir)
                             .with_capacity(opts.data_file_cache_capacity_mb * MB)
-                            .with_file_size(opts.data_file_cache_file_capacity_mb * MB)
-                            .build(),
-                    )
-                    .with_indexer_shards(opts.data_file_cache_indexer_shards)
-                    .with_flushers(opts.data_file_cache_flushers)
-                    .with_reclaimers(opts.data_file_cache_reclaimers)
-                    .with_buffer_threshold(opts.data_file_cache_flush_buffer_threshold_mb * MB) // 128 MiB
-                    .with_clean_region_threshold(
-                        opts.data_file_cache_reclaimers + opts.data_file_cache_reclaimers / 2,
+                            .with_file_size(opts.data_file_cache_file_capacity_mb * MB),
                     )
                     .with_recover_mode(opts.data_file_cache_recover_mode)
-                    .with_recover_concurrency(opts.data_file_cache_recover_concurrency)
-                    .with_compression(
-                        opts.data_file_cache_compression
-                            .as_str()
-                            .try_into()
-                            .map_err(HummockError::foyer_error)?,
-                    )
-                    .with_runtime_config(
-                        RuntimeConfigBuilder::new()
-                            .with_thread_name("foyer.data.runtime")
-                            .build(),
+                    .with_runtime_options(RuntimeOptions::Unified(TokioRuntimeOptions::default()))
+                    .with_large_object_disk_cache_options(
+                        LargeEngineOptions::new()
+                            .with_indexer_shards(opts.data_file_cache_indexer_shards)
+                            .with_flushers(opts.data_file_cache_flushers)
+                            .with_reclaimers(opts.data_file_cache_reclaimers)
+                            .with_buffer_pool_size(
+                                opts.data_file_cache_flush_buffer_threshold_mb * MB,
+                            ) // 128 MiB
+                            .with_clean_region_threshold(
+                                opts.data_file_cache_reclaimers
+                                    + opts.data_file_cache_reclaimers / 2,
+                            )
+                            .with_recover_concurrency(opts.data_file_cache_recover_concurrency),
                     );
                 if opts.data_file_cache_insert_rate_limit_mb > 0 {
                     builder = builder.with_admission_picker(Arc::new(RateLimitPicker::new(

@@ -31,7 +31,6 @@
 //! ```
 
 #![cfg_attr(not(feature = "std"), no_std)]
-#![feature(lint_reasons)]
 #![feature(let_chains)]
 #![expect(clippy::doc_markdown)]
 #![expect(clippy::upper_case_acronyms)]

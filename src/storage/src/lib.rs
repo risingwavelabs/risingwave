@@ -18,7 +18,6 @@
 #![feature(extract_if)]
 #![feature(coroutines)]
 #![feature(hash_extract_if)]
-#![feature(lint_reasons)]
 #![feature(proc_macro_hygiene)]
 #![feature(stmt_expr_attributes)]
 #![feature(strict_provenance)]

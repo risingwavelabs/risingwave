@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use expect_test::expect;
-use foyer::CacheContext;
+use foyer::CacheHint;
 use futures::{pin_mut, StreamExt};
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
@@ -57,7 +57,7 @@ async fn test_empty_read_v2() {
             u64::MAX,
             ReadOptions {
                 table_id: TableId { table_id: 2333 },
-                cache_policy: CachePolicy::Fill(CacheContext::Default),
+                cache_policy: CachePolicy::Fill(CacheHint::Normal),
                 ..Default::default()
             },
         )
@@ -73,7 +73,7 @@ async fn test_empty_read_v2() {
             u64::MAX,
             ReadOptions {
                 table_id: TableId { table_id: 2333 },
-                cache_policy: CachePolicy::Fill(CacheContext::Default),
+                cache_policy: CachePolicy::Fill(CacheHint::Normal),
                 ..Default::default()
             },
         )
@@ -173,7 +173,7 @@ async fn test_basic_v2() {
             anchor.clone(),
             epoch1,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(CacheContext::Default),
+                cache_policy: CachePolicy::Fill(CacheHint::Normal),
                 ..Default::default()
             },
         )
@@ -186,7 +186,7 @@ async fn test_basic_v2() {
             gen_key_from_str(VirtualNode::ZERO, "bb"),
             epoch1,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(CacheContext::Default),
+                cache_policy: CachePolicy::Fill(CacheHint::Normal),
                 ..Default::default()
             },
         )
@@ -201,7 +201,7 @@ async fn test_basic_v2() {
             gen_key_from_str(VirtualNode::ZERO, "ab"),
             epoch1,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(CacheContext::Default),
+                cache_policy: CachePolicy::Fill(CacheHint::Normal),
                 ..Default::default()
             },
         )
@@ -231,7 +231,7 @@ async fn test_basic_v2() {
             anchor.clone(),
             epoch2,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(CacheContext::Default),
+                cache_policy: CachePolicy::Fill(CacheHint::Normal),
                 ..Default::default()
             },
         )
@@ -261,7 +261,7 @@ async fn test_basic_v2() {
             anchor.clone(),
             epoch3,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(CacheContext::Default),
+                cache_policy: CachePolicy::Fill(CacheHint::Normal),
                 ..Default::default()
             },
         )
@@ -275,7 +275,7 @@ async fn test_basic_v2() {
             gen_key_from_str(VirtualNode::ZERO, "ff"),
             epoch3,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(CacheContext::Default),
+                cache_policy: CachePolicy::Fill(CacheHint::Normal),
                 ..Default::default()
             },
         )
@@ -295,7 +295,7 @@ async fn test_basic_v2() {
             ),
             epoch1,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(CacheContext::Default),
+                cache_policy: CachePolicy::Fill(CacheHint::Normal),
                 ..Default::default()
             },
         )
@@ -310,7 +310,7 @@ async fn test_basic_v2() {
             anchor.clone(),
             epoch1,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(CacheContext::Default),
+                cache_policy: CachePolicy::Fill(CacheHint::Normal),
                 ..Default::default()
             },
         )
@@ -325,7 +325,7 @@ async fn test_basic_v2() {
             anchor.clone(),
             epoch2,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(CacheContext::Default),
+                cache_policy: CachePolicy::Fill(CacheHint::Normal),
                 ..Default::default()
             },
         )
@@ -346,7 +346,7 @@ async fn test_basic_v2() {
             epoch2,
             ReadOptions {
                 prefetch_options: PrefetchOptions::default(),
-                cache_policy: CachePolicy::Fill(CacheContext::Default),
+                cache_policy: CachePolicy::Fill(CacheHint::Normal),
                 ..Default::default()
             },
         )
@@ -368,7 +368,7 @@ async fn test_basic_v2() {
             epoch3,
             ReadOptions {
                 prefetch_options: PrefetchOptions::default(),
-                cache_policy: CachePolicy::Fill(CacheContext::Default),
+                cache_policy: CachePolicy::Fill(CacheHint::Normal),
                 ..Default::default()
             },
         )
@@ -387,7 +387,7 @@ async fn test_basic_v2() {
             gen_key_from_str(VirtualNode::ZERO, "bb"),
             epoch2,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(CacheContext::Default),
+                cache_policy: CachePolicy::Fill(CacheHint::Normal),
                 ..Default::default()
             },
         )
@@ -400,7 +400,7 @@ async fn test_basic_v2() {
             gen_key_from_str(VirtualNode::ZERO, "dd"),
             epoch2,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(CacheContext::Default),
+                cache_policy: CachePolicy::Fill(CacheHint::Normal),
                 ..Default::default()
             },
         )
@@ -596,7 +596,7 @@ async fn test_reload_storage() {
             anchor.clone(),
             epoch1,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(CacheContext::Default),
+                cache_policy: CachePolicy::Fill(CacheHint::Normal),
                 ..Default::default()
             },
         )
@@ -611,7 +611,7 @@ async fn test_reload_storage() {
             gen_key_from_str(VirtualNode::ZERO, "ab"),
             epoch1,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(CacheContext::Default),
+                cache_policy: CachePolicy::Fill(CacheHint::Normal),
                 ..Default::default()
             },
         )
@@ -639,7 +639,7 @@ async fn test_reload_storage() {
             anchor.clone(),
             epoch2,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(CacheContext::Default),
+                cache_policy: CachePolicy::Fill(CacheHint::Normal),
                 ..Default::default()
             },
         )
@@ -661,7 +661,7 @@ async fn test_reload_storage() {
             epoch1,
             ReadOptions {
                 prefetch_options: PrefetchOptions::default(),
-                cache_policy: CachePolicy::Fill(CacheContext::Default),
+                cache_policy: CachePolicy::Fill(CacheHint::Normal),
                 ..Default::default()
             },
         )
@@ -676,7 +676,7 @@ async fn test_reload_storage() {
             anchor.clone(),
             epoch1,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(CacheContext::Default),
+                cache_policy: CachePolicy::Fill(CacheHint::Normal),
                 ..Default::default()
             },
         )
@@ -691,7 +691,7 @@ async fn test_reload_storage() {
             anchor.clone(),
             epoch2,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(CacheContext::Default),
+                cache_policy: CachePolicy::Fill(CacheHint::Normal),
                 ..Default::default()
             },
         )
@@ -712,7 +712,7 @@ async fn test_reload_storage() {
             epoch2,
             ReadOptions {
                 prefetch_options: PrefetchOptions::default(),
-                cache_policy: CachePolicy::Fill(CacheContext::Default),
+                cache_policy: CachePolicy::Fill(CacheHint::Normal),
                 ..Default::default()
             },
         )
@@ -748,7 +748,7 @@ async fn test_reload_storage() {
 //                         gen_key_from_str(VirtualNode::ZERO, "aa"),
 //                         epoch,
 //                         ReadOptions {
-//                             cache_policy: CachePolicy::Fill(CacheContext::Default),
+//                             cache_policy: CachePolicy::Fill(CacheHint::Normal),
 //                             ..Default::default()
 //                         }
 //                     )
@@ -763,7 +763,7 @@ async fn test_reload_storage() {
 //                         gen_key_from_str(VirtualNode::ZERO, "bb"),
 //                         epoch,
 //                         ReadOptions {
-//                             cache_policy: CachePolicy::Fill(CacheContext::Default),
+//                             cache_policy: CachePolicy::Fill(CacheHint::Normal),
 //                             ..Default::default()
 //                         }
 //                     )
@@ -778,7 +778,7 @@ async fn test_reload_storage() {
 //                         gen_key_from_str(VirtualNode::ZERO, "cc"),
 //                         epoch,
 //                         ReadOptions {
-//                             cache_policy: CachePolicy::Fill(CacheContext::Default),
+//                             cache_policy: CachePolicy::Fill(CacheHint::Normal),
 //                             ..Default::default()
 //                         }
 //                     )
@@ -795,7 +795,7 @@ async fn test_reload_storage() {
 //                     ),
 //                     epoch,
 //                     ReadOptions {
-//                         cache_policy: CachePolicy::Fill(CacheContext::Default),
+//                         cache_policy: CachePolicy::Fill(CacheHint::Normal),
 //                         ..Default::default()
 //                     },
 //                 )
@@ -880,7 +880,7 @@ async fn test_reload_storage() {
 //                         gen_key_from_str(VirtualNode::ZERO, "aa"),
 //                         epoch,
 //                         ReadOptions {
-//                             cache_policy: CachePolicy::Fill(CacheContext::Default),
+//                             cache_policy: CachePolicy::Fill(CacheHint::Normal),
 //                             ..Default::default()
 //                         }
 //                     )
@@ -894,7 +894,7 @@ async fn test_reload_storage() {
 //                     gen_key_from_str(VirtualNode::ZERO, "bb"),
 //                     epoch,
 //                     ReadOptions {
-//                         cache_policy: CachePolicy::Fill(CacheContext::Default),
+//                         cache_policy: CachePolicy::Fill(CacheHint::Normal),
 //                         ..Default::default()
 //                     }
 //                 )
@@ -908,7 +908,7 @@ async fn test_reload_storage() {
 //                         gen_key_from_str(VirtualNode::ZERO, "cc"),
 //                         epoch,
 //                         ReadOptions {
-//                             cache_policy: CachePolicy::Fill(CacheContext::Default),
+//                             cache_policy: CachePolicy::Fill(CacheHint::Normal),
 //                             ..Default::default()
 //                         }
 //                     )
@@ -924,7 +924,7 @@ async fn test_reload_storage() {
 //                     ),
 //                     epoch,
 //                     ReadOptions {
-//                         cache_policy: CachePolicy::Fill(CacheContext::Default),
+//                         cache_policy: CachePolicy::Fill(CacheHint::Normal),
 //                         ..Default::default()
 //                     },
 //                 )
@@ -1086,7 +1086,7 @@ async fn test_delete_get_v2() {
             gen_key_from_str(VirtualNode::ZERO, "bb"),
             epoch2,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(CacheContext::Default),
+                cache_policy: CachePolicy::Fill(CacheHint::Normal),
                 ..Default::default()
             }
         )
@@ -1179,7 +1179,7 @@ async fn test_multiple_epoch_sync_v2() {
                         gen_key_from_str(VirtualNode::ZERO, "bb"),
                         epoch1,
                         ReadOptions {
-                            cache_policy: CachePolicy::Fill(CacheContext::Default),
+                            cache_policy: CachePolicy::Fill(CacheHint::Normal),
                             ..Default::default()
                         }
                     )
@@ -1193,7 +1193,7 @@ async fn test_multiple_epoch_sync_v2() {
                     gen_key_from_str(VirtualNode::ZERO, "bb"),
                     epoch2,
                     ReadOptions {
-                        cache_policy: CachePolicy::Fill(CacheContext::Default),
+                        cache_policy: CachePolicy::Fill(CacheHint::Normal),
                         ..Default::default()
                     }
                 )
@@ -1206,7 +1206,7 @@ async fn test_multiple_epoch_sync_v2() {
                         gen_key_from_str(VirtualNode::ZERO, "bb"),
                         epoch3,
                         ReadOptions {
-                            cache_policy: CachePolicy::Fill(CacheContext::Default),
+                            cache_policy: CachePolicy::Fill(CacheHint::Normal),
                             ..Default::default()
                         }
                     )
@@ -1366,7 +1366,7 @@ async fn test_replicated_local_hummock_storage() {
         table_id: TableId {
             table_id: TEST_TABLE_ID.table_id,
         },
-        cache_policy: CachePolicy::Fill(CacheContext::Default),
+        cache_policy: CachePolicy::Fill(CacheHint::Normal),
         ..Default::default()
     };
 

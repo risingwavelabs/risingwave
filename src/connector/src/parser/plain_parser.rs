@@ -297,10 +297,9 @@ mod tests {
             .unwrap()
             .into_iter()
             .filter(|c| c.cardinality() > 0)
-            .map(|c| {
+            .inspect(|c| {
                 // 5 data messages in a single chunk
                 assert_eq!(5, c.cardinality());
-                c
             })
             .collect_vec();
 

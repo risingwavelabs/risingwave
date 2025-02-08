@@ -38,7 +38,7 @@ pub struct SinkDesc {
     /// All columns of the sink. Note that this is NOT sorted by columnId in the vector.
     pub columns: Vec<ColumnCatalog>,
 
-    /// Primiary keys of the sink. Derived by the frontend.
+    /// Primary keys of the sink. Derived by the frontend.
     pub plan_pk: Vec<ColumnOrder>,
 
     /// User-defined primary key indices for upsert sink.

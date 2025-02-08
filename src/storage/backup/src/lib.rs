@@ -17,7 +17,6 @@
 #![feature(type_alias_impl_trait)]
 #![feature(extract_if)]
 #![feature(custom_test_frameworks)]
-#![feature(lint_reasons)]
 #![feature(map_try_insert)]
 #![feature(hash_extract_if)]
 #![feature(btree_extract_if)]

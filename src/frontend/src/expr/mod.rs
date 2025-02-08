@@ -988,10 +988,9 @@ impl ExprImpl {
                 _ => return None,
             };
             let list: Vec<_> = inputs
-                .map(|expr| {
+                .inspect(|expr| {
                     // Non constant IN will be bound to OR
                     assert!(expr.is_const());
-                    expr
                 })
                 .collect();
 

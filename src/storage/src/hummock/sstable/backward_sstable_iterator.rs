@@ -15,7 +15,7 @@
 use std::cmp::Ordering::{Equal, Less};
 use std::sync::Arc;
 
-use foyer::CacheContext;
+use foyer::CacheHint;
 use risingwave_hummock_sdk::key::FullKey;
 
 use crate::hummock::iterator::{Backward, HummockIterator, ValueMeta};
@@ -67,7 +67,7 @@ impl BackwardSstableIterator {
                 .get(
                     &self.sst,
                     idx as usize,
-                    crate::hummock::CachePolicy::Fill(CacheContext::Default),
+                    crate::hummock::CachePolicy::Fill(CacheHint::Normal),
                     &mut self.stats,
                 )
                 .await?;

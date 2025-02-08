@@ -129,7 +129,6 @@ impl FoyerCache {
             .with_eviction_config(foyer::LruConfig {
                 high_priority_pool_ratio: 0.8,
             })
-            .with_object_pool_capacity(8 * 1024)
             .build();
         Self {
             inner,
@@ -146,7 +145,6 @@ impl FoyerCache {
                 cmsketch_eps: 0.001,
                 cmsketch_confidence: 0.9,
             })
-            .with_object_pool_capacity(8 * 1024)
             .build();
         Self {
             inner,
@@ -186,8 +184,7 @@ impl FoyerHybridCache {
             .with_eviction_config(foyer::LruConfig {
                 high_priority_pool_ratio: 0.8,
             })
-            .with_object_pool_capacity(8 * 1024)
-            .storage()
+            .storage(foyer::Engine::Large)
             .build()
             .await
             .unwrap();
@@ -207,8 +204,7 @@ impl FoyerHybridCache {
                 cmsketch_eps: 0.001,
                 cmsketch_confidence: 0.9,
             })
-            .with_object_pool_capacity(8 * 1024)
-            .storage()
+            .storage(foyer::Engine::Large)
             .build()
             .await
             .unwrap();

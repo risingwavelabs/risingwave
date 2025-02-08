@@ -20,7 +20,7 @@ pub(crate) mod tests {
     use std::sync::Arc;
 
     use bytes::{BufMut, Bytes, BytesMut};
-    use foyer::CacheContext;
+    use foyer::CacheHint;
     use itertools::Itertools;
     use rand::{Rng, RngCore, SeedableRng};
     use risingwave_common::bitmap::BitmapBuilder;
@@ -371,7 +371,7 @@ pub(crate) mod tests {
                 TableKey(key.clone()),
                 read_epoch,
                 ReadOptions {
-                    cache_policy: CachePolicy::Fill(CacheContext::Default),
+                    cache_policy: CachePolicy::Fill(CacheHint::Normal),
                     ..Default::default()
                 },
             )
@@ -385,7 +385,7 @@ pub(crate) mod tests {
                 ((TEST_WATERMARK - 1) * 1000) << 16,
                 ReadOptions {
                     prefix_hint: Some(key.clone()),
-                    cache_policy: CachePolicy::Fill(CacheContext::Default),
+                    cache_policy: CachePolicy::Fill(CacheHint::Normal),
                     ..Default::default()
                 },
             )
@@ -509,7 +509,7 @@ pub(crate) mod tests {
                 TableKey(key.clone()),
                 get_epoch,
                 ReadOptions {
-                    cache_policy: CachePolicy::Fill(CacheContext::Default),
+                    cache_policy: CachePolicy::Fill(CacheHint::Normal),
                     ..Default::default()
                 },
             )
@@ -856,7 +856,7 @@ pub(crate) mod tests {
                 ReadOptions {
                     table_id: TableId::from(existing_table_ids),
                     prefetch_options: PrefetchOptions::default(),
-                    cache_policy: CachePolicy::Fill(CacheContext::Default),
+                    cache_policy: CachePolicy::Fill(CacheHint::Normal),
                     ..Default::default()
                 },
             )
@@ -1057,7 +1057,7 @@ pub(crate) mod tests {
                 ReadOptions {
                     table_id: TableId::from(existing_table_id),
                     prefetch_options: PrefetchOptions::default(),
-                    cache_policy: CachePolicy::Fill(CacheContext::Default),
+                    cache_policy: CachePolicy::Fill(CacheHint::Normal),
                     ..Default::default()
                 },
             )
@@ -1258,7 +1258,7 @@ pub(crate) mod tests {
                     prefix_hint: Some(Bytes::from(bloom_filter_key)),
                     table_id: TableId::from(existing_table_id),
                     prefetch_options: PrefetchOptions::default(),
-                    cache_policy: CachePolicy::Fill(CacheContext::Default),
+                    cache_policy: CachePolicy::Fill(CacheHint::Normal),
                     ..Default::default()
                 },
             )
