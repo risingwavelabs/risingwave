@@ -273,12 +273,12 @@ def do_sink(config, file_num, item_num_per_file, prefix):
         test_timestamptz_ns,
         nested_struct
         from {_table()} WITH (
-        connector = 'snowflake',
+        connector = 's3',
         match_pattern = '*.parquet',
-        snowflake.aws_region = 'custom',
-        snowflake.s3_bucket = 'hummock001',
-        snowflake.aws_access_key_id = 'hummockadmin',
-        snowflake.aws_secret_access_key = 'hummockadmin',
+        s3.region_name = 'custom',
+        s3.bucket_name = 'hummock001',
+        s3.credentials.access = 'hummockadmin',
+        s3.credentials.secret = 'hummockadmin',
         s3.endpoint_url = 'http://hummock001.127.0.0.1:9301',
         s3.path = 'test_json_sink/',
         type = 'append-only',
