@@ -133,7 +133,7 @@ pub async fn handle_drop_table(
                             .common
                             .full_table_name()
                             .context("Unable to parse table name")?;
-                        let catalog_type = iceberg_properties.common.catalog_type().to_string();
+                        let catalog_type = iceberg_properties.common.catalog_type().to_owned();
                         (catalog_type, catalog, table_id)
                     }
                     Either::Right(iceberg_config) => {
@@ -141,7 +141,7 @@ pub async fn handle_drop_table(
                         let table_id = iceberg_config
                             .full_table_name()
                             .context("Unable to parse table name")?;
-                        let catalog_type = iceberg_config.catalog_type().to_string();
+                        let catalog_type = iceberg_config.catalog_type().to_owned();
                         (catalog_type, catalog, table_id)
                     }
                 };
