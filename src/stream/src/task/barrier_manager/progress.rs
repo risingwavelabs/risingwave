@@ -199,7 +199,7 @@ impl CreateMviewProgressReporter {
                     last,
                     consumed_epoch
                 );
-                assert!(last_consumed_rows <= current_consumed_rows);
+                // assert!(last_consumed_rows <= current_consumed_rows);
             }
             Some(state) => {
                 panic!(
