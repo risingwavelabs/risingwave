@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use arrow_udf_js::{CallMode, Runtime};
+use arrow_udf_js::{AggregateOptions, FunctionOptions, Runtime};
 use futures_util::{FutureExt, StreamExt};
 use risingwave_common::array::arrow::arrow_schema_udf::{DataType, Field};
 use risingwave_common::array::arrow::{UdfArrowConvert, UdfToArrow};
@@ -44,6 +44,8 @@ static QUICKJS: UdfImplDescriptor = UdfImplDescriptor {
                 runtime.enable_fetch().await?;
             }
             if opts.kind.is_aggregate() {
+                let mut options = AggregateOptions::default();
+                options.is_async = is_async;
                 runtime
                     .add_aggregate(
                         opts.identifier,
@@ -51,20 +53,20 @@ static QUICKJS: UdfImplDescriptor = UdfImplDescriptor {
                             [("ARROW:extension:name".into(), "arrowudf.json".into())].into(),
                         ),
                         UdfArrowConvert::default().to_arrow_field("", opts.return_type)?,
-                        CallMode::CalledOnNullInput,
                         opts.body.context("body is required")?,
-                        is_async,
+                        options,
                     )
                     .await
                     .context("failed to add_aggregate")?;
             } else {
+                let mut options = FunctionOptions::default();
+                options.is_async = is_async;
                 let res = runtime
                     .add_function(
                         opts.identifier,
                         UdfArrowConvert::default().to_arrow_field("", opts.return_type)?,
-                        CallMode::CalledOnNullInput,
                         opts.body.context("body is required")?,
-                        is_async,
+                        options,
                     )
                     .await;
 
@@ -82,9 +84,8 @@ static QUICKJS: UdfImplDescriptor = UdfImplDescriptor {
                         .add_function(
                             opts.identifier,
                             UdfArrowConvert::default().to_arrow_field("", opts.return_type)?,
-                            CallMode::CalledOnNullInput,
                             &body,
-                            false,
+                            options,
                         )
                         .await
                         .context("failed to add_function")?;
