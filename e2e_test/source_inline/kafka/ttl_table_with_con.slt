@@ -28,7 +28,7 @@ flush;
 # Wait enough time to ensure SourceExecutor consumes all Kafka data.
 sleep 1s
 
-query IT rowsort
+query IT rowsort retry 3 backoff 5s
 select * from t
 ----
 1 1

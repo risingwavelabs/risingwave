@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_pb::telemetry::PbTelemetryDatabaseObject;
+use sea_orm::DatabaseTransaction;
+
 use super::*;
 
 impl CatalogController {
@@ -120,15 +123,24 @@ impl CatalogController {
                 ObjectType::Table => {
                     ensure_object_not_refer(object_type, object_id, &txn).await?;
                     let indexes = get_referring_objects(object_id, &txn).await?;
+                    for obj in indexes.iter().filter(|object| {
+                        object.obj_type == ObjectType::Source || object.obj_type == ObjectType::Sink
+                    }) {
+                        report_drop_object(obj.obj_type, obj.oid, &txn).await;
+                    }
                     assert!(
                         indexes.iter().all(|obj| obj.obj_type == ObjectType::Index),
                         "only index could be dropped in restrict mode"
                     );
                     indexes
                 }
-                ObjectType::Source
-                | ObjectType::Sink
-                | ObjectType::View
+                object_type @ (ObjectType::Source | ObjectType::Sink) => {
+                    ensure_object_not_refer(object_type, object_id, &txn).await?;
+                    report_drop_object(object_type, object_id, &txn).await;
+                    vec![]
+                }
+
+                ObjectType::View
                 | ObjectType::Index
                 | ObjectType::Function
                 | ObjectType::Connection
@@ -377,5 +389,43 @@ impl CatalogController {
             },
             version,
         ))
+    }
+}
+
+async fn report_drop_object(
+    object_type: ObjectType,
+    object_id: ObjectId,
+    txn: &DatabaseTransaction,
+) {
+    let connector_name = {
+        match object_type {
+            ObjectType::Sink => Sink::find_by_id(object_id)
+                .one(txn)
+                .await
+                .ok()
+                .flatten()
+                .and_then(|sink| sink.properties.inner_ref().get("connector").cloned()),
+            ObjectType::Source => Source::find_by_id(object_id)
+                .one(txn)
+                .await
+                .ok()
+                .flatten()
+                .and_then(|source| source.with_properties.inner_ref().get("connector").cloned()),
+            _ => unreachable!(),
+        }
+    };
+    if let Some(connector_name) = connector_name {
+        report_event(
+            PbTelemetryEventStage::DropStreamJob,
+            "source",
+            object_id.into(),
+            Some(connector_name),
+            Some(match object_type {
+                ObjectType::Source => PbTelemetryDatabaseObject::Source,
+                ObjectType::Sink => PbTelemetryDatabaseObject::Sink,
+                _ => unreachable!(),
+            }),
+            None,
+        );
     }
 }
