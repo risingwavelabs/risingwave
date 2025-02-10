@@ -39,13 +39,15 @@ static QUICKJS: UdfImplDescriptor = UdfImplDescriptor {
             let mut runtime = Runtime::new()
                 .await
                 .context("failed to create QuickJS Runtime")?;
-            let is_async = opts.language == "javascript_async";
-            if is_async {
-                runtime.enable_fetch().await?;
+            if opts.is_async.unwrap_or(false) {
+                runtime
+                    .enable_fetch()
+                    .await
+                    .context("failed to enable fetch")?;
             }
             if opts.kind.is_aggregate() {
                 let mut options = AggregateOptions::default();
-                options.is_async = is_async;
+                options.is_async = opts.is_async.unwrap_or(false);
                 runtime
                     .add_aggregate(
                         opts.identifier,
@@ -60,13 +62,14 @@ static QUICKJS: UdfImplDescriptor = UdfImplDescriptor {
                     .context("failed to add_aggregate")?;
             } else {
                 let mut options = FunctionOptions::default();
-                options.is_async = is_async;
+                options.is_async = opts.is_async.unwrap_or(false);
+                options.is_batched = opts.is_batched.unwrap_or(false);
                 let res = runtime
                     .add_function(
                         opts.identifier,
                         UdfArrowConvert::default().to_arrow_field("", opts.return_type)?,
                         opts.body.context("body is required")?,
-                        options,
+                        options.clone(),
                     )
                     .await;
 

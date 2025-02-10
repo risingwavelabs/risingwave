@@ -106,6 +106,8 @@ pub struct UdfOptions<'a> {
     pub return_type: &'a DataType,
     pub always_retry_on_network_error: bool,
     pub language: &'a str,
+    pub is_async: Option<bool>,
+    pub is_batched: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumAsInner)]
