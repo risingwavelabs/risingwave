@@ -1472,57 +1472,6 @@ pub async fn create_iceberg_engine_table(
     let meta_store_endpoint = url::Url::parse(&meta_store_endpoint).map_err(|_| {
         ErrorCode::InternalError("failed to parse the meta store endpoint".to_owned())
     })?;
-    let meta_store_backend = meta_store_endpoint.scheme().to_owned();
-    let meta_store_user = meta_store_endpoint.username().to_owned();
-    let meta_store_password = meta_store_endpoint
-        .password()
-        .ok_or_else(|| {
-            ErrorCode::InternalError("failed to parse password from meta store endpoint".to_owned())
-        })?
-        .to_owned();
-    let meta_store_host = meta_store_endpoint
-        .host_str()
-        .ok_or_else(|| {
-            ErrorCode::InternalError("failed to parse host from meta store endpoint".to_owned())
-        })?
-        .to_owned();
-    let meta_store_port = meta_store_endpoint.port().ok_or_else(|| {
-        ErrorCode::InternalError("failed to parse port from meta store endpoint".to_owned())
-    })?;
-    let meta_store_database = meta_store_endpoint
-        .path()
-        .trim_start_matches('/')
-        .to_owned();
-
-    let Ok(meta_backend) = MetaBackend::from_str(&meta_store_backend, true) else {
-        bail!("failed to parse meta backend: {}", meta_store_backend);
-    };
-
-    let catalog_uri = match meta_backend {
-        MetaBackend::Postgres => {
-            format!(
-                "jdbc:postgresql://{}:{}/{}",
-                meta_store_host.clone(),
-                meta_store_port.clone(),
-                meta_store_database.clone()
-            )
-        }
-        MetaBackend::Mysql => {
-            format!(
-                "jdbc:mysql://{}:{}/{}",
-                meta_store_host.clone(),
-                meta_store_port.clone(),
-                meta_store_database.clone()
-            )
-        }
-        MetaBackend::Sqlite | MetaBackend::Sql | MetaBackend::Mem => {
-            bail!(
-                "Unsupported meta backend for iceberg engine table: {}",
-                meta_store_backend
-            );
-        }
-    };
-
     let rw_db_name = session
         .env()
         .catalog_reader()
@@ -1544,214 +1493,134 @@ pub async fn create_iceberg_engine_table(
     let iceberg_engine_connection: String = session.config().iceberg_engine_connection();
 
     let mut connection_ref = BTreeMap::new();
-    let with_common = if iceberg_engine_connection.is_empty() {
-        // No iceberg engine connection --> use risingwave s3 bucket and meta store as catalog and enable compaction.
-        let (s3_region, s3_endpoint, s3_ak, s3_sk, warehouse_path) = match state_store_endpoint {
-            s3 if s3.starts_with("hummock+s3://") => {
-                let s3_region = if let Ok(s3_region) = std::env::var("AWS_REGION") {
-                    s3_region
-                } else {
-                    bail!("To create an iceberg engine table with s3 backend, AWS_REGION needed to be set");
-                };
-                let s3_bucket = s3.strip_prefix("hummock+s3://").unwrap().to_owned();
-                (
-                    Some(s3_region),
-                    None,
-                    None,
-                    None,
-                    Some(format!(
-                        "s3://{}/{}/iceberg/{}",
-                        s3_bucket, data_directory, iceberg_catalog_name
-                    )),
-                )
-            }
-            minio if minio.starts_with("hummock+minio://") => {
-                let server = minio.strip_prefix("hummock+minio://").unwrap();
-                let (access_key_id, rest) = server.split_once(':').unwrap();
-                let (secret_access_key, mut rest) = rest.split_once('@').unwrap();
-                let endpoint_prefix = if let Some(rest_stripped) = rest.strip_prefix("https://") {
-                    rest = rest_stripped;
-                    "https://"
-                } else if let Some(rest_stripped) = rest.strip_prefix("http://") {
-                    rest = rest_stripped;
-                    "http://"
-                } else {
-                    "http://"
-                };
-                let (address, s3_bucket) = rest.split_once('/').unwrap();
-                (
-                    Some("us-east-1".to_owned()),
-                    Some(format!("{}{}", endpoint_prefix, address)),
-                    Some(access_key_id.to_owned()),
-                    Some(secret_access_key.to_owned()),
-                    Some(format!(
-                        "s3://{}/{}/iceberg/{}",
-                        s3_bucket, data_directory, iceberg_catalog_name
-                    )),
-                )
-            }
-            _ => {
-                bail!(
-                    "iceberg engine can't operate with this state store endpoint: {}",
-                    state_store_endpoint
-                );
-            }
-        };
 
-        let mut with_common = BTreeMap::new();
+    let mut with_common = BTreeMap::new();
+    with_common.insert("connector".to_owned(), "iceberg".to_owned());
+    with_common.insert("database.name".to_owned(), iceberg_database_name.to_owned());
+    with_common.insert("table.name".to_owned(), iceberg_table_name.to_owned());
+
+    if iceberg_engine_connection.is_empty() {
+        // No iceberg engine connection --> use risingwave s3 bucket and meta store as catalog and enable compaction.
+
         with_common.insert("enable_config_load".to_owned(), "true".to_owned());
         with_common.insert("enable_compaction".to_owned(), "true".to_owned());
-        with_common.insert("connector".to_owned(), "iceberg".to_owned());
-        with_common.insert("catalog.type".to_owned(), "jdbc".to_owned());
-        if let Some(warehouse_path) = warehouse_path.clone() {
-            with_common.insert("warehouse.path".to_owned(), warehouse_path.to_owned());
-        }
-        if let Some(s3_endpoint) = s3_endpoint.clone() {
-            with_common.insert("s3.endpoint".to_owned(), s3_endpoint);
-        }
-        if let Some(s3_ak) = s3_ak.clone() {
-            with_common.insert("s3.access.key".to_owned(), s3_ak.to_owned());
-        }
-        if let Some(s3_sk) = s3_sk.clone() {
-            with_common.insert("s3.secret.key".to_owned(), s3_sk.to_owned());
-        }
-        if let Some(s3_region) = s3_region.clone() {
-            with_common.insert("s3.region".to_owned(), s3_region.to_owned());
-        }
-        with_common.insert("catalog.uri".to_owned(), catalog_uri.to_owned());
-        with_common.insert("catalog.jdbc.user".to_owned(), meta_store_user.to_owned());
-        with_common.insert(
-            "catalog.jdbc.password".to_owned(),
-            meta_store_password.clone(),
-        );
-        with_common.insert("catalog.name".to_owned(), iceberg_catalog_name.to_owned());
-        with_common.insert("database.name".to_owned(), iceberg_database_name.to_owned());
-        with_common.insert("table.name".to_owned(), iceberg_table_name.to_owned());
 
-        with_common
+        iceberg_storage_options_from_state_store(
+            &mut with_common,
+            &state_store_endpoint,
+            &data_directory,
+            &iceberg_catalog_name,
+        )?;
+        iceberg_catalog_options_from_meta(
+            &mut with_common,
+            &meta_store_endpoint,
+            &iceberg_catalog_name,
+        )?;
     } else {
         let parts: Vec<&str> = iceberg_engine_connection.split('.').collect();
         assert_eq!(parts.len(), 2);
         let connection_catalog =
             session.get_connection_by_name(Some(parts[0].to_owned()), parts[1])?;
-        if let ConnectionInfo::ConnectionParams(params) = &connection_catalog.info {
-            if params.connection_type == ConnectionType::Iceberg as i32 {
-                // With iceberg engine connection:
-                // 1. the connection contains storage info only --> use risingwave meta store as catalog.
-                //    - if storage info is s3, ensure it is in the same region as risingwave and enable compaction.
-                // 2. the connection contains storage info and catalog info
-                //    - disable compaction.
-
-                let catalog_type = params.properties.get("catalog.type").map(|x| x.to_owned());
-                let scheme = match params.properties.get("warehouse.path") {
-                    Some(warehouse_path) => {
-                        let url = Url::parse(warehouse_path);
-                        if url.is_err()
-                            && let Some(catalog_type) = &catalog_type
-                            && catalog_type == "rest"
-                        {
-                            // If the warehouse path is not a valid URL, it could be a warehouse name in rest catalog,
-                            // so we allow it to pass here.
-                            None
-                        } else {
-                            let url = url.with_context(|| {
-                                format!("Invalid warehouse path: {}", warehouse_path)
-                            })?;
-                            Some(url.scheme().to_owned())
-                        }
-                    }
-                    None => {
-                        if let Some(catalog_type) = &catalog_type
-                            && catalog_type == "rest"
-                        {
-                            None
-                        } else {
-                            bail!("`warehouse.path` must be set");
-                        }
-                    }
-                };
-
-                connection_ref.insert(
-                    "connection".to_owned(),
-                    ConnectionRefValue {
-                        connection_name: ObjectName::from(vec![
-                            Ident::from(parts[0]),
-                            Ident::from(parts[1]),
-                        ]),
-                    },
-                );
-
-                let enable_compaction = if let Some(scheme) = scheme {
-                    match scheme.as_str() {
-                        "s3" | "s3a" => {
-                            if state_store_endpoint.starts_with("hummock+s3://") {
-                                // check s3 region for iceberg engine connection to avoid cross region bucket accessing.
-                                let connection_s3_region = params
-                                    .properties
-                                    .get("s3.region")
-                                    .ok_or_else(|| {
-                                        anyhow!(
-                                            "`s3.region` must be set in iceberg engine connection"
-                                        )
-                                    })?
-                                    .to_owned();
-                                let env_s3_region = if let Ok(s3_region) =
-                                    std::env::var("AWS_REGION")
-                                {
-                                    s3_region
-                                } else {
-                                    bail!("To create an iceberg engine table with s3 backend, AWS_REGION needed to be set");
-                                };
-                                if connection_s3_region != env_s3_region {
-                                    bail!(format!("iceberg engine connection `s3.region` should be the same as the cluster region, got {} expected {}", connection_s3_region, env_s3_region));
-                                }
-                                true
-                            } else {
-                                false
-                            }
-                        }
-                        "gs" | "gcs" => false,
-                        _ => {
-                            bail!("Unsupported scheme: {}", scheme);
-                        }
-                    }
-                } else {
-                    false
-                };
-
-                let mut with_common = BTreeMap::new();
-                with_common.insert("connector".to_owned(), "iceberg".to_owned());
-                with_common.insert("database.name".to_owned(), iceberg_database_name.to_owned());
-                with_common.insert("table.name".to_owned(), iceberg_table_name.to_owned());
-                if catalog_type.is_some() {
-                    with_common.insert("enable_compaction".to_owned(), "false".to_owned());
-                } else {
-                    with_common.insert("catalog.type".to_owned(), "jdbc".to_owned());
-                    with_common.insert("catalog.uri".to_owned(), catalog_uri.to_owned());
-                    with_common.insert("catalog.jdbc.user".to_owned(), meta_store_user.to_owned());
-                    with_common.insert(
-                        "catalog.jdbc.password".to_owned(),
-                        meta_store_password.to_owned(),
-                    );
-                    with_common.insert("catalog.name".to_owned(), iceberg_catalog_name.to_owned());
-                    with_common.insert(
-                        "enable_compaction".to_owned(),
-                        enable_compaction.to_string(),
-                    );
-                }
-                with_common
-            } else {
-                return Err(RwError::from(ErrorCode::InvalidParameterValue(
-                    "Only iceberg connection could be used in iceberg engine".to_owned(),
-                )));
-            }
-        } else {
+        let ConnectionInfo::ConnectionParams(params) = &connection_catalog.info else {
             return Err(RwError::from(ErrorCode::InvalidParameterValue(
                 "Private Link Service has been deprecated. Please create a new connection instead."
                     .to_owned(),
             )));
+        };
+        if params.connection_type != ConnectionType::Iceberg as i32 {
+            return Err(RwError::from(ErrorCode::InvalidParameterValue(
+                "Only iceberg connection could be used in iceberg engine".to_owned(),
+            )));
         }
-    };
+
+        // With iceberg engine connection:
+        // 1. the connection contains storage info only --> use risingwave meta store as catalog.
+        //    - if storage info is s3, ensure it is in the same region as risingwave and enable compaction.
+        // 2. the connection contains storage info and catalog info
+        //    - disable compaction.
+
+        let catalog_type = params.properties.get("catalog.type").map(|x| x.to_owned());
+        let storage_scheme = match params.properties.get("warehouse.path") {
+            Some(warehouse_path) => {
+                let url = Url::parse(warehouse_path);
+                if url.is_err() && catalog_type.as_deref() == Some("rest") {
+                    // If the warehouse path is not a valid URL, it could be a warehouse name in rest catalog,
+                    // so we allow it to pass here.
+                    None
+                } else {
+                    let url =
+                        url.with_context(|| format!("Invalid warehouse path: {}", warehouse_path))?;
+                    Some(url.scheme().to_owned())
+                }
+            }
+            None => {
+                if catalog_type.as_deref() == Some("rest") {
+                    None
+                } else {
+                    bail!("`warehouse.path` must be set");
+                }
+            }
+        };
+
+        connection_ref.insert(
+            "connection".to_owned(),
+            ConnectionRefValue {
+                connection_name: ObjectName::from(vec![
+                    Ident::from(parts[0]),
+                    Ident::from(parts[1]),
+                ]),
+            },
+        );
+
+        if catalog_type.is_some() {
+            // user-provided catalog
+            with_common.insert("enable_compaction".to_owned(), "false".to_owned());
+        } else {
+            // metastore as catalog
+            iceberg_catalog_options_from_meta(
+                &mut with_common,
+                &meta_store_endpoint,
+                &iceberg_catalog_name,
+            )?;
+            let enable_compaction = if let Some(scheme) = storage_scheme {
+                match scheme.as_str() {
+                    "s3" | "s3a" => {
+                        if state_store_endpoint.starts_with("hummock+s3://") {
+                            // check s3 region for iceberg engine connection to avoid cross region bucket accessing.
+                            let connection_s3_region = params
+                                .properties
+                                .get("s3.region")
+                                .ok_or_else(|| {
+                                    anyhow!("`s3.region` must be set in iceberg engine connection")
+                                })?
+                                .to_owned();
+                            let env_s3_region = if let Ok(s3_region) = std::env::var("AWS_REGION") {
+                                s3_region
+                            } else {
+                                bail!("To create an iceberg engine table with s3 backend, AWS_REGION needed to be set");
+                            };
+                            if connection_s3_region != env_s3_region {
+                                bail!(format!("iceberg engine connection `s3.region` should be the same as the cluster region, got {} expected {}", connection_s3_region, env_s3_region));
+                            }
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                    "gs" | "gcs" => false,
+                    _ => {
+                        bail!("Unsupported scheme: {}", scheme);
+                    }
+                }
+            } else {
+                false
+            };
+            with_common.insert(
+                "enable_compaction".to_owned(),
+                enable_compaction.to_string(),
+            );
+        }
+    }
 
     // Iceberg sinks require a primary key, if none is provided, we will use the _row_id column
     // Fetch primary key from columns
@@ -1898,6 +1767,150 @@ pub async fn create_iceberg_engine_table(
     create_sink::handle_create_sink(sink_handler_args, create_sink_stmt).await?;
     create_source::handle_create_source(source_handler_args, create_source_stmt).await?;
 
+    Ok(())
+}
+
+fn iceberg_storage_options_from_state_store(
+    with_options: &mut BTreeMap<String, String>,
+    state_store_endpoint: &str,
+    data_directory: &str,
+    iceberg_catalog_name: &str,
+) -> Result<()> {
+    let (s3_region, s3_endpoint, s3_ak, s3_sk, warehouse_path) = match state_store_endpoint {
+        s3 if s3.starts_with("hummock+s3://") => {
+            let s3_region = if let Ok(s3_region) = std::env::var("AWS_REGION") {
+                s3_region
+            } else {
+                bail!("To create an iceberg engine table with s3 backend, AWS_REGION needed to be set");
+            };
+            let s3_bucket = s3.strip_prefix("hummock+s3://").unwrap().to_owned();
+            (
+                Some(s3_region),
+                None,
+                None,
+                None,
+                Some(format!(
+                    "s3://{}/{}/iceberg/{}",
+                    s3_bucket, data_directory, iceberg_catalog_name
+                )),
+            )
+        }
+        minio if minio.starts_with("hummock+minio://") => {
+            let server = minio.strip_prefix("hummock+minio://").unwrap();
+            let (access_key_id, rest) = server.split_once(':').unwrap();
+            let (secret_access_key, mut rest) = rest.split_once('@').unwrap();
+            let endpoint_prefix = if let Some(rest_stripped) = rest.strip_prefix("https://") {
+                rest = rest_stripped;
+                "https://"
+            } else if let Some(rest_stripped) = rest.strip_prefix("http://") {
+                rest = rest_stripped;
+                "http://"
+            } else {
+                "http://"
+            };
+            let (address, s3_bucket) = rest.split_once('/').unwrap();
+            (
+                Some("us-east-1".to_owned()),
+                Some(format!("{}{}", endpoint_prefix, address)),
+                Some(access_key_id.to_owned()),
+                Some(secret_access_key.to_owned()),
+                Some(format!(
+                    "s3://{}/{}/iceberg/{}",
+                    s3_bucket, data_directory, iceberg_catalog_name
+                )),
+            )
+        }
+        _ => {
+            bail!(
+                "iceberg engine can't operate with this state store endpoint: {}",
+                state_store_endpoint
+            );
+        }
+    };
+
+    if let Some(warehouse_path) = warehouse_path.clone() {
+        with_options.insert("warehouse.path".to_owned(), warehouse_path.to_owned());
+    }
+    if let Some(s3_endpoint) = s3_endpoint.clone() {
+        with_options.insert("s3.endpoint".to_owned(), s3_endpoint);
+    }
+    if let Some(s3_ak) = s3_ak.clone() {
+        with_options.insert("s3.access.key".to_owned(), s3_ak.to_owned());
+    }
+    if let Some(s3_sk) = s3_sk.clone() {
+        with_options.insert("s3.secret.key".to_owned(), s3_sk.to_owned());
+    }
+    if let Some(s3_region) = s3_region.clone() {
+        with_options.insert("s3.region".to_owned(), s3_region.to_owned());
+    }
+
+    Ok(())
+}
+
+fn iceberg_catalog_options_from_meta(
+    with_options: &mut BTreeMap<String, String>,
+    meta_store_endpoint: &Url,
+    iceberg_catalog_name: &str,
+) -> Result<()> {
+    let meta_store_backend = meta_store_endpoint.scheme().to_owned();
+    let meta_store_user = meta_store_endpoint.username().to_owned();
+    let meta_store_password = meta_store_endpoint
+        .password()
+        .ok_or_else(|| {
+            ErrorCode::InternalError("failed to parse password from meta store endpoint".to_owned())
+        })?
+        .to_owned();
+    let meta_store_host = meta_store_endpoint
+        .host_str()
+        .ok_or_else(|| {
+            ErrorCode::InternalError("failed to parse host from meta store endpoint".to_owned())
+        })?
+        .to_owned();
+    let meta_store_port = meta_store_endpoint.port().ok_or_else(|| {
+        ErrorCode::InternalError("failed to parse port from meta store endpoint".to_owned())
+    })?;
+    let meta_store_database = meta_store_endpoint
+        .path()
+        .trim_start_matches('/')
+        .to_owned();
+
+    let Ok(meta_backend) = MetaBackend::from_str(&meta_store_backend, true) else {
+        bail!("failed to parse meta backend: {}", meta_store_backend);
+    };
+
+    let catalog_uri_from_meta = match meta_backend {
+        MetaBackend::Postgres => {
+            format!(
+                "jdbc:postgresql://{}:{}/{}",
+                meta_store_host.clone(),
+                meta_store_port.clone(),
+                meta_store_database.clone()
+            )
+        }
+        MetaBackend::Mysql => {
+            format!(
+                "jdbc:mysql://{}:{}/{}",
+                meta_store_host.clone(),
+                meta_store_port.clone(),
+                meta_store_database.clone()
+            )
+        }
+        MetaBackend::Sqlite | MetaBackend::Sql | MetaBackend::Mem => {
+            bail!(
+                "Unsupported meta backend for iceberg engine table: {}",
+                meta_store_backend
+            );
+        }
+    };
+
+    with_options.insert("catalog.type".to_owned(), "jdbc".to_owned());
+    with_options.insert("catalog.uri".to_owned(), catalog_uri_from_meta.to_owned());
+    with_options.insert("catalog.jdbc.user".to_owned(), meta_store_user.to_owned());
+    with_options.insert(
+        "catalog.jdbc.password".to_owned(),
+        meta_store_password.to_owned(),
+    );
+    with_options.insert("catalog.name".to_owned(), iceberg_catalog_name.to_owned());
     Ok(())
 }
 
