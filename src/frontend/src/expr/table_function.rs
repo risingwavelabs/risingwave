@@ -645,7 +645,8 @@ fn expr_impl_to_string_fn(arg: &ExprImpl) -> RwResult<String> {
         Some(Ok(value)) => {
             let Some(scalar) = value else {
                 return Err(BindError(
-                    "postgres_query function and mysql_query function do not accept null arguments".to_owned(),
+                    "postgres_query function and mysql_query function do not accept null arguments"
+                        .to_owned(),
                 )
                 .into());
             };
