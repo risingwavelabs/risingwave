@@ -119,6 +119,7 @@ impl LocalQueryExecution {
             self.shutdown_rx().clone(),
         );
         let executor = executor.build().await?;
+        drop(plan_node);
 
         #[for_await]
         for chunk in executor.execute() {

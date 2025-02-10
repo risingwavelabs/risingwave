@@ -154,16 +154,7 @@ pub fn cstr_to_str(b: &Bytes) -> Result<&str, Utf8Error> {
 }
 
 /// Record `sql` in the current tracing span.
-fn record_sql_in_span(sql: &str, _redact_sql_option_keywords: Option<RedactSqlOptionKeywordsRef>) {
-    let redacted_sql = sql.to_owned();
-    tracing::Span::current().record(
-        "sql",
-        tracing::field::display(truncated_fmt::TruncatedFmt(
-            &redacted_sql,
-            *RW_QUERY_LOG_TRUNCATE_LEN,
-        )),
-    );
-}
+fn record_sql_in_span(sql: &str, _redact_sql_option_keywords: Option<RedactSqlOptionKeywordsRef>) {}
 
 #[allow(dead_code)]
 fn redact_sql(sql: &str, keywords: RedactSqlOptionKeywordsRef) -> String {
@@ -847,6 +838,7 @@ where
             let portal = self.get_portal(&portal_name)?;
             let sql: Arc<str> = Arc::from(format!("{}", portal));
             record_sql_in_span(&sql, self.redact_sql_option_keywords.clone());
+            drop(sql);
 
             session.check_idle_in_transaction_timeout()?;
             let _exec_context_guard = session.init_exec_context("removed for debugging".into());
