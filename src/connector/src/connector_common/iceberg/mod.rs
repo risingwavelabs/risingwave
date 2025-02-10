@@ -99,9 +99,6 @@ pub struct IcebergCommon {
     /// enable config load currently is used by iceberg engine.
     #[serde(default, deserialize_with = "deserialize_optional_bool_from_string")]
     pub enable_config_load: Option<bool>,
-    /// enable compaction currently is used by iceberg engine.
-    #[serde(default, deserialize_with = "deserialize_optional_bool_from_string")]
-    pub enable_compaction: Option<bool>,
 }
 
 impl IcebergCommon {

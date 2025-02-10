@@ -250,10 +250,8 @@ impl Connection for IcebergConnection {
             }
         }
 
-        // If there is no catalog type, we won't test the catalog.
-        // The iceberg connection could be used to provide warehouse information only.
         if self.catalog_type.is_none() {
-            return Ok(());
+            bail!("`catalog.type` must be set");
         }
 
         // Test catalog
@@ -276,7 +274,6 @@ impl Connection for IcebergConnection {
             database_name: Some("test_database".to_owned()),
             table_name: "test_table".to_owned(),
             enable_config_load: Some(false),
-            enable_compaction: None,
         };
 
         let mut java_map = HashMap::new();

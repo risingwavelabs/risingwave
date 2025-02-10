@@ -422,7 +422,8 @@ impl Sink for IcebergSink {
     async fn new_coordinator(&self) -> Result<Self::Coordinator> {
         let catalog = self.config.create_catalog().await?;
         let table = self.create_and_validate_table().await?;
-        let (commit_tx, finish_tx) = if self.config.common.enable_compaction.unwrap_or(false) {
+        // Only iceberg engine table will enable config load and need compaction.
+        let (commit_tx, finish_tx) = if self.config.common.enable_config_load.unwrap_or(false) {
             let (commit_tx, finish_tx) = spawn_compaction_client(&self.config)?;
             (Some(commit_tx), Some(finish_tx))
         } else {

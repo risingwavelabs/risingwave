@@ -504,11 +504,6 @@ IcebergConfig:
     comments: enable config load currently is used by iceberg engine.
     required: false
     default: Default::default
-  - name: enable_compaction
-    field_type: bool
-    comments: enable compaction currently is used by iceberg engine.
-    required: false
-    default: Default::default
   - name: primary_key
     field_type: Vec<String>
     required: false
