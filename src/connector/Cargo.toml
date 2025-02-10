@@ -112,7 +112,7 @@ rdkafka = { workspace = true, features = [
     "gssapi",
     "zstd",
 ] }
-redis = { version = "0.25", features = ["aio", "tokio-comp", "async-std-comp","cluster-async"] }
+redis = { version = "0.28", features = ["aio", "tokio-comp", "async-std-comp","cluster-async","geospatial"] }
 regex = "1.4"
 reqwest = { version = "0.12.2", features = ["json", "stream"] }
 risingwave_common = { workspace = true }
