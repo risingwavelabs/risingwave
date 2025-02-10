@@ -1445,7 +1445,6 @@ mod test {
                 scope: None,
                 token: None,
                 enable_config_load: None,
-                enable_compaction: None,
             },
             r#type: "upsert".to_owned(),
             force_append_only: false,
