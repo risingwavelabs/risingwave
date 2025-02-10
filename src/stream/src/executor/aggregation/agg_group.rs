@@ -35,7 +35,7 @@ use crate::executor::error::StreamExecutorResult;
 use crate::executor::PkIndices;
 
 #[derive(Debug)]
-struct Context {
+pub struct Context {
     group_key: Option<GroupKey>,
 }
 
@@ -421,8 +421,9 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
 
     /// Build change for aggregation intermediate states, according to previous and current agg states.
     /// The change should be applied to the intermediate state table.
+    ///
     /// The saved previous inter states will be updated to the latest states after calling this method.
-    pub async fn build_states_change(
+    pub fn build_states_change(
         &mut self,
         funcs: &[BoxedAggregateFunction],
     ) -> StreamExecutorResult<Option<Record<OwnedRow>>> {
@@ -488,7 +489,12 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
     }
 
     /// Build aggregation result change, according to previous and current agg outputs.
+    /// The change should be yielded to downstream.
+    ///
     /// The saved previous outputs will be updated to the latest outputs after this method.
+    ///
+    /// Note that this method is very likely to cost more than `build_states_change`, because it
+    /// needs to produce output for materialized input states which may involve state table read.
     pub async fn build_outputs_change(
         &mut self,
         storages: &[AggStateStorage<S>],

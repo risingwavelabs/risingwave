@@ -196,33 +196,38 @@ impl<S: StateStore> SimpleAggExecutor<S> {
             // Flush distinct dedup state.
             vars.distinct_dedup.flush(&mut this.distinct_dedup_tables)?;
 
-            // Flush states into intermediate state table.
-            let encoded_states = vars.agg_group.encode_states(&this.agg_funcs)?;
-            this.intermediate_state_table
-                .update_without_old_value(encoded_states);
-        }
-
-        // Retrieve modified states and put the changes into the builders.
-        let (change, _stats) = vars
-            .agg_group
-            .build_change(&this.storages, &this.agg_funcs)
-            .await?;
-        let chunk = change.and_then(|change| {
-            if !this.must_output_per_barrier {
-                if let Record::Update { old_row, new_row } = &change {
-                    if old_row == new_row {
-                        return None;
-                    }
-                };
+            // Build and apply change for intermediate states.
+            if let Some(inter_states_change) =
+                vars.agg_group.build_states_change(&this.agg_funcs)?
+            {
+                this.intermediate_state_table
+                    .write_record(inter_states_change);
             }
+        }
+        vars.state_changed = false;
+
+        // Build and apply change for the final outputs.
+        let (outputs_change, _stats) = vars
+            .agg_group
+            .build_outputs_change(&this.storages, &this.agg_funcs)
+            .await?;
+
+        let change =
+            outputs_change.expect("`AlwaysOutput` strategy will output a change in any case");
+        let chunk = if !this.must_output_per_barrier
+            && let Record::Update { old_row, new_row } = &change
+            && old_row == new_row
+        {
+            // for cases without approx percentile, we don't need to output the change if it's noop
+            None
+        } else {
             Some(change.to_stream_chunk(&this.info.schema.data_types()))
-        });
+        };
 
         // Commit all state tables.
         futures::future::try_join_all(this.all_state_tables_mut().map(|table| table.commit(epoch)))
             .await?;
 
-        vars.state_changed = false;
         Ok(chunk)
     }
 
