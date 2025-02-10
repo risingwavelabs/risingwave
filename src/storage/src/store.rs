@@ -394,7 +394,7 @@ pub trait StateStore: StateStoreRead + StateStoreReadLog + StaticSendSync + Clon
 /// written by itself. Each local state store is not `Clone`, and is owned by a streaming state
 /// table.
 pub trait LocalStateStore: StaticSendSync {
-    type FlushedSnapshotReader: StateStoreRead + Clone;
+    type FlushedSnapshotReader: StateStoreRead;
     type Iter<'a>: StateStoreIter + 'a;
     type RevIter<'a>: StateStoreIter + 'a;
 
