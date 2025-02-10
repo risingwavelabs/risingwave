@@ -155,21 +155,21 @@ pub fn cstr_to_str(b: &Bytes) -> Result<&str, Utf8Error> {
 }
 
 /// Record `sql` in the current tracing span.
-fn record_sql_in_span(sql: &str, redact_sql_option_keywords: Option<RedactSqlOptionKeywordsRef>) {
+fn record_sql_in_span(
+    sql: &str,
+    redact_sql_option_keywords: Option<RedactSqlOptionKeywordsRef>,
+) -> String {
     let redacted_sql = if let Some(keywords) = redact_sql_option_keywords {
         redact_sql(sql, keywords)
     } else {
         sql.to_owned()
     };
-    tracing::Span::current().record(
-        "sql",
-        tracing::field::display(truncated_fmt::TruncatedFmt(
-            &redacted_sql,
-            *RW_QUERY_LOG_TRUNCATE_LEN,
-        )),
-    );
+    let truncated = truncated_fmt::TruncatedFmt(&redacted_sql, *RW_QUERY_LOG_TRUNCATE_LEN);
+    tracing::Span::current().record("sql", tracing::field::display(&truncated));
+    truncated.to_string()
 }
 
+/// Redacts SQL options. Data in DML is not redacted.
 fn redact_sql(sql: &str, keywords: RedactSqlOptionKeywordsRef) -> String {
     match Parser::parse_sql(sql) {
         Ok(sqls) => sqls
@@ -408,7 +408,12 @@ where
             FeMessage::Ssl => self.process_ssl_msg().await?,
             FeMessage::Startup(msg) => self.process_startup_msg(msg)?,
             FeMessage::Password(msg) => self.process_password_msg(msg).await?,
-            FeMessage::Query(query_msg) => self.process_query_msg(query_msg.get_sql()).await?,
+            FeMessage::Query(query_msg) => {
+                let sql = Arc::from(query_msg.get_sql()?);
+                // The process_query_msg can be slow. Release potential large FeQueryMessage early.
+                drop(query_msg);
+                self.process_query_msg(sql).await?
+            }
             FeMessage::CancelQuery(m) => self.process_cancel_msg(m)?,
             FeMessage::Terminate => self.process_terminate(),
             FeMessage::Parse(m) => {
@@ -568,16 +573,14 @@ where
         Ok(())
     }
 
-    async fn process_query_msg(&mut self, query_string: io::Result<&str>) -> PsqlResult<()> {
-        let sql: Arc<str> =
-            Arc::from(query_string.map_err(|err| PsqlError::SimpleQueryError(Box::new(err)))?);
-        record_sql_in_span(&sql, self.redact_sql_option_keywords.clone());
+    async fn process_query_msg(&mut self, sql: Arc<str>) -> PsqlResult<()> {
+        let truncated_sql = record_sql_in_span(&sql, self.redact_sql_option_keywords.clone());
         let session = self.session.clone().unwrap();
 
         session.check_idle_in_transaction_timeout()?;
-        let _exec_context_guard = session.init_exec_context(sql.clone());
-        self.inner_process_query_msg(sql.clone(), session.clone())
-            .await
+        // Store only truncated SQL in context to prevent excessive memory usage from large SQL.
+        let _exec_context_guard = session.init_exec_context(truncated_sql.into());
+        self.inner_process_query_msg(sql, session.clone()).await
     }
 
     async fn inner_process_query_msg(
@@ -588,6 +591,8 @@ where
         // Parse sql.
         let stmts =
             Parser::parse_sql(&sql).map_err(|err| PsqlError::SimpleQueryError(err.into()))?;
+        // The following inner_process_query_msg_one_stmt can be slow. Release potential large String early.
+        drop(sql);
         if stmts.is_empty() {
             self.stream.write_no_flush(&BeMessage::EmptyQueryResponse)?;
         }
@@ -611,10 +616,7 @@ where
         let session = session.clone();
 
         // execute query
-        let res = session
-            .clone()
-            .run_one_query(stmt.clone(), Format::Text)
-            .await;
+        let res = session.clone().run_one_query(stmt, Format::Text).await;
         for notice in session.take_notices() {
             self.stream
                 .write_no_flush(&BeMessage::NoticeResponse(&notice))?;
@@ -706,20 +708,23 @@ where
         self.is_terminate = true;
     }
 
-    async fn process_parse_msg(&mut self, msg: FeParseMessage) -> PsqlResult<()> {
-        let sql = cstr_to_str(&msg.sql_bytes).unwrap();
-        record_sql_in_span(sql, self.redact_sql_option_keywords.clone());
+    async fn process_parse_msg(&mut self, mut msg: FeParseMessage) -> PsqlResult<()> {
+        let sql = Arc::from(cstr_to_str(&msg.sql_bytes).unwrap());
+        record_sql_in_span(&sql, self.redact_sql_option_keywords.clone());
         let session = self.session.clone().unwrap();
         let statement_name = cstr_to_str(&msg.statement_name).unwrap().to_owned();
-
-        self.inner_process_parse_msg(session, sql, statement_name, msg.type_ids)
-            .await
+        let type_ids = std::mem::take(&mut msg.type_ids);
+        // The inner_process_parse_msg can be slow. Release potential large FeParseMessage early.
+        drop(msg);
+        self.inner_process_parse_msg(session, sql, statement_name, type_ids)
+            .await?;
+        Ok(())
     }
 
     async fn inner_process_parse_msg(
         &mut self,
         session: Arc<SM::Session>,
-        sql: &str,
+        sql: Arc<str>,
         statement_name: String,
         type_ids: Vec<i32>,
     ) -> PsqlResult<()> {
@@ -734,9 +739,9 @@ where
         }
 
         let stmt = {
-            let stmts = Parser::parse_sql(sql)
+            let stmts = Parser::parse_sql(&sql)
                 .map_err(|err| PsqlError::ExtendedPrepareError(err.into()))?;
-
+            drop(sql);
             if stmts.len() > 1 {
                 return Err(PsqlError::ExtendedPrepareError(
                     "Only one statement is allowed in extended query mode".into(),
@@ -831,6 +836,7 @@ where
     async fn process_execute_msg(&mut self, msg: FeExecuteMessage) -> PsqlResult<()> {
         let portal_name = cstr_to_str(&msg.portal_name).unwrap().to_owned();
         let row_max = msg.max_rows as usize;
+        drop(msg);
         let session = self.session.clone().unwrap();
 
         if let Some(mut result_cache) = self.result_cache.remove(&portal_name) {
@@ -843,11 +849,13 @@ where
             }
         } else {
             let portal = self.get_portal(&portal_name)?;
-            let sql: Arc<str> = Arc::from(format!("{}", portal));
-            record_sql_in_span(&sql, self.redact_sql_option_keywords.clone());
+            let sql = format!("{}", portal);
+            let truncated_sql = record_sql_in_span(&sql, self.redact_sql_option_keywords.clone());
+            drop(sql);
 
             session.check_idle_in_transaction_timeout()?;
-            let _exec_context_guard = session.init_exec_context(sql.clone());
+            // Store only truncated SQL in context to prevent excessive memory usage from large SQL.
+            let _exec_context_guard = session.init_exec_context(truncated_sql.into());
             let result = session.clone().execute(portal).await;
 
             let pg_response = result.map_err(PsqlError::ExtendedExecuteError)?;

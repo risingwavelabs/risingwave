@@ -563,11 +563,9 @@ pub async fn local_execute(
 
     let snapshot = session.pinned_snapshot();
 
-    // TODO: Passing sql here
     let execution = LocalQueryExecution::new(
         query,
         front_env.clone(),
-        "",
         snapshot.support_barrier_read(),
         snapshot.batch_query_epoch(read_storage_tables)?,
         session,
