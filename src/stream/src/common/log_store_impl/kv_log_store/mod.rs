@@ -35,6 +35,7 @@ use crate::executor::monitor::StreamingMetrics;
 pub(crate) mod buffer;
 pub mod reader;
 pub(crate) mod serde;
+pub(crate) mod state;
 #[cfg(test)]
 pub mod test_utils;
 mod writer;
@@ -303,6 +304,7 @@ mod v1 {
 
 pub(crate) use v2::KV_LOG_STORE_V2_INFO;
 
+use crate::common::log_store_impl::kv_log_store::state::new_log_store_state;
 use crate::task::ActorId;
 
 /// A new version of log store schema. Compared to v1, the v2 added a new vnode column to the log store pk,
@@ -410,25 +412,17 @@ impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
 
         let (tx, rx) = new_log_store_buffer(self.max_row_count, self.metrics.clone());
 
+        let (read_state, write_state) = new_log_store_state(table_id, local_state_store, serde);
+
         let reader = KvLogStoreReader::new(
-            table_id,
-            local_state_store.new_flushed_snapshot_reader(),
-            serde.clone(),
+            read_state,
             rx,
             self.metrics.clone(),
             pause_rx,
             self.identity.clone(),
         );
 
-        let writer = KvLogStoreWriter::new(
-            table_id,
-            local_state_store,
-            serde,
-            tx,
-            self.metrics,
-            pause_tx,
-            self.identity,
-        );
+        let writer = KvLogStoreWriter::new(write_state, tx, self.metrics, pause_tx, self.identity);
 
         (reader, writer)
     }
