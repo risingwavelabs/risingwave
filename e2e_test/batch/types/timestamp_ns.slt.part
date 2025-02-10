@@ -62,7 +62,7 @@ select * from t1 where v2 >= '2012-01-01 01:01:01.123456';
 6  2013-01-01 01:01:01.123456789
 
 query T rowsort
-select v1, cast(v2 as date) as date_v2, cast(v2 as timestamp_ns) as timestamptz_v2 from t1;
+select v1, cast(v2 as date) as date_v2, cast(v2 as timestamptz) as timestamptz_v2 from t1;
 ----
 1  2013-01-01     2013-01-01 01:01:01.123456+00:00
 2  2012-01-01     2012-01-01 01:01:01.123456+00:00
