@@ -165,7 +165,7 @@ opendal = "0.49"
 # used only by arrow-udf-flight
 arrow-flight = "53"
 arrow-udf-js = { git = "https://github.com/arrow-udf/arrow-udf.git", rev = "3caacf6960a775f238755822dbf2b920844a2339" }
-arrow-udf-wasm = { version = "0.4", features = ["build"] }
+arrow-udf-wasm = { git = "https://github.com/arrow-udf/arrow-udf.git", rev = "3caacf6960a775f238755822dbf2b920844a2339", features = ["build"] }
 arrow-udf-python = "0.4"
 arrow-udf-flight = "0.4"
 clap = { version = "4", features = ["cargo", "derive", "env"] }
