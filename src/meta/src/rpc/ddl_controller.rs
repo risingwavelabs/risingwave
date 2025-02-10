@@ -52,7 +52,6 @@ use risingwave_pb::ddl_service::{
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::PbFragment;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::update_mutation::PbMergeUpdate;
 use risingwave_pb::stream_plan::{
     Dispatcher, DispatcherType, FragmentTypeFlag, MergeNode, PbStreamFragmentGraph,
     StreamFragmentGraph as StreamFragmentGraphProto,
@@ -834,19 +833,25 @@ impl DdlController {
         };
 
         let upstream_actors = sink_fragment.get_actors();
+        let sink_fragment_dispatchers = replace_table_ctx
+            .dispatchers
+            .entry(sink_fragment.fragment_id)
+            .or_default();
 
         for actor in upstream_actors {
-            replace_table_ctx.dispatchers.insert(
-                actor.actor_id,
-                vec![Dispatcher {
-                    r#type: DispatcherType::Hash as _,
-                    dist_key_indices: dist_key_indices.clone(),
-                    output_indices: output_indices.clone(),
-                    hash_mapping: mapping.as_ref().map(|m| m.to_protobuf()),
-                    dispatcher_id: union_fragment.fragment_id as _,
-                    downstream_actor_id: downstream_actor_ids.clone(),
-                }],
-            );
+            sink_fragment_dispatchers
+                .try_insert(
+                    actor.actor_id,
+                    vec![Dispatcher {
+                        r#type: DispatcherType::Hash as _,
+                        dist_key_indices: dist_key_indices.clone(),
+                        output_indices: output_indices.clone(),
+                        hash_mapping: mapping.as_ref().map(|m| m.to_protobuf()),
+                        dispatcher_id: union_fragment.fragment_id as _,
+                        downstream_actor_id: downstream_actor_ids.clone(),
+                    }],
+                )
+                .expect("non-duplicate");
         }
 
         let upstream_fragment_id = sink_fragment.fragment_id;
@@ -1251,7 +1256,7 @@ impl DdlController {
                 )
                 .await?;
 
-            let result: MetaResult<Vec<PbMergeUpdate>> = try {
+            let result: MetaResult<_> = try {
                 let merge_updates = ctx.merge_updates.clone();
 
                 self.metadata_manager
@@ -1408,7 +1413,7 @@ impl DdlController {
         tracing::debug!(id = job_id, "building replace streaming job");
         let mut updated_sink_catalogs = vec![];
 
-        let result: MetaResult<Vec<PbMergeUpdate>> = try {
+        let result: MetaResult<_> = try {
             let (mut ctx, mut stream_job_fragments) = self
                 .build_replace_job(
                     ctx,
