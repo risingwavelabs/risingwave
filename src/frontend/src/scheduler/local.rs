@@ -58,8 +58,7 @@ use crate::session::{FrontendEnv, SessionImpl};
 // TODO(error-handling): use a concrete error type.
 pub type LocalQueryStream = ReceiverStream<Result<DataChunk, BoxedError>>;
 pub struct LocalQueryExecution {
-    sql: String,
-    query: Query,
+    query: Option<Query>,
     front_env: FrontendEnv,
     batch_query_epoch: BatchQueryEpoch,
     session: Arc<SessionImpl>,
@@ -71,19 +70,17 @@ impl LocalQueryExecution {
     pub fn new<S: Into<String>>(
         query: Query,
         front_env: FrontendEnv,
-        sql: S,
+        _sql: S,
         support_barrier_read: bool,
         batch_query_epoch: BatchQueryEpoch,
         session: Arc<SessionImpl>,
         timeout: Option<Duration>,
     ) -> Self {
-        let sql = sql.into();
         let worker_node_manager =
             WorkerNodeSelector::new(front_env.worker_node_manager_ref(), support_barrier_read);
 
         Self {
-            sql,
-            query,
+            query: Some(query),
             front_env,
             batch_query_epoch,
             session,
@@ -97,19 +94,22 @@ impl LocalQueryExecution {
     }
 
     #[try_stream(ok = DataChunk, error = RwError)]
-    pub async fn run_inner(self) {
-        debug!(%self.query.query_id, self.sql, "Starting to run query");
-
+    pub async fn run_inner(mut self) {
+        debug!(
+            query_id = %self.query.as_ref().unwrap().query_id,
+            "Starting to run query"
+        );
         let context = FrontendBatchTaskContext::new(self.session.clone());
 
         let task_id = TaskId {
-            query_id: self.query.query_id.id.clone(),
+            query_id: self.query.as_ref().unwrap().query_id.id.clone(),
             stage_id: 0,
             task_id: 0,
         };
 
         let plan_fragment = self.create_plan_fragment()?;
         let plan_node = plan_fragment.root.unwrap();
+        self.query = None;
 
         let executor = ExecutorBuilder::new(
             &plan_node,
@@ -129,7 +129,7 @@ impl LocalQueryExecution {
     fn run(self) -> BoxStream<'static, Result<DataChunk, RwError>> {
         let span = tracing::info_span!(
             "local_execute",
-            query_id = self.query.query_id.id,
+            query_id = self.query.as_ref().unwrap().query_id.id,
             epoch = ?self.batch_query_epoch,
         );
         Box::pin(self.run_inner().instrument(span))
@@ -220,10 +220,22 @@ impl LocalQueryExecution {
     /// the pushed-down plan fragment.
     fn create_plan_fragment(&self) -> SchedulerResult<PlanFragment> {
         let next_executor_id = Arc::new(AtomicU32::new(0));
-        let root_stage_id = self.query.root_stage_id();
-        let root_stage = self.query.stage_graph.stages.get(&root_stage_id).unwrap();
+        let root_stage_id = self.query.as_ref().unwrap().root_stage_id();
+        let root_stage = self
+            .query
+            .as_ref()
+            .unwrap()
+            .stage_graph
+            .stages
+            .get(&root_stage_id)
+            .unwrap();
         assert_eq!(root_stage.parallelism.unwrap(), 1);
-        let second_stage_id = self.query.stage_graph.get_child_stages(&root_stage_id);
+        let second_stage_id = self
+            .query
+            .as_ref()
+            .unwrap()
+            .stage_graph
+            .get_child_stages(&root_stage_id);
         let plan_node_prost = match second_stage_id {
             None => {
                 debug!("Local execution mode converts a plan with a single stage");
@@ -238,8 +250,14 @@ impl LocalQueryExecution {
                 } else {
                     let mut second_stages = HashMap::new();
                     for second_stage_id in second_stage_ids {
-                        let second_stage =
-                            self.query.stage_graph.stages.get(second_stage_id).unwrap();
+                        let second_stage = self
+                            .query
+                            .as_ref()
+                            .unwrap()
+                            .stage_graph
+                            .stages
+                            .get(second_stage_id)
+                            .unwrap();
                         second_stages.insert(*second_stage_id, second_stage.clone());
                     }
                     let mut stage_id_to_plan = Some(second_stages);
@@ -344,7 +362,7 @@ impl LocalQueryExecution {
                                 task_id: Some(PbTaskId {
                                     task_id: idx as u64,
                                     stage_id: exchange_source_stage_id,
-                                    query_id: self.query.query_id.id.clone(),
+                                    query_id: self.query.as_ref().unwrap().query_id.id.clone(),
                                 }),
                                 output_id: 0,
                             }),
@@ -390,7 +408,7 @@ impl LocalQueryExecution {
                                 task_id: Some(PbTaskId {
                                     task_id: id as u64,
                                     stage_id: exchange_source_stage_id,
-                                    query_id: self.query.query_id.id.clone(),
+                                    query_id: self.query.as_ref().unwrap().query_id.id.clone(),
                                 }),
                                 output_id: 0,
                             }),
@@ -429,7 +447,7 @@ impl LocalQueryExecution {
                                 task_id: Some(PbTaskId {
                                     task_id: id as u64,
                                     stage_id: exchange_source_stage_id,
-                                    query_id: self.query.query_id.id.clone(),
+                                    query_id: self.query.as_ref().unwrap().query_id.id.clone(),
                                 }),
                                 output_id: 0,
                             }),
@@ -469,7 +487,7 @@ impl LocalQueryExecution {
                                     task_id: Some(PbTaskId {
                                         task_id: idx as u64,
                                         stage_id: exchange_source_stage_id,
-                                        query_id: self.query.query_id.id.clone(),
+                                        query_id: self.query.as_ref().unwrap().query_id.id.clone(),
                                     }),
                                     output_id: 0,
                                 }),

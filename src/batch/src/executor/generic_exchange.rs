@@ -241,6 +241,7 @@ impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> GenericExchangeExec
         let mut source = source_creator
             .create_source(context.clone(), &prost_source)
             .await?;
+        drop(prost_source);
         // create the collector
         let counter = metrics
             .as_ref()
