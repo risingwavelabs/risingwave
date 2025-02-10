@@ -370,6 +370,9 @@ impl Sink for IcebergSink {
     const SINK_NAME: &'static str = ICEBERG_SINK;
 
     async fn validate(&self) -> Result<()> {
+        if "snowflake".eq_ignore_ascii_case(self.config.catalog_type()) {
+            bail!("Snowflake catalog only supports iceberg sources");
+        }
         if "glue".eq_ignore_ascii_case(self.config.catalog_type()) {
             risingwave_common::license::Feature::IcebergSinkWithGlue
                 .check_available()

@@ -123,6 +123,7 @@ impl JavaVmWrapper {
             .version(JNIVersion::V8)
             .option("-Dis_embedded_connector=true")
             .option(format!("-Djava.class.path={}", class_vec.join(":")))
+            .option("--add-opens=java.base/java.nio=org.apache.arrow.memory.core,ALL-UNNAMED")
             .option("-Xms16m")
             .option(format!("-Xmx{}", jvm_heap_size));
 

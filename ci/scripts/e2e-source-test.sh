@@ -38,6 +38,12 @@ apt-get -y install jq
 echo "--- e2e, inline test"
 RUST_LOG="debug,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info,risingwave_meta=info" \
 risedev ci-start ci-inline-source-test
+
+# check if run debug only test
+if [ "$profile" == "ci-dev" ]; then
+    echo "--- Run debug mode only tests"
+    risedev slt './e2e_test/debug_mode_only/debug_splits.slt'
+fi
 risedev slt './e2e_test/source_inline/**/*.slt' -j16
 risedev slt './e2e_test/source_inline/**/*.slt.serial'
 echo "--- Kill cluster"
