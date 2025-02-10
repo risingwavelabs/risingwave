@@ -37,6 +37,9 @@ use crate::catalog::root_catalog::SchemaPath;
 use crate::error::ErrorCode::BindError;
 use crate::utils::FRONTEND_RUNTIME;
 
+const INLINE_ARG_LEN: usize = 6;
+const CDC_SOURCE_ARG_LEN: usize = 2;
+
 /// A table function takes a row as input and returns a table. It is also known as Set-Returning
 /// Function.
 ///
@@ -302,39 +305,16 @@ impl TableFunction {
         expect_connector_name: &str,
     ) -> RwResult<Vec<ExprImpl>> {
         let cast_args = match args.len() {
-            6 => {
-                let mut cast_args = Vec::with_capacity(6);
+            INLINE_ARG_LEN => {
+                let mut cast_args = Vec::with_capacity(INLINE_ARG_LEN);
                 for arg in args {
                     let arg = arg.cast_implicit(DataType::Varchar)?;
                     cast_args.push(arg);
                 }
                 cast_args
             }
-            2 => {
-                let source_name = match args
-                    .get(0)
-                    .unwrap()
-                    .clone()
-                    .cast_implicit(DataType::Varchar)?
-                    .try_fold_const()
-                {
-                    Some(Ok(value)) => {
-                        let Some(source_name) = value else {
-                            return Err(BindError(
-                                "postgres_query function only accepts constant arguments"
-                                    .to_owned(),
-                            )
-                            .into());
-                        };
-                        source_name.into_utf8().to_string()
-                    }
-                    _ => {
-                        return Err(BindError(
-                            "postgres_query function only accepts constant arguments".to_owned(),
-                        )
-                        .into());
-                    }
-                };
+            CDC_SOURCE_ARG_LEN => {
+                let source_name = expr_impl_to_string_fn(&args[0])?;
                 let source_catalog = catalog_reader
                     .get_source_by_name(db_name, schema_path, &source_name)?
                     .0;
@@ -382,32 +362,10 @@ impl TableFunction {
             args,
             "postgres-cdc",
         )?;
-        let evaled_args = {
-            let mut evaled_args: Vec<String> = Vec::with_capacity(6);
-            for arg in &args {
-                match arg.try_fold_const() {
-                    Some(Ok(value)) => {
-                        let Some(scalar) = value else {
-                            return Err(BindError(
-                                "postgres_query function does not accept null arguments".to_owned(),
-                            )
-                            .into());
-                        };
-                        evaled_args.push(scalar.into_utf8().into());
-                    }
-                    Some(Err(err)) => {
-                        return Err(err);
-                    }
-                    None => {
-                        return Err(BindError(
-                            "postgres_query function only accepts constant arguments".to_owned(),
-                        )
-                        .into());
-                    }
-                }
-            }
-            evaled_args
-        };
+        let evaled_args = args
+            .iter()
+            .map(expr_impl_to_string_fn)
+            .collect::<RwResult<Vec<_>>>()?;
 
         #[cfg(madsim)]
         {
@@ -496,7 +454,6 @@ impl TableFunction {
         schema_path: SchemaPath<'_>,
         args: Vec<ExprImpl>,
     ) -> RwResult<Self> {
-        static MYSQL_ARGS_LEN: usize = 6;
         let args = Self::handle_postgres_or_mysql_query_args(
             catalog_reader,
             db_name,
@@ -504,32 +461,10 @@ impl TableFunction {
             args,
             "mysql-cdc",
         )?;
-        let evaled_args = {
-            let mut evaled_args: Vec<String> = Vec::with_capacity(MYSQL_ARGS_LEN);
-            for arg in &args {
-                match arg.try_fold_const() {
-                    Some(Ok(value)) => {
-                        let Some(scalar) = value else {
-                            return Err(BindError(
-                                "mysql_query function does not accept null arguments".to_owned(),
-                            )
-                            .into());
-                        };
-                        evaled_args.push(scalar.into_utf8().into());
-                    }
-                    Some(Err(err)) => {
-                        return Err(err);
-                    }
-                    None => {
-                        return Err(BindError(
-                            "mysql_query function only accepts constant arguments".to_owned(),
-                        )
-                        .into());
-                    }
-                }
-            }
-            evaled_args
-        };
+        let evaled_args = args
+            .iter()
+            .map(expr_impl_to_string_fn)
+            .collect::<RwResult<Vec<_>>>()?;
 
         #[cfg(madsim)]
         {
@@ -702,5 +637,25 @@ impl Expr for TableFunction {
 
     fn to_expr_proto(&self) -> risingwave_pb::expr::ExprNode {
         unreachable!("Table function should not be converted to ExprNode")
+    }
+}
+
+fn expr_impl_to_string_fn(arg: &ExprImpl) -> RwResult<String> {
+    match arg.try_fold_const() {
+        Some(Ok(value)) => {
+            let Some(scalar) = value else {
+                return Err(BindError(
+                    "postgres_query function does not accept null arguments".to_owned(),
+                )
+                .into());
+            };
+            Ok(scalar.into_utf8().to_string())
+        }
+        Some(Err(err)) => Err(err),
+        None => Err(BindError(
+            "postgres_query function and mysql_query function only accepts constant arguments"
+                .to_owned(),
+        )
+        .into()),
     }
 }
