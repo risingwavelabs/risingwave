@@ -537,7 +537,7 @@ pub trait FromArrow {
             Timestamp(Second, Some(_)) => DataType::Timestamptz,
             Timestamp(Millisecond, None) => DataType::Timestamp,
             Timestamp(Millisecond, Some(_)) => DataType::Timestamptz,
-            Timestamp(Nanosecond, None) => DataType::Timestamp,
+            Timestamp(Nanosecond, None) => DataType::TimestampNanosecond,
             Timestamp(Nanosecond, Some(_)) => DataType::Timestamptz,
             Interval(MonthDayNano) => DataType::Interval,
             Utf8 => DataType::Varchar,
@@ -815,7 +815,7 @@ pub trait FromArrow {
         &self,
         array: &arrow_array::TimestampNanosecondArray,
     ) -> Result<ArrayImpl, ArrayError> {
-        Ok(ArrayImpl::Timestamp(array.into()))
+        Ok(ArrayImpl::TimestampNanosecond(array.into()))
     }
 
     fn from_timestampns_some_array(

@@ -33,7 +33,9 @@ use opendal::Operator;
 use parquet::arrow::async_reader::AsyncFileReader;
 use parquet::arrow::{parquet_to_arrow_schema, ParquetRecordBatchStreamBuilder, ProjectionMask};
 use parquet::file::metadata::{FileMetaData, ParquetMetaData, ParquetMetaDataReader};
-use risingwave_common::array::arrow::arrow_schema_udf::{DataType as ArrowDateType, IntervalUnit};
+use risingwave_common::array::arrow::arrow_schema_udf::{
+    DataType as ArrowDateType, IntervalUnit, TimeUnit,
+};
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::ColumnId;
@@ -396,7 +398,22 @@ fn is_parquet_schema_match_source_schema(
                 RwDataType::Float32
             )
             | (ArrowDateType::Float64, RwDataType::Float64)
-            | (ArrowDateType::Timestamp(_, None), RwDataType::Timestamp)
+            | (
+                ArrowDateType::Timestamp(TimeUnit::Second, None),
+                RwDataType::Timestamp
+            )
+            | (
+                ArrowDateType::Timestamp(TimeUnit::Millisecond, None),
+                RwDataType::Timestamp
+            )
+            | (
+                ArrowDateType::Timestamp(TimeUnit::Microsecond, None),
+                RwDataType::Timestamp
+            )
+            | (
+                ArrowDateType::Timestamp(TimeUnit::Nanosecond, None),
+                RwDataType::TimestampNanosecond
+            )
             | (
                 ArrowDateType::Timestamp(_, Some(_)),
                 RwDataType::Timestamptz

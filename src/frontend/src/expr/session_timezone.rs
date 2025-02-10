@@ -94,6 +94,8 @@ impl SessionTimezone {
             // => `(input_timestamptz AT TIME ZONE zone_string)::time`
             // `input_timestamptz::timestamp`
             // => `input_timestamptz AT TIME ZONE zone_string`
+            // `input_timestamptz::timestamp_ns`
+            // => `input_timestamptz AT TIME ZONE zone_string`
             ExprType::Cast => {
                 assert_eq!(inputs.len(), 1);
                 let mut input = inputs[0].clone();
