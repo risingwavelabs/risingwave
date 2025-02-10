@@ -435,7 +435,6 @@ impl<K: HashKey, S: StateStore, const EOWC: bool> HashAggExecutor<K, S, EOWC> {
                         .collect();
                     let states = row.into_iter().skip(this.group_key_indices.len()).collect();
 
-                    // TODO(rc): Will use the `EOWC` flag to get rid of this special constructor in the next PR.
                     let mut agg_group = AggGroup::<S, EOWC>::create_eowc(
                         this.version,
                         Some(GroupKey::new(
