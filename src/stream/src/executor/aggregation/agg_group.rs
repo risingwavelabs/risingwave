@@ -308,6 +308,48 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
         Ok(this)
     }
 
+    /// Create a group from intermediate states for EOWC output.
+    /// Will always produce `Insert` when building change.
+    #[allow(clippy::too_many_arguments)]
+    pub fn for_eowc_output(
+        version: PbAggNodeVersion,
+        group_key: Option<GroupKey>,
+        agg_calls: &[AggCall],
+        agg_funcs: &[BoxedAggregateFunction],
+        storages: &[AggStateStorage<S>],
+        inter_states: &OwnedRow,
+        pk_indices: &PkIndices,
+        row_count_index: usize,
+        emit_on_window_close: bool,
+        extreme_cache_size: usize,
+        input_schema: &Schema,
+    ) -> StreamExecutorResult<Self> {
+        let mut states = Vec::with_capacity(agg_calls.len());
+        for (idx, (agg_call, agg_func)) in agg_calls.iter().zip_eq_fast(agg_funcs).enumerate() {
+            let state = AggState::create(
+                version,
+                agg_call,
+                agg_func,
+                &storages[idx],
+                Some(&inter_states[idx]),
+                pk_indices,
+                extreme_cache_size,
+                input_schema,
+            )?;
+            states.push(state);
+        }
+
+        Ok(Self {
+            ctx: Context { group_key },
+            states,
+            prev_inter_states: None, // this doesn't matter
+            prev_outputs: None,      // this will make sure the outputs change to be `Insert`
+            row_count_index,
+            emit_on_window_close,
+            _phantom: PhantomData,
+        })
+    }
+
     pub fn group_key(&self) -> Option<&GroupKey> {
         self.ctx.group_key()
     }
@@ -560,50 +602,6 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
             }),
             stats,
         ))
-    }
-}
-
-impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
-    /// Create a group from intermediate states for EOWC output.
-    /// Will always produce `Insert` when building change.
-    #[allow(clippy::too_many_arguments)]
-    pub fn for_eowc_output(
-        version: PbAggNodeVersion,
-        group_key: Option<GroupKey>,
-        agg_calls: &[AggCall],
-        agg_funcs: &[BoxedAggregateFunction],
-        storages: &[AggStateStorage<S>],
-        inter_states: &OwnedRow,
-        pk_indices: &PkIndices,
-        row_count_index: usize,
-        emit_on_window_close: bool,
-        extreme_cache_size: usize,
-        input_schema: &Schema,
-    ) -> StreamExecutorResult<Self> {
-        let mut states = Vec::with_capacity(agg_calls.len());
-        for (idx, (agg_call, agg_func)) in agg_calls.iter().zip_eq_fast(agg_funcs).enumerate() {
-            let state = AggState::create(
-                version,
-                agg_call,
-                agg_func,
-                &storages[idx],
-                Some(&inter_states[idx]),
-                pk_indices,
-                extreme_cache_size,
-                input_schema,
-            )?;
-            states.push(state);
-        }
-
-        Ok(Self {
-            ctx: Context { group_key },
-            states,
-            prev_inter_states: None, // this doesn't matter
-            prev_outputs: None,      // this will make sure the outputs change to be `Insert`
-            row_count_index,
-            emit_on_window_close,
-            _phantom: PhantomData,
-        })
     }
 }
 
