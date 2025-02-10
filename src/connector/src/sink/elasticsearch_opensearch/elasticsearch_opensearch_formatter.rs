@@ -102,7 +102,8 @@ impl ElasticSearchOpenSearchFormatter {
         } else {
             None
         };
-        let key_encoder = TemplateEncoder::new(schema.clone(), col_indices.clone(), key_format);
+        let key_encoder =
+            TemplateEncoder::new_string(schema.clone(), col_indices.clone(), key_format);
         let value_encoder = JsonEncoder::new_with_es(schema.clone(), col_indices.clone());
         Ok(Self {
             key_encoder,
@@ -150,7 +151,7 @@ impl ElasticSearchOpenSearchFormatter {
                 .transpose()?;
             match op {
                 Op::Insert | Op::UpdateInsert => {
-                    let key = self.key_encoder.encode(rows)?;
+                    let key = self.key_encoder.encode(rows)?.into_string()?;
                     let value = self.value_encoder.encode(rows)?;
                     result_vec.push(BuildBulkPara {
                         index: index.to_owned(),
@@ -166,7 +167,7 @@ impl ElasticSearchOpenSearchFormatter {
                             "`Delete` operation is not supported in `append_only` mode"
                         )));
                     }
-                    let key = self.key_encoder.encode(rows)?;
+                    let key = self.key_encoder.encode(rows)?.into_string()?;
                     let mem_size_b = std::mem::size_of_val(&key);
                     result_vec.push(BuildBulkPara {
                         index: index.to_owned(),
