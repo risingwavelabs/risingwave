@@ -585,7 +585,6 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
 }
 
 impl<S: StateStoreRead> LogStoreReadState<S> {
-    #[expect(clippy::too_many_arguments)]
     pub(crate) fn read_flushed_chunk(
         &self,
         vnode_bitmap: Bitmap,

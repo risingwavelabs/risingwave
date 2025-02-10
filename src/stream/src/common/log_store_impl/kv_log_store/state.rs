@@ -127,6 +127,9 @@ impl<S: LocalStateStore> LogStoreWriteState<S> {
                 switch_op_consistency_level: None,
             },
         );
+        let epoch = self.epoch.as_mut().expect("should have init");
+        epoch.prev = epoch.curr;
+        epoch.curr = next_epoch;
     }
 
     pub(crate) fn update_vnode_bitmap(&mut self, new_vnodes: &Arc<Bitmap>) {
