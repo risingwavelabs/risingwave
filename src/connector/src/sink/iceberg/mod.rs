@@ -327,7 +327,7 @@ impl IcebergSink {
                     )
                     .unwrap();
                     if !re.is_match(partition_field) {
-                        bail!(format!("Invalid partition fields: {}", partition_field))
+                        bail!(format!("Invalid partition fields: {}\nHINT: Supported formats are column, transform(column), transform(n,column), transform(n, column)", partition_field))
                     }
                     let caps = re.captures_iter(partition_field);
                     for mat in caps {
@@ -352,7 +352,7 @@ impl IcebergSink {
                                     .build(),
                             ),
                             None => bail!(format!(
-                                "Partition column does not exist in schema: {}",
+                                "Partition source column does not exist in schema: {}",
                                 column
                             )),
                         };
