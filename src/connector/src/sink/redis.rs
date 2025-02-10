@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -21,13 +21,14 @@ use redis::cluster::{ClusterClient, ClusterConnection, ClusterPipeline};
 use redis::{Client as RedisClient, Pipeline};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
+use risingwave_common::types::DataType;
 use serde_derive::Deserialize;
 use serde_json::Value;
 use serde_with::serde_as;
 use with_options::WithOptions;
 
 use super::catalog::SinkFormatDesc;
-use super::encoder::template::TemplateEncoder;
+use super::encoder::template::{RedisSinkPayloadWriterInput, TemplateStringEncoder};
 use super::formatter::SinkFormatterImpl;
 use super::writer::FormattedSink;
 use super::{SinkError, SinkParam};
@@ -42,6 +43,12 @@ use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkWriterParam};
 pub const REDIS_SINK: &str = "redis";
 pub const KEY_FORMAT: &str = "key_format";
 pub const VALUE_FORMAT: &str = "value_format";
+pub const REDIS_VALUE_TYPE: &str = "redis_value_type";
+pub const REDIS_VALUE_TYPE_STRING: &str = "string";
+pub const REDIS_VALUE_TYPE_GEO: &str = "geospatial";
+pub const LON_NAME: &str = "longitude";
+pub const LAT_NAME: &str = "latitude";
+pub const MEMBER_NAME: &str = "member";
 
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct RedisCommon {
@@ -74,26 +81,68 @@ impl RedisPipe {
         }
     }
 
-    pub fn set(&mut self, k: String, v: Vec<u8>) {
+    pub fn set(
+        &mut self,
+        k: RedisSinkPayloadWriterInput,
+        v: RedisSinkPayloadWriterInput,
+    ) -> Result<()> {
         match self {
-            RedisPipe::Cluster(pipe) => {
-                pipe.set(k, v);
-            }
-            RedisPipe::Single(pipe) => {
-                pipe.set(k, v);
-            }
+            RedisPipe::Cluster(pipe) => match (k, v) {
+                (
+                    RedisSinkPayloadWriterInput::String(k),
+                    RedisSinkPayloadWriterInput::String(v),
+                ) => {
+                    pipe.set(k, v);
+                }
+                (
+                    RedisSinkPayloadWriterInput::RedisGeoKey((key, member)),
+                    RedisSinkPayloadWriterInput::RedisGeoValue((lat, lon)),
+                ) => {
+                    pipe.geo_add(key, (lon, lat, member));
+                }
+                _ => return Err(SinkError::Redis("RedisPipe set not match".to_owned())),
+            },
+            RedisPipe::Single(pipe) => match (k, v) {
+                (
+                    RedisSinkPayloadWriterInput::String(k),
+                    RedisSinkPayloadWriterInput::String(v),
+                ) => {
+                    pipe.set(k, v);
+                }
+                (
+                    RedisSinkPayloadWriterInput::RedisGeoKey((key, member)),
+                    RedisSinkPayloadWriterInput::RedisGeoValue((lat, lon)),
+                ) => {
+                    pipe.geo_add(key, (lon, lat, member));
+                }
+                _ => return Err(SinkError::Redis("RedisPipe set not match".to_owned())),
+            },
         };
+        Ok(())
     }
 
-    pub fn del(&mut self, k: String) {
+    pub fn del(&mut self, k: RedisSinkPayloadWriterInput) -> Result<()> {
         match self {
-            RedisPipe::Cluster(pipe) => {
-                pipe.del(k);
-            }
-            RedisPipe::Single(pipe) => {
-                pipe.del(k);
-            }
+            RedisPipe::Cluster(pipe) => match k {
+                RedisSinkPayloadWriterInput::String(k) => {
+                    pipe.del(k);
+                }
+                RedisSinkPayloadWriterInput::RedisGeoKey((key, member)) => {
+                    pipe.zrem(key, member);
+                }
+                _ => return Err(SinkError::Redis("RedisPipe del not match".to_owned())),
+            },
+            RedisPipe::Single(pipe) => match k {
+                RedisSinkPayloadWriterInput::String(k) => {
+                    pipe.del(k);
+                }
+                RedisSinkPayloadWriterInput::RedisGeoKey((key, member)) => {
+                    pipe.zrem(key, member);
+                }
+                _ => return Err(SinkError::Redis("RedisPipe del not match".to_owned())),
+            },
         };
+        Ok(())
     }
 }
 pub enum RedisConn {
@@ -213,19 +262,19 @@ impl Sink for RedisSink {
 
     async fn validate(&self) -> Result<()> {
         self.config.common.build_conn_and_pipe().await?;
-        let all_set: HashSet<String> = self
+        let all_map: HashMap<String, DataType> = self
             .schema
             .fields()
             .iter()
-            .map(|f| f.name.clone())
+            .map(|f| (f.name.clone(), f.data_type.clone()))
             .collect();
-        let pk_set: HashSet<String> = self
+        let pk_map: HashMap<String, DataType> = self
             .schema
             .fields()
             .iter()
             .enumerate()
             .filter(|(k, _)| self.pk_indices.contains(k))
-            .map(|(_, v)| v.name.clone())
+            .map(|(_, v)| (v.name.clone(), v.data_type.clone()))
             .collect();
         if matches!(
             self.format_desc.encode,
@@ -233,16 +282,79 @@ impl Sink for RedisSink {
         ) {
             let key_format = self.format_desc.options.get(KEY_FORMAT).ok_or_else(|| {
                 SinkError::Config(anyhow!(
-                    "Cannot find 'key_format', please set it or use JSON"
+                    "Cannot find '{KEY_FORMAT}', please set it or use JSON"
                 ))
             })?;
-            let value_format = self.format_desc.options.get(VALUE_FORMAT).ok_or_else(|| {
-                SinkError::Config(anyhow!(
-                    "Cannot find 'value_format', please set it or use JSON"
-                ))
-            })?;
-            TemplateEncoder::check_string_format(key_format, &pk_set)?;
-            TemplateEncoder::check_string_format(value_format, &all_set)?;
+            TemplateStringEncoder::check_string_format(key_format, &pk_map)?;
+            match self
+                .format_desc
+                .options
+                .get(REDIS_VALUE_TYPE)
+                .map(|s| s.as_str())
+            {
+                Some(REDIS_VALUE_TYPE_STRING) => {
+                    let value_format =
+                        self.format_desc.options.get(VALUE_FORMAT).ok_or_else(|| {
+                            SinkError::Config(anyhow!(
+                                "Cannot find `{VALUE_FORMAT}`, please set it or use JSON"
+                            ))
+                        })?;
+                    TemplateStringEncoder::check_string_format(value_format, &all_map)?;
+                }
+                Some(REDIS_VALUE_TYPE_GEO) => {
+                    let lon_name = self.format_desc.options.get(LON_NAME).ok_or_else(|| {
+                        SinkError::Config(anyhow!(
+                            "Cannot find `{LON_NAME}`, please set it or use JSON or set `{REDIS_VALUE_TYPE}` to `{REDIS_VALUE_TYPE_STRING}`"
+                        ))
+                    })?;
+                    let lat_name = self.format_desc.options.get(LAT_NAME).ok_or_else(|| {
+                        SinkError::Config(anyhow!(
+                            "Cannot find `{LAT_NAME}`, please set it or use JSON or set `{REDIS_VALUE_TYPE}` to `{REDIS_VALUE_TYPE_STRING}`"
+                        ))
+                    })?;
+                    let member_name = self.format_desc.options.get(MEMBER_NAME).ok_or_else(|| {
+                        SinkError::Config(anyhow!(
+                            "Cannot find `{MEMBER_NAME}`, please set it or use JSON or set `{REDIS_VALUE_TYPE}` to `{REDIS_VALUE_TYPE_STRING}`"
+                        ))
+                    })?;
+                    if let Some(lon_type) = all_map.get(lon_name)
+                        && (lon_type == &DataType::Float64
+                            || lon_type == &DataType::Float32
+                            || lon_type == &DataType::Varchar)
+                    {
+                        // do nothing
+                    } else {
+                        return Err(SinkError::Config(anyhow!(
+                            "`{LON_NAME}` must be set to `float64` or `float32` or `varchar`"
+                        )));
+                    }
+                    if let Some(lat_type) = all_map.get(lat_name)
+                        && (lat_type == &DataType::Float64
+                            || lat_type == &DataType::Float32
+                            || lat_type == &DataType::Varchar)
+                    {
+                        // do nothing
+                    } else {
+                        return Err(SinkError::Config(anyhow!(
+                            "`{LAT_NAME}` must be set to `float64` or `float32` or `varchar`"
+                        )));
+                    }
+                    if let Some(member_type) = pk_map.get(member_name)
+                        && member_type == &DataType::Varchar
+                    {
+                        // do nothing
+                    } else {
+                        return Err(SinkError::Config(anyhow!(
+                            "`{MEMBER_NAME}` must be set to `varchar` and `primary_key`"
+                        )));
+                    }
+                }
+                _ => {
+                    return Err(SinkError::Config(anyhow!(
+                        "`{REDIS_VALUE_TYPE}` must be set to `{REDIS_VALUE_TYPE_STRING}` or `{REDIS_VALUE_TYPE_GEO}`"
+                    )))
+                }
+            }
         }
         Ok(())
     }
@@ -295,14 +407,14 @@ impl RedisSinkPayloadWriter {
 }
 
 impl FormattedSink for RedisSinkPayloadWriter {
-    type K = String;
-    type V = Vec<u8>;
+    type K = RedisSinkPayloadWriterInput;
+    type V = RedisSinkPayloadWriterInput;
 
     async fn write_one(&mut self, k: Option<Self::K>, v: Option<Self::V>) -> Result<()> {
         let k = k.ok_or_else(|| SinkError::Redis("The redis key cannot be null".to_owned()))?;
         match v {
-            Some(v) => self.pipe.set(k, v),
-            None => self.pipe.del(k),
+            Some(v) => self.pipe.set(k, v)?,
+            None => self.pipe.del(k)?,
         };
         Ok(())
     }

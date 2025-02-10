@@ -436,6 +436,7 @@ impl IcebergCommon {
             }
             catalog_type
                 if catalog_type == "hive"
+                    || catalog_type == "snowflake"
                     || catalog_type == "jdbc"
                     || catalog_type == "rest"
                     || catalog_type == "glue" =>
@@ -446,6 +447,7 @@ impl IcebergCommon {
                 let catalog_impl = match catalog_type {
                     "hive" => "org.apache.iceberg.hive.HiveCatalog",
                     "jdbc" => "org.apache.iceberg.jdbc.JdbcCatalog",
+                    "snowflake" => "org.apache.iceberg.snowflake.SnowflakeCatalog",
                     "rest" => "org.apache.iceberg.rest.RESTCatalog",
                     "glue" => "org.apache.iceberg.aws.glue.GlueCatalog",
                     _ => unreachable!(),
