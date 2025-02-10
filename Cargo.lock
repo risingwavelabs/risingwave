@@ -316,9 +316,9 @@ checksum = "7d5a26814d8dcb93b0e5a0ff3c6d80a8843bafb21b39e8e18a6f05471870e110"
 
 [[package]]
 name = "arc-swap"
-version = "1.7.0"
+version = "1.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b3d0060af21e8d11a926981cc00c6c1541aa91dd64b9f881985c3da1094425f"
+checksum = "69f7f8c3906b62b754cd5326047894316021dcfe5a194c8ea52bdd94934a3457"
 
 [[package]]
 name = "array-init"
@@ -10135,15 +10135,31 @@ version = "0.25.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e0d7a6955c7511f60f3ba9e86c6d02b3c3f144f8c24b288d1f4e18074ab8bbec"
 dependencies = [
+ "combine",
+ "itoa",
+ "percent-encoding",
+ "ryu",
+ "sha1_smol",
+ "socket2 0.5.6",
+ "url",
+]
+
+[[package]]
+name = "redis"
+version = "0.28.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e37ec3fd44bea2ec947ba6cc7634d7999a6590aca7c35827c250bc0de502bda6"
+dependencies = [
+ "arc-swap",
  "async-std",
- "async-trait",
  "bytes",
  "combine",
  "crc16",
- "futures",
+ "futures-sink",
  "futures-util",
  "itoa",
  "log",
+ "num-bigint",
  "percent-encoding",
  "pin-project-lite",
  "rand",
@@ -10526,7 +10542,7 @@ dependencies = [
  "log",
  "madsim-rdkafka",
  "madsim-tokio",
- "redis",
+ "redis 0.25.4",
  "regex",
  "reqwest 0.12.4",
  "serde",
@@ -11201,7 +11217,7 @@ dependencies = [
  "pulsar",
  "quote",
  "rand",
- "redis",
+ "redis 0.28.2",
  "regex",
  "reqwest 0.12.4",
  "risingwave_common",
