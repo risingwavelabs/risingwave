@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::future::Future;
 use std::sync::Arc;
 
 use risingwave_common::array::StreamChunk;
@@ -135,6 +136,32 @@ impl<S: LocalStateStore> LogStoreWriteState<S> {
     pub(crate) fn update_vnode_bitmap(&mut self, new_vnodes: &Arc<Bitmap>) {
         self.serde.update_vnode_bitmap(new_vnodes.clone());
         self.state_store.update_vnode_bitmap(new_vnodes.clone());
+    }
+}
+
+pub(crate) type LogStoreStateWriteChunkFuture<S: LocalStateStore> =
+    impl Future<Output = (LogStoreWriteState<S>, LogStoreResult<(FlushInfo, Bitmap)>)> + 'static;
+
+impl<S: LocalStateStore> LogStoreWriteState<S> {
+    pub(crate) fn into_write_chunk_future(
+        mut self,
+        chunk: StreamChunk,
+        epoch: u64,
+        start_seq_id: SeqIdType,
+        end_seq_id: SeqIdType,
+    ) -> LogStoreStateWriteChunkFuture<S> {
+        async move {
+            let result = try {
+                let mut writer = self.start_writer(true);
+                writer.write_chunk(&chunk, epoch, start_seq_id, end_seq_id)?;
+                let (flush_info, bitmap) = writer.finish().await?;
+                (
+                    flush_info,
+                    bitmap.expect("should exist when pass true when start_writer"),
+                )
+            };
+            (self, result)
+        }
     }
 }
 
