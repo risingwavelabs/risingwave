@@ -271,6 +271,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                 &this.intermediate_state_table,
                 &this.input_pk_indices,
                 this.row_count_index,
+                false, // emit on window close
                 this.extreme_cache_size,
                 &this.input_schema,
             )
