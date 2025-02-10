@@ -375,7 +375,7 @@ pub fn is_parquet_schema_match_source_schema(
     arrow_data_type: &ArrowDateType,
     rw_data_type: &RwDataType,
 ) -> bool {
-    matches!(
+    let is_match = matches!(
         (arrow_data_type, rw_data_type),
         (ArrowDateType::Boolean, RwDataType::Boolean)
             | (
@@ -425,5 +425,14 @@ pub fn is_parquet_schema_match_source_schema(
             | (ArrowDateType::List(_), RwDataType::List(_))
             | (ArrowDateType::Struct(_), RwDataType::Struct(_))
             | (ArrowDateType::Map(_, _), RwDataType::Map(_))
-    )
+    );
+
+    if !is_match {
+        tracing::info!(
+            "Type mismatch when reading parquet files: Parquet DataType: {:?}, User defined DataType: {:?}",
+            arrow_data_type, rw_data_type
+        );
+    }
+
+    is_match
 }
