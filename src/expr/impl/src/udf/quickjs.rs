@@ -111,6 +111,7 @@ struct QuickJsFunction {
 #[async_trait::async_trait]
 impl UdfImpl for QuickJsFunction {
     async fn call(&self, input: &RecordBatch) -> Result<RecordBatch> {
+        // TODO(eric): if not batched, call JS function row by row. Otherwise, one row failure will fail the entire chunk.
         self.runtime.call(&self.identifier, input).await
     }
 
