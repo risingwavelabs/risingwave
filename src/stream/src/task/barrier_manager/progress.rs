@@ -194,7 +194,7 @@ impl CreateMviewProgressReporter {
         match self.state {
             Some(BackfillState::ConsumingUpstreamTableOrSource(last, last_consumed_rows)) => {
                 assert!(
-                    last < consumed_epoch,
+                    last <= consumed_epoch,
                     "last_epoch: {:#?} must be greater than consumed epoch: {:#?}",
                     last,
                     consumed_epoch

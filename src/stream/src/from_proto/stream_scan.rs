@@ -164,7 +164,7 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                     .local_barrier_manager
                     .subscribe_barrier(params.actor_context.id);
 
-                let upstream_table = StorageTable::new_partial(
+                let upstream_table = BatchTable::new_partial(
                     state_store.clone(),
                     column_ids,
                     vnodes.clone(),
