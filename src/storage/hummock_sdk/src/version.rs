@@ -30,7 +30,9 @@ use risingwave_pb::hummock::{
 };
 use tracing::warn;
 
-use crate::change_log::{ChangeLogDeltaCommon, TableChangeLogCommon};
+use crate::change_log::{
+    ChangeLogDeltaCommon, EpochNewChangeLogCommon, TableChangeLog, TableChangeLogCommon,
+};
 use crate::compaction_group::hummock_version_ext::build_initial_compaction_group_levels;
 use crate::compaction_group::StaticCompactionGroupId;
 use crate::level::LevelsCommon;
@@ -217,17 +219,19 @@ impl HummockVersionStateTableInfo {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct HummockVersionCommon<T> {
+pub struct HummockVersionCommon<T, L = T> {
     pub id: HummockVersionId,
     pub levels: HashMap<CompactionGroupId, LevelsCommon<T>>,
     #[deprecated]
     pub(crate) max_committed_epoch: u64,
     pub table_watermarks: HashMap<TableId, Arc<TableWatermarks>>,
-    pub table_change_log: HashMap<TableId, TableChangeLogCommon<T>>,
+    pub table_change_log: HashMap<TableId, TableChangeLogCommon<L>>,
     pub state_table_info: HummockVersionStateTableInfo,
 }
 
 pub type HummockVersion = HummockVersionCommon<SstableInfo>;
+
+pub type LocalHummockVersion = HummockVersionCommon<SstableInfo, ()>;
 
 impl Default for HummockVersion {
     fn default() -> Self {
@@ -433,13 +437,6 @@ impl HummockVersion {
         }
     }
 
-    pub fn table_committed_epoch(&self, table_id: TableId) -> Option<u64> {
-        self.state_table_info
-            .info()
-            .get(&table_id)
-            .map(|info| info.committed_epoch)
-    }
-
     pub fn create_init_version(default_compaction_config: Arc<CompactionConfig>) -> HummockVersion {
         #[expect(deprecated)]
         let mut init_version = HummockVersion {
@@ -476,10 +473,41 @@ impl HummockVersion {
             state_table_info_delta: Default::default(),
         }
     }
+
+    pub fn split_change_log(mut self) -> (LocalHummockVersion, HashMap<TableId, TableChangeLog>) {
+        let table_change_log = {
+            let mut table_change_log = HashMap::new();
+            for (table_id, log) in &mut self.table_change_log {
+                let change_log_iter =
+                    log.change_log_iter_mut()
+                        .map(|item| EpochNewChangeLogCommon {
+                            new_value: std::mem::take(&mut item.new_value),
+                            old_value: std::mem::take(&mut item.old_value),
+                            epochs: item.epochs.clone(),
+                        });
+                table_change_log.insert(*table_id, TableChangeLogCommon::new(change_log_iter));
+            }
+
+            table_change_log
+        };
+
+        let local_version = LocalHummockVersion::from(self);
+
+        (local_version, table_change_log)
+    }
+}
+
+impl<T, L> HummockVersionCommon<T, L> {
+    pub fn table_committed_epoch(&self, table_id: TableId) -> Option<u64> {
+        self.state_table_info
+            .info()
+            .get(&table_id)
+            .map(|info| info.committed_epoch)
+    }
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub struct HummockVersionDeltaCommon<T> {
+pub struct HummockVersionDeltaCommon<T, L = T> {
     pub id: HummockVersionId,
     pub prev_id: HummockVersionId,
     pub group_deltas: HashMap<CompactionGroupId, GroupDeltasCommon<T>>,
@@ -488,11 +516,13 @@ pub struct HummockVersionDeltaCommon<T> {
     pub trivial_move: bool,
     pub new_table_watermarks: HashMap<TableId, TableWatermarks>,
     pub removed_table_ids: HashSet<TableId>,
-    pub change_log_delta: HashMap<TableId, ChangeLogDeltaCommon<T>>,
+    pub change_log_delta: HashMap<TableId, ChangeLogDeltaCommon<L>>,
     pub state_table_info_delta: HashMap<TableId, StateTableInfoDelta>,
 }
 
 pub type HummockVersionDelta = HummockVersionDeltaCommon<SstableInfo>;
+
+pub type LocalHummockVersionDelta = HummockVersionDeltaCommon<SstableInfo, ()>;
 
 impl Default for HummockVersionDelta {
     fn default() -> Self {
@@ -896,7 +926,7 @@ impl IntraLevelDelta {
 pub enum GroupDeltaCommon<T> {
     NewL0SubLevel(Vec<T>),
     IntraLevel(IntraLevelDeltaCommon<T>),
-    GroupConstruct(PbGroupConstruct),
+    GroupConstruct(Box<PbGroupConstruct>),
     GroupDestroy(PbGroupDestroy),
     GroupMerge(PbGroupMerge),
 }
@@ -913,7 +943,7 @@ where
                 GroupDeltaCommon::IntraLevel(IntraLevelDeltaCommon::from(pb_intra_level_delta))
             }
             Some(PbDeltaType::GroupConstruct(pb_group_construct)) => {
-                GroupDeltaCommon::GroupConstruct(pb_group_construct)
+                GroupDeltaCommon::GroupConstruct(Box::new(pb_group_construct))
             }
             Some(PbDeltaType::GroupDestroy(pb_group_destroy)) => {
                 GroupDeltaCommon::GroupDestroy(pb_group_destroy)
@@ -943,7 +973,7 @@ where
                 delta_type: Some(PbDeltaType::IntraLevel(intra_level_delta.into())),
             },
             GroupDeltaCommon::GroupConstruct(pb_group_construct) => PbGroupDelta {
-                delta_type: Some(PbDeltaType::GroupConstruct(pb_group_construct)),
+                delta_type: Some(PbDeltaType::GroupConstruct(*pb_group_construct)),
             },
             GroupDeltaCommon::GroupDestroy(pb_group_destroy) => PbGroupDelta {
                 delta_type: Some(PbDeltaType::GroupDestroy(pb_group_destroy)),
@@ -973,7 +1003,7 @@ where
                 delta_type: Some(PbDeltaType::IntraLevel(intra_level_delta.into())),
             },
             GroupDeltaCommon::GroupConstruct(pb_group_construct) => PbGroupDelta {
-                delta_type: Some(PbDeltaType::GroupConstruct(pb_group_construct.clone())),
+                delta_type: Some(PbDeltaType::GroupConstruct(*pb_group_construct.clone())),
             },
             GroupDeltaCommon::GroupDestroy(pb_group_destroy) => PbGroupDelta {
                 delta_type: Some(PbDeltaType::GroupDestroy(*pb_group_destroy)),
@@ -1000,7 +1030,7 @@ where
                 GroupDeltaCommon::IntraLevel(IntraLevelDeltaCommon::from(pb_intra_level_delta))
             }
             Some(PbDeltaType::GroupConstruct(pb_group_construct)) => {
-                GroupDeltaCommon::GroupConstruct(pb_group_construct.clone())
+                GroupDeltaCommon::GroupConstruct(Box::new(pb_group_construct.clone()))
             }
             Some(PbDeltaType::GroupDestroy(pb_group_destroy)) => {
                 GroupDeltaCommon::GroupDestroy(*pb_group_destroy)
@@ -1093,5 +1123,66 @@ where
 {
     pub fn to_protobuf(&self) -> PbGroupDeltas {
         self.into()
+    }
+}
+
+impl From<HummockVersionDelta> for LocalHummockVersionDelta {
+    #[expect(deprecated)]
+    fn from(delta: HummockVersionDelta) -> Self {
+        Self {
+            id: delta.id,
+            prev_id: delta.prev_id,
+            group_deltas: delta.group_deltas,
+            max_committed_epoch: delta.max_committed_epoch,
+            trivial_move: delta.trivial_move,
+            new_table_watermarks: delta.new_table_watermarks,
+            removed_table_ids: delta.removed_table_ids,
+            change_log_delta: delta
+                .change_log_delta
+                .into_iter()
+                .map(|(k, v)| {
+                    (
+                        k,
+                        ChangeLogDeltaCommon {
+                            truncate_epoch: v.truncate_epoch,
+                            new_log: EpochNewChangeLogCommon {
+                                epochs: v.new_log.epochs,
+                                new_value: Vec::new(),
+                                old_value: Vec::new(),
+                            },
+                        },
+                    )
+                })
+                .collect(),
+            state_table_info_delta: delta.state_table_info_delta,
+        }
+    }
+}
+
+impl From<HummockVersion> for LocalHummockVersion {
+    #[expect(deprecated)]
+    fn from(version: HummockVersion) -> Self {
+        Self {
+            id: version.id,
+            levels: version.levels,
+            max_committed_epoch: version.max_committed_epoch,
+            table_watermarks: version.table_watermarks,
+            table_change_log: version
+                .table_change_log
+                .into_iter()
+                .map(|(k, v)| {
+                    let epoch_new_change_logs: Vec<EpochNewChangeLogCommon<()>> = v
+                        .change_log_into_iter()
+                        .map(|epoch_new_change_log| EpochNewChangeLogCommon {
+                            epochs: epoch_new_change_log.epochs,
+                            new_value: Vec::new(),
+                            old_value: Vec::new(),
+                        })
+                        .collect();
+                    (k, TableChangeLogCommon::new(epoch_new_change_logs))
+                })
+                .collect(),
+            state_table_info: version.state_table_info,
+        }
     }
 }

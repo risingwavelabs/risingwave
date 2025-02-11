@@ -92,9 +92,12 @@ impl Frame {
         let bounds = match frame.get_type()? {
             PbType::Unspecified => bail!("unspecified type of `WindowFrame`"),
             PbType::RowsLegacy => {
-                let start = FrameBound::<usize>::from_protobuf_legacy(frame.get_start()?)?;
-                let end = FrameBound::<usize>::from_protobuf_legacy(frame.get_end()?)?;
-                FrameBounds::Rows(RowsFrameBounds { start, end })
+                #[expect(deprecated)]
+                {
+                    let start = FrameBound::<usize>::from_protobuf_legacy(frame.get_start()?)?;
+                    let end = FrameBound::<usize>::from_protobuf_legacy(frame.get_end()?)?;
+                    FrameBounds::Rows(RowsFrameBounds { start, end })
+                }
             }
             PbType::Rows => {
                 let bounds = must_match!(frame.get_bounds()?, PbBounds::Rows(bounds) => bounds);

@@ -144,6 +144,15 @@ impl SourceCatalog {
 
         self.create_sql_ast()
     }
+
+    /// Fills the `definition` field with the purified SQL definition.
+    ///
+    /// There's no need to call this method for correctness because we automatically purify the
+    /// SQL definition at the time of querying. However, this helps to maintain more accurate
+    /// `definition` field in the catalog when directly inspected for debugging purposes.
+    pub fn fill_purified_create_sql(&mut self) {
+        self.definition = self.create_sql_purified();
+    }
 }
 
 impl From<&PbSource> for SourceCatalog {

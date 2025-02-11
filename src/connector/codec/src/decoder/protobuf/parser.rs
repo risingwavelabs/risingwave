@@ -79,7 +79,7 @@ fn pb_field_to_col_desc(
             description: None,
             additional_column_type: 0, // deprecated
             additional_column: Some(AdditionalColumn { column_type: None }),
-            version: ColumnDescVersion::Pr13707 as i32,
+            version: ColumnDescVersion::LATEST as _,
         })
     } else {
         *index += 1;
@@ -88,7 +88,7 @@ fn pb_field_to_col_desc(
             name: field_descriptor.name().to_owned(),
             column_type: Some(field_type.to_protobuf()),
             additional_column: Some(AdditionalColumn { column_type: None }),
-            version: ColumnDescVersion::Pr13707 as i32,
+            version: ColumnDescVersion::LATEST as _,
             ..Default::default()
         })
     }

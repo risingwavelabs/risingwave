@@ -267,11 +267,13 @@ impl<S: StateStore> BackfillState<S> {
                 {
                     match &prev_progress.progress {
                         EpochBackfillProgress::Consuming { latest_pk: prev_pk } => {
+                            // TODO: enable this check
                             // assert_eq!(prev_progress.epoch, progress.epoch);
                             if let EpochBackfillProgress::Consuming { latest_pk: pk } =
                                 &progress.progress
                             {
                                 assert_eq!(pk.len(), self.pk_serde.get_data_types().len());
+                                // TODO: enable this check
                                 // assert!(prev_progress.row_count <= progress.row_count);
                                 if cfg!(debug_assertions) {
                                     let mut prev_buf = vec![];

@@ -59,7 +59,7 @@ use risingwave_pb::meta::list_actor_states_response::ActorState;
 use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistribution;
 use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
-use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
+use risingwave_pb::meta::list_streaming_job_states_response::StreamingJobState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::{
     EventLog, PbTableParallelism, PbThrottleTarget, RecoveryStatus, SystemParams,
@@ -988,7 +988,7 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         Ok(HashMap::default())
     }
 
-    async fn list_table_fragment_states(&self) -> RpcResult<Vec<TableFragmentState>> {
+    async fn list_streaming_job_states(&self) -> RpcResult<Vec<StreamingJobState>> {
         Ok(vec![])
     }
 

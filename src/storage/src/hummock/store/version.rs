@@ -33,7 +33,7 @@ use risingwave_hummock_sdk::key::{
 use risingwave_hummock_sdk::key_range::KeyRangeCommon;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_watermark::{
-    TableWatermarksIndex, VnodeWatermark, WatermarkDirection,
+    TableWatermarksIndex, VnodeWatermark, WatermarkDirection, WatermarkSerdeType,
 };
 use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::LevelType;
@@ -141,6 +141,7 @@ pub enum VersionUpdate {
         direction: WatermarkDirection,
         epoch: HummockEpoch,
         vnode_watermarks: Vec<VnodeWatermark>,
+        watermark_type: WatermarkSerdeType,
     },
 }
 
@@ -248,19 +249,24 @@ impl HummockReadVersion {
         Self {
             table_id,
             instance_id,
-            table_watermarks: committed_version.table_watermarks.get(&table_id).map(
-                |table_watermarks| {
-                    TableWatermarksIndex::new_committed(
-                        table_watermarks.clone(),
-                        committed_version
-                            .state_table_info
-                            .info()
-                            .get(&table_id)
-                            .expect("should exist")
-                            .committed_epoch,
-                    )
-                },
-            ),
+            table_watermarks: {
+                match committed_version.table_watermarks.get(&table_id) {
+                    Some(table_watermarks) => match table_watermarks.watermark_type {
+                        WatermarkSerdeType::PkPrefix => Some(TableWatermarksIndex::new_committed(
+                            table_watermarks.clone(),
+                            committed_version
+                                .state_table_info
+                                .info()
+                                .get(&table_id)
+                                .expect("should exist")
+                                .committed_epoch,
+                        )),
+
+                        WatermarkSerdeType::NonPkPrefix => None, /* do not fill the non-pk prefix watermark to index */
+                    },
+                    None => None,
+                }
+            },
             staging: StagingVersion {
                 imm: VecDeque::default(),
                 sst: VecDeque::default(),
@@ -406,7 +412,9 @@ impl HummockReadVersion {
                 direction,
                 epoch,
                 vnode_watermarks,
+                watermark_type,
             } => {
+                assert_eq!(WatermarkSerdeType::PkPrefix, watermark_type);
                 if let Some(watermark_index) = &mut self.table_watermarks {
                     watermark_index.add_epoch_watermark(
                         epoch,
@@ -992,11 +1000,15 @@ impl HummockVersionReader {
         key_range: TableKeyRange,
         options: ReadLogOptions,
     ) -> HummockResult<ChangeLogIterator> {
-        let change_log = if let Some(change_log) = version.table_change_log.get(&options.table_id) {
-            change_log.filter_epoch(epoch_range).collect_vec()
-        } else {
-            Vec::new()
+        let change_log = {
+            let table_change_logs = version.table_change_log_read_lock();
+            if let Some(change_log) = table_change_logs.get(&options.table_id) {
+                change_log.filter_epoch(epoch_range).cloned().collect_vec()
+            } else {
+                Vec::new()
+            }
         };
+
         if let Some(max_epoch_change_log) = change_log.last() {
             let (_, max_epoch) = epoch_range;
             if !max_epoch_change_log.epochs.contains(&max_epoch) {

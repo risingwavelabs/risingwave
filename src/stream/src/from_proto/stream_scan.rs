@@ -20,7 +20,7 @@ use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAw
 use risingwave_common::util::value_encoding::BasicSerde;
 use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_pb::stream_plan::{StreamScanNode, StreamScanType};
-use risingwave_storage::table::batch_table::storage_table::StorageTable;
+use risingwave_storage::table::batch_table::BatchTable;
 
 use super::*;
 use crate::common::table::state_table::{ReplicatedStateTable, StateTable};
@@ -83,7 +83,7 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                 };
 
                 let upstream_table =
-                    StorageTable::new_partial(state_store.clone(), column_ids, vnodes, table_desc);
+                    BatchTable::new_partial(state_store.clone(), column_ids, vnodes, table_desc);
 
                 BackfillExecutor::new(
                     upstream_table,
@@ -168,7 +168,7 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                     .local_barrier_manager
                     .subscribe_barrier(params.actor_context.id);
 
-                let upstream_table = StorageTable::new_partial(
+                let upstream_table = BatchTable::new_partial(
                     state_store.clone(),
                     column_ids,
                     vnodes.clone(),

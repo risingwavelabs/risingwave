@@ -24,7 +24,7 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::PrefetchOptions;
-use risingwave_storage::table::batch_table::storage_table::StorageTable;
+use risingwave_storage::table::batch_table::BatchTable;
 use risingwave_storage::table::ChangeLogRow;
 use risingwave_storage::StateStore;
 
@@ -57,7 +57,7 @@ pub trait UpstreamTable: Send + Sync + 'static {
     fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>);
 }
 
-impl<S: StateStore> UpstreamTable for StorageTable<S> {
+impl<S: StateStore> UpstreamTable for BatchTable<S> {
     type ChangeLogStream = impl Stream<Item = StreamExecutorResult<ChangeLogRow>>;
     type SnapshotStream = impl Stream<Item = StreamExecutorResult<OwnedRow>>;
 

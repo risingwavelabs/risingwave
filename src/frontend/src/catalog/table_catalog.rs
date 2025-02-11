@@ -923,7 +923,7 @@ mod tests {
                             description: None,
                             generated_or_default_column: None,
                             additional_column: AdditionalColumn { column_type: None },
-                            version: ColumnDescVersion::Pr13707,
+                            version: ColumnDescVersion::LATEST,
                             system_column: None,
                         },
                         is_hidden: false
