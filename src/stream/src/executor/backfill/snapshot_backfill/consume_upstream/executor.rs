@@ -146,13 +146,14 @@ impl<T: UpstreamTable, S: StateStore> UpstreamTableExecutor<T, S> {
                     let mut row_count = 0;
                     let mut is_finished = true;
                     for (_, progress) in progress_state.latest_progress() {
-                        if let Some(progress) = progress
-                            && progress.epoch == self.snapshot_epoch
-                        {
-                            if let EpochBackfillProgress::Consuming { .. } = &progress.progress {
-                                is_finished = false;
+                        if let Some(progress) = progress {
+                            if progress.epoch == self.snapshot_epoch {
+                                if let EpochBackfillProgress::Consuming { .. } = &progress.progress
+                                {
+                                    is_finished = false;
+                                }
+                                row_count += progress.row_count;
                             }
-                            row_count += progress.row_count;
                         } else {
                             is_finished = false;
                         }
