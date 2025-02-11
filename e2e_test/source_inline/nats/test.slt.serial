@@ -16,11 +16,11 @@ set streaming_parallelism to 4;
 statement ok
 create table t_nats ( i int ) with (
   connector = 'nats',
-  server_url='nats-server:4222',
+  server_url='localhost:4222',
   subject='testsubject',
   connect_mode='plain',
   consumer.durable_name = 'demo1',
-  consumer.ack_policy = 'all',
+  consumer.ack_policy = 'explicit',
   stream='teststream',
   consumer.max_ack_pending = '100000')
 format plain encode json;
@@ -51,7 +51,7 @@ alter table t_nats set PARALLELISM to 6;
 system ok
 python3 e2e_test/source_inline/nats/operation.py produce_stream "teststream" "testsubject"
 
-sleep 3s
+sleep 4s
 
 statement ok
 flush;
@@ -73,7 +73,7 @@ alter table t_nats set PARALLELISM to 2;
 system ok
 python3 e2e_test/source_inline/nats/operation.py produce_stream "teststream" "testsubject"
 
-sleep 3s
+sleep 4s
 
 statement ok
 flush;
@@ -110,7 +110,7 @@ include subject
 include offset
 with (
   connector = 'nats',
-  server_url='nats-server:4222',
+  server_url='localhost:4222',
   subject='testsubject1,testsubject2',
   connect_mode='plain',
   consumer.durable_name = 'demo_subject',
