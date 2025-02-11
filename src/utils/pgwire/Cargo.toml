@@ -34,7 +34,6 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "macros",
 ] }
 tokio-openssl = "0.6.3"
-tokio-util = { workspace = true, features = ["rt"] }
 tracing = "0.1"
 
 [target.'cfg(not(madsim))'.dependencies]

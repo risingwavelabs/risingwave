@@ -36,7 +36,6 @@ use thiserror_ext::AsReport;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::sync::Mutex;
 use tokio_openssl::SslStream;
-use tokio_util::task::AbortOnDropHandle;
 use tracing::Instrument;
 
 use crate::error::{PsqlError, PsqlResult};
@@ -234,7 +233,7 @@ where
                         }
                     }
                 });
-                notice_task = Some(AbortOnDropHandle::new(handle));
+                notice_task = Some(handle);
             }
 
             // Read and process messages.
@@ -251,6 +250,11 @@ where
             if terminated {
                 break;
             }
+        }
+
+        // Abort the notice task to release ref count of the session and the stream.
+        if let Some(task) = notice_task {
+            task.abort();
         }
     }
 
