@@ -1843,8 +1843,8 @@ impl DdlController {
                 // we do not remove the original table catalog as it's still needed for the streaming job
                 // just need to remove the ref to the state table
                 to_change_streaming_job_id: id as i32,
-                to_remove_state_table_id: old_internal_table_ids[0] as i32,
-                to_remove_source_id: old_internal_table_ids[0] as i32, // asserted before
+                to_remove_state_table_id: old_internal_table_ids[0] as i32, // asserted before
+                to_remove_source_id: drop_table_associated_source_id.unwrap() as i32,
             });
         } else {
             let old_internal_tables = self
