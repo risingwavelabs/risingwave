@@ -9,9 +9,11 @@ fi
 STATE_STORE_PATH="${HOME}/.risingwave/state_store"
 META_STORE_PATH="${HOME}/.risingwave/meta_store"
 
-VERSION=$(curl -s https://api.github.com/repos/risingwavelabs/risingwave/releases/latest \
- | grep '.tag_name' \
- | sed -E -n 's/.*(v[0-9]+.[0-9]+.[0-9]+.*)\",/\1/p')
+VERSION=$(
+  curl -sI 'https://github.com/risingwavelabs/risingwave/releases/latest' |
+    grep "location:" |
+    sed -E -n 's/.*(v[0-9]+.[0-9]+.[0-9]+.*)$/\1/p'
+)
 
 BASE_URL="https://github.com/risingwavelabs/risingwave/releases/download"
 
