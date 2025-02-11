@@ -207,6 +207,7 @@ impl PostgresExternalTable {
             SeaType::Boolean => Ok(PgType::BOOL),
             SeaType::Point => Ok(PgType::POINT),
             SeaType::Uuid => Ok(PgType::UUID),
+            SeaType::Json => Ok(PgType::JSON),
             SeaType::JsonBinary => Ok(PgType::JSONB),
             SeaType::Array(t) => {
                 let Some(t) = t.col_type.as_ref() else {
@@ -234,6 +235,7 @@ impl PostgresExternalTable {
                     SeaType::Boolean => Ok(PgType::BOOL_ARRAY),
                     SeaType::Point => Ok(PgType::POINT_ARRAY),
                     SeaType::Uuid => Ok(PgType::UUID_ARRAY),
+                    SeaType::Json => Ok(PgType::JSON_ARRAY),
                     SeaType::JsonBinary => Ok(PgType::JSONB_ARRAY),
                     SeaType::Array(_) => bail!("nested array type is not supported"),
                     SeaType::Unknown(name) => {
