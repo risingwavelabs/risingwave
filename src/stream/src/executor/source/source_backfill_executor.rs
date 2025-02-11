@@ -386,7 +386,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         let retry_reader_stream = stream_reader_builder
             .into_retry_stream(
                 Some(backfill_stage.read().await.get_latest_unfinished_splits()?),
-                is_initialize,
+                false, // do not use the latest, because we need to backfill from the beginning
             )
             .boxed();
         tracing::debug!(?backfill_stage, "source backfill started");
@@ -499,7 +499,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                             .await
                                             .get_latest_unfinished_splits()?,
                                     ),
-                                    true,
+                                    false,
                                 )
                                 .boxed();
 
@@ -603,7 +603,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                                                 .await
                                                                 .get_latest_unfinished_splits()?,
                                                         ),
-                                                        true,
+                                                        false,
                                                     )
                                                     .boxed();
 
@@ -636,7 +636,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                             source_desc.clone(),
                                             get_latest_split_info_fn.clone(),
                                         )
-                                        .into_retry_stream(Some(latest_unfinished_splits), true)
+                                        .into_retry_stream(Some(latest_unfinished_splits), false)
                                         .boxed();
 
                                     backfill_stream = select_with_strategy(
