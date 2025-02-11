@@ -1516,17 +1516,6 @@ impl DdlController {
                             dropped_source_ids: release_ctx.removed_source_ids.clone(),
                         })
                         .await;
-                    self.stream_manager
-                        .drop_streaming_jobs(
-                            risingwave_common::catalog::DatabaseId::from(
-                                release_ctx.database_id as u32,
-                            ),
-                            vec![],
-                            vec![],
-                            release_ctx.removed_state_table_ids.clone(),
-                            HashSet::new(),
-                        )
-                        .await;
                 }
                 Ok(version)
             }

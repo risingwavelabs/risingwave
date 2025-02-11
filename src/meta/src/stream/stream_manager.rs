@@ -380,6 +380,7 @@ impl GlobalStreamManager {
                 init_split_assignment,
                 streaming_job,
                 tmp_id: tmp_table_id.table_id,
+                to_drop_state_table_ids: Vec::new(), /* the create streaming job command will not drop any state table */
             });
         }
 
@@ -467,6 +468,7 @@ impl GlobalStreamManager {
             dispatchers,
             tmp_id,
             streaming_job,
+            release_ctx,
             ..
         }: ReplaceStreamJobContext,
     ) -> MetaResult<()> {
@@ -494,6 +496,17 @@ impl GlobalStreamManager {
                     init_split_assignment,
                     streaming_job,
                     tmp_id,
+                    to_drop_state_table_ids: {
+                        if let Some(release_ctx) = &release_ctx {
+                            release_ctx
+                                .removed_state_table_ids
+                                .iter()
+                                .map(|table_id| TableId::new(*table_id as _))
+                                .collect()
+                        } else {
+                            Vec::new()
+                        }
+                    },
                 }),
             )
             .await?;
