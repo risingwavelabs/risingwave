@@ -85,4 +85,4 @@ statement ok
 drop database d2;
 
 system ok
-./risedev psql -c 'drop database d1;'
+risedev psql -c 'drop database d1;'
