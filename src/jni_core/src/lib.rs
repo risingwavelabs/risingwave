@@ -178,7 +178,7 @@ impl<T> OwnedPointer<T> {
     fn release(self) {
         tracing::debug!(
             type_name = std::any::type_name::<T>(),
-            address = self.pointer,
+            address = %format_args!("{:x}", self.pointer),
             "release jni OwnedPointer"
         );
         assert!(self.pointer != 0);

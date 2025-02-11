@@ -135,9 +135,11 @@ public class JniDbzSourceHandler {
                     // If resp is null means just check whether channel is closed.
                     success = channel.send(null);
                 }
+                // When user drops the connector, the channel rx will be dropped and we fail to send
+                // the message. We should stop the engine in this case.
                 if (!success) {
                     LOG.info(
-                            "Engine#{}: JNI sender broken detected, stop the engine",
+                            "Engine#{}: JNI receiver closed, stop the engine",
                             config.getSourceId());
                     runner.stop();
                     return;
