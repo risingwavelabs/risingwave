@@ -63,7 +63,7 @@ use sea_orm::{
 };
 
 use crate::barrier::{ReplaceStreamJobPlan, Reschedule};
-use crate::controller::catalog::{CatalogController, ReleaseContext};
+use crate::controller::catalog::{CatalogController, DropTableConnectorContext};
 use crate::controller::rename::ReplaceTableExprRewriter;
 use crate::controller::utils::{
     build_object_group_for_delete, check_relation_name_duplicate, check_sink_into_table_cycle,
@@ -980,7 +980,7 @@ impl CatalogController {
         merge_updates: HashMap<crate::model::FragmentId, Vec<MergeUpdate>>,
         col_index_mapping: Option<ColIndexMapping>,
         sink_into_table_context: SinkIntoTableContext,
-        release_ctx: Option<&ReleaseContext>,
+        drop_table_connector_ctx: Option<&DropTableConnectorContext>,
     ) -> MetaResult<NotificationVersion> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
@@ -996,8 +996,11 @@ impl CatalogController {
         .await?;
 
         let mut notification_objs: Option<(Vec<PbUserInfo>, Vec<PartialObject>)> = None;
-        if let Some(release_ctx) = release_ctx {
-            notification_objs = Some(self.drop_table_associated_source(&txn, release_ctx).await?);
+        if let Some(drop_table_connector_ctx) = drop_table_connector_ctx {
+            notification_objs = Some(
+                self.drop_table_associated_source(&txn, drop_table_connector_ctx)
+                    .await?,
+            );
         }
 
         txn.commit().await?;
