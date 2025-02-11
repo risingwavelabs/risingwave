@@ -27,13 +27,12 @@ use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_sqlparser::ast::{RedactSqlOptionKeywordsRef, Statement};
 use serde::Deserialize;
 use thiserror_ext::AsReport;
-use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::error::{PsqlError, PsqlResult};
 use crate::net::{AddressRef, Listener, TcpKeepalive};
 use crate::pg_field_descriptor::PgFieldDescriptor;
 use crate::pg_message::TransactionStatus;
-use crate::pg_protocol::{PgProtocol, TlsConfig};
+use crate::pg_protocol::{PgByteStream, PgProtocol, TlsConfig};
 use crate::pg_response::{PgResponse, ValuesStream};
 use crate::types::Format;
 
@@ -332,7 +331,7 @@ pub async fn handle_connection<S, SM>(
     peer_addr: AddressRef,
     redact_sql_option_keywords: Option<RedactSqlOptionKeywordsRef>,
 ) where
-    S: AsyncWrite + AsyncRead + Unpin,
+    S: PgByteStream,
     SM: SessionManager,
 {
     PgProtocol::new(

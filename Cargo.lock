@@ -8840,6 +8840,7 @@ dependencies = [
  "thiserror-ext",
  "tokio-openssl",
  "tokio-postgres",
+ "tokio-util",
  "tracing",
  "workspace-hack",
 ]
@@ -14489,17 +14490,18 @@ dependencies = [
 
 [[package]]
 name = "tokio-util"
-version = "0.7.9"
+version = "0.7.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d68074620f57a0b21594d9735eb2e98ab38b17f80d3fcb189fca266771ca60d"
+checksum = "d7fcaa8d55a2bdd6b83ace262b016eca0d79ee02818c5c1bcdf0305114081078"
 dependencies = [
  "bytes",
  "futures-core",
  "futures-io",
  "futures-sink",
+ "futures-util",
+ "hashbrown 0.14.5",
  "pin-project-lite",
  "tokio",
- "tracing",
 ]
 
 [[package]]

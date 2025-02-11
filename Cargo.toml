@@ -217,7 +217,7 @@ tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "0dd1055"
     "net",
     "fs",
 ] }
-tokio-util = "0.7"
+tokio-util = "0.7.12"
 tracing-opentelemetry = "0.25"
 rand = { version = "0.8", features = ["small_rng"] }
 governor = { version = "0.8", default-features = false, features = ["std"] }
