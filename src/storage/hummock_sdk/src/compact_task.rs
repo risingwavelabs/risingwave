@@ -12,20 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::mem::size_of;
 
 use itertools::Itertools;
-use risingwave_pb::hummock::compact_task::{PbTaskStatus, PbTaskType, TaskStatus};
+use risingwave_pb::hummock::compact_task::{PbTaskStatus, PbTaskType, TaskStatus, TaskType};
 use risingwave_pb::hummock::subscribe_compaction_event_request::PbReportTask;
 use risingwave_pb::hummock::{
-    PbCompactTask, PbKeyRange, PbTableOption, PbTableSchema, PbTableStats, PbValidationTask,
+    LevelType, PbCompactTask, PbKeyRange, PbTableOption, PbTableSchema, PbTableStats,
+    PbValidationTask,
 };
 
+use crate::compaction_group::StateTableId;
 use crate::key_range::KeyRange;
 use crate::level::InputLevel;
 use crate::sstable_info::SstableInfo;
-use crate::table_watermark::TableWatermarks;
+use crate::table_watermark::{TableWatermarks, WatermarkSerdeType};
 use crate::HummockSstableObjectId;
 
 #[derive(Clone, PartialEq, Default, Debug)]
@@ -65,7 +67,9 @@ pub struct CompactTask {
     pub table_vnode_partition: BTreeMap<u32, u32>,
     /// The table watermark of any table id. In compaction we only use the table watermarks on safe epoch,
     /// so we only need to include the table watermarks on safe epoch to reduce the size of metadata.
-    pub table_watermarks: BTreeMap<u32, TableWatermarks>,
+    pub pk_prefix_table_watermarks: BTreeMap<u32, TableWatermarks>,
+
+    pub non_pk_prefix_table_watermarks: BTreeMap<u32, TableWatermarks>,
 
     pub table_schemas: BTreeMap<u32, PbTableSchema>,
 
@@ -107,15 +111,117 @@ impl CompactTask {
             + size_of::<u32>()
             + self.table_vnode_partition.len() * size_of::<u64>()
             + self
-                .table_watermarks
+                .pk_prefix_table_watermarks
                 .values()
                 .map(|table_watermark| size_of::<u32>() + table_watermark.estimated_encode_len())
                 .sum::<usize>()
+            + self
+                .non_pk_prefix_table_watermarks
+                .values()
+                .map(|table_watermark| size_of::<u32>() + table_watermark.estimated_encode_len())
+                .sum::<usize>()
+    }
+
+    pub fn is_trivial_move_task(&self) -> bool {
+        if self.task_type != TaskType::Dynamic && self.task_type != TaskType::Emergency {
+            return false;
+        }
+
+        if self.input_ssts.len() != 2 || self.input_ssts[0].level_type != LevelType::Nonoverlapping
+        {
+            return false;
+        }
+
+        // it may be a manual compaction task
+        if self.input_ssts[0].level_idx == self.input_ssts[1].level_idx
+            && self.input_ssts[0].level_idx > 0
+        {
+            return false;
+        }
+
+        if self.input_ssts[1].level_idx == self.target_level
+            && self.input_ssts[1].table_infos.is_empty()
+        {
+            return true;
+        }
+
+        false
+    }
+
+    pub fn is_trivial_reclaim(&self) -> bool {
+        // Currently all VnodeWatermark tasks are trivial reclaim.
+        if self.task_type == TaskType::VnodeWatermark {
+            return true;
+        }
+        let exist_table_ids = HashSet::<u32>::from_iter(self.existing_table_ids.clone());
+        self.input_ssts.iter().all(|level| {
+            level.table_infos.iter().all(|sst| {
+                sst.table_ids
+                    .iter()
+                    .all(|table_id| !exist_table_ids.contains(table_id))
+            })
+        })
+    }
+}
+
+impl CompactTask {
+    // The compact task may need to reclaim key with TTL
+    pub fn contains_ttl(&self) -> bool {
+        self.table_options
+            .iter()
+            .any(|(_, table_option)| table_option.retention_seconds.is_some_and(|ttl| ttl > 0))
+    }
+
+    // The compact task may need to reclaim key with range tombstone
+    pub fn contains_range_tombstone(&self) -> bool {
+        self.input_ssts
+            .iter()
+            .flat_map(|level| level.table_infos.iter())
+            .any(|sst| sst.range_tombstone_count > 0)
+    }
+
+    // The compact task may need to reclaim key with split sst
+    pub fn contains_split_sst(&self) -> bool {
+        self.input_ssts
+            .iter()
+            .flat_map(|level| level.table_infos.iter())
+            .any(|sst| sst.sst_id != sst.object_id)
+    }
+
+    pub fn get_table_ids_from_input_ssts(&self) -> impl Iterator<Item = StateTableId> {
+        self.input_ssts
+            .iter()
+            .flat_map(|level| level.table_infos.iter())
+            .flat_map(|sst| sst.table_ids.clone())
+            .sorted()
+            .dedup()
+    }
+
+    // filter the table-id that in existing_table_ids with the table-id in compact-task
+    pub fn build_compact_table_ids(&self) -> Vec<StateTableId> {
+        let existing_table_ids: HashSet<u32> = HashSet::from_iter(self.existing_table_ids.clone());
+        self.get_table_ids_from_input_ssts()
+            .filter(|table_id| existing_table_ids.contains(table_id))
+            .collect()
     }
 }
 
 impl From<PbCompactTask> for CompactTask {
     fn from(pb_compact_task: PbCompactTask) -> Self {
+        let (pk_prefix_table_watermarks, non_pk_prefix_table_watermarks) = pb_compact_task
+            .table_watermarks
+            .into_iter()
+            .map(|(table_id, pb_table_watermark)| {
+                let table_watermark = TableWatermarks::from(pb_table_watermark);
+                (table_id, table_watermark)
+            })
+            .partition(|(_table_id, table_watermarke)| {
+                matches!(
+                    table_watermarke.watermark_type,
+                    WatermarkSerdeType::PkPrefix
+                )
+            });
+
         #[expect(deprecated)]
         Self {
             input_ssts: pb_compact_task
@@ -154,13 +260,8 @@ impl From<PbCompactTask> for CompactTask {
             split_by_state_table: pb_compact_task.split_by_state_table,
             split_weight_by_vnode: pb_compact_task.split_weight_by_vnode,
             table_vnode_partition: pb_compact_task.table_vnode_partition.clone(),
-            table_watermarks: pb_compact_task
-                .table_watermarks
-                .into_iter()
-                .map(|(table_id, pb_table_watermark)| {
-                    (table_id, TableWatermarks::from(pb_table_watermark))
-                })
-                .collect(),
+            pk_prefix_table_watermarks,
+            non_pk_prefix_table_watermarks,
             table_schemas: pb_compact_task.table_schemas,
             max_sub_compaction: pb_compact_task.max_sub_compaction,
         }
@@ -169,6 +270,20 @@ impl From<PbCompactTask> for CompactTask {
 
 impl From<&PbCompactTask> for CompactTask {
     fn from(pb_compact_task: &PbCompactTask) -> Self {
+        let (pk_prefix_table_watermarks, non_pk_prefix_table_watermarks) = pb_compact_task
+            .table_watermarks
+            .iter()
+            .map(|(table_id, pb_table_watermark)| {
+                let table_watermark = TableWatermarks::from(pb_table_watermark);
+                (*table_id, table_watermark)
+            })
+            .partition(|(_table_id, table_watermarke)| {
+                matches!(
+                    table_watermarke.watermark_type,
+                    WatermarkSerdeType::PkPrefix
+                )
+            });
+
         #[expect(deprecated)]
         Self {
             input_ssts: pb_compact_task
@@ -207,13 +322,8 @@ impl From<&PbCompactTask> for CompactTask {
             split_by_state_table: pb_compact_task.split_by_state_table,
             split_weight_by_vnode: pb_compact_task.split_weight_by_vnode,
             table_vnode_partition: pb_compact_task.table_vnode_partition.clone(),
-            table_watermarks: pb_compact_task
-                .table_watermarks
-                .iter()
-                .map(|(table_id, pb_table_watermark)| {
-                    (*table_id, TableWatermarks::from(pb_table_watermark))
-                })
-                .collect(),
+            pk_prefix_table_watermarks,
+            non_pk_prefix_table_watermarks,
             table_schemas: pb_compact_task.table_schemas.clone(),
             max_sub_compaction: pb_compact_task.max_sub_compaction,
         }
@@ -260,8 +370,9 @@ impl From<CompactTask> for PbCompactTask {
             split_weight_by_vnode: compact_task.split_weight_by_vnode,
             table_vnode_partition: compact_task.table_vnode_partition.clone(),
             table_watermarks: compact_task
-                .table_watermarks
+                .pk_prefix_table_watermarks
                 .into_iter()
+                .chain(compact_task.non_pk_prefix_table_watermarks)
                 .map(|(table_id, table_watermark)| (table_id, table_watermark.into()))
                 .collect(),
             split_by_state_table: compact_task.split_by_state_table,
@@ -311,8 +422,9 @@ impl From<&CompactTask> for PbCompactTask {
             split_weight_by_vnode: compact_task.split_weight_by_vnode,
             table_vnode_partition: compact_task.table_vnode_partition.clone(),
             table_watermarks: compact_task
-                .table_watermarks
+                .pk_prefix_table_watermarks
                 .iter()
+                .chain(compact_task.non_pk_prefix_table_watermarks.iter())
                 .map(|(table_id, table_watermark)| (*table_id, table_watermark.into()))
                 .collect(),
             split_by_state_table: compact_task.split_by_state_table,

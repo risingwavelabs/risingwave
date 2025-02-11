@@ -199,7 +199,7 @@ impl CommandContext {
                             .post_collect_job_fragments(
                                 new_fragments.stream_job_id().table_id as _,
                                 new_fragments.actor_ids(),
-                                dispatchers.clone(),
+                                dispatchers,
                                 init_split_assignment,
                             )
                             .await?;
@@ -209,7 +209,7 @@ impl CommandContext {
                                 old_fragments,
                                 new_fragments.stream_source_fragments(),
                                 init_split_assignment.clone(),
-                                replace_plan.fragment_replacements(),
+                                replace_plan,
                             )
                             .await;
                     }
@@ -251,7 +251,7 @@ impl CommandContext {
                     .post_collect_job_fragments(
                         stream_job_fragments.stream_job_id().table_id as _,
                         stream_job_fragments.actor_ids(),
-                        dispatchers.clone(),
+                        dispatchers,
                         init_split_assignment,
                     )
                     .await?;
@@ -295,7 +295,7 @@ impl CommandContext {
                     .post_collect_job_fragments(
                         new_fragments.stream_job_id().table_id as _,
                         new_fragments.actor_ids(),
-                        dispatchers.clone(),
+                        dispatchers,
                         init_split_assignment,
                     )
                     .await?;
@@ -307,7 +307,7 @@ impl CommandContext {
                         old_fragments,
                         new_fragments.stream_source_fragments(),
                         init_split_assignment.clone(),
-                        replace_plan.fragment_replacements(),
+                        replace_plan,
                     )
                     .await;
             }
