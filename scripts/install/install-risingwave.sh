@@ -11,8 +11,7 @@ META_STORE_PATH="${HOME}/.risingwave/meta_store"
 
 VERSION=$(
   curl -sI 'https://github.com/risingwavelabs/risingwave/releases/latest' |
-    grep -i "location:" |
-    sed -E -n 's/.*(v[0-9]+.[0-9]+.[0-9]+.*)$/\1/p'
+    grep -i "location:" | tr '\r' '\n' | awk -F '/' '{print $NF}'
 )
 
 BASE_URL="https://github.com/risingwavelabs/risingwave/releases/download"
