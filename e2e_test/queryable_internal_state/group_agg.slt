@@ -27,7 +27,7 @@ statement ok
 insert into t values (2, 3), (2, 4);
 
 query ok
-select * from mv;
+select * from mv order by foo;
 ----
 1 7
 2 7
