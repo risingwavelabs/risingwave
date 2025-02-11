@@ -45,7 +45,7 @@ pub async fn handle_create_function(
         Some(lang) => {
             let lang = lang.real_value().to_lowercase();
             match &*lang {
-                "python" | "java" | "wasm" | "rust" | "javascript" | "javascript_async" => lang,
+                "python" | "java" | "wasm" | "rust" | "javascript" => lang,
                 _ => {
                     return Err(ErrorCode::InvalidParameterValue(format!(
                         "language {} is not supported",

@@ -79,7 +79,7 @@ impl From<&PbFunction> for FunctionCatalog {
             compressed_binary: prost.compressed_binary.clone(),
             always_retry_on_network_error: prost.always_retry_on_network_error,
             is_async: prost.is_async.clone(),
-            is_batched: prost.is_async.clone(),
+            is_batched: prost.is_batched.clone(),
         }
     }
 }
