@@ -1,6 +1,7 @@
 syntax = "proto3";
 
-package provision;
+// Provision a node via the serverless backfill controller.
+package sbc_provision;
 
 option optimize_for = SPEED;
 
