@@ -40,10 +40,12 @@ public class JniDbzSourceHandler {
 
     private final DbzConnectorConfig config;
     private final DbzCdcEngineRunner runner;
+    private final CdcSourceChannel channel;
 
     public JniDbzSourceHandler(DbzConnectorConfig config, CdcSourceChannel channel) {
         this.config = config;
         this.runner = DbzCdcEngineRunner.create(config, channel);
+        this.channel = channel;
 
         if (runner == null) {
             throw new CdcConnectorException("Failed to create engine runner");
@@ -76,9 +78,7 @@ public class JniDbzSourceHandler {
                         request.getSnapshotDone(),
                         isCdcSourceJob);
         JniDbzSourceHandler handler = new JniDbzSourceHandler(config, channel);
-        // register handler to the registry
-        JniDbzSourceRegistry.register(config.getSourceId(), handler);
-        handler.start(channel);
+        handler.start();
     }
 
     public void commitOffset(String encodedOffset) throws InterruptedException {
@@ -99,9 +99,11 @@ public class JniDbzSourceHandler {
         }
     }
 
-    public void start(CdcSourceChannel channel) {
-
+    public void start() {
         try {
+            // register handler to the registry
+            JniDbzSourceRegistry.register(config.getSourceId(), this);
+
             // Start the engine
             var startOk = runner.start();
             if (!sendHandshakeMessage(runner, channel, startOk)) {
@@ -148,10 +150,10 @@ public class JniDbzSourceHandler {
             } catch (Exception e) {
                 LOG.warn("Failed to stop Engine#{}", config.getSourceId(), e);
             }
+        } finally {
+            // remove the handler from registry
+            JniDbzSourceRegistry.unregister(config.getSourceId());
         }
-
-        // remove the handler from registry
-        JniDbzSourceRegistry.unregister(config.getSourceId());
     }
 
     private boolean sendHandshakeMessage(
