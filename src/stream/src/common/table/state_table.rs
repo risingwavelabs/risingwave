@@ -1026,18 +1026,6 @@ where
         self.update_inner(new_key_bytes, Some(old_value_bytes), new_value_bytes);
     }
 
-    /// Update a row without giving old value.
-    ///
-    /// `op_consistency_level` should be set to `Inconsistent`.
-    pub fn update_without_old_value(&mut self, new_value: impl Row) {
-        let new_pk = (&new_value).project(self.pk_indices());
-        let new_key_bytes =
-            serialize_pk_with_vnode(new_pk, &self.pk_serde, self.compute_vnode_by_pk(new_pk));
-        let new_value_bytes = self.serialize_value(new_value);
-
-        self.update_inner(new_key_bytes, None, new_value_bytes);
-    }
-
     /// Write a record into state table. Must have the same schema with the table.
     pub fn write_record(&mut self, record: Record<impl Row>) {
         match record {

@@ -83,7 +83,7 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
         )
         .await;
         // disable sanity check so that old value is not required when updating states
-        let intermediate_state_table = StateTable::from_table_catalog_inconsistent_op(
+        let intermediate_state_table = StateTable::from_table_catalog(
             node.get_intermediate_state_table().unwrap(),
             store.clone(),
             vnodes.clone(),
