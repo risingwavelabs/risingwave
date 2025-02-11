@@ -126,21 +126,23 @@ pub async fn handle_drop_table(
             .await?;
 
             if let Some(either) = either {
-                let (iceberg_catalog, table_id) = match either {
+                let (catalog_type, iceberg_catalog, table_id) = match either {
                     Either::Left(iceberg_properties) => {
                         let catalog = iceberg_properties.create_catalog().await?;
                         let table_id = iceberg_properties
                             .common
                             .full_table_name()
                             .context("Unable to parse table name")?;
-                        (catalog, table_id)
+                        let catalog_type = iceberg_properties.common.catalog_type().to_owned();
+                        (catalog_type, catalog, table_id)
                     }
                     Either::Right(iceberg_config) => {
                         let catalog = iceberg_config.create_catalog().await?;
                         let table_id = iceberg_config
                             .full_table_name()
                             .context("Unable to parse table name")?;
-                        (catalog, table_id)
+                        let catalog_type = iceberg_config.catalog_type().to_owned();
+                        (catalog_type, catalog, table_id)
                     }
                 };
 
@@ -157,10 +159,12 @@ pub async fn handle_drop_table(
                 } else {
                     warn!("Table {} with iceberg engine, but failed to load iceberg table. It might be the warehouse path has been cleared but fail before drop iceberg source", table_name);
                 }
-                iceberg_catalog
-                    .drop_table(&table_id)
-                    .await
-                    .context("failed to drop iceberg table")?;
+                if !catalog_type.eq_ignore_ascii_case("storage") {
+                    iceberg_catalog
+                        .drop_table(&table_id)
+                        .await
+                        .context("failed to drop iceberg table")?;
+                }
 
                 crate::handler::drop_source::handle_drop_source(
                     handler_args.clone(),
