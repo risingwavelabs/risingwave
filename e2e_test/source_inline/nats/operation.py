@@ -96,7 +96,7 @@ async def ensure_all_ack(stream_name: str, consumer_name: str):
     nc = NATS()
     await nc.connect(servers=[NATS_SERVER])
     js = nc.jetstream()
-    
+
     # Get consumer info
     consumer = await js.consumer_info(stream_name, consumer_name)
     print(f"Consumer stats for {consumer_name} on stream {stream_name}:")
@@ -104,7 +104,7 @@ async def ensure_all_ack(stream_name: str, consumer_name: str):
     print(f"  Ack Pending: {consumer.num_pending}")
     print(f"  Redelivered: {consumer.num_redelivered}")
     print(f"  Waiting: {consumer.num_waiting}")
-    
+
     if consumer.num_pending > 0:
         raise Exception(f"Consumer {consumer_name} on stream {stream_name} has {consumer.num_pending} pending messages")
     await nc.close()
