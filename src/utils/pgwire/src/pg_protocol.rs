@@ -216,45 +216,49 @@ where
 
     /// Run the protocol to serve the connection.
     pub async fn run(&mut self) {
-        let mut notice_task = None;
+        let mut notice_fut = None;
 
         loop {
-            // If a session is present, spawn a task to subscribe and send notices asynchronously.
-            if notice_task.is_none()
+            // Once a session is present, create a future to subscribe and send notices asynchronously.
+            if notice_fut.is_none()
                 && let Some(session) = self.session.clone()
             {
                 let mut stream = self.stream.clone();
-                let handle = tokio::spawn(async move {
+                notice_fut = Some(Box::pin(async move {
                     loop {
                         let notice = session.next_notice().await;
                         if let Err(e) = stream.write(&BeMessage::NoticeResponse(&notice)).await {
                             tracing::error!(error = %e.as_report(), notice, "failed to send notice");
-                            break;
                         }
                     }
-                });
-                notice_task = Some(handle);
+                }));
             }
 
             // Read and process messages.
-            let msg = match self.read_message().await {
-                Ok(msg) => msg,
-                Err(e) => {
-                    tracing::error!(error = %e.as_report(), "error when reading message");
-                    break; // terminate the connection
+            let process = std::pin::pin!(async {
+                let msg = match self.read_message().await {
+                    Ok(msg) => msg,
+                    Err(e) => {
+                        tracing::error!(error = %e.as_report(), "error when reading message");
+                        return true; // terminate the connection
+                    }
+                };
+                tracing::trace!(?msg, "received message");
+                self.process(msg).await
+            });
+
+            let terminated = if let Some(notice_fut) = notice_fut.as_mut() {
+                tokio::select! {
+                    _ = notice_fut => unreachable!(),
+                    terminated = process => terminated,
                 }
+            } else {
+                process.await
             };
-            tracing::trace!(?msg, "received message");
-            let terminated = self.process(msg).await;
 
             if terminated {
                 break;
             }
-        }
-
-        // Abort the notice task to release ref count of the session and the stream.
-        if let Some(task) = notice_task {
-            task.abort();
         }
     }
 
