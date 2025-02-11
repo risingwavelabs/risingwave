@@ -16,11 +16,11 @@ set streaming_parallelism to 4;
 statement ok
 create table t_nats ( i int ) with (
   connector = 'nats',
-  server_url='localhost:4222',
+  server_url='nats-server:4222',
   subject='testsubject',
   connect_mode='plain',
   consumer.durable_name = 'demo1',
-  consumer.ack_policy = 'explicit',
+  consumer.ack_policy = 'all',
   stream='teststream',
   consumer.max_ack_pending = '100000')
 format plain encode json;
@@ -110,7 +110,7 @@ include subject
 include offset
 with (
   connector = 'nats',
-  server_url='localhost:4222',
+  server_url='nats-server:4222',
   subject='testsubject1,testsubject2',
   connect_mode='plain',
   consumer.durable_name = 'demo_subject',
