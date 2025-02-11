@@ -154,18 +154,20 @@ pub fn cstr_to_str(b: &Bytes) -> Result<&str, Utf8Error> {
 }
 
 /// Record `sql` in the current tracing span.
-fn record_sql_in_span(sql: &str, _redact_sql_option_keywords: Option<RedactSqlOptionKeywordsRef>) {
-    let redacted_sql = sql.to_owned();
-    tracing::Span::current().record(
-        "sql",
-        tracing::field::display(truncated_fmt::TruncatedFmt(
-            &redacted_sql,
-            *RW_QUERY_LOG_TRUNCATE_LEN,
-        )),
-    );
+fn record_sql_in_span(
+    sql: &str,
+    redact_sql_option_keywords: Option<RedactSqlOptionKeywordsRef>,
+) -> String {
+    let redacted_sql = if let Some(keywords) = redact_sql_option_keywords {
+        redact_sql(sql, keywords)
+    } else {
+        sql.to_owned()
+    };
+    let truncated = truncated_fmt::TruncatedFmt(&redacted_sql, *RW_QUERY_LOG_TRUNCATE_LEN);
+    tracing::Span::current().record("sql", tracing::field::display(&truncated));
+    truncated.to_string()
 }
 
-#[allow(dead_code)]
 fn redact_sql(sql: &str, keywords: RedactSqlOptionKeywordsRef) -> String {
     match Parser::parse_sql(sql) {
         Ok(sqls) => sqls
@@ -573,11 +575,12 @@ where
     }
 
     async fn process_query_msg(&mut self, sql: Arc<str>) -> PsqlResult<()> {
-        record_sql_in_span(&sql, self.redact_sql_option_keywords.clone());
+        let truncated_redacted_sql =
+            record_sql_in_span(&sql, self.redact_sql_option_keywords.clone());
         let session = self.session.clone().unwrap();
 
         session.check_idle_in_transaction_timeout()?;
-        let _exec_context_guard = session.init_exec_context("removed for debugging".into());
+        let _exec_context_guard = session.init_exec_context(truncated_redacted_sql.into());
         self.inner_process_query_msg(sql, session.clone()).await
     }
 
@@ -845,12 +848,13 @@ where
             }
         } else {
             let portal = self.get_portal(&portal_name)?;
-            let sql: Arc<str> = Arc::from(format!("{}", portal));
-            record_sql_in_span(&sql, self.redact_sql_option_keywords.clone());
+            let sql = format!("{}", portal);
+            let truncated_redacted_sql =
+                record_sql_in_span(&sql, self.redact_sql_option_keywords.clone());
             drop(sql);
 
             session.check_idle_in_transaction_timeout()?;
-            let _exec_context_guard = session.init_exec_context("removed for debugging".into());
+            let _exec_context_guard = session.init_exec_context(truncated_redacted_sql.into());
             let result = session.clone().execute(portal).await;
 
             let pg_response = result.map_err(PsqlError::ExtendedExecuteError)?;
