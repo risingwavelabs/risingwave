@@ -522,6 +522,7 @@ impl CatalogController {
         txn.commit().await?;
 
         if !objects.is_empty() {
+            assert!(is_materialized_view);
             self.notify_frontend(Operation::Add, Info::ObjectGroup(PbObjectGroup { objects }))
                 .await;
         }
@@ -657,6 +658,27 @@ impl CatalogController {
         >,
         split_assignment: &SplitAssignment,
     ) -> MetaResult<()> {
+        self.post_collect_job_fragments_inner(
+            job_id,
+            actor_ids,
+            new_actor_dispatchers,
+            split_assignment,
+            false,
+        )
+        .await
+    }
+
+    pub async fn post_collect_job_fragments_inner(
+        &self,
+        job_id: ObjectId,
+        actor_ids: Vec<crate::model::ActorId>,
+        new_actor_dispatchers: &HashMap<
+            crate::model::FragmentId,
+            HashMap<crate::model::ActorId, Vec<PbDispatcher>>,
+        >,
+        split_assignment: &SplitAssignment,
+        is_mv: bool,
+    ) -> MetaResult<()> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
@@ -744,7 +766,16 @@ impl CatalogController {
         .update(&txn)
         .await?;
 
+        let fragment_mapping = if is_mv {
+            get_fragment_mappings(&txn, job_id as _).await?
+        } else {
+            vec![]
+        };
+
         txn.commit().await?;
+
+        self.notify_fragment_mapping(NotificationOperation::Add, fragment_mapping)
+            .await;
 
         Ok(())
     }
