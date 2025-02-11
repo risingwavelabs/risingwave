@@ -158,6 +158,11 @@ enum WriteFuture<S: LocalStateStore> {
     Empty,
 }
 
+enum WriteFutureEvent {
+    UpstreamMessageReceived(Message),
+    ChunkFlushed(FlushedChunkInfo),
+}
+
 impl<S: LocalStateStore> WriteFuture<S> {
     fn flush_chunk(
         stream: BoxedMessageStream,
@@ -193,11 +198,7 @@ impl<S: LocalStateStore> WriteFuture<S> {
 
     async fn next_event(
         &mut self,
-    ) -> StreamExecutorResult<(
-        BoxedMessageStream,
-        LogStoreWriteState<S>,
-        Either<Message, FlushedChunkInfo>,
-    )> {
+    ) -> StreamExecutorResult<(BoxedMessageStream, LogStoreWriteState<S>, WriteFutureEvent)> {
         match self {
             WriteFuture::ReceiveFromUpstream { future, .. } => {
                 let (opt, stream) = future.await;
@@ -205,7 +206,7 @@ impl<S: LocalStateStore> WriteFuture<S> {
                     opt
                     .ok_or_else(|| anyhow!("end of upstream input").into())
                     .and_then(|result| result.map(|item| {
-                        (stream, write_state, Either::Left(item))
+                        (stream, write_state, WriteFutureEvent::UpstreamMessageReceived(item))
                     }))
                 })
             }
@@ -213,7 +214,7 @@ impl<S: LocalStateStore> WriteFuture<S> {
                 let (write_state, result) = future.await;
                 let result = must_match!(replace(self, WriteFuture::Empty), WriteFuture::FlushingChunk { epoch, start_seq_id, end_seq_id, stream, ..  } => {
                     result.map(|(flush_info, vnode_bitmap)| {
-                        (stream, write_state, Either::Right(FlushedChunkInfo {
+                        (stream, write_state, WriteFutureEvent::ChunkFlushed(FlushedChunkInfo {
                             epoch,
                             start_seq_id,
                             end_seq_id,
@@ -297,8 +298,8 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                         drop(write_future);
                         let (stream, mut write_state, either) = result?;
                         match either {
-                            Either::Left(message) => {
-                                match message {
+                            WriteFutureEvent::UpstreamMessageReceived(msg) => {
+                                match msg {
                                     Message::Barrier(barrier) => {
                                         Self::write_barrier(
                                             &mut write_state,
@@ -362,7 +363,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                                     }
                                 }
                             }
-                            Either::Right(FlushedChunkInfo {
+                            WriteFutureEvent::ChunkFlushed(FlushedChunkInfo {
                                 start_seq_id,
                                 end_seq_id,
                                 epoch,
@@ -431,7 +432,7 @@ impl<S: StateStoreRead> ReadFuture<S> {
         }
         match self {
             ReadFuture::ReadingPersistedStream(_) => {
-                unreachable!("must be Idle when reaching here")
+                unreachable!("must have finished read persisted stream when reaching here")
             }
             ReadFuture::ReadingFlushedChunk { .. } => {}
             ReadFuture::Idle => loop {
