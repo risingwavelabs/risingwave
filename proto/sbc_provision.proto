@@ -14,11 +14,11 @@ message ProvisionResponse {
 }
 
 service NodeGroupController {
-    // Provision interacts with Kubernetes to provide a group of compute nodes. 
-    // To avoid collision and simplify GC, it will generate the a name for node 
+    // Provision interacts with Kubernetes to provide a group of compute nodes.
+    // To avoid collision and simplify GC, it will generate the a name for node
     // group identification.
-    // The RPC call will hold until all nodes haven been observed in the 
-    // RisingWave's system catalog. Timeout may be applied over the call to 
+    // The RPC call will hold until all nodes haven been observed in the
+    // RisingWave's system catalog. Timeout may be applied over the call to
     // cancel the request, and GC shall be taken care of by the service provider.
     rpc Provision(ProvisionRequest) returns (ProvisionResponse);
 }
