@@ -1249,7 +1249,7 @@ pub mod truncated_fmt {
                 let actual = s.floor_char_boundary(self.remaining);
                 self.f.write_str(&s[0..actual])?;
                 self.remaining -= actual;
-                self.f.write_str("...(truncated)")?;
+                self.f.write_str(&format!("...(truncated,{})", s.len()))?;
                 self.finished = true; // so that ...(truncated) is printed exactly once
             } else {
                 self.f.write_str(s)?;
@@ -1297,7 +1297,7 @@ pub mod truncated_fmt {
         fn test_trunc_utf8() {
             assert_eq!(
                 format!("{}", TruncatedFmt(&"select '🌊';", 10)),
-                "select '...(truncated)",
+                "select '...(truncated,14)",
             );
         }
     }
