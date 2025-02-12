@@ -787,7 +787,6 @@ impl CatalogController {
 
     // drop table associated source is a special case of drop relation, which just remove the source object and associated state table, keeping the streaming job and fragments.
     pub async fn drop_table_associated_source(
-        &self,
         txn: &DatabaseTransaction,
         drop_table_connector_ctx: &DropTableConnectorContext,
     ) -> MetaResult<(Vec<PbUserInfo>, Vec<PartialObject>)> {

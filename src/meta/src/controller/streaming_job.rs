@@ -923,7 +923,7 @@ impl CatalogController {
             }) => {
                 let incoming_sink_id = job_id;
 
-                let (relations, fragment_mapping) = Self::finish_replace_streaming_job_inner(
+                let (relations, fragment_mapping, _) = Self::finish_replace_streaming_job_inner(
                     tmp_id as ObjectId,
                     merge_updates,
                     None,
@@ -934,6 +934,7 @@ impl CatalogController {
                     },
                     &txn,
                     streaming_job,
+                    None, // will not drop table connector when creating a streaming job
                 )
                 .await?;
 
@@ -985,23 +986,17 @@ impl CatalogController {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
-        let (objects, fragment_mapping) = Self::finish_replace_streaming_job_inner(
-            tmp_id,
-            merge_updates,
-            col_index_mapping,
-            sink_into_table_context,
-            &txn,
-            streaming_job,
-        )
-        .await?;
-
-        let mut notification_objs: Option<(Vec<PbUserInfo>, Vec<PartialObject>)> = None;
-        if let Some(drop_table_connector_ctx) = drop_table_connector_ctx {
-            notification_objs = Some(
-                self.drop_table_associated_source(&txn, drop_table_connector_ctx)
-                    .await?,
-            );
-        }
+        let (objects, fragment_mapping, notification_objs) =
+            Self::finish_replace_streaming_job_inner(
+                tmp_id,
+                merge_updates,
+                col_index_mapping,
+                sink_into_table_context,
+                &txn,
+                streaming_job,
+                drop_table_connector_ctx,
+            )
+            .await?;
 
         txn.commit().await?;
 
@@ -1043,7 +1038,12 @@ impl CatalogController {
         }: SinkIntoTableContext,
         txn: &DatabaseTransaction,
         streaming_job: StreamingJob,
-    ) -> MetaResult<(Vec<PbObject>, Vec<PbFragmentWorkerSlotMapping>)> {
+        drop_table_connector_ctx: Option<&DropTableConnectorContext>,
+    ) -> MetaResult<(
+        Vec<PbObject>,
+        Vec<PbFragmentWorkerSlotMapping>,
+        Option<(Vec<PbUserInfo>, Vec<PartialObject>)>,
+    )> {
         let original_job_id = streaming_job.id() as ObjectId;
         let job_type = streaming_job.job_type();
 
@@ -1287,7 +1287,13 @@ impl CatalogController {
 
         let fragment_mapping: Vec<_> = get_fragment_mappings(txn, original_job_id as _).await?;
 
-        Ok((objects, fragment_mapping))
+        let mut notification_objs: Option<(Vec<PbUserInfo>, Vec<PartialObject>)> = None;
+        if let Some(drop_table_connector_ctx) = drop_table_connector_ctx {
+            notification_objs =
+                Some(Self::drop_table_associated_source(txn, drop_table_connector_ctx).await?);
+        }
+
+        Ok((objects, fragment_mapping, notification_objs))
     }
 
     /// Abort the replacing streaming job by deleting the temporary job object.
