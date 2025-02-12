@@ -10411,7 +10411,6 @@ dependencies = [
  "futures-async-stream",
  "futures-util",
  "hashbrown 0.14.5",
- "iceberg",
  "itertools 0.14.0",
  "linkme",
  "madsim-tokio",
