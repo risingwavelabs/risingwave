@@ -1519,7 +1519,7 @@ pub async fn create_iceberg_engine_table(
                 "Unsupported meta backend for iceberg engine table: {}",
                 meta_store_backend
             );
-        },
+        }
     };
 
     let rw_db_name = session

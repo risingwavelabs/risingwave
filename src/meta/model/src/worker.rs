@@ -64,19 +64,6 @@ impl From<WorkerType> for PbWorkerType {
     }
 }
 
-impl From<&str> for WorkerType {
-    fn from(value: &str) -> Self {
-        match value {
-            "Frontend" => Self::Frontend,
-            "ComputeNode" => Self::ComputeNode,
-            "RiseCtl" => Self::RiseCtl,
-            "Compactor" => Self::Compactor,
-            "Meta" => Self::Meta,
-            _ => unreachable!("unspecified worker type"),
-        }
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
 #[sea_orm(rs_type = "String", db_type = "string(None)")]
 pub enum WorkerStatus {
@@ -92,16 +79,6 @@ impl From<PbState> for WorkerStatus {
             PbState::Unspecified => unreachable!("unspecified worker status"),
             PbState::Starting => Self::Starting,
             PbState::Running => Self::Running,
-        }
-    }
-}
-
-impl From<&str> for WorkerStatus {
-    fn from(value: &str) -> Self {
-        match value {
-            "Starting" => Self::Starting,
-            "Running" => Self::Running,
-            _ => unreachable!("unspecified worker status"),
         }
     }
 }
@@ -226,10 +203,10 @@ impl<'de> Deserialize<'de> for MongoDb {
                             worker_id =
                                 Some(<WorkerId as std::str::FromStr>::from_str(value).unwrap())
                         }
-                        "worker_type" => worker_type = Some(WorkerType::from(value)),
+                        "worker_type" => worker_type = Some(WorkerType::deserialize(value).unwrap()),
                         "host" => host = Some(value.to_string()),
                         "port" => port = Some(<i32 as std::str::FromStr>::from_str(value).unwrap()),
-                        "status" => status = Some(WorkerStatus::from(value)),
+                        "status" => status = Some(WorkerStatus::deserialize(value).unwrap()),
                         "transaction_id" => {
                             transaction_id =
                                 Some(<TransactionId as std::str::FromStr>::from_str(value).unwrap())

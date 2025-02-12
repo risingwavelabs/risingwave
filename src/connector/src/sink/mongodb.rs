@@ -676,7 +676,7 @@ impl MongodbPayloadWriter {
 
         let pk = self.row_encoder.construct_pk(row);
 
-        // Specify the primary key (_id) for the MongoDb collection if the user does not provide one.
+        // Specify the primary key (_id) for the MongoDB collection if the user does not provide one.
         if self.pk_indices.len() > 1
             || self.schema.fields[self.pk_indices[0]].name != MONGODB_PK_NAME
         {
@@ -705,7 +705,7 @@ impl MongodbPayloadWriter {
     ) -> TryJoinAll<SendBulkWriteCommandFuture> {
         // TODO try sending bulk-write of each collection concurrently to improve the performance when
         // `dynamic collection` is enabled. We may need to provide best practice to guide user on setting
-        // the MongoDb driver's connection properties.
+        // the MongoDB driver's connection properties.
         let futures = insert_builder.into_iter().map(|(ns, builder)| {
             let db = self.client.database(&ns.0);
             send_bulk_write_commands(db, Some(builder.build()), None)
@@ -719,7 +719,7 @@ impl MongodbPayloadWriter {
     ) -> TryJoinAll<SendBulkWriteCommandFuture> {
         // TODO try sending bulk-write of each collection concurrently to improve the performance when
         // `dynamic collection` is enabled. We may need to provide best practice to guide user on setting
-        // the MongoDb driver's connection properties.
+        // the MongoDB driver's connection properties.
         let futures = upsert_builder.into_iter().map(|(ns, builder)| {
             let (upsert, delete) = builder.build();
             // we are sending the bulk upsert first because, under same pk, the `Insert` and `UpdateInsert`

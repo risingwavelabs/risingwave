@@ -829,7 +829,7 @@ pub(crate) fn load_private_key(
 #[serde_as]
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct MongodbCommon {
-    /// The URL of MongoDb
+    /// The URL of MongoDB
     #[serde(rename = "mongodb.url")]
     pub connect_uri: String,
     /// The collection name where data should be written to or read from. For sinks, the format is

@@ -32,7 +32,6 @@ use risingwave_meta::controller::cluster::ClusterController;
 use risingwave_meta::controller::DB;
 use risingwave_meta::manager::{MetadataManager, META_NODE_ID};
 use risingwave_meta::rpc::election::dummy::DummyElectionClient;
-use risingwave_meta::rpc::election::sql::MongoDBDriver;
 use risingwave_meta::rpc::intercept::MetricsMiddlewareLayer;
 use risingwave_meta::rpc::ElectionClientRef;
 use risingwave_meta::stream::ScaleController;
@@ -78,7 +77,7 @@ use risingwave_pb::meta::telemetry_info_service_server::TelemetryInfoServiceServ
 use risingwave_pb::meta::SystemParams;
 use risingwave_pb::user::user_service_server::UserServiceServer;
 use risingwave_rpc_client::ComputeClientPool;
-use sea_orm::{ConnectionTrait, DatabaseConnection, DbBackend};
+use sea_orm::{ConnectionTrait, DbBackend};
 use thiserror_ext::AsReport;
 use tokio::sync::watch;
 
@@ -89,7 +88,7 @@ use crate::controller::MetaStore;
 use crate::hummock::HummockManager;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{IdleManager, MetaOpts, MetaSrvEnv};
-use crate::rpc::election::sql::{BackendElectionClient, MySqlDriver, PostgresDriver};
+use crate::rpc::election::sql::{BackendElectionClient, MySqlDriver, PostgresDriver, MongoDBDriver};
 use crate::rpc::metrics::{
     start_fragment_info_monitor, start_worker_info_monitor, GLOBAL_META_METRICS,
 };

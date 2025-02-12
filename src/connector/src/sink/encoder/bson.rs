@@ -97,7 +97,7 @@ impl RowEncoder for BsonEncoder {
     }
 }
 
-/// We support converting all types to `MongoDb`. If there is an unmatched type, it will be
+/// We support converting all types to `MongoDB`. If there is an unmatched type, it will be
 /// converted to its string representation. If there is a conversion error, a warning log is printed
 /// and a `Bson::Null` is returned
 fn datum_to_bson(field: &Field, datum: DatumRef<'_>) -> Bson {

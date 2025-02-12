@@ -14,6 +14,7 @@
 
 pub mod dummy;
 pub mod sql;
+pub mod mongodb;
 
 use serde::Serialize;
 use tokio::sync::watch::Receiver;
