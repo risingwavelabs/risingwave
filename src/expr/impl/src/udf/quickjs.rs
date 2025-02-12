@@ -46,8 +46,10 @@ static QUICKJS: UdfImplDescriptor = UdfImplDescriptor {
                     .context("failed to enable fetch")?;
             }
             if opts.kind.is_aggregate() {
-                let mut options = AggregateOptions::default();
-                options.is_async = opts.is_async.unwrap_or(false);
+                let options = AggregateOptions {
+                    is_async: opts.is_async.unwrap_or(false),
+                    ..Default::default()
+                };
                 runtime
                     .add_aggregate(
                         opts.identifier,
@@ -61,9 +63,11 @@ static QUICKJS: UdfImplDescriptor = UdfImplDescriptor {
                     .await
                     .context("failed to add_aggregate")?;
             } else {
-                let mut options = FunctionOptions::default();
-                options.is_async = opts.is_async.unwrap_or(false);
-                options.is_batched = opts.is_batched.unwrap_or(false);
+                let options = FunctionOptions {
+                    is_async: opts.is_async.unwrap_or(false),
+                    is_batched: opts.is_batched.unwrap_or(false),
+                    ..Default::default()
+                };
                 let res = runtime
                     .add_function(
                         opts.identifier,
@@ -144,7 +148,10 @@ impl UdfImpl for QuickJsFunction {
         self.runtime.finish(&self.identifier, state).await
     }
 
-    async fn memory_usage(&self) -> usize {
-        self.runtime.inner().memory_usage().await.malloc_size as usize
+    fn memory_usage(&self) -> usize {
+        futures::executor::block_on(async {
+            // As `runtime` is not shared, this await will never block.
+            self.runtime.inner().memory_usage().await.malloc_size as usize
+        })
     }
 }

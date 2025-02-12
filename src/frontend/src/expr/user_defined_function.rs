@@ -61,8 +61,8 @@ impl UserDefinedFunction {
             link: udf.link.clone(),
             compressed_binary: udf.compressed_binary.clone(),
             always_retry_on_network_error: udf.always_retry_on_network_error,
-            is_batched: udf.is_batched.clone(),
-            is_async: udf.is_async.clone(),
+            is_batched: udf.is_batched,
+            is_async: udf.is_async,
         };
 
         Ok(Self {
@@ -100,8 +100,8 @@ impl Expr for UserDefinedFunction {
                 body: self.catalog.body.clone(),
                 compressed_binary: self.catalog.compressed_binary.clone(),
                 always_retry_on_network_error: self.catalog.always_retry_on_network_error,
-                is_async: self.catalog.is_async.clone(),
-                is_batched: self.catalog.is_batched.clone(),
+                is_async: self.catalog.is_async,
+                is_batched: self.catalog.is_batched,
             }))),
         }
     }
