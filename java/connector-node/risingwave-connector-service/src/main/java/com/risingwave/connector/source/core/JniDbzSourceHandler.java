@@ -22,7 +22,7 @@ import com.risingwave.connector.cdc.debezium.internal.DebeziumOffsetSerializer;
 import com.risingwave.connector.source.common.CdcConnectorException;
 import com.risingwave.connector.source.common.DbzConnectorConfig;
 import com.risingwave.connector.source.common.DbzSourceUtils;
-import com.risingwave.java.binding.Binding;
+import com.risingwave.java.binding.CdcSourceChannel;
 import com.risingwave.metrics.ConnectorNodeMetrics;
 import com.risingwave.proto.ConnectorServiceProto;
 import com.risingwave.proto.ConnectorServiceProto.GetEventStreamResponse;
@@ -40,10 +40,12 @@ public class JniDbzSourceHandler {
 
     private final DbzConnectorConfig config;
     private final DbzCdcEngineRunner runner;
+    private final CdcSourceChannel channel;
 
-    public JniDbzSourceHandler(DbzConnectorConfig config, long channelPtr) {
+    public JniDbzSourceHandler(DbzConnectorConfig config, CdcSourceChannel channel) {
         this.config = config;
-        this.runner = DbzCdcEngineRunner.create(config, channelPtr);
+        this.runner = DbzCdcEngineRunner.create(config, channel);
+        this.channel = channel;
 
         if (runner == null) {
             throw new CdcConnectorException("Failed to create engine runner");
@@ -52,6 +54,9 @@ public class JniDbzSourceHandler {
 
     public static void runJniDbzSourceThread(byte[] getEventStreamRequestBytes, long channelPtr)
             throws Exception {
+
+        var channel = CdcSourceChannel.fromOwnedPointer(channelPtr);
+
         var request =
                 ConnectorServiceProto.GetEventStreamRequest.parseFrom(getEventStreamRequestBytes);
         // userProps extracted from request, underlying implementation is UnmodifiableMap
@@ -72,10 +77,8 @@ public class JniDbzSourceHandler {
                         mutableUserProps,
                         request.getSnapshotDone(),
                         isCdcSourceJob);
-        JniDbzSourceHandler handler = new JniDbzSourceHandler(config, channelPtr);
-        // register handler to the registry
-        JniDbzSourceRegistry.register(config.getSourceId(), handler);
-        handler.start(channelPtr);
+        JniDbzSourceHandler handler = new JniDbzSourceHandler(config, channel);
+        handler.start();
     }
 
     public void commitOffset(String encodedOffset) throws InterruptedException {
@@ -96,12 +99,14 @@ public class JniDbzSourceHandler {
         }
     }
 
-    public void start(long channelPtr) {
-
+    public void start() {
         try {
+            // register handler to the registry
+            JniDbzSourceRegistry.register(config.getSourceId(), this);
+
             // Start the engine
             var startOk = runner.start();
-            if (!sendHandshakeMessage(runner, channelPtr, startOk)) {
+            if (!sendHandshakeMessage(runner, channel, startOk)) {
                 LOG.error(
                         "Failed to send handshake message to channel. sourceId={}",
                         config.getSourceId());
@@ -125,14 +130,16 @@ public class JniDbzSourceHandler {
                             "Engine#{}: emit one chunk {} events to network ",
                             config.getSourceId(),
                             resp.getEventsCount());
-                    success = Binding.sendCdcSourceMsgToChannel(channelPtr, resp.toByteArray());
+                    success = channel.send(resp.toByteArray());
                 } else {
                     // If resp is null means just check whether channel is closed.
-                    success = Binding.sendCdcSourceMsgToChannel(channelPtr, null);
+                    success = channel.send(null);
                 }
+                // When user drops the connector, the channel rx will be dropped and we fail to send
+                // the message. We should stop the engine in this case.
                 if (!success) {
                     LOG.info(
-                            "Engine#{}: JNI sender broken detected, stop the engine",
+                            "Engine#{}: JNI receiver closed, stop the engine",
                             config.getSourceId());
                     runner.stop();
                     return;
@@ -145,14 +152,14 @@ public class JniDbzSourceHandler {
             } catch (Exception e) {
                 LOG.warn("Failed to stop Engine#{}", config.getSourceId(), e);
             }
+        } finally {
+            // remove the handler from registry
+            JniDbzSourceRegistry.unregister(config.getSourceId());
         }
-
-        // remove the handler from registry
-        JniDbzSourceRegistry.unregister(config.getSourceId());
     }
 
     private boolean sendHandshakeMessage(
-            DbzCdcEngineRunner runner, long channelPtr, boolean startOk) throws Exception {
+            DbzCdcEngineRunner runner, CdcSourceChannel channel, boolean startOk) throws Exception {
         // send a handshake message to notify the Source executor
         // if the handshake is not ok, the split reader will return error to source actor
         var controlInfo =
@@ -163,7 +170,7 @@ public class JniDbzSourceHandler {
                         .setSourceId(config.getSourceId())
                         .setControl(controlInfo)
                         .build();
-        var success = Binding.sendCdcSourceMsgToChannel(channelPtr, handshakeMsg.toByteArray());
+        var success = channel.send(handshakeMsg.toByteArray());
         if (!success) {
             LOG.info(
                     "Engine#{}: JNI sender broken detected, stop the engine", config.getSourceId());
