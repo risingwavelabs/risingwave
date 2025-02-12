@@ -90,7 +90,7 @@ impl<'de> Deserialize<'de> for MongoDb {
                     match key {
                         "_id" => name = Some(val.to_string()),
                         "value" => value = Some(val.to_string()),
-                        "is_mutable" => is_mutable = Some(value.parse::<bool>().unwrap()),
+                        "is_mutable" => is_mutable = Some(bool::deserialize(val).unwrap()),
                         "description" => description = Some(val.to_string()),
                         x => return Err(Error::unknown_field(x, &FIELDS)),
                     }

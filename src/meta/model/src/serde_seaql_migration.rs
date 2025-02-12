@@ -12,10 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt::Formatter;
 /// It duplicates the one found in crate sea-orm-migration, but derives serde.
 /// It's only used by metadata backup/restore.
 use sea_orm::entity::prelude::*;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::de::{Error, MapAccess, Visitor};
+use serde::ser::SerializeStruct;
+
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Deserialize)]
 // One should override the name of migration table via `MigratorTrait::migration_table_name` method
 #[sea_orm(table_name = "seaql_migrations")]
@@ -29,3 +33,63 @@ pub struct Model {
 pub enum Relation {}
 
 impl ActiveModelBehavior for ActiveModel {}
+
+const FIELDS: [&str; 2] = [
+    "_id",
+    "applied_at",
+];
+
+pub struct MongoDb {
+    pub seaql_migration: Model
+}
+
+impl Serialize for MongoDb {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        // 3 is the number of fields in the struct.
+        let mut state = serializer.serialize_struct("MongoDb", 2)?;
+        state.serialize_field("_id", &self.seaql_migration.version)?;
+        state.serialize_field("applied_at", &self.seaql_migration.applied_at)?;
+        state.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for MongoDb {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct MongoDbVisitor;
+        impl<'de> Visitor<'de> for MongoDbVisitor {
+            type Value = MongoDb;
+
+            fn expecting(&self, formatter: &mut Formatter) -> std::fmt::Result {
+                formatter.write_str("MongoDb")
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: MapAccess<'de>,
+            {
+                let mut version: Option<String> = None;
+                let mut applied_at: Option<i64> = None;
+                while let Some((key, value)) = map.next_entry()? {
+                    match key {
+                        "_id" => version = Some(value.to_string()),
+                        "applied_at" => applied_at = Some(i64::deserialize(value).unwrap()),
+                        x => return Err(Error::unknown_field(x, &FIELDS)),
+                    }
+                }
+
+                let seaql_migration = Model {
+                    version: version.ok_or_else(|| Error::missing_field("_id"))?,
+                    applied_at: applied_at.ok_or_else(|| Error::missing_field("applied_at"))?,
+                };
+                Ok(Self::Value { seaql_migration })
+            }
+        }
+        deserializer.deserialize_map(MongoDbVisitor {})
+    }
+}

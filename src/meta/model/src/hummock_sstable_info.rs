@@ -83,8 +83,8 @@ impl<'de> Deserialize<'de> for MongoDb {
                 let mut sstable_info: Option<SstableInfoV2Backend> = None;
                 while let Some((key, value)) = map.next_entry()? {
                     match key {
-                        "_id" => sst_id = Some(<HummockSstableObjectId as std::str::FromStr>::from_str(value).unwrap()),
-                        "object_id" => object_id = Some(<HummockSstableObjectId as std::str::FromStr>::from_str(value).unwrap()),
+                        "_id" => sst_id = Some(i64::deserialize(value).unwrap()),
+                        "object_id" => object_id = Some(i64::deserialize(value).unwrap()),
                         "sstable_info" => sstable_info = Some(SstableInfoV2Backend::deserialize(value).unwrap()),
                         x => return Err(Error::unknown_field(x, &FIELDS)),
                     }

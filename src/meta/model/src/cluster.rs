@@ -12,8 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt::Formatter;
 use sea_orm::entity::prelude::*;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::de::{Error, MapAccess, Visitor};
+use serde::ser::SerializeStruct;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
 #[sea_orm(table_name = "cluster")]
@@ -27,3 +30,63 @@ pub struct Model {
 pub enum Relation {}
 
 impl ActiveModelBehavior for ActiveModel {}
+
+const FIELDS: [&str; 2] = [
+    "_id",
+    "created_at",
+];
+
+pub struct MongoDb {
+    pub cluster: Model
+}
+
+impl Serialize for MongoDb {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        // 3 is the number of fields in the struct.
+        let mut state = serializer.serialize_struct("MongoDb", 2)?;
+        state.serialize_field("_id", &self.cluster.cluster_id)?;
+        state.serialize_field("created_at", &self.cluster.created_at)?;
+        state.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for MongoDb {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct MongoDbVisitor;
+        impl<'de> Visitor<'de> for MongoDbVisitor {
+            type Value = MongoDb;
+
+            fn expecting(&self, formatter: &mut Formatter) -> std::fmt::Result {
+                formatter.write_str("MongoDb")
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: MapAccess<'de>,
+            {
+                let mut cluster_id: Option<Uuid> = None;
+                let mut created_at: Option<DateTime> = None;
+                while let Some((key, value)) = map.next_entry()? {
+                    match key {
+                        "_id" => cluster_id = Some(Uuid::deserialize(value).unwrap()),
+                        "created_at" => created_at = Some(DateTime::deserialize(value).unwrap()),
+                        x => return Err(Error::unknown_field(x, &FIELDS)),
+                    }
+                }
+
+                let cluster = Model {
+                    cluster_id: cluster_id.ok_or_else(|| Error::missing_field("_id"))?,
+                    created_at: created_at.ok_or_else(|| Error::missing_field("created_at"))?,
+                };
+                Ok(Self::Value { cluster })
+            }
+        }
+        deserializer.deserialize_map(MongoDbVisitor {})
+    }
+}

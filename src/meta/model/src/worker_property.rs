@@ -78,11 +78,13 @@ impl Serialize for MongoDb {
         state.serialize_field("is_streaming", &self.worker_property.is_streaming)?;
         state.serialize_field("is_serving", &self.worker_property.is_serving)?;
         state.serialize_field("is_unschedulable", &self.worker_property.is_unschedulable)?;
-        if self.worker_property.internal_rpc_host_addr.is_some(){
-            state.serialize_field("internal_rpc_host_addr", &self.worker_property.internal_rpc_host_addr)?;
+        match &self.worker_property.internal_rpc_host_addr {
+            Some(internal_rpc_host_addr) => state.serialize_field("internal_rpc_host_addr", internal_rpc_host_addr)?,
+            _ => ()
         }
-        if self.worker_property.resource_group.is_some(){
-            state.serialize_field("resource_group", &self.worker_property.resource_group)?;
+        match &self.worker_property.resource_group {
+            Some(resource_group) => state.serialize_field("resource_group", resource_group)?,
+            _ => ()
         }
         state.end()
     }
@@ -115,11 +117,11 @@ impl<'de> Deserialize<'de> for MongoDb {
                     match key {
                         "parallelism" => {
                             parallelism =
-                                Some(<i32 as std::str::FromStr>::from_str(value).unwrap())
+                                Some(i32::from(value))
                         }
-                        "is_streaming" => is_streaming = Some(<bool as std::str::FromStr>::from_str(value).unwrap()),
-                        "is_serving" => is_serving = Some(<bool as std::str::FromStr>::from_str(value).unwrap()),
-                        "is_unschedulable" => is_unschedulable = Some(<bool as std::str::FromStr>::from_str(value).unwrap()),
+                        "is_streaming" => is_streaming = Some(bool::deserialize(value).unwrap()),
+                        "is_serving" => is_serving = Some(bool::deserialize(value).unwrap()),
+                        "is_unschedulable" => is_unschedulable = Some(bool::deserialize(value).unwrap()),
                         "internal_rpc_host_addr" => internal_rpc_host_addr = Some(value.to_string()),
                         "resource_group" => resource_group = Some(value.to_string()),
                         x => return Err(Error::unknown_field(x, &FIELDS)),

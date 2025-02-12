@@ -94,7 +94,7 @@ impl<'de> Deserialize<'de> for MongoDb {
                             epoch = Some(id.epoch);
                             table_id = Some(id.table_id);
                         },
-                        "version_id" => version_id = Some(<HummockVersionId as std::str::FromStr>::from_str(value).unwrap()),
+                        "version_id" => version_id = Some(i64::deserialize(value).unwrap()),
                         x => return Err(Error::unknown_field(x, &FIELDS)),
                     }
                 }

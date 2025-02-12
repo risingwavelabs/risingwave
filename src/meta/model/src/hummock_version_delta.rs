@@ -106,11 +106,11 @@ impl<'de> Deserialize<'de> for MongoDb {
                     match key {
                         "_id" => {
                             id =
-                                Some(<HummockVersionId as std::str::FromStr>::from_str(value).unwrap())
+                                Some(i64::deserialize(value).unwrap())
                         }
-                        "prev_id" => prev_id = Some(<HummockVersionId as std::str::FromStr>::from_str(value).unwrap()),
-                        "max_committed_epoch" => max_committed_epoch = Some(<Epoch as std::str::FromStr>::from_str(value).unwrap()),
-                        "safe_epoch" => safe_epoch = Some(<Epoch as std::str::FromStr>::from_str(value).unwrap()),
+                        "prev_id" => prev_id = Some(i64::deserialize(value).unwrap()),
+                        "max_committed_epoch" => max_committed_epoch = Some(i64::deserialize(value).unwrap()),
+                        "safe_epoch" => safe_epoch = Some(i64::deserialize(value).unwrap()),
                         "trivial_move" => trivial_move = Some(value.parse::<bool>().unwrap()),
                         "full_version_delta" => {
                             full_version_delta =

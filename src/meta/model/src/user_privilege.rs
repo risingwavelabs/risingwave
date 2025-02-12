@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt::Formatter;
 use risingwave_pb::user::grant_privilege::PbAction;
 use sea_orm::entity::prelude::*;
-use serde::{Deserialize, Serialize};
-
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::de::{Error, MapAccess, Visitor};
+use serde::ser::SerializeStruct;
 use crate::{ObjectId, PrivilegeId, UserId};
-use crate::prelude::UserPrivilege;
 
 #[derive(
     Clone, Copy, Debug, Hash, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize,
@@ -130,7 +131,93 @@ impl Related<super::object::Entity> for Entity {
 
 impl ActiveModelBehavior for ActiveModel {}
 
+const FIELDS: [&str; 7] = [
+    "_id",
+    "dependent_id",
+    "user_id",
+    "oid",
+    "granted_by",
+    "action",
+    "with_grant_option",
+];
+
 pub struct MongoDb {
     pub user_privilege: Model
 }
 
+impl Serialize for MongoDb {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        // 3 is the number of fields in the struct.
+        let mut state = match &self.user_privilege.dependent_id {
+            Some(dependent_id) => {
+                let mut state  =serializer.serialize_struct("MongoDb", 7)?;
+                state.serialize_field("dependent_id", dependent_id)?;
+                state
+            },
+            None => serializer.serialize_struct("MongoDb", 6)?
+        };
+        state.serialize_field("_id", &self.user_privilege.id)?;
+        state.serialize_field("user_id", &self.user_privilege.user_id)?;
+        state.serialize_field("oid", &self.user_privilege.oid)?;
+        state.serialize_field("granted_by", &self.user_privilege.granted_by)?;
+        state.serialize_field("action", &self.user_privilege.action)?;
+        state.serialize_field("with_grant_option", &self.user_privilege.with_grant_option)?;
+        state.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for MongoDb {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct MongoDbVisitor;
+        impl<'de> Visitor<'de> for MongoDbVisitor {
+            type Value = MongoDb;
+
+            fn expecting(&self, formatter: &mut Formatter) -> std::fmt::Result {
+                formatter.write_str("MongoDb")
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: MapAccess<'de>,
+            {
+                let mut id: Option<PrivilegeId> = None;
+                let mut dependent_id: Option<PrivilegeId> = None;
+                let mut user_id: Option<UserId> = None;
+                let mut oid: Option<ObjectId> = None;
+                let mut granted_by: Option<UserId> = None;
+                let mut action: Option<Action> = None;
+                let mut with_grant_option: Option<bool> = None;
+                while let Some((key, value)) = map.next_entry()? {
+                    match key {
+                        "_id" => id = Some(i32::deserialize(value).unwrap()),
+                        "dependent_id" => dependent_id = Some(i32::deserialize(value).unwrap()),
+                        "user_id" => user_id = Some(i32::deserialize(value).unwrap()),
+                        "oid" => oid = Some(i32::deserialize(value).unwrap()),
+                        "granted_by" => granted_by = Some(i32::deserialize(value).unwrap()),
+                        "action" => action = Some(Action::deserialize(value).unwrap()),
+                        "with_grant_option" => with_grant_option = Some(bool::deserialize(value).unwrap()),
+                        x => return Err(Error::unknown_field(x, &FIELDS)),
+                    }
+                }
+
+                let user_privilege = Model {
+                    id: id.ok_or_else(|| Error::missing_field("_id"))?,
+                    dependent_id,
+                    user_id: user_id.ok_or_else(|| Error::missing_field("user_id"))?,
+                    oid: oid.ok_or_else(|| Error::missing_field("oid"))?,
+                    granted_by: granted_by.ok_or_else(|| Error::missing_field("granted_by"))?,
+                    action: action.ok_or_else(|| Error::missing_field("action"))?,
+                    with_grant_option: with_grant_option.ok_or_else(|| Error::missing_field("with_grant_option"))?,
+                };
+                Ok(Self::Value { user_privilege })
+            }
+        }
+        deserializer.deserialize_map(MongoDbVisitor {})
+    }
+}

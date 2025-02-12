@@ -16,8 +16,9 @@ use risingwave_pb::user::PbUserInfo;
 use sea_orm::entity::prelude::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::NotSet;
-use serde::{Deserialize, Serialize};
-
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::de::{Error, MapAccess, Visitor};
+use serde::ser::SerializeStruct;
 use crate::{AuthInfo, UserId};
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
@@ -82,6 +83,66 @@ impl From<Model> for PbUserInfo {
     }
 }
 
-pub struct MongoDb {
-    pub user: Model
-}
+// const FIELDS: [&str; 6] = [
+//     "_id",
+//     "is_super",
+//     "can_create_db",
+//     "can_create_user",
+//     "can_login",
+//     "auth_info",
+// ];
+//
+// pub struct MongoDb {
+//     pub compaction_config: Model
+// }
+//
+// impl Serialize for MongoDb {
+//     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+//     where
+//         S: Serializer,
+//     {
+//         // 3 is the number of fields in the struct.
+//         let mut state = serializer.serialize_struct("MongoDb", 2)?;
+//         state.serialize_field("_id", &self.compaction_config.compaction_group_id)?;
+//         state.serialize_field("config", &self.compaction_config.config)?;
+//         state.end()
+//     }
+// }
+//
+// impl<'de> Deserialize<'de> for MongoDb {
+//     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+//     where
+//         D: Deserializer<'de>,
+//     {
+//         struct MongoDbVisitor;
+//         impl<'de> Visitor<'de> for MongoDbVisitor {
+//             type Value = MongoDb;
+//
+//             fn expecting(&self, formatter: &mut Formatter) -> std::fmt::Result {
+//                 formatter.write_str("MongoDb")
+//             }
+//
+//             fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+//             where
+//                 A: MapAccess<'de>,
+//             {
+//                 let mut compaction_group_id: Option<CompactionGroupId> = None;
+//                 let mut config: Option<CompactionConfig> = None;
+//                 while let Some((key, value)) = map.next_entry()? {
+//                     match key {
+//                         "_id" => compaction_group_id = Some(i64::deserialize(value).unwrap()),
+//                         "config" => config = Some(CompactionConfig::deserialize(value).unwrap()),
+//                         x => return Err(Error::unknown_field(x, &FIELDS)),
+//                     }
+//                 }
+//
+//                 let compaction_config = Model {
+//                     compaction_group_id: compaction_group_id.ok_or_else(|| Error::missing_field("_id"))?,
+//                     config: config.ok_or_else(|| Error::missing_field("config"))?,
+//                 };
+//                 Ok(Self::Value { compaction_config })
+//             }
+//         }
+//         deserializer.deserialize_map(MongoDbVisitor {})
+//     }
+// }

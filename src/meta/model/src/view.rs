@@ -117,7 +117,7 @@ impl<'de> Deserialize<'de> for MongoDb {
                     match key {
                         "_id" => {
                             view_id =
-                                Some(<ViewId as std::str::FromStr>::from_str(value).unwrap())
+                                Some(i32::deserialize(value).unwrap())
                         }
                         "name" => name = Some(value.to_string()),
                         "properties" => properties = Some(Property::deserialize(value).unwrap()),

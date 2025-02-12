@@ -78,7 +78,7 @@ impl<'de> Deserialize<'de> for MongoDb {
                 let mut config: Option<CompactionConfig> = None;
                 while let Some((key, value)) = map.next_entry()? {
                     match key {
-                        "_id" => compaction_group_id = Some(<CompactionGroupId as std::str::FromStr>::from_str(value).unwrap()),
+                        "_id" => compaction_group_id = Some(i64::deserialize(value).unwrap()),
                         "config" => config = Some(CompactionConfig::deserialize(value).unwrap()),
                         x => return Err(Error::unknown_field(x, &FIELDS)),
                     }

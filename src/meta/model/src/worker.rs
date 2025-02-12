@@ -201,15 +201,15 @@ impl<'de> Deserialize<'de> for MongoDb {
                     match key {
                         "_id" => {
                             worker_id =
-                                Some(<WorkerId as std::str::FromStr>::from_str(value).unwrap())
+                                Some(i32::deserialize(value).unwrap())
                         }
                         "worker_type" => worker_type = Some(WorkerType::deserialize(value).unwrap()),
                         "host" => host = Some(value.to_string()),
-                        "port" => port = Some(<i32 as std::str::FromStr>::from_str(value).unwrap()),
+                        "port" => port = Some(i32::deserialize(value).unwrap()),
                         "status" => status = Some(WorkerStatus::deserialize(value).unwrap()),
                         "transaction_id" => {
                             transaction_id =
-                                Some(<TransactionId as std::str::FromStr>::from_str(value).unwrap())
+                                Some(i32::deserialize(value).unwrap())
                         }
                         "worker_property" => {
                             worker_property = Some(
