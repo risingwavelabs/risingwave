@@ -22,8 +22,7 @@ use super::*;
 #[linkme::distributed_slice(UDF_IMPLS)]
 static QUICKJS: UdfImplDescriptor = UdfImplDescriptor {
     match_fn: |language, runtime, _link| {
-        (language == "javascript" || language == "javascript_async")
-            && matches!(runtime, None | Some("quickjs"))
+        language == "javascript" && matches!(runtime, None | Some("quickjs"))
     },
     create_fn: |opts| {
         Ok(CreateFunctionOutput {
