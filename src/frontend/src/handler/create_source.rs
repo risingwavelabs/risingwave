@@ -850,8 +850,18 @@ pub async fn bind_create_source_or_table_with_connector(
         .into());
     }
 
+    // User may specify a generated or additional column with the same name as one from the external schema.
+    // Ensure duplicated column names are handled here.
+    if let Some(duplicated_name) = columns.iter().map(|c| c.name()).duplicates().next() {
+        return Err(ErrorCode::InvalidInputSyntax(format!(
+            "column \"{}\" specified more than once",
+            duplicated_name
+        ))
+        .into());
+    }
+
     // XXX: why do we use col_id_gen here? It doesn't seem to be very necessary.
-    // XXX: should we also chenge the col id for struct fields?
+    // XXX: should we also change the col id for struct fields?
     for c in &mut columns {
         c.column_desc.column_id = col_id_gen.generate(&*c)?;
     }

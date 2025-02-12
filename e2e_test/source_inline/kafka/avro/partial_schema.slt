@@ -35,7 +35,19 @@ FORMAT PLAIN ENCODE AVRO (
     schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}'
 );
 
-# Specify incorrect schema
+# Specify partial schema, with a generated column having the same name as a column in the source schema.
+# We should treat the generated column as a new column.
+statement ok
+create table t3 (bar int, foo varchar as 'generated')
+WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'avro_partial_schema_test'
+)
+FORMAT PLAIN ENCODE AVRO (
+    schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}'
+);
+
+# Specify incorrect schema: inexistent column
 statement error
 create table t (bar int, foo varchar, baz int)
 WITH (
@@ -52,6 +64,7 @@ Caused by:
   Protocol error: Column "baz" is defined in SQL but not found in the source
 
 
+# Specify incorrect schema: data type mismatch
 statement error
 create table t (bar double)
 WITH (
@@ -95,8 +108,9 @@ FORMAT PLAIN ENCODE AVRO (
 query TT rowsort
 SELECT name, SUBSTRING(definition, 1, POSITION(' WITH' IN definition) - 1) FROM rw_tables WHERE name LIKE 't%';
 ----
-t1	    CREATE TABLE t1 (foo CHARACTER VARYING, bar INT)
-t2	    CREATE TABLE t2 (bar INT, gen_col INT AS bar + 1)
+t1	CREATE TABLE t1 (foo CHARACTER VARYING, bar INT)
+t2	CREATE TABLE t2 (bar INT, gen_col INT AS bar + 1)
+t3	CREATE TABLE t3 (bar INT, foo CHARACTER VARYING AS 'generated')
 tstar	CREATE TABLE tstar (bar INT, foo CHARACTER VARYING, gen_col INT AS bar + 1)
 tstar2	CREATE TABLE tstar2 (bar INT, foo CHARACTER VARYING, gen_col INT AS bar + 1)
 
@@ -131,6 +145,18 @@ Caused by:
 
 
 statement ok
+alter table t3 add column baz double;
+
+statement error
+alter table t3 add column foo varchar;
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Invalid input syntax: column "foo" of table "t3" already exists
+
+
+statement ok
 alter table tstar drop column foo;
 
 statement error
@@ -158,8 +184,9 @@ Caused by:
 query TT rowsort
 SELECT name, SUBSTRING(definition, 1, POSITION(' WITH' IN definition) - 1) FROM rw_tables WHERE name LIKE 't%';
 ----
-t1	    CREATE TABLE t1 (bar INT)
-t2	    CREATE TABLE t2 (bar INT, gen_col INT AS bar + 1, baz DOUBLE)
+t1	CREATE TABLE t1 (bar INT)
+t2	CREATE TABLE t2 (bar INT, gen_col INT AS bar + 1, baz DOUBLE)
+t3	CREATE TABLE t3 (bar INT, foo CHARACTER VARYING AS 'generated', baz DOUBLE)
 tstar	CREATE TABLE tstar (bar INT, gen_col INT AS bar + 1, baz DOUBLE)
 tstar2	CREATE TABLE tstar2 (bar INT, foo CHARACTER VARYING, gen_col INT AS bar + 1)
 
@@ -169,6 +196,25 @@ alter table t1 refresh schema;
 
 statement ok
 alter table t2 refresh schema;
+
+
+# Refreshing schema for t3 will fail, because the name of the generated column conflicts with the one in the external schema.
+# After dropping it, the schema can be refreshed.
+statement error
+alter table t3 refresh schema;
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Invalid input syntax: column "foo" specified more than once
+
+
+statement ok
+alter table t3 drop column foo;
+
+statement ok
+alter table t3 refresh schema;
+
 
 statement ok
 alter table tstar refresh schema;
@@ -180,8 +226,9 @@ alter table tstar2 refresh schema;
 query TT rowsort
 SELECT name, SUBSTRING(definition, 1, POSITION(' WITH' IN definition) - 1) FROM rw_tables WHERE name LIKE 't%';
 ----
-t1	    CREATE TABLE t1 (bar INT, foo CHARACTER VARYING, baz DOUBLE)
-t2	    CREATE TABLE t2 (bar INT, foo CHARACTER VARYING, baz DOUBLE, gen_col INT AS bar + 1)
+t1	CREATE TABLE t1 (bar INT, foo CHARACTER VARYING, baz DOUBLE)
+t2	CREATE TABLE t2 (bar INT, foo CHARACTER VARYING, baz DOUBLE, gen_col INT AS bar + 1)
+t3	CREATE TABLE t3 (bar INT, foo CHARACTER VARYING, baz DOUBLE)
 tstar	CREATE TABLE tstar (bar INT, foo CHARACTER VARYING, baz DOUBLE, gen_col INT AS bar + 1)
 tstar2	CREATE TABLE tstar2 (bar INT, foo CHARACTER VARYING, baz DOUBLE, gen_col INT AS bar + 1)
 
@@ -191,6 +238,9 @@ DROP TABLE t1;
 
 statement ok
 DROP TABLE t2;
+
+statement ok
+DROP TABLE t3;
 
 statement ok
 DROP TABLE tstar;
