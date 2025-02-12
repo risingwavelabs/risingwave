@@ -256,7 +256,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                                     actor_to_apply.get(&self.actor_ctx.id)
                                                     && *new_rate_limit != self.rate_limit_rps
                                                 {
-                                                    tracing::debug!(
+                                                    tracing::info!(
                                                         "updating rate limit from {:?} to {:?}",
                                                         self.rate_limit_rps,
                                                         *new_rate_limit
