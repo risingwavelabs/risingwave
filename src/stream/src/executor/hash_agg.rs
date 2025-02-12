@@ -298,6 +298,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                                 &this.intermediate_state_table,
                                 &this.input_pk_indices,
                                 this.row_count_index,
+                                this.emit_on_window_close,
                                 this.extreme_cache_size,
                                 &this.input_schema,
                             )
@@ -407,14 +408,17 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         let window_watermark = vars.window_watermark.take();
 
         // flush changed states into intermediate state table
-        for agg_group in vars.dirty_groups.values() {
-            let encoded_states = agg_group.encode_states(&this.agg_funcs)?;
+        for mut agg_group in vars.dirty_groups.values_mut() {
+            let Some(inter_states_change) = agg_group.build_states_change(&this.agg_funcs)? else {
+                continue;
+            };
+
             if this.emit_on_window_close {
                 vars.buffer
-                    .update_without_old_value(encoded_states, &mut this.intermediate_state_table);
+                    .apply_change(inter_states_change, &mut this.intermediate_state_table);
             } else {
                 this.intermediate_state_table
-                    .update_without_old_value(encoded_states);
+                    .write_record(inter_states_change);
             }
         }
 
@@ -432,9 +436,9 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         .into_iter()
                         .take(this.group_key_indices.len())
                         .collect();
-                    let states = row.into_iter().skip(this.group_key_indices.len()).collect();
+                    let inter_states = row.into_iter().skip(this.group_key_indices.len()).collect();
 
-                    let mut agg_group = AggGroup::create_eowc(
+                    let mut agg_group = AggGroup::<S>::for_eowc_output(
                         this.version,
                         Some(GroupKey::new(
                             group_key,
@@ -443,15 +447,16 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         &this.agg_calls,
                         &this.agg_funcs,
                         &this.storages,
-                        &states,
+                        &inter_states,
                         &this.input_pk_indices,
                         this.row_count_index,
+                        this.emit_on_window_close,
                         this.extreme_cache_size,
                         &this.input_schema,
                     )?;
 
                     let (change, stats) = agg_group
-                        .build_change(&this.storages, &this.agg_funcs)
+                        .build_outputs_change(&this.storages, &this.agg_funcs)
                         .await?;
                     vars.stats.merge_state_cache_stats(stats);
 
@@ -468,7 +473,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             for mut agg_group in vars.dirty_groups.values_mut() {
                 let agg_group = agg_group.as_mut();
                 let (change, stats) = agg_group
-                    .build_change(&this.storages, &this.agg_funcs)
+                    .build_outputs_change(&this.storages, &this.agg_funcs)
                     .await?;
                 vars.stats.merge_state_cache_stats(stats);
 
