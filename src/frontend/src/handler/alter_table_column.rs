@@ -30,7 +30,6 @@ use risingwave_sqlparser::ast::{AlterTableOperation, ColumnOption, ObjectName, S
 
 use super::create_source::SqlColumnStrategy;
 use super::create_table::{generate_stream_graph_for_replace_table, ColumnIdGenerator};
-use super::util::SourceSchemaCompatExt;
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::purify::try_purify_table_source_create_sql_ast;
 use crate::catalog::root_catalog::SchemaPath;

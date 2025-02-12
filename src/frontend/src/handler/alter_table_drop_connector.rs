@@ -164,7 +164,7 @@ pub async fn handle_alter_table_drop_connector(
         table_name,
         new_statement,
         &table_def,
-        SqlColumnStrategy::Follow,
+        SqlColumnStrategy::FollowUnchecked,
     )
     .await?;
 
