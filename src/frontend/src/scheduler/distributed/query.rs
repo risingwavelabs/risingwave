@@ -73,6 +73,7 @@ pub struct QueryExecution {
     /// Identified by `process_id`, `secret_key`. Query in the same session should have same key.
     pub session_id: SessionId,
     /// Permit to execute the query. Once query finishes execution, this is dropped.
+    #[expect(dead_code)]
     pub permit: Option<tokio::sync::OwnedSemaphorePermit>,
 }
 
