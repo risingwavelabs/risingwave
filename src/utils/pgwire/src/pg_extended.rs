@@ -21,7 +21,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::error::{PsqlError, PsqlResult};
 use crate::pg_message::{BeCommandCompleteMessage, BeMessage};
-use crate::pg_protocol::Conn;
+use crate::pg_protocol::PgStream;
 use crate::pg_response::{PgResponse, ValuesStream};
 use crate::types::{Format, Row};
 
@@ -48,7 +48,7 @@ where
     pub async fn consume<S: AsyncWrite + AsyncRead + Unpin>(
         &mut self,
         row_limit: usize,
-        msg_stream: &mut Conn<S>,
+        msg_stream: &mut PgStream<S>,
     ) -> PsqlResult<bool> {
         for notice in self.result.notices() {
             msg_stream.write_no_flush(&BeMessage::NoticeResponse(notice))?;
