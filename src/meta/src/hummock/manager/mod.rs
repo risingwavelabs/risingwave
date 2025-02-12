@@ -134,7 +134,7 @@ macro_rules! start_measure_real_process_timer {
 }
 pub(crate) use start_measure_real_process_timer;
 
-use crate::controller::SqlMetaStore;
+use crate::controller::{MetaStore, DB};
 use crate::hummock::manager::compaction_group_manager::CompactionGroupManager;
 use crate::hummock::manager::worker::HummockManagerEventSender;
 
@@ -310,7 +310,7 @@ impl HummockManager {
         Ok(instance)
     }
 
-    fn meta_store_ref(&self) -> &SqlMetaStore {
+    fn meta_store_ref(&self) -> &MetaStore {
         self.env.meta_store_ref()
     }
 
@@ -339,44 +339,59 @@ impl HummockManager {
     ) -> Result<()> {
         use sea_orm::EntityTrait;
         let meta_store = self.meta_store_ref();
-        let compaction_statuses: BTreeMap<CompactionGroupId, CompactStatus> =
-            compaction_status::Entity::find()
-                .all(&meta_store.conn)
+        let compaction_statuses: BTreeMap<CompactionGroupId, CompactStatus> = match &meta_store.conn
+        {
+            DB::SQL(conn) => compaction_status::Entity::find()
+                .all(conn)
                 .await
                 .map_err(MetadataModelError::from)?
                 .into_iter()
                 .map(|m| (m.compaction_group_id as CompactionGroupId, m.into()))
-                .collect();
+                .collect(),
+            DB::MONGODB(client) => {
+                todo!("not implemented")
+            }
+        };
         if !compaction_statuses.is_empty() {
             compaction_guard.compaction_statuses = compaction_statuses;
         }
 
-        compaction_guard.compact_task_assignment = compaction_task::Entity::find()
-            .all(&meta_store.conn)
-            .await
-            .map_err(MetadataModelError::from)?
-            .into_iter()
-            .map(|m| {
-                (
-                    m.id as HummockCompactionTaskId,
-                    PbCompactTaskAssignment::from(m),
-                )
-            })
-            .collect();
-
-        let hummock_version_deltas: BTreeMap<HummockVersionId, HummockVersionDelta> =
-            hummock_version_delta::Entity::find()
-                .all(&meta_store.conn)
+        compaction_guard.compact_task_assignment = match &meta_store.conn {
+            DB::SQL(conn) => compaction_task::Entity::find()
+                .all(conn)
                 .await
                 .map_err(MetadataModelError::from)?
                 .into_iter()
                 .map(|m| {
                     (
-                        HummockVersionId::new(m.id as _),
-                        HummockVersionDelta::from_persisted_protobuf(&m.into()),
+                        m.id as HummockCompactionTaskId,
+                        PbCompactTaskAssignment::from(m),
                     )
                 })
-                .collect();
+                .collect(),
+            DB::MONGODB(client) => {
+                todo!("not implemented")
+            }
+        };
+
+        let hummock_version_deltas: BTreeMap<HummockVersionId, HummockVersionDelta> =
+            match &meta_store.conn {
+                DB::SQL(conn) => hummock_version_delta::Entity::find()
+                    .all(conn)
+                    .await
+                    .map_err(MetadataModelError::from)?
+                    .into_iter()
+                    .map(|m| {
+                        (
+                            HummockVersionId::new(m.id as _),
+                            HummockVersionDelta::from_persisted_protobuf(&m.into()),
+                        )
+                    })
+                    .collect(),
+                DB::MONGODB(client) => {
+                    todo!("not implemented")
+                }
+            };
 
         let checkpoint = self.try_read_checkpoint().await?;
         let mut redo_state = if let Some(c) = checkpoint {
@@ -420,27 +435,39 @@ impl HummockManager {
             }
         }
         tracing::info!("Finish redo Hummock version.");
-        versioning_guard.version_stats = hummock_version_stats::Entity::find()
-            .one(&meta_store.conn)
-            .await
-            .map_err(MetadataModelError::from)?
-            .map(HummockVersionStats::from)
-            .unwrap_or_else(|| HummockVersionStats {
-                // version_stats.hummock_version_id is always 0 in meta store.
-                hummock_version_id: 0,
-                ..Default::default()
-            });
+        versioning_guard.version_stats = match &meta_store.conn {
+            DB::SQL(conn) => {
+                hummock_version_stats::Entity::find()
+                    .one(conn)
+                    .await
+                    .map_err(MetadataModelError::from)?
+                    .map(HummockVersionStats::from)
+                    .unwrap_or_else(|| HummockVersionStats {
+                        // version_stats.hummock_version_id is always 0 in meta store.
+                        hummock_version_id: 0,
+                        ..Default::default()
+                    })
+            }
+            DB::MONGODB(client) => {
+                todo!("not implemented")
+            }
+        };
 
         versioning_guard.current_version = redo_state;
         versioning_guard.hummock_version_deltas = hummock_version_deltas;
 
-        context_info.pinned_versions = hummock_pinned_version::Entity::find()
-            .all(&meta_store.conn)
-            .await
-            .map_err(MetadataModelError::from)?
-            .into_iter()
-            .map(|m| (m.context_id as HummockContextId, m.into()))
-            .collect();
+        context_info.pinned_versions = match &meta_store.conn {
+            DB::SQL(conn) => hummock_pinned_version::Entity::find()
+                .all(conn)
+                .await
+                .map_err(MetadataModelError::from)?
+                .into_iter()
+                .map(|m| (m.context_id as HummockContextId, m.into()))
+                .collect(),
+            DB::MONGODB(client) => {
+                todo!("not implemented")
+            }
+        };
 
         self.initial_compaction_group_config_after_load(
             versioning_guard,

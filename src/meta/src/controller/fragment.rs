@@ -101,6 +101,7 @@ impl CatalogControllerInner {
     pub async fn all_running_fragment_mappings(
         &self,
     ) -> MetaResult<impl Iterator<Item = FragmentWorkerSlotMapping> + '_> {
+        // TODO implement MongoDB
         let txn = self.db.begin().await?;
 
         let job_ids: Vec<ObjectId> = StreamingJob::find()

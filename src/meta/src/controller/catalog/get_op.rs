@@ -17,6 +17,7 @@ use crate::controller::utils::{get_database_resource_group, get_existing_job_res
 
 impl CatalogController {
     pub async fn get_secret_by_id(&self, secret_id: SecretId) -> MetaResult<PbSecret> {
+        // TODO implement MongoDB
         let inner = self.inner.read().await;
         let (secret, obj) = Secret::find_by_id(secret_id)
             .find_also_related(Object)

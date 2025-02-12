@@ -1514,12 +1514,12 @@ pub async fn create_iceberg_engine_table(
                 meta_store_database.clone()
             )
         }
-        MetaBackend::Sqlite | MetaBackend::Sql | MetaBackend::Mem => {
+        MetaBackend::MongoDb | MetaBackend::Sqlite | MetaBackend::Sql | MetaBackend::Mem => {
             bail!(
                 "Unsupported meta backend for iceberg engine table: {}",
                 meta_store_backend
             );
-        }
+        },
     };
 
     let rw_db_name = session

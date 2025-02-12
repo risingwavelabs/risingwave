@@ -17,16 +17,21 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
 use fail::fail_point;
+use mongodb::bson::doc;
+use mongodb::Client;
 use parking_lot::RwLock;
 use risingwave_hummock_sdk::compact::statistics_compact_task;
 use risingwave_hummock_sdk::compact_task::CompactTask;
 use risingwave_hummock_sdk::{HummockCompactionTaskId, HummockContextId};
+use risingwave_meta_model::compaction_task::Model;
 use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
 use risingwave_pb::hummock::{
     CancelCompactTask, CompactTaskAssignment, CompactTaskProgress, SubscribeCompactionEventResponse,
 };
+use sea_orm::DatabaseConnection;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
+use crate::controller::DB;
 use crate::manager::MetaSrvEnv;
 use crate::model::MetadataModelError;
 use crate::MetaResult;
@@ -138,13 +143,25 @@ impl CompactorManagerInner {
         use risingwave_meta_model::compaction_task;
         use sea_orm::EntityTrait;
         // Retrieve the existing task assignments from metastore.
-        let task_assignment: Vec<CompactTaskAssignment> = compaction_task::Entity::find()
-            .all(&env.meta_store_ref().conn)
-            .await
-            .map_err(MetadataModelError::from)?
-            .into_iter()
-            .map(Into::into)
-            .collect();
+        let task_assignment: Vec<CompactTaskAssignment> = match &env.meta_store_ref().conn {
+            DB::SQL(conn) => compaction_task::Entity::find()
+                .all(conn)
+                .await
+                .map_err(MetadataModelError::from)?
+                .into_iter()
+                .map(Into::into)
+                .collect(),
+            DB::MONGODB(client) => {
+                client
+                    .default_database()
+                    .unwrap()
+                    .collection::<Model>("compaction_task")
+                    .find(doc! {})
+                    .await
+                    .map_err(MetadataModelError::from)?;
+                Vec::new()
+            }
+        };
         let mut manager = Self {
             task_expired_seconds: env.opts.compaction_task_max_progress_interval_secs,
             heartbeat_expired_seconds: env.opts.compaction_task_max_heartbeat_interval_secs,

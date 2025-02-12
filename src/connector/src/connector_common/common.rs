@@ -829,7 +829,7 @@ pub(crate) fn load_private_key(
 #[serde_as]
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct MongodbCommon {
-    /// The URL of MongoDB
+    /// The URL of MongoDb
     #[serde(rename = "mongodb.url")]
     pub connect_uri: String,
     /// The collection name where data should be written to or read from. For sinks, the format is
@@ -841,7 +841,14 @@ pub struct MongodbCommon {
 
 impl MongodbCommon {
     pub(crate) async fn build_client(&self) -> ConnectorResult<mongodb::Client> {
-        let client = mongodb::Client::with_uri_str(&self.connect_uri).await?;
+        let mut options = mongodb::options::ClientOptions::parse(&self.connect_uri).await?;
+        // Set the server_api field of the client_options object to Stable API version 1
+        let server_api = mongodb::options::ServerApi::builder()
+            .version(mongodb::options::ServerApiVersion::V1)
+            .build();
+        options.server_api = Some(server_api);
+        // Create a new client and connect to the server
+        let client = mongodb::Client::with_options(options)?;
 
         Ok(client)
     }

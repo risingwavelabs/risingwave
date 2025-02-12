@@ -26,7 +26,7 @@ use thiserror_ext::AsReport;
 use tokio::sync::RwLock;
 use tracing::info;
 
-use crate::controller::SqlMetaStore;
+use crate::controller::MetaStore;
 use crate::manager::NotificationManagerRef;
 use crate::{MetaError, MetaResult};
 
@@ -43,7 +43,7 @@ pub struct SessionParamsController {
 
 impl SessionParamsController {
     pub async fn new(
-        sql_meta_store: SqlMetaStore,
+        sql_meta_store: MetaStore,
         notification_manager: NotificationManagerRef,
         mut init_params: SessionConfig,
     ) -> MetaResult<Self> {

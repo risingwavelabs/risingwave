@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt::Formatter;
 use risingwave_common::catalog::OBJECT_ID_PLACEHOLDER;
 use risingwave_common::hash::VnodeCountCompat;
 use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, PbEngine, PbTableType};
@@ -19,8 +20,9 @@ use risingwave_pb::catalog::{PbHandleConflictBehavior, PbTable};
 use sea_orm::entity::prelude::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::NotSet;
-use serde::{Deserialize, Serialize};
-
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::de::{MapAccess, Visitor};
+use serde::ser::SerializeStruct;
 use crate::{
     Cardinality, ColumnCatalogArray, ColumnOrderArray, FragmentId, I32Array, ObjectId, SourceId,
     TableId, TableVersion, WebhookSourceInfo,
@@ -305,3 +307,152 @@ impl From<PbTable> for ActiveModel {
         }
     }
 }
+
+const FIELDS: [&str; 32] = [
+    "_id",
+    "name",
+    "optional_associated_source_id",
+    "table_type",
+    "belongs_to_job_id",
+    "columns",
+    "pk",
+    "distribution_key",
+    "stream_key",
+    "append_only",
+    "fragment_id",
+    "vnode_col_index",
+    "row_id_index",
+    "value_indices",
+    "definition",
+    "handle_pk_conflict_behavior",
+    "version_column_index",
+    "read_prefix_len_hint",
+    "watermark_indices",
+    "dist_key_in_pk",
+    "dml_fragment_id",
+    "cardinality",
+    "cleaned_by_watermark",
+    "description",
+    "version",
+    "retention_seconds",
+    "incoming_sinks",
+    "cdc_table_id",
+    "vnode_count",
+    "webhook_info",
+    "engine",
+    "clean_watermark_index_in_pk",
+];
+pub struct MongoDb {
+    pub table: Model,
+}
+
+// impl Serialize for MongoDb {
+//     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+//     where
+//         S: Serializer,
+//     {
+//         // 3 is the number of fields in the struct.
+//         let mut state = serializer.serialize_struct("MongoDb", 12)?;
+//         state.serialize_field("_id", &self.table.table_id)?;
+//         state.serialize_field("worker_type", &self.worker.worker_type)?;
+//         state.serialize_field("host", &self.worker.host)?;
+//         state.serialize_field("port", &self.worker.port)?;
+//         state.serialize_field("status", &self.worker.status)?;
+//         state.serialize_field("transaction_id", &self.worker.transaction_id)?;
+//         if let Some(worker_property) = &self.worker_property {
+//             state.serialize_field("worker_property", &worker_property)?;
+//         }
+//         state.end()
+//     }
+// }
+//
+// impl<'de> Deserialize<'de> for MongoDb {
+//     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+//     where
+//         D: Deserializer<'de>,
+//     {
+//         struct MongoDbVisitor;
+//         impl<'de> Visitor<'de> for MongoDbVisitor {
+//             type Value = MongoDb;
+//
+//             fn expecting(&self, formatter: &mut Formatter) -> std::fmt::Result {
+//                 formatter.write_str("MongoDb")
+//             }
+//
+//             fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+//             where
+//                 A: MapAccess<'de>,
+//             {
+//                 let mut table_id: TableId,
+//                 let mut name: String,
+//                 let mut optional_associated_source_id: Option<SourceId>,
+//                 let mut table_type: TableType,
+//                 let mut belongs_to_job_id: Option<ObjectId>,
+//                 let mut columns: ColumnCatalogArray,
+//                 let mut pk: ColumnOrderArray,
+//                 let mut distribution_key: I32Array,
+//                 let mut stream_key: I32Array,
+//                 let mut append_only: bool,
+//                 let mut fragment_id: Option<FragmentId>,
+//                 let mut vnode_col_index: Option<i32>,
+//                 let mut row_id_index: Option<i32>,
+//                 let mut value_indices: I32Array,
+//                 let mut definition: String,
+//                 let mut handle_pk_conflict_behavior: HandleConflictBehavior,
+//                 let mut version_column_index: Option<i32>,
+//                 let mut read_prefix_len_hint: i32,
+//                 let mut watermark_indices: I32Array,
+//                 let mut dist_key_in_pk: I32Array,
+//                 let mut dml_fragment_id: Option<FragmentId>,
+//                 let mut cardinality: Option<Cardinality>,
+//                 let mut cleaned_by_watermark: bool,
+//                 let mut description: Option<String>,
+//                 let mut version: Option<TableVersion>,
+//                 let mut retention_seconds: Option<i32>,
+//                 let mut incoming_sinks: I32Array,
+//                 let mut cdc_table_id: Option<String>,
+//                 let mut vnode_count: i32,
+//                 let mut webhook_info: Option<WebhookSourceInfo>,
+//                 let mut engine: Option<Engine>,
+//                 let mut clean_watermark_index_in_pk: Option<i32>,
+//                 while let Some((key, value)) = map.next_entry()? {
+//                     match key {
+//                         "_id" => {
+//                             worker_id =
+//                                 Some(<WorkerId as std::str::FromStr>::from_str(value).unwrap())
+//                         }
+//                         "worker_type" => worker_type = Some(WorkerType::from(value)),
+//                         "host" => host = Some(value.to_string()),
+//                         "port" => port = Some(<i32 as std::str::FromStr>::from_str(value).unwrap()),
+//                         "status" => status = Some(WorkerStatus::from(value)),
+//                         "transaction_id" => {
+//                             transaction_id =
+//                                 Some(<TransactionId as std::str::FromStr>::from_str(value).unwrap())
+//                         }
+//                         "worker_property" => {
+//                             worker_property = Some(
+//                                 serde_json::from_str::<super::worker_property::Model>(value)
+//                                     .unwrap(),
+//                             )
+//                         }
+//                         x => return Err(Error::unknown_field(x, &FIELDS)),
+//                     }
+//                 }
+//
+//                 let worker = Model {
+//                     worker_id: worker_id.ok_or_else(|| Error::missing_field("_id"))?,
+//                     worker_type: worker_type.ok_or_else(|| Error::missing_field("worker_type"))?,
+//                     host: host.ok_or_else(|| Error::missing_field("host"))?,
+//                     port: port.ok_or_else(|| Error::missing_field("port"))?,
+//                     status: status.ok_or_else(|| Error::missing_field("status"))?,
+//                     transaction_id,
+//                 };
+//                 Ok(Self::Value {
+//                     worker,
+//                     worker_property,
+//                 })
+//             }
+//         }
+//         deserializer.deserialize_map(MongoDbVisitor {})
+//     }
+// }

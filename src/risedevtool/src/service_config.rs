@@ -409,6 +409,27 @@ pub struct SqlServerConfig {
     pub persist_data: bool,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
+pub struct MongoDbConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
+    pub id: String,
+
+    pub port: u16,
+    pub address: String,
+
+    pub user: String,
+    pub password: String,
+    pub database: String,
+
+    pub application: Application,
+    pub image: String,
+    pub user_managed: bool,
+    pub persist_data: bool,
+}
+
 /// All service configuration
 #[derive(Clone, Debug, PartialEq)]
 pub enum ServiceConfig {
@@ -431,6 +452,7 @@ pub enum ServiceConfig {
     MySql(MySqlConfig),
     Postgres(PostgresConfig),
     SqlServer(SqlServerConfig),
+    MongoDb(MongoDbConfig),
 }
 
 #[derive(PartialEq, Eq, Hash)]
@@ -443,6 +465,7 @@ pub enum TaskGroup {
     Postgres,
     SqlServer,
     Redis,
+    MongoDb,
 }
 
 impl ServiceConfig {
@@ -467,6 +490,7 @@ impl ServiceConfig {
             Self::Postgres(c) => &c.id,
             Self::SqlServer(c) => &c.id,
             Self::SchemaRegistry(c) => &c.id,
+            Self::MongoDb(c) => &c.id,
         }
     }
 
@@ -492,6 +516,7 @@ impl ServiceConfig {
             Self::Postgres(c) => Some(c.port),
             Self::SqlServer(c) => Some(c.port),
             Self::SchemaRegistry(c) => Some(c.port),
+            Self::MongoDb(c) => Some(c.port),
         }
     }
 
@@ -516,6 +541,7 @@ impl ServiceConfig {
             Self::Postgres(c) => c.user_managed,
             Self::SqlServer(c) => c.user_managed,
             Self::SchemaRegistry(c) => c.user_managed,
+            Self::MongoDb(c) => c.user_managed,
         }
     }
 
@@ -549,6 +575,13 @@ impl ServiceConfig {
                     RisingWave
                 } else {
                     Postgres
+                }
+            }
+            ServiceConfig::MongoDb(mongodb_config) => {
+                if matches!(mongodb_config.application, Application::Metastore) {
+                    RisingWave
+                } else {
+                    MongoDb
                 }
             }
             ServiceConfig::SqlServer(_) => SqlServer,

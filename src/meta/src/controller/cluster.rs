@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::any::{Any, TypeId};
 use std::cmp;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -19,8 +20,14 @@ use std::ops::Add;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
+use futures::{FutureExt, StreamExt};
 use itertools::Itertools;
+use mongodb::bson::{doc, Document};
+use mongodb::error::UNKNOWN_TRANSACTION_COMMIT_RESULT;
+use mongodb::options::{ReadConcern, WriteConcern};
+use mongodb::{bson, Client, ClientSession, Cursor};
 use risingwave_common::hash::WorkerSlotId;
+use risingwave_common::range::RangeBoundsExt;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
@@ -49,6 +56,7 @@ use tokio::sync::{RwLock, RwLockReadGuard};
 use tokio::task::JoinHandle;
 
 use crate::controller::utils::filter_workers_by_resource_group;
+use crate::controller::DB;
 use crate::manager::{LocalNotification, MetaSrvEnv, WorkerKey, META_NODE_ID};
 use crate::model::ClusterId;
 use crate::{MetaError, MetaResult};
@@ -509,7 +517,7 @@ fn meta_node_info(host: &str, started_at: Option<u64>) -> PbWorkerNode {
 }
 
 pub struct ClusterControllerInner {
-    db: DatabaseConnection,
+    db: DB,
     /// Record for tracking available machine ids, one is available.
     available_transactional_ids: VecDeque<TransactionId>,
     worker_extra_info: HashMap<WorkerId, WorkerExtraInfo>,
@@ -517,20 +525,34 @@ pub struct ClusterControllerInner {
 }
 
 impl ClusterControllerInner {
+    const COLLECTION: &'static str = "worker";
     pub const MAX_WORKER_REUSABLE_ID_BITS: usize = 10;
     pub const MAX_WORKER_REUSABLE_ID_COUNT: usize = 1 << Self::MAX_WORKER_REUSABLE_ID_BITS;
 
-    pub async fn new(
-        db: DatabaseConnection,
-        disable_automatic_parallelism_control: bool,
-    ) -> MetaResult<Self> {
-        let workers: Vec<(WorkerId, Option<TransactionId>)> = Worker::find()
-            .select_only()
-            .column(worker::Column::WorkerId)
-            .column(worker::Column::TransactionId)
-            .into_tuple()
-            .all(&db)
-            .await?;
+    pub async fn new(db: DB, disable_automatic_parallelism_control: bool) -> MetaResult<Self> {
+        let workers: Vec<(WorkerId, Option<TransactionId>)> = match &db {
+            DB::SQL(conn) => {
+                Worker::find()
+                    .select_only()
+                    .column(worker::Column::WorkerId)
+                    .column(worker::Column::TransactionId)
+                    .into_tuple()
+                    .all(conn)
+                    .await?
+            }
+            DB::MONGODB(client) => {
+                client
+                    .default_database()
+                    .unwrap()
+                    .collection(Self::COLLECTION)
+                    .find(doc! {})
+                    .projection(doc! {"_id": 1, "transaction_id": 1})
+                    .await?
+                    .with_type::<(WorkerId, Option<TransactionId>)>()
+                    .collect()
+                    .await?
+            }
+        };
         let inuse_txn_ids: HashSet<_> = workers
             .iter()
             .cloned()
@@ -554,16 +576,32 @@ impl ClusterControllerInner {
     }
 
     pub async fn count_worker_by_type(&self) -> MetaResult<HashMap<WorkerType, i64>> {
-        let workers: Vec<(WorkerType, i64)> = Worker::find()
-            .select_only()
-            .column(worker::Column::WorkerType)
-            .column_as(worker::Column::WorkerId.count(), "count")
-            .group_by(worker::Column::WorkerType)
-            .into_tuple()
-            .all(&self.db)
-            .await?;
-
-        Ok(workers.into_iter().collect())
+        Ok(match &self.db {
+            DB::SQL(conn) => Worker::find()
+                .select_only()
+                .column(worker::Column::WorkerType)
+                .column_as(worker::Column::WorkerId.count(), "count")
+                .group_by(worker::Column::WorkerType)
+                .into_tuple()
+                .all(conn)
+                .await?
+                .into_iter()
+                .collect(),
+            DB::MONGODB(client) => {
+                client
+                    .default_database()
+                    .unwrap()
+                    .collection(Self::COLLECTION)
+                    .aggregate(vec![
+                        doc! { "$group": {"_id": "$workerType", "count": {"$count": {}}}},
+                        doc! { "$project": { "_id": 1, "count": 1}},
+                    ])
+                    .await?
+                    .with_type::<(WorkerType, i64)>()
+                    .collect()
+                    .await?
+            }
+        })
     }
 
     pub fn update_worker_ttl(&mut self, worker_id: WorkerId, ttl: Duration) -> MetaResult<()> {
@@ -621,6 +659,31 @@ impl ClusterControllerInner {
             .sum()
     }
 
+    async fn commit_transaction(&self, mut session: ClientSession) -> MetaResult<()> {
+        // An "UnknownTransactionCommitResult" label indicates that it is unknown whether the
+        // commit has satisfied the write concern associated with the transaction. If an error
+        // with this label is returned, it is safe to retry the commit until the write concern is
+        // satisfied or an error without the label is returned.
+        loop {
+            let result = session.commit_transaction().await;
+            if let Err(ref error) = result {
+                if error.contains_label(UNKNOWN_TRANSACTION_COMMIT_RESULT) {
+                    continue;
+                }
+            }
+            result?;
+            break;
+        }
+        Ok(())
+    }
+
+    fn convert_to_model(
+        &self,
+        worker: worker::MongoDb,
+    ) -> (worker::Model, Option<worker_property::Model>) {
+        (worker.worker, worker.worker_property.map_or(None, |mdb| Some(mdb.worker_property)))
+    }
+
     pub async fn add_worker(
         &mut self,
         r#type: PbWorkerType,
@@ -629,17 +692,43 @@ impl ClusterControllerInner {
         resource: PbResource,
         ttl: Duration,
     ) -> MetaResult<WorkerId> {
-        let txn = self.db.begin().await?;
+        let mut txn: Box<dyn Any>;
 
-        let worker = Worker::find()
-            .filter(
-                worker::Column::Host
-                    .eq(host_address.host.clone())
-                    .and(worker::Column::Port.eq(host_address.port)),
-            )
-            .find_also_related(WorkerProperty)
-            .one(&txn)
-            .await?;
+        let worker: Option<(worker::Model, Option<worker_property::Model>)> = match &self.db {
+            DB::SQL(conn) => {
+                txn = Box::new(conn.begin().await?);
+                Worker::find()
+                    .filter(
+                        worker::Column::Host
+                            .eq(host_address.host.clone())
+                            .and(worker::Column::Port.eq(host_address.port)),
+                    )
+                    .find_also_related(WorkerProperty)
+                    .one(&*txn)
+                    .await?
+            }
+            DB::MONGODB(client) => {
+                txn = Box::new(client.start_session().await?);
+
+                // incase backend is a replica-set, ensure that the transaction propagated through completely
+                txn.start_transaction()
+                    .read_concern(ReadConcern::majority())
+                    .write_concern(WriteConcern::majority())
+                    .await?;
+                *txn::<ClientSession>
+                    .client()
+                    .default_database()
+                    .unwrap()
+                    .collection(Self::COLLECTION)
+                    .find_one(doc! {
+                        "host": host_address.host.clone(),
+                        "port": host_address.port,
+                    })
+                    .session(&mut *txn)
+                    .await?
+                    .map(|result| self.convert_to_model(result))
+            }
+        };
         // Worker already exist.
         if let Some((worker, property)) = worker {
             assert_eq!(worker.worker_type, r#type.into());
@@ -680,41 +769,109 @@ impl ClusterControllerInner {
                     }
                     Ordering::Equal => {}
                 }
-                let mut property: worker_property::ActiveModel = property.into();
 
-                // keep `is_unschedulable` unchanged.
-                property.is_streaming = Set(add_property.is_streaming);
-                property.is_serving = Set(add_property.is_serving);
-                property.parallelism = Set(current_parallelism as _);
-                property.resource_group =
-                    Set(Some(add_property.resource_group.unwrap_or_else(|| {
-                        tracing::warn!(
-                            "resource_group is not set for worker {}, fallback to `default`",
-                            worker.worker_id
-                        );
-                        DEFAULT_RESOURCE_GROUP.to_owned()
-                    })));
+                match &self.db {
+                    DB::SQL(_) => {
+                        let mut property: worker_property::ActiveModel = property.into();
 
-                WorkerProperty::update(property).exec(&txn).await?;
-                txn.commit().await?;
+                        // keep `is_unschedulable` unchanged.
+                        property.is_streaming = Set(add_property.is_streaming);
+                        property.is_serving = Set(add_property.is_serving);
+                        property.parallelism = Set(current_parallelism as _);
+                        property.resource_group =
+                            Set(Some(add_property.resource_group.unwrap_or_else(|| {
+                                tracing::warn!(
+                                    "resource_group is not set for worker {}, fallback to `default`",
+                                    worker.worker_id
+                                );
+                                DEFAULT_RESOURCE_GROUP.to_owned()
+                            })));
+
+                        WorkerProperty::update(property).exec(&*txn).await?;
+                        *txn.commit().await?;
+                    }
+                    DB::MONGODB(_) => {
+                        *txn::<ClientSession>.client()
+                            .default_database()
+                            .unwrap()
+                            .collection::<worker::Model>(Self::COLLECTION)
+                            .update_one(
+                                doc! {"_id": worker.worker_id},
+                                doc! {
+                                    "$set": {
+                                        // keep `is_unschedulable` unchanged.
+                                        "worker_property.is_streaming": add_property.is_streaming,
+                                        "worker_property.is_serving": add_property.is_serving,
+                                        "worker_property.parallelism": current_parallelism as i32,
+                                        "worker_property.resource_group": Some(add_property.resource_group.unwrap_or_else(|| {
+                                            tracing::warn!(
+                                                    "resource_group is not set for worker {}, fallback to `default`",
+                                                    worker.worker_id
+                                            );
+                                            DEFAULT_RESOURCE_GROUP.to_owned()
+                                        })),
+                                    }
+                                }
+                            )
+                            .session(&mut *txn)
+                            .await?;
+                        self.commit_transaction(*txn).await?;
+                    }
+                };
+
                 self.update_worker_ttl(worker.worker_id, ttl)?;
                 self.update_resource_and_started_at(worker.worker_id, resource)?;
                 Ok(worker.worker_id)
             } else if worker.worker_type == WorkerType::Frontend && property.is_none() {
-                let worker_property = worker_property::ActiveModel {
-                    worker_id: Set(worker.worker_id),
-                    parallelism: Set(add_property
-                        .parallelism
-                        .try_into()
-                        .expect("invalid parallelism")),
-                    is_streaming: Set(add_property.is_streaming),
-                    is_serving: Set(add_property.is_serving),
-                    is_unschedulable: Set(add_property.is_unschedulable),
-                    internal_rpc_host_addr: Set(Some(add_property.internal_rpc_host_addr)),
-                    resource_group: Set(None),
+                match &self.db {
+                    DB::SQL(_) => {
+                        let worker_property = worker_property::ActiveModel {
+                            worker_id: Set(worker.worker_id),
+                            parallelism: Set(add_property
+                                .parallelism
+                                .try_into()
+                                .expect("invalid parallelism")),
+                            is_streaming: Set(add_property.is_streaming),
+                            is_serving: Set(add_property.is_serving),
+                            is_unschedulable: Set(add_property.is_unschedulable),
+                            internal_rpc_host_addr: Set(Some(add_property.internal_rpc_host_addr)),
+                            resource_group: Set(None),
+                        };
+                        WorkerProperty::insert(worker_property).exec(&*txn).await?;
+                        *txn.commit().await?;
+                    }
+                    DB::MONGODB(_) => {
+                        *txn::<ClientSession>.client()
+                            .default_database()
+                            .unwrap()
+                            .collection(Self::COLLECTION)
+                            .update_one(
+                                doc! {"_id": worker.worker_id},
+                                doc! {
+                                    "$set": {
+                                        "worker_property.is_unschedulable": add_property.is_unschedulable,
+                                        "worker_property.is_streaming": add_property.is_streaming,
+                                        "worker_property.is_serving": add_property.is_serving,
+                                        "worker_property.internal_rpc_host_addr": Some(add_property.internal_rpc_host_addr),
+                                        "worker_property.parallelism": add_property
+                                            .parallelism
+                                            .try_into()
+                                            .expect("invalid parallelism"),
+                                        "worker_property.resource_group": Some(add_property.resource_group.unwrap_or_else(|| {
+                                            tracing::warn!(
+                                                    "resource_group is not set for worker {}, fallback to `default`",
+                                                    worker.worker_id
+                                                );
+                                            DEFAULT_RESOURCE_GROUP.to_owned()
+                                        })),
+                                    }
+                                }
+                            )
+                            .session(&mut *txn)
+                            .await?;
+                        self.commit_transaction(*txn).await?;
+                    }
                 };
-                WorkerProperty::insert(worker_property).exec(&txn).await?;
-                txn.commit().await?;
                 self.update_worker_ttl(worker.worker_id, ttl)?;
                 self.update_resource_and_started_at(worker.worker_id, resource)?;
                 Ok(worker.worker_id)
@@ -726,37 +883,105 @@ impl ClusterControllerInner {
         }
         let txn_id = self.apply_transaction_id(r#type)?;
 
-        let worker = worker::ActiveModel {
-            worker_id: Default::default(),
-            worker_type: Set(r#type.into()),
-            host: Set(host_address.host),
-            port: Set(host_address.port),
-            status: Set(WorkerStatus::Starting),
-            transaction_id: Set(txn_id),
-        };
-        let insert_res = Worker::insert(worker).exec(&txn).await?;
-        let worker_id = insert_res.last_insert_id as WorkerId;
-        if r#type == PbWorkerType::ComputeNode || r#type == PbWorkerType::Frontend {
-            let property = worker_property::ActiveModel {
-                worker_id: Set(worker_id),
-                parallelism: Set(add_property
-                    .parallelism
-                    .try_into()
-                    .expect("invalid parallelism")),
-                is_streaming: Set(add_property.is_streaming),
-                is_serving: Set(add_property.is_serving),
-                is_unschedulable: Set(add_property.is_unschedulable),
-                internal_rpc_host_addr: Set(Some(add_property.internal_rpc_host_addr)),
-                resource_group: if r#type == PbWorkerType::ComputeNode {
-                    Set(add_property.resource_group.clone())
-                } else {
-                    Set(None)
-                },
-            };
-            WorkerProperty::insert(property).exec(&txn).await?;
-        }
+        let worker_id = match &self.db {
+            DB::SQL(_) => {
+                let worker = worker::ActiveModel {
+                    worker_id: Default::default(),
+                    worker_type: Set(r#type.into()),
+                    host: Set(host_address.host),
+                    port: Set(host_address.port),
+                    status: Set(WorkerStatus::Starting),
+                    transaction_id: Set(txn_id),
+                };
+                let insert_res = Worker::insert(worker).exec(&*txn).await?;
+                let worker_id = insert_res.last_insert_id as WorkerId;
 
-        txn.commit().await?;
+                if r#type == PbWorkerType::ComputeNode || r#type == PbWorkerType::Frontend {
+                    let property = worker_property::ActiveModel {
+                        worker_id: Set(worker_id),
+                        parallelism: Set(add_property
+                            .parallelism
+                            .try_into()
+                            .expect("invalid parallelism")),
+                        is_streaming: Set(add_property.is_streaming),
+                        is_serving: Set(add_property.is_serving),
+                        is_unschedulable: Set(add_property.is_unschedulable),
+                        internal_rpc_host_addr: Set(Some(add_property.internal_rpc_host_addr)),
+                        resource_group: if r#type == PbWorkerType::ComputeNode {
+                            Set(add_property.resource_group.clone())
+                        } else {
+                            Set(None)
+                        },
+                    };
+                    WorkerProperty::insert(property).exec(&*txn).await?;
+                }
+
+                *txn.commit().await?;
+                worker_id
+            }
+            DB::MONGODB(_) => {
+                let worker_id: WorkerId = *txn::<ClientSession>
+                    .client()
+                    .default_database()
+                    .unwrap()
+                    .collection("counters")
+                    .find_one_and_update(
+                        doc! {"_id": Self::COLLECTION},
+                        doc! {"$inc":{"counter": 1}},
+                    )
+                    .projection(doc! {"counter": 1})
+                    .upsert(true)
+                    .await?
+                    .unwrap();
+
+                let worker = worker::MongoDb {
+                    worker: worker::Model {
+                        worker_id: Default::default(),
+                        worker_type: Set(r#type.into()),
+                        host: Set(host_address.host),
+                        port: Set(host_address.port),
+                        status: Set(WorkerStatus::Starting),
+                        transaction_id: Set(txn_id),
+                    },
+                    worker_property: if r#type == PbWorkerType::ComputeNode
+                        || r#type == PbWorkerType::Frontend
+                    {
+                        Some(worker_property::MongoDb{
+                            worker_property: worker_property::Model {
+                                worker_id: 0,
+                                parallelism: add_property
+                                    .parallelism
+                                    .try_into()
+                                    .expect("invalid parallelism"),
+                                is_streaming: add_property.is_streaming,
+                                is_serving: add_property.is_serving,
+                                is_unschedulable: add_property.is_unschedulable,
+                                internal_rpc_host_addr: Some(add_property.internal_rpc_host_addr),
+                                resource_group: if r#type == PbWorkerType::ComputeNode {
+                                    add_property.resource_group.clone()
+                                } else {
+                                    None
+                                },
+                            }
+                        })
+                    } else {
+                        None
+                    },
+                };
+
+                *txn::<ClientSession>
+                    .client()
+                    .default_database()
+                    .unwrap()
+                    .collection::<worker::Model>(Self::COLLECTION)
+                    .insert_one(worker)
+                    .await?;
+                self.commit_transaction(*txn).await?;
+
+                worker_id
+            }
+        };
+
         if let Some(txn_id) = txn_id {
             self.available_transactional_ids.retain(|id| *id != txn_id);
         }
@@ -771,17 +996,44 @@ impl ClusterControllerInner {
         Ok(worker_id)
     }
 
+    async fn iterate_cursor(
+        &self,
+        cursor: Cursor<worker::MongoDb>,
+    ) -> MetaResult<Vec<(worker::Model, Option<worker_property::Model>)>> {
+        Ok(cursor
+            .map(|result| self.convert_to_model(result.unwrap()))
+            .collect()
+            .await)
+    }
+
     pub async fn activate_worker(&self, worker_id: WorkerId) -> MetaResult<PbWorkerNode> {
-        let worker = worker::ActiveModel {
-            worker_id: Set(worker_id),
-            status: Set(WorkerStatus::Running),
-            ..Default::default()
+        let (worker, worker_property) = match &self.db {
+            DB::SQL(conn) => {
+                let worker = worker::ActiveModel {
+                    worker_id: Set(worker_id),
+                    status: Set(WorkerStatus::Running),
+                    ..Default::default()
+                };
+
+                let worker = worker.update(conn).await?;
+                let worker_property = WorkerProperty::find_by_id(worker_id).one(conn).await?;
+                (worker, worker_property)
+            }
+            DB::MONGODB(client) => {
+                let document = client
+                    .default_database()
+                    .unwrap()
+                    .collection(Self::COLLECTION)
+                    .find_one_and_update(
+                        doc! {"_id": worker_id},
+                        doc! {"status": WorkerStatus::Running},
+                    )
+                    .await?
+                    .unwrap();
+                self.convert_to_model(document)
+            }
         };
 
-        let worker = worker.update(&self.db).await?;
-        let worker_property = WorkerProperty::find_by_id(worker.worker_id)
-            .one(&self.db)
-            .await?;
         let extra_info = self.get_extra_info_checked(worker_id)?;
         Ok(WorkerInfo(worker, worker_property, extra_info).into())
     }
@@ -792,38 +1044,70 @@ impl ClusterControllerInner {
         schedulability: Schedulability,
     ) -> MetaResult<()> {
         let is_unschedulable = schedulability == Schedulability::Unschedulable;
-        WorkerProperty::update_many()
-            .col_expr(
-                worker_property::Column::IsUnschedulable,
-                Expr::value(is_unschedulable),
-            )
-            .filter(worker_property::Column::WorkerId.is_in(worker_ids))
-            .exec(&self.db)
-            .await?;
+        match &self.db {
+            DB::SQL(conn) => {
+                WorkerProperty::update_many()
+                    .col_expr(
+                        worker_property::Column::IsUnschedulable,
+                        Expr::value(is_unschedulable),
+                    )
+                    .filter(worker_property::Column::WorkerId.is_in(worker_ids))
+                    .exec(conn)
+                    .await?;
+            }
+            DB::MONGODB(client) => {
+                client
+                    .default_database()
+                    .unwrap()
+                    .collection::<worker::Model>(Self::COLLECTION)
+                    .update_many(
+                        doc! {
+                            "_id": {
+                                "$in": worker_ids,
+                            },
+                        },
+                        doc! { "$set": { "worker_property.is_unschedulable": is_unschedulable } },
+                    )
+                    .await?;
+            }
+        };
 
         Ok(())
     }
 
     pub async fn delete_worker(&mut self, host_addr: HostAddress) -> MetaResult<PbWorkerNode> {
-        let worker = Worker::find()
-            .filter(
-                worker::Column::Host
-                    .eq(host_addr.host)
-                    .and(worker::Column::Port.eq(host_addr.port)),
-            )
-            .find_also_related(WorkerProperty)
-            .one(&self.db)
-            .await?;
-        let Some((worker, property)) = worker else {
-            return Err(MetaError::invalid_parameter("worker not found!"));
-        };
+        let (worker, property) = match &self.db {
+            DB::SQL(conn) => {
+                let worker = Worker::find()
+                    .filter(
+                        worker::Column::Host
+                            .eq(host_addr.host)
+                            .and(worker::Column::Port.eq(host_addr.port)),
+                    )
+                    .find_also_related(WorkerProperty)
+                    .one(conn)
+                    .await?;
+                let Some((worker, property)) = worker else {
+                    return Err(MetaError::invalid_parameter("worker not found!"));
+                };
 
-        let res = Worker::delete_by_id(worker.worker_id)
-            .exec(&self.db)
-            .await?;
-        if res.rows_affected == 0 {
-            return Err(MetaError::invalid_parameter("worker not found!"));
-        }
+                let res = Worker::delete_by_id(worker.worker_id).exec(conn).await?;
+                if res.rows_affected == 0 {
+                    return Err(MetaError::invalid_parameter("worker not found!"));
+                }
+                (worker, property)
+            }
+            DB::MONGODB(client) => client
+                .default_database()
+                .unwrap()
+                .collection(Self::COLLECTION)
+                .find_one_and_delete(doc! {"host": host_addr.host, "port": host_addr.port})
+                .await?
+                .map_or(
+                    Err(MetaError::invalid_parameter("worker not found!")),
+                    |result| Ok(self.convert_to_model(result)),
+                )?,
+        };
 
         let extra_info = self.worker_extra_info.remove(&worker.worker_id).unwrap();
         if let Some(txn_id) = &worker.transaction_id {
@@ -848,83 +1132,172 @@ impl ClusterControllerInner {
         worker_type: Option<WorkerType>,
         worker_status: Option<WorkerStatus>,
     ) -> MetaResult<Vec<PbWorkerNode>> {
-        let mut find = Worker::find();
-        if let Some(worker_type) = worker_type {
-            find = find.filter(worker::Column::WorkerType.eq(worker_type));
-        }
-        if let Some(worker_status) = worker_status {
-            find = find.filter(worker::Column::Status.eq(worker_status));
-        }
-        let workers = find.find_also_related(WorkerProperty).all(&self.db).await?;
-        Ok(workers
-            .into_iter()
-            .map(|(worker, property)| {
-                let extra_info = self.get_extra_info_checked(worker.worker_id).unwrap();
-                WorkerInfo(worker, property, extra_info).into()
-            })
-            .collect_vec())
+        Ok(match &self.db {
+            DB::SQL(conn) => {
+                let mut find = Worker::find();
+                if let Some(worker_type) = worker_type {
+                    find = find.filter(worker::Column::WorkerType.eq(worker_type));
+                }
+                if let Some(worker_status) = worker_status {
+                    find = find.filter(worker::Column::Status.eq(worker_status));
+                }
+                find.find_also_related(WorkerProperty)
+                    .all(conn)
+                    .await?
+                    .map(|(worker, property)| {
+                        let extra_info = self
+                            .get_extra_info_checked(WorkerId::from(&worker.worker_id))
+                            .unwrap();
+                        WorkerInfo(worker, property, extra_info).into()
+                    })
+                    .collect_vec()
+            }
+            DB::MONGODB(client) => {
+                let mut query = doc! {};
+                if let Some(worker_type) = worker_type {
+                    query.insert("worker_type", bson::to_bson(&worker_type).unwrap());
+                }
+                if let Some(worker_status) = worker_status {
+                    query.insert("status", bson::to_bson(&worker_status).unwrap());
+                }
+                client
+                    .default_database()
+                    .unwrap()
+                    .collection::<worker::MongoDb>(Self::COLLECTION)
+                    .find(query)
+                    .await?
+                    .map(|result| {
+                        let worker = result.unwrap();
+                        let extra_info = self
+                            .get_extra_info_checked(WorkerId::from(&worker.worker.worker_id))
+                            .unwrap();
+                        WorkerInfo(worker.worker, worker.worker_property.map_or(None, |mdb| Some(mdb.worker_property)), extra_info).into()
+                    })
+                    .collect()
+                    .await?
+            }
+        })
     }
 
     pub async fn list_active_streaming_workers(&self) -> MetaResult<Vec<PbWorkerNode>> {
-        let workers = Worker::find()
-            .filter(
-                worker::Column::WorkerType
-                    .eq(WorkerType::ComputeNode)
-                    .and(worker::Column::Status.eq(WorkerStatus::Running)),
-            )
-            .inner_join(WorkerProperty)
-            .select_also(WorkerProperty)
-            .filter(worker_property::Column::IsStreaming.eq(true))
-            .all(&self.db)
-            .await?;
-
-        Ok(workers
-            .into_iter()
-            .map(|(worker, property)| {
-                let extra_info = self.get_extra_info_checked(worker.worker_id).unwrap();
-                WorkerInfo(worker, property, extra_info).into()
-            })
-            .collect_vec())
+        Ok(match &self.db {
+            DB::SQL(conn) => Worker::find()
+                .filter(
+                    worker::Column::WorkerType
+                        .eq(WorkerType::ComputeNode)
+                        .and(worker::Column::Status.eq(WorkerStatus::Running)),
+                )
+                .inner_join(WorkerProperty)
+                .select_also(WorkerProperty)
+                .filter(worker_property::Column::IsStreaming.eq(true))
+                .all(conn)
+                .await?
+                .map(|(worker, property)| {
+                    let extra_info = self
+                        .get_extra_info_checked(WorkerId::from(&worker.worker_id))
+                        .unwrap();
+                    WorkerInfo(worker, property, extra_info).into()
+                })
+                .collect_vec(),
+            DB::MONGODB(client) => {
+                client
+                    .default_database()
+                    .unwrap()
+                    .collection(Self::COLLECTION)
+                    .find(doc! {
+                        "worker_type": WorkerType::ComputeNode,
+                        "status": WorkerStatus::Running,
+                        "worker_property.is_streaming": true
+                    })
+                    .map(|result| {
+                        let worker = result.unwrap();
+                        let extra_info = self
+                            .get_extra_info_checked(WorkerId::from(&worker.worker.worker_id))
+                            .unwrap();
+                        WorkerInfo(worker.worker, worker.worker_property, extra_info).into()
+                    })
+                    .collect()
+                    .await?
+            }
+        })
     }
 
     pub async fn list_active_worker_slots(&self) -> MetaResult<Vec<WorkerSlotId>> {
-        let worker_parallelisms: Vec<(WorkerId, i32)> = WorkerProperty::find()
-            .select_only()
-            .column(worker_property::Column::WorkerId)
-            .column(worker_property::Column::Parallelism)
-            .inner_join(Worker)
-            .filter(worker::Column::Status.eq(WorkerStatus::Running))
-            .into_tuple()
-            .all(&self.db)
-            .await?;
-        Ok(worker_parallelisms
-            .into_iter()
-            .flat_map(|(worker_id, parallelism)| {
-                (0..parallelism).map(move |idx| WorkerSlotId::new(worker_id as u32, idx as usize))
-            })
-            .collect_vec())
+        Ok(match &self.db {
+            DB::SQL(conn) => WorkerProperty::find()
+                .select_only()
+                .column(worker_property::Column::WorkerId)
+                .column(worker_property::Column::Parallelism)
+                .inner_join(Worker)
+                .filter(worker::Column::Status.eq(WorkerStatus::Running))
+                .into_tuple()
+                .all(conn)
+                .await?
+                .flat_map(|(worker_id, parallelism)| {
+                    (0..parallelism).map(move |idx| WorkerSlotId::new(worker_id, idx as usize))
+                })
+                .collect_vec(),
+            DB::MONGODB(client) => {
+                client
+                    .default_database()
+                    .unwrap()
+                    .collection(Self::COLLECTION)
+                    .find(doc! {"status": WorkerStatus::Running})
+                    .projection(doc! {"_id": 1, "parallelism": "$worker_property.parallelism"})
+                    .await?
+                    .with_type::<(WorkerId, i32)>()
+                    .flat_map(|result| {
+                        let (worker_id, parallelism) = result.unwrap();
+                        (0..parallelism).map(move |idx| WorkerSlotId::new(worker_id, idx as usize))
+                    })
+                    .collect()
+                    .await?
+            }
+        })
     }
 
     pub async fn list_active_serving_workers(&self) -> MetaResult<Vec<PbWorkerNode>> {
-        let workers = Worker::find()
-            .filter(
-                worker::Column::WorkerType
-                    .eq(WorkerType::ComputeNode)
-                    .and(worker::Column::Status.eq(WorkerStatus::Running)),
-            )
-            .inner_join(WorkerProperty)
-            .select_also(WorkerProperty)
-            .filter(worker_property::Column::IsServing.eq(true))
-            .all(&self.db)
-            .await?;
-
-        Ok(workers
-            .into_iter()
-            .map(|(worker, property)| {
-                let extra_info = self.get_extra_info_checked(worker.worker_id).unwrap();
-                WorkerInfo(worker, property, extra_info).into()
-            })
-            .collect_vec())
+        Ok(match &self.db {
+            DB::SQL(conn) => Worker::find()
+                .filter(
+                    worker::Column::WorkerType
+                        .eq(WorkerType::ComputeNode)
+                        .and(worker::Column::Status.eq(WorkerStatus::Running)),
+                )
+                .inner_join(WorkerProperty)
+                .select_also(WorkerProperty)
+                .filter(worker_property::Column::IsServing.eq(true))
+                .all(conn)
+                .await?
+                .map(|(worker, property)| {
+                    let extra_info = self
+                        .get_extra_info_checked(WorkerId::from(&worker.worker_id))
+                        .unwrap();
+                    WorkerInfo(worker, property, extra_info).into()
+                })
+                .collect_vec(),
+            DB::MONGODB(client) => {
+                client
+                    .default_database()
+                    .unwrap()
+                    .collection(Self::COLLECTION)
+                    .find(doc! {
+                        "worker_type": WorkerType::ComputeNode,
+                        "status": WorkerStatus::Running,
+                        "worker_property.is_serving": true,
+                    })
+                    .await?
+                    .map(|result| {
+                        let (worker, property) = result.unwrap();
+                        let extra_info = self
+                            .get_extra_info_checked(WorkerId::from(&worker.worker_id))
+                            .unwrap();
+                        WorkerInfo(worker, property, extra_info).into()
+                    })
+                    .collect()
+                    .await?
+            }
+        })
     }
 
     pub async fn get_streaming_cluster_info(&self) -> MetaResult<StreamingClusterInfo> {
@@ -957,15 +1330,25 @@ impl ClusterControllerInner {
     }
 
     pub async fn get_worker_by_id(&self, worker_id: WorkerId) -> MetaResult<Option<PbWorkerNode>> {
-        let worker = Worker::find_by_id(worker_id)
-            .find_also_related(WorkerProperty)
-            .one(&self.db)
-            .await?;
-        if worker.is_none() {
-            return Ok(None);
+        match &self.db {
+            DB::SQL(conn) => Ok(Worker::find_by_id(worker_id)
+                .find_also_related(WorkerProperty)
+                .one(conn)
+                .await?
+                .map_or(None, |(w, p)| {
+                    let extra_info = self.get_extra_info_checked(worker_id).unwrap();
+                    WorkerInfo(w, p, extra_info).into()
+                })),
+            DB::MONGODB(client) => Ok(client
+                .default_database()
+                .unwrap()
+                .collection(Self::COLLECTION)
+                .find_one(doc! {"_id": worker_id})
+                .await?
+                .map_or(None, |result| {
+                    self.convert_to_pbworkernode(result.unwrap()).into()
+                })),
         }
-        let extra_info = self.get_extra_info_checked(worker_id)?;
-        Ok(worker.map(|(w, p)| WorkerInfo(w, p, extra_info).into()))
     }
 
     pub fn get_worker_extra_info_by_id(&self, worker_id: WorkerId) -> Option<WorkerExtraInfo> {
@@ -987,7 +1370,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_cluster_controller() -> MetaResult<()> {
+    async fn test_cluster_controller<T>() -> MetaResult<()> {
         let env = MetaSrvEnv::for_test().await;
         let cluster_ctl = ClusterController::new(env, Duration::from_secs(1)).await?;
 
@@ -1076,7 +1459,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_update_schedulability() -> MetaResult<()> {
+    async fn test_update_schedulability<T>() -> MetaResult<()> {
         let env = MetaSrvEnv::for_test().await;
         let cluster_ctl = ClusterController::new(env, Duration::from_secs(1)).await?;
 

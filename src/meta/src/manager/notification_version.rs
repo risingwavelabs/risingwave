@@ -18,7 +18,7 @@ use risingwave_meta_model::prelude::CatalogVersion;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait, TransactionTrait};
 
-use crate::controller::SqlMetaStore;
+use crate::controller::MetaStore;
 use crate::MetaResult;
 
 pub struct NotificationVersionGenerator {
@@ -28,7 +28,8 @@ pub struct NotificationVersionGenerator {
 
 // TODO: add pre-allocation if necessary
 impl NotificationVersionGenerator {
-    pub async fn new(meta_store_impl: SqlMetaStore) -> MetaResult<Self> {
+    pub async fn new(meta_store_impl: MetaStore) -> MetaResult<Self> {
+        // TODO implement MongoDB
         let txn = meta_store_impl.conn.begin().await?;
         let model = CatalogVersion::find_by_id(VersionCategory::Notification)
             .one(&txn)

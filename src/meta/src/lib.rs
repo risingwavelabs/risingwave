@@ -60,4 +60,7 @@ pub enum MetaStoreBackend {
         endpoint: String,
         config: MetaStoreConfig,
     },
+    MongoDb {
+        endpoint: String,
+    },
 }

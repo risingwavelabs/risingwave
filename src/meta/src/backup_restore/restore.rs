@@ -29,7 +29,7 @@ use thiserror_ext::AsReport;
 use crate::backup_restore::restore_impl::v2::{LoaderV2, WriterModelV2ToMetaStoreV2};
 use crate::backup_restore::restore_impl::{Loader, Writer};
 use crate::backup_restore::utils::{get_backup_store, get_meta_store};
-use crate::controller::SqlMetaStore;
+use crate::controller::MetaStore;
 
 /// Command-line arguments for restore.
 #[derive(clap::Args, Debug, Clone)]
@@ -41,6 +41,8 @@ pub struct RestoreOpts {
     /// Type of meta store to restore.
     #[clap(long, value_enum, default_value_t = MetaBackend::Mem)]
     pub meta_store_type: MetaBackend,
+    #[clap(long, default_value_t = String::from(""))]
+    pub mongodb_uri: Option<String>,
     #[clap(long, default_value_t = String::from(""))]
     pub sql_endpoint: String,
     /// Username of sql backend, required when meta backend set to MySQL or PostgreSQL.
@@ -107,9 +109,9 @@ async fn restore_hummock_version(
 /// Restores a meta store.
 /// Uses `meta_store` and `backup_store` if provided.
 /// Otherwise creates them based on `opts`.
-async fn restore_impl(
+async fn restore_impl<T>(
     opts: RestoreOpts,
-    meta_store: Option<SqlMetaStore>,
+    meta_store: Option<MetaStore>,
     backup_store: Option<MetaSnapshotStorageRef>,
 ) -> BackupResult<()> {
     if cfg!(not(test)) {

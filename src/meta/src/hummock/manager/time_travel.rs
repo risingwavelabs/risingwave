@@ -50,6 +50,7 @@ impl HummockManager {
         guard.mark_next_time_travel_version_snapshot();
 
         guard.last_time_travel_snapshot_sst_ids = HashSet::new();
+        // TODO implement MongoDB
         let Some(version) = hummock_time_travel_version::Entity::find()
             .order_by_desc(hummock_time_travel_version::Column::VersionId)
             .one(&sql_store.conn)

@@ -25,6 +25,7 @@ use risingwave_meta_model::prelude::HummockSequence;
 use sea_orm::{ActiveModelTrait, ActiveValue, DatabaseConnection, EntityTrait, TransactionTrait};
 use tokio::sync::Mutex;
 
+use crate::controller::DB;
 use crate::hummock::error::Result;
 use crate::manager::MetaSrvEnv;
 
@@ -38,11 +39,11 @@ static SEQ_INIT: LazyLock<HashMap<String, i64>> = LazyLock::new(|| {
 });
 
 pub struct SequenceGenerator {
-    db: Mutex<DatabaseConnection>,
+    db: Mutex<DB>,
 }
 
 impl SequenceGenerator {
-    pub fn new(db: DatabaseConnection) -> Self {
+    pub fn new(db: DB) -> Self {
         Self { db: Mutex::new(db) }
     }
 
@@ -53,6 +54,7 @@ impl SequenceGenerator {
     /// If num is 0, the next seq is returned just like num is 1, but caller must not use this seq.
     pub async fn next_interval(&self, ident: &str, num: u32) -> Result<u64> {
         // TODO: add pre-allocation if necessary
+        // TODO implement MongoDB
         let guard = self.db.lock().await;
         let txn = guard.begin().await?;
         let model: Option<hummock_sequence::Model> =
@@ -116,13 +118,13 @@ pub async fn next_sstable_object_id(
 
 #[cfg(test)]
 mod tests {
-    use crate::controller::SqlMetaStore;
+    use crate::controller::MetaStore;
     use crate::hummock::manager::sequence::{SequenceGenerator, COMPACTION_TASK_ID};
 
     #[cfg(not(madsim))]
     #[tokio::test]
     async fn test_seq_gen() {
-        let store = SqlMetaStore::for_test().await;
+        let store = MetaStore::for_test().await;
         let conn = store.conn.clone();
         let s = SequenceGenerator::new(conn);
         assert_eq!(1, s.next_interval(COMPACTION_TASK_ID, 1).await.unwrap());

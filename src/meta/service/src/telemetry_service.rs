@@ -12,8 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use mongodb::bson::doc;
 use risingwave_common::telemetry::telemetry_cluster_type_from_env_var;
-use risingwave_meta::controller::SqlMetaStore;
+use risingwave_meta::controller::{MetaStore, DB};
 use risingwave_meta_model::prelude::Cluster;
 use risingwave_pb::meta::telemetry_info_service_server::TelemetryInfoService;
 use risingwave_pb::meta::{GetTelemetryInfoRequest, TelemetryInfoResponse};
@@ -24,16 +25,27 @@ use crate::model::ClusterId;
 use crate::MetaResult;
 
 pub struct TelemetryInfoServiceImpl {
-    meta_store_impl: SqlMetaStore,
+    meta_store_impl: MetaStore,
 }
 
 impl TelemetryInfoServiceImpl {
-    pub fn new(meta_store_impl: SqlMetaStore) -> Self {
+    pub fn new(meta_store_impl: MetaStore) -> Self {
         Self { meta_store_impl }
     }
 
     async fn get_tracking_id(&self) -> MetaResult<Option<ClusterId>> {
-        let cluster = Cluster::find().one(&self.meta_store_impl.conn).await?;
+        let cluster = match &self.meta_store_impl.conn {
+            DB::SQL(conn) => Cluster::find().one(conn).await?,
+            DB::MONGODB(client) => {
+                client
+                    .default_database()
+                    .unwrap()
+                    .collection("cluster")
+                    .find_one(doc! {})
+                    .await?
+                    .map(|c| c.get_str("_id").unwrap().to_string().into());
+            }
+        };
         let cluster_id = cluster.map(|c| c.cluster_id.to_string().into());
         Ok(cluster_id)
     }

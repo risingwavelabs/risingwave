@@ -218,6 +218,7 @@ fn main() -> Result<()> {
             ServiceConfig::Redis(_)
             | ServiceConfig::MySql(_)
             | ServiceConfig::Postgres(_)
+            | ServiceConfig::MongoDb(_)
             | ServiceConfig::SqlServer(_)
             | ServiceConfig::SchemaRegistry(_) => return Err(anyhow!("not supported")),
         };

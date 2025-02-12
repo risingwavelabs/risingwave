@@ -16,6 +16,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::anyhow;
+use chrono::prelude::*;
+use futures::StreamExt;
+use mongodb::bson::{doc, DateTime, Document};
+use mongodb::error::UNKNOWN_TRANSACTION_COMMIT_RESULT;
+use mongodb::options::{ReadConcern, WriteConcern};
+use mongodb::{Client, ClientSession, Cursor};
 use sea_orm::{
     ConnectionTrait, DatabaseBackend, DatabaseConnection, FromQueryResult, Statement,
     TransactionTrait, Value,
@@ -28,13 +34,13 @@ use tokio::time;
 use crate::rpc::election::META_ELECTION_KEY;
 use crate::{ElectionClient, ElectionMember, MetaResult};
 
-pub struct SqlBackendElectionClient<T: SqlDriver> {
+pub struct BackendElectionClient<T: Driver> {
     id: String,
     driver: Arc<T>,
     is_leader_sender: watch::Sender<bool>,
 }
 
-impl<T: SqlDriver> SqlBackendElectionClient<T> {
+impl<T: Driver> BackendElectionClient<T> {
     pub fn new(id: String, driver: Arc<T>) -> Self {
         let (sender, _) = watch::channel(false);
         Self {
@@ -52,7 +58,7 @@ pub struct ElectionRow {
 }
 
 #[async_trait::async_trait]
-pub trait SqlDriver: Send + Sync + 'static {
+pub trait Driver: Send + Sync + 'static {
     async fn init_database(&self) -> MetaResult<()>;
 
     async fn update_heartbeat(&self, service_name: &str, id: &str) -> MetaResult<()>;
@@ -68,7 +74,7 @@ pub trait SqlDriver: Send + Sync + 'static {
     async fn trim_candidates(&self, service_name: &str, timeout: i64) -> MetaResult<()>;
 }
 
-pub trait SqlDriverCommon {
+pub trait DriverCommon {
     const ELECTION_LEADER_TABLE_NAME: &'static str = "election_leader";
     const ELECTION_MEMBER_TABLE_NAME: &'static str = "election_member";
 
@@ -80,11 +86,13 @@ pub trait SqlDriverCommon {
     }
 }
 
-impl SqlDriverCommon for MySqlDriver {}
+impl DriverCommon for MySqlDriver {}
 
-impl SqlDriverCommon for PostgresDriver {}
+impl DriverCommon for PostgresDriver {}
 
-impl SqlDriverCommon for SqliteDriver {}
+impl DriverCommon for SqliteDriver {}
+
+impl DriverCommon for MongoDBDriver {}
 
 pub struct MySqlDriver {
     pub(crate) conn: DatabaseConnection,
@@ -116,8 +124,214 @@ impl SqliteDriver {
     }
 }
 
+pub struct MongoDBDriver {
+    pub(crate) conn: Client,
+}
+
+impl MongoDBDriver {
+    pub fn new(conn: Client) -> Arc<Self> {
+        Arc::new(Self { conn })
+    }
+}
+
 #[async_trait::async_trait]
-impl SqlDriver for SqliteDriver {
+impl Driver for MongoDBDriver {
+    async fn init_database(&self) -> MetaResult<()> {
+        // noop
+        Ok(())
+    }
+
+    async fn update_heartbeat(&self, service_name: &str, id: &str) -> MetaResult<()> {
+        self.conn
+            .default_database()
+            .unwrap()
+            .collection::<Document>(Self::member_table_name())
+            .update_one(
+                doc! {
+                    "_id": doc! {
+                        "id": id,
+                        "service": service_name,
+                    },
+                },
+                doc! {
+                    "$set": {"last_heartbeat": "$$NOW"}
+                },
+            )
+            .upsert(true)
+            .await?;
+        Ok(())
+    }
+
+    async fn try_campaign(
+        &self,
+        service_name: &str,
+        id: &str,
+        ttl: i64,
+    ) -> MetaResult<ElectionRow> {
+        let filter = DateTime::from_millis(Utc::now().timestamp_millis() - 1000 * ttl);
+        let query_result: Option<Document> = self
+            .conn
+            .default_database()
+            .unwrap()
+            .collection(Self::election_table_name())
+            .find_one_and_update(
+                doc! {
+                    "_id": service_name, // pkey
+                },
+                doc! {
+                    "$set": doc!{
+                        "id": doc! {
+                            "$cond": doc! {
+                                "if": {"$lt": filter,},
+                                "then": id,
+                                "else": "$id"
+                            }
+                        },
+                        "last_heartbeat": doc! {
+                            "$cond": doc! {
+                                "if": {
+                                    "$or": [
+                                        doc! {"$lt": filter},
+                                        doc! {
+                                            "$eq": ["$id", id]
+                                        },
+                                    ]
+                                },
+                                "then": "$$NOW",
+                                "else": "$last_heartbeat"
+                            }
+                        }
+                    }
+                },
+            )
+            .upsert(true)
+            .await?;
+
+        let row = query_result.map(|query_result: Document| ElectionRow {
+            service: query_result.get_str("service").unwrap().to_string(),
+            id: query_result.get_str("_id").unwrap().to_string(),
+        });
+
+        let row = row.ok_or_else(|| anyhow!("bad result from mongodb"))?;
+
+        Ok(row)
+    }
+
+    async fn leader(&self, service_name: &str) -> MetaResult<Option<ElectionRow>> {
+        let query_result: Option<Document> = self
+            .conn
+            .default_database()
+            .unwrap()
+            .collection(Self::election_table_name())
+            .find_one(doc! {"_id": service_name})
+            .await?;
+
+        let row = query_result.map(|query_result: Document| ElectionRow {
+            service: query_result.get_str("_id").unwrap().to_string(),
+            id: query_result.get_str("id").unwrap().to_string(),
+        });
+
+        Ok(row)
+    }
+
+    async fn candidates(&self, service_name: &str) -> MetaResult<Vec<ElectionRow>> {
+        let mut cursor: Cursor<Document> = self
+            .conn
+            .default_database()
+            .unwrap()
+            .collection(Self::member_table_name())
+            .find(doc! {"_id.service": service_name})
+            .await?;
+
+        let rows: Vec<ElectionRow> = cursor
+            .map(|query_result| {
+                let doc = query_result.unwrap();
+                ElectionRow {
+                    service: doc.get_str("service").unwrap().to_string(),
+                    id: doc.get_str("_id").unwrap().to_string(),
+                }
+            })
+            .collect()
+            .await?;
+
+        Ok(rows)
+    }
+
+    async fn resign(&self, service_name: &str, id: &str) -> MetaResult<()> {
+        let mut session: ClientSession = self.conn.start_session().await?;
+
+        // incase backend is a replica-set, ensure that the transaction propagated through completely
+        session
+            .start_transaction()
+            .read_concern(ReadConcern::majority())
+            .write_concern(WriteConcern::majority())
+            .await?;
+
+        let db = session.client().default_database().unwrap();
+
+        let election_table = db.collection::<Document>(Self::election_table_name());
+        let member_table = db.collection::<Document>(Self::member_table_name());
+
+        election_table
+            .delete_one(doc! {
+                "_id": service_name,
+                "id": id,
+            })
+            .session(&mut session)
+            .await?;
+
+        member_table
+            .delete_one(doc! {
+                "_id": doc! {
+                    "id": id,
+                    "service": service_name,
+                },
+            })
+            .session(&mut session)
+            .await?;
+        // An "UnknownTransactionCommitResult" label indicates that it is unknown whether the
+        // commit has satisfied the write concern associated with the transaction. If an error
+        // with this label is returned, it is safe to retry the commit until the write concern is
+        // satisfied or an error without the label is returned.
+        loop {
+            let result = session.commit_transaction().await;
+            if let Err(ref error) = result {
+                if error.contains_label(UNKNOWN_TRANSACTION_COMMIT_RESULT) {
+                    continue;
+                }
+            }
+            result?;
+            break;
+        }
+
+        Ok(())
+    }
+
+    async fn trim_candidates(&self, service_name: &str, timeout: i64) -> MetaResult<()> {
+        self.conn
+            .default_database()
+            .unwrap()
+            .collection::<Document>(Self::member_table_name())
+            .delete_many(
+                doc! {
+                    "$and": [
+                        doc! {"_id.service": service_name},
+                        doc! {
+                            "last_heartbeat": doc! {
+                                "$lt": DateTime::from_millis(Utc::now().timestamp_millis() - 1000 * timeout),
+                            }
+                        }
+                    ]
+                }
+            )
+            .await?;
+
+        Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl Driver for SqliteDriver {
     async fn init_database(&self) -> MetaResult<()> {
         self.conn.execute(
             Statement::from_string(DatabaseBackend::Sqlite, format!(
@@ -285,7 +499,7 @@ DO
 }
 
 #[async_trait::async_trait]
-impl SqlDriver for MySqlDriver {
+impl Driver for MySqlDriver {
     async fn init_database(&self) -> MetaResult<()> {
         self.conn.execute(
             Statement::from_string(DatabaseBackend::MySql, format!(
@@ -460,7 +674,7 @@ impl SqlDriver for MySqlDriver {
 }
 
 #[async_trait::async_trait]
-impl SqlDriver for PostgresDriver {
+impl Driver for PostgresDriver {
     async fn init_database(&self) -> MetaResult<()> {
         self.conn.execute(
             Statement::from_string(DatabaseBackend::Postgres, format!(
@@ -635,9 +849,9 @@ impl SqlDriver for PostgresDriver {
 }
 
 #[async_trait::async_trait]
-impl<T> ElectionClient for SqlBackendElectionClient<T>
+impl<T> ElectionClient for BackendElectionClient<T>
 where
-    T: SqlDriver + Send + Sync + 'static,
+    T: Driver + Send + Sync + 'static,
 {
     async fn init(&self) -> MetaResult<()> {
         tracing::info!("initializing database for Sql backend election client");
@@ -794,7 +1008,7 @@ mod tests {
     use sea_orm::{ConnectionTrait, Database, DatabaseConnection, DbBackend, Statement};
     use tokio::sync::watch;
 
-    use crate::rpc::election::sql::{SqlBackendElectionClient, SqlDriverCommon, SqliteDriver};
+    use crate::rpc::election::sql::{BackendElectionClient, DriverCommon, SqliteDriver};
     use crate::{ElectionClient, MetaResult};
 
     async fn prepare_sqlite_env() -> MetaResult<DatabaseConnection> {
@@ -826,7 +1040,7 @@ mod tests {
 
         let provider = SqliteDriver { conn };
         let (sender, _) = watch::channel(false);
-        let sql_election_client: Arc<dyn ElectionClient> = Arc::new(SqlBackendElectionClient {
+        let sql_election_client: Arc<dyn ElectionClient> = Arc::new(BackendElectionClient {
             id,
             driver: Arc::new(provider),
             is_leader_sender: sender,
@@ -859,7 +1073,7 @@ mod tests {
             let id = format!("test_id_{}", i);
             let provider = SqliteDriver { conn: conn.clone() };
             let (sender, _) = watch::channel(false);
-            let sql_election_client: Arc<dyn ElectionClient> = Arc::new(SqlBackendElectionClient {
+            let sql_election_client: Arc<dyn ElectionClient> = Arc::new(BackendElectionClient {
                 id,
                 driver: Arc::new(provider),
                 is_leader_sender: sender,

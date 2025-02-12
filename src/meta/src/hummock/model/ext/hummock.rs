@@ -37,9 +37,17 @@ use crate::model::{MetadataModelError, MetadataModelResult, Transactional};
 use crate::storage::MetaStoreError;
 
 pub type Transaction = sea_orm::DatabaseTransaction;
+// TODO implement for MongoDb
+pub type Session = mongodb::ClientSession;
 
 impl From<sea_orm::DbErr> for MetadataModelError {
     fn from(err: sea_orm::DbErr) -> Self {
+        MetadataModelError::MetaStoreError(MetaStoreError::Internal(err.into()))
+    }
+}
+
+impl From<mongodb::error::Error> for MetadataModelError {
+    fn from(err: mongodb::error::Error) -> Self {
         MetadataModelError::MetaStoreError(MetaStoreError::Internal(err.into()))
     }
 }
@@ -75,6 +83,17 @@ impl Transactional<Transaction> for CompactionGroup {
 }
 
 #[async_trait::async_trait]
+impl Transactional<Session> for CompactionGroup {
+    async fn upsert_in_transaction(&self, trx: &mut Session) -> MetadataModelResult<()> {
+        todo!("not implemented")
+    }
+
+    async fn delete_in_transaction(&self, trx: &mut Session) -> MetadataModelResult<()> {
+        todo!("not implemented")
+    }
+}
+
+#[async_trait::async_trait]
 impl Transactional<Transaction> for CompactStatus {
     async fn upsert_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
         let m = compaction_status::ActiveModel {
@@ -101,6 +120,17 @@ impl Transactional<Transaction> for CompactStatus {
         .exec(trx)
         .await?;
         Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl Transactional<Session> for CompactStatus {
+    async fn upsert_in_transaction(&self, trx: &mut Session) -> MetadataModelResult<()> {
+        todo!("not implemented")
+    }
+
+    async fn delete_in_transaction(&self, trx: &mut Session) -> MetadataModelResult<()> {
+        todo!("not implemented")
     }
 }
 
@@ -138,6 +168,17 @@ impl Transactional<Transaction> for CompactTaskAssignment {
 }
 
 #[async_trait::async_trait]
+impl Transactional<Session> for CompactTaskAssignment {
+    async fn upsert_in_transaction(&self, trx: &mut Session) -> MetadataModelResult<()> {
+        todo!("not implemented")
+    }
+
+    async fn delete_in_transaction(&self, trx: &mut Session) -> MetadataModelResult<()> {
+        todo!("not implemented")
+    }
+}
+
+#[async_trait::async_trait]
 impl Transactional<Transaction> for HummockPinnedVersion {
     async fn upsert_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
         let m = hummock_pinned_version::ActiveModel {
@@ -160,6 +201,17 @@ impl Transactional<Transaction> for HummockPinnedVersion {
             .exec(trx)
             .await?;
         Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl Transactional<Session> for HummockPinnedVersion {
+    async fn upsert_in_transaction(&self, trx: &mut Session) -> MetadataModelResult<()> {
+        todo!("not implemented")
+    }
+
+    async fn delete_in_transaction(&self, trx: &mut Session) -> MetadataModelResult<()> {
+        todo!("not implemented")
     }
 }
 
@@ -190,6 +242,17 @@ impl Transactional<Transaction> for HummockPinnedSnapshot {
 }
 
 #[async_trait::async_trait]
+impl Transactional<Session> for HummockPinnedSnapshot {
+    async fn upsert_in_transaction(&self, trx: &mut Session) -> MetadataModelResult<()> {
+        todo!("not implemented")
+    }
+
+    async fn delete_in_transaction(&self, trx: &mut Session) -> MetadataModelResult<()> {
+        todo!("not implemented")
+    }
+}
+
+#[async_trait::async_trait]
 impl Transactional<Transaction> for HummockVersionStats {
     async fn upsert_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
         let m = hummock_version_stats::ActiveModel {
@@ -214,6 +277,17 @@ impl Transactional<Transaction> for HummockVersionStats {
         .exec(trx)
         .await?;
         Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl Transactional<Session> for HummockVersionStats {
+    async fn upsert_in_transaction(&self, trx: &mut Session) -> MetadataModelResult<()> {
+        todo!("not implemented")
+    }
+
+    async fn delete_in_transaction(&self, trx: &mut Session) -> MetadataModelResult<()> {
+        todo!("not implemented")
     }
 }
 
@@ -252,6 +326,17 @@ impl Transactional<Transaction> for HummockVersionDelta {
         .exec(trx)
         .await?;
         Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl Transactional<Session> for HummockVersionDelta {
+    async fn upsert_in_transaction(&self, trx: &mut Session) -> MetadataModelResult<()> {
+        todo!("not implemented")
+    }
+
+    async fn delete_in_transaction(&self, trx: &mut Session) -> MetadataModelResult<()> {
+        todo!("not implemented")
     }
 }
 

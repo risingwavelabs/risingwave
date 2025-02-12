@@ -15,6 +15,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use mongodb::Client;
 use otlp_embedded::TraceServiceServer;
 use regex::Regex;
 use risingwave_common::monitor::{RouterExt, TcpConfig};
@@ -28,8 +29,10 @@ use risingwave_common_service::{MetricsManager, TracingExtractLayer};
 use risingwave_meta::barrier::GlobalBarrierManager;
 use risingwave_meta::controller::catalog::CatalogController;
 use risingwave_meta::controller::cluster::ClusterController;
+use risingwave_meta::controller::DB;
 use risingwave_meta::manager::{MetadataManager, META_NODE_ID};
 use risingwave_meta::rpc::election::dummy::DummyElectionClient;
+use risingwave_meta::rpc::election::sql::MongoDBDriver;
 use risingwave_meta::rpc::intercept::MetricsMiddlewareLayer;
 use risingwave_meta::rpc::ElectionClientRef;
 use risingwave_meta::stream::ScaleController;
@@ -75,18 +78,18 @@ use risingwave_pb::meta::telemetry_info_service_server::TelemetryInfoServiceServ
 use risingwave_pb::meta::SystemParams;
 use risingwave_pb::user::user_service_server::UserServiceServer;
 use risingwave_rpc_client::ComputeClientPool;
-use sea_orm::{ConnectionTrait, DbBackend};
+use sea_orm::{ConnectionTrait, DatabaseConnection, DbBackend};
 use thiserror_ext::AsReport;
 use tokio::sync::watch;
 
 use crate::backup_restore::BackupManager;
 use crate::barrier::BarrierScheduler;
 use crate::controller::system_param::SystemParamsController;
-use crate::controller::SqlMetaStore;
+use crate::controller::MetaStore;
 use crate::hummock::HummockManager;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{IdleManager, MetaOpts, MetaSrvEnv};
-use crate::rpc::election::sql::{MySqlDriver, PostgresDriver, SqlBackendElectionClient};
+use crate::rpc::election::sql::{BackendElectionClient, MySqlDriver, PostgresDriver};
 use crate::rpc::metrics::{
     start_fragment_info_monitor, start_worker_info_monitor, GLOBAL_META_METRICS,
 };
@@ -127,7 +130,7 @@ pub async fn rpc_serve(
     init_session_config: SessionConfig,
     shutdown: CancellationToken,
 ) -> MetaResult<()> {
-    let meta_store_impl = SqlMetaStore::connect(meta_store_backend.clone()).await?;
+    let meta_store_impl = MetaStore::connect(meta_store_backend.clone()).await?;
 
     let election_client = match meta_store_backend {
         MetaStoreBackend::Mem => {
@@ -139,16 +142,34 @@ pub async fn rpc_serve(
         MetaStoreBackend::Sql { .. } => {
             // Init election client.
             let id = address_info.advertise_addr.clone();
-            let conn = meta_store_impl.conn.clone();
+            let conn = match &meta_store_impl.conn {
+                DB::SQL(conn) => Some(conn.clone()),
+                _ => None,
+            }
+            .unwrap();
             let election_client: ElectionClientRef = match conn.get_database_backend() {
                 DbBackend::Sqlite => Arc::new(DummyElectionClient::new(id)),
                 DbBackend::Postgres => {
-                    Arc::new(SqlBackendElectionClient::new(id, PostgresDriver::new(conn)))
+                    Arc::new(BackendElectionClient::new(id, PostgresDriver::new(conn)))
                 }
                 DbBackend::MySql => {
-                    Arc::new(SqlBackendElectionClient::new(id, MySqlDriver::new(conn)))
+                    Arc::new(BackendElectionClient::new(id, MySqlDriver::new(conn)))
                 }
             };
+            election_client.init().await?;
+
+            election_client
+        }
+        MetaStoreBackend::MongoDb { .. } => {
+            // init election client.
+            let id = address_info.advertise_addr.clone();
+            let conn = match &meta_store_impl.conn {
+                DB::MONGODB(client) => Some(client.clone()),
+                _ => None,
+            }
+            .unwrap();
+            let election_client: ElectionClientRef =
+                Arc::new(BackendElectionClient::new(id, MongoDBDriver::new(conn)));
             election_client.init().await?;
 
             election_client
@@ -174,7 +195,7 @@ pub async fn rpc_serve(
 /// Returns when the `shutdown` token is triggered, or when leader status is lost, or if the leader
 /// service fails to start.
 pub async fn rpc_serve_with_store(
-    meta_store_impl: SqlMetaStore,
+    meta_store_impl: MetaStore,
     election_client: ElectionClientRef,
     address_info: AddressInfo,
     max_cluster_heartbeat_interval: Duration,
@@ -302,7 +323,7 @@ pub async fn start_service_as_election_follower(
 ///
 /// Returns when the `shutdown` token is triggered, or if the service initialization fails.
 pub async fn start_service_as_election_leader(
-    meta_store_impl: SqlMetaStore,
+    meta_store_impl: MetaStore,
     address_info: AddressInfo,
     max_cluster_heartbeat_interval: Duration,
     opts: MetaOpts,

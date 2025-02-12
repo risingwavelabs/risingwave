@@ -63,6 +63,10 @@ pub struct MetaNodeOpts {
     #[clap(long, env = "RW_PROMETHEUS_HOST", alias = "prometheus-host")]
     pub prometheus_listener_addr: Option<String>,
 
+    /// Endpoint of the MongoDb service.
+    #[clap(long, default_value_t = String::from(""))]
+    pub mongodb_uri: Option<String>,
+
     /// Endpoint of the SQL service, make it non-option when SQL service is required.
     #[clap(long, hide = true, env = "RW_SQL_ENDPOINT")]
     pub sql_endpoint: Option<Secret<String>>,
@@ -274,6 +278,9 @@ pub fn start(
                     opts.sql_database
                 ),
                 config: meta_store_config,
+            },
+            MetaBackend::MongoDb => MetaStoreBackend::MongoDb {
+                endpoint: opts.mongodb_uri,
             },
         };
         validate_config(&config);

@@ -459,6 +459,7 @@ macro_rules! crit_check_in_loop {
 
 impl CatalogController {
     pub async fn integrity_check(&self) -> MetaResult<()> {
+        // TODO implement MongoDB
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
         Self::graph_check(&txn).await

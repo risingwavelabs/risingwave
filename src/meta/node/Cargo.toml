@@ -11,6 +11,7 @@ repository = { workspace = true }
 clap = { workspace = true }
 educe = "0.6"
 hex = "0.4"
+mongodb = "3"
 otlp-embedded = { workspace = true }
 prometheus-http-query = "0.8"
 redact = "0.1.5"
@@ -23,6 +24,7 @@ risingwave_meta_service = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
 sea-orm = { workspace = true }
+serde = { version = "1" }
 serde_json = "1"
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [

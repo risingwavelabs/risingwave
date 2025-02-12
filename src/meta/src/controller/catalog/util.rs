@@ -12,6 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use mongodb::bson::doc;
+use mongodb::{Client, ClientSession};
+use sea_orm::DatabaseTransaction;
+
 use super::*;
 
 pub(crate) async fn update_internal_tables(
@@ -53,6 +57,7 @@ impl CatalogController {
     /// Fill in the `cdc_table_id` field for Table with empty `cdc_table_id` and parent Source job.
     /// NOTES: We assume Table with a parent Source job is a CDC table
     pub(crate) async fn table_catalog_cdc_table_id_update(&self) -> MetaResult<()> {
+        // TODO implement MongoDB
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
 

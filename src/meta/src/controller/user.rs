@@ -57,6 +57,7 @@ impl CatalogController {
 
     pub async fn create_user(&self, pb_user: PbUserInfo) -> MetaResult<NotificationVersion> {
         let inner = self.inner.write().await;
+        // TODO implement MongoDB
         let txn = inner.db.begin().await?;
         check_user_name_duplicate(&pb_user.name, &txn).await?;
 

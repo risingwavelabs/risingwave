@@ -17,6 +17,7 @@ use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::{ObjectId, PrivilegeId, UserId};
+use crate::prelude::UserPrivilege;
 
 #[derive(
     Clone, Copy, Debug, Hash, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize,
@@ -128,3 +129,8 @@ impl Related<super::object::Entity> for Entity {
 }
 
 impl ActiveModelBehavior for ActiveModel {}
+
+pub struct MongoDb {
+    pub user_privilege: Model
+}
+

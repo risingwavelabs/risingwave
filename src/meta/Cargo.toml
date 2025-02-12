@@ -29,6 +29,7 @@ http = "1"
 itertools = { workspace = true }
 jsonbb = { workspace = true }
 maplit = "1.0.2"
+mongodb = "3"
 notify = { version = "8", default-features = false, features = [
     "macos_fsevent",
 ] }

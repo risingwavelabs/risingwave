@@ -176,6 +176,7 @@ pub fn map_single_node_opts_to_standalone_opts(opts: SingleNodeOpts) -> ParsedSt
     let meta_backend_is_set = match meta_opts.backend {
         Some(MetaBackend::Sql)
         | Some(MetaBackend::Sqlite)
+        | Some(MetaBackend::MongoDb)
         | Some(MetaBackend::Postgres)
         | Some(MetaBackend::Mysql) => meta_opts.sql_endpoint.is_some(),
         Some(MetaBackend::Mem) => true,

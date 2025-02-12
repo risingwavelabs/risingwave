@@ -81,3 +81,7 @@ impl From<Model> for PbUserInfo {
         }
     }
 }
+
+pub struct MongoDb {
+    pub user: Model
+}

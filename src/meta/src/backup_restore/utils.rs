@@ -21,11 +21,11 @@ use risingwave_object_store::object::build_remote_object_store;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 
 use crate::backup_restore::RestoreOpts;
-use crate::controller::SqlMetaStore;
+use crate::controller::MetaStore;
 use crate::MetaStoreBackend;
 
 // Code is copied from src/meta/src/rpc/server.rs. TODO #6482: extract method.
-pub async fn get_meta_store(opts: RestoreOpts) -> BackupResult<SqlMetaStore> {
+pub async fn get_meta_store(opts: RestoreOpts) -> BackupResult<MetaStore> {
     let meta_store_backend = match opts.meta_store_type {
         MetaBackend::Mem => MetaStoreBackend::Mem,
         MetaBackend::Sql => MetaStoreBackend::Sql {
@@ -50,9 +50,12 @@ pub async fn get_meta_store(opts: RestoreOpts) -> BackupResult<SqlMetaStore> {
             ),
             config: MetaStoreConfig::default(),
         },
+        MetaBackend::MongoDb => MetaStoreBackend::MongoDb {
+            endpoint: opts.mongodb_uri.unwrap(),
+        },
     };
 
-    SqlMetaStore::connect(meta_store_backend)
+    MetaStore::connect(meta_store_backend)
         .await
         .map_err(|e| BackupError::MetaStorage(e.into()))
 }

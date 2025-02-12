@@ -78,7 +78,7 @@ use super::utils::{
 };
 use crate::controller::catalog::util::update_internal_tables;
 use crate::controller::utils::*;
-use crate::controller::ObjectModel;
+use crate::controller::{ObjectModel, DB};
 use crate::manager::{
     get_referred_connection_ids_from_source, get_referred_secret_ids_from_source, MetaSrvEnv,
     NotificationVersion, IGNORED_NOTIFICATION_VERSION,
@@ -155,7 +155,7 @@ impl CatalogController {
 }
 
 pub struct CatalogControllerInner {
-    pub(crate) db: DatabaseConnection,
+    pub(crate) db: DB,
     /// Registered finish notifiers for creating tables.
     ///
     /// `DdlController` will update this map, and pass the `tx` side to `CatalogController`.
@@ -192,6 +192,7 @@ impl CatalogController {
     }
 }
 
+// TODO add mongodb
 impl CatalogController {
     pub async fn finish_create_subscription_catalog(&self, subscription_id: u32) -> MetaResult<()> {
         let inner = self.inner.write().await;
@@ -230,11 +231,15 @@ impl CatalogController {
     ) -> MetaResult<NotificationVersion> {
         let inner = self.inner.read().await;
         let job_id = subscription_id as i32;
-        let (subscription, obj) = Subscription::find_by_id(job_id)
-            .find_also_related(Object)
-            .one(&inner.db)
-            .await?
-            .ok_or_else(|| MetaError::catalog_id_not_found("subscription", job_id))?;
+
+        let (subscription, obj) = match &inner.db {
+            DB::SQL(conn) => Subscription::find_by_id(job_id)
+                .find_also_related(Object)
+                .one(conn)
+                .await?
+                .ok_or_else(|| MetaError::catalog_id_not_found("subscription", job_id))?,
+            DB::MONGODB(client) => todo!("not implemented"),
+        };
 
         let version = self
             .notify_frontend(
@@ -535,24 +540,39 @@ impl CatalogControllerInner {
     }
 
     pub async fn stats(&self) -> MetaResult<CatalogStats> {
-        let mut table_num_map: HashMap<_, _> = Table::find()
-            .select_only()
-            .column(table::Column::TableType)
-            .column_as(table::Column::TableId.count(), "num")
-            .group_by(table::Column::TableType)
-            .having(table::Column::TableType.ne(TableType::Internal))
-            .into_tuple::<(TableType, i64)>()
-            .all(&self.db)
-            .await?
-            .into_iter()
-            .map(|(table_type, num)| (table_type, num as u64))
-            .collect();
+        let (mut table_num_map, source_num, sink_num, function_num, streaming_job_num, actor_num) =
+            match &self.db {
+                DB::SQL(conn) => {
+                    let table_num_map: HashMap<_, _> = Table::find()
+                        .select_only()
+                        .column(table::Column::TableType)
+                        .column_as(table::Column::TableId.count(), "num")
+                        .group_by(table::Column::TableType)
+                        .having(table::Column::TableType.ne(TableType::Internal))
+                        .into_tuple::<(TableType, i64)>()
+                        .all(conn)
+                        .await?
+                        .into_iter()
+                        .map(|(table_type, num)| (table_type, num as u64))
+                        .collect();
 
-        let source_num = Source::find().count(&self.db).await?;
-        let sink_num = Sink::find().count(&self.db).await?;
-        let function_num = Function::find().count(&self.db).await?;
-        let streaming_job_num = StreamingJob::find().count(&self.db).await?;
-        let actor_num = Actor::find().count(&self.db).await?;
+                    let source_num = Source::find().count(conn).await?;
+                    let sink_num = Sink::find().count(conn).await?;
+                    let function_num = Function::find().count(conn).await?;
+                    let streaming_job_num = StreamingJob::find().count(conn).await?;
+                    let actor_num = Actor::find().count(conn).await?;
+
+                    (
+                        table_num_map,
+                        source_num,
+                        sink_num,
+                        function_num,
+                        streaming_job_num,
+                        actor_num,
+                    )
+                }
+                DB::MONGODB(client) => todo!("not implemented"),
+            };
 
         Ok(CatalogStats {
             table_num: table_num_map.remove(&TableType::Table).unwrap_or(0),
@@ -569,91 +589,104 @@ impl CatalogControllerInner {
     }
 
     async fn list_databases(&self) -> MetaResult<Vec<PbDatabase>> {
-        let db_objs = Database::find()
-            .find_also_related(Object)
-            .all(&self.db)
-            .await?;
-        Ok(db_objs
-            .into_iter()
-            .map(|(db, obj)| ObjectModel(db, obj.unwrap()).into())
-            .collect())
+        Ok(match &self.db {
+            DB::SQL(conn) => Database::find()
+                .find_also_related(Object)
+                .all(conn)
+                .await?
+                .map(|(db, obj)| ObjectModel(db, obj.unwrap()).into())
+                .collect(),
+            DB::MONGODB(client) => todo!("not implemented"),
+        })
     }
 
     async fn list_schemas(&self) -> MetaResult<Vec<PbSchema>> {
-        let schema_objs = Schema::find()
-            .find_also_related(Object)
-            .all(&self.db)
-            .await?;
-
-        Ok(schema_objs
-            .into_iter()
-            .map(|(schema, obj)| ObjectModel(schema, obj.unwrap()).into())
-            .collect())
+        Ok(match &self.db {
+            DB::SQL(conn) => Schema::find()
+                .find_also_related(Object)
+                .all(conn)
+                .await?
+                .map(|(schema, obj)| ObjectModel(schema, obj.unwrap()).into())
+                .collect(),
+            DB::MONGODB(client) => todo!("not implemented"),
+        })
     }
 
     async fn list_users(&self) -> MetaResult<Vec<PbUserInfo>> {
-        let mut user_infos: Vec<PbUserInfo> = User::find()
-            .all(&self.db)
-            .await?
-            .into_iter()
-            .map(Into::into)
-            .collect();
+        Ok(match &self.db {
+            DB::SQL(conn) => {
+                let mut user_infos: Vec<PbUserInfo> = User::find()
+                    .all(conn)
+                    .await?
+                    .into_iter()
+                    .map(Into::into)
+                    .collect();
 
-        for user_info in &mut user_infos {
-            user_info.grant_privileges = get_user_privilege(user_info.id as _, &self.db).await?;
-        }
-        Ok(user_infos)
+                for user_info in &mut user_infos {
+                    user_info.grant_privileges =
+                        get_user_privilege(user_info.id as _, conn).await?;
+                }
+                user_infos
+            }
+            DB::MONGODB(client) => todo!("not implemented"),
+        })
     }
 
     /// `list_all_tables` return all tables and internal tables.
     pub async fn list_all_state_tables(&self) -> MetaResult<Vec<PbTable>> {
-        let table_objs = Table::find()
-            .find_also_related(Object)
-            .all(&self.db)
-            .await?;
-
-        Ok(table_objs
-            .into_iter()
-            .map(|(table, obj)| ObjectModel(table, obj.unwrap()).into())
-            .collect())
+        Ok(match &self.db {
+            DB::SQL(conn) => Table::find()
+                .find_also_related(Object)
+                .all(conn)
+                .await?
+                .map(|(table, obj)| ObjectModel(table, obj.unwrap()).into())
+                .collect(),
+            DB::MONGODB(client) => todo!("not implemented"),
+        })
     }
 
     /// `list_tables` return all `CREATED` tables, `CREATING` materialized views and internal tables that belong to them.
     async fn list_tables(&self) -> MetaResult<Vec<PbTable>> {
-        let table_objs = Table::find()
-            .find_also_related(Object)
-            .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
-            .filter(
-                streaming_job::Column::JobStatus
-                    .eq(JobStatus::Created)
-                    .or(table::Column::TableType.eq(TableType::MaterializedView)),
-            )
-            .all(&self.db)
-            .await?;
+        let (table_objs, created_streaming_job_ids, internal_table_objs) = match &self.db {
+            DB::SQL(conn) => {
+                let table_objs = Table::find()
+                    .find_also_related(Object)
+                    .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
+                    .filter(
+                        streaming_job::Column::JobStatus
+                            .eq(JobStatus::Created)
+                            .or(table::Column::TableType.eq(TableType::MaterializedView)),
+                    )
+                    .all(conn)
+                    .await?;
 
-        let created_streaming_job_ids: Vec<ObjectId> = StreamingJob::find()
-            .select_only()
-            .column(streaming_job::Column::JobId)
-            .filter(streaming_job::Column::JobStatus.eq(JobStatus::Created))
-            .into_tuple()
-            .all(&self.db)
-            .await?;
+                let created_streaming_job_ids: Vec<ObjectId> = StreamingJob::find()
+                    .select_only()
+                    .column(streaming_job::Column::JobId)
+                    .filter(streaming_job::Column::JobStatus.eq(JobStatus::Created))
+                    .into_tuple()
+                    .all(conn)
+                    .await?;
 
-        let job_ids: HashSet<ObjectId> = table_objs
-            .iter()
-            .map(|(t, _)| t.table_id)
-            .chain(created_streaming_job_ids.iter().cloned())
-            .collect();
+                let job_ids: HashSet<ObjectId> = table_objs
+                    .iter()
+                    .map(|(t, _)| t.table_id)
+                    .chain(created_streaming_job_ids.iter().cloned())
+                    .collect();
 
-        let internal_table_objs = Table::find()
-            .find_also_related(Object)
-            .filter(
-                table::Column::TableType
-                    .eq(TableType::Internal)
-                    .and(table::Column::BelongsToJobId.is_in(job_ids)),
-            )
-            .all(&self.db)
-            .await?;
+                let internal_table_objs = Table::find()
+                    .find_also_related(Object)
+                    .filter(
+                        table::Column::TableType
+                            .eq(TableType::Internal)
+                            .and(table::Column::BelongsToJobId.is_in(job_ids)),
+                    )
+                    .all(conn)
+                    .await?;
+                (table_objs, created_streaming_job_ids, internal_table_objs)
+            }
+            DB::MONGODB(client) => todo!("not implemented"),
+        };
 
         Ok(table_objs
             .into_iter()
@@ -676,33 +709,39 @@ impl CatalogControllerInner {
 
     /// `list_sources` return all sources and `CREATED` ones if contains any streaming jobs.
     async fn list_sources(&self) -> MetaResult<Vec<PbSource>> {
-        let mut source_objs = Source::find()
-            .find_also_related(Object)
-            .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
-            .filter(
-                streaming_job::Column::JobStatus
-                    .is_null()
-                    .or(streaming_job::Column::JobStatus.eq(JobStatus::Created)),
-            )
-            .all(&self.db)
-            .await?;
+        let (mut source_objs, created_table_ids) = match &self.db {
+            DB::SQL(conn) => {
+                let source_objs = Source::find()
+                    .find_also_related(Object)
+                    .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
+                    .filter(
+                        streaming_job::Column::JobStatus
+                            .is_null()
+                            .or(streaming_job::Column::JobStatus.eq(JobStatus::Created)),
+                    )
+                    .all(conn)
+                    .await?;
+                // filter out inner connector sources that are still under creating.
+                let created_table_ids: HashSet<TableId> = Table::find()
+                    .select_only()
+                    .column(table::Column::TableId)
+                    .join(JoinType::InnerJoin, table::Relation::Object1.def())
+                    .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
+                    .filter(
+                        table::Column::OptionalAssociatedSourceId
+                            .is_not_null()
+                            .and(streaming_job::Column::JobStatus.eq(JobStatus::Created)),
+                    )
+                    .into_tuple()
+                    .all(conn)
+                    .await?
+                    .into_iter()
+                    .collect();
+                (source_objs, created_table_ids)
+            }
+            DB::MONGODB(client) => todo!("not implemented"),
+        };
 
-        // filter out inner connector sources that are still under creating.
-        let created_table_ids: HashSet<TableId> = Table::find()
-            .select_only()
-            .column(table::Column::TableId)
-            .join(JoinType::InnerJoin, table::Relation::Object1.def())
-            .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
-            .filter(
-                table::Column::OptionalAssociatedSourceId
-                    .is_not_null()
-                    .and(streaming_job::Column::JobStatus.eq(JobStatus::Created)),
-            )
-            .into_tuple()
-            .all(&self.db)
-            .await?
-            .into_iter()
-            .collect();
         source_objs.retain_mut(|(source, _)| {
             source.optional_associated_table_id.is_none()
                 || created_table_ids.contains(&source.optional_associated_table_id.unwrap())
@@ -716,89 +755,93 @@ impl CatalogControllerInner {
 
     /// `list_sinks` return all `CREATED` sinks.
     async fn list_sinks(&self) -> MetaResult<Vec<PbSink>> {
-        let sink_objs = Sink::find()
-            .find_also_related(Object)
-            .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
-            .filter(streaming_job::Column::JobStatus.eq(JobStatus::Created))
-            .all(&self.db)
-            .await?;
-
-        Ok(sink_objs
-            .into_iter()
-            .map(|(sink, obj)| ObjectModel(sink, obj.unwrap()).into())
-            .collect())
+        Ok(match &self.db {
+            DB::SQL(conn) => Sink::find()
+                .find_also_related(Object)
+                .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
+                .filter(streaming_job::Column::JobStatus.eq(JobStatus::Created))
+                .all(conn)
+                .await?
+                .map(|(sink, obj)| ObjectModel(sink, obj.unwrap()).into())
+                .collect(),
+            DB::MONGODB(client) => todo!("not implemented"),
+        })
     }
 
     /// `list_subscriptions` return all `CREATED` subscriptions.
     async fn list_subscriptions(&self) -> MetaResult<Vec<PbSubscription>> {
-        let subscription_objs = Subscription::find()
-            .find_also_related(Object)
-            .all(&self.db)
-            .await?;
-
-        Ok(subscription_objs
-            .into_iter()
-            .map(|(subscription, obj)| ObjectModel(subscription, obj.unwrap()).into())
-            .collect())
+        Ok(match &self.db {
+            DB::SQL(conn) => Subscription::find()
+                .find_also_related(Object)
+                .all(conn)
+                .await?
+                .map(|(subscription, obj)| ObjectModel(subscription, obj.unwrap()).into())
+                .collect(),
+            DB::MONGODB(client) => todo!("not implemented"),
+        })
     }
 
     async fn list_views(&self) -> MetaResult<Vec<PbView>> {
-        let view_objs = View::find().find_also_related(Object).all(&self.db).await?;
-
-        Ok(view_objs
-            .into_iter()
-            .map(|(view, obj)| ObjectModel(view, obj.unwrap()).into())
-            .collect())
+        Ok(match &self.db {
+            DB::SQL(conn) => View::find()
+                .find_also_related(Object)
+                .all(conn)
+                .await?
+                .map(|(view, obj)| ObjectModel(view, obj.unwrap()).into())
+                .collect(),
+            DB::MONGODB(client) => todo!("not implemented"),
+        })
     }
 
     /// `list_indexes` return all `CREATED` indexes.
     async fn list_indexes(&self) -> MetaResult<Vec<PbIndex>> {
-        let index_objs = Index::find()
-            .find_also_related(Object)
-            .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
-            .filter(streaming_job::Column::JobStatus.eq(JobStatus::Created))
-            .all(&self.db)
-            .await?;
-
-        Ok(index_objs
-            .into_iter()
-            .map(|(index, obj)| ObjectModel(index, obj.unwrap()).into())
-            .collect())
+        Ok(match &self.db {
+            DB::SQL(conn) => Index::find()
+                .find_also_related(Object)
+                .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
+                .filter(streaming_job::Column::JobStatus.eq(JobStatus::Created))
+                .all(&self.db)
+                .await?
+                .map(|(index, obj)| ObjectModel(index, obj.unwrap()).into())
+                .collect(),
+            DB::MONGODB(client) => todo!("not implemented"),
+        })
     }
 
     async fn list_connections(&self) -> MetaResult<Vec<PbConnection>> {
-        let conn_objs = Connection::find()
-            .find_also_related(Object)
-            .all(&self.db)
-            .await?;
-
-        Ok(conn_objs
-            .into_iter()
-            .map(|(conn, obj)| ObjectModel(conn, obj.unwrap()).into())
-            .collect())
+        Ok(match &self.db {
+            DB::SQL(conn) => Connection::find()
+                .find_also_related(Object)
+                .all(conn)
+                .await?
+                .map(|(conn, obj)| ObjectModel(conn, obj.unwrap()).into())
+                .collect(),
+            DB::MONGODB(client) => todo!("not implemented"),
+        })
     }
 
     pub async fn list_secrets(&self) -> MetaResult<Vec<PbSecret>> {
-        let secret_objs = Secret::find()
-            .find_also_related(Object)
-            .all(&self.db)
-            .await?;
-        Ok(secret_objs
-            .into_iter()
-            .map(|(secret, obj)| ObjectModel(secret, obj.unwrap()).into())
-            .collect())
+        Ok(match &self.db {
+            DB::SQL(conn) => Secret::find()
+                .find_also_related(Object)
+                .all(conn)
+                .await?
+                .map(|(secret, obj)| ObjectModel(secret, obj.unwrap()).into())
+                .collect(),
+            DB::MONGODB(client) => todo!("not implemented"),
+        })
     }
 
     async fn list_functions(&self) -> MetaResult<Vec<PbFunction>> {
-        let func_objs = Function::find()
-            .find_also_related(Object)
-            .all(&self.db)
-            .await?;
-
-        Ok(func_objs
-            .into_iter()
-            .map(|(func, obj)| ObjectModel(func, obj.unwrap()).into())
-            .collect())
+        Ok(match &self.db {
+            DB::SQL(conn) => Function::find()
+                .find_also_related(Object)
+                .all(conn)
+                .await?
+                .map(|(func, obj)| ObjectModel(func, obj.unwrap()).into())
+                .collect(),
+            DB::MONGODB(client) => todo!("not implemented"),
+        })
     }
 
     pub(crate) fn register_finish_notifier(
@@ -813,19 +856,24 @@ impl CatalogControllerInner {
     }
 
     pub(crate) async fn streaming_job_is_finished(&mut self, id: i32) -> MetaResult<bool> {
-        let status = StreamingJob::find()
-            .select_only()
-            .column(streaming_job::Column::JobStatus)
-            .filter(streaming_job::Column::JobId.eq(id))
-            .into_tuple::<JobStatus>()
-            .one(&self.db)
-            .await?;
-
-        status
-            .map(|status| status == JobStatus::Created)
-            .ok_or_else(|| {
-                MetaError::catalog_id_not_found("streaming job", "may have been cancelled/dropped")
-            })
+        match &self.db {
+            DB::SQL(conn) => StreamingJob::find()
+                .select_only()
+                .column(streaming_job::Column::JobStatus)
+                .filter(streaming_job::Column::JobId.eq(id))
+                .into_tuple::<JobStatus>()
+                .one(conn)
+                .await?
+                .filter(|status| *status == JobStatus::Created)
+                .map_or(
+                    Err(MetaError::catalog_id_not_found(
+                        "streaming job",
+                        "may have been cancelled/dropped",
+                    )),
+                    |_| Ok(true),
+                ),
+            DB::MONGODB(client) => todo!("not implemented"),
+        }
     }
 
     pub(crate) fn notify_finish_failed(&mut self, err: &MetaError) {
@@ -838,17 +886,22 @@ impl CatalogControllerInner {
     }
 
     pub async fn list_time_travel_table_ids(&self) -> MetaResult<Vec<TableId>> {
-        let table_ids: Vec<TableId> = Table::find()
-            .select_only()
-            .filter(table::Column::TableType.is_in(vec![
-                TableType::Table,
-                TableType::MaterializedView,
-                TableType::Index,
-            ]))
-            .column(table::Column::TableId)
-            .into_tuple()
-            .all(&self.db)
-            .await?;
+        let table_ids: Vec<TableId> = match &self.db {
+            DB::SQL(conn) => {
+                Table::find()
+                    .select_only()
+                    .filter(table::Column::TableType.is_in(vec![
+                        TableType::Table,
+                        TableType::MaterializedView,
+                        TableType::Index,
+                    ]))
+                    .column(table::Column::TableId)
+                    .into_tuple()
+                    .all(conn)
+                    .await?
+            }
+            DB::MONGODB(client) => todo!("not implemented"),
+        };
         Ok(table_ids)
     }
 }

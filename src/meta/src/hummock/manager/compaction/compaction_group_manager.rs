@@ -17,6 +17,7 @@ use std::ops::DerefMut;
 use std::sync::Arc;
 
 use itertools::Itertools;
+use mongodb::bson::doc;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::get_compaction_group_ids;
@@ -33,6 +34,7 @@ use sea_orm::EntityTrait;
 use tokio::sync::OnceCell;
 
 use super::CompactionGroupStatistic;
+use crate::controller::DB;
 use crate::hummock::compaction::compaction_config::{
     validate_compaction_config, CompactionConfigBuilder,
 };
@@ -70,13 +72,27 @@ impl CompactionGroupManager {
         };
 
         let loaded_compaction_groups: BTreeMap<CompactionGroupId, CompactionGroup> =
-            compaction_config::Entity::find()
-                .all(&env.meta_store_ref().conn)
-                .await
-                .map_err(MetadataModelError::from)?
-                .into_iter()
-                .map(|m| (m.compaction_group_id as CompactionGroupId, m.into()))
-                .collect();
+            match &env.meta_store_ref().conn {
+                DB::SQL(conn) => compaction_config::Entity::find()
+                    .all(conn)
+                    .await
+                    .map_err(MetadataModelError::from)?
+                    .into_iter()
+                    .map(|m| (m.compaction_group_id as CompactionGroupId, m.into()))
+                    .collect(),
+                DB::MONGODB(client) => {
+                    client
+                        .default_database()
+                        .unwrap()
+                        .collection::<compaction_config::MongoDb>("compaction_config")
+                        .find(doc! {})
+                        .await
+                        .map_err(MetadataModelError::from)?
+                        .map(|m| (m._id as CompactionGroupId, m.into()))
+                        .collect()
+                        .await?
+                }
+            };
 
         compaction_group_manager.init(loaded_compaction_groups);
         Ok(compaction_group_manager)
@@ -710,7 +726,7 @@ mod tests {
     use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
     use risingwave_pb::meta::table_fragments::Fragment;
 
-    use crate::controller::SqlMetaStore;
+    use crate::controller::MetaStore;
     use crate::hummock::commit_multi_var;
     use crate::hummock::error::Result;
     use crate::hummock::manager::compaction_group_manager::CompactionGroupManager;
@@ -724,7 +740,7 @@ mod tests {
         assert_eq!(inner.compaction_groups.len(), 2);
 
         async fn update_compaction_config(
-            meta: &SqlMetaStore,
+            meta: &MetaStore,
             inner: &mut CompactionGroupManager,
             cg_ids: &[u64],
             config_to_update: &[MutableConfig],
@@ -735,7 +751,7 @@ mod tests {
         }
 
         async fn insert_compaction_group_configs(
-            meta: &SqlMetaStore,
+            meta: &MetaStore,
             inner: &mut CompactionGroupManager,
             cg_ids: &[u64],
         ) {

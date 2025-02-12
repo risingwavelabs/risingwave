@@ -23,7 +23,7 @@ use risingwave_backup::MetaSnapshotId;
 use sea_orm::DbErr;
 
 use crate::backup_restore::restore_impl::{Loader, Writer};
-use crate::controller::SqlMetaStore;
+use crate::controller::{MetaStore, DB};
 
 pub struct LoaderV2 {
     backup_store: MetaSnapshotStorageRef,
@@ -87,11 +87,11 @@ impl Loader<MetadataV2> for LoaderV2 {
 }
 
 pub struct WriterModelV2ToMetaStoreV2 {
-    meta_store: SqlMetaStore,
+    meta_store: MetaStore,
 }
 
 impl WriterModelV2ToMetaStoreV2 {
-    pub fn new(meta_store: SqlMetaStore) -> Self {
+    pub fn new(meta_store: MetaStore) -> Self {
         Self { meta_store }
     }
 }
@@ -100,64 +100,68 @@ impl WriterModelV2ToMetaStoreV2 {
 impl Writer<MetadataV2> for WriterModelV2ToMetaStoreV2 {
     async fn write(&self, target_snapshot: MetaSnapshot<MetadataV2>) -> BackupResult<()> {
         let metadata = target_snapshot.metadata;
-        let db = &self.meta_store.conn;
-        insert_models(metadata.seaql_migrations.clone(), db).await?;
-        insert_models(metadata.clusters.clone(), db).await?;
-        insert_models(metadata.version_stats.clone(), db).await?;
-        insert_models(metadata.compaction_configs.clone(), db).await?;
-        insert_models(metadata.hummock_sequences.clone(), db).await?;
-        insert_models(metadata.workers.clone(), db).await?;
-        insert_models(metadata.worker_properties.clone(), db).await?;
-        insert_models(metadata.users.clone(), db).await?;
-        // The sort is required to pass table's foreign key check.
-        use risingwave_meta_model::object::ObjectType;
-        insert_models(
-            metadata
-                .objects
-                .iter()
-                .sorted_by(|a, b| match (a.obj_type, b.obj_type) {
-                    (ObjectType::Database, ObjectType::Database) => a.oid.cmp(&b.oid),
-                    (ObjectType::Database, _) => cmp::Ordering::Less,
-                    (_, ObjectType::Database) => cmp::Ordering::Greater,
-                    (ObjectType::Schema, ObjectType::Schema) => a.oid.cmp(&b.oid),
-                    (ObjectType::Schema, _) => cmp::Ordering::Less,
-                    (_, ObjectType::Schema) => cmp::Ordering::Greater,
-                    (_, _) => a.oid.cmp(&b.oid),
-                })
-                .cloned(),
-            db,
-        )
-        .await?;
-        insert_models(
-            metadata
-                .user_privileges
-                .iter()
-                .sorted_by_key(|u| u.id)
-                .cloned(),
-            db,
-        )
-        .await?;
-        insert_models(metadata.object_dependencies.clone(), db).await?;
-        insert_models(metadata.databases.clone(), db).await?;
-        insert_models(metadata.schemas.clone(), db).await?;
-        insert_models(metadata.streaming_jobs.clone(), db).await?;
-        insert_models(metadata.fragments.clone(), db).await?;
-        insert_models(metadata.actors.clone(), db).await?;
-        insert_models(metadata.actor_dispatchers.clone(), db).await?;
-        insert_models(metadata.connections.clone(), db).await?;
-        insert_models(metadata.sources.clone(), db).await?;
-        insert_models(metadata.tables.clone(), db).await?;
-        insert_models(metadata.sinks.clone(), db).await?;
-        insert_models(metadata.views.clone(), db).await?;
-        insert_models(metadata.indexes.clone(), db).await?;
-        insert_models(metadata.functions.clone(), db).await?;
-        insert_models(metadata.system_parameters.clone(), db).await?;
-        insert_models(metadata.catalog_versions.clone(), db).await?;
-        insert_models(metadata.subscriptions.clone(), db).await?;
-        insert_models(metadata.session_parameters.clone(), db).await?;
-        insert_models(metadata.secrets.clone(), db).await?;
-        // update_auto_inc must be called last.
-        update_auto_inc(&metadata, db).await?;
+        let db = match &self.meta_store {
+            DB::SQL(db) => {
+                insert_models(metadata.seaql_migrations.clone(), db).await?;
+                insert_models(metadata.clusters.clone(), db).await?;
+                insert_models(metadata.version_stats.clone(), db).await?;
+                insert_models(metadata.compaction_configs.clone(), db).await?;
+                insert_models(metadata.hummock_sequences.clone(), db).await?;
+                insert_models(metadata.workers.clone(), db).await?;
+                insert_models(metadata.worker_properties.clone(), db).await?;
+                insert_models(metadata.users.clone(), db).await?;
+                // The sort is required to pass table's foreign key check.
+                use risingwave_meta_model::object::ObjectType;
+                insert_models(
+                    metadata
+                        .objects
+                        .iter()
+                        .sorted_by(|a, b| match (a.obj_type, b.obj_type) {
+                            (ObjectType::Database, ObjectType::Database) => a.oid.cmp(&b.oid),
+                            (ObjectType::Database, _) => cmp::Ordering::Less,
+                            (_, ObjectType::Database) => cmp::Ordering::Greater,
+                            (ObjectType::Schema, ObjectType::Schema) => a.oid.cmp(&b.oid),
+                            (ObjectType::Schema, _) => cmp::Ordering::Less,
+                            (_, ObjectType::Schema) => cmp::Ordering::Greater,
+                            (_, _) => a.oid.cmp(&b.oid),
+                        })
+                        .cloned(),
+                    db,
+                )
+                .await?;
+                insert_models(
+                    metadata
+                        .user_privileges
+                        .iter()
+                        .sorted_by_key(|u| u.id)
+                        .cloned(),
+                    db,
+                )
+                .await?;
+                insert_models(metadata.object_dependencies.clone(), db).await?;
+                insert_models(metadata.databases.clone(), db).await?;
+                insert_models(metadata.schemas.clone(), db).await?;
+                insert_models(metadata.streaming_jobs.clone(), db).await?;
+                insert_models(metadata.fragments.clone(), db).await?;
+                insert_models(metadata.actors.clone(), db).await?;
+                insert_models(metadata.actor_dispatchers.clone(), db).await?;
+                insert_models(metadata.connections.clone(), db).await?;
+                insert_models(metadata.sources.clone(), db).await?;
+                insert_models(metadata.tables.clone(), db).await?;
+                insert_models(metadata.sinks.clone(), db).await?;
+                insert_models(metadata.views.clone(), db).await?;
+                insert_models(metadata.indexes.clone(), db).await?;
+                insert_models(metadata.functions.clone(), db).await?;
+                insert_models(metadata.system_parameters.clone(), db).await?;
+                insert_models(metadata.catalog_versions.clone(), db).await?;
+                insert_models(metadata.subscriptions.clone(), db).await?;
+                insert_models(metadata.session_parameters.clone(), db).await?;
+                insert_models(metadata.secrets.clone(), db).await?;
+                // update_auto_inc must be called last.
+                update_auto_inc(&metadata, db).await?;
+            }
+            DB::MONGODB(client) => todo!("not implemented"),
+        };
         Ok(())
     }
 }

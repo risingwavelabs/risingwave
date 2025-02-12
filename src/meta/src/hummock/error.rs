@@ -96,6 +96,12 @@ impl From<sea_orm::DbErr> for Error {
     }
 }
 
+impl From<mongodb::error::Error> for Error {
+    fn from(value: mongodb::error::Error) -> Self {
+        MetadataModelError::from(value).into()
+    }
+}
+
 impl From<Error> for tonic::Status {
     fn from(err: Error) -> Self {
         err.to_status(tonic::Code::Internal, "hummock")

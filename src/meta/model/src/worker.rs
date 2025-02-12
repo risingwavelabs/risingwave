@@ -12,11 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt::Formatter;
+
 use risingwave_pb::common::worker_node::PbState;
 use risingwave_pb::common::{PbWorkerNode, PbWorkerType};
 use sea_orm::entity::prelude::*;
 use sea_orm::ActiveValue::Set;
-use serde::{Deserialize, Serialize};
+use serde::de::{Error, MapAccess, Visitor};
+use serde::ser::SerializeStruct;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::{TransactionId, WorkerId};
 
@@ -60,6 +64,19 @@ impl From<WorkerType> for PbWorkerType {
     }
 }
 
+impl From<&str> for WorkerType {
+    fn from(value: &str) -> Self {
+        match value {
+            "Frontend" => Self::Frontend,
+            "ComputeNode" => Self::ComputeNode,
+            "RiseCtl" => Self::RiseCtl,
+            "Compactor" => Self::Compactor,
+            "Meta" => Self::Meta,
+            _ => unreachable!("unspecified worker type"),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
 #[sea_orm(rs_type = "String", db_type = "string(None)")]
 pub enum WorkerStatus {
@@ -75,6 +92,16 @@ impl From<PbState> for WorkerStatus {
             PbState::Unspecified => unreachable!("unspecified worker status"),
             PbState::Starting => Self::Starting,
             PbState::Running => Self::Running,
+        }
+    }
+}
+
+impl From<&str> for WorkerStatus {
+    fn from(value: &str) -> Self {
+        match value {
+            "Starting" => Self::Starting,
+            "Running" => Self::Running,
+            _ => unreachable!("unspecified worker status"),
         }
     }
 }
@@ -127,3 +154,110 @@ impl Related<super::worker_property::Entity> for Entity {
 }
 
 impl ActiveModelBehavior for ActiveModel {}
+
+const FIELDS: [&str; 7] = [
+    "_id",
+    "worker_type",
+    "host",
+    "port",
+    "status",
+    "transaction_id",
+    "worker_property",
+];
+
+pub struct MongoDb {
+    pub worker: Model,
+    pub worker_property: Option<super::worker_property::MongoDb>,
+}
+
+impl Serialize for MongoDb {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        // 3 is the number of fields in the struct.
+        let mut state = match &self.worker_property {
+            Some(worker_property) => {
+                let mut state = serializer.serialize_struct("MongoDb", 7)?;
+                state.serialize_field("worker_property", worker_property)?;
+                state
+            },
+            None => {
+                serializer.serialize_struct("MongoDb", 6)?;
+            }
+        };
+        state.serialize_field("_id", &self.worker.worker_id)?;
+        state.serialize_field("worker_type", &self.worker.worker_type)?;
+        state.serialize_field("host", &self.worker.host)?;
+        state.serialize_field("port", &self.worker.port)?;
+        state.serialize_field("status", &self.worker.status)?;
+        state.serialize_field("transaction_id", &self.worker.transaction_id)?;
+        state.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for MongoDb {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct MongoDbVisitor;
+        impl<'de> Visitor<'de> for MongoDbVisitor {
+            type Value = MongoDb;
+
+            fn expecting(&self, formatter: &mut Formatter) -> std::fmt::Result {
+                formatter.write_str("MongoDb")
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: MapAccess<'de>,
+            {
+                let mut worker_id: Option<WorkerId> = None;
+                let mut worker_type: Option<WorkerType> = None;
+                let mut host: Option<String> = None;
+                let mut port: Option<i32> = None;
+                let mut status: Option<WorkerStatus> = None;
+                let mut transaction_id = None;
+                let mut worker_property = None;
+                while let Some((key, value)) = map.next_entry()? {
+                    match key {
+                        "_id" => {
+                            worker_id =
+                                Some(<WorkerId as std::str::FromStr>::from_str(value).unwrap())
+                        }
+                        "worker_type" => worker_type = Some(WorkerType::from(value)),
+                        "host" => host = Some(value.to_string()),
+                        "port" => port = Some(<i32 as std::str::FromStr>::from_str(value).unwrap()),
+                        "status" => status = Some(WorkerStatus::from(value)),
+                        "transaction_id" => {
+                            transaction_id =
+                                Some(<TransactionId as std::str::FromStr>::from_str(value).unwrap())
+                        }
+                        "worker_property" => {
+                            worker_property = Some(
+                                super::worker_property::MongoDb::deserialize(value)
+                                    .unwrap(),
+                            )
+                        }
+                        x => return Err(Error::unknown_field(x, &FIELDS)),
+                    }
+                }
+
+                let worker = Model {
+                    worker_id: worker_id.ok_or_else(|| Error::missing_field("_id"))?,
+                    worker_type: worker_type.ok_or_else(|| Error::missing_field("worker_type"))?,
+                    host: host.ok_or_else(|| Error::missing_field("host"))?,
+                    port: port.ok_or_else(|| Error::missing_field("port"))?,
+                    status: status.ok_or_else(|| Error::missing_field("status"))?,
+                    transaction_id,
+                };
+                Ok(Self::Value {
+                    worker,
+                    worker_property,
+                })
+            }
+        }
+        deserializer.deserialize_map(MongoDbVisitor {})
+    }
+}

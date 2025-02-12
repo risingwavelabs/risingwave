@@ -16,6 +16,8 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use anyhow::{anyhow, Context};
+use mongodb::options::{ClientOptions, ServerApi, ServerApiVersion};
+use mongodb::Client;
 use risingwave_common::hash::VnodeCount;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_meta_model::{
@@ -58,15 +60,27 @@ impl From<sea_orm::DbErr> for MetaError {
     }
 }
 
+impl From<mongodb::error::Error> for MetaError {
+    fn from(err: mongodb::error::Error) -> Self {
+        anyhow!(err).into()
+    }
+}
+
 #[derive(Clone)]
-pub struct SqlMetaStore {
-    pub conn: DatabaseConnection,
+pub enum DB {
+    SQL(DatabaseConnection),
+    MONGODB(Client),
+}
+
+#[derive(Clone)]
+pub struct MetaStore {
+    pub conn: DB,
     pub endpoint: String,
 }
 
-impl SqlMetaStore {
+impl MetaStore {
     /// Connect to the SQL meta store based on the given configuration.
-    pub async fn connect(backend: MetaStoreBackend) -> Result<Self, sea_orm::DbErr> {
+    pub async fn connect<E>(backend: MetaStoreBackend) -> Result<Self, E> {
         const MAX_DURATION: Duration = Duration::new(u64::MAX / 4, 0);
 
         #[easy_ext::ext]
@@ -101,7 +115,7 @@ impl SqlMetaStore {
                     .idle_timeout(MAX_DURATION)
                     .max_lifetime(MAX_DURATION);
 
-                let conn = sea_orm::Database::connect(options).await?;
+                let conn = DB::SQL(sea_orm::Database::connect(options).await?);
                 Self {
                     conn,
                     endpoint: IN_MEMORY_STORE.to_owned(),
@@ -120,7 +134,17 @@ impl SqlMetaStore {
                     options.sqlite_common();
                 }
 
-                let conn = sea_orm::Database::connect(options).await?;
+                let conn = DB::SQL(sea_orm::Database::connect(options).await?);
+                Self { conn, endpoint }
+            }
+            MetaStoreBackend::MongoDb { endpoint } => {
+                // Parse connection options from uri
+                let mut options = ClientOptions::parse(endpoint).await?;
+                // Set the server_api field of the client_options object to Stable API version 1
+                let server_api = ServerApi::builder().version(ServerApiVersion::V1).build();
+                options.server_api = Some(server_api);
+                // Create a new client and connect to the server
+                let conn = DB::MONGODB(Client::with_options(options)?);
                 Self { conn, endpoint }
             }
         })
@@ -139,15 +163,20 @@ impl SqlMetaStore {
     ///
     /// Note: this check should be performed before [`Self::up()`].
     async fn is_first_launch(&self) -> MetaResult<bool> {
-        let migrations = Migrator::get_applied_migrations(&self.conn)
-            .await
-            .context("failed to get applied migrations")?;
-        for migration in migrations {
-            if migration.name() == "m20230908_072257_init"
-                && migration.status() == MigrationStatus::Applied
-            {
-                return Ok(false);
+        match &self.conn {
+            DB::SQL(conn) => {
+                let migrations = Migrator::get_applied_migrations(conn)
+                    .await
+                    .context("failed to get applied migrations")?;
+                for migration in migrations {
+                    if migration.name() == "m20230908_072257_init"
+                        && migration.status() == MigrationStatus::Applied
+                    {
+                        return Ok(false);
+                    }
+                }
             }
+            _ => (),
         }
         Ok(true)
     }
@@ -157,11 +186,15 @@ impl SqlMetaStore {
     /// Returns whether the cluster is the first launch.
     pub async fn up(&self) -> MetaResult<bool> {
         let cluster_first_launch = self.is_first_launch().await?;
-        // Try to upgrade if any new model changes are added.
-        Migrator::up(&self.conn, None)
-            .await
-            .context("failed to upgrade models in meta store")?;
-
+        match &self.conn {
+            DB::SQL(conn) => {
+                // Try to upgrade if any new model changes are added.
+                Migrator::up(conn, None)
+                    .await
+                    .context("failed to upgrade models in meta store")?;
+            }
+            _ => (),
+        }
         Ok(cluster_first_launch)
     }
 }

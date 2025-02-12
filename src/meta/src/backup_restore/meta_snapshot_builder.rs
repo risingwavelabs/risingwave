@@ -23,7 +23,7 @@ use risingwave_meta_model as model;
 use risingwave_pb::hummock::PbHummockVersionDelta;
 use sea_orm::{DbErr, EntityTrait, QueryOrder, TransactionTrait};
 
-use crate::controller::SqlMetaStore;
+use crate::controller::{MetaStore, DB};
 
 const VERSION: u32 = 2;
 
@@ -52,11 +52,11 @@ risingwave_backup::for_all_metadata_models_v2!(define_set_metadata);
 
 pub struct MetaSnapshotV2Builder {
     snapshot: MetaSnapshotV2,
-    meta_store: SqlMetaStore,
+    meta_store: MetaStore,
 }
 
 impl MetaSnapshotV2Builder {
-    pub fn new(meta_store: SqlMetaStore) -> Self {
+    pub fn new(meta_store: MetaStore) -> Self {
         Self {
             snapshot: MetaSnapshotV2::default(),
             meta_store,
@@ -74,23 +74,29 @@ impl MetaSnapshotV2Builder {
         // We have ensure the required delta logs for replay is available, see
         // `HummockManager::delete_version_deltas`.
         let hummock_version = hummock_version_builder.await;
-        let txn = self
-            .meta_store
-            .conn
-            .begin_with_config(
-                Some(sea_orm::IsolationLevel::Serializable),
-                Some(sea_orm::AccessMode::ReadOnly),
-            )
-            .await
-            .map_err(map_db_err)?;
-        let version_deltas = model::prelude::HummockVersionDelta::find()
-            .order_by_asc(model::hummock_version_delta::Column::Id)
-            .all(&txn)
-            .await
-            .map_err(map_db_err)?
-            .into_iter()
-            .map_into::<PbHummockVersionDelta>()
-            .map(|pb_delta| HummockVersionDelta::from_persisted_protobuf(&pb_delta));
+        let (txn, version_deltas) = match &self.meta_store.conn {
+            DB::SQL(conn) => {
+                let txn = conn
+                    .begin_with_config(
+                        Some(sea_orm::IsolationLevel::Serializable),
+                        Some(sea_orm::AccessMode::ReadOnly),
+                    )
+                    .await
+                    .map_err(map_db_err)?;
+                let version_deltas = model::prelude::HummockVersionDelta::find()
+                    .order_by_asc(model::hummock_version_delta::Column::Id)
+                    .all(&txn)
+                    .await
+                    .map_err(map_db_err)?
+                    .into_iter()
+                    .map_into::<PbHummockVersionDelta>()
+                    .map(|pb_delta| HummockVersionDelta::from_persisted_protobuf(&pb_delta));
+
+                (txn, version_deltas)
+            }
+            DB::MONGODB(client) => todo!("not implemented"),
+        };
+
         let hummock_version = {
             let mut redo_state = hummock_version;
             let mut max_log_id = None;
@@ -114,9 +120,13 @@ impl MetaSnapshotV2Builder {
             hummock_version,
             ..Default::default()
         };
-        set_metadata(&mut metadata, &txn).await?;
-
-        txn.commit().await.map_err(map_db_err)?;
+        match &self.meta_store.conn {
+            DB::SQL(_) => {
+                set_metadata(&mut metadata, &txn).await?;
+                txn.commit().await.map_err(map_db_err)?;
+            }
+            DB::MONGODB(client) => todo!("not implemented"),
+        };
         self.snapshot.metadata = metadata;
         Ok(())
     }

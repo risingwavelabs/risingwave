@@ -16,7 +16,8 @@ use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use anyhow::Context;
+use anyhow::{anyhow, Context};
+use mongodb::bson::doc;
 use risingwave_common::config::{CompactionConfig, DefaultParallelism, ObjectStoreConfig};
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
@@ -28,12 +29,10 @@ use risingwave_rpc_client::{
 };
 use sea_orm::EntityTrait;
 
-use crate::controller::id::{
-    IdGeneratorManager as SqlIdGeneratorManager, IdGeneratorManagerRef as SqlIdGeneratorManagerRef,
-};
+use crate::controller::id::{IdGeneratorManager, IdGeneratorManagerRef};
 use crate::controller::session_params::{SessionParamsController, SessionParamsControllerRef};
 use crate::controller::system_param::{SystemParamsController, SystemParamsControllerRef};
-use crate::controller::SqlMetaStore;
+use crate::controller::{MetaStore, DB};
 use crate::hummock::sequence::SequenceGenerator;
 use crate::manager::event_log::{start_event_log_manager, EventLogManagerRef};
 use crate::manager::{IdleManager, IdleManagerRef, NotificationManager, NotificationManagerRef};
@@ -45,7 +44,7 @@ use crate::MetaResult;
 #[derive(Clone)]
 pub struct MetaSrvEnv {
     /// id generator manager.
-    id_gen_manager_impl: SqlIdGeneratorManagerRef,
+    id_gen_manager_impl: IdGeneratorManagerRef,
 
     /// system param manager.
     system_param_manager_impl: SystemParamsControllerRef,
@@ -54,7 +53,7 @@ pub struct MetaSrvEnv {
     session_param_manager_impl: SessionParamsControllerRef,
 
     /// meta store.
-    meta_store_impl: SqlMetaStore,
+    meta_store_impl: MetaStore,
 
     /// notification manager.
     notification_manager: NotificationManagerRef,
@@ -344,7 +343,7 @@ impl MetaSrvEnv {
         opts: MetaOpts,
         mut init_system_params: SystemParams,
         init_session_config: SessionConfig,
-        meta_store_impl: SqlMetaStore,
+        meta_store_impl: MetaStore,
     ) -> MetaResult<Self> {
         let idle_manager = Arc::new(IdleManager::new(opts.max_idle_ms));
         let stream_client_pool = Arc::new(StreamClientPool::new(1)); // typically no need for plural clients
@@ -377,11 +376,26 @@ impl MetaSrvEnv {
 
         let notification_manager =
             Arc::new(NotificationManager::new(meta_store_impl.clone()).await);
-        let cluster_id = Cluster::find()
-            .one(&meta_store_impl.conn)
-            .await?
-            .map(|c| c.cluster_id.to_string().into())
-            .unwrap();
+
+        let cluster_id = match &meta_store_impl.conn {
+            DB::SQL(conn) => Cluster::find()
+                .one(&conn)
+                .await?
+                .map(|c| c.cluster_id.to_string().into()),
+            DB::MONGODB(client) => client
+                .default_database()
+                .unwrap()
+                .collection("cluster")
+                .find_one(doc! {})
+                .projection(doc! {"_id": 1})
+                .await?
+                .unwrap()
+                .to_string()
+                .into(),
+        }
+        .map_or(Err(anyhow!("unable to find cluster")), |tracking_id| {
+            tracking_id
+        });
 
         // For new clusters:
         // - the name of the object store needs to be prefixed according to the object id.
@@ -407,7 +421,7 @@ impl MetaSrvEnv {
             .await?,
         );
         Ok(Self {
-            id_gen_manager_impl: Arc::new(SqlIdGeneratorManager::new(&meta_store_impl.conn).await?),
+            id_gen_manager_impl: Arc::new(IdGeneratorManager::new(&meta_store_impl.conn).await?),
             system_param_manager_impl: system_param_controller,
             session_param_manager_impl: session_param_controller,
             meta_store_impl: meta_store_impl.clone(),
@@ -422,15 +436,15 @@ impl MetaSrvEnv {
         })
     }
 
-    pub fn meta_store(&self) -> SqlMetaStore {
+    pub fn meta_store(&self) -> MetaStore {
         self.meta_store_impl.clone()
     }
 
-    pub fn meta_store_ref(&self) -> &SqlMetaStore {
+    pub fn meta_store_ref(&self) -> &MetaStore {
         &self.meta_store_impl
     }
 
-    pub fn id_gen_manager(&self) -> &SqlIdGeneratorManagerRef {
+    pub fn id_gen_manager(&self) -> &IdGeneratorManagerRef {
         &self.id_gen_manager_impl
     }
 
@@ -495,7 +509,7 @@ impl MetaSrvEnv {
             opts,
             risingwave_common::system_param::system_params_for_test(),
             Default::default(),
-            SqlMetaStore::for_test().await,
+            MetaStore::for_test().await,
         )
         .await
         .unwrap()

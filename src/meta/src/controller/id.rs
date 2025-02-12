@@ -20,6 +20,7 @@ use risingwave_meta_model::{actor, fragment};
 use sea_orm::sea_query::{Expr, Func};
 use sea_orm::{DatabaseConnection, EntityTrait, QuerySelect};
 
+use crate::controller::DB;
 use crate::MetaResult;
 
 pub type IdCategoryType = u8;
@@ -38,33 +39,43 @@ pub mod IdCategory {
 pub struct IdGenerator<const TYPE: IdCategoryType>(AtomicU64);
 
 impl<const TYPE: IdCategoryType> IdGenerator<TYPE> {
-    pub async fn new(conn: &DatabaseConnection) -> MetaResult<Self> {
+    pub async fn new(conn: &DB) -> MetaResult<Self> {
         let id: i32 = match TYPE {
             IdCategory::Table => {
                 // Since we are using object pk to generate id for tables, here we just implement a dummy
                 // id generator and refill it later when inserting the table.
                 0
             }
-            IdCategory::Fragment => Fragment::find()
-                .select_only()
-                .expr(Func::if_null(
-                    Expr::col(fragment::Column::FragmentId).max().add(1),
-                    1,
-                ))
-                .into_tuple()
-                .one(conn)
-                .await?
-                .unwrap_or_default(),
-            IdCategory::Actor => Actor::find()
-                .select_only()
-                .expr(Func::if_null(
-                    Expr::col(actor::Column::ActorId).max().add(1),
-                    1,
-                ))
-                .into_tuple()
-                .one(conn)
-                .await?
-                .unwrap_or_default(),
+            IdCategory::Fragment => match conn {
+                DB::SQL(conn) => Fragment::find()
+                    .select_only()
+                    .expr(Func::if_null(
+                        Expr::col(fragment::Column::FragmentId).max().add(1),
+                        1,
+                    ))
+                    .into_tuple()
+                    .one(conn)
+                    .await?
+                    .unwrap_or_default(),
+                DB::MONGODB(client) => {
+                    todo!("not implemented")
+                }
+            },
+            IdCategory::Actor => match conn {
+                DB::SQL(conn) => Actor::find()
+                    .select_only()
+                    .expr(Func::if_null(
+                        Expr::col(actor::Column::ActorId).max().add(1),
+                        1,
+                    ))
+                    .into_tuple()
+                    .one(conn)
+                    .await?
+                    .unwrap_or_default(),
+                DB::MONGODB(client) => {
+                    todo!("not implemented")
+                }
+            },
             _ => unreachable!("IdGeneratorV2 only supports Table, Fragment, and Actor"),
         };
 
@@ -87,7 +98,7 @@ pub struct IdGeneratorManager {
 }
 
 impl IdGeneratorManager {
-    pub async fn new(conn: &DatabaseConnection) -> MetaResult<Self> {
+    pub async fn new(conn: &DB) -> MetaResult<Self> {
         Ok(Self {
             tables: Arc::new(IdGenerator::new(conn).await?),
             fragments: Arc::new(IdGenerator::new(conn).await?),

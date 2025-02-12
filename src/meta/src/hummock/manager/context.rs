@@ -27,7 +27,7 @@ use risingwave_meta_model::hummock_gc_history;
 use risingwave_pb::hummock::{HummockPinnedVersion, ValidationTask};
 use sea_orm::{DatabaseConnection, EntityTrait};
 
-use crate::controller::SqlMetaStore;
+use crate::controller::MetaStore;
 use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::worker::{HummockManagerEvent, HummockManagerEventSender};
 use crate::hummock::manager::{commit_multi_var, start_measure_real_process_timer};
@@ -70,7 +70,7 @@ impl ContextInfo {
     async fn release_contexts(
         &mut self,
         context_ids: impl AsRef<[HummockContextId]>,
-        meta_store_ref: SqlMetaStore,
+        meta_store_ref: MetaStore,
     ) -> Result<()> {
         fail_point!("release_contexts_metastore_err", |_| Err(Error::MetaStore(
             anyhow::anyhow!("failpoint metastore error")
@@ -245,7 +245,7 @@ impl HummockManager {
             )?;
             if self.env.opts.gc_history_retention_time_sec != 0 {
                 let ids = sstables.iter().map(|s| s.sst_info.object_id).collect_vec();
-                check_gc_history(&self.meta_store_ref().conn, ids).await?;
+                check_gc_history(&self.meta_store_ref().conn, ids).await?; // TODO implement MongoDB
             }
         }
 

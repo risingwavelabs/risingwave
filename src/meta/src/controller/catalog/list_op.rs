@@ -14,6 +14,8 @@
 
 use super::*;
 
+// TODO implement MongoDb
+
 impl CatalogController {
     pub async fn list_time_travel_table_ids(&self) -> MetaResult<Vec<TableId>> {
         self.inner.read().await.list_time_travel_table_ids().await
@@ -23,19 +25,26 @@ impl CatalogController {
         &self,
     ) -> MetaResult<Vec<MetaTelemetryJobDesc>> {
         let inner = self.inner.read().await;
-        let info: Vec<(TableId, Option<Property>)> = Table::find()
-            .select_only()
-            .column(table::Column::TableId)
-            .column(source::Column::WithProperties)
-            .join(JoinType::LeftJoin, table::Relation::Source.def())
-            .filter(
-                table::Column::TableType
-                    .eq(TableType::Table)
-                    .or(table::Column::TableType.eq(TableType::MaterializedView)),
-            )
-            .into_tuple()
-            .all(&inner.db)
-            .await?;
+        let info: Vec<(TableId, Option<Property>)> = match &inner.db {
+            DB::SQL(conn) => {
+                Table::find()
+                    .select_only()
+                    .column(table::Column::TableId)
+                    .column(source::Column::WithProperties)
+                    .join(JoinType::LeftJoin, table::Relation::Source.def())
+                    .filter(
+                        table::Column::TableType
+                            .eq(TableType::Table)
+                            .or(table::Column::TableType.eq(TableType::MaterializedView)),
+                    )
+                    .into_tuple()
+                    .all(conn)
+                    .await?
+            }
+            DB::MONGODB(client) => {
+                todo!("not implemented")
+            }
+        };
 
         Ok(info
             .into_iter()
@@ -67,20 +76,27 @@ impl CatalogController {
         } else {
             streaming_job::Column::JobStatus.eq(JobStatus::Creating)
         };
-        let tables = Table::find()
-            .join(JoinType::LeftJoin, table::Relation::Object1.def())
-            .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
-            .filter(
-                table::Column::TableType
-                    .eq(TableType::MaterializedView)
-                    .and(
-                        streaming_job::Column::CreateType
-                            .eq(CreateType::Background)
-                            .and(status_cond),
-                    ),
-            )
-            .all(&inner.db)
-            .await?;
+        let tables = match &inner.db {
+            DB::SQL(conn) => {
+                Table::find()
+                    .join(JoinType::LeftJoin, table::Relation::Object1.def())
+                    .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
+                    .filter(
+                        table::Column::TableType
+                            .eq(TableType::MaterializedView)
+                            .and(
+                                streaming_job::Column::CreateType
+                                    .eq(CreateType::Background)
+                                    .and(status_cond),
+                            ),
+                    )
+                    .all(conn)
+                    .await?
+            }
+            DB::MONGODB(client) => {
+                todo!("not implemented")
+            }
+        };
         Ok(tables)
     }
 
@@ -109,58 +125,86 @@ impl CatalogController {
 
     pub async fn list_readonly_table_ids(&self, schema_id: SchemaId) -> MetaResult<Vec<TableId>> {
         let inner = self.inner.read().await;
-        let table_ids: Vec<TableId> = Table::find()
-            .select_only()
-            .column(table::Column::TableId)
-            .join(JoinType::InnerJoin, table::Relation::Object1.def())
-            .filter(
-                object::Column::SchemaId
-                    .eq(schema_id)
-                    .and(table::Column::TableType.ne(TableType::Table)),
-            )
-            .into_tuple()
-            .all(&inner.db)
-            .await?;
+        let table_ids: Vec<TableId> = match &inner.db {
+            DB::SQL(conn) => {
+                Table::find()
+                    .select_only()
+                    .column(table::Column::TableId)
+                    .join(JoinType::InnerJoin, table::Relation::Object1.def())
+                    .filter(
+                        object::Column::SchemaId
+                            .eq(schema_id)
+                            .and(table::Column::TableType.ne(TableType::Table)),
+                    )
+                    .into_tuple()
+                    .all(conn)
+                    .await?
+            }
+            DB::MONGODB(client) => {
+                todo!("not implemented")
+            }
+        };
         Ok(table_ids)
     }
 
     pub async fn list_dml_table_ids(&self, schema_id: SchemaId) -> MetaResult<Vec<TableId>> {
         let inner = self.inner.read().await;
-        let table_ids: Vec<TableId> = Table::find()
-            .select_only()
-            .column(table::Column::TableId)
-            .join(JoinType::InnerJoin, table::Relation::Object1.def())
-            .filter(
-                object::Column::SchemaId
-                    .eq(schema_id)
-                    .and(table::Column::TableType.eq(TableType::Table)),
-            )
-            .into_tuple()
-            .all(&inner.db)
-            .await?;
+        let table_ids: Vec<TableId> = match &inner.db {
+            DB::SQL(conn) => {
+                Table::find()
+                    .select_only()
+                    .column(table::Column::TableId)
+                    .join(JoinType::InnerJoin, table::Relation::Object1.def())
+                    .filter(
+                        object::Column::SchemaId
+                            .eq(schema_id)
+                            .and(table::Column::TableType.eq(TableType::Table)),
+                    )
+                    .into_tuple()
+                    .all(conn)
+                    .await?
+            }
+            DB::MONGODB(client) => {
+                todo!("not implemented")
+            }
+        };
         Ok(table_ids)
     }
 
     pub async fn list_view_ids(&self, schema_id: SchemaId) -> MetaResult<Vec<ViewId>> {
         let inner = self.inner.read().await;
-        let view_ids: Vec<ViewId> = View::find()
-            .select_only()
-            .column(view::Column::ViewId)
-            .join(JoinType::InnerJoin, view::Relation::Object.def())
-            .filter(object::Column::SchemaId.eq(schema_id))
-            .into_tuple()
-            .all(&inner.db)
-            .await?;
+        let view_ids: Vec<ViewId> = match &inner.db {
+            DB::SQL(conn) => {
+                View::find()
+                    .select_only()
+                    .column(view::Column::ViewId)
+                    .join(JoinType::InnerJoin, view::Relation::Object.def())
+                    .filter(object::Column::SchemaId.eq(schema_id))
+                    .into_tuple()
+                    .all(conn)
+                    .await?
+            }
+            DB::MONGODB(client) => {
+                todo!("not implemented")
+            }
+        };
         Ok(view_ids)
     }
 
     pub async fn list_tables_by_type(&self, table_type: TableType) -> MetaResult<Vec<PbTable>> {
         let inner = self.inner.read().await;
-        let table_objs = Table::find()
-            .find_also_related(Object)
-            .filter(table::Column::TableType.eq(table_type))
-            .all(&inner.db)
-            .await?;
+        let table_objs = match &inner.db {
+            DB::SQL(conn) => {
+                Table::find()
+                    .find_also_related(Object)
+                    .filter(table::Column::TableType.eq(table_type))
+                    .all(conn)
+                    .await?
+            }
+            DB::MONGODB(client) => {
+                todo!("not implemented")
+            }
+        };
         Ok(table_objs
             .into_iter()
             .map(|(table, obj)| ObjectModel(table, obj.unwrap()).into())
@@ -175,12 +219,19 @@ impl CatalogController {
     // Return a hashmap to distinguish whether each source is shared or not.
     pub async fn list_source_id_with_shared_types(&self) -> MetaResult<HashMap<SourceId, bool>> {
         let inner = self.inner.read().await;
-        let source_ids: Vec<(SourceId, Option<StreamSourceInfo>)> = Source::find()
-            .select_only()
-            .columns([source::Column::SourceId, source::Column::SourceInfo])
-            .into_tuple()
-            .all(&inner.db)
-            .await?;
+        let source_ids: Vec<(SourceId, Option<StreamSourceInfo>)> = match &inner.db {
+            DB::SQL(conn) => {
+                Source::find()
+                    .select_only()
+                    .columns([source::Column::SourceId, source::Column::SourceInfo])
+                    .into_tuple()
+                    .all(conn)
+                    .await?
+            }
+            DB::MONGODB(client) => {
+                todo!("not implemented")
+            }
+        };
 
         Ok(source_ids
             .into_iter()
@@ -196,10 +247,17 @@ impl CatalogController {
 
     pub async fn list_connections(&self) -> MetaResult<Vec<PbConnection>> {
         let inner = self.inner.read().await;
-        let conn_objs = Connection::find()
-            .find_also_related(Object)
-            .all(&inner.db)
-            .await?;
+        let conn_objs = match &inner.db {
+            DB::SQL(conn) => {
+                Connection::find()
+                    .find_also_related(Object)
+                    .all(conn)
+                    .await?
+            }
+            DB::MONGODB(client) => {
+                todo!("not implemented")
+            }
+        };
         Ok(conn_objs
             .into_iter()
             .map(|(conn, obj)| ObjectModel(conn, obj.unwrap()).into())
@@ -208,14 +266,21 @@ impl CatalogController {
 
     pub async fn list_source_ids(&self, schema_id: SchemaId) -> MetaResult<Vec<SourceId>> {
         let inner = self.inner.read().await;
-        let source_ids: Vec<SourceId> = Source::find()
-            .select_only()
-            .column(source::Column::SourceId)
-            .join(JoinType::InnerJoin, source::Relation::Object.def())
-            .filter(object::Column::SchemaId.eq(schema_id))
-            .into_tuple()
-            .all(&inner.db)
-            .await?;
+        let source_ids: Vec<SourceId> = match &inner.db {
+            DB::SQL(conn) => {
+                Source::find()
+                    .select_only()
+                    .column(source::Column::SourceId)
+                    .join(JoinType::InnerJoin, source::Relation::Object.def())
+                    .filter(object::Column::SchemaId.eq(schema_id))
+                    .into_tuple()
+                    .all(conn)
+                    .await?
+            }
+            DB::MONGODB(client) => {
+                todo!("not implemented")
+            }
+        };
         Ok(source_ids)
     }
 
