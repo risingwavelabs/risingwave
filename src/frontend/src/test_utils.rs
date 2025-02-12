@@ -643,11 +643,12 @@ impl CatalogWriter for MockCatalogWriter {
     ) -> Result<()> {
         match object {
             alter_set_schema_request::Object::TableId(table_id) => {
-                let pb_table = {
+                let mut pb_table = {
                     let reader = self.catalog.read();
                     let table = reader.get_any_table_by_id(&table_id.into())?.to_owned();
                     table.to_prost()
                 };
+                pb_table.schema_id = new_schema_id;
                 self.catalog.write().update_table(&pb_table);
                 self.table_id_to_schema_id
                     .write()
