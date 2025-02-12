@@ -1497,7 +1497,9 @@ impl Session for SessionImpl {
         let string = stmt.to_string();
         let sql_str = string.as_str();
         let sql: Arc<str> = Arc::from(sql_str);
-        let rsp = handle(self, stmt, sql.clone(), vec![format]).await?;
+        // The handle can be slow. Release potential large String early.
+        drop(string);
+        let rsp = handle(self, stmt, sql, vec![format]).await?;
         Ok(rsp)
     }
 
