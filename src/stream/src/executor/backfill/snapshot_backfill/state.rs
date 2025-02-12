@@ -265,11 +265,17 @@ impl<S: StateStore> BackfillState<S> {
                 }
                 // sanity check
                 {
+                    assert!(
+                        prev_progress.epoch <= progress.epoch,
+                        "progress epoch regress from {} to {}",
+                        prev_progress.epoch,
+                        progress.epoch
+                    );
                     match &prev_progress.progress {
                         EpochBackfillProgress::Consuming { latest_pk: prev_pk } => {
-                            assert_eq!(prev_progress.epoch, progress.epoch);
-                            if let EpochBackfillProgress::Consuming { latest_pk: pk } =
-                                &progress.progress
+                            if prev_progress.epoch == progress.epoch
+                                && let EpochBackfillProgress::Consuming { latest_pk: pk } =
+                                    &progress.progress
                             {
                                 assert_eq!(pk.len(), self.pk_serde.get_data_types().len());
                                 assert!(prev_progress.row_count <= progress.row_count);
