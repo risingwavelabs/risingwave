@@ -130,7 +130,7 @@ pub(crate) mod transaction;
 
 /// The global environment for the frontend server.
 #[derive(Clone)]
-pub struct FrontendEnv {
+pub(crate) struct FrontendEnv {
     // Different session may access catalog at the same time and catalog is protected by a
     // RwLock.
     meta_client: Arc<dyn FrontendMetaClient>,
@@ -162,6 +162,7 @@ pub struct FrontendEnv {
     spill_metrics: Arc<BatchSpillMetrics>,
 
     batch_config: BatchConfig,
+    #[expect(dead_code)]
     meta_config: MetaConfig,
     streaming_config: StreamingConfig,
 
@@ -521,10 +522,6 @@ impl FrontendEnv {
         &self.user_info_reader
     }
 
-    pub fn worker_node_manager(&self) -> &WorkerNodeManager {
-        &self.worker_node_manager
-    }
-
     pub fn worker_node_manager_ref(&self) -> WorkerNodeManagerRef {
         self.worker_node_manager.clone()
     }
@@ -563,10 +560,6 @@ impl FrontendEnv {
 
     pub fn batch_config(&self) -> &BatchConfig {
         &self.batch_config
-    }
-
-    pub fn meta_config(&self) -> &MetaConfig {
-        &self.meta_config
     }
 
     pub fn streaming_config(&self) -> &StreamingConfig {
@@ -736,7 +729,7 @@ impl From<CheckRelationError> for RwError {
 }
 
 impl SessionImpl {
-    pub fn new(
+    pub(crate) fn new(
         env: FrontendEnv,
         auth_context: AuthContext,
         user_authenticator: UserAuthenticator,
@@ -797,7 +790,7 @@ impl SessionImpl {
         }
     }
 
-    pub fn env(&self) -> &FrontendEnv {
+    pub(crate) fn env(&self) -> &FrontendEnv {
         &self.env
     }
 
@@ -1371,7 +1364,7 @@ impl SessionManagerImpl {
         })
     }
 
-    pub fn env(&self) -> &FrontendEnv {
+    pub(crate) fn env(&self) -> &FrontendEnv {
         &self.env
     }
 
