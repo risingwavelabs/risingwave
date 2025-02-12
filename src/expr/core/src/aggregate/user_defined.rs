@@ -42,7 +42,7 @@ impl AggregateFunction for UserDefinedAggregateFunction {
 
     /// Creates an initial state of the aggregate function.
     fn create_state(&self) -> Result<AggregateState> {
-        // FIXME(eric): This is bad. Let's make `create_state` async later
+        // FIXME(eric): This is bad. Let's make `create_state` async if someday we allow async UDAF
         futures::executor::block_on(async {
             let state = self.runtime.call_agg_create_state().await?;
             Ok(AggregateState::Any(Box::new(State(state))))

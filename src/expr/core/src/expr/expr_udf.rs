@@ -115,7 +115,7 @@ impl UserDefinedFunction {
         // update memory usage
         self.metrics
             .memory_usage_bytes
-            .set(self.runtime.memory_usage().await as i64);
+            .set(self.runtime.memory_usage() as i64);
 
         let arrow_output = arrow_output_result?;
 
@@ -186,8 +186,8 @@ impl Build for UserDefinedFunction {
             return_type: &return_type,
             always_retry_on_network_error: udf.always_retry_on_network_error,
             language,
-            is_async: udf.is_async.clone(),
-            is_batched: udf.is_batched.clone(),
+            is_async: udf.is_async,
+            is_batched: udf.is_batched,
         })
         .context("failed to build UDF runtime")?;
 

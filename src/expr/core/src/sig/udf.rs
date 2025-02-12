@@ -161,7 +161,7 @@ pub trait UdfImpl: std::fmt::Debug + Send + Sync {
     /// Return the memory size consumed by UDF runtime in bytes.
     ///
     /// If not available, return 0.
-    async fn memory_usage(&self) -> usize {
+    fn memory_usage(&self) -> usize {
         0
     }
 }
