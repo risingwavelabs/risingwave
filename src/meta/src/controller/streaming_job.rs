@@ -436,6 +436,7 @@ impl CatalogController {
 
         let mut fragment_relations = BTreeMap::new();
 
+        // Fill in the fragment relation based on the actor dispatcher.
         for (fragment, actors, actor_dispatchers) in &fragment_actors {
             for actor in actors {
                 if let Some(dispatcher) = actor_dispatchers.get(&actor.actor_id) {
@@ -696,39 +697,29 @@ impl CatalogController {
             }
         }
 
-        let actor_fragments: Vec<(ActorId, FragmentId)> = Actor::find()
-            .select_only()
-            .columns([actor::Column::ActorId, actor::Column::FragmentId])
-            .into_tuple()
-            .all(&txn)
-            .await?;
-
-        let actor_to_fragments: HashMap<_, _> = actor_fragments.into_iter().collect();
-
         let mut fragment_relations = BTreeMap::new();
 
-        for (actor_id, dispatchers) in &new_actor_dispatchers {
-            let fragment_id = actor_to_fragments
-                .get(&(*actor_id as ActorId))
-                .ok_or_else(|| MetaError::catalog_id_not_found("actor", *actor_id))?;
+        // Fill in the fragment relation based on the new creating actor dispatchers.
+        for (&fragment_id, actor_dispatchers) in new_actor_dispatchers {
+            for dispatchers in actor_dispatchers.values() {
+                for dispatcher in dispatchers {
+                    let key = (fragment_id, dispatcher.dispatcher_id);
 
-            for dispatcher in dispatchers {
-                let key = (fragment_id, dispatcher.dispatcher_id);
+                    if fragment_relations.contains_key(&key) {
+                        continue;
+                    }
 
-                if fragment_relations.contains_key(&key) {
-                    continue;
+                    fragment_relations.insert(
+                        key,
+                        fragment_relation::Model {
+                            source_fragment_id: fragment_id as FragmentId,
+                            target_fragment_id: dispatcher.dispatcher_id as FragmentId,
+                            dispatcher_type: dispatcher.r#type().into(),
+                            dist_key_indices: I32Array::from(dispatcher.dist_key_indices.clone()),
+                            output_indices: I32Array::from(dispatcher.output_indices.clone()),
+                        },
+                    );
                 }
-
-                fragment_relations.insert(
-                    key,
-                    fragment_relation::Model {
-                        source_fragment_id: *fragment_id,
-                        target_fragment_id: dispatcher.dispatcher_id as FragmentId,
-                        dispatcher_type: dispatcher.r#type().into(),
-                        dist_key_indices: I32Array::from(dispatcher.dist_key_indices.clone()),
-                        output_indices: I32Array::from(dispatcher.output_indices.clone()),
-                    },
-                );
             }
         }
 
