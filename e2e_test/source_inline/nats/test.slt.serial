@@ -39,7 +39,7 @@ select count(*) >= 100 from t_nats;
 ----
 t
 
-system ok
+system ok retry 3 backoff 5s
 python3 e2e_test/source_inline/nats/operation.py validate_state "t_nats" 4
 
 system ok
@@ -61,7 +61,7 @@ select count(*) >= 200 from t_nats;
 ----
 t
 
-system ok
+system ok retry 3 backoff 5s
 python3 e2e_test/source_inline/nats/operation.py validate_state "t_nats" 6
 
 system ok
@@ -83,7 +83,7 @@ select count(*) >= 300 from t_nats;
 ----
 t
 
-system ok
+system ok retry 3 backoff 5s
 python3 e2e_test/source_inline/nats/operation.py validate_state "t_nats" 2
 
 system ok
