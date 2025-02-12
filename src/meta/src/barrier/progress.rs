@@ -519,8 +519,6 @@ impl CreateMviewProgressTracker {
 
         let CreateStreamingJobCommandInfo {
             stream_job_fragments: table_fragments,
-            upstream_root_actors,
-            dispatchers,
             definition,
             job_type,
             create_type,
@@ -528,30 +526,9 @@ impl CreateMviewProgressTracker {
         } = &info;
 
         let creating_mv_id = table_fragments.stream_job_id();
-
-        let (upstream_mv_count, upstream_total_key_count, job_type, create_type) = {
-            // Keep track of how many times each upstream MV appears.
-            let mut upstream_mv_count = HashMap::new();
-            for (table_id, actors) in upstream_root_actors {
-                assert!(!actors.is_empty());
-                let dispatch_count: usize = dispatchers
-                    .values()
-                    .flatten()
-                    .filter(|(upstream_actor_id, _)| actors.contains(upstream_actor_id))
-                    .map(|(_, v)| v.len())
-                    .sum();
-                upstream_mv_count.insert(*table_id, dispatch_count / actors.len());
-            }
-
-            let upstream_total_key_count: u64 =
-                calculate_total_key_count(&upstream_mv_count, version_stats);
-            (
-                upstream_mv_count,
-                upstream_total_key_count,
-                job_type,
-                create_type,
-            )
-        };
+        let upstream_mv_count = table_fragments.dependent_table_ids();
+        let upstream_total_key_count: u64 =
+            calculate_total_key_count(&upstream_mv_count, version_stats);
 
         for (actor, _backfill_upstream_type) in &actors {
             self.actor_map.insert(*actor, creating_mv_id);

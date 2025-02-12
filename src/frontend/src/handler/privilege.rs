@@ -87,20 +87,16 @@ fn resolve_relation_privileges(
 }
 
 /// resolve privileges in `query`
-fn resolve_query_privileges(query: &BoundQuery) -> (Vec<ObjectCheckItem>, HashSet<DatabaseId>) {
-    let mut objects = Vec::new();
-    let mut check_databases = HashSet::new();
+fn resolve_query_privileges(
+    check_objs: &mut Vec<ObjectCheckItem>,
+    check_dbs: &mut HashSet<DatabaseId>,
+    query: &BoundQuery,
+) {
     if let crate::binder::BoundSetExpr::Select(select) = &query.body {
         if let Some(sub_relation) = &select.from {
-            resolve_relation_privileges(
-                sub_relation,
-                AclMode::Select,
-                &mut objects,
-                &mut check_databases,
-            );
+            resolve_relation_privileges(sub_relation, AclMode::Select, check_objs, check_dbs);
         }
     }
-    (objects, check_databases)
 }
 
 impl SessionImpl {
@@ -129,17 +125,47 @@ impl SessionImpl {
         Ok(())
     }
 
+    /// Check whether the user of the current session has the privilege to connect to the databases
+    pub fn check_database_connect_privileges(&self, db_ids: HashSet<DatabaseId>) -> Result<()> {
+        let user_reader = self.env().user_info_reader();
+        let reader = user_reader.read_guard();
+
+        if let Some(user) = reader.get_user_by_name(&self.user_name()) {
+            if user.is_super {
+                return Ok(());
+            }
+            let current_database = self.database_id();
+            for db_id in db_ids {
+                if db_id == current_database {
+                    continue;
+                }
+                let has_privilege =
+                    user.check_privilege(&PbObject::DatabaseId(db_id), AclMode::Connect);
+                if !has_privilege {
+                    return Err(PermissionDenied("Do not have CONNECT privilege".to_owned()).into());
+                }
+            }
+        } else {
+            return Err(PermissionDenied("Session user is invalid".to_owned()).into());
+        }
+
+        Ok(())
+    }
+
     pub fn check_privileges_for_query(&self, query: &BoundQuery) -> Result<()> {
-        self.check_privileges_for_stmt(&BoundStatement::Query(query.clone().into()))
+        let mut items = Vec::new();
+        let mut check_databases = HashSet::new();
+
+        resolve_query_privileges(&mut items, &mut check_databases, query);
+
+        self.check_privileges(&items)?;
+        self.check_database_connect_privileges(check_databases)?;
+
+        Ok(())
     }
 
     pub fn check_privileges_for_stmt(&self, stmt: &BoundStatement) -> Result<()> {
-        let user_reader = self.env().user_info_reader();
-        let reader = user_reader.read_guard();
-        let user = reader
-            .get_user_by_name(&self.user_name())
-            .ok_or(PermissionDenied("Session user is invalid".to_owned()))?;
-        if user.is_super {
+        if self.is_super_user() {
             return Ok(());
         }
 
@@ -181,44 +207,19 @@ impl SessionImpl {
                 items.push(item);
             }
             BoundStatement::Query(ref query) => {
-                let (objs, dbs) = resolve_query_privileges(query);
-                items.extend(objs);
-                check_databases.extend(dbs);
+                resolve_query_privileges(&mut items, &mut check_databases, query);
             }
             BoundStatement::DeclareCursor(ref declare_cursor) => {
-                let (objs, dbs) = resolve_query_privileges(&declare_cursor.query);
-                items.extend(objs);
-                check_databases.extend(dbs);
+                resolve_query_privileges(&mut items, &mut check_databases, &declare_cursor.query);
             }
             BoundStatement::FetchCursor(_) => unimplemented!(),
             BoundStatement::CreateView(ref create_view) => {
-                let (objs, dbs) = resolve_query_privileges(&create_view.query);
-                items.extend(objs);
-                check_databases.extend(dbs);
+                resolve_query_privileges(&mut items, &mut check_databases, &create_view.query);
             }
         };
 
-        for item in items {
-            if item.owner == user.id {
-                continue;
-            }
-            let has_privilege = user.check_privilege(&item.object, item.mode);
-            if !has_privilege {
-                return Err(PermissionDenied("Do not have the privilege".to_owned()).into());
-            }
-        }
-
-        let current_database = self.database_id();
-        for db_id in check_databases {
-            if db_id == current_database {
-                continue;
-            }
-            let has_privilege =
-                user.check_privilege(&PbObject::DatabaseId(db_id), AclMode::Connect);
-            if !has_privilege {
-                return Err(PermissionDenied("Do not have CONNECT privilege".to_owned()).into());
-            }
-        }
+        self.check_privileges(&items)?;
+        self.check_database_connect_privileges(check_databases)?;
 
         Ok(())
     }

@@ -85,7 +85,8 @@ impl BuildingFragment {
         Self::fill_internal_tables(&mut fragment, job, table_id_gen);
 
         let job_id = Self::fill_job(&mut fragment, job).then(|| job.id());
-        let upstream_table_columns = Self::extract_upstream_table_columns(&mut fragment);
+        let upstream_table_columns =
+            Self::extract_upstream_table_columns_except_cross_db_backfill(&mut fragment);
 
         Self {
             inner: fragment,
@@ -201,8 +202,8 @@ impl BuildingFragment {
         has_job
     }
 
-    /// Extract the required columns (in IDs) of each upstream table.
-    fn extract_upstream_table_columns(
+    /// Extract the required columns (in IDs) of each upstream table except for cross-db backfill.
+    fn extract_upstream_table_columns_except_cross_db_backfill(
         // TODO: no need to take `&mut` here
         fragment: &mut StreamFragment,
     ) -> HashMap<TableId, Vec<i32>> {

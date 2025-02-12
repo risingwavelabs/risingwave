@@ -1626,16 +1626,6 @@ impl DdlController {
             .get_upstream_root_fragments(&upstream_table_ids)
             .await?;
 
-        let upstream_root_actors: HashMap<_, _> = upstream_root_fragments
-            .iter()
-            .map(|(&table_id, fragment)| {
-                (
-                    table_id,
-                    fragment.actors.iter().map(|a| a.actor_id).collect_vec(),
-                )
-            })
-            .collect();
-
         if snapshot_backfill_info.is_some() {
             if stream_job.create_type() == CreateType::Background {
                 return Err(anyhow!("snapshot_backfill must be used as Foreground mode").into());
@@ -1773,7 +1763,6 @@ impl DdlController {
 
         let ctx = CreateStreamingJobContext {
             dispatchers,
-            upstream_root_actors,
             internal_tables,
             building_locations,
             existing_locations,

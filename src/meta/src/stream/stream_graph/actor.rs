@@ -174,7 +174,8 @@ impl FragmentActorBuilder {
             NodeBody::StreamScan(stream_scan) => {
                 let input = stream_node.get_input();
                 if stream_scan.stream_scan_type() == StreamScanType::CrossDbSnapshotBackfill {
-                    // CrossDbSnapshotBackfill is a special case, which doesn't have any upstreams.
+                    // CrossDbSnapshotBackfill is a special case, which doesn't have any upstream actor
+                    // and always reads from log store.
                     assert!(input.is_empty());
                     return Ok(stream_node.clone());
                 }

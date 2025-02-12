@@ -75,7 +75,6 @@ use crate::error::{ErrorCode, Result};
 use crate::expr::TimestamptzExprFinder;
 use crate::handler::create_table::{CreateTableInfo, CreateTableProps};
 use crate::optimizer::plan_node::generic::{SourceNodeKind, Union};
-use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::plan_node::{
     BatchExchange, PlanNodeType, PlanTreeNode, RewriteExprsRecursive, StreamExchange, StreamUnion,
     ToStream, VisitExprsRecursive,
@@ -1039,12 +1038,6 @@ impl PlanRoot {
             .session_ctx()
             .config()
             .streaming_use_snapshot_backfill()
-    }
-
-    pub fn should_use_cross_db_snapshot_backfill(&self) -> bool {
-        // todo:
-        // self.plan.append_only()
-        self.plan.emit_on_window_close()
     }
 
     /// used when the plan has a target relation such as DML and sink into table, return the mapping from table's columns to the plan's schema

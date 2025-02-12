@@ -84,5 +84,6 @@ drop table t1 cascade;
 statement ok
 drop database d2;
 
-system ok
-risedev psql -c 'drop database d1;'
+connection other
+statement ok
+drop database d1;
