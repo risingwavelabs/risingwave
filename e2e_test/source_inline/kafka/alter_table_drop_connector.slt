@@ -48,6 +48,11 @@ ALTER TABLE t_no_connector DROP CONNECTOR;
 statement ok
 ALTER TABLE plain_students DROP CONNECTOR;
 
+query TT
+show create table plain_students;
+----
+public.plain_students CREATE TABLE plain_students ("ID" INT, "firstName" CHARACTER VARYING, "lastName" CHARACTER VARYING, age INT, height REAL, weight REAL, _rw_kafka_timestamp TIMESTAMP WITH TIME ZONE, _rw_kafka_partition CHARACTER VARYING, _rw_kafka_key BYTEA)
+
 system ok
 cat <<EOF | rpk topic produce 'test_alter_table_drop_connector' -f "%k^%v\n"
 {"ID": 6}^{"ID": 6, "firstName": "Leah", "lastName": "Davis", "age": 18, "height": 5.7, "weight": 140}
@@ -97,6 +102,11 @@ ABC	1
 
 statement ok
 alter table avro_drop_table_connector_test_table drop connector;
+
+query TT
+show create table avro_drop_table_connector_test_table;
+----
+public.avro_drop_table_connector_test_table CREATE TABLE avro_drop_table_connector_test_table (bar INT, foo CHARACTER VARYING)
 
 query ??
 select foo, bar from avro_drop_table_connector_test_table
