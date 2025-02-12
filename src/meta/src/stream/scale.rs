@@ -589,7 +589,6 @@ impl ScaleController {
                 let (related_job, job_definition) =
                     related_jobs.get(&job_id).expect("job not found");
 
-                #[expect(deprecated)]
                 let fragment = CustomFragmentInfo {
                     fragment_id: fragment_id as _,
                     fragment_type_mask: fragment_type_mask as _,
@@ -598,11 +597,9 @@ impl ScaleController {
                     upstream_fragment_ids: upstream_fragment_id.into_u32_array(),
                     node: stream_node.to_protobuf(),
                     actor_template: PbStreamActor {
-                        nodes: None,
                         actor_id,
                         fragment_id: fragment_id as _,
                         dispatcher,
-                        upstream_actor_id: vec![],
                         vnode_bitmap: vnode_bitmap.map(|b| b.to_protobuf()),
                         mview_definition: job_definition.to_owned(),
                         expr_context: expr_contexts

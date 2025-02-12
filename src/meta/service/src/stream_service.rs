@@ -226,6 +226,7 @@ impl StreamManagerService for StreamServiceImpl {
                                 .into_iter()
                                 .map(|actor| ActorInfo {
                                     id: actor.actor_id,
+                                    node: fragment.nodes.clone(),
                                     dispatcher: actor.dispatcher,
                                 })
                                 .collect_vec(),

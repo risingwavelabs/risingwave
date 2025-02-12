@@ -483,13 +483,10 @@ impl CatalogController {
                 pb_actor_splits.insert(actor_id as _, splits.to_protobuf());
             }
 
-            #[expect(deprecated)]
             pb_actors.push(PbStreamActor {
                 actor_id: actor_id as _,
                 fragment_id: fragment_id as _,
-                nodes: None,
                 dispatcher: pb_dispatcher,
-                upstream_actor_id: vec![],
                 vnode_bitmap: pb_vnode_bitmap,
                 mview_definition: "".to_owned(),
                 expr_context: pb_expr_context,
@@ -1799,24 +1796,19 @@ mod tests {
         let stream_node = generate_merger_stream_node(upstream_actor_ids.values().next().unwrap());
 
         let pb_actors = (0..actor_count)
-            .map(|actor_id| {
-                #[expect(deprecated)]
-                PbStreamActor {
-                    actor_id: actor_id as _,
-                    fragment_id: TEST_FRAGMENT_ID as _,
-                    nodes: None,
-                    dispatcher: generate_dispatchers_for_actor(actor_id),
-                    vnode_bitmap: actor_bitmaps
-                        .get(&actor_id)
-                        .cloned()
-                        .map(|bitmap| bitmap.to_protobuf()),
-                    mview_definition: "".to_owned(),
-                    expr_context: Some(PbExprContext {
-                        time_zone: String::from("America/New_York"),
-                        strict_mode: false,
-                    }),
-                    ..Default::default()
-                }
+            .map(|actor_id| PbStreamActor {
+                actor_id: actor_id as _,
+                fragment_id: TEST_FRAGMENT_ID as _,
+                dispatcher: generate_dispatchers_for_actor(actor_id),
+                vnode_bitmap: actor_bitmaps
+                    .get(&actor_id)
+                    .cloned()
+                    .map(|bitmap| bitmap.to_protobuf()),
+                mview_definition: "".to_owned(),
+                expr_context: Some(PbExprContext {
+                    time_zone: String::from("America/New_York"),
+                    strict_mode: false,
+                }),
             })
             .collect_vec();
 

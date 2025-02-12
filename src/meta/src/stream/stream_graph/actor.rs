@@ -308,19 +308,14 @@ impl ActorBuilder {
         #[cfg(debug_assertions)]
         let mview_definition = job.definition();
 
-        Ok(
-            #[expect(deprecated)]
-            StreamActor {
-                actor_id: self.actor_id.as_global_id(),
-                fragment_id: self.fragment_id.as_global_id(),
-                nodes: None,
-                dispatcher: self.downstreams.into_values().collect(),
-                upstream_actor_id: vec![],
-                vnode_bitmap: self.vnode_bitmap.map(|b| b.to_protobuf()),
-                mview_definition,
-                expr_context: Some(expr_context),
-            },
-        )
+        Ok(StreamActor {
+            actor_id: self.actor_id.as_global_id(),
+            fragment_id: self.fragment_id.as_global_id(),
+            dispatcher: self.downstreams.into_values().collect(),
+            vnode_bitmap: self.vnode_bitmap.map(|b| b.to_protobuf()),
+            mview_definition,
+            expr_context: Some(expr_context),
+        })
     }
 }
 

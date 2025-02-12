@@ -220,6 +220,7 @@ message ListTableFragmentsRequest {
 message ListTableFragmentsResponse {
   message ActorInfo {
     uint32 id = 1;
+    stream_plan.StreamNode node = 2;
     repeated stream_plan.Dispatcher dispatcher = 3;
   }
   message FragmentInfo {
