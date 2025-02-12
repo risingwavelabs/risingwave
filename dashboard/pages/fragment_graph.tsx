@@ -174,7 +174,7 @@ function buildFragmentDependencyAsEdges(
     const externalParentIds = new Set<number>()
 
     for (const upstreamFragmentId of fragment.upstreamFragmentIds) {
-      if (fragments.fragments.has(upstreamFragmentId)) {
+      if (fragments.fragments[upstreamFragmentId]) {
         parentIds.add(upstreamFragmentId)
       } else {
         externalParentIds.add(upstreamFragmentId)
