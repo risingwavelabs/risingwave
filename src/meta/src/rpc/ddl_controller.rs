@@ -1645,7 +1645,8 @@ impl DdlController {
             })
             .collect();
 
-        let snapshot_backfill_info = fragment_graph.collect_snapshot_backfill_info()?;
+        let (snapshot_backfill_info, cross_db_snapshot_backfill_info) =
+            fragment_graph.collect_snapshot_backfill_info()?;
         if snapshot_backfill_info.is_some() {
             if stream_job.create_type() == CreateType::Background {
                 return Err(anyhow!("snapshot_backfill must be used as Foreground mode").into());
@@ -1795,6 +1796,7 @@ impl DdlController {
             replace_table_job_info,
             option: CreateStreamingJobOption {},
             snapshot_backfill_info,
+            cross_db_snapshot_backfill_info,
         };
 
         Ok((ctx, stream_job_fragments))
