@@ -23,6 +23,7 @@ use std::{io, str};
 
 use bytes::{Bytes, BytesMut};
 use futures::stream::StreamExt;
+use futures::FutureExt;
 use itertools::Itertools;
 use openssl::ssl::{SslAcceptor, SslContext, SslContextRef, SslMethod};
 use risingwave_common::types::DataType;
@@ -182,7 +183,7 @@ fn redact_sql(sql: &str, keywords: RedactSqlOptionKeywordsRef) -> String {
 
 impl<S, SM> PgProtocol<S, SM>
 where
-    S: AsyncWrite + AsyncRead + Unpin,
+    S: PgByteStream,
     SM: SessionManager,
 {
     pub fn new(
@@ -210,6 +211,54 @@ where
             ignore_util_sync: false,
             peer_addr,
             redact_sql_option_keywords,
+        }
+    }
+
+    /// Run the protocol to serve the connection.
+    pub async fn run(&mut self) {
+        let mut notice_fut = None;
+
+        loop {
+            // Once a session is present, create a future to subscribe and send notices asynchronously.
+            if notice_fut.is_none()
+                && let Some(session) = self.session.clone()
+            {
+                let mut stream = self.stream.clone();
+                notice_fut = Some(Box::pin(async move {
+                    loop {
+                        let notice = session.next_notice().await;
+                        if let Err(e) = stream.write(&BeMessage::NoticeResponse(&notice)).await {
+                            tracing::error!(error = %e.as_report(), notice, "failed to send notice");
+                        }
+                    }
+                }));
+            }
+
+            // Read and process messages.
+            let process = std::pin::pin!(async {
+                let msg = match self.read_message().await {
+                    Ok(msg) => msg,
+                    Err(e) => {
+                        tracing::error!(error = %e.as_report(), "error when reading message");
+                        return true; // terminate the connection
+                    }
+                };
+                tracing::trace!(?msg, "received message");
+                self.process(msg).await
+            });
+
+            let terminated = if let Some(notice_fut) = notice_fut.as_mut() {
+                tokio::select! {
+                    _ = notice_fut => unreachable!(),
+                    terminated = process => terminated,
+                }
+            } else {
+                process.await
+            };
+
+            if terminated {
+                break;
+            }
         }
     }
 
@@ -615,10 +664,13 @@ where
             .clone()
             .run_one_query(stmt.clone(), Format::Text)
             .await;
-        for notice in session.take_notices() {
+
+        // Take all remaining notices (if any) and send them before `CommandComplete`.
+        while let Some(notice) = session.next_notice().now_or_never() {
             self.stream
                 .write_no_flush(&BeMessage::NoticeResponse(&notice))?;
         }
+
         let mut res = res.map_err(PsqlError::SimpleQueryError)?;
 
         for notice in res.notices() {
@@ -994,6 +1046,10 @@ enum PgStreamInner<S> {
     Ssl(SslStream<S>),
 }
 
+/// Trait for a byte stream that can be used for pg protocol.
+pub trait PgByteStream: AsyncWrite + AsyncRead + Unpin + Send + 'static {}
+impl<S> PgByteStream for S where S: AsyncWrite + AsyncRead + Unpin + Send + 'static {}
+
 /// Wraps a byte stream and read/write pg messages.
 ///
 /// Cloning a `PgStream` will share the same stream but a fresh & independent write buffer,
@@ -1049,7 +1105,7 @@ pub struct ParameterStatus {
 
 impl<S> PgStream<S>
 where
-    S: AsyncWrite + AsyncRead + Unpin,
+    S: PgByteStream,
 {
     async fn read_startup(&mut self) -> io::Result<FeMessage> {
         let mut stream = self.stream.lock().await;
@@ -1117,7 +1173,7 @@ where
 
 impl<S> PgStream<S>
 where
-    S: AsyncWrite + AsyncRead + Unpin,
+    S: PgByteStream,
 {
     /// Convert the underlying stream to ssl stream based on the given context.
     async fn upgrade_to_ssl(&mut self, ssl_ctx: &SslContextRef) -> PsqlResult<()> {
