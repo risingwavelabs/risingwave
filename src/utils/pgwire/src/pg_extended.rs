@@ -17,11 +17,10 @@ use std::vec::IntoIter;
 use futures::stream::FusedStream;
 use futures::{StreamExt, TryStreamExt};
 use postgres_types::FromSql;
-use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::error::{PsqlError, PsqlResult};
 use crate::pg_message::{BeCommandCompleteMessage, BeMessage};
-use crate::pg_protocol::PgStream;
+use crate::pg_protocol::{PgByteStream, PgStream};
 use crate::pg_response::{PgResponse, ValuesStream};
 use crate::types::{Format, Row};
 
@@ -45,7 +44,7 @@ where
     }
 
     /// Return indicate whether the result is consumed completely.
-    pub async fn consume<S: AsyncWrite + AsyncRead + Unpin>(
+    pub async fn consume<S: PgByteStream>(
         &mut self,
         row_limit: usize,
         msg_stream: &mut PgStream<S>,
