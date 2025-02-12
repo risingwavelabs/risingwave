@@ -339,7 +339,7 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn replace_table_drop_table_associated_source(
+    async fn replace_table_drop_table_connector(
         &self,
         table: PbTable,
         _graph: StreamFragmentGraph,

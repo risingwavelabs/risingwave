@@ -388,7 +388,7 @@ message ReplaceJobPlan {
     catalog.Source source = 1;
   }
 
-  message DropTableAssociatedSource {
+  message DropTableConnector {
     // The id of the table's associated source.
     uint32 associated_source_id = 1;
 
@@ -399,7 +399,7 @@ message ReplaceJobPlan {
   oneof replace_job {
     ReplaceTable replace_table = 3;
     ReplaceSource replace_source = 4;
-    DropTableAssociatedSource drop_table_associated_source = 5;
+    DropTableConnector drop_table_connector = 5;
   }
 }
 

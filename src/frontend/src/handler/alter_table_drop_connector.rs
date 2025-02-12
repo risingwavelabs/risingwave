@@ -170,7 +170,7 @@ pub async fn handle_alter_table_drop_connector(
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .replace_table_drop_table_associated_source(table, graph, col_index_mapping, source_def.id)
+        .replace_table_drop_table_connector(table, graph, col_index_mapping, source_def.id)
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::ALTER_TABLE))

@@ -26,7 +26,7 @@ use risingwave_pb::catalog::{
     PbSubscription, PbTable, PbView,
 };
 use risingwave_pb::ddl_service::replace_job_plan::{
-    DropTableAssociatedSource, ReplaceJob, ReplaceSource, ReplaceTable,
+    DropTableConnector, ReplaceJob, ReplaceSource, ReplaceTable,
 };
 use risingwave_pb::ddl_service::{
     alter_name_request, alter_owner_request, alter_set_schema_request, alter_swap_rename_request,
@@ -108,7 +108,7 @@ pub trait CatalogWriter: Send + Sync {
         job_type: TableJobType,
     ) -> Result<()>;
 
-    async fn replace_table_drop_table_associated_source(
+    async fn replace_table_drop_table_connector(
         &self,
         table: PbTable,
         graph: StreamFragmentGraph,
@@ -362,7 +362,7 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
-    async fn replace_table_drop_table_associated_source(
+    async fn replace_table_drop_table_connector(
         &self,
         table: PbTable,
         graph: StreamFragmentGraph,
@@ -370,7 +370,7 @@ impl CatalogWriter for CatalogWriterImpl {
         drop_table_associated_source_id: u32,
     ) -> Result<()> {
         tracing::info!(
-            "replace table drop table associated source: {:?}, table id {}",
+            "replace table drop table connector: {:?}, table id {}",
             drop_table_associated_source_id,
             table.id
         );
@@ -379,7 +379,7 @@ impl CatalogWriter for CatalogWriterImpl {
             .replace_job(
                 graph,
                 mapping,
-                ReplaceJob::DropTableAssociatedSource(DropTableAssociatedSource {
+                ReplaceJob::DropTableConnector(DropTableConnector {
                     associated_source_id: drop_table_associated_source_id,
                     table: Some(table),
                 }),

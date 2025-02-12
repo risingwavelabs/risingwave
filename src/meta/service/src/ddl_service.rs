@@ -18,7 +18,7 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use rand::seq::SliceRandom;
 use rand::thread_rng;
-use replace_job_plan::{DropTableAssociatedSource, ReplaceSource, ReplaceTable};
+use replace_job_plan::{DropTableConnector, ReplaceSource, ReplaceTable};
 use risingwave_common::catalog::ColumnCatalog;
 use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
@@ -112,14 +112,12 @@ impl DdlServiceImpl {
             replace_job_plan::ReplaceJob::ReplaceSource(ReplaceSource { source }) => {
                 StreamingJob::Source(source.unwrap())
             }
-            replace_job_plan::ReplaceJob::DropTableAssociatedSource(
-                DropTableAssociatedSource {
-                    associated_source_id,
-                    table,
-                },
-            ) => {
+            replace_job_plan::ReplaceJob::DropTableConnector(DropTableConnector {
+                associated_source_id,
+                table,
+            }) => {
                 tracing::info!(
-                    "replace table drop table associated source: {:?}, table id {}",
+                    "replace table drop table connector: source_id {:?}, table_id {}",
                     associated_source_id,
                     table.as_ref().unwrap().id
                 );
