@@ -320,7 +320,7 @@ impl CreateMviewProgressTracker {
             let progress = Self::recover_progress(
                 states,
                 backfill_upstream_types,
-                table_fragments.dependent_table_ids(),
+                table_fragments.upstream_table_counts(),
                 definition,
                 version_stats,
             );
@@ -526,7 +526,7 @@ impl CreateMviewProgressTracker {
         } = &info;
 
         let creating_mv_id = table_fragments.stream_job_id();
-        let upstream_mv_count = table_fragments.dependent_table_ids();
+        let upstream_mv_count = table_fragments.upstream_table_counts();
         let upstream_total_key_count: u64 =
             calculate_total_key_count(&upstream_mv_count, version_stats);
 

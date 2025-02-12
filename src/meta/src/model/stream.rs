@@ -511,9 +511,8 @@ impl StreamJobFragments {
         }
     }
 
-    /// Returns a mapping of dependent table ids of the `TableFragments`
-    /// to their corresponding count.
-    pub fn dependent_table_ids(&self) -> HashMap<TableId, usize> {
+    /// Returns upstream table counts.
+    pub fn upstream_table_counts(&self) -> HashMap<TableId, usize> {
         let mut table_ids = HashMap::new();
         self.fragments.values().for_each(|fragment| {
             let actor = &fragment.actors[0];
