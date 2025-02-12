@@ -946,6 +946,17 @@ impl HummockManager {
         {
             // Avoid merge when the group is in emergency state
             let versioning_guard = self.versioning.read().await;
+            if !versioning_guard
+                .current_version
+                .levels
+                .contains_key(&group.group_id)
+            {
+                return Err(Error::CompactionGroup(format!(
+                    "Not Merge group {} not exist",
+                    group.group_id
+                )));
+            }
+
             if let EmergencyState::Emergency = check_emergency_state(
                 versioning_guard
                     .current_version
@@ -955,6 +966,17 @@ impl HummockManager {
                 return Err(Error::CompactionGroup(format!(
                     "Not Merge write limit group {} next group {}",
                     group.group_id, next_group.group_id
+                )));
+            }
+
+            if !versioning_guard
+                .current_version
+                .levels
+                .contains_key(&next_group.group_id)
+            {
+                return Err(Error::CompactionGroup(format!(
+                    "Not Merge group {} not exist",
+                    next_group.group_id
                 )));
             }
 
