@@ -557,10 +557,6 @@ impl Catalog {
         Ok(self.get_database_by_name(db_name)?.get_all_schema_names())
     }
 
-    pub fn get_all_schema_info(&self, db_name: &str) -> CatalogResult<Vec<PbSchema>> {
-        Ok(self.get_database_by_name(db_name)?.get_all_schema_info())
-    }
-
     pub fn iter_schemas(
         &self,
         db_name: &str,
@@ -599,17 +595,6 @@ impl Catalog {
         self.get_database_by_id(db_id)?
             .get_schema_by_id(schema_id)
             .ok_or_else(|| CatalogError::NotFound("schema_id", schema_id.to_string()))
-    }
-
-    pub fn get_source_by_id(
-        &self,
-        db_id: &DatabaseId,
-        schema_id: &SchemaId,
-        source_id: &SourceId,
-    ) -> CatalogResult<&Arc<SourceCatalog>> {
-        self.get_schema_by_id(db_id, schema_id)?
-            .get_source_by_id(source_id)
-            .ok_or_else(|| CatalogError::NotFound("source_id", source_id.to_string()))
     }
 
     /// Refer to [`SearchPath`].
@@ -688,17 +673,6 @@ impl Catalog {
             }
         }
         Err(CatalogError::NotFound("table id", table_id.to_string()))
-    }
-
-    pub fn get_schema_by_table_id(
-        &self,
-        db_name: &str,
-        table_id: &TableId,
-    ) -> CatalogResult<&SchemaCatalog> {
-        self.database_by_name
-            .get(db_name)
-            .and_then(|db| db.find_schema_containing_table_id(table_id))
-            .ok_or_else(|| CatalogError::NotFound("schema with table", table_id.to_string()))
     }
 
     // Used by test_utils only.
