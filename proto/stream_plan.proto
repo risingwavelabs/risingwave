@@ -585,6 +585,9 @@ enum StreamScanType {
 
   // SnapshotBackfillExecutor
   STREAM_SCAN_TYPE_SNAPSHOT_BACKFILL = 6;
+
+  // SnapshotBackfillExecutor
+  STREAM_SCAN_TYPE_CROSS_DB_SNAPSHOT_BACKFILL = 7;
 }
 
 // StreamScanNode reads data from upstream table first, and then pass all events to downstream.
@@ -999,6 +1002,7 @@ enum FragmentTypeFlag {
   FRAGMENT_TYPE_FLAG_SNAPSHOT_BACKFILL_STREAM_SCAN = 2048;
   // Note: this flag is not available in old fragments, so only suitable for debugging purpose.
   FRAGMENT_TYPE_FLAG_FS_FETCH = 4096;
+  FRAGMENT_TYPE_FLAG_CROSS_DB_SNAPSHOT_BACKFILL_STREAM_SCAN = 8192;
 }
 
 // The streaming context associated with a stream plan
