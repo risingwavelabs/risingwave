@@ -1893,15 +1893,16 @@ pub async fn generate_stream_graph_for_replace_table(
         risingwave_sqlparser::ast::Engine::Iceberg => Engine::Iceberg,
     };
 
-    let is_drop_connector = {
-        original_catalog.associated_source_id().is_some()
-            && format_encode.is_none()
+    let is_drop_connector =
+        original_catalog.associated_source_id().is_some() && format_encode.is_none();
+    debug_assert!(
+        is_drop_connector
             && source_watermarks.is_empty()
             && include_column_options.is_empty()
             && with_options
                 .iter()
                 .all(|opt| opt.name.real_value().to_lowercase() != "connector")
-    };
+    );
 
     let props = CreateTableProps {
         definition: handler_args.normalized_sql.clone(),

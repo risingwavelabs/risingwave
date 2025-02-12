@@ -620,7 +620,7 @@ impl Catalog {
         ))
     }
 
-    pub fn get_any_source_by_id<'a>(
+    pub fn get_source_by_id<'a>(
         &self,
         db_name: &'a str,
         schema_path: SchemaPath<'a>,

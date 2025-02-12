@@ -61,7 +61,7 @@ fn fetch_schema_info(
         .into());
     };
     let (source_def, _) =
-        reader.get_any_source_by_id(db_name.as_str(), schema_path, &source_id.table_id())?;
+        reader.get_source_by_id(db_name.as_str(), schema_path, &source_id.table_id())?;
     Ok((table_def.clone(), source_def.clone()))
 }
 
@@ -79,7 +79,7 @@ fn rewrite_table_definition(
         name,
         wildcard_idx,
         constraints,
-        with_options,
+        mut with_options,
         append_only,
         on_conflict,
         with_version_column,
@@ -131,11 +131,12 @@ fn rewrite_table_definition(
         columns: columns.clone(),
         wildcard_idx,
         constraints: constraints.clone(),
-        with_options: with_options
-            .clone()
-            .into_iter()
-            .filter(|item| TABLE_PROPS.contains(item.name.real_value().to_lowercase().as_str()))
-            .collect::<Vec<_>>(),
+        with_options: {
+            with_options.retain(|item| {
+                TABLE_PROPS.contains(item.name.real_value().to_lowercase().as_str())
+            });
+            with_options
+        },
         format_encode: None,
         source_watermarks: vec![], // no source, no watermark
         append_only,
