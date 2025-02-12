@@ -1289,7 +1289,7 @@ pub mod truncated_fmt {
         fn test_trunc_utf8() {
             assert_eq!(
                 format!("{}", TruncatedFmt(&"select '🌊';", 10)),
-                "select '...(truncated)",
+                "select '...(truncated,14)",
             );
         }
     }
