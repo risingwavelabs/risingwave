@@ -196,7 +196,7 @@ fn ensure_column_options_supported(c: &ColumnDef) -> Result<()> {
 /// This primary key is not combined with table constraints yet.
 pub fn bind_sql_columns(
     column_defs: &[ColumnDef],
-    is_for_replace_plan: bool,
+    is_for_drop_table_connector: bool,
 ) -> Result<Vec<ColumnCatalog>> {
     let mut columns = Vec::with_capacity(column_defs.len());
 
@@ -238,7 +238,7 @@ pub fn bind_sql_columns(
             }
         }
 
-        if !is_for_replace_plan {
+        if !is_for_drop_table_connector {
             // additional column name may have prefix _rw
             // When converting dropping the connector from table, the additional columns are converted to normal columns and keep the original name.
             // Under this case, we loosen the check for _rw prefix.

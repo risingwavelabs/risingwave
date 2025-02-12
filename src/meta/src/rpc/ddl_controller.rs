@@ -702,7 +702,7 @@ impl DdlController {
                 fragment_graph,
                 None,
                 tmp_id as _,
-                // guarantee that not drop the source because the code path is for creating streaming job
+                // no source is dropped because the code path is for creating streaming job
                 None,
             )
             .await?;
@@ -1303,7 +1303,7 @@ impl DdlController {
                                 dropping_sink_id: Some(sink_id),
                                 updated_sink_catalogs: vec![],
                             },
-                            None, // release_ctx is None because we already drop the objects and not require atomic drop things when replacing table.
+                            None, // no source is dropped when dropping sink into table
                         )
                         .await?;
                     Ok(version)
@@ -1510,7 +1510,6 @@ impl DdlController {
                     )
                     .await?;
                 if let Some(drop_table_connector_ctx) = &drop_table_connector_ctx {
-                    // drop table associated source, we have already drop the objects in catalog above and need to run command to clean up the hummock entry.
                     self.source_manager
                         .apply_source_change(SourceChange::DropSource {
                             dropped_source_ids: vec![drop_table_connector_ctx.to_remove_source_id],
