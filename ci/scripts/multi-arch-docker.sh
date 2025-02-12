@@ -8,6 +8,7 @@ set -euo pipefail
 #
 # Also add addtional tags to the images:
 # nightly-yyyyMMdd: nightly build in main-cron
+# vX.Y.Z-alpha.yyyyMMdd: nightly build in main-cron, semver tag for compatibility
 # latest: the latest stable build
 # nightly: the latest nightly build
 
