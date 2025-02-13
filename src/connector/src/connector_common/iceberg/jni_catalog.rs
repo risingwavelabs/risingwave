@@ -369,7 +369,7 @@ impl Drop for JniCatalog {
     fn drop(&mut self) {
         let _ = execute_with_jni_env(self.jvm, |env| {
             call_method!(env, self.java_catalog.as_obj(), {void close()})
-                .with_context(|| format!("Failed to close iceberg catalog"))?;
+                .with_context(|| "Failed to close iceberg catalog".to_string())?;
             Ok(())
         })
         .inspect_err(|e| {
