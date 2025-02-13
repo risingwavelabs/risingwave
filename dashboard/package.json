@@ -49,15 +49,17 @@
     "reflect-metadata": "^0.2.2",
     "styled-components": "5.3.0",
     "ts-proto": "^1.169.1",
-    "uuid":"^11.0.5"
+    "uuid": "^11.0.5"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^5.16.2",
     "@testing-library/react": "^13.3.0",
     "@types/loadable__component": "^5.13.4",
     "@types/node": "20.11.0",
+    "@types/react": "^19.0.8",
     "@types/styled-components": "^5.1.26",
-    "@typescript-eslint/eslint-plugin": "^5.52.0",
+    "@typescript-eslint/eslint-plugin": "^8.24.0",
+    "@typescript-eslint/parser": "^8.24.0",
     "cors": "^2.8.5",
     "eslint": "^8.45.0",
     "eslint-config-next": "^14.1.0",
