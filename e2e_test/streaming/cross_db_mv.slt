@@ -30,6 +30,9 @@ statement ok
 create subscription sub from t1 with(retention = '1D');
 
 statement ok
+create subscription sub2 from t1 with(retention = '1D');
+
+statement ok
 set database to d2;
 
 query ok
@@ -65,6 +68,13 @@ set database to d1;
 # need to drop cross-db mv first
 statement error
 drop table t1 cascade;
+
+statement ok
+drop subscription sub2;
+
+# requires at least one active subscription to maintain log store.
+statement error
+drop subscription sub;
 
 statement ok
 set database to d2;

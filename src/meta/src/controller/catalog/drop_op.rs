@@ -34,13 +34,17 @@ impl CatalogController {
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found(object_type.as_str(), object_id))?;
         assert_eq!(obj.obj_type, object_type);
-        // TODO: refactor ReleaseContext when the cross-database query is supported.
         let database_id = if object_type == ObjectType::Database {
             object_id
         } else {
             obj.database_id
                 .ok_or_else(|| anyhow!("dropped object should have database_id"))?
         };
+
+        // Check the cross-db dependency info to see if the subscription can be dropped.
+        if obj.obj_type == ObjectType::Subscription {
+            validate_subscription_deletion(&txn, object_id).await?;
+        }
 
         let mut removed_objects = match drop_mode {
             DropMode::Cascade => get_referring_objects_cascade(object_id, &txn).await?,

@@ -204,8 +204,7 @@ impl BuildingFragment {
 
     /// Extract the required columns (in IDs) of each upstream table except for cross-db backfill.
     fn extract_upstream_table_columns_except_cross_db_backfill(
-        // TODO: no need to take `&mut` here
-        fragment: &mut StreamFragment,
+        fragment: &StreamFragment,
     ) -> HashMap<TableId, Vec<i32>> {
         let mut table_columns = HashMap::new();
 
