@@ -470,6 +470,12 @@ impl PlanRoot {
             ApplyOrder::BottomUp,
         ))?;
 
+        let plan = plan.optimize_by_rules(&OptimizationStage::new(
+            "Iceberg Count Star",
+            vec![BatchIcebergCountStar::create()],
+            ApplyOrder::TopDown,
+        ))?;
+
         assert_eq!(plan.convention(), Convention::Batch);
         Ok(plan)
     }
