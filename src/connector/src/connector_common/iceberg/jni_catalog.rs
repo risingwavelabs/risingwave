@@ -373,9 +373,9 @@ impl Drop for JniCatalog {
                 .with_context(|| "Failed to close iceberg catalog".to_owned())?;
             Ok(())
         })
-        .inspect_err(|e| {
-            tracing::error!(error = ?e.as_report(), "Failed to close iceberg catalog")
-        });
+        .inspect_err(
+            |e| tracing::error!(error = ?e.as_report(), "Failed to close iceberg catalog"),
+        );
     }
 }
 
