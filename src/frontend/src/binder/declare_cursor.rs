@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_sqlparser::ast::ObjectName;
+use risingwave_sqlparser::ast::Ident;
 
 use super::statement::RewriteExprsRecursive;
 use crate::binder::BoundQuery;
@@ -20,7 +20,7 @@ use crate::expr::ExprRewriter;
 
 #[derive(Debug, Clone)]
 pub struct BoundDeclareCursor {
-    pub cursor_name: ObjectName,
+    pub cursor_name: Ident,
     // Currently we only support cursor with query
     pub query: Box<BoundQuery>, // reuse the BoundQuery struct
 }

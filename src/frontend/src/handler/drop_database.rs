@@ -30,9 +30,10 @@ pub async fn handle_drop_database(
     let catalog_reader = session.env().catalog_reader();
     let database_name = Binder::resolve_database_name(database_name)?;
     if session.database() == database_name {
-        return Err(
-            ErrorCode::InternalError("cannot drop the currently open database".to_owned()).into(),
-        );
+        return Err(ErrorCode::PermissionDenied(
+            "cannot drop the currently open database".to_owned(),
+        )
+        .into());
     }
     if mode.is_some() {
         return Err(ErrorCode::BindError("Drop database not support drop mode".to_owned()).into());

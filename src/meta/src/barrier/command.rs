@@ -37,7 +37,7 @@ use risingwave_pb::stream_plan::update_mutation::*;
 use risingwave_pb::stream_plan::{
     AddMutation, BarrierMutation, CombinedMutation, Dispatcher, Dispatchers,
     DropSubscriptionsMutation, PauseMutation, ResumeMutation, SourceChangeSplitMutation,
-    StopMutation, StreamActor, SubscriptionUpstreamInfo, ThrottleMutation, UpdateMutation,
+    StopMutation, SubscriptionUpstreamInfo, ThrottleMutation, UpdateMutation,
 };
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::warn;
@@ -49,8 +49,12 @@ use crate::barrier::InflightSubscriptionInfo;
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::hummock::{CommitEpochInfo, NewTableFragmentInfo};
 use crate::manager::{StreamingJob, StreamingJobType};
-use crate::model::{ActorId, DispatcherId, FragmentId, StreamJobFragments, TableParallelism};
-use crate::stream::{build_actor_connector_splits, SplitAssignment, ThrottleConfig};
+use crate::model::{
+    ActorId, DispatcherId, FragmentId, StreamActorWithUpstreams, StreamJobFragments,
+};
+use crate::stream::{
+    build_actor_connector_splits, JobReschedulePostUpdates, SplitAssignment, ThrottleConfig,
+};
 
 /// [`Reschedule`] is for the [`Command::RescheduleFragment`], which is used for rescheduling actors
 /// in some fragment, like scaling or migrating.
@@ -81,7 +85,7 @@ pub struct Reschedule {
     /// `Source` and `SourceBackfill` are handled together here.
     pub actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
 
-    pub newly_created_actors: Vec<(StreamActor, PbActorStatus)>,
+    pub newly_created_actors: Vec<(StreamActorWithUpstreams, PbActorStatus)>,
 }
 
 /// Replacing an old job with a new one. All actors in the job will be rebuilt.
@@ -96,8 +100,8 @@ pub struct ReplaceStreamJobPlan {
     pub new_fragments: StreamJobFragments,
     /// Downstream jobs of the replaced job need to update their `Merge` node to
     /// connect to the new fragment.
-    pub merge_updates: Vec<MergeUpdate>,
-    pub dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
+    pub merge_updates: HashMap<FragmentId, Vec<MergeUpdate>>,
+    pub dispatchers: HashMap<FragmentId, HashMap<ActorId, Vec<Dispatcher>>>,
     /// For a table with connector, the `SourceExecutor` actor will also be rebuilt with new actor ids.
     /// We need to reassign splits for it.
     ///
@@ -153,7 +157,7 @@ impl ReplaceStreamJobPlan {
     /// `old_fragment_id` -> `new_fragment_id`
     pub fn fragment_replacements(&self) -> HashMap<FragmentId, FragmentId> {
         let mut fragment_replacements = HashMap::new();
-        for merge_update in &self.merge_updates {
+        for merge_update in self.merge_updates.values().flatten() {
             if let Some(new_upstream_fragment_id) = merge_update.new_upstream_fragment_id {
                 let r = fragment_replacements
                     .insert(merge_update.upstream_fragment_id, new_upstream_fragment_id);
@@ -170,7 +174,8 @@ impl ReplaceStreamJobPlan {
 
     pub fn dropped_actors(&self) -> HashSet<ActorId> {
         self.merge_updates
-            .iter()
+            .values()
+            .flatten()
             .flat_map(|merge_update| merge_update.removed_upstream_actor_id.clone())
             .collect()
     }
@@ -183,7 +188,7 @@ pub struct CreateStreamingJobCommandInfo {
     pub stream_job_fragments: StreamJobFragments,
     /// Refer to the doc on [`crate::manager::MetadataManager::get_upstream_root_fragments`] for the meaning of "root".
     pub upstream_root_actors: HashMap<TableId, Vec<ActorId>>,
-    pub dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
+    pub dispatchers: HashMap<FragmentId, HashMap<ActorId, Vec<Dispatcher>>>,
     pub init_split_assignment: SplitAssignment,
     pub definition: String,
     pub job_type: StreamingJobType,
@@ -288,6 +293,7 @@ pub enum Command {
     CreateStreamingJob {
         info: CreateStreamingJobCommandInfo,
         job_type: CreateStreamingJobType,
+        cross_db_snapshot_backfill_info: SnapshotBackfillInfo,
     },
     MergeSnapshotBackfillStreamingJobs(
         HashMap<TableId, (SnapshotBackfillInfo, InflightStreamingJobInfo)>,
@@ -300,9 +306,10 @@ pub enum Command {
     /// very similar to `Create` and `Drop` commands, for added and removed actors, respectively.
     RescheduleFragment {
         reschedules: HashMap<FragmentId, Reschedule>,
-        table_parallelism: HashMap<TableId, TableParallelism>,
-        // should contain the actor ids in upstream and downstream fragment of `reschedules`
+        // Should contain the actor ids in upstream and downstream fragment of `reschedules`
         fragment_actors: HashMap<FragmentId, HashSet<ActorId>>,
+        // Used for updating additional metadata after the barrier ends
+        post_updates: JobReschedulePostUpdates,
     },
 
     /// `ReplaceStreamJob` command generates a `Update` barrier with the given `merge_updates`. This is
@@ -373,7 +380,7 @@ impl Command {
                     .map(|fragment_id| (*fragment_id, CommandFragmentChanges::RemoveFragment))
                     .collect(),
             ),
-            Command::CreateStreamingJob { info, job_type } => {
+            Command::CreateStreamingJob { info, job_type, .. } => {
                 assert!(
                     !matches!(job_type, CreateStreamingJobType::SnapshotBackfill(_)),
                     "should handle fragment changes separately for snapshot backfill"
@@ -546,26 +553,27 @@ impl CommandContext {
         let (sst_to_context, synced_ssts, new_table_watermarks, old_value_ssts) =
             collect_resp_info(resps);
 
-        let new_table_fragment_infos = if let Some(Command::CreateStreamingJob { info, job_type }) =
-            &self.command
-            && !matches!(job_type, CreateStreamingJobType::SnapshotBackfill(_))
-        {
-            let table_fragments = &info.stream_job_fragments;
-            let mut table_ids: HashSet<_> = table_fragments
-                .internal_table_ids()
-                .into_iter()
-                .map(TableId::new)
-                .collect();
-            if let Some(mv_table_id) = table_fragments.mv_table_id() {
-                table_ids.insert(TableId::new(mv_table_id));
-            }
+        let new_table_fragment_infos =
+            if let Some(Command::CreateStreamingJob { info, job_type, .. }) = &self.command
+                && !matches!(job_type, CreateStreamingJobType::SnapshotBackfill(_))
+            {
+                let table_fragments = &info.stream_job_fragments;
+                let mut table_ids: HashSet<_> = table_fragments
+                    .internal_table_ids()
+                    .into_iter()
+                    .map(TableId::new)
+                    .collect();
+                if let Some(mv_table_id) = table_fragments.mv_table_id() {
+                    table_ids.insert(TableId::new(mv_table_id));
+                }
 
-            vec![NewTableFragmentInfo { table_ids }]
-        } else {
-            vec![]
-        };
+                vec![NewTableFragmentInfo { table_ids }]
+            } else {
+                vec![]
+            };
 
         let mut mv_log_store_truncate_epoch = HashMap::new();
+        // TODO: may collect cross db snapshot backfill
         let mut update_truncate_epoch =
             |table_id: TableId, truncate_epoch| match mv_log_store_truncate_epoch
                 .entry(table_id.table_id)
@@ -682,9 +690,11 @@ impl Command {
                             ..
                         },
                     job_type,
+                    ..
                 } => {
                     let actor_dispatchers = dispatchers
-                        .iter()
+                        .values()
+                        .flatten()
                         .map(|(&actor_id, dispatchers)| {
                             (
                                 actor_id,
@@ -949,9 +959,9 @@ impl Command {
         mutation
     }
 
-    pub fn actors_to_create(&self) -> Option<HashMap<WorkerId, Vec<StreamActor>>> {
+    pub fn actors_to_create(&self) -> Option<HashMap<WorkerId, Vec<StreamActorWithUpstreams>>> {
         match self {
-            Command::CreateStreamingJob { info, job_type } => {
+            Command::CreateStreamingJob { info, job_type, .. } => {
                 let mut map = match job_type {
                     CreateStreamingJobType::Normal => HashMap::new(),
                     CreateStreamingJobType::SinkIntoTable(replace_table) => {
@@ -987,14 +997,15 @@ impl Command {
 
     fn generate_update_mutation_for_replace_table(
         old_fragments: &StreamJobFragments,
-        merge_updates: &[MergeUpdate],
-        dispatchers: &HashMap<ActorId, Vec<Dispatcher>>,
+        merge_updates: &HashMap<FragmentId, Vec<MergeUpdate>>,
+        dispatchers: &HashMap<FragmentId, HashMap<ActorId, Vec<Dispatcher>>>,
         init_split_assignment: &SplitAssignment,
     ) -> Option<Mutation> {
         let dropped_actors = old_fragments.actor_ids();
 
         let actor_new_dispatchers = dispatchers
-            .iter()
+            .values()
+            .flatten()
             .map(|(&actor_id, dispatchers)| {
                 (
                     actor_id,
@@ -1012,7 +1023,7 @@ impl Command {
 
         Some(Mutation::Update(UpdateMutation {
             actor_new_dispatchers,
-            merge_update: merge_updates.to_owned(),
+            merge_update: merge_updates.values().flatten().cloned().collect(),
             dropped_actors,
             actor_splits,
             ..Default::default()

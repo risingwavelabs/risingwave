@@ -34,7 +34,7 @@ use risingwave_hummock_sdk::{
     SyncResult,
 };
 use risingwave_pb::common::{HostAddress, WorkerType};
-use risingwave_pb::hummock::compact_task::TaskStatus;
+use risingwave_pb::hummock::compact_task::{TaskStatus, TaskType};
 use risingwave_pb::hummock::subscribe_compaction_event_request::{Event, ReportTask};
 use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
 use risingwave_pb::hummock::{
@@ -42,7 +42,9 @@ use risingwave_pb::hummock::{
     SubscribeCompactionEventResponse,
 };
 use risingwave_rpc_client::error::{Result, RpcError};
-use risingwave_rpc_client::{CompactionEventItem, HummockMetaClient};
+use risingwave_rpc_client::{
+    CompactionEventItem, HummockMetaClient, HummockMetaClientChangeLogInfo,
+};
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio::task::JoinHandle;
@@ -51,6 +53,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use crate::hummock::compaction::selector::{
     default_compaction_selector, CompactionSelector, SpaceReclaimCompactionSelector,
 };
+use crate::hummock::error::Error;
 use crate::hummock::{CommitEpochInfo, HummockManager, NewTableFragmentInfo};
 
 pub struct MockHummockMetaClient {
@@ -134,11 +137,11 @@ impl HummockMetaClient for MockHummockMetaClient {
             })
     }
 
-    async fn commit_epoch(
+    async fn commit_epoch_with_change_log(
         &self,
         epoch: HummockEpoch,
         sync_result: SyncResult,
-        is_log_store: bool,
+        change_log_info: Option<HummockMetaClientChangeLogInfo>,
     ) -> Result<()> {
         let version: HummockVersion = self.hummock_manager.get_current_version().await;
         let table_ids = version
@@ -148,17 +151,13 @@ impl HummockMetaClient for MockHummockMetaClient {
             .map(|table_id| table_id.table_id)
             .collect::<BTreeSet<_>>();
 
-        let old_value_ssts_vec = if is_log_store {
-            sync_result.old_value_ssts.clone()
-        } else {
-            vec![]
-        };
         let commit_table_ids = sync_result
             .uncommitted_ssts
             .iter()
             .flat_map(|sstable| sstable.sst_info.table_ids.clone())
             .chain({
-                old_value_ssts_vec
+                sync_result
+                    .old_value_ssts
                     .iter()
                     .flat_map(|sstable| sstable.sst_info.table_ids.clone())
             })
@@ -192,22 +191,21 @@ impl HummockMetaClient for MockHummockMetaClient {
             .map(|LocalSstableInfo { sst_info, .. }| (sst_info.object_id, self.context_id))
             .collect();
         let new_table_watermark = sync_result.table_watermarks;
-        let table_change_log_table_ids = if is_log_store {
-            commit_table_ids.clone()
-        } else {
-            BTreeSet::new()
+        let table_change_log = match change_log_info {
+            Some(epochs) => {
+                assert_eq!(*epochs.last().expect("non-empty"), epoch);
+                build_table_change_log_delta(
+                    sync_result
+                        .old_value_ssts
+                        .into_iter()
+                        .map(|sst| sst.sst_info),
+                    sync_result.uncommitted_ssts.iter().map(|sst| &sst.sst_info),
+                    &epochs,
+                    commit_table_ids.iter().map(|&table_id| (table_id, 0)),
+                )
+            }
+            None => Default::default(),
         };
-        let table_change_log = build_table_change_log_delta(
-            sync_result
-                .old_value_ssts
-                .into_iter()
-                .map(|sst| sst.sst_info),
-            sync_result.uncommitted_ssts.iter().map(|sst| &sst.sst_info),
-            &vec![epoch],
-            table_change_log_table_ids
-                .into_iter()
-                .map(|table_id| (table_id, 0)),
-        );
 
         self.hummock_manager
             .commit_epoch(CommitEpochInfo {
@@ -292,6 +290,22 @@ impl HummockMetaClient for MockHummockMetaClient {
                 }
 
                 let (group, task_type) = group_and_type.unwrap();
+
+                if let TaskType::Ttl = task_type {
+                    match hummock_manager_compact
+                        .metadata_manager_ref()
+                        .get_all_table_options()
+                        .await
+                        .map_err(|err| Error::MetaStore(err.into()))
+                    {
+                        Ok(table_options) => {
+                            hummock_manager_compact.update_table_id_to_table_option(table_options);
+                        }
+                        Err(e) => {
+                            tracing::error!(error = %e.as_report(), "get_all_table_options fail");
+                        }
+                    }
+                }
 
                 let mut selector: Box<dyn CompactionSelector> = match task_type {
                     compact_task::TaskType::Dynamic => default_compaction_selector(),

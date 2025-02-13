@@ -26,7 +26,6 @@ use super::{barrier_to_message_stream, StreamSourceCore};
 use crate::executor::prelude::*;
 use crate::executor::stream_reader::StreamReaderWithPause;
 
-#[allow(dead_code)]
 pub struct FsListExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
 
@@ -34,15 +33,18 @@ pub struct FsListExecutor<S: StateStore> {
     stream_source_core: Option<StreamSourceCore<S>>,
 
     /// Metrics for monitor.
+    #[expect(dead_code)]
     metrics: Arc<StreamingMetrics>,
 
     /// Receiver of barrier channel.
     barrier_receiver: Option<UnboundedReceiver<Barrier>>,
 
     /// System parameter reader to read barrier interval
+    #[expect(dead_code)]
     system_params: SystemParamsReaderRef,
 
     /// Rate limit in rows/s.
+    #[expect(dead_code)]
     rate_limit_rps: Option<u32>,
 }
 
@@ -65,7 +67,6 @@ impl<S: StateStore> FsListExecutor<S> {
         }
     }
 
-    #[allow(clippy::disallowed_types)]
     fn build_chunked_paginate_stream(
         &self,
         source_desc: &SourceDesc,

@@ -16,6 +16,7 @@ use std::future::Future;
 use std::ops::Bound;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::pin::Pin;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::anyhow;
@@ -26,7 +27,6 @@ use futures::future::{try_join_all, BoxFuture};
 use futures::{FutureExt, TryFutureExt};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntCounter};
 use risingwave_common::util::epoch::EpochExt;
@@ -40,7 +40,7 @@ use risingwave_storage::hummock::CachePolicy;
 use risingwave_storage::store::{
     PrefetchOptions, ReadOptions, StateStoreKeyedRowRef, StateStoreRead,
 };
-use risingwave_storage::{StateStore, StateStoreIter};
+use risingwave_storage::StateStoreIter;
 use tokio::sync::watch;
 use tokio::time::sleep;
 use tokio_stream::StreamExt;
@@ -49,9 +49,12 @@ use crate::common::log_store_impl::kv_log_store::buffer::{
     LogStoreBufferItem, LogStoreBufferReceiver,
 };
 use crate::common::log_store_impl::kv_log_store::serde::{
-    merge_log_store_item_stream, KvLogStoreItem, LogStoreItemMergeStream, LogStoreRowSerde,
+    merge_log_store_item_stream, KvLogStoreItem, LogStoreItemMergeStream,
 };
-use crate::common::log_store_impl::kv_log_store::KvLogStoreMetrics;
+use crate::common::log_store_impl::kv_log_store::state::LogStoreReadState;
+use crate::common::log_store_impl::kv_log_store::{
+    KvLogStoreMetrics, KvLogStoreReadMetrics, SeqIdType,
+};
 
 pub(crate) const REWIND_BASE_DELAY: Duration = Duration::from_secs(1);
 pub(crate) const REWIND_BACKOFF_FACTOR: u64 = 2;
@@ -117,12 +120,8 @@ impl RewindDelay {
     }
 }
 
-pub struct KvLogStoreReader<S: StateStore> {
-    table_id: TableId,
-
-    state_store: S,
-
-    serde: LogStoreRowSerde,
+pub struct KvLogStoreReader<S: StateStoreRead> {
+    state: LogStoreReadState<S>,
 
     rx: LogStoreBufferReceiver,
 
@@ -153,11 +152,9 @@ pub struct KvLogStoreReader<S: StateStore> {
     rewind_delay: RewindDelay,
 }
 
-impl<S: StateStore> KvLogStoreReader<S> {
+impl<S: StateStoreRead> KvLogStoreReader<S> {
     pub(crate) fn new(
-        table_id: TableId,
-        state_store: S,
-        serde: LogStoreRowSerde,
+        state: LogStoreReadState<S>,
         rx: LogStoreBufferReceiver,
         metrics: KvLogStoreMetrics,
         is_paused: watch::Receiver<bool>,
@@ -165,9 +162,7 @@ impl<S: StateStore> KvLogStoreReader<S> {
     ) -> Self {
         let rewind_delay = RewindDelay::new(&metrics);
         Self {
-            table_id,
-            state_store,
-            serde,
+            state,
             rx,
             read_flushed_chunk_future: None,
             first_write_epoch: None,
@@ -197,8 +192,8 @@ impl<S: StateStore> KvLogStoreReader<S> {
     }
 }
 
-struct AutoRebuildStateStoreReadIter<S: StateStoreRead, F> {
-    state_store: S,
+pub struct AutoRebuildStateStoreReadIter<S: StateStoreRead, F> {
+    state_store: Arc<S>,
     iter: S::Iter,
     // call to get whether to rebuild the iter. Once return true, the closure should reset itself.
     should_rebuild: F,
@@ -209,7 +204,7 @@ struct AutoRebuildStateStoreReadIter<S: StateStoreRead, F> {
 
 impl<S: StateStoreRead, F: FnMut() -> bool> AutoRebuildStateStoreReadIter<S, F> {
     async fn new(
-        state_store: S,
+        state_store: Arc<S>,
         should_rebuild: F,
         range: TableKeyRange,
         epoch: HummockEpoch,
@@ -230,7 +225,8 @@ impl<S: StateStoreRead, F: FnMut() -> bool> AutoRebuildStateStoreReadIter<S, F> 
     }
 }
 
-mod timeout_auto_rebuild {
+pub(crate) mod timeout_auto_rebuild {
+    use std::sync::Arc;
     use std::time::{Duration, Instant};
 
     use risingwave_hummock_sdk::key::TableKeyRange;
@@ -240,11 +236,11 @@ mod timeout_auto_rebuild {
 
     use crate::common::log_store_impl::kv_log_store::reader::AutoRebuildStateStoreReadIter;
 
-    pub(super) type TimeoutAutoRebuildIter<S: StateStoreRead> =
+    pub(crate) type TimeoutAutoRebuildIter<S: StateStoreRead> =
         AutoRebuildStateStoreReadIter<S, impl FnMut() -> bool + Send>;
 
     pub(super) async fn iter_with_timeout_rebuild<S: StateStoreRead>(
-        state_store: S,
+        state_store: Arc<S>,
         range: TableKeyRange,
         epoch: HummockEpoch,
         options: ReadOptions,
@@ -338,68 +334,22 @@ impl<S: StateStoreRead, F: FnMut() -> bool + Send> StateStoreIter
     }
 }
 
-impl<S: StateStore> KvLogStoreReader<S> {
+impl<S: StateStoreRead> KvLogStoreReader<S> {
     fn read_persisted_log_store(
         &self,
         last_persisted_epoch: Option<u64>,
     ) -> impl Future<
         Output = LogStoreResult<Pin<Box<LogStoreItemMergeStream<TimeoutAutoRebuildIter<S>>>>>,
     > + Send {
-        let range_start = if let Some(last_persisted_epoch) = last_persisted_epoch {
-            // start from the next epoch of last_persisted_epoch
-            Included(
-                self.serde
-                    .serialize_pk_epoch_prefix(last_persisted_epoch.next_epoch()),
-            )
-        } else {
-            Unbounded
-        };
-        let range_end = self.serde.serialize_pk_epoch_prefix(
-            self.first_write_epoch
-                .expect("should have set first write epoch"),
-        );
-
-        let serde = self.serde.clone();
-        let table_id = self.table_id;
-        let read_metrics = self.metrics.persistent_log_read_metrics.clone();
-        let streams_future = try_join_all(serde.vnodes().iter_vnodes().map(|vnode| {
-            let key_range = prefixed_range_with_vnode(
-                (range_start.clone(), Excluded(range_end.clone())),
-                vnode,
-            );
-            let state_store = self.state_store.clone();
-            async move {
-                // rebuild the iter every 10 minutes to avoid pinning hummock version for too long
-                iter_with_timeout_rebuild(
-                    state_store,
-                    key_range,
-                    HummockEpoch::MAX,
-                    ReadOptions {
-                        // This stream lives too long, the connection of prefetch object may break. So use a short connection prefetch.
-                        prefetch_options: PrefetchOptions::prefetch_for_small_range_scan(),
-                        cache_policy: CachePolicy::Fill(CacheHint::Low),
-                        table_id,
-                        ..Default::default()
-                    },
-                    Duration::from_secs(10 * 60),
-                )
-                .await
-            }
-        }));
-
-        streams_future.map_err(Into::into).map_ok(|streams| {
-            // TODO: set chunk size by config
-            Box::pin(merge_log_store_item_stream(
-                streams,
-                serde,
-                1024,
-                read_metrics,
-            ))
-        })
+        self.state.read_persisted_log_store(
+            &self.metrics,
+            self.first_write_epoch.expect("should have init"),
+            last_persisted_epoch,
+        )
     }
 }
 
-impl<S: StateStore> LogReader for KvLogStoreReader<S> {
+impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
     async fn init(&mut self) -> LogStoreResult<()> {
         let first_write_epoch = self.rx.init().await;
 
@@ -506,55 +456,17 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
                 chunk_id,
             } => {
                 let read_flushed_chunk_future = {
-                    let serde = self.serde.clone();
-                    let state_store = self.state_store.clone();
-                    let table_id = self.table_id;
                     let read_metrics = self.metrics.flushed_buffer_read_metrics.clone();
-                    async move {
-                        let iters = try_join_all(vnode_bitmap.iter_vnodes().map(|vnode| {
-                            let range_start =
-                                serde.serialize_log_store_pk(vnode, item_epoch, Some(start_seq_id));
-                            let range_end =
-                                serde.serialize_log_store_pk(vnode, item_epoch, Some(end_seq_id));
-                            let state_store = &state_store;
-
-                            // Use MAX EPOCH here because the epoch to consume may be below the safe
-                            // epoch
-                            async move {
-                                Ok::<_, anyhow::Error>(
-                                    state_store
-                                        .iter(
-                                            (Included(range_start), Included(range_end)),
-                                            HummockEpoch::MAX,
-                                            ReadOptions {
-                                                prefetch_options:
-                                                    PrefetchOptions::prefetch_for_large_range_scan(),
-                                                cache_policy: CachePolicy::Fill(CacheHint::Low),
-                                                table_id,
-                                                ..Default::default()
-                                            },
-                                        )
-                                        .await?,
-                                )
-                            }
-                        }))
-                            .instrument_await("Wait Create Iter Stream")
-                        .await?;
-
-                        let chunk = serde
-                            .deserialize_stream_chunk(
-                                iters,
-                                start_seq_id,
-                                end_seq_id,
-                                item_epoch,
-                                &read_metrics,
-                            )
-                            .instrument_await("Deserialize Stream Chunk")
-                            .await?;
-
-                        Ok((chunk_id, chunk, item_epoch))
-                    }
-                    .boxed()
+                    self.state
+                        .read_flushed_chunk(
+                            vnode_bitmap,
+                            chunk_id,
+                            start_seq_id,
+                            end_seq_id,
+                            item_epoch,
+                            read_metrics,
+                        )
+                        .boxed()
                 };
 
                 // Store the future in case that in the subsequent pending await point,
@@ -602,7 +514,7 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
                 (item_epoch, LogStoreReadItem::Barrier { is_checkpoint })
             }
             LogStoreBufferItem::UpdateVnodes(bitmap) => {
-                self.serde.update_vnode_bitmap(bitmap.clone());
+                self.state.serde.update_vnode_bitmap(bitmap.clone());
                 (item_epoch, LogStoreReadItem::UpdateVnodeBitmap(bitmap))
             }
         })
@@ -668,60 +580,189 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
         }
         self.rx.rewind();
 
-        Ok((true, Some((**self.serde.vnodes()).clone())))
+        Ok((true, Some((**self.state.serde.vnodes()).clone())))
+    }
+}
+
+impl<S: StateStoreRead> LogStoreReadState<S> {
+    pub(crate) fn read_flushed_chunk(
+        &self,
+        vnode_bitmap: Bitmap,
+        chunk_id: ChunkId,
+        start_seq_id: SeqIdType,
+        end_seq_id: SeqIdType,
+        item_epoch: u64,
+        read_metrics: KvLogStoreReadMetrics,
+    ) -> impl Future<Output = LogStoreResult<(ChunkId, StreamChunk, u64)>> + 'static {
+        let state_store = self.state_store.clone();
+        let serde = self.serde.clone();
+        let table_id = self.table_id;
+        async move {
+            tracing::trace!("reading flushed chunk from buffer: start_seq_id: {start_seq_id}, end_seq_id: {end_seq_id}, chunk_id: {chunk_id}");
+            let iters = try_join_all(vnode_bitmap.iter_vnodes().map(|vnode| {
+                let range_start =
+                    serde.serialize_log_store_pk(vnode, item_epoch, Some(start_seq_id));
+                let range_end = serde.serialize_log_store_pk(vnode, item_epoch, Some(end_seq_id));
+                let state_store = &state_store;
+
+                // Use MAX EPOCH here because the epoch to consume may be below the safe
+                // epoch
+                async move {
+                    Ok::<_, anyhow::Error>(
+                        state_store
+                            .iter(
+                                (Included(range_start), Included(range_end)),
+                                HummockEpoch::MAX,
+                                ReadOptions {
+                                    prefetch_options:
+                                        PrefetchOptions::prefetch_for_large_range_scan(),
+                                    cache_policy: CachePolicy::Fill(CacheHint::Low),
+                                    table_id,
+                                    ..Default::default()
+                                },
+                            )
+                            .await?,
+                    )
+                }
+            }))
+            .instrument_await("Wait Create Iter Stream")
+            .await?;
+
+            let chunk = serde
+                .deserialize_stream_chunk(
+                    iters,
+                    start_seq_id,
+                    end_seq_id,
+                    item_epoch,
+                    &read_metrics,
+                )
+                .instrument_await("Deserialize Stream Chunk")
+                .await?;
+
+            Ok((chunk_id, chunk, item_epoch))
+        }
+    }
+
+    pub(crate) fn read_persisted_log_store(
+        &self,
+        metrics: &KvLogStoreMetrics,
+        first_write_epoch: u64,
+        last_persisted_epoch: Option<u64>,
+    ) -> impl Future<
+        Output = LogStoreResult<Pin<Box<LogStoreItemMergeStream<TimeoutAutoRebuildIter<S>>>>>,
+    > + Send
+           + 'static {
+        let serde = self.serde.clone();
+        let range_start = if let Some(last_persisted_epoch) = last_persisted_epoch {
+            // start from the next epoch of last_persisted_epoch
+            Included(serde.serialize_pk_epoch_prefix(last_persisted_epoch.next_epoch()))
+        } else {
+            Unbounded
+        };
+        let range_end = serde.serialize_pk_epoch_prefix(first_write_epoch);
+
+        let state_store = self.state_store.clone();
+        let read_metrics = metrics.persistent_log_read_metrics.clone();
+        let table_id = self.table_id;
+        let streams_future = try_join_all(self.serde.vnodes().iter_vnodes().map(move |vnode| {
+            let key_range = prefixed_range_with_vnode(
+                (range_start.clone(), Excluded(range_end.clone())),
+                vnode,
+            );
+            let state_store = state_store.clone();
+            async move {
+                // rebuild the iter every 10 minutes to avoid pinning hummock version for too long
+                iter_with_timeout_rebuild(
+                    state_store,
+                    key_range,
+                    HummockEpoch::MAX,
+                    ReadOptions {
+                        // This stream lives too long, the connection of prefetch object may break. So use a short connection prefetch.
+                        prefetch_options: PrefetchOptions::prefetch_for_small_range_scan(),
+                        cache_policy: CachePolicy::Fill(CacheHint::Low),
+                        table_id,
+                        ..Default::default()
+                    },
+                    Duration::from_secs(10 * 60),
+                )
+                .await
+            }
+        }));
+
+        streams_future.map_err(Into::into).map_ok(move |streams| {
+            // TODO: set chunk size by config
+            Box::pin(merge_log_store_item_stream(
+                streams,
+                serde,
+                1024,
+                read_metrics,
+            ))
+        })
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::ops::Bound::Unbounded;
+    use std::collections::{Bound, HashSet};
+    use std::sync::Arc;
 
     use bytes::Bytes;
     use itertools::Itertools;
-    use risingwave_common::util::epoch::test_epoch;
-    use risingwave_hummock_sdk::key::TableKey;
+    use risingwave_common::hash::VirtualNode;
+    use risingwave_common::util::epoch::{test_epoch, EpochExt};
+    use risingwave_hummock_sdk::key::{prefixed_range_with_vnode, KeyPayloadType, TableKey};
+    use risingwave_hummock_test::local_state_store_test_utils::LocalStateStoreTestExt;
+    use risingwave_hummock_test::test_utils::prepare_hummock_test_env;
     use risingwave_storage::hummock::iterator::test_utils::{
         iterator_test_table_key_of, iterator_test_value_of,
     };
-    use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::storage_value::StorageValue;
-    use risingwave_storage::store::{ReadOptions, StateStoreRead, StateStoreWrite, WriteOptions};
-    use risingwave_storage::StateStoreIter;
+    use risingwave_storage::store::{
+        LocalStateStore, NewLocalOptions, ReadOptions, SealCurrentEpochOptions, StateStoreRead,
+    };
+    use risingwave_storage::{StateStore, StateStoreIter};
 
     use crate::common::log_store_impl::kv_log_store::reader::AutoRebuildStateStoreReadIter;
     use crate::common::log_store_impl::kv_log_store::test_utils::TEST_TABLE_ID;
 
     #[tokio::test]
     async fn test_auto_rebuild_iter() {
-        let state_store = MemoryStateStore::new();
+        let test_env = prepare_hummock_test_env().await;
+        test_env.register_table_id(TEST_TABLE_ID).await;
+        let mut state_store = test_env
+            .storage
+            .new_local(NewLocalOptions::for_test(TEST_TABLE_ID))
+            .await;
+        let epoch = test_epoch(1);
+        test_env
+            .storage
+            .start_epoch(epoch, HashSet::from_iter([TEST_TABLE_ID]));
+        state_store.init_for_test(epoch).await.unwrap();
         let key_count = 100;
         let pairs = (0..key_count)
             .map(|i| {
                 let key = iterator_test_table_key_of(i);
                 let value = iterator_test_value_of(i);
-                (TableKey(Bytes::from(key)), StorageValue::new_put(value))
+                (TableKey(Bytes::from(key)), Bytes::from(value))
             })
             .collect_vec();
-        let epoch = test_epoch(1);
-        state_store
-            .ingest_batch(
-                pairs.clone(),
-                vec![],
-                WriteOptions {
-                    epoch,
-                    table_id: TEST_TABLE_ID,
-                },
-            )
-            .unwrap();
+        for (key, value) in &pairs {
+            state_store
+                .insert(key.clone(), value.clone(), None)
+                .unwrap();
+        }
+        state_store.flush().await.unwrap();
+        state_store.seal_current_epoch(epoch.next_epoch(), SealCurrentEpochOptions::for_test());
+        test_env.commit_epoch(epoch).await;
+        let state_store = Arc::new(test_env.storage.clone());
 
         async fn validate(
-            mut kv_iter: impl Iterator<Item = (TableKey<Bytes>, StorageValue)>,
+            mut kv_iter: impl Iterator<Item = (TableKey<Bytes>, Bytes)>,
             mut iter: impl StateStoreIter,
         ) {
             while let Some((key, value)) = iter.try_next().await.unwrap() {
                 let (k, v) = kv_iter.next().unwrap();
                 assert_eq!(key.user_key.table_key, k.to_ref());
-                assert_eq!(v.user_value.as_deref(), Some(value));
+                assert_eq!(v.as_ref(), value);
             }
             assert!(kv_iter.next().is_none());
         }
@@ -730,10 +771,17 @@ mod tests {
             table_id: TEST_TABLE_ID,
             ..Default::default()
         };
+        let key_range = prefixed_range_with_vnode(
+            (
+                Bound::<KeyPayloadType>::Unbounded,
+                Bound::<KeyPayloadType>::Unbounded,
+            ),
+            VirtualNode::ZERO,
+        );
 
         let kv_iter = pairs.clone().into_iter();
         let iter = state_store
-            .iter((Unbounded, Unbounded), epoch, read_options.clone())
+            .iter(key_range.clone(), epoch, read_options.clone())
             .await
             .unwrap();
         validate(kv_iter, iter).await;
@@ -755,7 +803,7 @@ mod tests {
                     false
                 }
             },
-            (Unbounded, Unbounded),
+            key_range.clone(),
             epoch,
             read_options,
         )

@@ -73,6 +73,7 @@ pub struct QueryExecution {
     /// Identified by `process_id`, `secret_key`. Query in the same session should have same key.
     pub session_id: SessionId,
     /// Permit to execute the query. Once query finishes execution, this is dropped.
+    #[expect(dead_code)]
     pub permit: Option<tokio::sync::OwnedSemaphorePermit>,
 }
 
@@ -657,7 +658,7 @@ pub(crate) mod tests {
         let eq_join_predicate =
             EqJoinPredicate::new(Condition::true_cond(), vec![eq_key_1, eq_key_2], 2, 2);
         let hash_join_node: PlanRef =
-            BatchHashJoin::new(logical_join_node, eq_join_predicate).into();
+            BatchHashJoin::new(logical_join_node, eq_join_predicate, None).into();
         let batch_exchange_node: PlanRef = BatchExchange::new(
             hash_join_node.clone(),
             Order::default(),
@@ -734,6 +735,7 @@ pub(crate) mod tests {
             worker_node_selector,
             catalog_reader,
             None,
+            "UTC".to_owned(),
             batch_exchange_node.clone(),
         )
         .unwrap();

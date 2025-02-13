@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, Weak};
 use std::time::Duration;
 
@@ -20,6 +20,7 @@ use anyhow::{anyhow, Context};
 use async_trait::async_trait;
 use moka::future::Cache as MokaCache;
 use moka::ops::compute::Op;
+use rdkafka::admin::{AdminClient, AdminOptions};
 use rdkafka::consumer::{BaseConsumer, Consumer};
 use rdkafka::error::KafkaResult;
 use rdkafka::{ClientConfig, Offset, TopicPartitionList};
@@ -35,10 +36,19 @@ use crate::source::kafka::{
 };
 use crate::source::SourceEnumeratorContextRef;
 
-type KafkaClientType = BaseConsumer<RwConsumerContext>;
+type KafkaConsumer = BaseConsumer<RwConsumerContext>;
+type KafkaAdmin = AdminClient<RwConsumerContext>;
 
-pub static SHARED_KAFKA_CLIENT: LazyLock<MokaCache<KafkaConnectionProps, Weak<KafkaClientType>>> =
+/// Consumer client is shared, and the cache doesn't manage the lifecycle, so we store `Weak` and no eviction.
+pub static SHARED_KAFKA_CONSUMER: LazyLock<MokaCache<KafkaConnectionProps, Weak<KafkaConsumer>>> =
     LazyLock::new(|| moka::future::Cache::builder().build());
+/// Admin client is short-lived, so we store `Arc` and sets a time-to-idle eviction policy.
+pub static SHARED_KAFKA_ADMIN: LazyLock<MokaCache<KafkaConnectionProps, Arc<KafkaAdmin>>> =
+    LazyLock::new(|| {
+        moka::future::Cache::builder()
+            .time_to_idle(Duration::from_secs(5 * 60))
+            .build()
+    });
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum KafkaEnumeratorOffset {
@@ -52,7 +62,7 @@ pub struct KafkaSplitEnumerator {
     context: SourceEnumeratorContextRef,
     broker_address: String,
     topic: String,
-    client: Arc<KafkaClientType>,
+    client: Arc<KafkaConsumer>,
     start_offset: KafkaEnumeratorOffset,
 
     // maybe used in the future for batch processing
@@ -60,9 +70,38 @@ pub struct KafkaSplitEnumerator {
 
     sync_call_timeout: Duration,
     high_watermark_metrics: HashMap<i32, LabelGuardedIntGauge<2>>,
+
+    properties: KafkaProperties,
+    config: rdkafka::ClientConfig,
 }
 
-impl KafkaSplitEnumerator {}
+impl KafkaSplitEnumerator {
+    async fn drop_consumer_groups(&self, fragment_ids: Vec<u32>) -> ConnectorResult<()> {
+        let admin = SHARED_KAFKA_ADMIN
+            .try_get_with_by_ref(&self.properties.connection, async {
+                tracing::info!("build new kafka admin for {}", self.broker_address);
+                Ok(Arc::new(
+                    build_kafka_admin(&self.config, &self.properties).await?,
+                ))
+            })
+            .await?;
+
+        let group_ids = fragment_ids
+            .iter()
+            .map(|fragment_id| self.properties.group_id(*fragment_id))
+            .collect::<Vec<_>>();
+        let group_ids: Vec<&str> = group_ids.iter().map(|s| s.as_str()).collect();
+        let res = admin
+            .delete_groups(&group_ids, &AdminOptions::default())
+            .await?;
+        tracing::debug!(
+            topic = self.topic,
+            ?fragment_ids,
+            "delete groups result: {res:?}"
+        );
+        Ok(())
+    }
+}
 
 #[async_trait]
 impl SplitEnumerator for KafkaSplitEnumerator {
@@ -77,7 +116,6 @@ impl SplitEnumerator for KafkaSplitEnumerator {
         let common_props = &properties.common;
 
         let broker_address = properties.connection.brokers.clone();
-        let broker_rewrite_map = properties.privatelink_common.broker_rewrite_map.clone();
         let topic = common_props.topic.clone();
         config.set("bootstrap.servers", &broker_address);
         config.set("isolation.level", KAFKA_ISOLATION_LEVEL);
@@ -102,56 +140,22 @@ impl SplitEnumerator for KafkaSplitEnumerator {
             scan_start_offset = KafkaEnumeratorOffset::Timestamp(time_offset)
         }
 
-        async fn build_kafka_client(
-            config: &ClientConfig,
-            properties: &KafkaProperties,
-            rewrite_map: Option<BTreeMap<String, String>>,
-        ) -> ConnectorResult<KafkaClientType> {
-            let ctx_common = KafkaContextCommon::new(
-                rewrite_map,
-                None,
-                None,
-                properties.aws_auth_props.clone(),
-                properties.connection.is_aws_msk_iam(),
-            )
-            .await?;
-            let client_ctx = RwConsumerContext::new(ctx_common);
-            let client: BaseConsumer<RwConsumerContext> =
-                config.create_with_context(client_ctx).await?;
-
-            // Note that before any SASL/OAUTHBEARER broker connection can succeed the application must call
-            // rd_kafka_oauthbearer_set_token() once – either directly or, more typically, by invoking either
-            // rd_kafka_poll(), rd_kafka_consumer_poll(), rd_kafka_queue_poll(), etc, in order to cause retrieval
-            // of an initial token to occur.
-            // https://docs.confluent.io/platform/current/clients/librdkafka/html/rdkafka_8h.html#a988395722598f63396d7a1bedb22adaf
-            if properties.connection.is_aws_msk_iam() {
-                #[cfg(not(madsim))]
-                client.poll(Duration::from_secs(10)); // note: this is a blocking call
-                #[cfg(madsim)]
-                client.poll(Duration::from_secs(10)).await;
-            }
-            Ok(client)
-        }
-
-        let mut client_arc: Option<Arc<KafkaClientType>> = None;
-        SHARED_KAFKA_CLIENT
+        let mut client: Option<Arc<KafkaConsumer>> = None;
+        SHARED_KAFKA_CONSUMER
             .entry_by_ref(&properties.connection)
             .and_try_compute_with::<_, _, ConnectorError>(|maybe_entry| async {
                 if let Some(entry) = maybe_entry {
                     let entry_value = entry.into_value();
-                    if let Some(client) = entry_value.upgrade() {
+                    if let Some(client_) = entry_value.upgrade() {
                         // return if the client is already built
                         tracing::info!("reuse existing kafka client for {}", broker_address);
-                        client_arc = Some(client);
+                        client = Some(client_);
                         return Ok(Op::Nop);
                     }
                 }
-                let new_client_arc = Arc::new(
-                    build_kafka_client(&config, &properties, broker_rewrite_map.clone()).await?,
-                );
                 tracing::info!("build new kafka client for {}", broker_address);
-                client_arc = Some(new_client_arc.clone());
-                Ok(Op::Put(Arc::downgrade(&new_client_arc)))
+                client = Some(build_kafka_client(&config, &properties).await?);
+                Ok(Op::Put(Arc::downgrade(client.as_ref().unwrap())))
             })
             .await?;
 
@@ -159,11 +163,13 @@ impl SplitEnumerator for KafkaSplitEnumerator {
             context,
             broker_address,
             topic,
-            client: client_arc.unwrap(),
+            client: client.unwrap(),
             start_offset: scan_start_offset,
             stop_offset: KafkaEnumeratorOffset::None,
             sync_call_timeout: properties.common.sync_call_timeout,
             high_watermark_metrics: HashMap::new(),
+            properties,
+            config,
         })
     }
 
@@ -196,6 +202,60 @@ impl SplitEnumerator for KafkaSplitEnumerator {
 
         Ok(ret)
     }
+
+    async fn on_drop_fragments(&mut self, fragment_ids: Vec<u32>) -> ConnectorResult<()> {
+        self.drop_consumer_groups(fragment_ids).await
+    }
+
+    async fn on_finish_backfill(&mut self, fragment_ids: Vec<u32>) -> ConnectorResult<()> {
+        self.drop_consumer_groups(fragment_ids).await
+    }
+}
+
+async fn build_kafka_client(
+    config: &ClientConfig,
+    properties: &KafkaProperties,
+) -> ConnectorResult<Arc<KafkaConsumer>> {
+    let ctx_common = KafkaContextCommon::new(
+        properties.privatelink_common.broker_rewrite_map.clone(),
+        None,
+        None,
+        properties.aws_auth_props.clone(),
+        properties.connection.is_aws_msk_iam(),
+    )
+    .await?;
+    let client_ctx = RwConsumerContext::new(ctx_common);
+    let client: KafkaConsumer = config.create_with_context(client_ctx).await?;
+
+    // Note that before any SASL/OAUTHBEARER broker connection can succeed the application must call
+    // rd_kafka_oauthbearer_set_token() once – either directly or, more typically, by invoking either
+    // rd_kafka_poll(), rd_kafka_consumer_poll(), rd_kafka_queue_poll(), etc, in order to cause retrieval
+    // of an initial token to occur.
+    // https://docs.confluent.io/platform/current/clients/librdkafka/html/rdkafka_8h.html#a988395722598f63396d7a1bedb22adaf
+    if properties.connection.is_aws_msk_iam() {
+        #[cfg(not(madsim))]
+        client.poll(Duration::from_secs(10)); // note: this is a blocking call
+        #[cfg(madsim)]
+        client.poll(Duration::from_secs(10)).await;
+    }
+    Ok(Arc::new(client))
+}
+async fn build_kafka_admin(
+    config: &ClientConfig,
+    properties: &KafkaProperties,
+) -> ConnectorResult<KafkaAdmin> {
+    let ctx_common = KafkaContextCommon::new(
+        properties.privatelink_common.broker_rewrite_map.clone(),
+        None,
+        None,
+        properties.aws_auth_props.clone(),
+        properties.connection.is_aws_msk_iam(),
+    )
+    .await?;
+    let client_ctx = RwConsumerContext::new(ctx_common);
+    let client: KafkaAdmin = config.create_with_context(client_ctx).await?;
+    // AdminClient calls start_poll_thread on creation, so the additional poll seems not needed. (And currently no API for this.)
+    Ok(client)
 }
 
 impl KafkaSplitEnumerator {

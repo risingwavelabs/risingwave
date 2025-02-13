@@ -30,7 +30,7 @@ use risingwave_common::catalog::{
     get_dist_key_in_pk_indices, ColumnDesc, ColumnId, TableId, TableOption,
 };
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt, VnodeCountCompat};
-use risingwave_common::row::{self, once, CompactedRow, Once, OwnedRow, Row, RowExt};
+use risingwave_common::row::{self, once, Once, OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, Datum, DefaultOrd, DefaultOrdered, ScalarImpl};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::EpochPair;
@@ -42,9 +42,12 @@ use risingwave_hummock_sdk::key::{
     end_bound_of_prefix, prefixed_range_with_vnode, start_bound_of_excluded_prefix, CopyFromSlice,
     TableKey, TableKeyRange,
 };
-use risingwave_hummock_sdk::table_watermark::{VnodeWatermark, WatermarkDirection};
+use risingwave_hummock_sdk::table_watermark::{
+    VnodeWatermark, WatermarkDirection, WatermarkSerdeType,
+};
+use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::catalog::Table;
-use risingwave_storage::error::{ErrorKind, StorageError};
+use risingwave_storage::error::{ErrorKind, StorageError, StorageResult};
 use risingwave_storage::hummock::CachePolicy;
 use risingwave_storage::mem_table::MemTableError;
 use risingwave_storage::row_serde::find_columns_by_ids;
@@ -55,6 +58,7 @@ use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::store::{
     InitOptions, LocalStateStore, NewLocalOptions, OpConsistencyLevel, PrefetchOptions,
     ReadLogOptions, ReadOptions, SealCurrentEpochOptions, StateStoreIter, StateStoreIterExt,
+    TryWaitEpochOptions,
 };
 use risingwave_storage::table::merge_sort::merge_sort;
 use risingwave_storage::table::{
@@ -156,6 +160,8 @@ pub struct StateTableInner<
     output_indices: Vec<usize>,
 
     op_consistency_level: StateTableOpConsistencyLevel,
+
+    clean_watermark_index_in_pk: Option<i32>,
 }
 
 /// `StateTable` will use `BasicSerde` as default
@@ -181,6 +187,17 @@ where
     pub async fn init_epoch(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         self.local_store.init(InitOptions::new(epoch)).await?;
         Ok(())
+    }
+
+    pub async fn try_wait_committed_epoch(&self, prev_epoch: u64) -> StorageResult<()> {
+        self.store
+            .try_wait_epoch(
+                HummockReadEpoch::Committed(prev_epoch),
+                TryWaitEpochOptions {
+                    table_id: self.table_id,
+                },
+            )
+            .await
     }
 
     pub fn state_store(&self) -> &S {
@@ -428,23 +445,28 @@ where
         );
 
         // Restore persisted table watermark.
-        let prefix_deser = if pk_indices.is_empty() {
+        let watermark_serde = if pk_indices.is_empty() {
             None
         } else {
-            Some(pk_serde.prefix(1))
+            match table_catalog.clean_watermark_index_in_pk {
+                None => Some(pk_serde.index(0)),
+                Some(clean_watermark_index_in_pk) => {
+                    Some(pk_serde.index(clean_watermark_index_in_pk as usize))
+                }
+            }
         };
         let max_watermark_of_vnodes = distribution
             .vnodes()
             .iter_vnodes()
             .filter_map(|vnode| local_state_store.get_table_watermark(vnode))
             .max();
-        let committed_watermark = if let Some(deser) = prefix_deser
+        let committed_watermark = if let Some(deser) = watermark_serde
             && let Some(max_watermark) = max_watermark_of_vnodes
         {
-            let deserialized = deser
-                .deserialize(&max_watermark)
-                .ok()
-                .and_then(|row| row[0].clone());
+            let deserialized = deser.deserialize(&max_watermark).ok().and_then(|row| {
+                assert!(row.len() == 1);
+                row[0].clone()
+            });
             if deserialized.is_none() {
                 tracing::error!(
                     vnodes = ?distribution.vnodes(),
@@ -510,6 +532,7 @@ where
             output_indices,
             i2o_mapping,
             op_consistency_level: state_table_op_consistency_level,
+            clean_watermark_index_in_pk: table_catalog.clean_watermark_index_in_pk,
         }
     }
 
@@ -660,25 +683,6 @@ where
             .map_err(Into::into)
     }
 
-    /// Get a row in value-encoding format from state table.
-    pub async fn get_compacted_row(
-        &self,
-        pk: impl Row,
-    ) -> StreamExecutorResult<Option<CompactedRow>> {
-        if self.row_serde.kind().is_basic() {
-            // Basic serde is in value-encoding format, which is compatible with the compacted row.
-            self.get_encoded_row(pk)
-                .await
-                .map(|bytes| bytes.map(CompactedRow::new))
-        } else {
-            // For other encodings, we must first deserialize it into a `Row` first, then serialize
-            // it back into value-encoding format.
-            self.get_row(pk)
-                .await
-                .map(|row| row.map(CompactedRow::from))
-        }
-    }
-
     /// Update the vnode bitmap of the state table, returns the previous vnode bitmap.
     #[must_use = "the executor should decide whether to manipulate the cache based on the previous vnode bitmap"]
     pub fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) -> (Arc<Bitmap>, bool) {
@@ -824,18 +828,6 @@ where
         let new_value_bytes = self.serialize_value(new_value);
 
         self.update_inner(new_key_bytes, Some(old_value_bytes), new_value_bytes);
-    }
-
-    /// Update a row without giving old value.
-    ///
-    /// `op_consistency_level` should be set to `Inconsistent`.
-    pub fn update_without_old_value(&mut self, new_value: impl Row) {
-        let new_pk = (&new_value).project(self.pk_indices());
-        let new_key_bytes =
-            serialize_pk_with_vnode(new_pk, &self.pk_serde, self.compute_vnode_by_pk(new_pk));
-        let new_value_bytes = self.serialize_value(new_value);
-
-        self.update_inner(new_key_bytes, None, new_value_bytes);
     }
 
     /// Write a record into state table. Must have the same schema with the table.
@@ -1041,7 +1033,8 @@ where
                     for entry in merged_stream.take(self.watermark_cache.capacity()) {
                         let keyed_row = entry?;
                         let pk = self.pk_serde.deserialize(keyed_row.key())?;
-                        if !pk.is_null_at(0) {
+                        // watermark column should be part of the pk
+                        if !pk.is_null_at(self.clean_watermark_index_in_pk.unwrap_or(0) as usize) {
                             pks.push(pk);
                         }
                     }
@@ -1064,16 +1057,31 @@ where
     }
 
     /// Commit pending watermark and return vnode bitmap-watermark pairs to seal.
-    fn commit_pending_watermark(&mut self) -> Option<(WatermarkDirection, Vec<VnodeWatermark>)> {
+    fn commit_pending_watermark(
+        &mut self,
+    ) -> Option<(WatermarkDirection, Vec<VnodeWatermark>, WatermarkSerdeType)> {
         let watermark = self.pending_watermark.take();
         watermark.as_ref().inspect(|watermark| {
             trace!(table_id = %self.table_id, watermark = ?watermark, "state cleaning");
         });
 
-        let prefix_serializer = if self.pk_indices().is_empty() {
+        let watermark_serializer = if self.pk_indices().is_empty() {
             None
         } else {
-            Some(self.pk_serde.prefix(1))
+            match self.clean_watermark_index_in_pk {
+                None => Some(self.pk_serde.index(0)),
+                Some(clean_watermark_index_in_pk) => {
+                    Some(self.pk_serde.index(clean_watermark_index_in_pk as usize))
+                }
+            }
+        };
+
+        let watermark_type = match self.clean_watermark_index_in_pk {
+            None => WatermarkSerdeType::PkPrefix,
+            Some(clean_watermark_index_in_pk) => match clean_watermark_index_in_pk {
+                0 => WatermarkSerdeType::PkPrefix,
+                _ => WatermarkSerdeType::NonPkPrefix,
+            },
         };
 
         let should_clean_watermark = match watermark {
@@ -1101,31 +1109,34 @@ where
         let watermark_suffix = watermark.as_ref().map(|watermark| {
             serialize_pk(
                 row::once(Some(watermark.clone())),
-                prefix_serializer.as_ref().unwrap(),
+                watermark_serializer.as_ref().unwrap(),
             )
         });
 
-        let mut seal_watermark: Option<(WatermarkDirection, VnodeWatermark)> = None;
+        let mut seal_watermark: Option<(WatermarkDirection, VnodeWatermark, WatermarkSerdeType)> =
+            None;
 
         // Compute Delete Ranges
         if should_clean_watermark && let Some(watermark_suffix) = watermark_suffix {
             trace!(table_id = %self.table_id, watermark = ?watermark_suffix, vnodes = ?{
                 self.vnodes().iter_vnodes().collect_vec()
             }, "delete range");
-            if prefix_serializer
+
+            let order_type = watermark_serializer
                 .as_ref()
                 .unwrap()
                 .get_order_types()
-                .first()
-                .unwrap()
-                .is_ascending()
-            {
+                .get(0)
+                .unwrap();
+
+            if order_type.is_ascending() {
                 seal_watermark = Some((
                     WatermarkDirection::Ascending,
                     VnodeWatermark::new(
                         self.vnodes().clone(),
                         Bytes::copy_from_slice(watermark_suffix.as_ref()),
                     ),
+                    watermark_type,
                 ));
             } else {
                 seal_watermark = Some((
@@ -1134,6 +1145,7 @@ where
                         self.vnodes().clone(),
                         Bytes::copy_from_slice(watermark_suffix.as_ref()),
                     ),
+                    watermark_type,
                 ));
             }
         }
@@ -1150,7 +1162,9 @@ where
             self.watermark_cache.clear();
         }
 
-        seal_watermark.map(|(direction, watermark)| (direction, vec![watermark]))
+        seal_watermark.map(|(direction, watermark, is_non_pk_prefix)| {
+            (direction, vec![watermark], is_non_pk_prefix)
+        })
     }
 
     pub async fn try_flush(&mut self) -> StreamExecutorResult<()> {

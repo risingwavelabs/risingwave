@@ -13,19 +13,34 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::future::Future;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::{Bound, RangeBounds};
 use std::sync::{Arc, LazyLock};
 
 use bytes::Bytes;
+use itertools::Itertools;
 use parking_lot::RwLock;
-use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange, UserKey};
+use risingwave_common::bitmap::Bitmap;
+use risingwave_common::catalog::{TableId, TableOption};
+use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
+use risingwave_hummock_sdk::key::{
+    prefixed_range_with_vnode, FullKey, TableKey, TableKeyRange, UserKey,
+};
+use risingwave_hummock_sdk::table_watermark::WatermarkDirection;
 use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
+use thiserror_ext::AsReport;
+use tokio::task::yield_now;
+use tracing::error;
 
 use crate::error::StorageResult;
-use crate::mem_table::MemtableLocalStateStore;
+use crate::hummock::utils::{
+    do_delete_sanity_check, do_insert_sanity_check, do_update_sanity_check, merge_stream,
+    sanity_check_enabled,
+};
+use crate::hummock::HummockError;
+use crate::mem_table::{KeyOp, MemTable};
 use crate::storage_value::StorageValue;
 use crate::store::*;
 
@@ -105,6 +120,7 @@ impl RangeKv for BTreeMapRangeKv {
 pub mod sled {
     use std::fs::create_dir_all;
     use std::ops::RangeBounds;
+    use std::sync::Arc;
 
     use bytes::Bytes;
     use risingwave_hummock_sdk::key::FullKey;
@@ -240,12 +256,14 @@ pub mod sled {
         pub fn new(path: impl AsRef<std::path::Path>) -> Self {
             RangeKvStateStore {
                 inner: SledRangeKv::new(path),
+                table_next_epochs: Arc::new(Default::default()),
             }
         }
 
         pub fn new_temp() -> Self {
             RangeKvStateStore {
                 inner: SledRangeKv::new_temp(),
+                table_next_epochs: Arc::new(Default::default()),
             }
         }
     }
@@ -505,6 +523,8 @@ pub type MemoryStateStore = RangeKvStateStore<BTreeMapRangeKv>;
 pub struct RangeKvStateStore<R: RangeKv> {
     /// Stores (key, epoch) -> user value.
     inner: R,
+    /// `table_id` -> `prev_epoch` -> `curr_epoch`
+    table_next_epochs: Arc<parking_lot::Mutex<HashMap<TableId, BTreeMap<u64, u64>>>>,
 }
 
 fn to_full_key_range<R, B>(table_id: TableId, table_key_range: R) -> BytesFullKeyRange
@@ -603,7 +623,6 @@ impl<R: RangeKv> RangeKvStateStore<R> {
 }
 
 impl<R: RangeKv> StateStoreRead for RangeKvStateStore<R> {
-    type ChangeLogIter = RangeKvStateStoreChangeLogIter<R>;
     type Iter = RangeKvStateStoreIter<R>;
     type RevIter = RangeKvStateStoreRevIter<R>;
 
@@ -663,6 +682,29 @@ impl<R: RangeKv> StateStoreRead for RangeKvStateStore<R> {
             true,
         ))
     }
+}
+
+impl<R: RangeKv> StateStoreReadLog for RangeKvStateStore<R> {
+    type ChangeLogIter = RangeKvStateStoreChangeLogIter<R>;
+
+    async fn next_epoch(&self, epoch: u64, options: NextEpochOptions) -> StorageResult<u64> {
+        loop {
+            {
+                let table_next_epochs = self.table_next_epochs.lock();
+                let Some(table_next_epochs) = table_next_epochs.get(&options.table_id) else {
+                    return Err(HummockError::next_epoch(format!(
+                        "table {} not exist",
+                        options.table_id
+                    ))
+                    .into());
+                };
+                if let Some(next_epoch) = table_next_epochs.get(&epoch) {
+                    break Ok(*next_epoch);
+                }
+            }
+            yield_now().await;
+        }
+    }
 
     async fn iter_log(
         &self,
@@ -692,8 +734,8 @@ impl<R: RangeKv> StateStoreRead for RangeKvStateStore<R> {
     }
 }
 
-impl<R: RangeKv> StateStoreWrite for RangeKvStateStore<R> {
-    fn ingest_batch(
+impl<R: RangeKv> RangeKvStateStore<R> {
+    pub(crate) fn ingest_batch(
         &self,
         mut kv_pairs: Vec<(TableKey<Bytes>, StorageValue)>,
         delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
@@ -735,7 +777,7 @@ impl<R: RangeKv> StateStoreWrite for RangeKvStateStore<R> {
 }
 
 impl<R: RangeKv> StateStore for RangeKvStateStore<R> {
-    type Local = MemtableLocalStateStore<Self>;
+    type Local = RangeKvLocalStateStore<R>;
 
     #[allow(clippy::unused_async)]
     async fn try_wait_epoch(
@@ -748,7 +790,279 @@ impl<R: RangeKv> StateStore for RangeKvStateStore<R> {
     }
 
     async fn new_local(&self, option: NewLocalOptions) -> Self::Local {
-        MemtableLocalStateStore::new(self.clone(), option)
+        RangeKvLocalStateStore::new(self.clone(), option)
+    }
+}
+
+pub struct RangeKvLocalStateStore<R: RangeKv> {
+    mem_table: MemTable,
+    inner: RangeKvStateStore<R>,
+
+    epoch: Option<u64>,
+
+    table_id: TableId,
+    op_consistency_level: OpConsistencyLevel,
+    table_option: TableOption,
+    vnodes: Arc<Bitmap>,
+}
+
+impl<R: RangeKv> RangeKvLocalStateStore<R> {
+    pub fn new(inner: RangeKvStateStore<R>, option: NewLocalOptions) -> Self {
+        Self {
+            inner,
+            mem_table: MemTable::new(option.op_consistency_level.clone()),
+            epoch: None,
+            table_id: option.table_id,
+            op_consistency_level: option.op_consistency_level,
+            table_option: option.table_option,
+            vnodes: option.vnodes,
+        }
+    }
+}
+
+impl<R: RangeKv> LocalStateStore for RangeKvLocalStateStore<R> {
+    type FlushedSnapshotReader = RangeKvStateStore<R>;
+
+    type Iter<'a> = impl StateStoreIter + 'a;
+    type RevIter<'a> = impl StateStoreIter + 'a;
+
+    async fn get(
+        &self,
+        key: TableKey<Bytes>,
+        read_options: ReadOptions,
+    ) -> StorageResult<Option<Bytes>> {
+        match self.mem_table.buffer.get(&key) {
+            None => self.inner.get(key, self.epoch(), read_options).await,
+            Some(op) => match op {
+                KeyOp::Insert(value) | KeyOp::Update((_, value)) => Ok(Some(value.clone())),
+                KeyOp::Delete(_) => Ok(None),
+            },
+        }
+    }
+
+    #[allow(clippy::manual_async_fn)]
+    fn iter(
+        &self,
+        key_range: TableKeyRange,
+        read_options: ReadOptions,
+    ) -> impl Future<Output = StorageResult<Self::Iter<'_>>> + Send + '_ {
+        async move {
+            let iter = self
+                .inner
+                .iter(key_range.clone(), self.epoch(), read_options)
+                .await?;
+            Ok(FromStreamStateStoreIter::new(Box::pin(merge_stream(
+                self.mem_table.iter(key_range),
+                iter.into_stream(to_owned_item),
+                self.table_id,
+                self.epoch(),
+                false,
+            ))))
+        }
+    }
+
+    #[allow(clippy::manual_async_fn)]
+    fn rev_iter(
+        &self,
+        key_range: TableKeyRange,
+        read_options: ReadOptions,
+    ) -> impl Future<Output = StorageResult<Self::RevIter<'_>>> + Send + '_ {
+        async move {
+            let iter = self
+                .inner
+                .rev_iter(key_range.clone(), self.epoch(), read_options)
+                .await?;
+            Ok(FromStreamStateStoreIter::new(Box::pin(merge_stream(
+                self.mem_table.rev_iter(key_range),
+                iter.into_stream(to_owned_item),
+                self.table_id,
+                self.epoch(),
+                true,
+            ))))
+        }
+    }
+
+    fn insert(
+        &mut self,
+        key: TableKey<Bytes>,
+        new_val: Bytes,
+        old_val: Option<Bytes>,
+    ) -> StorageResult<()> {
+        match old_val {
+            None => self.mem_table.insert(key, new_val)?,
+            Some(old_val) => self.mem_table.update(key, old_val, new_val)?,
+        };
+        Ok(())
+    }
+
+    fn delete(&mut self, key: TableKey<Bytes>, old_val: Bytes) -> StorageResult<()> {
+        Ok(self.mem_table.delete(key, old_val)?)
+    }
+
+    async fn flush(&mut self) -> StorageResult<usize> {
+        let buffer = self.mem_table.drain().into_parts();
+        let mut kv_pairs = Vec::with_capacity(buffer.len());
+        for (key, key_op) in buffer {
+            match key_op {
+                // Currently, some executors do not strictly comply with these semantics. As
+                // a workaround you may call disable the check by initializing the
+                // state store with `op_consistency_level=Inconsistent`.
+                KeyOp::Insert(value) => {
+                    if sanity_check_enabled() {
+                        do_insert_sanity_check(
+                            &key,
+                            &value,
+                            &self.inner,
+                            self.epoch(),
+                            self.table_id,
+                            self.table_option,
+                            &self.op_consistency_level,
+                        )
+                        .await?;
+                    }
+                    kv_pairs.push((key, StorageValue::new_put(value)));
+                }
+                KeyOp::Delete(old_value) => {
+                    if sanity_check_enabled() {
+                        do_delete_sanity_check(
+                            &key,
+                            &old_value,
+                            &self.inner,
+                            self.epoch(),
+                            self.table_id,
+                            self.table_option,
+                            &self.op_consistency_level,
+                        )
+                        .await?;
+                    }
+                    kv_pairs.push((key, StorageValue::new_delete()));
+                }
+                KeyOp::Update((old_value, new_value)) => {
+                    if sanity_check_enabled() {
+                        do_update_sanity_check(
+                            &key,
+                            &old_value,
+                            &new_value,
+                            &self.inner,
+                            self.epoch(),
+                            self.table_id,
+                            self.table_option,
+                            &self.op_consistency_level,
+                        )
+                        .await?;
+                    }
+                    kv_pairs.push((key, StorageValue::new_put(new_value)));
+                }
+            }
+        }
+        self.inner.ingest_batch(
+            kv_pairs,
+            vec![],
+            WriteOptions {
+                epoch: self.epoch(),
+                table_id: self.table_id,
+            },
+        )
+    }
+
+    fn epoch(&self) -> u64 {
+        self.epoch.expect("should have set the epoch")
+    }
+
+    fn is_dirty(&self) -> bool {
+        self.mem_table.is_dirty()
+    }
+
+    #[allow(clippy::unused_async)]
+    async fn init(&mut self, options: InitOptions) -> StorageResult<()> {
+        assert!(
+            self.epoch.replace(options.epoch.curr).is_none(),
+            "epoch in local state store of table id {:?} is init for more than once",
+            self.table_id
+        );
+        self.inner
+            .table_next_epochs
+            .lock()
+            .entry(self.table_id)
+            .or_default()
+            .insert(options.epoch.prev, options.epoch.curr);
+
+        Ok(())
+    }
+
+    fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions) {
+        assert!(!self.is_dirty());
+        if let Some(value_checker) = opts.switch_op_consistency_level {
+            self.mem_table.op_consistency_level.update(&value_checker);
+        }
+        let prev_epoch = self
+            .epoch
+            .replace(next_epoch)
+            .expect("should have init epoch before seal the first epoch");
+        assert!(
+            next_epoch > prev_epoch,
+            "new epoch {} should be greater than current epoch: {}",
+            next_epoch,
+            prev_epoch
+        );
+
+        self.inner
+            .table_next_epochs
+            .lock()
+            .entry(self.table_id)
+            .or_default()
+            .insert(prev_epoch, next_epoch);
+
+        if let Some((direction, watermarks, _watermark_type)) = opts.table_watermarks {
+            let delete_ranges = watermarks
+                .iter()
+                .flat_map(|vnode_watermark| {
+                    let inner_range = match direction {
+                        WatermarkDirection::Ascending => {
+                            (Unbounded, Excluded(vnode_watermark.watermark().clone()))
+                        }
+                        WatermarkDirection::Descending => {
+                            (Excluded(vnode_watermark.watermark().clone()), Unbounded)
+                        }
+                    };
+                    vnode_watermark
+                        .vnode_bitmap()
+                        .iter_vnodes()
+                        .map(move |vnode| {
+                            let (start, end) =
+                                prefixed_range_with_vnode(inner_range.clone(), vnode);
+                            (start.map(|key| key.0.clone()), end.map(|key| key.0.clone()))
+                        })
+                })
+                .collect_vec();
+            if let Err(e) = self.inner.ingest_batch(
+                Vec::new(),
+                delete_ranges,
+                WriteOptions {
+                    epoch: self.epoch(),
+                    table_id: self.table_id,
+                },
+            ) {
+                error!(error = %e.as_report(), "failed to write delete ranges of table watermark");
+            }
+        }
+    }
+
+    async fn try_flush(&mut self) -> StorageResult<()> {
+        Ok(())
+    }
+
+    fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
+        std::mem::replace(&mut self.vnodes, vnodes)
+    }
+
+    fn get_table_watermark(&self, _vnode: VirtualNode) -> Option<Bytes> {
+        // TODO: may store the written table watermark and have a correct implementation
+        None
+    }
+
+    fn new_flushed_snapshot_reader(&self) -> Self::FlushedSnapshotReader {
+        self.inner.clone()
     }
 }
 

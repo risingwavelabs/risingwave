@@ -24,16 +24,16 @@ use super::opendal_source::OpendalSource;
 use crate::error::ConnectorResult;
 use crate::source::{SplitId, SplitMetaData};
 
-///  [`FsSplit`] Describes a file or a split of a file. A file is a generic concept,
+///  [`LegacyFsSplit`] Describes a file or a split of a file. A file is a generic concept,
 /// and can be a local file, a distributed file system, or am object in S3 bucket.
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
-pub struct FsSplit {
+pub struct LegacyFsSplit {
     pub name: String,
     pub offset: usize,
     pub size: usize,
 }
 
-impl From<&Object> for FsSplit {
+impl From<&Object> for LegacyFsSplit {
     fn from(value: &Object) -> Self {
         Self {
             name: value.key().unwrap().to_owned(),
@@ -43,7 +43,7 @@ impl From<&Object> for FsSplit {
     }
 }
 
-impl SplitMetaData for FsSplit {
+impl SplitMetaData for LegacyFsSplit {
     fn id(&self) -> SplitId {
         self.name.as_str().into()
     }
@@ -63,7 +63,7 @@ impl SplitMetaData for FsSplit {
     }
 }
 
-impl FsSplit {
+impl LegacyFsSplit {
     pub fn new(name: String, start: usize, size: usize) -> Self {
         Self {
             name,

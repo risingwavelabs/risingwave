@@ -78,7 +78,14 @@ impl JavaVmWrapper {
 
         let mut class_vec = vec![];
 
-        let entries = fs::read_dir(&libs_path).context("failed to read connector libs")?;
+        let entries = fs::read_dir(&libs_path).context(if cfg!(debug_assertions) {
+            "failed to read connector libs; \
+            for RiseDev users, please check if ENABLE_BUILD_RW_CONNECTOR is set with `risedev configure`
+            "
+        } else {
+            "failed to read connector libs, \
+            please check if env var CONNECTOR_LIBS_PATH is correctly configured"
+        })?;
         for entry in entries.flatten() {
             let entry_path = entry.path();
             if entry_path.file_name().is_some() {
@@ -116,6 +123,7 @@ impl JavaVmWrapper {
             .version(JNIVersion::V8)
             .option("-Dis_embedded_connector=true")
             .option(format!("-Djava.class.path={}", class_vec.join(":")))
+            .option("--add-opens=java.base/java.nio=org.apache.arrow.memory.core,ALL-UNNAMED")
             .option("-Xms16m")
             .option(format!("-Xmx{}", jvm_heap_size));
 

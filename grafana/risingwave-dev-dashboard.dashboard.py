@@ -951,83 +951,49 @@ def section_streaming(outer_panels):
                 # TODO: These 2 metrics should be deprecated because they are unaware of Log Store
                 # Let's remove them when all sinks are migrated to Log Store
                 panels.timeseries_rowsps(
-                    "Sink Throughput(rows/s)",
-                    "The number of rows streamed into each sink per second. For sinks with 'sink_decouple = true', please refer to the 'Sink Metrics' section",
+                    "Sink Executor Throughput (rows/s)",
+                    "The number of rows streamed into the SinkExecutor per second. For sinks with 'sink_decouple = true', please refer to the 'Sink Metrics' section",
                     [
                         panels.target(
                             f"sum(rate({metric('stream_sink_input_row_count')}[$__rate_interval])) by (sink_id) * on(sink_id) group_left(sink_name) group({metric('sink_info')}) by (sink_id, sink_name)",
                             "sink {{sink_id}} {{sink_name}}",
                         ),
-                    ],
-                ),
-                panels.timeseries_rowsps(
-                    "Sink Throughput(rows/s) per Partition",
-                    "The number of rows streamed into each sink per second. For sinks with 'sink_decouple = true', please refer to the 'Sink Metrics' section",
-                    [
-                        panels.target(
+                        panels.target_hidden(
                             f"sum(rate({metric('stream_sink_input_row_count')}[$__rate_interval])) by (sink_id, actor_id) * on(actor_id) group_left(sink_name) {metric('sink_info')}",
                             "sink {{sink_id}} {{sink_name}} - actor {{actor_id}}",
                         ),
                     ],
                 ),
                 panels.timeseries_bytesps(
-                    "Sink Throughput(MB/s)",
-                    "The figure shows the number of bytes written each sink per second. For sinks with 'sink_decouple = true', please refer to the 'Sink Metrics' section",
+                    "Sink Executor Throughput (MB/s)",
+                    "The figure shows the number of bytes written SinkExecutor per second. For sinks with 'sink_decouple = true', please refer to the 'Sink Metrics' section",
                     [
                         panels.target(
                             f"(sum(rate({metric('stream_sink_input_bytes')}[$__rate_interval])) by (sink_id) * on(sink_id) group_left(sink_name) group({metric('sink_info')}) by (sink_id, sink_name)) / (1000*1000)",
                             "sink {{sink_id}} {{sink_name}}",
                         ),
-                    ],
-                ),
-                panels.timeseries_bytesps(
-                    "Sink Throughput(MB/s) per Partition",
-                    "The number of bytes streamed into each sink per second. For sinks with 'sink_decouple = true', please refer to the 'Sink Metrics' section",
-                    [
-                        panels.target(
+                        panels.target_hidden(
                             f"(sum(rate({metric('stream_sink_input_bytes')}[$__rate_interval])) by (sink_id, actor_id) * on(actor_id) group_left(sink_name) {metric('sink_info')}) / (1000*1000)",
                             "sink {{sink_id}} {{sink_name}} - actor {{actor_id}}",
                         ),
                     ],
                 ),
                 panels.timeseries_rowsps(
-                    "Materialized View Throughput(rows/s)",
+                    "Materialized View Throughput (rows/s)",
                     "The figure shows the number of rows written into each materialized view per second.",
                     [
                         panels.target(
                             f"sum(rate({table_metric('stream_mview_input_row_count')}[$__rate_interval])) by (table_id) * on(table_id) group_left(table_name) group({metric('table_info')}) by (table_id, table_name)",
                             "mview {{table_id}} {{table_name}}",
                         ),
-                    ],
-                ),
-                panels.timeseries_rowsps(
-                    "Materialized View Throughput(rows/s) per Partition",
-                    "The figure shows the number of rows written into each materialized view per second.",
-                    [
-                        panels.target(
+                        panels.target_hidden(
                             f"rate({table_metric('stream_mview_input_row_count')}[$__rate_interval]) * on(fragment_id, table_id) group_left(table_name) {metric('table_info')}",
                             "mview {{table_id}} {{table_name}} - actor {{actor_id}} fragment_id {{fragment_id}}",
                         ),
                     ],
                 ),
                 panels.timeseries_rowsps(
-                    "Backfill Snapshot Read Throughput(rows)",
-                    "Rows/sec that we read from the backfill snapshot",
-                    [
-                        panels.target(
-                            f"rate({table_metric('stream_backfill_snapshot_read_row_count')}[$__rate_interval])",
-                            "table_id={{table_id}} actor={{actor_id}} @ {{%s}}"
-                            % NODE_LABEL,
-                        ),
-                        panels.target(
-                            f"rate({table_metric('stream_snapshot_backfill_consume_snapshot_row_count')}[$__rate_interval])",
-                            "table_id={{table_id}} actor={{actor_id}} {{stage}} @ {{%s}}"
-                            % NODE_LABEL,
-                        ),
-                    ],
-                ),
-                panels.timeseries_rowsps(
-                    "Backfill Snapshot Read Throughput(rows) by MV",
+                    "Backfill Snapshot-Read Throughput (rows/s)",
                     "Rows/sec that we read from the backfill snapshot by materialized view",
                     [
                         panels.target(
@@ -1040,14 +1006,35 @@ def section_streaming(outer_panels):
                                 )
                             """,
                             "table_name={{table_name}} table_id={{table_id}}",
-                        )
+                        ),
+                        panels.target_hidden(
+                            f"rate({table_metric('stream_backfill_snapshot_read_row_count')}[$__rate_interval])",
+                            "table_id={{table_id}} actor={{actor_id}} @ {{%s}}"
+                            % NODE_LABEL,
+                        ),
+                        panels.target_hidden(
+                            f"rate({table_metric('stream_snapshot_backfill_consume_snapshot_row_count')}[$__rate_interval])",
+                            "table_id={{table_id}} actor={{actor_id}} {{stage}} @ {{%s}}"
+                            % NODE_LABEL,
+                        ),
                     ],
                 ),
                 panels.timeseries_rowsps(
-                    "Backfill Upstream Throughput(rows)",
+                    "Backfill Upstream Throughput (rows/s)",
                     "Total number of rows that have been output from the backfill upstream",
                     [
                         panels.target(
+                            f"""
+                                sum by (table_id) (
+                                  rate({metric('stream_backfill_upstream_output_row_count', node_filter_enabled=False, table_id_filter_enabled=True)}[$__rate_interval])
+                                )
+                                * on(table_id) group_left(table_name) (
+                                  group({metric('table_info', node_filter_enabled=False)}) by (table_name, table_id)
+                                )
+                            """,
+                            "table_name={{table_name}} table_id={{table_id}}",
+                        ),
+                        panels.target_hidden(
                             f"rate({table_metric('stream_backfill_upstream_output_row_count')}[$__rate_interval])",
                             "table_id={{table_id}} actor={{actor_id}} @ {{%s}}"
                             % NODE_LABEL,
@@ -1328,7 +1315,7 @@ def section_streaming_actors(outer_panels: Panels):
                             f"sum(rate({metric('stream_actor_out_record_cnt')}[$__rate_interval])) by (fragment_id)",
                             "fragment total {{fragment_id}}",
                         ),
-                        panels.target(
+                        panels.target_hidden(
                             f"rate({metric('stream_actor_out_record_cnt', actor_level_filter)}[$__rate_interval])",
                             "actor {{actor_id}}",
                         ),
@@ -1342,7 +1329,7 @@ def section_streaming_actors(outer_panels: Panels):
                             f"sum({metric('stream_memory_usage')}) by (table_id, desc)",
                             "table total {{table_id}}: {{desc}}",
                         ),
-                        panels.target(
+                        panels.target_hidden(
                             f"{metric('stream_memory_usage', actor_level_filter)}",
                             "actor {{actor_id}} table {{table_id}}: {{desc}}",
                         ),
@@ -1384,11 +1371,11 @@ def section_streaming_actors(outer_panels: Panels):
                             f"sum(rate({table_metric('stream_materialize_cache_total_count')}[$__rate_interval])) by (table_id, fragment_id)",
                             "total cached count - table {{table_id}} fragment {{fragment_id}}",
                         ),
-                        panels.target(
+                        panels.target_hidden(
                             f"rate({table_metric('stream_materialize_cache_hit_count', actor_level_filter)}[$__rate_interval])",
                             "cache hit count - actor {{actor_id}} table {{table_id}} fragment {{fragment_id}}",
                         ),
-                        panels.target(
+                        panels.target_hidden(
                             f"rate({table_metric('stream_materialize_cache_total_count', actor_level_filter)}[$__rate_interval])",
                             "total cached count - actor {{actor_id}} table {{table_id}} fragment {{fragment_id}}",
                         ),
@@ -1484,8 +1471,7 @@ def section_streaming_actors(outer_panels: Panels):
                         ),
                         panels.target(
                             f"1 - (sum(rate({metric('stream_materialize_cache_hit_count')}[$__rate_interval])) by (table_id, fragment_id) ) / (sum(rate({metric('stream_materialize_cache_total_count')}[$__rate_interval])) by (table_id, fragment_id)) >= 0",
-                            "Materialize executor cache miss ratio - table {{table_id}} fragment {{fragment_id}}  {{%s}}"
-                            % NODE_LABEL,
+                            "Materialize executor cache miss ratio - table {{table_id}} fragment {{fragment_id}}"
                         ),
                         panels.target(
                             f"(sum(rate({metric('stream_over_window_cache_miss_count')}[$__rate_interval])) by (table_id, fragment_id) ) / (sum(rate({metric('stream_over_window_cache_lookup_count')}[$__rate_interval])) by (table_id, fragment_id)) >= 0",
@@ -1512,7 +1498,7 @@ def section_streaming_actors(outer_panels: Panels):
                             / ignoring (wait_side, executor) group_left sum({metric('stream_actor_count')}) by (fragment_id)",
                             "fragment avg {{fragment_id}} {{wait_side}} {{executor}}",
                         ),
-                        panels.target(
+                        panels.target_hidden(
                             f"rate({metric('stream_barrier_align_duration_ns', actor_level_filter)}[$__rate_interval]) / 1000000000",
                             "actor {{actor_id}} fragment {{fragment_id}} {{wait_side}} {{executor}}",
                         ),
@@ -1744,7 +1730,7 @@ def section_streaming_actors(outer_panels: Panels):
                             f"sum(rate({metric('stream_executor_row_count')}[$__rate_interval])) by (executor_identity, fragment_id)",
                             "{{executor_identity}} fragment total {{fragment_id}}",
                         ),
-                        panels.target(
+                        panels.target_hidden(
                             f"rate({metric('stream_executor_row_count', actor_level_filter)}[$__rate_interval])",
                             "{{executor_identity}} actor {{actor_id}}",
                         ),
@@ -3967,12 +3953,12 @@ def section_iceberg_metrics(outer_panels):
         outer_panels.row_collapsed(
             "Iceberg Metrics",
             [
-                panels.timeseries_count(
+                panels.timeseries_ops(
                     "Write Qps Of Iceberg Writer",
                     "iceberg write qps",
                     [
                         panels.target(
-                            f"{metric('iceberg_write_qps')}",
+                            f"sum(rate({metric('iceberg_write_qps')}[$__rate_interval])) by (actor_id, sink_id, sink_name)",
                             "{{sink_id}} {{sink_name}} actor {{actor_id}}",
                         ),
                     ],
@@ -4183,8 +4169,8 @@ def section_sink_metrics(outer_panels):
                     "The rows sent by remote sink to the Java connector process",
                     [
                         panels.target(
-                            f"rate({metric('connector_sink_rows_received')}[$__rate_interval])",
-                            "{{sink_id}} {{sink_name}} @ actor {{actor_id}}",
+                            f"sum(rate({metric('connector_sink_rows_received')}[$__rate_interval])) by (sink_id, sink_name)",
+                            "{{sink_id}} {{sink_name}}",
                         ),
                     ],
                 ),
@@ -4661,6 +4647,113 @@ def section_udf(outer_panels):
         )
     ]
 
+def section_alert_overview(panels):
+    return [
+        panels.row("Alert Overview"),
+        panels.timeseries_count(
+            "Alerts",
+            """Alerts in the system group by type:
+            - Too Many Barriers: there are too many uncommitted barriers generated. This means the streaming graph is stuck or under heavy load. Check 'Barrier Latency' panel.
+            - Recovery Triggered: cluster recovery is triggered. Check 'Errors by Type' / 'Node Count' panels.
+            - Lagging Version: the checkpointed or pinned version id is lagging behind the current version id. Check 'Hummock Manager' section in dev dashboard.
+            - Lagging Compaction: there are too many ssts in L0. This can be caused by compactor failure or lag of compactor resource. Check 'Compaction' section in dev dashboard, and take care of the type of 'Commit Flush Bytes' and 'Compaction Throughput', whether the throughput is too low.
+            - Lagging Vacuum: there are too many stale files waiting to be cleaned. This can be caused by compactor failure or lag of compactor resource. Check 'Compaction' section in dev dashboard.
+            - Abnormal Meta Cache Memory: the meta cache memory usage is too large, exceeding the expected 10 percent.
+            - Abnormal Block Cache Memory: the block cache memory usage is too large, exceeding the expected 10 percent.
+            - Abnormal Uploading Memory Usage: uploading memory is more than 70 percent of the expected, and is about to spill.
+            - Write Stall: Compaction cannot keep up. Stall foreground write, Check 'Compaction' section in dev dashboard.
+            - Abnormal Version Size: the size of the version is too large, exceeding the expected 300MB. Check 'Hummock Manager' section in dev dashboard.
+            - Abnormal Delta Log Number: the number of delta logs is too large, exceeding the expected 5000. Check 'Hummock Manager' and `Compaction` section in dev dashboard and take care of the type of 'Compaction Success Count', whether the number of trivial-move tasks spiking.
+            - Abnormal Pending Event Number: the number of pending events is too large, exceeding the expected 10000000. Check 'Hummock Write' section in dev dashboard and take care of the 'Event handle latency', whether the time consumed exceeds the barrier latency.
+            - Abnormal Object Storage Failure: the number of object storage failures is too large, exceeding the expected 50. Check 'Object Storage' section in dev dashboard and take care of the 'Object Storage Failure Rate', whether the rate is too high.
+            """,
+            [
+                panels.target(
+                    f"{metric('all_barrier_nums')} >= bool 200",
+                    "Too Many Barriers {{database_id}}",
+                ),
+                panels.target(
+                    f"sum(rate({metric('recovery_latency_count')}[$__rate_interval])) > bool 0 + sum({metric('recovery_failure_cnt')}) > bool 0",
+                    "Recovery Triggered",
+                ),
+                panels.target(
+                    f"(({metric('storage_current_version_id')} - {metric('storage_checkpoint_version_id')}) >= bool 100) + "
+                    + f"(({metric('storage_current_version_id')} - {metric('storage_min_pinned_version_id')}) >= bool 100)",
+                    "Lagging Version",
+                ),
+                panels.target(
+                    f"sum(label_replace({metric('storage_level_total_file_size')}, 'L0', 'L0', 'level_index', '.*_L0') unless "
+                    + f"{metric('storage_level_total_file_size')}) by (L0) >= bool 52428800",
+                    "Lagging Compaction",
+                ),
+                panels.target(
+                    f"{metric('storage_stale_object_count')} >= bool 200",
+                    "Lagging Vacuum",
+                ),
+                panels.target(
+                    f"{metric('state_store_meta_cache_usage_ratio')} >= bool 1.1",
+                    "Abnormal Meta Cache Memory",
+                ),
+                panels.target(
+                    f"{metric('state_store_block_cache_usage_ratio')} >= bool 1.1",
+                    "Abnormal Block Cache Memory",
+                ),
+                panels.target(
+                    f"{metric('state_store_uploading_memory_usage_ratio')} >= bool 0.7",
+                    "Abnormal Uploading Memory Usage",
+                ),
+                panels.target(
+                    f"{metric('storage_write_stop_compaction_groups')} > bool 0",
+                    "Write Stall",
+                ),
+                panels.target(
+                    f"{metric('storage_version_size')} >= bool 314572800",
+                    "Abnormal Version Size",
+                ),
+                panels.target(
+                    f"{metric('storage_delta_log_count')} >= bool 5000",
+                    "Abnormal Delta Log Number",
+                ),
+                panels.target(
+                    f"{metric('state_store_event_handler_pending_event')} >= bool 10000000",
+                    "Abnormal Pending Event Number",
+                ),
+                panels.target(
+                    f"{metric('object_store_failure_count')} >= bool 50",
+                    "Abnormal Object Storage Failure",
+                ),
+            ],
+            ["last"],
+        ),
+        panels.timeseries_count(
+            "Errors",
+            "Errors in the system group by type",
+            [
+                panels.target(
+                    f"sum({metric('user_compute_error')}) by (error_type, executor_name, fragment_id)",
+                    "{{error_type}} @ {{executor_name}} (fragment_id={{fragment_id}})",
+                ),
+                panels.target(
+                    f"sum({metric('user_source_error')}) by (error_type, source_id, source_name, fragment_id)",
+                    "{{error_type}} @ {{source_name}} (source_id={{source_id}} fragment_id={{fragment_id}})",
+                ),
+                panels.target(
+                    f"sum({metric('user_sink_error')}) by (error_type, sink_id, sink_name, fragment_id)",
+                    "{{error_type}} @ {{sink_name}} (sink_id={{sink_id}} fragment_id={{fragment_id}})",
+                ),
+                panels.target(
+                    f"{metric('source_status_is_up')} == 0",
+                    "source error: source_id={{source_id}}, source_name={{source_name}} @ {{%s}}"
+                    % NODE_LABEL,
+                ),
+                panels.target(
+                    f"sum(rate({metric('object_store_failure_count')}[$__rate_interval])) by ({NODE_LABEL}, {COMPONENT_LABEL}, type)",
+                    "remote storage error {{type}}: {{%s}} @ {{%s}}"
+                    % (COMPONENT_LABEL, NODE_LABEL),
+                ),
+            ],
+        ),
+    ]
 
 templating_list = []
 if dynamic_source_enabled:
@@ -4840,5 +4933,6 @@ dashboard = Dashboard(
         *section_network_connection(panels),
         *section_iceberg_metrics(panels),
         *section_udf(panels),
+        *section_alert_overview(panels),
     ],
 ).auto_panel_ids()

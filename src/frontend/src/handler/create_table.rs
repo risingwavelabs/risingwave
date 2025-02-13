@@ -22,6 +22,7 @@ use either::Either;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
+use prost::Message as _;
 use risingwave_common::catalog::{
     CdcTableDesc, ColumnCatalog, ColumnDesc, ConflictBehavior, Engine, FieldLike, TableId,
     TableVersionId, DEFAULT_SCHEMA_NAME, INITIAL_TABLE_VERSION_ID, RISINGWAVE_ICEBERG_ROW_ID,
@@ -32,7 +33,6 @@ use risingwave_common::license::Feature;
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::types::DataType;
-use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_common::{bail, bail_not_implemented};
@@ -43,6 +43,8 @@ use risingwave_connector::source::cdc::external::{
     ExternalTableConfig, ExternalTableImpl, DATABASE_NAME_KEY, SCHEMA_NAME_KEY, TABLE_NAME_KEY,
 };
 use risingwave_connector::{source, WithOptionsSecResolved};
+use risingwave_pb::catalog::connection::Info as ConnectionInfo;
+use risingwave_pb::catalog::connection_params::ConnectionType;
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::{PbSource, PbTable, PbWebhookSourceInfo, Table, WatermarkDesc};
 use risingwave_pb::ddl_service::TableJobType;
@@ -54,22 +56,22 @@ use risingwave_pb::secret::secret_ref::PbRefAsType;
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_sqlparser::ast::{
-    CdcTableInfo, ColumnDef, ColumnOption, CompatibleFormatEncode, CreateSink, CreateSinkStatement,
-    CreateSourceStatement, DataType as AstDataType, ExplainOptions, Format, FormatEncodeOptions,
-    Ident, ObjectName, OnConflict, SecretRefAsType, SourceWatermark, Statement, TableConstraint,
-    WebhookSourceInfo, WithProperties,
+    CdcTableInfo, ColumnDef, ColumnOption, CompatibleFormatEncode, ConnectionRefValue, CreateSink,
+    CreateSinkStatement, CreateSourceStatement, DataType as AstDataType, ExplainOptions, Format,
+    FormatEncodeOptions, Ident, ObjectName, OnConflict, SecretRefAsType, SourceWatermark,
+    Statement, TableConstraint, WebhookSourceInfo, WithProperties,
 };
 use risingwave_sqlparser::parser::{IncludeOption, Parser};
 use thiserror_ext::AsReport;
 
-use super::create_source::{bind_columns_from_source, CreateSourceType};
+use super::create_source::{bind_columns_from_source, CreateSourceType, SqlColumnStrategy};
 use super::{create_sink, create_source, RwPgResponse};
 use crate::binder::{bind_data_type, bind_struct_field, Clause, SecureCompareContext};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::table_catalog::{TableVersion, ICEBERG_SINK_PREFIX, ICEBERG_SOURCE_PREFIX};
 use crate::catalog::{check_valid_column_name, ColumnId, DatabaseId, SchemaId};
-use crate::error::{ErrorCode, Result, RwError};
+use crate::error::{bail_bind_error, ErrorCode, Result, RwError};
 use crate::expr::{Expr, ExprImpl, ExprRewriter};
 use crate::handler::create_source::{
     bind_connector_props, bind_create_source_or_table_with_connector, bind_source_watermark,
@@ -179,7 +181,8 @@ fn ensure_column_options_supported(c: &ColumnDef) -> Result<()> {
     for option_def in &c.options {
         match option_def.option {
             ColumnOption::GeneratedColumns(_) => {}
-            ColumnOption::DefaultColumns(_) => {}
+            ColumnOption::DefaultValue(_) => {}
+            ColumnOption::DefaultValueInternal { .. } => {}
             ColumnOption::Unique { is_primary: true } => {}
             _ => bail_not_implemented!("column constraints \"{}\"", option_def),
         }
@@ -251,7 +254,7 @@ pub fn bind_sql_columns(column_defs: &[ColumnDef]) -> Result<Vec<ColumnCatalog>>
                 generated_or_default_column: None,
                 description: None,
                 additional_column: AdditionalColumn { column_type: None },
-                version: ColumnDescVersion::Pr13707,
+                version: ColumnDescVersion::LATEST,
                 system_column: None,
             },
             is_hidden: false,
@@ -323,12 +326,20 @@ pub fn bind_sql_column_constraints(
     binder.bind_columns_to_context(table_name.clone(), column_catalogs)?;
 
     for column in columns {
+        let Some(idx) = column_catalogs
+            .iter()
+            .position(|c| c.name() == column.name.real_value())
+        else {
+            // It's possible that we don't follow the user defined columns in SQL but take the
+            // ones resolved from the source, thus missing some columns. Simply ignore them.
+            continue;
+        };
+
         for option_def in column.options {
             match option_def.option {
                 ColumnOption::GeneratedColumns(expr) => {
                     binder.set_clause(Some(Clause::GeneratedColumn));
-                    let idx = binder
-                        .get_column_binding_index(table_name.clone(), &column.name.real_value())?;
+
                     let expr_impl = binder.bind_expr(expr).with_context(|| {
                         format!(
                             "fail to bind expression in generated column \"{}\"",
@@ -352,9 +363,7 @@ pub fn bind_sql_column_constraints(
                     );
                     binder.set_clause(None);
                 }
-                ColumnOption::DefaultColumns(expr) => {
-                    let idx = binder
-                        .get_column_binding_index(table_name.clone(), &column.name.real_value())?;
+                ColumnOption::DefaultValue(expr) => {
                     let expr_impl = binder
                         .bind_expr(expr)?
                         .cast_assign(column_catalogs[idx].data_type().clone())?;
@@ -388,6 +397,24 @@ pub fn bind_sql_column_constraints(
                         ))
                         .into());
                     }
+                }
+                ColumnOption::DefaultValueInternal { persisted, expr: _ } => {
+                    // When a `DEFAULT INTERNAL` is used internally for schema change, the persisted value
+                    // should already be set during purifcation. So if we encounter an empty value here, it
+                    // means the user has specified it explicitly in the SQL statement, typically by
+                    // directly copying the result of `SHOW CREATE TABLE` and executing it.
+                    if persisted.is_empty() {
+                        bail_bind_error!(
+                            "DEFAULT INTERNAL is only used for internal purposes, \
+                             please specify a concrete default value"
+                        );
+                    }
+
+                    let desc = DefaultColumnDesc::decode(&*persisted)
+                        .expect("failed to decode persisted `DefaultColumnDesc`");
+
+                    column_catalogs[idx].column_desc.generated_or_default_column =
+                        Some(GeneratedOrDefaultColumn::DefaultColumn(desc));
                 }
                 _ => {}
             }
@@ -505,6 +532,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
     mut col_id_gen: ColumnIdGenerator,
     include_column_options: IncludeOption,
     props: CreateTableProps,
+    sql_column_strategy: SqlColumnStrategy,
 ) -> Result<(PlanRef, Option<PbSource>, PbTable)> {
     if props.append_only
         && format_encode.format != Format::Plain
@@ -523,6 +551,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
     let db_name: &str = &session.database();
     let (schema_name, _) = Binder::resolve_schema_qualified_name(db_name, table_name.clone())?;
 
+    // TODO: omit this step if `sql_column_strategy` is `Follow`.
     let (columns_from_resolve_source, source_info) = bind_columns_from_source(
         session,
         &format_encode,
@@ -548,6 +577,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
         &mut col_id_gen,
         CreateSourceType::Table,
         rate_limit,
+        sql_column_strategy,
     )
     .await?;
 
@@ -1067,6 +1097,7 @@ pub(super) async fn handle_create_table_plan(
                 col_id_gen,
                 include_column_options,
                 props,
+                SqlColumnStrategy::FollowChecked,
             )
             .await?,
             TableJobType::General,
@@ -1097,6 +1128,8 @@ pub(super) async fn handle_create_table_plan(
 
             let session = &handler_args.session;
             let db_name = &session.database();
+            let user_name = &session.user_name();
+            let search_path = session.config().search_path();
             let (schema_name, resolved_table_name) =
                 Binder::resolve_schema_qualified_name(db_name, table_name.clone())?;
             let (database_id, schema_id) =
@@ -1108,12 +1141,12 @@ pub(super) async fn handle_create_table_plan(
 
             let source = {
                 let catalog_reader = session.env().catalog_reader().read_guard();
-                let schema_name = format_encode
-                    .clone()
-                    .unwrap_or(DEFAULT_SCHEMA_NAME.to_owned());
+                let schema_path =
+                    SchemaPath::new(format_encode.as_deref(), &search_path, user_name);
+
                 let (source, _) = catalog_reader.get_source_by_name(
                     db_name,
-                    SchemaPath::Name(schema_name.as_str()),
+                    schema_path,
                     source_name.as_str(),
                 )?;
                 source.clone()
@@ -1128,7 +1161,9 @@ pub(super) async fn handle_create_table_plan(
                 None => {
                     for column_def in &column_defs {
                         for option_def in &column_def.options {
-                            if let ColumnOption::DefaultColumns(_) = option_def.option {
+                            if let ColumnOption::DefaultValue(_)
+                            | ColumnOption::DefaultValueInternal { .. } = option_def.option
+                            {
                                 return Err(ErrorCode::NotSupported(
                                             "Default value for columns defined on the table created from a CDC source".into(),
                                             "Remove the default value expression in the column definitions".into(),
@@ -1139,29 +1174,34 @@ pub(super) async fn handle_create_table_plan(
                     }
 
                     let (mut columns, pk_names) =
-                        bind_cdc_table_schema(&column_defs, &constraints, None)?;
+                        bind_cdc_table_schema(&column_defs, &constraints)?;
                     // read default value definition from external db
                     let (options, secret_refs) = cdc_with_options.clone().into_parts();
                     let config = ExternalTableConfig::try_from_btreemap(options, secret_refs)
                         .context("failed to extract external table config")?;
 
-                    let table = ExternalTableImpl::connect(config)
+                    let table: ExternalTableImpl = ExternalTableImpl::connect(config)
                         .await
                         .context("failed to auto derive table schema")?;
-                    let external_columns: Vec<_> = table
+                    let external_columns: HashMap<&str, &ColumnDesc> = table
                         .column_descs()
                         .iter()
-                        .cloned()
-                        .map(|column_desc| ColumnCatalog {
-                            column_desc,
-                            is_hidden: false,
-                        })
+                        .map(|column_desc| (column_desc.name.as_str(), column_desc))
                         .collect();
-                    for (col, external_col) in
-                        columns.iter_mut().zip_eq_fast(external_columns.into_iter())
-                    {
+
+                    for col in &mut columns {
+                        let external_column_desc =
+                            *external_columns.get(col.name()).ok_or_else(|| {
+                                ErrorCode::ConnectorError(
+                                    format!(
+                                        "Column '{}' not found in the upstream database",
+                                        col.name()
+                                    )
+                                    .into(),
+                                )
+                            })?;
                         col.column_desc.generated_or_default_column =
-                            external_col.column_desc.generated_or_default_column;
+                            external_column_desc.generated_or_default_column.clone();
                     }
                     (columns, pk_names)
                 }
@@ -1299,25 +1339,9 @@ async fn bind_cdc_table_schema_externally(
 fn bind_cdc_table_schema(
     column_defs: &Vec<ColumnDef>,
     constraints: &Vec<TableConstraint>,
-    new_version_columns: Option<Vec<ColumnCatalog>>,
 ) -> Result<(Vec<ColumnCatalog>, Vec<String>)> {
-    let mut columns = bind_sql_columns(column_defs)?;
-    // If new_version_columns is provided, we are in the process of auto schema change.
-    // update the default value column since the default value column is not set in the
-    // column sql definition.
-    if let Some(new_version_columns) = new_version_columns {
-        for (col, new_version_col) in columns
-            .iter_mut()
-            .zip_eq_fast(new_version_columns.into_iter())
-        {
-            assert_eq!(col.name(), new_version_col.name());
-            col.column_desc.generated_or_default_column =
-                new_version_col.column_desc.generated_or_default_column;
-        }
-    }
-
+    let columns = bind_sql_columns(column_defs)?;
     let pk_names = bind_sql_pk_names(column_defs, bind_table_constraints(constraints)?)?;
-
     Ok((columns, pk_names))
 }
 
@@ -1430,7 +1454,10 @@ pub async fn create_iceberg_engine_table(
     constraints: Vec<TableConstraint>,
     table_name: ObjectName,
 ) -> Result<()> {
-    // 1. fetch iceberg engine options from the meta node.
+    risingwave_common::license::Feature::IcebergEngine
+        .check_available()
+        .map_err(|e| anyhow::anyhow!(e))?;
+    // 1. fetch iceberg engine options from the meta node. Or use iceberg engine connection provided by users.
     // 2. create a hummock table
     // 3. create an iceberg sink
     // 4. create an iceberg source
@@ -1440,51 +1467,6 @@ pub async fn create_iceberg_engine_table(
     let state_store_endpoint = system_params.state_store().to_owned();
     let data_directory = system_params.data_directory().to_owned();
     let meta_store_endpoint = meta_client.get_meta_store_endpoint().await?;
-
-    let (s3_region, s3_bucket, s3_endpoint, s3_ak, s3_sk) = match state_store_endpoint {
-        s3 if s3.starts_with("hummock+s3://") => {
-            let s3_region = if let Ok(s3_region) = std::env::var("AWS_REGION") {
-                s3_region
-            } else {
-                bail!("To create an iceberg engine table with s3 backend, AWS_REGION needed to be set");
-            };
-            (
-                s3_region,
-                s3.strip_prefix("hummock+s3://").unwrap().to_owned(),
-                None,
-                None,
-                None,
-            )
-        }
-        minio if minio.starts_with("hummock+minio://") => {
-            let server = minio.strip_prefix("hummock+minio://").unwrap();
-            let (access_key_id, rest) = server.split_once(':').unwrap();
-            let (secret_access_key, mut rest) = rest.split_once('@').unwrap();
-            let endpoint_prefix = if let Some(rest_stripped) = rest.strip_prefix("https://") {
-                rest = rest_stripped;
-                "https://"
-            } else if let Some(rest_stripped) = rest.strip_prefix("http://") {
-                rest = rest_stripped;
-                "http://"
-            } else {
-                "http://"
-            };
-            let (address, bucket) = rest.split_once('/').unwrap();
-            (
-                "us-east-1".to_owned(),
-                bucket.to_owned(),
-                Some(format!("{}{}", endpoint_prefix, address)),
-                Some(access_key_id.to_owned()),
-                Some(secret_access_key.to_owned()),
-            )
-        }
-        _ => {
-            bail!(
-                "iceberg engine can't operate with this state store endpoint: {}",
-                state_store_endpoint
-            );
-        }
-    };
 
     let meta_store_endpoint = url::Url::parse(&meta_store_endpoint).map_err(|_| {
         ErrorCode::InternalError("failed to parse the meta store endpoint".to_owned())
@@ -1515,6 +1497,31 @@ pub async fn create_iceberg_engine_table(
         bail!("failed to parse meta backend: {}", meta_store_backend);
     };
 
+    let catalog_uri = match meta_backend {
+        MetaBackend::Postgres => {
+            format!(
+                "jdbc:postgresql://{}:{}/{}",
+                meta_store_host.clone(),
+                meta_store_port.clone(),
+                meta_store_database.clone()
+            )
+        }
+        MetaBackend::Mysql => {
+            format!(
+                "jdbc:mysql://{}:{}/{}",
+                meta_store_host.clone(),
+                meta_store_port.clone(),
+                meta_store_database.clone()
+            )
+        }
+        MetaBackend::Sqlite | MetaBackend::Sql | MetaBackend::Mem => {
+            bail!(
+                "Unsupported meta backend for iceberg engine table: {}",
+                meta_store_backend
+            );
+        }
+    };
+
     let rw_db_name = session
         .env()
         .catalog_reader()
@@ -1532,6 +1539,132 @@ pub async fn create_iceberg_engine_table(
     let iceberg_catalog_name = rw_db_name.clone();
     let iceberg_database_name = rw_schema_name.clone();
     let iceberg_table_name = table_name.0.last().unwrap().real_value();
+
+    let iceberg_engine_connection: String = session.config().iceberg_engine_connection();
+
+    let mut connection_ref = BTreeMap::new();
+    let with_common = if iceberg_engine_connection.is_empty() {
+        #[allow(dead_code)]
+        {
+            let (s3_region, s3_endpoint, s3_ak, s3_sk, warehouse_path) = match state_store_endpoint
+            {
+                s3 if s3.starts_with("hummock+s3://") => {
+                    let s3_region = if let Ok(s3_region) = std::env::var("AWS_REGION") {
+                        s3_region
+                    } else {
+                        bail!("To create an iceberg engine table with s3 backend, AWS_REGION needed to be set");
+                    };
+                    let s3_bucket = s3.strip_prefix("hummock+s3://").unwrap().to_owned();
+                    (
+                        Some(s3_region),
+                        None,
+                        None,
+                        None,
+                        Some(format!(
+                            "s3://{}/{}/iceberg/{}",
+                            s3_bucket, data_directory, iceberg_catalog_name
+                        )),
+                    )
+                }
+                minio if minio.starts_with("hummock+minio://") => {
+                    let server = minio.strip_prefix("hummock+minio://").unwrap();
+                    let (access_key_id, rest) = server.split_once(':').unwrap();
+                    let (secret_access_key, mut rest) = rest.split_once('@').unwrap();
+                    let endpoint_prefix = if let Some(rest_stripped) = rest.strip_prefix("https://")
+                    {
+                        rest = rest_stripped;
+                        "https://"
+                    } else if let Some(rest_stripped) = rest.strip_prefix("http://") {
+                        rest = rest_stripped;
+                        "http://"
+                    } else {
+                        "http://"
+                    };
+                    let (address, s3_bucket) = rest.split_once('/').unwrap();
+                    (
+                        Some("us-east-1".to_owned()),
+                        Some(format!("{}{}", endpoint_prefix, address)),
+                        Some(access_key_id.to_owned()),
+                        Some(secret_access_key.to_owned()),
+                        Some(format!(
+                            "s3://{}/{}/iceberg/{}",
+                            s3_bucket, data_directory, iceberg_catalog_name
+                        )),
+                    )
+                }
+                _ => {
+                    bail!(
+                        "iceberg engine can't operate with this state store endpoint: {}",
+                        state_store_endpoint
+                    );
+                }
+            };
+
+            let mut with_common = BTreeMap::new();
+            with_common.insert("enable_config_load".to_owned(), "true".to_owned());
+            with_common.insert("connector".to_owned(), "iceberg".to_owned());
+            with_common.insert("catalog.type".to_owned(), "jdbc".to_owned());
+            if let Some(warehouse_path) = warehouse_path.clone() {
+                with_common.insert("warehouse.path".to_owned(), warehouse_path.to_owned());
+            }
+            if let Some(s3_endpoint) = s3_endpoint.clone() {
+                with_common.insert("s3.endpoint".to_owned(), s3_endpoint);
+            }
+            if let Some(s3_ak) = s3_ak.clone() {
+                with_common.insert("s3.access.key".to_owned(), s3_ak.to_owned());
+            }
+            if let Some(s3_sk) = s3_sk.clone() {
+                with_common.insert("s3.secret.key".to_owned(), s3_sk.to_owned());
+            }
+            if let Some(s3_region) = s3_region.clone() {
+                with_common.insert("s3.region".to_owned(), s3_region.to_owned());
+            }
+            with_common.insert("catalog.uri".to_owned(), catalog_uri.to_owned());
+            with_common.insert("catalog.jdbc.user".to_owned(), meta_store_user.to_owned());
+            with_common.insert(
+                "catalog.jdbc.password".to_owned(),
+                meta_store_password.clone(),
+            );
+            with_common.insert("catalog.name".to_owned(), iceberg_catalog_name.to_owned());
+            with_common.insert("database.name".to_owned(), iceberg_database_name.to_owned());
+            with_common.insert("table.name".to_owned(), iceberg_table_name.to_owned());
+        }
+        bail!("to use iceberg engine table, the variable `iceberg_engine_connection` must be set.");
+    } else {
+        let parts: Vec<&str> = iceberg_engine_connection.split('.').collect();
+        assert_eq!(parts.len(), 2);
+        let connection_catalog =
+            session.get_connection_by_name(Some(parts[0].to_owned()), parts[1])?;
+        if let ConnectionInfo::ConnectionParams(params) = &connection_catalog.info {
+            if params.connection_type == ConnectionType::Iceberg as i32 {
+                // With iceberg engine connection:
+                connection_ref.insert(
+                    "connection".to_owned(),
+                    ConnectionRefValue {
+                        connection_name: ObjectName::from(vec![
+                            Ident::from(parts[0]),
+                            Ident::from(parts[1]),
+                        ]),
+                    },
+                );
+
+                let mut with_common = BTreeMap::new();
+                with_common.insert("connector".to_owned(), "iceberg".to_owned());
+                with_common.insert("database.name".to_owned(), iceberg_database_name.to_owned());
+                with_common.insert("table.name".to_owned(), iceberg_table_name.to_owned());
+                with_common
+            } else {
+                return Err(RwError::from(ErrorCode::InvalidParameterValue(
+                    "Only iceberg connection could be used in iceberg engine".to_owned(),
+                )));
+            }
+        } else {
+            return Err(RwError::from(ErrorCode::InvalidParameterValue(
+                "Private Link Service has been deprecated. Please create a new connection instead."
+                    .to_owned(),
+            )));
+        }
+    };
 
     // Iceberg sinks require a primary key, if none is provided, we will use the _row_id column
     // Fetch primary key from columns
@@ -1587,7 +1720,6 @@ pub async fn create_iceberg_engine_table(
         CreateSink::From(table_name.clone())
     };
 
-    let with_properties = WithProperties(vec![]);
     let mut sink_name = table_name.clone();
     *sink_name.0.last_mut().unwrap() = Ident::from(
         (ICEBERG_SINK_PREFIX.to_owned() + &sink_name.0.last().unwrap().real_value()).as_str(),
@@ -1595,7 +1727,7 @@ pub async fn create_iceberg_engine_table(
     let create_sink_stmt = CreateSinkStatement {
         if_not_exists: false,
         sink_name,
-        with_properties,
+        with_properties: WithProperties(vec![]),
         sink_from,
         columns: vec![],
         emit_mode: None,
@@ -1603,63 +1735,13 @@ pub async fn create_iceberg_engine_table(
         into_table_name: None,
     };
 
-    let catalog_uri = match meta_backend {
-        MetaBackend::Postgres => {
-            format!(
-                "jdbc:postgresql://{}:{}/{}",
-                meta_store_host.clone(),
-                meta_store_port.clone(),
-                meta_store_database.clone()
-            )
-        }
-        MetaBackend::Mysql => {
-            format!(
-                "jdbc:mysql://{}:{}/{}",
-                meta_store_host.clone(),
-                meta_store_port.clone(),
-                meta_store_database.clone()
-            )
-        }
-        MetaBackend::Sqlite | MetaBackend::Sql | MetaBackend::Mem => {
-            bail!(
-                "Unsupported meta backend for iceberg engine table: {}",
-                meta_store_backend
-            );
-        }
-    };
-
-    let warehouse_path = format!(
-        "s3://{}/{}/iceberg/{}",
-        s3_bucket, data_directory, iceberg_catalog_name
-    );
-
     let mut sink_handler_args = handler_args.clone();
-    let mut with = BTreeMap::new();
-    with.insert("connector".to_owned(), "iceberg".to_owned());
 
-    with.insert("primary_key".to_owned(), pks.join(","));
-    with.insert("type".to_owned(), "upsert".to_owned());
-    with.insert("catalog.type".to_owned(), "jdbc".to_owned());
-    with.insert("warehouse.path".to_owned(), warehouse_path.clone());
-    if let Some(s3_endpoint) = s3_endpoint.clone() {
-        with.insert("s3.endpoint".to_owned(), s3_endpoint);
-    }
-    if let Some(s3_ak) = s3_ak.clone() {
-        with.insert("s3.access.key".to_owned(), s3_ak.clone());
-    }
-    if let Some(s3_sk) = s3_sk.clone() {
-        with.insert("s3.secret.key".to_owned(), s3_sk.clone());
-    }
-    with.insert("s3.region".to_owned(), s3_region.clone());
-    with.insert("catalog.uri".to_owned(), catalog_uri.clone());
-    with.insert("catalog.jdbc.user".to_owned(), meta_store_user.clone());
-    with.insert(
-        "catalog.jdbc.password".to_owned(),
-        meta_store_password.clone(),
-    );
-    with.insert("catalog.name".to_owned(), iceberg_catalog_name.clone());
-    with.insert("database.name".to_owned(), iceberg_database_name.clone());
-    with.insert("table.name".to_owned(), iceberg_table_name.clone());
+    let mut sink_with = with_common.clone();
+
+    sink_with.insert("primary_key".to_owned(), pks.join(","));
+    sink_with.insert("type".to_owned(), "upsert".to_owned());
+
     let commit_checkpoint_interval = handler_args
         .with_options
         .get(COMMIT_CHECKPOINT_INTERVAL)
@@ -1686,13 +1768,14 @@ pub async fn create_iceberg_engine_table(
         bail!("config conflict: `commit_checkpoint_interval` larger than 1 means that sink decouple must be enabled, but session config sink_decouple is disabled")
     }
 
-    with.insert(
+    sink_with.insert(
         COMMIT_CHECKPOINT_INTERVAL.to_owned(),
         commit_checkpoint_interval.to_string(),
     );
-    with.insert("create_table_if_not_exists".to_owned(), "true".to_owned());
-    with.insert("enable_config_load".to_owned(), "true".to_owned());
-    sink_handler_args.with_options = WithOptions::new_with_options(with);
+    sink_with.insert("create_table_if_not_exists".to_owned(), "true".to_owned());
+
+    sink_handler_args.with_options =
+        WithOptions::new(sink_with, Default::default(), connection_ref.clone());
 
     let mut source_name = table_name.clone();
     *source_name.0.last_mut().unwrap() = Ident::from(
@@ -1712,31 +1795,9 @@ pub async fn create_iceberg_engine_table(
     };
 
     let mut source_handler_args = handler_args.clone();
-    let mut with = BTreeMap::new();
-    with.insert("connector".to_owned(), "iceberg".to_owned());
-    with.insert("catalog.type".to_owned(), "jdbc".to_owned());
-    with.insert("warehouse.path".to_owned(), warehouse_path.clone());
-    if let Some(s3_endpoint) = s3_endpoint {
-        with.insert("s3.endpoint".to_owned(), s3_endpoint.clone());
-    }
-    if let Some(s3_ak) = s3_ak.clone() {
-        with.insert("s3.access.key".to_owned(), s3_ak.clone());
-    }
-    if let Some(s3_sk) = s3_sk.clone() {
-        with.insert("s3.secret.key".to_owned(), s3_sk.clone());
-    }
-    with.insert("s3.region".to_owned(), s3_region.clone());
-    with.insert("catalog.uri".to_owned(), catalog_uri.clone());
-    with.insert("catalog.jdbc.user".to_owned(), meta_store_user.clone());
-    with.insert(
-        "catalog.jdbc.password".to_owned(),
-        meta_store_password.clone(),
-    );
-    with.insert("catalog.name".to_owned(), iceberg_catalog_name.clone());
-    with.insert("database.name".to_owned(), iceberg_database_name.clone());
-    with.insert("table.name".to_owned(), iceberg_table_name.clone());
-    with.insert("enable_config_load".to_owned(), "true".to_owned());
-    source_handler_args.with_options = WithOptions::new_with_options(with);
+    let source_with = with_common;
+    source_handler_args.with_options =
+        WithOptions::new(source_with, Default::default(), connection_ref);
 
     // before we create the table, ensure the JVM is initialized as we use jdbc catalog right now.
     // If JVM isn't initialized successfully, current not atomic ddl will result in a partially created iceberg engine table.
@@ -1795,9 +1856,9 @@ pub async fn generate_stream_graph_for_replace_table(
     on_conflict: Option<OnConflict>,
     with_version_column: Option<String>,
     cdc_table_info: Option<CdcTableInfo>,
-    new_version_columns: Option<Vec<ColumnCatalog>>,
     include_column_options: IncludeOption,
     engine: Engine,
+    sql_column_strategy: SqlColumnStrategy,
 ) -> Result<(StreamFragmentGraph, Table, Option<PbSource>, TableJobType)> {
     use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 
@@ -1824,6 +1885,7 @@ pub async fn generate_stream_graph_for_replace_table(
                 col_id_gen,
                 include_column_options,
                 props,
+                sql_column_strategy,
             )
             .await?,
             TableJobType::General,
@@ -1851,8 +1913,7 @@ pub async fn generate_stream_graph_for_replace_table(
                 cdc_table.external_table_name.clone(),
             )?;
 
-            let (columns, pk_names) =
-                bind_cdc_table_schema(&column_defs, &constraints, new_version_columns)?;
+            let (columns, pk_names) = bind_cdc_table_schema(&column_defs, &constraints)?;
 
             let context: OptimizerContextRef =
                 OptimizerContext::new(handler_args, ExplainOptions::default()).into();

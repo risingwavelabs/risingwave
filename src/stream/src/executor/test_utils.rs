@@ -484,7 +484,7 @@ pub mod agg_executor {
         };
 
         let exec = HashAggExecutor::<SerializedKey, S>::new(AggExecutorArgs {
-            version: PbAggNodeVersion::Max,
+            version: PbAggNodeVersion::LATEST,
 
             input,
             actor_ctx: ActorContext::for_test(123),
@@ -552,7 +552,7 @@ pub mod agg_executor {
         };
 
         let exec = SimpleAggExecutor::new(AggExecutorArgs {
-            version: PbAggNodeVersion::Max,
+            version: PbAggNodeVersion::LATEST,
 
             input,
             actor_ctx,
@@ -756,10 +756,15 @@ pub mod hash_join_executor {
         let params_l = JoinParams::new(vec![0], vec![1]);
         let params_r = JoinParams::new(vec![0], vec![1]);
 
+        let cache_size = match workload {
+            HashJoinWorkload::InCache => Some(1_000_000),
+            HashJoinWorkload::NotInCache => None,
+        };
+
         match join_type {
             JoinType::Inner => {
                 let executor =
-                    HashJoinExecutor::<Key128, MemoryStateStore, { ConstJoinType::Inner }>::new(
+                    HashJoinExecutor::<Key128, MemoryStateStore, { ConstJoinType::Inner }>::new_with_cache_size(
                         ActorContext::for_test(123),
                         info,
                         source_l,
@@ -779,6 +784,7 @@ pub mod hash_join_executor {
                         Arc::new(StreamingMetrics::unused()),
                         1024, // chunk_size
                         2048, // high_join_amplification_threshold
+                        cache_size,
                     );
                 (tx_l, tx_r, executor.boxed().execute())
             }
@@ -787,7 +793,7 @@ pub mod hash_join_executor {
                     Key128,
                     MemoryStateStore,
                     { ConstJoinType::LeftOuter },
-                >::new(
+                >::new_with_cache_size(
                     ActorContext::for_test(123),
                     info,
                     source_l,
@@ -807,6 +813,7 @@ pub mod hash_join_executor {
                     Arc::new(StreamingMetrics::unused()),
                     1024, // chunk_size
                     2048, // high_join_amplification_threshold
+                    cache_size,
                 );
                 (tx_l, tx_r, executor.boxed().execute())
             }

@@ -17,9 +17,10 @@ use std::ffi::CStr;
 use std::io::{Error, ErrorKind, IoSlice, Result, Write};
 
 use anyhow::anyhow;
-use byteorder::{BigEndian, ByteOrder, NetworkEndian};
+use byteorder::{BigEndian, ByteOrder};
 /// Part of code learned from <https://github.com/zenithdb/zenith/blob/main/zenith_utils/src/pq_proto.rs>.
 use bytes::{Buf, BufMut, Bytes, BytesMut};
+use peekable::tokio::AsyncPeekable;
 use tokio::io::{AsyncRead, AsyncReadExt};
 
 use crate::error_or_notice::ErrorOrNoticeMessage;
@@ -297,31 +298,18 @@ impl FeMessage {
 impl FeStartupMessage {
     /// Read startup message from the stream.
     pub async fn read(stream: &mut (impl AsyncRead + Unpin)) -> Result<FeMessage> {
-        let mut buffer1 = vec![0; 1];
-        let result = stream.read_exact(&mut buffer1).await;
-        let filled1 = match result {
-            Ok(n) => n,
-            Err(err) => {
-                // Detect whether it is a health check.
-                if err.kind() == ErrorKind::UnexpectedEof {
-                    return Ok(FeMessage::HealthCheck);
-                } else {
-                    return Err(err);
-                }
+        let mut stream = AsyncPeekable::new(stream);
+
+        if let Err(err) = stream.peek_exact(&mut [0; 1]).await {
+            // If the stream is empty, it can be a health check. Do not return error.
+            if err.kind() == ErrorKind::UnexpectedEof {
+                return Ok(FeMessage::HealthCheck);
+            } else {
+                return Err(err);
             }
-        };
-        assert_eq!(filled1, 1);
+        }
 
-        let mut buffer2 = vec![0; 3];
-        let filled2 = stream.read_exact(&mut buffer2).await?;
-        assert_eq!(filled2, 3);
-
-        let mut buffer3 = BytesMut::with_capacity(4);
-        buffer3.put_slice(&buffer1);
-        buffer3.put_slice(&buffer2);
-
-        let len = NetworkEndian::read_i32(&buffer3);
-
+        let len = stream.read_i32().await?;
         let protocol_num = stream.read_i32().await?;
         let payload_len = (len - 8) as usize;
         if payload_len >= isize::MAX as usize {

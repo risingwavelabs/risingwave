@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -26,22 +26,19 @@ use risingwave_pb::catalog::{Source, Table};
 use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{ProjectNode, StreamFragmentGraph};
-use risingwave_sqlparser::ast::{
-    AlterTableOperation, ColumnDef, ColumnOption, Ident, ObjectName, Statement, TableConstraint,
-};
+use risingwave_sqlparser::ast::{AlterTableOperation, ColumnOption, ObjectName, Statement};
 
-use super::create_source::schema_has_schema_registry;
+use super::create_source::SqlColumnStrategy;
 use super::create_table::{generate_stream_graph_for_replace_table, ColumnIdGenerator};
 use super::util::SourceSchemaCompatExt;
 use super::{HandlerArgs, RwPgResponse};
+use crate::catalog::purify::try_purify_table_source_create_sql_ast;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::table_catalog::TableType;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{Expr, ExprImpl, InputRef, Literal};
 use crate::handler::create_sink::{fetch_incoming_sinks, insert_merger_to_union_with_project};
-use crate::handler::create_table::bind_table_constraints;
 use crate::session::SessionImpl;
-use crate::utils::data_type::DataTypeToAst;
 use crate::{Binder, TableCatalog};
 
 /// Used in auto schema change process
@@ -52,63 +49,40 @@ pub async fn get_new_table_definition_for_cdc_table(
 ) -> Result<(Statement, Arc<TableCatalog>)> {
     let original_catalog = fetch_table_catalog_for_alter(session.as_ref(), &table_name)?;
 
-    // Retrieve the original table definition and parse it to AST.
+    assert_eq!(
+        original_catalog.row_id_index, None,
+        "primary key of cdc table must be user defined"
+    );
+
+    // Retrieve the original table definition.
     let mut definition = original_catalog.create_sql_ast()?;
 
-    let Statement::CreateTable {
-        columns: original_columns,
-        format_encode,
-        constraints,
-        ..
-    } = &mut definition
-    else {
-        panic!("unexpected statement: {:?}", definition);
-    };
+    // Clear the original columns field, so that we'll follow `new_columns` to generate a
+    // purified definition.
+    {
+        let Statement::CreateTable {
+            columns,
+            constraints,
+            ..
+        } = &mut definition
+        else {
+            panic!("unexpected statement: {:?}", definition);
+        };
 
-    assert!(
-        format_encode.is_none(),
-        "source schema should be None for CDC table"
-    );
-
-    if bind_table_constraints(constraints)?.is_empty() {
-        // For table created by `create table t (*)` the constraint is empty, we need to
-        // retrieve primary key names from original table catalog if available
-        let pk_names: Vec<_> = original_catalog
-            .pk
-            .iter()
-            .map(|x| original_catalog.columns[x.column_index].name().to_owned())
-            .collect();
-
-        constraints.push(TableConstraint::Unique {
-            name: None,
-            columns: pk_names.iter().map(Ident::new_unchecked).collect(),
-            is_primary: true,
-        });
+        columns.clear();
+        constraints.clear();
     }
 
-    let orig_column_catalog: HashMap<String, ColumnCatalog> = HashMap::from_iter(
-        original_catalog
-            .columns()
-            .iter()
-            .map(|col| (col.name().to_owned(), col.clone())),
-    );
+    let new_definition = try_purify_table_source_create_sql_ast(
+        definition,
+        new_columns,
+        None,
+        // The IDs of `new_columns` may not be consistently maintained at this point.
+        // So we use the column names to identify the primary key columns.
+        &original_catalog.pk_column_names(),
+    )?;
 
-    // update the original columns with new version columns
-    let mut new_column_defs = vec![];
-    for new_col in new_columns {
-        // if the column exists in the original catalog, use it to construct the column definition.
-        // since we don't support altering the column type right now
-        if let Some(original_col) = orig_column_catalog.get(new_col.name()) {
-            let ty = original_col.data_type().to_ast();
-            new_column_defs.push(ColumnDef::new(original_col.name().into(), ty, None, vec![]));
-        } else {
-            let ty = new_col.data_type().to_ast();
-            new_column_defs.push(ColumnDef::new(new_col.name().into(), ty, None, vec![]));
-        }
-    }
-    *original_columns = new_column_defs;
-
-    Ok((definition, original_catalog))
+    Ok((new_definition, original_catalog))
 }
 
 pub async fn get_replace_table_plan(
@@ -116,7 +90,7 @@ pub async fn get_replace_table_plan(
     table_name: ObjectName,
     new_definition: Statement,
     old_catalog: &Arc<TableCatalog>,
-    new_version_columns: Option<Vec<ColumnCatalog>>, // only provided in auto schema change
+    sql_column_strategy: SqlColumnStrategy,
 ) -> Result<(
     Option<Source>,
     Table,
@@ -169,9 +143,9 @@ pub async fn get_replace_table_plan(
         on_conflict,
         with_version_column,
         cdc_table_info,
-        new_version_columns,
         include_column_options,
         engine,
+        sql_column_strategy,
     )
     .await?;
 
@@ -285,39 +259,10 @@ pub async fn handle_alter_table_column(
     }
 
     // Retrieve the original table definition and parse it to AST.
-    let mut definition = original_catalog.create_sql_ast()?;
-    let Statement::CreateTable {
-        columns,
-        format_encode,
-        ..
-    } = &mut definition
-    else {
+    let mut definition = original_catalog.create_sql_ast_purified()?;
+    let Statement::CreateTable { columns, .. } = &mut definition else {
         panic!("unexpected statement: {:?}", definition);
     };
-
-    let format_encode = format_encode
-        .clone()
-        .map(|format_encode| format_encode.into_v2_with_warning());
-
-    let fail_if_has_schema_registry = || {
-        if let Some(format_encode) = &format_encode
-            && schema_has_schema_registry(format_encode)
-        {
-            Err(ErrorCode::NotSupported(
-                "alter table with schema registry".to_owned(),
-                "try `ALTER TABLE .. FORMAT .. ENCODE .. (...)` instead".to_owned(),
-            ))
-        } else {
-            Ok(())
-        }
-    };
-
-    if columns.is_empty() {
-        Err(ErrorCode::NotSupported(
-            "alter a table with empty column definitions".to_owned(),
-            "Please recreate the table with column definitions.".to_owned(),
-        ))?
-    }
 
     if !original_catalog.incoming_sinks.is_empty()
         && matches!(operation, AlterTableOperation::DropColumn { .. })
@@ -327,12 +272,27 @@ pub async fn handle_alter_table_column(
         ))?;
     }
 
-    match operation {
+    // The `sql_column_strategy` will be `FollowChecked` if the operation is `AddColumn`, and
+    // `FollowUnchecked` if the operation is `DropColumn`.
+    //
+    // Consider the following example:
+    // - There was a column `foo` and a generated column `gen` that references `foo`.
+    // - The external schema is updated to remove `foo`.
+    // - The user tries to drop `foo` from the table.
+    //
+    // Dropping `foo` directly will fail because `gen` references `foo`. However, dropping `gen`
+    // first will also be rejected because `foo` does not exist any more. Also, executing
+    // `REFRESH SCHEMA` will not help because it keeps the generated column. The user gets stuck.
+    //
+    // `FollowUnchecked` workarounds this issue. There are also some alternatives:
+    // - Allow dropping multiple columns at once.
+    // - Check against the persisted schema, instead of resolving again.
+    //
+    // Applied only to tables with schema registry.
+    let sql_column_strategy = match operation {
         AlterTableOperation::AddColumn {
             column_def: new_column,
         } => {
-            fail_if_has_schema_registry()?;
-
             // Duplicated names can actually be checked by `StreamMaterialize`. We do here for
             // better error reporting.
             let new_column_name = new_column.name.real_value();
@@ -357,6 +317,8 @@ pub async fn handle_alter_table_column(
 
             // Add the new column to the table definition if it is not created by `create table (*)` syntax.
             columns.push(new_column);
+
+            SqlColumnStrategy::FollowChecked
         }
 
         AlterTableOperation::DropColumn {
@@ -370,10 +332,6 @@ pub async fn handle_alter_table_column(
 
             // Check if the column to drop is referenced by any generated columns.
             for column in original_catalog.columns() {
-                if column_name.real_value() == column.name() && !column.is_generated() {
-                    fail_if_has_schema_registry()?;
-                }
-
                 if let Some(expr) = column.generated_expr() {
                     let expr = ExprImpl::from_expr_proto(expr)?;
                     let refs = expr.collect_input_refs(original_catalog.columns().len());
@@ -413,13 +371,20 @@ pub async fn handle_alter_table_column(
                     column_name, table_name
                 )))?
             }
+
+            SqlColumnStrategy::FollowUnchecked
         }
 
         _ => unreachable!(),
     };
-
-    let (source, table, graph, col_index_mapping, job_type) =
-        get_replace_table_plan(&session, table_name, definition, &original_catalog, None).await?;
+    let (source, table, graph, col_index_mapping, job_type) = get_replace_table_plan(
+        &session,
+        table_name,
+        definition,
+        &original_catalog,
+        sql_column_strategy,
+    )
+    .await?;
 
     let catalog_writer = session.catalog_writer()?;
 

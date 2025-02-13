@@ -31,6 +31,7 @@ use risingwave_pb::stream_service::barrier_complete_response::{
     PbCreateMviewProgress, PbLocalSstableInfo,
 };
 use risingwave_rpc_client::error::{ToTonicStatus, TonicStatusWrapper};
+use risingwave_storage::store_impl::AsHummock;
 use thiserror_ext::AsReport;
 use tokio::select;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
@@ -625,7 +626,7 @@ mod await_epoch_completed_future {
 
 use await_epoch_completed_future::*;
 use risingwave_common::catalog::{DatabaseId, TableId};
-use risingwave_storage::StateStoreImpl;
+use risingwave_storage::{dispatch_state_store, StateStoreImpl};
 
 fn sync_epoch(
     state_store: &StateStoreImpl,
@@ -634,14 +635,14 @@ fn sync_epoch(
     table_ids: HashSet<TableId>,
 ) -> BoxFuture<'static, StreamResult<SyncResult>> {
     let timer = streaming_metrics.barrier_sync_latency.start_timer();
-    let hummock = state_store.as_hummock().cloned();
+
+    let state_store = state_store.clone();
     let future = async move {
-        if let Some(hummock) = hummock {
+        dispatch_state_store!(state_store, hummock, {
             hummock.sync(vec![(prev_epoch, table_ids)]).await
-        } else {
-            Ok(SyncResult::default())
-        }
+        })
     };
+
     future
         .instrument_await(format!("sync_epoch (epoch {})", prev_epoch))
         .inspect_ok(move |_| {

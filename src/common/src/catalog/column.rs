@@ -137,7 +137,7 @@ impl ColumnDesc {
             generated_or_default_column: None,
             description: None,
             additional_column: AdditionalColumn { column_type: None },
-            version: ColumnDescVersion::Pr13707,
+            version: ColumnDescVersion::LATEST,
             system_column: None,
         }
     }
@@ -152,7 +152,7 @@ impl ColumnDesc {
             generated_or_default_column: None,
             description: None,
             additional_column: AdditionalColumn { column_type: None },
-            version: ColumnDescVersion::Pr13707,
+            version: ColumnDescVersion::LATEST,
             system_column: None,
         }
     }
@@ -193,7 +193,7 @@ impl ColumnDesc {
             generated_or_default_column: None,
             description: None,
             additional_column: additional_column_type,
-            version: ColumnDescVersion::Pr13707,
+            version: ColumnDescVersion::LATEST,
             system_column: None,
         }
     }
@@ -213,7 +213,7 @@ impl ColumnDesc {
             generated_or_default_column: None,
             description: None,
             additional_column: AdditionalColumn { column_type: None },
-            version: ColumnDescVersion::Pr13707,
+            version: ColumnDescVersion::LATEST,
             system_column: Some(system_column),
         }
     }
@@ -263,7 +263,7 @@ impl ColumnDesc {
             generated_or_default_column: None,
             description: None,
             additional_column: AdditionalColumn { column_type: None },
-            version: ColumnDescVersion::Pr13707,
+            version: ColumnDescVersion::LATEST,
             system_column: None,
         }
     }
@@ -285,7 +285,7 @@ impl ColumnDesc {
             generated_or_default_column: None,
             description: None,
             additional_column: AdditionalColumn { column_type: None },
-            version: ColumnDescVersion::Pr13707,
+            version: ColumnDescVersion::LATEST,
             system_column: None,
         }
     }
@@ -304,7 +304,7 @@ impl ColumnDesc {
             description: None,
             generated_or_default_column: None,
             additional_column: AdditionalColumn { column_type: None },
-            version: ColumnDescVersion::Pr13707,
+            version: ColumnDescVersion::LATEST,
             system_column: None,
         }
     }

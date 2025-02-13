@@ -16,6 +16,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use bytes::Bytes;
+use futures::future::BoxFuture;
 use futures::{Future, FutureExt};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
@@ -32,6 +33,7 @@ use crate::error::StorageResult;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{HummockStorage, SstableObjectIdManagerRef};
 use crate::store::*;
+use crate::store_impl::AsHummock;
 
 #[derive(Clone)]
 pub struct TracedStateStore<S> {
@@ -131,6 +133,9 @@ impl<S> TracedStateStore<S> {
 }
 
 impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
+    // Not trace the FlushedSnapshotReader
+    type FlushedSnapshotReader = S::FlushedSnapshotReader;
+
     type Iter<'a> = impl StateStoreIter + 'a;
     type RevIter<'a> = impl StateStoreIter + 'a;
 
@@ -260,6 +265,10 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
     fn get_table_watermark(&self, vnode: VirtualNode) -> Option<Bytes> {
         self.inner.get_table_watermark(vnode)
     }
+
+    fn new_flushed_snapshot_reader(&self) -> Self::FlushedSnapshotReader {
+        self.inner.new_flushed_snapshot_reader()
+    }
 }
 
 impl<S: StateStore> StateStore for TracedStateStore<S> {
@@ -285,7 +294,6 @@ impl<S: StateStore> StateStore for TracedStateStore<S> {
 }
 
 impl<S: StateStoreRead> StateStoreRead for TracedStateStore<S> {
-    type ChangeLogIter = impl StateStoreReadChangeLogIter;
     type Iter = impl StateStoreReadIter;
     type RevIter = impl StateStoreReadIter;
 
@@ -336,6 +344,14 @@ impl<S: StateStoreRead> StateStoreRead for TracedStateStore<S> {
         );
         self.traced_iter(self.inner.rev_iter(key_range, epoch, read_options), span)
     }
+}
+
+impl<S: StateStoreReadLog> StateStoreReadLog for TracedStateStore<S> {
+    type ChangeLogIter = impl StateStoreReadChangeLogIter;
+
+    fn next_epoch(&self, epoch: u64, options: NextEpochOptions) -> impl StorageFuture<'_, u64> {
+        self.inner.next_epoch(epoch, options)
+    }
 
     fn iter_log(
         &self,
@@ -355,23 +371,33 @@ impl TracedStateStore<HummockStorage> {
     pub fn sstable_object_id_manager(&self) -> &SstableObjectIdManagerRef {
         self.inner.sstable_object_id_manager()
     }
+}
 
-    pub async fn sync(
+impl<S: AsHummock> AsHummock for TracedStateStore<S> {
+    fn as_hummock(&self) -> Option<&HummockStorage> {
+        self.inner.as_hummock()
+    }
+
+    fn sync(
         &self,
         sync_table_epochs: Vec<(HummockEpoch, HashSet<TableId>)>,
-    ) -> StorageResult<SyncResult> {
-        let span: MayTraceSpan = TraceSpan::new_sync_span(&sync_table_epochs, self.storage_type);
+    ) -> BoxFuture<'_, StorageResult<SyncResult>> {
+        async move {
+            let span: MayTraceSpan =
+                TraceSpan::new_sync_span(&sync_table_epochs, self.storage_type);
 
-        let future = self.inner.sync(sync_table_epochs);
+            let future = self.inner.sync(sync_table_epochs);
 
-        future
-            .map(move |sync_result| {
-                span.may_send_result(OperationResult::Sync(
-                    sync_result.as_ref().map(|res| res.sync_size).into(),
-                ));
-                sync_result
-            })
-            .await
+            future
+                .map(move |sync_result| {
+                    span.may_send_result(OperationResult::Sync(
+                        sync_result.as_ref().map(|res| res.sync_size).into(),
+                    ));
+                    sync_result
+                })
+                .await
+        }
+        .boxed()
     }
 }
 

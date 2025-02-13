@@ -22,7 +22,7 @@ use risingwave_common::metrics::{
 use risingwave_connector::sink::log_store::LogStoreFactory;
 use risingwave_connector::sink::SinkParam;
 use risingwave_pb::catalog::Table;
-use risingwave_storage::store::{NewLocalOptions, OpConsistencyLevel};
+use risingwave_storage::store::{LocalStateStore, NewLocalOptions, OpConsistencyLevel};
 use risingwave_storage::StateStore;
 use tokio::sync::watch;
 
@@ -32,11 +32,12 @@ use crate::common::log_store_impl::kv_log_store::serde::LogStoreRowSerde;
 use crate::common::log_store_impl::kv_log_store::writer::KvLogStoreWriter;
 use crate::executor::monitor::StreamingMetrics;
 
-mod buffer;
-mod reader;
+pub(crate) mod buffer;
+pub mod reader;
 pub(crate) mod serde;
+pub(crate) mod state;
 #[cfg(test)]
-mod test_utils;
+pub mod test_utils;
 mod writer;
 
 pub(crate) use reader::{REWIND_BACKOFF_FACTOR, REWIND_BASE_DELAY, REWIND_MAX_DELAY};
@@ -55,7 +56,7 @@ pub(crate) const FIRST_SEQ_ID: SeqIdType = 0;
 pub(crate) type ReaderTruncationOffsetType = (u64, Option<SeqIdType>);
 
 #[derive(Clone)]
-pub(crate) struct KvLogStoreReadMetrics {
+pub struct KvLogStoreReadMetrics {
     pub storage_read_count: LabelGuardedIntCounter<5>,
     pub storage_read_size: LabelGuardedIntCounter<5>,
 }
@@ -190,7 +191,7 @@ impl KvLogStoreMetrics {
     }
 
     #[cfg(test)]
-    fn for_test() -> Self {
+    pub(crate) fn for_test() -> Self {
         KvLogStoreMetrics {
             storage_write_count: LabelGuardedIntCounter::test_int_counter(),
             storage_write_size: LabelGuardedIntCounter::test_int_counter(),
@@ -303,6 +304,7 @@ mod v1 {
 
 pub(crate) use v2::KV_LOG_STORE_V2_INFO;
 
+use crate::common::log_store_impl::kv_log_store::state::new_log_store_state;
 use crate::task::ActorId;
 
 /// A new version of log store schema. Compared to v1, the v2 added a new vnode column to the log store pk,
@@ -386,7 +388,7 @@ impl<S: StateStore> KvLogStoreFactory<S> {
 }
 
 impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
-    type Reader = KvLogStoreReader<S>;
+    type Reader = KvLogStoreReader<<S::Local as LocalStateStore>::FlushedSnapshotReader>;
     type Writer = KvLogStoreWriter<S::Local>;
 
     async fn build(self) -> (Self::Reader, Self::Writer) {
@@ -410,25 +412,17 @@ impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
 
         let (tx, rx) = new_log_store_buffer(self.max_row_count, self.metrics.clone());
 
+        let (read_state, write_state) = new_log_store_state(table_id, local_state_store, serde);
+
         let reader = KvLogStoreReader::new(
-            table_id,
-            self.state_store,
-            serde.clone(),
+            read_state,
             rx,
             self.metrics.clone(),
             pause_rx,
             self.identity.clone(),
         );
 
-        let writer = KvLogStoreWriter::new(
-            table_id,
-            local_state_store,
-            serde,
-            tx,
-            self.metrics,
-            pause_tx,
-            self.identity,
-        );
+        let writer = KvLogStoreWriter::new(write_state, tx, self.metrics, pause_tx, self.identity);
 
         (reader, writer)
     }
@@ -454,11 +448,9 @@ mod tests {
     };
     use risingwave_hummock_sdk::HummockReadEpoch;
     use risingwave_hummock_test::test_utils::prepare_hummock_test_env;
-    use risingwave_storage::hummock::HummockStorage;
     use risingwave_storage::store::TryWaitEpochOptions;
     use risingwave_storage::StateStore;
 
-    use crate::common::log_store_impl::kv_log_store::reader::KvLogStoreReader;
     use crate::common::log_store_impl::kv_log_store::test_utils::{
         calculate_vnode_bitmap, check_rows_eq, check_stream_chunk_eq,
         gen_multi_vnode_stream_chunks, gen_stream_chunk_with_info, gen_test_log_store_table,
@@ -1302,21 +1294,21 @@ mod tests {
         let bitmap = Arc::new(bitmap);
 
         async fn check_reader<'a, 'b>(
-            reader: &'a mut KvLogStoreReader<HummockStorage>,
+            reader: &'a mut impl LogReader,
             data: impl Iterator<Item = &'b (u64, Option<&'b StreamChunk>)>,
         ) -> Vec<ChunkId> {
             check_reader_inner(reader, data, true).await
         }
 
         async fn check_reader_last_unsealed<'a, 'b>(
-            reader: &'a mut KvLogStoreReader<HummockStorage>,
+            reader: &'a mut impl LogReader,
             data: impl Iterator<Item = &'b (u64, Option<&'b StreamChunk>)>,
         ) -> Vec<ChunkId> {
             check_reader_inner(reader, data, false).await
         }
 
         async fn check_reader_inner<'a, 'b>(
-            reader: &'a mut KvLogStoreReader<HummockStorage>,
+            reader: &'a mut impl LogReader,
             data: impl Iterator<Item = &'b (u64, Option<&'b StreamChunk>)>,
             last_sealed: bool,
         ) -> Vec<ChunkId> {
