@@ -86,7 +86,7 @@ impl BuildingFragment {
 
         let job_id = Self::fill_job(&mut fragment, job).then(|| job.id());
         let upstream_table_columns =
-            Self::extract_upstream_table_columns_except_cross_db_backfill(&mut fragment);
+            Self::extract_upstream_table_columns_except_cross_db_backfill(&fragment);
 
         Self {
             inner: fragment,
