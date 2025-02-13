@@ -92,15 +92,28 @@ impl KvLogStoreMetrics {
         sink_param: &SinkParam,
         connector: &'static str,
     ) -> Self {
-        let actor_id_str = actor_id.to_string();
-        let sink_id_str = sink_param.sink_id.sink_id.to_string();
+        let id = sink_param.sink_id.sink_id;
+        let name = &sink_param.sink_name;
+        Self::new_inner(metrics, actor_id, id, name, connector)
+    }
 
-        let labels = &[
-            &actor_id_str,
-            connector,
-            &sink_id_str,
-            &sink_param.sink_name,
-        ];
+    /// `id`: refers to a unique way to identify the logstore. This can be the sink id,
+    ///       or for joins, it can be the `fragment_id`.
+    /// `name`: refers to the MV / Sink that the log store is associated with.
+    /// `target`: refers to the target of the log store,
+    ///           for instance `MySql` Sink, PG sink, etc...
+    ///           or unaligned join.
+    pub(crate) fn new_inner(
+        metrics: &StreamingMetrics,
+        actor_id: ActorId,
+        id: u32,
+        name: &str,
+        target: &'static str,
+    ) -> Self {
+        let actor_id_str = actor_id.to_string();
+        let id_str = id.to_string();
+
+        let labels = &[&actor_id_str, target, &id_str, name];
         let storage_write_size = metrics
             .kv_log_store_storage_write_size
             .with_guarded_label_values(labels);
@@ -115,18 +128,18 @@ impl KvLogStoreMetrics {
             .kv_log_store_storage_read_size
             .with_guarded_label_values(&[
                 &actor_id_str,
-                connector,
-                &sink_id_str,
-                &sink_param.sink_name,
+                target,
+                &id_str,
+                name,
                 READ_PERSISTENT_LOG,
             ]);
         let persistent_log_read_count = metrics
             .kv_log_store_storage_read_count
             .with_guarded_label_values(&[
                 &actor_id_str,
-                connector,
-                &sink_id_str,
-                &sink_param.sink_name,
+                target,
+                &id_str,
+                name,
                 READ_PERSISTENT_LOG,
             ]);
 
@@ -134,18 +147,18 @@ impl KvLogStoreMetrics {
             .kv_log_store_storage_read_size
             .with_guarded_label_values(&[
                 &actor_id_str,
-                connector,
-                &sink_id_str,
-                &sink_param.sink_name,
+                target,
+                &id_str,
+                name,
                 READ_FLUSHED_BUFFER,
             ]);
         let flushed_buffer_read_count = metrics
             .kv_log_store_storage_read_count
             .with_guarded_label_values(&[
                 &actor_id_str,
-                connector,
-                &sink_id_str,
-                &sink_param.sink_name,
+                target,
+                &id_str,
+                name,
                 READ_FLUSHED_BUFFER,
             ]);
 
