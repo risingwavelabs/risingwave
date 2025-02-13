@@ -23,6 +23,7 @@ use std::{io, str};
 
 use bytes::{Bytes, BytesMut};
 use futures::stream::StreamExt;
+use futures::FutureExt;
 use itertools::Itertools;
 use openssl::ssl::{SslAcceptor, SslContext, SslContextRef, SslMethod};
 use risingwave_common::types::DataType;
@@ -155,21 +156,21 @@ pub fn cstr_to_str(b: &Bytes) -> Result<&str, Utf8Error> {
 }
 
 /// Record `sql` in the current tracing span.
-fn record_sql_in_span(sql: &str, redact_sql_option_keywords: Option<RedactSqlOptionKeywordsRef>) {
+fn record_sql_in_span(
+    sql: &str,
+    redact_sql_option_keywords: Option<RedactSqlOptionKeywordsRef>,
+) -> String {
     let redacted_sql = if let Some(keywords) = redact_sql_option_keywords {
         redact_sql(sql, keywords)
     } else {
         sql.to_owned()
     };
-    tracing::Span::current().record(
-        "sql",
-        tracing::field::display(truncated_fmt::TruncatedFmt(
-            &redacted_sql,
-            *RW_QUERY_LOG_TRUNCATE_LEN,
-        )),
-    );
+    let truncated = truncated_fmt::TruncatedFmt(&redacted_sql, *RW_QUERY_LOG_TRUNCATE_LEN);
+    tracing::Span::current().record("sql", tracing::field::display(&truncated));
+    truncated.to_string()
 }
 
+/// Redacts SQL options. Data in DML is not redacted.
 fn redact_sql(sql: &str, keywords: RedactSqlOptionKeywordsRef) -> String {
     match Parser::parse_sql(sql) {
         Ok(sqls) => sqls
@@ -182,7 +183,7 @@ fn redact_sql(sql: &str, keywords: RedactSqlOptionKeywordsRef) -> String {
 
 impl<S, SM> PgProtocol<S, SM>
 where
-    S: AsyncWrite + AsyncRead + Unpin,
+    S: PgByteStream,
     SM: SessionManager,
 {
     pub fn new(
@@ -210,6 +211,54 @@ where
             ignore_util_sync: false,
             peer_addr,
             redact_sql_option_keywords,
+        }
+    }
+
+    /// Run the protocol to serve the connection.
+    pub async fn run(&mut self) {
+        let mut notice_fut = None;
+
+        loop {
+            // Once a session is present, create a future to subscribe and send notices asynchronously.
+            if notice_fut.is_none()
+                && let Some(session) = self.session.clone()
+            {
+                let mut stream = self.stream.clone();
+                notice_fut = Some(Box::pin(async move {
+                    loop {
+                        let notice = session.next_notice().await;
+                        if let Err(e) = stream.write(&BeMessage::NoticeResponse(&notice)).await {
+                            tracing::error!(error = %e.as_report(), notice, "failed to send notice");
+                        }
+                    }
+                }));
+            }
+
+            // Read and process messages.
+            let process = std::pin::pin!(async {
+                let msg = match self.read_message().await {
+                    Ok(msg) => msg,
+                    Err(e) => {
+                        tracing::error!(error = %e.as_report(), "error when reading message");
+                        return true; // terminate the connection
+                    }
+                };
+                tracing::trace!(?msg, "received message");
+                self.process(msg).await
+            });
+
+            let terminated = if let Some(notice_fut) = notice_fut.as_mut() {
+                tokio::select! {
+                    _ = notice_fut => unreachable!(),
+                    terminated = process => terminated,
+                }
+            } else {
+                process.await
+            };
+
+            if terminated {
+                break;
+            }
         }
     }
 
@@ -408,7 +457,12 @@ where
             FeMessage::Ssl => self.process_ssl_msg().await?,
             FeMessage::Startup(msg) => self.process_startup_msg(msg)?,
             FeMessage::Password(msg) => self.process_password_msg(msg).await?,
-            FeMessage::Query(query_msg) => self.process_query_msg(query_msg.get_sql()).await?,
+            FeMessage::Query(query_msg) => {
+                let sql = Arc::from(query_msg.get_sql()?);
+                // The process_query_msg can be slow. Release potential large FeQueryMessage early.
+                drop(query_msg);
+                self.process_query_msg(sql).await?
+            }
             FeMessage::CancelQuery(m) => self.process_cancel_msg(m)?,
             FeMessage::Terminate => self.process_terminate(),
             FeMessage::Parse(m) => {
@@ -568,16 +622,14 @@ where
         Ok(())
     }
 
-    async fn process_query_msg(&mut self, query_string: io::Result<&str>) -> PsqlResult<()> {
-        let sql: Arc<str> =
-            Arc::from(query_string.map_err(|err| PsqlError::SimpleQueryError(Box::new(err)))?);
-        record_sql_in_span(&sql, self.redact_sql_option_keywords.clone());
+    async fn process_query_msg(&mut self, sql: Arc<str>) -> PsqlResult<()> {
+        let truncated_sql = record_sql_in_span(&sql, self.redact_sql_option_keywords.clone());
         let session = self.session.clone().unwrap();
 
         session.check_idle_in_transaction_timeout()?;
-        let _exec_context_guard = session.init_exec_context(sql.clone());
-        self.inner_process_query_msg(sql.clone(), session.clone())
-            .await
+        // Store only truncated SQL in context to prevent excessive memory usage from large SQL.
+        let _exec_context_guard = session.init_exec_context(truncated_sql.into());
+        self.inner_process_query_msg(sql, session.clone()).await
     }
 
     async fn inner_process_query_msg(
@@ -588,6 +640,8 @@ where
         // Parse sql.
         let stmts =
             Parser::parse_sql(&sql).map_err(|err| PsqlError::SimpleQueryError(err.into()))?;
+        // The following inner_process_query_msg_one_stmt can be slow. Release potential large String early.
+        drop(sql);
         if stmts.is_empty() {
             self.stream.write_no_flush(&BeMessage::EmptyQueryResponse)?;
         }
@@ -611,14 +665,14 @@ where
         let session = session.clone();
 
         // execute query
-        let res = session
-            .clone()
-            .run_one_query(stmt.clone(), Format::Text)
-            .await;
-        for notice in session.take_notices() {
+        let res = session.clone().run_one_query(stmt, Format::Text).await;
+
+        // Take all remaining notices (if any) and send them before `CommandComplete`.
+        while let Some(notice) = session.next_notice().now_or_never() {
             self.stream
                 .write_no_flush(&BeMessage::NoticeResponse(&notice))?;
         }
+
         let mut res = res.map_err(PsqlError::SimpleQueryError)?;
 
         for notice in res.notices() {
@@ -706,20 +760,23 @@ where
         self.is_terminate = true;
     }
 
-    async fn process_parse_msg(&mut self, msg: FeParseMessage) -> PsqlResult<()> {
-        let sql = cstr_to_str(&msg.sql_bytes).unwrap();
-        record_sql_in_span(sql, self.redact_sql_option_keywords.clone());
+    async fn process_parse_msg(&mut self, mut msg: FeParseMessage) -> PsqlResult<()> {
+        let sql = Arc::from(cstr_to_str(&msg.sql_bytes).unwrap());
+        record_sql_in_span(&sql, self.redact_sql_option_keywords.clone());
         let session = self.session.clone().unwrap();
         let statement_name = cstr_to_str(&msg.statement_name).unwrap().to_owned();
-
-        self.inner_process_parse_msg(session, sql, statement_name, msg.type_ids)
-            .await
+        let type_ids = std::mem::take(&mut msg.type_ids);
+        // The inner_process_parse_msg can be slow. Release potential large FeParseMessage early.
+        drop(msg);
+        self.inner_process_parse_msg(session, sql, statement_name, type_ids)
+            .await?;
+        Ok(())
     }
 
     async fn inner_process_parse_msg(
         &mut self,
         session: Arc<SM::Session>,
-        sql: &str,
+        sql: Arc<str>,
         statement_name: String,
         type_ids: Vec<i32>,
     ) -> PsqlResult<()> {
@@ -734,9 +791,9 @@ where
         }
 
         let stmt = {
-            let stmts = Parser::parse_sql(sql)
+            let stmts = Parser::parse_sql(&sql)
                 .map_err(|err| PsqlError::ExtendedPrepareError(err.into()))?;
-
+            drop(sql);
             if stmts.len() > 1 {
                 return Err(PsqlError::ExtendedPrepareError(
                     "Only one statement is allowed in extended query mode".into(),
@@ -831,6 +888,7 @@ where
     async fn process_execute_msg(&mut self, msg: FeExecuteMessage) -> PsqlResult<()> {
         let portal_name = cstr_to_str(&msg.portal_name).unwrap().to_owned();
         let row_max = msg.max_rows as usize;
+        drop(msg);
         let session = self.session.clone().unwrap();
 
         if let Some(mut result_cache) = self.result_cache.remove(&portal_name) {
@@ -843,11 +901,13 @@ where
             }
         } else {
             let portal = self.get_portal(&portal_name)?;
-            let sql: Arc<str> = Arc::from(format!("{}", portal));
-            record_sql_in_span(&sql, self.redact_sql_option_keywords.clone());
+            let sql = format!("{}", portal);
+            let truncated_sql = record_sql_in_span(&sql, self.redact_sql_option_keywords.clone());
+            drop(sql);
 
             session.check_idle_in_transaction_timeout()?;
-            let _exec_context_guard = session.init_exec_context(sql.clone());
+            // Store only truncated SQL in context to prevent excessive memory usage from large SQL.
+            let _exec_context_guard = session.init_exec_context(truncated_sql.into());
             let result = session.clone().execute(portal).await;
 
             let pg_response = result.map_err(PsqlError::ExtendedExecuteError)?;
@@ -994,6 +1054,10 @@ enum PgStreamInner<S> {
     Ssl(SslStream<S>),
 }
 
+/// Trait for a byte stream that can be used for pg protocol.
+pub trait PgByteStream: AsyncWrite + AsyncRead + Unpin + Send + 'static {}
+impl<S> PgByteStream for S where S: AsyncWrite + AsyncRead + Unpin + Send + 'static {}
+
 /// Wraps a byte stream and read/write pg messages.
 ///
 /// Cloning a `PgStream` will share the same stream but a fresh & independent write buffer,
@@ -1049,7 +1113,7 @@ pub struct ParameterStatus {
 
 impl<S> PgStream<S>
 where
-    S: AsyncWrite + AsyncRead + Unpin,
+    S: PgByteStream,
 {
     async fn read_startup(&mut self) -> io::Result<FeMessage> {
         let mut stream = self.stream.lock().await;
@@ -1117,7 +1181,7 @@ where
 
 impl<S> PgStream<S>
 where
-    S: AsyncWrite + AsyncRead + Unpin,
+    S: PgByteStream,
 {
     /// Convert the underlying stream to ssl stream based on the given context.
     async fn upgrade_to_ssl(&mut self, ssl_ctx: &SslContextRef) -> PsqlResult<()> {
@@ -1185,7 +1249,7 @@ pub mod truncated_fmt {
                 let actual = s.floor_char_boundary(self.remaining);
                 self.f.write_str(&s[0..actual])?;
                 self.remaining -= actual;
-                self.f.write_str("...(truncated)")?;
+                self.f.write_str(&format!("...(truncated,{})", s.len()))?;
                 self.finished = true; // so that ...(truncated) is printed exactly once
             } else {
                 self.f.write_str(s)?;
@@ -1233,7 +1297,7 @@ pub mod truncated_fmt {
         fn test_trunc_utf8() {
             assert_eq!(
                 format!("{}", TruncatedFmt(&"select '🌊';", 10)),
-                "select '...(truncated)",
+                "select '...(truncated,14)",
             );
         }
     }
