@@ -163,6 +163,8 @@ pub struct StateTableInner<
 
     clean_watermark_index_in_pk: Option<i32>,
 
+    /// Flag to indicate whether the state table has called `commit`, but has not called
+    /// `post_yield_barrier` on the `StateTablePostCommit` callback yet.
     on_post_commit: bool,
 }
 
@@ -687,6 +689,20 @@ where
     }
 }
 
+/// A callback struct returned from [`StateTableInner::commit`].
+///
+/// Introduced to support single barrier configuration change proposed in <https://github.com/risingwavelabs/risingwave/issues/18312>.
+/// In brief, to correctly handle the configuration change, when each stateful executor receives an upstream barrier, it should handle
+/// the barrier in the order of `state_table.commit()` -> `yield barrier` -> `update_vnode_bitmap`.
+///
+/// The `StateTablePostCommit` captures the mutable reference of `state_table` when calling `state_table.commit()`, and after the executor
+/// runs `yield barrier`, it should call `StateTablePostCommit::post_yield_barrier` to apply the vnode bitmap update if there is any.
+/// The `StateTablePostCommit` is marked with `must_use`. The method name `post_yield_barrier` indicates that it should be called after
+/// we have yielded the barrier. In `StateTable`, we add a flag `on_post_commit`, to indicate that whether the `StateTablePostCommit` is handled
+/// properly. On `state_table.commit()`, we will mark the `on_post_commit` as true, and in `StateTablePostCommit::post_yield_barrier`, we will
+/// remark the flag as false, and on `state_table.commit()`, we will assert that the `on_post_commit` must be false. Note that, the `post_yield_barrier`
+/// should be called for all barriers rather than only for the barrier with update vnode bitmap. In this way, though we don't have scale test for all
+/// streaming executor, we can ensure that all executor covered by normal e2e test have properly handled the `StateTablePostCommit`.
 #[must_use]
 pub struct StateTablePostCommit<
     'a,
