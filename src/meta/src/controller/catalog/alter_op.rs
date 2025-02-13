@@ -835,7 +835,7 @@ impl CatalogController {
             .all(txn)
             .await?;
 
-        tracing::info!(
+        tracing::debug!(
             "drop_table_associated_source: to_drop_objects: {:?}",
             to_drop_objects
         );

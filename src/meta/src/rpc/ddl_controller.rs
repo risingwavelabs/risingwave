@@ -40,6 +40,7 @@ use risingwave_meta_model::{
     ConnectionId, DatabaseId, FunctionId, IndexId, ObjectId, SchemaId, SecretId, SinkId, SourceId,
     SubscriptionId, TableId, UserId, ViewId,
 };
+use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{
     Comment, Connection, CreateType, Database, Function, PbSink, Schema, Secret, Sink, Source,
     Subscription, Table, View,
@@ -122,9 +123,6 @@ pub struct ReplaceStreamJobInfo {
     pub streaming_job: StreamingJob,
     pub fragment_graph: StreamFragmentGraphProto,
     pub col_index_mapping: Option<ColIndexMapping>,
-
-    /// only used for dropping table associated source
-    pub drop_table_associated_source_id: Option<u32>,
 }
 
 pub enum DdlCommand {
@@ -342,15 +340,9 @@ impl DdlController {
                     streaming_job,
                     fragment_graph,
                     col_index_mapping,
-                    drop_table_associated_source_id,
                 }) => {
-                    ctrl.replace_job(
-                        streaming_job,
-                        fragment_graph,
-                        col_index_mapping,
-                        drop_table_associated_source_id,
-                    )
-                    .await
+                    ctrl.replace_job(streaming_job, fragment_graph, col_index_mapping)
+                        .await
                 }
                 DdlCommand::AlterName(relation, name) => ctrl.alter_name(relation, &name).await,
                 DdlCommand::AlterObjectOwner(object, owner_id) => {
@@ -696,15 +688,7 @@ impl DdlController {
         fragment_graph: StreamFragmentGraph,
     ) -> MetaResult<(ReplaceStreamJobContext, StreamJobFragments)> {
         let (mut replace_table_ctx, mut stream_job_fragments) = self
-            .build_replace_job(
-                stream_ctx,
-                streaming_job,
-                fragment_graph,
-                None,
-                tmp_id as _,
-                // no source is dropped because the code path is for creating streaming job
-                None,
-            )
+            .build_replace_job(stream_ctx, streaming_job, fragment_graph, None, tmp_id as _)
             .await?;
 
         let target_table = streaming_job.table().unwrap();
@@ -1384,7 +1368,6 @@ impl DdlController {
         mut streaming_job: StreamingJob,
         fragment_graph: StreamFragmentGraphProto,
         col_index_mapping: Option<ColIndexMapping>,
-        drop_table_associated_source_id: Option<u32>,
     ) -> MetaResult<NotificationVersion> {
         match &mut streaming_job {
             StreamingJob::Table(..) | StreamingJob::Source(..) => {}
@@ -1440,7 +1423,6 @@ impl DdlController {
                     fragment_graph,
                     col_index_mapping.as_ref(),
                     tmp_id as _,
-                    drop_table_associated_source_id,
                 )
                 .await?;
             drop_table_connector_ctx = ctx.drop_table_connector_ctx.clone();
@@ -1814,7 +1796,6 @@ impl DdlController {
         mut fragment_graph: StreamFragmentGraph,
         col_index_mapping: Option<&ColIndexMapping>,
         tmp_job_id: TableId,
-        drop_table_associated_source_id: Option<u32>,
     ) -> MetaResult<(ReplaceStreamJobContext, StreamJobFragments)> {
         match &stream_job {
             StreamingJob::Table(..) | StreamingJob::Source(..) => {}
@@ -1827,6 +1808,30 @@ impl DdlController {
 
         let id = stream_job.id();
         let expr_context = stream_ctx.to_expr_context();
+
+        // check if performing drop table connector
+        let mut drop_table_associated_source_id = None;
+        if let StreamingJob::Table(None, _, _) = &stream_job {
+            let old_table_associate_source_id = self
+                .metadata_manager
+                .get_table_catalog_by_ids(vec![id])
+                .await?
+                .get(0)
+                .and_then(|table_catalog| table_catalog.optional_associated_source_id);
+
+            if old_table_associate_source_id.is_some() {
+                // new table catalog without source def but the old one has -> drop table connector
+                tracing::info!(
+                    "dropping table {}'s associated source {:?}",
+                    id,
+                    old_table_associate_source_id.unwrap()
+                );
+                drop_table_associated_source_id = old_table_associate_source_id.map(|id| {
+                    let OptionalAssociatedSourceId::AssociatedSourceId(source_id) = id;
+                    source_id
+                });
+            }
+        }
 
         let old_fragments = self
             .metadata_manager

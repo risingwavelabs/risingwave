@@ -17,6 +17,7 @@ use std::sync::{Arc, LazyLock};
 
 use risingwave_connector::parser::additional_columns::gen_default_addition_col_name;
 use risingwave_connector::sink::decouple_checkpoint_log_sink::COMMIT_CHECKPOINT_INTERVAL;
+use risingwave_pb::ddl_service::TableJobType;
 use risingwave_sqlparser::ast::{ColumnDef, Ident};
 
 use crate::catalog::root_catalog::SchemaPath;
@@ -171,7 +172,13 @@ pub async fn handle_alter_table_drop_connector(
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .replace_table_drop_table_connector(table, graph, col_index_mapping, source_def.id)
+        .replace_table(
+            None,
+            table,
+            graph,
+            col_index_mapping,
+            TableJobType::General as _,
+        )
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::ALTER_TABLE))
