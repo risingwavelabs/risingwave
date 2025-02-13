@@ -1475,9 +1475,9 @@ pub async fn rename_relation_refer(
     Ok(to_update_relations)
 }
 
-/// Check to ensure that subscription can be safely deleted, meeting any of the following conditions:
+/// Validate that subscription can be safely deleted, meeting any of the following conditions:
 /// 1. The upstream table is not referred to by any cross-db mv.
-/// 2. After deleting the subscription, the upstream table has at least one subscription.
+/// 2. After deleting the subscription, the upstream table still has at least one subscription.
 pub async fn validate_subscription_deletion<C>(txn: &C, subscription_id: ObjectId) -> MetaResult<()>
 where
     C: ConnectionTrait,
