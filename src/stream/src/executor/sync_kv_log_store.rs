@@ -113,7 +113,6 @@ pub struct SyncedKvLogStoreExecutor<S: StateStore> {
 }
 // Stream interface
 impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
-    #[cfg_attr(not(test), expect(dead_code))]
     pub(crate) fn new(
         actor_context: ActorContextRef,
         table_id: u32,
