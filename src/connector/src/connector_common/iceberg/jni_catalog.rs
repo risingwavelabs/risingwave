@@ -34,6 +34,7 @@ use risingwave_common::bail;
 use risingwave_jni_core::call_method;
 use risingwave_jni_core::jvm_runtime::{execute_with_jni_env, jobj_to_str, JVM};
 use serde::{Deserialize, Serialize};
+use thiserror_ext::AsReport;
 
 use crate::error::ConnectorResult;
 
@@ -373,7 +374,7 @@ impl Drop for JniCatalog {
             Ok(())
         })
         .inspect_err(|e| {
-            tracing::warn!("Failed to close iceberg catalog: {:?}", e);
+            tracing::error!(error = ?e.as_report(), "Failed to close iceberg catalog")
         });
     }
 }
