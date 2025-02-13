@@ -366,18 +366,19 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                     this.state_table.try_flush().await?;
                 }
                 Message::Barrier(barrier) => {
-                    this.state_table.commit(barrier.epoch).await?;
+                    let post_commit = this.state_table.commit(barrier.epoch).await?;
                     vars.partitions.evict();
 
-                    if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(this.actor_ctx.id) {
-                        let (_, cache_may_stale) =
-                            this.state_table.update_vnode_bitmap(vnode_bitmap);
+                    let update_vnode_bitmap = barrier.as_update_vnode_bitmap(this.actor_ctx.id);
+                    yield Message::Barrier(barrier);
+
+                    if let Some((_, cache_may_stale)) =
+                        post_commit.post_yield_barrier(update_vnode_bitmap).await?
+                    {
                         if cache_may_stale {
                             vars.partitions.clear();
                         }
                     }
-
-                    yield Message::Barrier(barrier);
                 }
             }
         }
