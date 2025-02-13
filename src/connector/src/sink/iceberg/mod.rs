@@ -18,12 +18,15 @@ mod prometheus;
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::Debug;
 use std::num::NonZeroU64;
+use std::str::FromStr;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
 use async_trait::async_trait;
 use iceberg::arrow::{arrow_schema_to_schema, schema_to_arrow_schema};
-use iceberg::spec::{DataFile, SerializedDataFile};
+use iceberg::spec::{
+    DataFile, SerializedDataFile, Transform, UnboundPartitionField, UnboundPartitionSpec,
+};
 use iceberg::table::Table;
 use iceberg::transaction::Transaction;
 use iceberg::writer::base_writer::data_file_writer::DataFileWriterBuilder;
@@ -47,6 +50,7 @@ use itertools::Itertools;
 use parquet::file::properties::WriterProperties;
 use prometheus::monitored_general_writer::MonitoredGeneralWriterBuilder;
 use prometheus::monitored_position_delete_writer::MonitoredPositionDeleteWriterBuilder;
+use regex::Regex;
 use risingwave_common::array::arrow::arrow_array_iceberg::{Int32Array, RecordBatch};
 use risingwave_common::array::arrow::arrow_schema_iceberg::{
     self, DataType as ArrowDataType, Field as ArrowField, Schema as ArrowSchema, SchemaRef,
@@ -108,6 +112,9 @@ pub struct IcebergConfig {
     // Props for java catalog props.
     #[serde(skip)]
     pub java_catalog_props: HashMap<String, String>,
+
+    #[serde(default)]
+    pub partition_by: Option<String>,
 
     /// Commit every n(>0) checkpoints, default is 10.
     #[serde(default = "default_commit_checkpoint_interval")]
@@ -311,9 +318,60 @@ impl IcebergSink {
                 }
             };
 
+            let partition_fields = match &self.config.partition_by {
+                Some(partition_field) => {
+                    let mut partition_fields = Vec::<UnboundPartitionField>::new();
+                    // captures column, transform(column), transform(n,column), transform(n, column)
+                    let re = Regex::new(
+                        r"(?<transform>\w+)(\(((?<n>\d+)?(?:,|(,\s)))?(?<field>\w+)\))?",
+                    )
+                    .unwrap();
+                    if !re.is_match(partition_field) {
+                        bail!(format!("Invalid partition fields: {}\nHINT: Supported formats are column, transform(column), transform(n,column), transform(n, column)", partition_field))
+                    }
+                    let caps = re.captures_iter(partition_field);
+                    for mat in caps {
+                        let (column, transform) = if mat["n"].is_empty() && mat["field"].is_empty()
+                        {
+                            (&mat["func"], Transform::Identity)
+                        } else {
+                            let mut func = mat["func"].to_owned();
+                            if func == "bucket" || func == "truncate" {
+                                let n = &mat["n"];
+                                func = format!("{func}({n})");
+                            }
+                            (&mat["field"], Transform::from_str(&func).unwrap())
+                        };
+
+                        match iceberg_schema.field_id_by_name(column) {
+                            Some(id) => partition_fields.push(
+                                UnboundPartitionField::builder()
+                                    .source_id(id)
+                                    .transform(transform)
+                                    .name(column.to_owned())
+                                    .build(),
+                            ),
+                            None => bail!(format!(
+                                "Partition source column does not exist in schema: {}",
+                                column
+                            )),
+                        };
+                    }
+                    partition_fields
+                }
+                None => Vec::<UnboundPartitionField>::new(),
+            };
+
             let table_creation_builder = TableCreation::builder()
                 .name(self.config.common.table_name.clone())
-                .schema(iceberg_schema);
+                .schema(iceberg_schema)
+                .partition_spec(
+                    UnboundPartitionSpec::builder()
+                        .add_partition_fields(partition_fields)
+                        .map_err(|e| SinkError::Iceberg(anyhow!(e)))
+                        .context("failed to add partition columns")?
+                        .build(),
+                );
 
             let table_creation = match location {
                 Some(location) => table_creation_builder.location(location).build(),
@@ -370,6 +428,9 @@ impl Sink for IcebergSink {
     const SINK_NAME: &'static str = ICEBERG_SINK;
 
     async fn validate(&self) -> Result<()> {
+        if "snowflake".eq_ignore_ascii_case(self.config.catalog_type()) {
+            bail!("Snowflake catalog only supports iceberg sources");
+        }
         if "glue".eq_ignore_ascii_case(self.config.catalog_type()) {
             risingwave_common::license::Feature::IcebergSinkWithGlue
                 .check_available()
@@ -1402,6 +1463,7 @@ mod test {
             ("connector", "iceberg"),
             ("type", "upsert"),
             ("primary_key", "v1"),
+            ("partition_by", "v1, identity(v1), truncate(4,v2), bucket(5,v1), year(v3), month(v4), day(v5), hour(v6), void(v1)"),
             ("warehouse.path", "s3://iceberg"),
             ("s3.endpoint", "http://127.0.0.1:9301"),
             ("s3.access.key", "hummockadmin"),
@@ -1432,6 +1494,7 @@ mod test {
                 secret_key: Some("hummockadmin".to_owned()),
                 gcs_credential: None,
                 catalog_type: Some("jdbc".to_owned()),
+                glue_id: None,
                 catalog_name: Some("demo".to_owned()),
                 database_name: Some("demo_db".to_owned()),
                 table_name: "demo_table".to_owned(),
@@ -1445,6 +1508,7 @@ mod test {
             r#type: "upsert".to_owned(),
             force_append_only: false,
             primary_key: Some(vec!["v1".to_owned()]),
+            partition_by: Some("v1, identity(v1), truncate(4,v2), bucket(5,v1), year(v3), month(v4), day(v5), hour(v6), void(v1)".to_owned()),
             java_catalog_props: [("jdbc.user", "admin"), ("jdbc.password", "123456")]
                 .into_iter()
                 .map(|(k, v)| (k.to_owned(), v.to_owned()))

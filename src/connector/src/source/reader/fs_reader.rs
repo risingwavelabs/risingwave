@@ -29,15 +29,14 @@ use crate::source::{
 use crate::WithOptionsSecResolved;
 
 #[derive(Clone, Debug)]
-pub struct FsSourceReader {
+pub struct LegacyFsSourceReader {
     pub config: ConnectorProperties,
     pub columns: Vec<SourceColumnDesc>,
     pub properties: WithOptionsSecResolved,
     pub parser_config: SpecificParserConfig,
 }
 
-impl FsSourceReader {
-    #[allow(clippy::too_many_arguments)]
+impl LegacyFsSourceReader {
     pub fn new(
         properties: WithOptionsSecResolved,
         columns: Vec<SourceColumnDesc>,

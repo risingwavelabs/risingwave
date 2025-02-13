@@ -32,11 +32,12 @@ use crate::common::log_store_impl::kv_log_store::serde::LogStoreRowSerde;
 use crate::common::log_store_impl::kv_log_store::writer::KvLogStoreWriter;
 use crate::executor::monitor::StreamingMetrics;
 
-mod buffer;
-mod reader;
+pub(crate) mod buffer;
+pub mod reader;
 pub(crate) mod serde;
+pub(crate) mod state;
 #[cfg(test)]
-mod test_utils;
+pub mod test_utils;
 mod writer;
 
 pub(crate) use reader::{REWIND_BACKOFF_FACTOR, REWIND_BASE_DELAY, REWIND_MAX_DELAY};
@@ -55,7 +56,7 @@ pub(crate) const FIRST_SEQ_ID: SeqIdType = 0;
 pub(crate) type ReaderTruncationOffsetType = (u64, Option<SeqIdType>);
 
 #[derive(Clone)]
-pub(crate) struct KvLogStoreReadMetrics {
+pub struct KvLogStoreReadMetrics {
     pub storage_read_count: LabelGuardedIntCounter<5>,
     pub storage_read_size: LabelGuardedIntCounter<5>,
 }
@@ -91,15 +92,28 @@ impl KvLogStoreMetrics {
         sink_param: &SinkParam,
         connector: &'static str,
     ) -> Self {
-        let actor_id_str = actor_id.to_string();
-        let sink_id_str = sink_param.sink_id.sink_id.to_string();
+        let id = sink_param.sink_id.sink_id;
+        let name = &sink_param.sink_name;
+        Self::new_inner(metrics, actor_id, id, name, connector)
+    }
 
-        let labels = &[
-            &actor_id_str,
-            connector,
-            &sink_id_str,
-            &sink_param.sink_name,
-        ];
+    /// `id`: refers to a unique way to identify the logstore. This can be the sink id,
+    ///       or for joins, it can be the `fragment_id`.
+    /// `name`: refers to the MV / Sink that the log store is associated with.
+    /// `target`: refers to the target of the log store,
+    ///           for instance `MySql` Sink, PG sink, etc...
+    ///           or unaligned join.
+    pub(crate) fn new_inner(
+        metrics: &StreamingMetrics,
+        actor_id: ActorId,
+        id: u32,
+        name: &str,
+        target: &'static str,
+    ) -> Self {
+        let actor_id_str = actor_id.to_string();
+        let id_str = id.to_string();
+
+        let labels = &[&actor_id_str, target, &id_str, name];
         let storage_write_size = metrics
             .kv_log_store_storage_write_size
             .with_guarded_label_values(labels);
@@ -114,18 +128,18 @@ impl KvLogStoreMetrics {
             .kv_log_store_storage_read_size
             .with_guarded_label_values(&[
                 &actor_id_str,
-                connector,
-                &sink_id_str,
-                &sink_param.sink_name,
+                target,
+                &id_str,
+                name,
                 READ_PERSISTENT_LOG,
             ]);
         let persistent_log_read_count = metrics
             .kv_log_store_storage_read_count
             .with_guarded_label_values(&[
                 &actor_id_str,
-                connector,
-                &sink_id_str,
-                &sink_param.sink_name,
+                target,
+                &id_str,
+                name,
                 READ_PERSISTENT_LOG,
             ]);
 
@@ -133,18 +147,18 @@ impl KvLogStoreMetrics {
             .kv_log_store_storage_read_size
             .with_guarded_label_values(&[
                 &actor_id_str,
-                connector,
-                &sink_id_str,
-                &sink_param.sink_name,
+                target,
+                &id_str,
+                name,
                 READ_FLUSHED_BUFFER,
             ]);
         let flushed_buffer_read_count = metrics
             .kv_log_store_storage_read_count
             .with_guarded_label_values(&[
                 &actor_id_str,
-                connector,
-                &sink_id_str,
-                &sink_param.sink_name,
+                target,
+                &id_str,
+                name,
                 READ_FLUSHED_BUFFER,
             ]);
 
@@ -190,7 +204,7 @@ impl KvLogStoreMetrics {
     }
 
     #[cfg(test)]
-    fn for_test() -> Self {
+    pub(crate) fn for_test() -> Self {
         KvLogStoreMetrics {
             storage_write_count: LabelGuardedIntCounter::test_int_counter(),
             storage_write_size: LabelGuardedIntCounter::test_int_counter(),
@@ -303,6 +317,7 @@ mod v1 {
 
 pub(crate) use v2::KV_LOG_STORE_V2_INFO;
 
+use crate::common::log_store_impl::kv_log_store::state::new_log_store_state;
 use crate::task::ActorId;
 
 /// A new version of log store schema. Compared to v1, the v2 added a new vnode column to the log store pk,
@@ -410,25 +425,17 @@ impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
 
         let (tx, rx) = new_log_store_buffer(self.max_row_count, self.metrics.clone());
 
+        let (read_state, write_state) = new_log_store_state(table_id, local_state_store, serde);
+
         let reader = KvLogStoreReader::new(
-            table_id,
-            local_state_store.new_flushed_snapshot_reader(),
-            serde.clone(),
+            read_state,
             rx,
             self.metrics.clone(),
             pause_rx,
             self.identity.clone(),
         );
 
-        let writer = KvLogStoreWriter::new(
-            table_id,
-            local_state_store,
-            serde,
-            tx,
-            self.metrics,
-            pause_tx,
-            self.identity,
-        );
+        let writer = KvLogStoreWriter::new(write_state, tx, self.metrics, pause_tx, self.identity);
 
         (reader, writer)
     }

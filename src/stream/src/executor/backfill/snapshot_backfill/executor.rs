@@ -29,12 +29,13 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_common_rate_limit::RateLimit;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::PrefetchOptions;
-use risingwave_storage::table::batch_table::storage_table::StorageTable;
+use risingwave_storage::table::batch_table::BatchTable;
 use risingwave_storage::table::ChangeLogRow;
 use risingwave_storage::StateStore;
 use tokio::select;
 use tokio::sync::mpsc::UnboundedReceiver;
 
+use crate::executor::backfill::snapshot_backfill::receive_next_barrier;
 use crate::executor::backfill::snapshot_backfill::state::{BackfillState, EpochBackfillProgress};
 use crate::executor::backfill::snapshot_backfill::vnode_stream::VnodeStream;
 use crate::executor::backfill::utils::{create_builder, mapping_message};
@@ -49,7 +50,7 @@ use crate::task::CreateMviewProgressReporter;
 
 pub struct SnapshotBackfillExecutor<S: StateStore> {
     /// Upstream table
-    upstream_table: StorageTable<S>,
+    upstream_table: BatchTable<S>,
 
     /// Backfill progress table
     progress_state_table: StateTable<S>,
@@ -76,7 +77,7 @@ pub struct SnapshotBackfillExecutor<S: StateStore> {
 impl<S: StateStore> SnapshotBackfillExecutor<S> {
     #[expect(clippy::too_many_arguments)]
     pub(crate) fn new(
-        upstream_table: StorageTable<S>,
+        upstream_table: BatchTable<S>,
         progress_state_table: StateTable<S>,
         upstream: MergeExecutorInput,
         output_indices: Vec<usize>,
@@ -560,17 +561,8 @@ impl<'a, S> UpstreamBuffer<'a, S> {
     }
 }
 
-async fn receive_next_barrier(
-    barrier_rx: &mut UnboundedReceiver<Barrier>,
-) -> StreamExecutorResult<Barrier> {
-    Ok(barrier_rx
-        .recv()
-        .await
-        .ok_or_else(|| anyhow!("end of barrier receiver"))?)
-}
-
 async fn make_log_stream(
-    upstream_table: &StorageTable<impl StateStore>,
+    upstream_table: &BatchTable<impl StateStore>,
     prev_epoch: u64,
     start_pk: Option<OwnedRow>,
     chunk_size: usize,
@@ -601,7 +593,7 @@ async fn make_log_stream(
 }
 
 async fn make_snapshot_stream(
-    upstream_table: &StorageTable<impl StateStore>,
+    upstream_table: &BatchTable<impl StateStore>,
     snapshot_epoch: u64,
     start_pk: Option<OwnedRow>,
     rate_limit: RateLimit,
@@ -634,7 +626,7 @@ async fn make_snapshot_stream(
 #[expect(clippy::too_many_arguments)]
 #[try_stream(ok = Message, error = StreamExecutorError)]
 async fn make_consume_snapshot_stream<'a, S: StateStore>(
-    upstream_table: &'a StorageTable<S>,
+    upstream_table: &'a BatchTable<S>,
     snapshot_epoch: u64,
     chunk_size: usize,
     rate_limit: RateLimit,

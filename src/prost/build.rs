@@ -246,7 +246,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute(
             "hummock.TableWatermarks.EpochNewWatermarks",
             "#[derive(Eq)]",
-        );
+        )
+        // proto version enums
+        .type_attribute("stream_plan.AggNodeVersion", "#[derive(prost_helpers::Version)]")
+        .type_attribute(
+            "plan_common.ColumnDescVersion",
+            "#[derive(prost_helpers::Version)]",
+        )
+        .type_attribute(
+            "hummock.CompatibilityVersion",
+            "#[derive(prost_helpers::Version)]",
+        )
+        // end
+        ;
 
     // If any configuration for `prost_build` is not exposed by `tonic_build`, specify it here.
     let mut prost_config = prost_build::Config::new();

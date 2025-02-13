@@ -16,6 +16,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use bytes::Bytes;
+use futures::future::BoxFuture;
 use futures::{Future, FutureExt};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
@@ -32,6 +33,7 @@ use crate::error::StorageResult;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{HummockStorage, SstableObjectIdManagerRef};
 use crate::store::*;
+use crate::store_impl::AsHummock;
 
 #[derive(Clone)]
 pub struct TracedStateStore<S> {
@@ -369,23 +371,33 @@ impl TracedStateStore<HummockStorage> {
     pub fn sstable_object_id_manager(&self) -> &SstableObjectIdManagerRef {
         self.inner.sstable_object_id_manager()
     }
+}
 
-    pub async fn sync(
+impl<S: AsHummock> AsHummock for TracedStateStore<S> {
+    fn as_hummock(&self) -> Option<&HummockStorage> {
+        self.inner.as_hummock()
+    }
+
+    fn sync(
         &self,
         sync_table_epochs: Vec<(HummockEpoch, HashSet<TableId>)>,
-    ) -> StorageResult<SyncResult> {
-        let span: MayTraceSpan = TraceSpan::new_sync_span(&sync_table_epochs, self.storage_type);
+    ) -> BoxFuture<'_, StorageResult<SyncResult>> {
+        async move {
+            let span: MayTraceSpan =
+                TraceSpan::new_sync_span(&sync_table_epochs, self.storage_type);
 
-        let future = self.inner.sync(sync_table_epochs);
+            let future = self.inner.sync(sync_table_epochs);
 
-        future
-            .map(move |sync_result| {
-                span.may_send_result(OperationResult::Sync(
-                    sync_result.as_ref().map(|res| res.sync_size).into(),
-                ));
-                sync_result
-            })
-            .await
+            future
+                .map(move |sync_result| {
+                    span.may_send_result(OperationResult::Sync(
+                        sync_result.as_ref().map(|res| res.sync_size).into(),
+                    ));
+                    sync_result
+                })
+                .await
+        }
+        .boxed()
     }
 }
 

@@ -37,6 +37,7 @@ pub struct ComputeNodeConfig {
     pub provide_aws_s3: Option<Vec<AwsS3Config>>,
     pub provide_tempo: Option<Vec<TempoConfig>>,
     pub user_managed: bool,
+    pub resource_group: String,
 
     pub total_memory_bytes: usize,
     pub parallelism: usize,
@@ -432,6 +433,18 @@ pub enum ServiceConfig {
     SqlServer(SqlServerConfig),
 }
 
+#[derive(PartialEq, Eq, Hash)]
+pub enum TaskGroup {
+    RisingWave,
+    Observability,
+    Kafka,
+    Pubsub,
+    MySql,
+    Postgres,
+    SqlServer,
+    Redis,
+}
+
 impl ServiceConfig {
     pub fn id(&self) -> &str {
         match self {
@@ -503,6 +516,42 @@ impl ServiceConfig {
             Self::Postgres(c) => c.user_managed,
             Self::SqlServer(c) => c.user_managed,
             Self::SchemaRegistry(c) => c.user_managed,
+        }
+    }
+
+    pub fn task_group(&self) -> TaskGroup {
+        use TaskGroup::*;
+        match self {
+            ServiceConfig::ComputeNode(_)
+            | ServiceConfig::MetaNode(_)
+            | ServiceConfig::Frontend(_)
+            | ServiceConfig::Compactor(_)
+            | ServiceConfig::Minio(_)
+            | ServiceConfig::Sqlite(_) => RisingWave,
+            ServiceConfig::Prometheus(_) | ServiceConfig::Grafana(_) | ServiceConfig::Tempo(_) => {
+                Observability
+            }
+            ServiceConfig::Opendal(_) | ServiceConfig::AwsS3(_) => RisingWave,
+            ServiceConfig::Kafka(_)
+            | ServiceConfig::SchemaRegistry(_)
+            | ServiceConfig::RedPanda(_) => Kafka,
+            ServiceConfig::Pubsub(_) => Pubsub,
+            ServiceConfig::Redis(_) => Redis,
+            ServiceConfig::MySql(my_sql_config) => {
+                if matches!(my_sql_config.application, Application::Metastore) {
+                    RisingWave
+                } else {
+                    MySql
+                }
+            }
+            ServiceConfig::Postgres(postgres_config) => {
+                if matches!(postgres_config.application, Application::Metastore) {
+                    RisingWave
+                } else {
+                    Postgres
+                }
+            }
+            ServiceConfig::SqlServer(_) => SqlServer,
         }
     }
 }
