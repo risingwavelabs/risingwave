@@ -598,7 +598,7 @@ impl SyncedLogStoreBuffer {
                 vnode_bitmap,
                 ..
             },
-        )) = self.buffer.front_mut()
+        )) = self.buffer.back_mut()
         {
             assert!(
                 *prev_end_seq_id < start_seq_id,
