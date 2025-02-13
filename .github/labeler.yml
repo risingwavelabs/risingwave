@@ -43,6 +43,10 @@ labels:
   files:
   - "src\\/meta\\/.*.rs"
 
+- label: "ci/run-backwards-compat-tests"
+  files:
+  - "src\\/meta\\/model\\/migration\\/.*.rs"
+
 - label: "ci/run-e2e-test-other-backends"
   files:
   - "src\\/meta\\/.*.rs"
