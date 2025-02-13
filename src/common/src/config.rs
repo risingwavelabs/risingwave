@@ -2108,6 +2108,11 @@ pub mod default {
         const DEFAULT_MAX_L0_COMPACT_LEVEL_COUNT: u32 = 42;
         const DEFAULT_SST_ALLOWED_TRIVIAL_MOVE_MIN_SIZE: u64 = 4 * MB;
 
+        // `input_levels contains` level_0 and level_base, `+1` means the base level
+        const DEFAULT_LEVEL0_MIN_TO_BASE_COMPACT_LEVEL_COUNT: u32 =
+            DEFAULT_MIN_SUB_LEVEL_COMPACT_LEVEL_COUNT + 1;
+        const DEFAULT_LEVEL0_MIN_TO_BASE_COMPACT_LEVEL_SIZE: u64 = 128 * MB;
+
         use crate::catalog::hummock::CompactionFilterFlag;
 
         pub fn max_bytes_for_level_base() -> u64 {
@@ -2184,6 +2189,14 @@ pub mod default {
 
         pub fn disable_auto_group_scheduling() -> bool {
             false
+        }
+
+        pub fn level0_min_to_base_compact_level_count() -> u32 {
+            DEFAULT_LEVEL0_MIN_TO_BASE_COMPACT_LEVEL_COUNT
+        }
+
+        pub fn level0_min_to_base_compact_size() -> u64 {
+            DEFAULT_LEVEL0_MIN_TO_BASE_COMPACT_LEVEL_SIZE
         }
     }
 
@@ -2564,6 +2577,10 @@ pub struct CompactionConfig {
     pub enable_emergency_picker: bool,
     #[serde(default = "default::compaction_config::max_level")]
     pub max_level: u32,
+    #[serde(default = "default::compaction_config::max_l0_compact_level_count")]
+    pub level0_min_to_base_compact_level_count: u32,
+    #[serde(default = "default::compaction_config::level0_min_to_base_compact_size")]
+    pub level0_min_to_base_compact_size: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]

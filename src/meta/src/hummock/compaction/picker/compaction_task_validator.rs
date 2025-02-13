@@ -197,6 +197,25 @@ impl CompactionTaskValidationRule for BaseCompactionTaskValidationRule {
             return true;
         }
 
+        // The size is too small, we shall skip this compact task and wait the data in base level
+        if input.select_input_size < self.config.level0_min_to_base_compact_size.unwrap_or(0) {
+            stats.skip_by_count_limit += 1;
+            return false;
+        }
+
+        // The level count is too small, we shall skip this compact task and wait the data in base
+        // `input_levels contains` level_0 and level_base, `+1` means the base level
+        if input.input_levels.len()
+            < self
+                .config
+                .level0_min_to_base_compact_level_count
+                .unwrap_or(0) as usize
+                + 1
+        {
+            stats.skip_by_count_limit += 1;
+            return false;
+        }
+
         // The size of target level may be too large, we shall skip this compact task and wait
         //  the data in base level compact to lower level.
         if input.target_input_size > self.config.max_compaction_bytes {

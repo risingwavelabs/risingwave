@@ -591,6 +591,12 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
             MutableConfig::DisableAutoGroupScheduling(c) => {
                 target.disable_auto_group_scheduling = Some(*c);
             }
+            MutableConfig::Level0MinToBaseCompactLevelCount(c) => {
+                target.level0_min_to_base_compact_level_count = Some(*c);
+            }
+            MutableConfig::Level0MinToBaseCompactSize(c) => {
+                target.level0_min_to_base_compact_size = Some(*c);
+            }
         }
     }
 }
