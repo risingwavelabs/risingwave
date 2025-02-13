@@ -365,6 +365,19 @@ impl Catalog for JniCatalog {
     }
 }
 
+impl Drop for JniCatalog {
+    fn drop(&mut self) {
+        let _ = execute_with_jni_env(self.jvm, |env| {
+            call_method!(env, self.java_catalog.as_obj(), {void close()})
+                .with_context(|| format!("Failed to close iceberg catalog"))?;
+            Ok(())
+        })
+        .inspect_err(|e| {
+            tracing::warn!("Failed to close iceberg catalog: {:?}", e);
+        });
+    }
+}
+
 impl JniCatalog {
     fn build(
         file_io_props: HashMap<String, String>,
