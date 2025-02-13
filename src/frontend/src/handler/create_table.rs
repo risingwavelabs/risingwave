@@ -1786,7 +1786,7 @@ pub async fn create_iceberg_engine_table(
         if_not_exists: false,
         columns: vec![],
         source_name,
-        wildcard_idx: None,
+        wildcard_idx: Some(0),
         constraints: vec![],
         with_properties: WithProperties(vec![]),
         format_encode: CompatibleFormatEncode::V2(FormatEncodeOptions::none()),
