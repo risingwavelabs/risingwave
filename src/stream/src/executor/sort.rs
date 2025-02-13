@@ -322,7 +322,7 @@ mod tests {
             create_executor(sort_column_index, store).await;
 
         // Push barrier
-        recovered_tx.push_barrier(test_epoch(3), false);
+        recovered_tx.push_barrier(test_epoch(2), false);
 
         // Consume the barrier
         recovered_sort_executor.expect_barrier().await;
