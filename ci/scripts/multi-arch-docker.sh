@@ -66,7 +66,8 @@ function isStableVersion() {
 
 function isLatestVersion() {
     local version=$1
-    latest_version=$(git tag -l --sort=-v:refname | egrep "^v[0-9]+\.[0-9]+\.[0-9]+$" | head -n 1)
+    git fetch origin 'refs/tags/*:refs/tags/*'
+    local latest_version=$(git tag -l --sort=-v:refname | egrep "^v[0-9]+\.[0-9]+\.[0-9]+$" | head -n 1)
     if [[ $version == $latest_version ]]; then
         return 0  # Latest version
     else
