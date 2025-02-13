@@ -6,9 +6,9 @@
     "project": "./tsconfig.json"
   },
   "extends": [
-    "next/core-web-vitals",
     "plugin:@typescript-eslint/recommended",
-    "plugin:@typescript-eslint/recommended-type-checked"
+    "plugin:@typescript-eslint/recommended-type-checked",
+    "next/core-web-vitals"
   ],
   "rules": {
     "prefer-const": "off",
