@@ -1033,14 +1033,9 @@ impl DatabaseCheckpointControl {
         {
             match job_type {
                 CreateStreamingJobType::Normal | CreateStreamingJobType::SinkIntoTable(_) => {
-                    for stream_actor in info
-                        .stream_job_fragments
-                        .fragments
-                        .values_mut()
-                        .flat_map(|fragment| fragment.actors.iter_mut())
-                    {
+                    for fragment in info.stream_job_fragments.fragments.values_mut() {
                         fill_snapshot_backfill_epoch(
-                            stream_actor.nodes.as_mut().expect("should exist"),
+                            fragment.nodes.as_mut().expect("should exist"),
                             None,
                             cross_db_snapshot_backfill_info,
                         )?;
@@ -1069,14 +1064,9 @@ impl DatabaseCheckpointControl {
                             "must not set previously"
                         );
                     }
-                    for stream_actor in info
-                        .stream_job_fragments
-                        .fragments
-                        .values_mut()
-                        .flat_map(|fragment| fragment.actors.iter_mut())
-                    {
+                    for fragment in info.stream_job_fragments.fragments.values_mut() {
                         fill_snapshot_backfill_epoch(
-                            stream_actor.nodes.as_mut().expect("should exist"),
+                            fragment.nodes.as_mut().expect("should exist"),
                             Some(snapshot_backfill_info),
                             cross_db_snapshot_backfill_info,
                         )?;
