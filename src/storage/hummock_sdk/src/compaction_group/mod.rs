@@ -171,14 +171,14 @@ pub mod group_split {
         {
             // origin_sst_info
             origin_sst_info.key_range = key_range_l;
-            origin_sst_info.sst_size = left_size;
+            origin_sst_info.sst_size = std::cmp::max(1, left_size);
             origin_sst_info.table_ids = table_ids_l;
         }
 
         {
             // new sst
             branch_table_info.key_range = key_range_r;
-            branch_table_info.sst_size = right_size;
+            branch_table_info.sst_size = std::cmp::max(1, right_size);
             branch_table_info.table_ids = table_ids_r;
         }
 
@@ -210,16 +210,6 @@ pub mod group_split {
         new_sst_size: u64,
         new_table_ids: Vec<u32>,
     ) -> (SstableInfo, SstableInfo) {
-        if new_sst_size == 0 || old_sst_size == 0 {
-            tracing::warn!(
-                "Sstable {} old_sst_size {} new_sst_size {} are under expected (object_size {})",
-                origin_sst_info.sst_id,
-                old_sst_size,
-                new_sst_size,
-                origin_sst_info.file_size,
-            );
-        };
-
         let mut sst_info = origin_sst_info.get_inner();
         let mut branch_table_info = sst_info.clone();
         branch_table_info.sst_id = *new_sst_id;
@@ -411,11 +401,11 @@ pub mod group_split {
                         let sst_size = sst.sst_size;
                         if sst_size / 2 == 0 {
                             tracing::warn!(
-                                "Sstable id {} object_id {} sst_size {} is under expected (object_size {})",
-                                sst.sst_id,
-                                sst.object_id,
-                                sst.sst_size,
-                                sst.file_size,
+                                id = sst.sst_id,
+                                object_id = sst.object_id,
+                                sst_size = sst.sst_size,
+                                file_size = sst.file_size,
+                                "Sstable sst_size is under expected",
                             );
                         };
 
@@ -423,8 +413,8 @@ pub mod group_split {
                             sst.clone(),
                             new_sst_id,
                             split_key.clone(),
-                            std::cmp::max(1, sst_size / 2),
-                            std::cmp::max(1, sst_size / 2),
+                            sst_size / 2,
+                            sst_size / 2,
                         );
                         if let Some(branch_sst) = right {
                             insert_table_infos.push(branch_sst);

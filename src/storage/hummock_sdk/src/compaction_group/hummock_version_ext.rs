@@ -1145,19 +1145,19 @@ fn split_sst_info_for_level(
         let sst_size = sst_info.sst_size;
         if sst_size / 2 == 0 {
             tracing::warn!(
-                "Sstable id {} object_id {} sst_size {} is under expected (object_size {})",
-                sst_info.sst_id,
-                sst_info.object_id,
-                sst_info.sst_size,
-                sst_info.file_size,
+                id = sst_info.sst_id,
+                object_id = sst_info.object_id,
+                sst_size = sst_info.sst_size,
+                file_size = sst_info.file_size,
+                "Sstable sst_size is under expected",
             );
         };
         if !removed_table_ids.is_empty() {
             let (modified_sst, branch_sst) = split_sst_with_table_ids(
                 sst_info,
                 new_sst_id,
-                std::cmp::max(1, sst_size / 2),
-                std::cmp::max(1, sst_size / 2),
+                sst_size / 2,
+                sst_size / 2,
                 member_table_ids.iter().cloned().collect_vec(),
             );
             *sst_info = modified_sst;
