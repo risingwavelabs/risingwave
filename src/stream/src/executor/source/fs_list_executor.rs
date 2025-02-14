@@ -44,7 +44,6 @@ pub struct FsListExecutor<S: StateStore> {
     system_params: SystemParamsReaderRef,
 
     /// Rate limit in rows/s.
-    #[expect(dead_code)]
     rate_limit_rps: Option<u32>,
 }
 
