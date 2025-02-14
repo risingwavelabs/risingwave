@@ -86,6 +86,7 @@ pub(crate) struct StreamReaderBuilder {
     pub rate_limit: Option<u32>,
     pub source_id: TableId,
     pub source_name: String,
+    pub reader_stream: Option<BoxSourceChunkStream>,
 
     // cdc related
     pub is_auto_schema_change_enable: bool,
@@ -160,13 +161,13 @@ impl StreamReaderBuilder {
     }
 
     pub(crate) async fn fetch_latest_splits(
-        &self,
+        &mut self,
         state: ConnectorState,
         seek_to_latest: bool,
     ) -> StreamExecutorResult<CreateSplitReaderResult> {
         let (column_ids, source_ctx) = self.prepare_source_stream_build();
         let source_ctx_ref = Arc::new(source_ctx);
-        let (_, res) = self
+        let (stream, res) = self
             .source_desc
             .source
             .build_stream(
@@ -177,27 +178,35 @@ impl StreamReaderBuilder {
             )
             .await
             .map_err(StreamExecutorError::connector_error)?;
+        self.reader_stream = Some(stream);
         Ok(res)
     }
 
     #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
-    pub(crate) async fn into_retry_stream(self, mut state: ConnectorState, is_initial_build: bool) {
+    pub(crate) async fn into_retry_stream(
+        mut self,
+        mut state: ConnectorState,
+        is_initial_build: bool,
+    ) {
         let (column_ids, source_ctx) = self.prepare_source_stream_build();
         let source_ctx_ref = Arc::new(source_ctx);
 
         'build_consume_loop: loop {
             tracing::debug!("build stream source reader with state: {:?}", state);
-            let build_stream_result = self
-                .source_desc
-                .source
-                .build_stream(
-                    state.clone(),
-                    column_ids.clone(),
-                    source_ctx_ref.clone(),
-                    // just `seek_to_latest` for initial build
-                    is_initial_build,
-                )
-                .await;
+            let build_stream_result = if let Some(exist_stream) = self.reader_stream.take() {
+                Ok((exist_stream, CreateSplitReaderResult::default()))
+            } else {
+                self.source_desc
+                    .source
+                    .build_stream(
+                        state.clone(),
+                        column_ids.clone(),
+                        source_ctx_ref.clone(),
+                        // just `seek_to_latest` for initial build
+                        is_initial_build,
+                    )
+                    .await
+            };
             if let Err(e) = build_stream_result {
                 if is_initial_build {
                     return Err(StreamExecutorError::connector_error(e));
@@ -279,6 +288,7 @@ impl<S: StateStore> SourceExecutor<S> {
             is_auto_schema_change_enable: self.is_auto_schema_change_enable(),
             actor_ctx: self.actor_ctx.clone(),
             get_latest_split_info_fn,
+            reader_stream: None,
         }
     }
 
@@ -697,7 +707,7 @@ impl<S: StateStore> SourceExecutor<S> {
         let barrier_stream = barrier_to_message_stream(barrier_receiver).boxed();
 
         // Build the source stream reader.
-        let init_reader_builder = self.stream_reader_builder(source_desc.clone());
+        let mut init_reader_builder = self.stream_reader_builder(source_desc.clone());
         let mut latest_splits = None;
         if is_uninitialized {
             // need to seek to latest for initial build && shared source

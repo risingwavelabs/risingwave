@@ -291,6 +291,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             actor_ctx: self.actor_ctx.clone(),
             is_auto_schema_change_enable: false,
             get_latest_split_info_fn,
+            reader_stream: None,
         }
     }
 
@@ -358,7 +359,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                 backfill_stage_guard.get_latest_unfinished_splits()
             })
         });
-        let stream_reader_builder =
+        let mut stream_reader_builder =
             self.stream_reader_builder(source_desc.clone(), get_latest_split_info_fn.clone());
 
         if is_initialize {
