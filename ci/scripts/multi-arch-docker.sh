@@ -10,6 +10,8 @@ set -euo pipefail
 # nightly-yyyyMMdd: nightly build in main-cron
 # latest: only push to ghcr. dockerhub latest is latest release
 
+export PATH=$PATH:/var/lib/buildkite-agent/.local/bin
+
 date="$(date +%Y%m%d)"
 ghcraddr="ghcr.io/risingwavelabs/risingwave"
 dockerhubaddr="risingwavelabs/risingwave"
