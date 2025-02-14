@@ -331,17 +331,20 @@ impl IcebergSink {
                     }
                     let caps = re.captures_iter(partition_field);
                     for mat in caps {
-                        let (column, transform) = if mat["n"].is_empty() && mat["field"].is_empty()
+                        let (column, transform) = if mat.name("n").is_none() && mat.name("field").is_none()
                         {
-                            (&mat["func"], Transform::Identity)
+                            (&mat["transform"], Transform::Identity)
                         } else {
-                            let mut func = mat["func"].to_owned();
+                            let mut func = mat["transform"].to_owned();
                             if func == "bucket" || func == "truncate" {
-                                let n = &mat["n"];
-                                func = format!("{func}({n})");
+                                let n = &mat.name("n").ok_or_else(||{
+                                    SinkError::Iceberg(anyhow!("The `n` must be set with `bucket` and `truncate`"))
+                                })?.as_str();
+                                func = format!("{func}[{n}]");
                             }
-                            (&mat["field"], Transform::from_str(&func).unwrap())
+                            (&mat["field"], Transform::from_str(&func).map_err(|e| SinkError::Iceberg(anyhow!(e)))?)
                         };
+                        println!("column: {}, transform: {:?}", column, transform);
 
                         match iceberg_schema.field_id_by_name(column) {
                             Some(id) => partition_fields.push(
