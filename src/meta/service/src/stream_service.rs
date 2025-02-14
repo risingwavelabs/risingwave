@@ -226,7 +226,7 @@ impl StreamManagerService for StreamServiceImpl {
                                 .into_iter()
                                 .map(|actor| ActorInfo {
                                     id: actor.actor_id,
-                                    node: actor.nodes,
+                                    node: fragment.nodes.clone(),
                                     dispatcher: actor.dispatcher,
                                 })
                                 .collect_vec(),
@@ -309,6 +309,7 @@ impl StreamManagerService for StreamServiceImpl {
                     fragment_type_mask: fragment_desc.fragment_type_mask as _,
                     parallelism: fragment_desc.parallelism as _,
                     vnode_count: fragment_desc.vnode_count as _,
+                    node: Some(fragment_desc.stream_node.to_protobuf()),
                 },
             )
             .collect_vec();

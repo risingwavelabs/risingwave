@@ -50,6 +50,8 @@ pub(crate) struct LogStoreWriteState<S: LocalStateStore> {
     state_store: S,
     serde: LogStoreRowSerde,
     epoch: Option<EpochPair>,
+
+    on_post_seal: bool,
 }
 
 pub(crate) fn new_log_store_state<S: LocalStateStore>(
@@ -71,6 +73,7 @@ pub(crate) fn new_log_store_state<S: LocalStateStore>(
             state_store,
             serde,
             epoch: None,
+            on_post_seal: false,
         },
     )
 }
@@ -107,7 +110,8 @@ impl<S: LocalStateStore> LogStoreWriteState<S> {
         &mut self,
         next_epoch: u64,
         truncate_offset: Option<ReaderTruncationOffsetType>,
-    ) {
+    ) -> LogStorePostSealCurrentEpoch<'_, S> {
+        assert!(!self.on_post_seal);
         let watermark = truncate_offset
             .map(|truncation_offset| {
                 vec![VnodeWatermark::new(
@@ -131,11 +135,26 @@ impl<S: LocalStateStore> LogStoreWriteState<S> {
         let epoch = self.epoch.as_mut().expect("should have init");
         epoch.prev = epoch.curr;
         epoch.curr = next_epoch;
-    }
 
-    pub(crate) fn update_vnode_bitmap(&mut self, new_vnodes: &Arc<Bitmap>) {
-        self.serde.update_vnode_bitmap(new_vnodes.clone());
-        self.state_store.update_vnode_bitmap(new_vnodes.clone());
+        self.on_post_seal = true;
+        LogStorePostSealCurrentEpoch { inner: self }
+    }
+}
+
+#[must_use]
+pub(crate) struct LogStorePostSealCurrentEpoch<'a, S: LocalStateStore> {
+    inner: &'a mut LogStoreWriteState<S>,
+}
+
+impl<S: LocalStateStore> LogStorePostSealCurrentEpoch<'_, S> {
+    pub(crate) fn post_yield_barrier(self, new_vnodes: Option<Arc<Bitmap>>) {
+        if let Some(new_vnodes) = new_vnodes {
+            self.inner.serde.update_vnode_bitmap(new_vnodes.clone());
+            self.inner
+                .state_store
+                .update_vnode_bitmap(new_vnodes.clone());
+        }
+        self.inner.on_post_seal = false;
     }
 }
 

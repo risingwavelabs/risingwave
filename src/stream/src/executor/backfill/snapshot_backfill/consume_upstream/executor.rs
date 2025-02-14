@@ -91,6 +91,7 @@ impl<T: UpstreamTable, S: StateStore> UpstreamTableExecutor<T, S> {
         )
         .await?;
         let mut finish_reported = false;
+        let mut prev_reported_row_count = 0;
         let mut upstream_table = self.upstream_table;
         let mut stream = ConsumeUpstreamStream::new(
             progress_state.latest_progress(),
@@ -140,40 +141,48 @@ impl<T: UpstreamTable, S: StateStore> UpstreamTableExecutor<T, S> {
                         }
                     })
                     .await?;
-                progress_state.commit(barrier.epoch).await?;
+
                 if !finish_reported {
                     let mut row_count = 0;
                     let mut is_finished = true;
                     for (_, progress) in progress_state.latest_progress() {
-                        if let Some(progress) = progress
-                            && progress.epoch == self.snapshot_epoch
-                        {
-                            if let EpochBackfillProgress::Consuming { .. } = &progress.progress {
-                                is_finished = false;
+                        if let Some(progress) = progress {
+                            if progress.epoch == self.snapshot_epoch {
+                                if let EpochBackfillProgress::Consuming { .. } = &progress.progress
+                                {
+                                    is_finished = false;
+                                }
+                                row_count += progress.row_count;
                             }
-                            row_count += progress.row_count;
                         } else {
                             is_finished = false;
                         }
                     }
+                    // ensure that the reported row count is non-decreasing.
+                    let row_count_to_report = std::cmp::max(prev_reported_row_count, row_count);
+                    prev_reported_row_count = row_count_to_report;
+
                     if is_finished {
-                        self.progress.finish(barrier.epoch, row_count as _);
+                        self.progress
+                            .finish(barrier.epoch, row_count_to_report as _);
                         finish_reported = true;
                     } else {
-                        self.progress
-                            .update(barrier.epoch, self.snapshot_epoch, row_count as _);
+                        self.progress.update(
+                            barrier.epoch,
+                            self.snapshot_epoch,
+                            row_count_to_report as _,
+                        );
                     }
                 }
 
+                let post_commit = progress_state.commit(barrier.epoch).await?;
                 let update_vnode_bitmap = barrier.as_update_vnode_bitmap(self.actor_ctx.id);
-                let barrier_epoch = barrier.epoch;
                 yield Message::Barrier(barrier);
-                if let Some(new_vnode_bitmap) = update_vnode_bitmap {
+                if let Some(new_vnode_bitmap) =
+                    post_commit.post_yield_barrier(update_vnode_bitmap).await?
+                {
                     drop(stream);
                     upstream_table.update_vnode_bitmap(new_vnode_bitmap.clone());
-                    progress_state
-                        .update_vnode_bitmap(new_vnode_bitmap, barrier_epoch)
-                        .await?;
                     // recreate the stream on update vnode bitmap
                     stream = ConsumeUpstreamStream::new(
                         progress_state.latest_progress(),
