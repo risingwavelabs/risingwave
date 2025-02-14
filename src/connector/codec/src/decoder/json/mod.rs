@@ -50,7 +50,7 @@ pub enum Error {
         ref_fragment: String,
     },
     #[error("json ref error")]
-    JSONRef {
+    JsonRef {
         #[from]
         source: std::io::Error,
     },
@@ -80,96 +80,93 @@ impl JsonRef {
         }
     }
 
-    async fn deref_value(&mut self, value: &mut Value, id: String) -> Result<()> {
-        let id_url = Url::parse(&id).into_url_parse(&id)?.to_string();
-        self.schema_cache.insert(id_url.clone(), value.clone());
-        self.deref(value, id_url, &vec![]).await?;
+    async fn deref_value(&mut self, value: &mut Value, retrieval_url: &Url) -> Result<()> {
+        self.schema_cache
+            .insert(retrieval_url.to_string(), value.clone());
+        self.deref(value, retrieval_url, &vec![]).await?;
         Ok(())
     }
 
     async fn deref(
         &mut self,
         value: &mut Value,
-        id: String,
+        base_url: &Url,
         used_refs: &Vec<String>,
     ) -> Result<()> {
-        if let Some(obj) = value.as_object_mut() {
-            if let Some(ref_value) = obj.remove("$ref") {
-                if let Some(ref_string) = ref_value.as_str() {
-                    let id_url = Url::parse(&id).into_url_parse(&id)?;
-                    let ref_url = id_url.join(ref_string).into_url_parse(ref_string)?;
-                    let mut ref_url_no_fragment = ref_url.clone();
-                    ref_url_no_fragment.set_fragment(None);
-                    let url_schema = ref_url_no_fragment.scheme();
-                    let ref_no_fragment = ref_url_no_fragment.to_string();
+        if let Some(obj) = value.as_object_mut()
+            && let Some(ref_value) = obj.remove("$ref")
+            && let Some(ref_string) = ref_value.as_str()
+        {
+            let ref_url = base_url.join(ref_string).into_url_parse(ref_string)?;
+            let mut ref_url_no_fragment = ref_url.clone();
+            ref_url_no_fragment.set_fragment(None);
+            let url_schema = ref_url_no_fragment.scheme();
+            let ref_no_fragment = ref_url_no_fragment.to_string();
 
-                    let mut schema = match self.schema_cache.get(&ref_no_fragment) {
-                        Some(cached_schema) => cached_schema.clone(),
-                        None => {
-                            if url_schema == "http" || url_schema == "https" {
-                                reqwest::get(ref_url_no_fragment)
-                                    .await
-                                    .into_request(&ref_no_fragment)?
-                                    .json()
-                                    .await
-                                    .into_request(&ref_no_fragment)?
-                            } else if url_schema == "file" {
-                                let file_path =
-                                    ref_url_no_fragment.to_file_path().map_err(|_| {
-                                        anyhow::anyhow!(
-                                            "could not convert url {} to file path",
-                                            &ref_url_no_fragment
-                                        )
-                                    })?;
-                                let file = fs::File::open(file_path)
-                                    .into_schema_from_file(&ref_no_fragment)?;
-                                serde_json::from_reader(file)
-                                    .into_schema_not_json_serde(ref_no_fragment.clone())?
-                            } else {
-                                return Err(Error::UnsupportedUrl {
-                                    url: ref_no_fragment,
-                                });
-                            }
-                        }
-                    };
-
-                    if !self.schema_cache.contains_key(&ref_no_fragment) {
-                        self.schema_cache
-                            .insert(ref_no_fragment.clone(), schema.clone());
+            let mut schema = match self.schema_cache.get(&ref_no_fragment) {
+                Some(cached_schema) => cached_schema.clone(),
+                None => {
+                    if url_schema == "http" || url_schema == "https" {
+                        reqwest::get(ref_url_no_fragment.clone())
+                            .await
+                            .into_request(&ref_no_fragment)?
+                            .json()
+                            .await
+                            .into_request(&ref_no_fragment)?
+                    } else if url_schema == "file" {
+                        let file_path = ref_url_no_fragment.to_file_path().map_err(|_| {
+                            anyhow::anyhow!(
+                                "could not convert url {} to file path",
+                                &ref_url_no_fragment
+                            )
+                        })?;
+                        let file =
+                            fs::File::open(file_path).into_schema_from_file(&ref_no_fragment)?;
+                        serde_json::from_reader(file)
+                            .into_schema_not_json_serde(ref_no_fragment.clone())?
+                    } else {
+                        return Err(Error::UnsupportedUrl {
+                            url: ref_no_fragment,
+                        });
                     }
+                }
+            };
 
-                    let ref_url_string = ref_url.to_string();
-                    if let Some(ref_fragment) = ref_url.fragment() {
-                        schema = schema
-                            .pointer(ref_fragment)
-                            .ok_or(Error::JsonRefPointerNotFound {
-                                ref_string: ref_string.to_owned(),
-                                ref_fragment: ref_fragment.to_owned(),
-                            })?
-                            .clone();
-                    }
-                    // Do not deref a url twice to prevent infinite loops
-                    if used_refs.contains(&ref_url_string) {
-                        return Ok(());
-                    }
-                    let mut new_used_refs = used_refs.clone();
-                    new_used_refs.push(ref_url_string);
+            if !self.schema_cache.contains_key(&ref_no_fragment) {
+                self.schema_cache
+                    .insert(ref_no_fragment.clone(), schema.clone());
+            }
 
-                    Box::pin(self.deref(&mut schema, ref_no_fragment, &new_used_refs)).await?;
-                    let old_value = mem::replace(value, schema);
+            let ref_url_string = ref_url.to_string();
+            if let Some(ref_fragment) = ref_url.fragment() {
+                schema = schema
+                    .pointer(ref_fragment)
+                    .ok_or(Error::JsonRefPointerNotFound {
+                        ref_string: ref_string.to_owned(),
+                        ref_fragment: ref_fragment.to_owned(),
+                    })?
+                    .clone();
+            }
+            // Do not deref a url twice to prevent infinite loops
+            if used_refs.contains(&ref_url_string) {
+                return Ok(());
+            }
+            let mut new_used_refs = used_refs.clone();
+            new_used_refs.push(ref_url_string);
 
-                    if let Some(reference_key) = &self.reference_key {
-                        if let Some(new_obj) = value.as_object_mut() {
-                            new_obj.insert(reference_key.clone(), old_value);
-                        }
-                    }
+            Box::pin(self.deref(&mut schema, &ref_url_no_fragment, &new_used_refs)).await?;
+            let old_value = mem::replace(value, schema);
+
+            if let Some(reference_key) = &self.reference_key {
+                if let Some(new_obj) = value.as_object_mut() {
+                    new_obj.insert(reference_key.clone(), old_value);
                 }
             }
         }
 
         if let Some(obj) = value.as_object_mut() {
             for obj_value in obj.values_mut() {
-                Box::pin(self.deref(obj_value, id.clone(), used_refs)).await?
+                Box::pin(self.deref(obj_value, base_url, used_refs)).await?
             }
         }
         Ok(())
@@ -185,8 +182,13 @@ impl crate::JsonSchema {
     /// <https://github.com/mozilla/jsonschema-transpiler/blob/fb715c7147ebd52427e0aea09b2bba2d539850b1/src/jsonschema.rs#L228-L280>
     ///
     /// TODO: examine other stuff like `oneOf`, `patternProperties`, etc.
-    pub async fn json_schema_to_columns(&mut self, uri: String) -> anyhow::Result<Vec<ColumnDesc>> {
-        JsonRef::new().deref_value(&mut self.0, uri).await?;
+    pub async fn json_schema_to_columns(
+        &mut self,
+        retrieval_url: Url,
+    ) -> anyhow::Result<Vec<ColumnDesc>> {
+        JsonRef::new()
+            .deref_value(&mut self.0, &retrieval_url)
+            .await?;
         let avro_schema = jst::convert_avro(&self.0, jst::Context::default()).to_string();
         let schema =
             apache_avro::Schema::parse_str(&avro_schema).context("failed to parse avro schema")?;

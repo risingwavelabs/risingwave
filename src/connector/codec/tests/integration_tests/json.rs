@@ -16,6 +16,7 @@ use std::fs;
 
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_connector_codec::JsonSchema;
+use url::Url;
 
 use crate::utils::{ColumnDescTestDisplay, *};
 
@@ -84,7 +85,7 @@ async fn test_json_schema_parse() {
     let mut json_schema = JsonSchema::parse_str(&schema).unwrap();
 
     let columns = json_schema
-        .json_schema_to_columns("http://test_schema_uri.test".to_string())
+        .json_schema_to_columns(Url::parse("http://test_schema_uri.test").unwrap())
         .await
         .unwrap()
         .into_iter()

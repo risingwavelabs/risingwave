@@ -97,7 +97,7 @@ pub async fn fetch_json_schema_and_map_to_columns(
         JsonSchema::parse_bytes(&bytes)?
     };
     json_schema
-        .json_schema_to_columns(url.first().unwrap().to_string())
+        .json_schema_to_columns(url.first().unwrap().clone())
         .await
         .map_err(Into::into)
 }
