@@ -559,7 +559,7 @@ impl HummockManager {
                         .iter()
                         .map(|level| level.level_idx)
                         .collect();
-                    let need_cancel = !levels.check_sst_ids_exist(&input_level_ids, input_sst_ids);
+                    let need_cancel = !levels.check_sst_ids_exist(&input_level_ids, &input_sst_ids);
                     if need_cancel {
                         canceled_tasks.push(ReportTask {
                             task_id: task.task_id,

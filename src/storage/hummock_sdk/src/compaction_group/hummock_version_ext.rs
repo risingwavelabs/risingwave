@@ -328,7 +328,7 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
                 .extend(insert_table_infos);
             cur_levels.levels[idx]
                 .table_infos
-                .sort_by(|sst1, sst2| sst1.key_range.cmp(&sst2.key_range));
+                .sort_unstable_by(|sst1, sst2| sst1.key_range.cmp(&sst2.key_range));
             assert!(can_concat(&cur_levels.levels[idx].table_infos));
             level
                 .table_infos
@@ -907,7 +907,7 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
                 .extend(insert_table_infos);
             cur_levels.levels[idx]
                 .table_infos
-                .sort_by(|sst1, sst2| sst1.key_range.cmp(&sst2.key_range));
+                .sort_unstable_by(|sst1, sst2| sst1.key_range.cmp(&sst2.key_range));
             assert!(can_concat(&cur_levels.levels[idx].table_infos));
             level
                 .table_infos
@@ -973,7 +973,7 @@ impl Levels {
         } = level_delta;
         let new_vnode_partition_count = *vnode_partition_count;
 
-        if !self.check_sst_ids_exist(&[*level_idx], delete_sst_ids_set.clone()) {
+        if !self.check_sst_ids_exist(&[*level_idx], &delete_sst_ids_set) {
             warn!(
                 "This VersionDelta may be committed by an expired compact task. Please check it. \n
                     insert_sst_level_id: {}\n,
@@ -1066,26 +1066,24 @@ impl Levels {
         }
     }
 
-    pub fn check_sst_ids_exist(
-        &self,
-        level_idx_to_check: &[u32],
-        mut sst_ids: HashSet<u64>,
-    ) -> bool {
+    pub fn check_sst_ids_exist(&self, level_idx_to_check: &[u32], sst_ids: &HashSet<u64>) -> bool {
+        let mut exists_ids = HashSet::with_capacity(self.count_ssts());
         for level_idx in level_idx_to_check {
             if *level_idx == 0 {
                 for level in &self.l0.sub_levels {
-                    level.table_infos.iter().for_each(|table| {
-                        sst_ids.remove(&table.sst_id);
-                    });
+                    for table in &level.table_infos {
+                        exists_ids.insert(table.sst_id);
+                    }
                 }
             } else {
-                let idx = *level_idx as usize - 1;
-                self.levels[idx].table_infos.iter().for_each(|table| {
-                    sst_ids.remove(&table.sst_id);
-                });
+                let levels = self.get_level(*level_idx as usize);
+                for table in &levels.table_infos {
+                    exists_ids.insert(table.sst_id);
+                }
             }
         }
-        sst_ids.is_empty()
+
+        exists_ids.is_superset(sst_ids)
     }
 }
 
@@ -1240,7 +1238,7 @@ pub fn add_ssts_to_sub_level(
     if l0.sub_levels[sub_level_idx].level_type == PbLevelType::Nonoverlapping {
         l0.sub_levels[sub_level_idx]
             .table_infos
-            .sort_by(|sst1, sst2| sst1.key_range.cmp(&sst2.key_range));
+            .sort_unstable_by(|sst1, sst2| sst1.key_range.cmp(&sst2.key_range));
         assert!(
             can_concat(&l0.sub_levels[sub_level_idx].table_infos),
             "sstable ids: {:?}",
@@ -1335,7 +1333,7 @@ fn level_insert_ssts(operand: &mut Level, insert_table_infos: &Vec<SstableInfo>)
         .extend(insert_table_infos.iter().cloned());
     operand
         .table_infos
-        .sort_by(|sst1, sst2| sst1.key_range.cmp(&sst2.key_range));
+        .sort_unstable_by(|sst1, sst2| sst1.key_range.cmp(&sst2.key_range));
     if operand.level_type == PbLevelType::Overlapping {
         operand.level_type = PbLevelType::Nonoverlapping;
     }
