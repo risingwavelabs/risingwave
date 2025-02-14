@@ -258,6 +258,12 @@ pub async fn handle_alter_table_column(
         )));
     }
 
+    if let Some(_) = original_catalog.webhook_info {
+        return Err(RwError::from(ErrorCode::BindError(
+            "Adding/dropping a column of a table with webhook has not been implemented.".to_owned(),
+        )));
+    }
+
     // Retrieve the original table definition and parse it to AST.
     let mut definition = original_catalog.create_sql_ast_purified()?;
     let Statement::CreateTable { columns, .. } = &mut definition else {

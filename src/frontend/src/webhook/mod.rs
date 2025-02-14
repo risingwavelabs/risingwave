@@ -153,7 +153,7 @@ pub(super) mod handlers {
         let search_path = SearchPath::default();
         let schema_path = SchemaPath::new(Some(schema.as_str()), &search_path, USER);
 
-        let (webhook_source_info, table_id, version_id) = {
+        let (webhook_source_info, table_id, version_id, row_id_index) = {
             let reader = frontend_env.catalog_reader().read_guard();
             let (table_catalog, _schema) = reader
                 .get_any_table_by_name(database.as_str(), schema_path, table)
@@ -173,6 +173,7 @@ pub(super) mod handlers {
                 webhook_source_info,
                 table_catalog.id(),
                 table_catalog.version_id().expect("table must be versioned"),
+                table_catalog.row_id_index.map(|idx| idx as u32),
             )
         };
 
@@ -182,7 +183,7 @@ pub(super) mod handlers {
             column_indices: vec![0],
             // leave the data_chunk empty for now
             data_chunk: None,
-            row_id_index: Some(1),
+            row_id_index,
             request_id,
             wait_for_persistence: webhook_source_info.wait_for_persistence,
         };
