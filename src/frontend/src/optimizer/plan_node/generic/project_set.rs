@@ -73,7 +73,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for ProjectSet<PlanRef> {
             // Get field info from o2i.
             let name = match o2i.try_map(idx) {
                 Some(input_idx) => input_schema.fields()[input_idx].name.clone(),
-                None => (format!("{:?}", ExprDisplay { expr, input_schema }),),
+                None => format!("{:?}", ExprDisplay { expr, input_schema }),
             };
             Field::with_name(expr.return_type(), name)
         }));
