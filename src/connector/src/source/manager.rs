@@ -130,11 +130,9 @@ impl From<&ColumnDesc> for SourceColumnDesc {
             data_type,
             column_id,
             name,
-            field_descs,
             additional_column,
             // ignored fields below
             generated_or_default_column,
-            type_name: _,
             description: _,
             version: _,
             system_column: _,
@@ -158,7 +156,7 @@ impl From<&ColumnDesc> for SourceColumnDesc {
             name: name.clone(),
             data_type: data_type.clone(),
             column_id: *column_id,
-            fields: field_descs.clone(),
+            fields: Vec::new(), // TODO(struct): fill or deprecate this?
             additional_column: additional_column.clone(),
             // additional fields below
             column_type,
@@ -174,7 +172,7 @@ impl From<&SourceColumnDesc> for ColumnDesc {
             name,
             data_type,
             column_id,
-            fields,
+            fields: _,
             additional_column,
             // ignored fields below
             column_type: _,
@@ -186,10 +184,8 @@ impl From<&SourceColumnDesc> for ColumnDesc {
             data_type: data_type.clone(),
             column_id: *column_id,
             name: name.clone(),
-            field_descs: fields.clone(),
             additional_column: additional_column.clone(),
             // additional fields below
-            type_name: "".to_owned(),
             generated_or_default_column: None,
             description: None,
             version: ColumnDescVersion::LATEST,
