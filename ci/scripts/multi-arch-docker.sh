@@ -12,6 +12,8 @@ set -euo pipefail
 # latest: the latest stable build
 # nightly: the latest nightly build
 
+export PATH=$PATH:/var/lib/buildkite-agent/.local/bin
+
 date="$(date +%Y%m%d)"
 ghcraddr="ghcr.io/risingwavelabs/risingwave"
 dockerhubaddr="risingwavelabs/risingwave"
