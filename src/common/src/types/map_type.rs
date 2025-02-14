@@ -20,11 +20,20 @@ use super::*;
 
 /// Refer to [`super::super::array::MapArray`] for the invariants of a map value.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct MapType(Box<(DataType, DataType)>);
+pub struct MapType<E = FieldName>(Box<(DataType<E>, DataType<E>)>);
 
 impl From<MapType> for DataType {
     fn from(value: MapType) -> Self {
         DataType::Map(value)
+    }
+}
+
+impl<E: Clone> MapType<E> {
+    pub fn map_extra<E2>(self, mut f: impl FnMut(E) -> E2) -> MapType<E2> {
+        MapType(Box::new((
+            self.0 .0.map_extra(&mut f),
+            self.0 .1.map_extra(&mut f),
+        )))
     }
 }
 

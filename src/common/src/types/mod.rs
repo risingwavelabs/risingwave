@@ -101,6 +101,30 @@ pub type F32 = ordered_float::OrderedFloat<f32>;
 /// A 64-bit floating point type with total order.
 pub type F64 = ordered_float::OrderedFloat<f64>;
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct DataTypeWith<E> {
+    pub extra: E,
+    pub data_type: DataType,
+}
+
+impl<E> DataTypeWith<E> {
+    pub fn map_extra<E2>(self, f: impl FnOnce(E) -> E2) -> DataTypeWith<E2> {
+        DataTypeWith {
+            extra: f(self.extra),
+            data_type: self.data_type,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct FieldName(pub String);
+
+impl DataTypeWith<FieldName> {
+    pub fn name(&self) -> &str {
+        &self.extra.0
+    }
+}
+
 /// The set of datatypes that are supported in RisingWave.
 ///
 /// # Trait implementations
@@ -115,8 +139,9 @@ pub type F64 = ordered_float::OrderedFloat<f64>;
 #[strum_discriminants(derive(Hash, Ord, PartialOrd))]
 #[strum_discriminants(name(DataTypeName))]
 #[strum_discriminants(vis(pub))]
+#[display(bound(StructType<E>, MapType<E>))] // TODO(struct): is it good to also impl Display for `E` other than `FieldName`?
 #[cfg_attr(test, strum_discriminants(derive(strum_macros::EnumIter)))]
-pub enum DataType {
+pub enum DataType<E = FieldName> {
     #[display("boolean")]
     #[from_str(regex = "(?i)^bool$|^boolean$")]
     Boolean,
@@ -158,10 +183,10 @@ pub enum DataType {
     Interval,
     #[display("{0}")]
     #[from_str(regex = "(?i)^(?P<0>.+)$")]
-    Struct(StructType),
+    Struct(StructType<E>),
     #[display("{0}[]")]
     #[from_str(regex = r"(?i)^(?P<0>.+)\[\]$")]
-    List(Box<DataType>),
+    List(Box<Self>),
     #[display("bytea")]
     #[from_str(regex = "(?i)^bytea$")]
     Bytea,
@@ -176,15 +201,18 @@ pub enum DataType {
     Int256,
     #[display("{0}")]
     #[from_str(regex = "(?i)^(?P<0>.+)$")]
-    Map(MapType),
+    Map(MapType<E>),
 }
 
 // For DataType::List
-impl std::str::FromStr for Box<DataType> {
-    type Err = BoxedError;
+impl<E> FromStr for Box<DataType<E>>
+where
+    DataType<E>: FromStr,
+{
+    type Err = <DataType<E> as FromStr>::Err;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Box::new(DataType::from_str(s)?))
+        Ok(Box::new(DataType::<E>::from_str(s)?))
     }
 }
 
@@ -318,6 +346,35 @@ pub mod data_types {
         };
     }
     pub use range_frame_datetime;
+}
+
+impl<E: Clone> DataType<E> {
+    pub fn map_extra<E2>(self, f: impl FnMut(E) -> E2) -> DataType<E2> {
+        match self {
+            DataType::Struct(t) => DataType::Struct(t.map_extra(f)),
+            DataType::List(t) => DataType::List(t.map_extra(f).into()),
+            DataType::Map(t) => DataType::Map(t.map_extra(f)),
+
+            // non-composite types
+            DataType::Boolean => DataType::Boolean,
+            DataType::Int16 => DataType::Int16,
+            DataType::Int32 => DataType::Int32,
+            DataType::Int64 => DataType::Int64,
+            DataType::Float32 => DataType::Float32,
+            DataType::Float64 => DataType::Float64,
+            DataType::Decimal => DataType::Decimal,
+            DataType::Date => DataType::Date,
+            DataType::Varchar => DataType::Varchar,
+            DataType::Time => DataType::Time,
+            DataType::Timestamp => DataType::Timestamp,
+            DataType::Timestamptz => DataType::Timestamptz,
+            DataType::Interval => DataType::Interval,
+            DataType::Bytea => DataType::Bytea,
+            DataType::Jsonb => DataType::Jsonb,
+            DataType::Serial => DataType::Serial,
+            DataType::Int256 => DataType::Int256,
+        }
+    }
 }
 
 impl DataType {
