@@ -602,12 +602,10 @@ mod tests {
             Field {
                 data_type: DataType::Int32,
                 name: "a".to_owned(),
-
             },
             Field {
                 data_type: DataType::Int32,
                 name: "b".to_owned(),
-
             },
         ]);
         let table_name = "test_table";
@@ -624,12 +622,10 @@ mod tests {
             Field {
                 data_type: DataType::Int32,
                 name: "a".to_owned(),
-
             },
             Field {
                 data_type: DataType::Int32,
                 name: "b".to_owned(),
-
             },
         ]);
         let table_name = "test_table";

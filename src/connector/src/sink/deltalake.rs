@@ -616,12 +616,10 @@ mod test {
             Field {
                 data_type: DataType::Int32,
                 name: "id".into(),
-
             },
             Field {
                 data_type: DataType::Varchar,
                 name: "name".into(),
-
             },
         ]);
 

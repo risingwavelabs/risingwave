@@ -188,7 +188,6 @@ impl LogicalSource {
                         &Field {
                             name: "filename".to_owned(),
                             data_type: DataType::Varchar,
-
                         },
                         0,
                     ),
@@ -199,7 +198,6 @@ impl LogicalSource {
                         &Field {
                             name: "last_edit_time".to_owned(),
                             data_type: DataType::Timestamptz,
-
                         },
                         1,
                     ),
@@ -210,7 +208,6 @@ impl LogicalSource {
                         &Field {
                             name: "file_size".to_owned(),
                             data_type: DataType::Int64,
-
                         },
                         0,
                     ),
