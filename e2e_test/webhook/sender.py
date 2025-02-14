@@ -76,7 +76,7 @@ def send_test_primary_key(secret):
         "X-Hub-Signature": signature  # Custom signature header
     }
     send_webhook(url, headers, payload_json)
-    
+
 
 def send_validate_raw_string(secret):
     payload = message
