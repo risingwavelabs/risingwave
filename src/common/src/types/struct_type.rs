@@ -62,7 +62,7 @@ impl StructType {
         Self::unnamed(Vec::new())
     }
 
-    /// Creates a struct type with unnamed fields, which will be named `f1`, `f2`, etc.
+    /// Creates a struct type with unnamed fields.
     pub fn unnamed(fields: Vec<DataType>) -> Self {
         let fields = fields
             .into_iter()
@@ -124,14 +124,17 @@ impl StructType {
 
 impl Display for StructType {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "struct<{}>",
-            self.iter()
-                .map(|(name, ty)| format!("{} {}", name, ty))
-                .join(", ")
-        )
-        // }
+        if self.is_unnamed() {
+            write!(f, "record")
+        } else {
+            write!(
+                f,
+                "struct<{}>",
+                self.iter()
+                    .map(|(name, ty)| format!("{} {}", name, ty))
+                    .join(", ")
+            )
+        }
     }
 }
 
