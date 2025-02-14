@@ -1145,8 +1145,9 @@ fn split_sst_info_for_level(
         let sst_size = sst_info.sst_size;
         if sst_size / 2 == 0 {
             tracing::warn!(
-                "Sstable {} sst_size {} is under expected (object_size {})",
+                "Sstable id {} object_id {} sst_size {} is under expected (object_size {})",
                 sst_info.sst_id,
+                sst_info.object_id,
                 sst_info.sst_size,
                 sst_info.file_size,
             );

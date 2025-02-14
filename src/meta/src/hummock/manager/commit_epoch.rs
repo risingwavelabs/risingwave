@@ -407,16 +407,28 @@ impl HummockManager {
 
                 if new_sst_size == 0 {
                     tracing::warn!(
-                        "Sstable {} doesn't contain any data for tables {:?}",
+                        "Sstable id {} object_id {} doesn't contain any data for tables {:?}",
+                        sst.sst_info.sst_id,
                         sst.sst_info.object_id,
                         match_ids
                     );
                 }
 
+                let old_sst_size = origin_sst_size.saturating_sub(new_sst_size);
+                if old_sst_size == 0 {
+                    tracing::warn!(
+                        "Sstable id {} object_id {} doesn't contain any data for tables {:?} origin_sst_size {} new_sst_size {}",
+                        sst.sst_info.sst_id,
+                        sst.sst_info.object_id,
+                        match_ids,
+                        origin_sst_size,
+                        new_sst_size
+                    );
+                }
                 let (modified_sst_info, branch_sst) = split_sst_with_table_ids(
                     &sst.sst_info,
                     &mut new_sst_id,
-                    origin_sst_size - new_sst_size,
+                    old_sst_size,
                     new_sst_size,
                     match_ids,
                 );
