@@ -502,7 +502,9 @@ where
                     if is_finished {
                         // If already finished, no need persist any state, but we need to advance the epoch of the state table anyway.
                         if let Some(table) = &mut self.state_table {
-                            table.commit(barrier.epoch).await?;
+                            table
+                                .commit_assert_no_update_vnode_bitmap(barrier.epoch)
+                                .await?;
                         }
                     } else {
                         // If snapshot was empty, we do not need to backfill,
@@ -572,7 +574,9 @@ where
                 if let Message::Barrier(barrier) = &msg {
                     // If already finished, no need persist any state, but we need to advance the epoch of the state table anyway.
                     if let Some(table) = &mut self.state_table {
-                        table.commit(barrier.epoch).await?;
+                        table
+                            .commit_assert_no_update_vnode_bitmap(barrier.epoch)
+                            .await?;
                     }
                 }
 

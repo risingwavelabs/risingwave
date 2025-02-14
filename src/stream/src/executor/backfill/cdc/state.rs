@@ -132,6 +132,8 @@ impl<S: StateStore> CdcBackfillState<S> {
 
     /// Persist the state to storage
     pub async fn commit_state(&mut self, new_epoch: EpochPair) -> StreamExecutorResult<()> {
-        self.state_table.commit(new_epoch).await
+        self.state_table
+            .commit_assert_no_update_vnode_bitmap(new_epoch)
+            .await
     }
 }

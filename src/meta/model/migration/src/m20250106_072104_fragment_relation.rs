@@ -82,10 +82,8 @@ async fn fulfill_fragment_relation(manager: &SchemaManager<'_>) -> Result<(), Db
     let database_backend = connection.get_database_backend();
 
     let (sql, values) = Query::select()
-        .distinct_on([
-            FragmentRelation::SourceFragmentId,
-            FragmentRelation::TargetFragmentId,
-        ])
+        // as sqlite does not support `distinct on` yet, we have to use `distinct` here
+        .distinct()
         .expr_as(
             Expr::col((Actor::Table, Actor::FragmentId)),
             FragmentRelation::SourceFragmentId,

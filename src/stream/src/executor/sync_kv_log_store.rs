@@ -86,7 +86,8 @@ use crate::common::log_store_impl::kv_log_store::serde::{
     KvLogStoreItem, LogStoreItemMergeStream, LogStoreRowSerde,
 };
 use crate::common::log_store_impl::kv_log_store::state::{
-    new_log_store_state, LogStoreReadState, LogStoreStateWriteChunkFuture, LogStoreWriteState,
+    new_log_store_state, LogStorePostSealCurrentEpoch, LogStoreReadState,
+    LogStoreStateWriteChunkFuture, LogStoreWriteState,
 };
 use crate::common::log_store_impl::kv_log_store::{
     FlushInfo, KvLogStoreMetrics, ReaderTruncationOffsetType, SeqIdType, FIRST_SEQ_ID,
@@ -301,7 +302,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                             WriteFutureEvent::UpstreamMessageReceived(msg) => {
                                 match msg {
                                     Message::Barrier(barrier) => {
-                                        Self::write_barrier(
+                                        let write_state_post_write_barrier = Self::write_barrier(
                                             &mut write_state,
                                             barrier.clone(),
                                             &self.metrics,
@@ -314,9 +315,10 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                                             barrier.as_update_vnode_bitmap(self.actor_context.id);
                                         let barrier_epoch = barrier.epoch;
                                         yield Message::Barrier(barrier);
+                                        write_state_post_write_barrier
+                                            .post_yield_barrier(update_vnode_bitmap.clone());
                                         if let Some(vnode_bitmap) = update_vnode_bitmap {
                                             // Apply Vnode Update
-                                            write_state.update_vnode_bitmap(&vnode_bitmap);
                                             read_state.update_vnode_bitmap(vnode_bitmap);
                                             initial_write_epoch = barrier_epoch;
                                             input = stream;
@@ -497,13 +499,13 @@ impl<S: StateStoreRead> ReadFuture<S> {
 
 // Write methods
 impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
-    async fn write_barrier(
-        write_state: &mut LogStoreWriteState<S::Local>,
+    async fn write_barrier<'a>(
+        write_state: &'a mut LogStoreWriteState<S::Local>,
         barrier: Barrier,
         metrics: &KvLogStoreMetrics,
         truncation_offset: Option<ReaderTruncationOffsetType>,
         buffer: &mut SyncedLogStoreBuffer,
-    ) -> StreamExecutorResult<()> {
+    ) -> StreamExecutorResult<LogStorePostSealCurrentEpoch<'a, S::Local>> {
         let epoch = barrier.epoch.prev;
         let mut writer = write_state.start_writer(false);
         // FIXME(kwannoel): Handle paused stream.
@@ -538,7 +540,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
         flush_info.report(metrics);
 
         // Apply truncation
-        write_state.seal_current_epoch(barrier.epoch.curr, truncation_offset);
+        let post_seal = write_state.seal_current_epoch(barrier.epoch.curr, truncation_offset);
 
         // Add to buffer
         buffer.buffer.push_back((
@@ -551,7 +553,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
         buffer.next_chunk_id = 0;
         buffer.update_unconsumed_buffer_metrics();
 
-        Ok(())
+        Ok(post_seal)
     }
 }
 
@@ -598,7 +600,7 @@ impl SyncedLogStoreBuffer {
                 vnode_bitmap,
                 ..
             },
-        )) = self.buffer.front_mut()
+        )) = self.buffer.back_mut()
         {
             assert!(
                 *prev_end_seq_id < start_seq_id,
