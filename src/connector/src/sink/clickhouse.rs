@@ -1073,18 +1073,19 @@ pub fn build_fields_name_type_from_schema(schema: &Schema) -> Result<Vec<(String
     let mut vec = vec![];
     for field in schema.fields() {
         if matches!(field.data_type, DataType::Struct(_)) {
-            for i in &field.sub_fields {
-                if matches!(i.data_type, DataType::Struct(_)) {
-                    return Err(SinkError::ClickHouse(
-                        "Only one level of nesting is supported for struct".to_owned(),
-                    ));
-                } else {
-                    vec.push((
-                        format!("{}.{}", field.name, i.name),
-                        DataType::List(Box::new(i.data_type())),
-                    ))
-                }
-            }
+            // for i in &field.sub_fields {
+            //     if matches!(i.data_type, DataType::Struct(_)) {
+            //         return Err(SinkError::ClickHouse(
+            //             "Only one level of nesting is supported for struct".to_owned(),
+            //         ));
+            //     } else {
+            //         vec.push((
+            //             format!("{}.{}", field.name, i.name),
+            //             DataType::List(Box::new(i.data_type())),
+            //         ))
+            //     }
+            // }
+            todo!()
         } else {
             vec.push((field.name.clone(), field.data_type()));
         }
