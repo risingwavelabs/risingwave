@@ -95,11 +95,12 @@ impl UserDefinedTableFunction {
                 output.columns().len()
             );
         }
-        if output.column_at(0).data_type() != DataType::Int32 {
+        let row_index_type = DataType::Int32;
+        if output.column_at(0).data_type() != row_index_type {
             bail!(
                 "UDF returned {:?} at column 0, but expected {:?}",
                 output.column_at(0).data_type(),
-                DataType::Int32,
+                row_index_type,
             );
         }
         if output.column_at(0).as_int32().raw_iter().any(|i| i < 0) {
