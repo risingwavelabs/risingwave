@@ -210,14 +210,24 @@ pub mod group_split {
         new_sst_size: u64,
         new_table_ids: Vec<u32>,
     ) -> (SstableInfo, SstableInfo) {
+        if new_sst_size == 0 || old_sst_size == 0 {
+            tracing::warn!(
+                "Sstable {} old_sst_size {} new_sst_size {} are under expected (object_size {})",
+                origin_sst_info.sst_id,
+                old_sst_size,
+                new_sst_size,
+                origin_sst_info.file_size,
+            );
+        };
+
         let mut sst_info = origin_sst_info.get_inner();
         let mut branch_table_info = sst_info.clone();
         branch_table_info.sst_id = *new_sst_id;
-        branch_table_info.sst_size = new_sst_size;
+        branch_table_info.sst_size = std::cmp::max(1, new_sst_size);
         *new_sst_id += 1;
 
         sst_info.sst_id = *new_sst_id;
-        sst_info.sst_size = old_sst_size;
+        sst_info.sst_size = std::cmp::max(1, old_sst_size);
         *new_sst_id += 1;
 
         {
@@ -398,12 +408,22 @@ pub mod group_split {
                         false
                     }
                     SstSplitType::Both => {
+                        let sst_size = sst.sst_size;
+                        if sst_size / 2 == 0 {
+                            tracing::warn!(
+                                "Sstable {} sst_size {} is under expected (object_size {})",
+                                sst.sst_id,
+                                sst.sst_size,
+                                sst.file_size,
+                            );
+                        };
+
                         let (left, right) = split_sst(
                             sst.clone(),
                             new_sst_id,
                             split_key.clone(),
-                            sst.sst_size / 2,
-                            sst.sst_size / 2,
+                            std::cmp::max(1, sst_size / 2),
+                            std::cmp::max(1, sst_size / 2),
                         );
                         if let Some(branch_sst) = right {
                             insert_table_infos.push(branch_sst);
@@ -439,6 +459,15 @@ pub mod group_split {
                     // split the sst
                     let sst = level.table_infos[pos].clone();
                     let sst_size = sst.sst_size;
+                    if sst_size / 2 == 0 {
+                        tracing::warn!(
+                            "Sstable {} sst_size {} is under expected (object_size {})",
+                            sst.sst_id,
+                            sst.sst_size,
+                            sst.file_size,
+                        );
+                    };
+
                     let (left, right) = split_sst(
                         sst,
                         new_sst_id,

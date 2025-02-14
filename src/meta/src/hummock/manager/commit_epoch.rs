@@ -405,6 +405,14 @@ impl HummockManager {
                     })
                     .sum();
 
+                if new_sst_size == 0 {
+                    tracing::warn!(
+                        "Sstable {} doesn't contain any data for tables {:?}",
+                        sst.sst_info.object_id,
+                        match_ids
+                    );
+                }
+
                 let (modified_sst_info, branch_sst) = split_sst_with_table_ids(
                     &sst.sst_info,
                     &mut new_sst_id,
