@@ -30,7 +30,6 @@ pub struct SourceColumnDesc {
     pub name: String,
     pub data_type: DataType,
     pub column_id: ColumnId,
-    pub fields: Vec<ColumnDesc>,
     /// `additional_column` and `column_type` are orthogonal
     /// `additional_column` is used to indicate the column is from which part of the message
     /// `column_type` is used to indicate the type of the column, only used in cdc scenario
@@ -79,19 +78,14 @@ impl SourceColumnType {
 }
 
 impl SourceColumnDesc {
-    /// Create a [`SourceColumnDesc`] without composite types.
-    #[track_caller]
+    /// Create a [`SourceColumnDesc`].
+    // TODO(struct): rename to `new`?
     pub fn simple(name: impl Into<String>, data_type: DataType, column_id: ColumnId) -> Self {
-        assert!(
-            !matches!(data_type, DataType::List { .. } | DataType::Struct(..)),
-            "called `SourceColumnDesc::simple` with a composite type."
-        );
         let name = name.into();
         Self {
             name,
             data_type,
             column_id,
-            fields: vec![],
             column_type: SourceColumnType::Normal,
             is_pk: false,
             is_hidden_addition_col: false,
@@ -156,7 +150,6 @@ impl From<&ColumnDesc> for SourceColumnDesc {
             name: name.clone(),
             data_type: data_type.clone(),
             column_id: *column_id,
-            fields: Vec::new(), // TODO(struct): fill or deprecate this?
             additional_column: additional_column.clone(),
             // additional fields below
             column_type,
@@ -172,7 +165,6 @@ impl From<&SourceColumnDesc> for ColumnDesc {
             name,
             data_type,
             column_id,
-            fields: _,
             additional_column,
             // ignored fields below
             column_type: _,
