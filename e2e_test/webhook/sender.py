@@ -77,7 +77,7 @@ def send_test_primary_key(secret):
     }
     send_webhook(url, headers, payload_json)
     
-    
+
 def send_validate_raw_string(secret):
     payload = message
     payload['source'] = "github"
@@ -92,7 +92,6 @@ def send_validate_raw_string(secret):
         "X-Hub-Signature": signature  # Custom signature header
     }
     send_webhook(url, headers, payload_json)
-    
 
 
 def send_github_hmac_sha256(secret):
