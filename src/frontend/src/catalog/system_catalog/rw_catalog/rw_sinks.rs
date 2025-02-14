@@ -53,29 +53,31 @@ fn read_rw_sinks_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSink>> {
     let users = user_reader.get_all_users();
     let username_map = user_reader.get_user_name_map();
 
-    Ok(schemas
+    schemas
         .flat_map(|schema| {
             schema.iter_sink().map(|sink| {
                 let connector_props = serialize_props_with_secret(
-                    schema,
+                    &catalog_reader,
+                    &reader.auth_context.database,
                     WithOptionsSecResolved::new(sink.properties.clone(), sink.secret_refs.clone()),
-                )
+                )?
                 .into();
                 let format_encode_options = sink
                     .format_desc
                     .as_ref()
                     .map(|desc| {
                         serialize_props_with_secret(
-                            schema,
+                            &catalog_reader,
+                            &reader.auth_context.database,
                             WithOptionsSecResolved::new(
                                 desc.options.clone(),
                                 desc.secret_refs.clone(),
                             ),
                         )
                     })
-                    .unwrap_or_else(jsonbb::Value::null)
+                    .unwrap_or_else(|| Ok(jsonbb::Value::null()))?
                     .into();
-                RwSink {
+                Ok(RwSink {
                     id: sink.id.sink_id as i32,
                     name: sink.name.clone(),
                     schema_id: schema.id() as i32,
@@ -101,10 +103,10 @@ fn read_rw_sinks_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSink>> {
                     created_at_cluster_version: sink.created_at_cluster_version.clone(),
                     connector_props,
                     format_encode_options,
-                }
+                })
             })
         })
-        .collect())
+        .collect::<Result<Vec<_>>>()
 }
 
 #[system_catalog(
