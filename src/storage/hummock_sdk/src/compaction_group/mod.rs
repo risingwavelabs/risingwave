@@ -452,11 +452,11 @@ pub mod group_split {
                     let sst_size = sst.sst_size;
                     if sst_size / 2 == 0 {
                         tracing::warn!(
-                            "Sstable id {} object_id {} sst_size {} is under expected (object_size {})",
-                            sst.sst_id,
-                            sst.object_id,
-                            sst.sst_size,
-                            sst.file_size,
+                            id = sst.sst_id,
+                            object_id = sst.object_id,
+                            sst_size = sst.sst_size,
+                            file_size = sst.file_size,
+                            "Sstable sst_size is under expected",
                         );
                     };
 
