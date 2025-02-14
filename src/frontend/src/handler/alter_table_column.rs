@@ -258,7 +258,7 @@ pub async fn handle_alter_table_column(
         )));
     }
 
-    if let Some(_) = original_catalog.webhook_info {
+    if original_catalog.webhook_info.is_some() {
         return Err(RwError::from(ErrorCode::BindError(
             "Adding/dropping a column of a table with webhook has not been implemented.".to_owned(),
         )));
