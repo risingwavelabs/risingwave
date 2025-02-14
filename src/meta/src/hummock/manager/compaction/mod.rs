@@ -1459,9 +1459,9 @@ impl HummockManager {
         // do not split sst by vnode partition when target_level > base_level
         // The purpose of data alignment is mainly to improve the parallelism of base level compaction and reduce write amplification.
         // However, at high level, the size of the sst file is often larger and only contains the data of a single table_id, so there is no need to cut it.
-        if compact_task.target_level > compact_task.base_level {
-            return;
-        }
+        // if compact_task.target_level > compact_task.base_level {
+        //     return;
+        // }
         if compaction_config.split_weight_by_vnode > 0 {
             for table_id in &compact_task.existing_table_ids {
                 compact_task
