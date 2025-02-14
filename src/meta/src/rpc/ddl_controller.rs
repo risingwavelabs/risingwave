@@ -31,7 +31,9 @@ use risingwave_common::util::stream_graph_visitor::{
 };
 use risingwave_common::{bail, bail_not_implemented, hash, must_match};
 use risingwave_connector::connector_common::validate_connection;
-use risingwave_connector::source::{ConnectorProperties, SourceEnumeratorContext};
+use risingwave_connector::source::{
+    ConnectorProperties, SourceEnumeratorContext, UPSTREAM_SOURCE_KEY,
+};
 use risingwave_connector::WithOptionsSecResolved;
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::{
@@ -50,11 +52,11 @@ use risingwave_pb::ddl_service::{
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::PbFragment;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::update_mutation::PbMergeUpdate;
 use risingwave_pb::stream_plan::{
     Dispatcher, DispatcherType, FragmentTypeFlag, MergeNode, PbStreamFragmentGraph,
     StreamFragmentGraph as StreamFragmentGraphProto,
 };
+use risingwave_pb::telemetry::{PbTelemetryDatabaseObject, PbTelemetryEventStage};
 use thiserror_ext::AsReport;
 use tokio::sync::Semaphore;
 use tokio::time::sleep;
@@ -76,6 +78,7 @@ use crate::stream::{
     GlobalStreamManagerRef, JobRescheduleTarget, ReplaceStreamJobContext, SourceChange,
     SourceManagerRef, StreamFragmentGraph,
 };
+use crate::telemetry::report_event;
 use crate::{MetaError, MetaResult};
 
 #[derive(PartialEq)]
@@ -647,9 +650,9 @@ impl DdlController {
                 )
             })?;
 
-        for actor in &stream_scan_fragment.actors {
+        {
             if let Some(NodeBody::StreamCdcScan(ref stream_cdc_scan)) =
-                actor.nodes.as_ref().unwrap().node_body
+                stream_scan_fragment.nodes.as_ref().unwrap().node_body
                 && let Some(ref cdc_table_desc) = stream_cdc_scan.cdc_table_desc
             {
                 let options_with_secret = WithOptionsSecResolved::new(
@@ -693,7 +696,7 @@ impl DdlController {
             let sink_fragment = creating_sink_table_fragments.sink_fragment().unwrap();
             let sink = sink.expect("sink not found");
             Self::inject_replace_table_plan_for_sink(
-                Some(sink.id),
+                sink.id,
                 &sink_fragment,
                 target_table,
                 &mut replace_table_ctx,
@@ -731,7 +734,7 @@ impl DdlController {
                 let sink_fragment = sink_table_fragments.sink_fragment().unwrap();
 
                 Self::inject_replace_table_plan_for_sink(
-                    Some(sink_id),
+                    sink_id,
                     &sink_fragment,
                     target_table,
                     &mut replace_table_ctx,
@@ -743,8 +746,8 @@ impl DdlController {
 
         // check if the union fragment is fully assigned.
         for fragment in stream_job_fragments.fragments.values() {
-            for actor in &fragment.actors {
-                if let Some(node) = &actor.nodes {
+            if let Some(node) = &fragment.nodes {
+                for actor in &fragment.actors {
                     visit_stream_node(node, |node| {
                         if let NodeBody::Merge(merge_node) = node {
                             let fragment_actor_upstreams = stream_job_fragments
@@ -768,7 +771,7 @@ impl DdlController {
     }
 
     pub(crate) fn inject_replace_table_plan_for_sink(
-        sink_id: Option<u32>,
+        sink_id: u32,
         sink_fragment: &PbFragment,
         table: &Table,
         replace_table_ctx: &mut ReplaceStreamJobContext,
@@ -790,16 +793,7 @@ impl DdlController {
             .map(|actor| actor.actor_id)
             .collect_vec();
 
-        let mut sink_fields = None;
-
-        for actor in &sink_fragment.actors {
-            if let Some(node) = &actor.nodes {
-                sink_fields = Some(node.fields.clone());
-                break;
-            }
-        }
-
-        let sink_fields = sink_fields.expect("sink fields not found");
+        let sink_fields = sink_fragment.nodes.as_ref().unwrap().fields.clone();
 
         let output_indices = sink_fields
             .iter()
@@ -830,25 +824,31 @@ impl DdlController {
         };
 
         let upstream_actors = sink_fragment.get_actors();
+        let sink_fragment_dispatchers = replace_table_ctx
+            .dispatchers
+            .entry(sink_fragment.fragment_id)
+            .or_default();
 
         for actor in upstream_actors {
-            replace_table_ctx.dispatchers.insert(
-                actor.actor_id,
-                vec![Dispatcher {
-                    r#type: DispatcherType::Hash as _,
-                    dist_key_indices: dist_key_indices.clone(),
-                    output_indices: output_indices.clone(),
-                    hash_mapping: mapping.as_ref().map(|m| m.to_protobuf()),
-                    dispatcher_id: union_fragment.fragment_id as _,
-                    downstream_actor_id: downstream_actor_ids.clone(),
-                }],
-            );
+            sink_fragment_dispatchers
+                .try_insert(
+                    actor.actor_id,
+                    vec![Dispatcher {
+                        r#type: DispatcherType::Hash as _,
+                        dist_key_indices: dist_key_indices.clone(),
+                        output_indices: output_indices.clone(),
+                        hash_mapping: mapping.as_ref().map(|m| m.to_protobuf()),
+                        dispatcher_id: union_fragment.fragment_id as _,
+                        downstream_actor_id: downstream_actor_ids.clone(),
+                    }],
+                )
+                .expect("non-duplicate");
         }
 
         let upstream_fragment_id = sink_fragment.fragment_id;
 
-        for actor in &mut union_fragment.actors {
-            if let Some(node) = &mut actor.nodes {
+        if let Some(node) = &mut union_fragment.nodes {
+            {
                 visit_stream_node_cont_mut(node, |node| {
                     if let Some(NodeBody::Union(_)) = &mut node.node_body {
                         for input_project_node in &mut node.input {
@@ -866,15 +866,24 @@ impl DdlController {
 
                                 if let Some(NodeBody::Merge(merge_node)) =
                                     &mut merge_stream_node.node_body
-                                    && union_fragment_actor_upstreams
-                                        .get(&actor.actor_id)
-                                        .and_then(|actor_upstream| {
-                                            actor_upstream.get(&merge_node.upstream_fragment_id)
-                                        })
-                                        .map(|upstream_actor_ids| upstream_actor_ids.is_empty())
-                                        .unwrap_or(true)
                                 {
-                                    if let Some(sink_id) = sink_id {
+                                    assert!(union_fragment.actors.iter().all(|actor| {
+                                        union_fragment_actor_upstreams
+                                            .get(&actor.actor_id)
+                                            .and_then(|actor_upstream| {
+                                                actor_upstream.get(&merge_node.upstream_fragment_id)
+                                            })
+                                            .map(|upstream_actor_ids| {
+                                                upstream_actor_ids.is_empty()
+                                            })
+                                            .unwrap_or(true)
+                                    }),
+                                            "replace table plan for sink has set upstream. upstreams: {:?} actors: {:?}",
+                                            union_fragment_actor_upstreams,
+                                            union_fragment.actors
+                                    );
+
+                                    {
                                         merge_stream_node.identity =
                                             format!("MergeExecutor(from sink {})", sink_id);
 
@@ -892,14 +901,16 @@ impl DdlController {
                                         }
                                     };
 
-                                    union_fragment_actor_upstreams
-                                        .entry(actor.actor_id)
-                                        .or_default()
-                                        .try_insert(
-                                            upstream_fragment_id,
-                                            HashSet::from_iter(sink_actor_ids.iter().cloned()),
-                                        )
-                                        .expect("checked non-exist");
+                                    for actor in &union_fragment.actors {
+                                        union_fragment_actor_upstreams
+                                            .entry(actor.actor_id)
+                                            .or_default()
+                                            .try_insert(
+                                                upstream_fragment_id,
+                                                HashSet::from_iter(sink_actor_ids.iter().cloned()),
+                                            )
+                                            .expect("checked non-exist");
+                                    }
 
                                     merge_stream_node.fields = sink_fields.to_vec();
 
@@ -1082,14 +1093,62 @@ impl DdlController {
             StreamingJob::Table(Some(source), ..) => {
                 // Register the source on the connector node.
                 self.source_manager.register_source(source).await?;
+                let connector_name = source
+                    .get_with_properties()
+                    .get(UPSTREAM_SOURCE_KEY)
+                    .cloned();
+                let attr = source.info.as_ref().map(|source_info| {
+                    jsonbb::json!({
+                            "format": source_info.format().as_str_name(),
+                            "encode": source_info.row_encode().as_str_name(),
+                    })
+                });
+                report_create_object(
+                    streaming_job.id(),
+                    "source",
+                    PbTelemetryDatabaseObject::Source,
+                    connector_name,
+                    attr,
+                );
             }
             StreamingJob::Sink(sink, _) => {
                 // Validate the sink on the connector node.
                 validate_sink(sink).await?;
+                let connector_name = sink.get_properties().get(UPSTREAM_SOURCE_KEY).cloned();
+                let attr = sink.format_desc.as_ref().map(|sink_info| {
+                    jsonbb::json!({
+                        "format": sink_info.format().as_str_name(),
+                        "encode": sink_info.encode().as_str_name(),
+                    })
+                });
+                report_create_object(
+                    streaming_job.id(),
+                    "sink",
+                    PbTelemetryDatabaseObject::Sink,
+                    connector_name,
+                    attr,
+                );
             }
             StreamingJob::Source(source) => {
                 // Register the source on the connector node.
                 self.source_manager.register_source(source).await?;
+                let connector_name = source
+                    .get_with_properties()
+                    .get(UPSTREAM_SOURCE_KEY)
+                    .cloned();
+                let attr = source.info.as_ref().map(|source_info| {
+                    jsonbb::json!({
+                            "format": source_info.format().as_str_name(),
+                            "encode": source_info.row_encode().as_str_name(),
+                    })
+                });
+                report_create_object(
+                    streaming_job.id(),
+                    "source",
+                    PbTelemetryDatabaseObject::Source,
+                    connector_name,
+                    attr,
+                );
             }
             _ => {}
         }
@@ -1199,7 +1258,7 @@ impl DdlController {
                 )
                 .await?;
 
-            let result: MetaResult<Vec<PbMergeUpdate>> = try {
+            let result: MetaResult<_> = try {
                 let merge_updates = ctx.merge_updates.clone();
 
                 self.metadata_manager
@@ -1356,7 +1415,7 @@ impl DdlController {
         tracing::debug!(id = job_id, "building replace streaming job");
         let mut updated_sink_catalogs = vec![];
 
-        let result: MetaResult<Vec<PbMergeUpdate>> = try {
+        let result: MetaResult<_> = try {
             let (mut ctx, mut stream_job_fragments) = self
                 .build_replace_job(
                     ctx,
@@ -1386,7 +1445,7 @@ impl DdlController {
                     let sink_fragment = sink_table_fragments.sink_fragment().unwrap();
 
                     Self::inject_replace_table_plan_for_sink(
-                        Some(*sink_id),
+                        *sink_id,
                         &sink_fragment,
                         table,
                         &mut ctx,
@@ -1559,7 +1618,8 @@ impl DdlController {
             })
             .collect();
 
-        let snapshot_backfill_info = fragment_graph.collect_snapshot_backfill_info()?;
+        let (snapshot_backfill_info, cross_db_snapshot_backfill_info) =
+            fragment_graph.collect_snapshot_backfill_info()?;
         if snapshot_backfill_info.is_some() {
             if stream_job.create_type() == CreateType::Background {
                 return Err(anyhow!("snapshot_backfill must be used as Foreground mode").into());
@@ -1709,6 +1769,7 @@ impl DdlController {
             replace_table_job_info,
             option: CreateStreamingJobOption {},
             snapshot_backfill_info,
+            cross_db_snapshot_backfill_info,
         };
 
         Ok((ctx, stream_job_fragments))
@@ -2015,4 +2076,21 @@ impl DdlController {
             .comment_on(comment)
             .await
     }
+}
+
+fn report_create_object(
+    catalog_id: u32,
+    event_name: &str,
+    obj_type: PbTelemetryDatabaseObject,
+    connector_name: Option<String>,
+    attr_info: Option<jsonbb::Value>,
+) {
+    report_event(
+        PbTelemetryEventStage::CreateStreamJob,
+        event_name,
+        catalog_id.into(),
+        connector_name,
+        Some(obj_type),
+        attr_info,
+    );
 }

@@ -18,7 +18,8 @@ use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
-use futures::{Future, TryFutureExt};
+use futures::future::BoxFuture;
+use futures::{Future, FutureExt, TryFutureExt};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
@@ -37,6 +38,7 @@ use crate::hummock::{HummockStorage, SstableObjectIdManagerRef};
 use crate::monitor::monitored_storage_metrics::StateStoreIterStats;
 use crate::monitor::{StateStoreIterLogStats, StateStoreIterStatsTrait};
 use crate::store::*;
+use crate::store_impl::AsHummock;
 
 /// A state store wrapper for monitoring metrics.
 #[derive(Clone)]
@@ -377,25 +379,34 @@ impl MonitoredStateStore<HummockStorage> {
     pub fn sstable_object_id_manager(&self) -> SstableObjectIdManagerRef {
         self.inner.sstable_object_id_manager().clone()
     }
+}
 
-    pub async fn sync(
+impl<S: AsHummock> AsHummock for MonitoredStateStore<S> {
+    fn as_hummock(&self) -> Option<&HummockStorage> {
+        self.inner.as_hummock()
+    }
+
+    fn sync(
         &self,
         sync_table_epochs: Vec<(HummockEpoch, HashSet<TableId>)>,
-    ) -> StorageResult<SyncResult> {
-        let future = self
-            .inner
-            .sync(sync_table_epochs)
-            .instrument_await("store_sync");
-        let timer = self.storage_metrics.sync_duration.start_timer();
-        let sync_size = self.storage_metrics.sync_size.clone();
-        let sync_result = future
-            .await
-            .inspect_err(|e| error!(error = %e.as_report(), "Failed in sync"))?;
-        timer.observe_duration();
-        if sync_result.sync_size != 0 {
-            sync_size.observe(sync_result.sync_size as _);
+    ) -> BoxFuture<'_, StorageResult<SyncResult>> {
+        async move {
+            let future = self
+                .inner
+                .sync(sync_table_epochs)
+                .instrument_await("store_sync");
+            let timer = self.storage_metrics.sync_duration.start_timer();
+            let sync_size = self.storage_metrics.sync_size.clone();
+            let sync_result = future
+                .await
+                .inspect_err(|e| error!(error = %e.as_report(), "Failed in sync"))?;
+            timer.observe_duration();
+            if sync_result.sync_size != 0 {
+                sync_size.observe(sync_result.sync_size as _);
+            }
+            Ok(sync_result)
         }
-        Ok(sync_result)
+        .boxed()
     }
 }
 

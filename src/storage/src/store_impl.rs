@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
 use std::fmt::Debug;
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
@@ -20,10 +21,13 @@ use enum_as_inner::EnumAsInner;
 use foyer::{
     DirectFsDeviceOptions, Engine, HybridCacheBuilder, LargeEngineOptions, RateLimitPicker,
 };
+use futures::future::BoxFuture;
+use futures::FutureExt;
 use mixtrics::registry::prometheus::PrometheusMetricsRegistry;
+use risingwave_common::catalog::TableId;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common_service::RpcNotificationClient;
-use risingwave_hummock_sdk::HummockSstableObjectId;
+use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId, SyncResult};
 use risingwave_object_store::object::build_remote_object_store;
 
 use crate::compaction_catalog_manager::{CompactionCatalogManager, RemoteTableAccessor};
@@ -272,7 +276,7 @@ pub mod verify {
         pub _phantom: PhantomData<T>,
     }
 
-    impl<A: AsHummock, E> AsHummock for VerifyStateStore<A, E> {
+    impl<A: AsHummock, E: AsHummock> AsHummock for VerifyStateStore<A, E> {
         fn as_hummock(&self) -> Option<&HummockStorage> {
             self.actual.as_hummock()
         }
@@ -778,8 +782,22 @@ impl StateStoreImpl {
     }
 }
 
-pub trait AsHummock {
+pub trait AsHummock: Send + Sync {
     fn as_hummock(&self) -> Option<&HummockStorage>;
+
+    fn sync(
+        &self,
+        sync_table_epochs: Vec<(HummockEpoch, HashSet<TableId>)>,
+    ) -> BoxFuture<'_, StorageResult<SyncResult>> {
+        async move {
+            if let Some(hummock) = self.as_hummock() {
+                hummock.sync(sync_table_epochs).await
+            } else {
+                Ok(SyncResult::default())
+            }
+        }
+        .boxed()
+    }
 }
 
 impl AsHummock for HummockStorage {

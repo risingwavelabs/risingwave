@@ -56,7 +56,7 @@ pub struct CreateStreamingJobOption {
 /// Note: for better readability, keep this struct complete and immutable once created.
 pub struct CreateStreamingJobContext {
     /// New dispatchers to add from upstream actors to downstream actors.
-    pub dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
+    pub dispatchers: HashMap<FragmentId, HashMap<ActorId, Vec<Dispatcher>>>,
 
     /// Upstream root fragments' actor ids grouped by table id.
     ///
@@ -85,6 +85,7 @@ pub struct CreateStreamingJobContext {
     pub replace_table_job_info: Option<(StreamingJob, ReplaceStreamJobContext, StreamJobFragments)>,
 
     pub snapshot_backfill_info: Option<SnapshotBackfillInfo>,
+    pub cross_db_snapshot_backfill_info: SnapshotBackfillInfo,
 
     pub option: CreateStreamingJobOption,
 
@@ -177,10 +178,10 @@ pub struct ReplaceStreamJobContext {
     pub old_fragments: StreamJobFragments,
 
     /// The updates to be applied to the downstream chain actors. Used for schema change.
-    pub merge_updates: Vec<MergeUpdate>,
+    pub merge_updates: HashMap<FragmentId, Vec<MergeUpdate>>,
 
     /// New dispatchers to add from upstream actors to downstream actors.
-    pub dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
+    pub dispatchers: HashMap<FragmentId, HashMap<ActorId, Vec<Dispatcher>>>,
 
     /// The locations of the actors to build in the new job to replace.
     pub building_locations: Locations,
@@ -347,6 +348,7 @@ impl GlobalStreamManager {
             replace_table_job_info,
             internal_tables,
             snapshot_backfill_info,
+            cross_db_snapshot_backfill_info,
             ..
         }: CreateStreamingJobContext,
     ) -> MetaResult<NotificationVersion> {
@@ -408,28 +410,25 @@ impl GlobalStreamManager {
             create_type,
         };
 
-        let command = if let Some(snapshot_backfill_info) = snapshot_backfill_info {
+        let job_type = if let Some(snapshot_backfill_info) = snapshot_backfill_info {
             tracing::debug!(
                 ?snapshot_backfill_info,
                 "sending Command::CreateSnapshotBackfillStreamingJob"
             );
-            Command::CreateStreamingJob {
-                info,
-                job_type: CreateStreamingJobType::SnapshotBackfill(snapshot_backfill_info),
-            }
+            CreateStreamingJobType::SnapshotBackfill(snapshot_backfill_info)
         } else {
             tracing::debug!("sending Command::CreateStreamingJob");
             if let Some(replace_table_command) = replace_table_command {
-                Command::CreateStreamingJob {
-                    info,
-                    job_type: CreateStreamingJobType::SinkIntoTable(replace_table_command),
-                }
+                CreateStreamingJobType::SinkIntoTable(replace_table_command)
             } else {
-                Command::CreateStreamingJob {
-                    info,
-                    job_type: CreateStreamingJobType::Normal,
-                }
+                CreateStreamingJobType::Normal
             }
+        };
+
+        let command = Command::CreateStreamingJob {
+            info,
+            job_type,
+            cross_db_snapshot_backfill_info,
         };
 
         if need_pause {

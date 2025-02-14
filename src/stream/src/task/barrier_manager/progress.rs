@@ -194,7 +194,7 @@ impl CreateMviewProgressReporter {
         match self.state {
             Some(BackfillState::ConsumingUpstreamTableOrSource(last, last_consumed_rows)) => {
                 assert!(
-                    last < consumed_epoch,
+                    last <= consumed_epoch,
                     "last_epoch: {:#?} must be greater than consumed epoch: {:#?}",
                     last,
                     consumed_epoch
@@ -209,6 +209,13 @@ impl CreateMviewProgressReporter {
             }
             None => {}
         };
+        tracing::debug!(
+            actor_id = self.backfill_actor_id,
+            ?epoch,
+            consumed_epoch,
+            current_consumed_rows,
+            "progress update"
+        );
         self.update_inner(
             epoch,
             BackfillState::ConsumingUpstreamTableOrSource(consumed_epoch, current_consumed_rows),
@@ -250,7 +257,12 @@ impl CreateMviewProgressReporter {
         if let Some(BackfillState::DoneConsumingUpstreamTableOrSource(_)) = self.state {
             return;
         }
-        tracing::debug!("progress finish");
+        tracing::debug!(
+            actor_id = self.backfill_actor_id,
+            ?epoch,
+            current_consumed_rows,
+            "progress finish"
+        );
         self.update_inner(
             epoch,
             BackfillState::DoneConsumingUpstreamTableOrSource(current_consumed_rows),
