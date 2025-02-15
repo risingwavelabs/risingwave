@@ -1077,6 +1077,12 @@ impl CatalogController {
                     debug_assert!(!incoming_sinks.contains(&{ sink_id }));
                     incoming_sinks.push(sink_id as _);
                 }
+                if let Some(drop_table_connector_ctx) = drop_table_connector_ctx
+                    && drop_table_connector_ctx.to_change_streaming_job_id == original_job_id
+                {
+                    // drop table connector, the rest logic is in `drop_table_associated_source`
+                    table.optional_associated_source_id = Set(None);
+                }
 
                 if let Some(sink_id) = dropping_sink_id {
                     let drained = incoming_sinks.extract_if(|id| *id == sink_id).collect_vec();

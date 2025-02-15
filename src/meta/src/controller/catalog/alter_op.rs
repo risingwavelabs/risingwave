@@ -790,18 +790,6 @@ impl CatalogController {
         txn: &DatabaseTransaction,
         drop_table_connector_ctx: &DropTableConnectorContext,
     ) -> MetaResult<(Vec<PbUserInfo>, Vec<PartialObject>)> {
-        {
-            // alter the original table to remove the ref to the state table catalog
-            let table_id = drop_table_connector_ctx.to_change_streaming_job_id;
-            Table::update(table::ActiveModel {
-                table_id: Set(table_id as _),
-                optional_associated_source_id: Set(None),
-                ..Default::default()
-            })
-            .exec(txn)
-            .await?;
-        }
-
         let to_drop_source_objects: Vec<PartialObject> = Object::find()
             .filter(object::Column::Oid.is_in(vec![drop_table_connector_ctx.to_remove_source_id]))
             .into_partial_model()
