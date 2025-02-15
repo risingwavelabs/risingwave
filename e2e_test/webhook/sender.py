@@ -78,6 +78,22 @@ def send_test_primary_key(secret):
     send_webhook(url, headers, payload_json)
 
 
+def send_validate_raw_string(secret):
+    payload = message
+    payload['source'] = "github"
+    payload['auth_algo'] = "hmac_sha1"
+    url = SERVER_URL + "validate_raw_string"
+
+    payload_json = json.dumps(payload)
+    signature = generate_signature_hmac(secret, payload_json, 'sha1', "sha1=")
+    # Webhook message headers
+    headers = {
+        "Content-Type": "application/json",
+        "X-Hub-Signature": signature  # Custom signature header
+    }
+    send_webhook(url, headers, payload_json)
+
+
 def send_github_hmac_sha256(secret):
     payload = message
     payload['source'] = "github"
@@ -162,3 +178,5 @@ if __name__ == "__main__":
 
     # ensure the single column can still work as normal
     send_test_primary_key(secret)
+    # check using raw string to verify the signature
+    send_validate_raw_string(secret)

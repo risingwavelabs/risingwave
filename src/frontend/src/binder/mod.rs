@@ -145,7 +145,7 @@ pub struct SecureCompareContext {
     /// The column name to store the whole payload in `JSONB`, but during validation it will be used as `bytea`
     pub column_name: String,
     /// The secret (usually a token provided by the webhook source user) to validate the calls
-    pub secret_name: String,
+    pub secret_name: Option<String>,
 }
 
 #[derive(Clone, Debug, Default)]
