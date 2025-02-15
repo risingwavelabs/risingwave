@@ -40,7 +40,6 @@ use risingwave_meta_model::{
     ConnectionId, DatabaseId, FunctionId, IndexId, ObjectId, SchemaId, SecretId, SinkId, SourceId,
     SubscriptionId, TableId, UserId, ViewId,
 };
-use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{
     Comment, Connection, CreateType, Database, Function, PbSink, Schema, Secret, Sink, Source,
     Subscription, Table, View,
@@ -1812,25 +1811,10 @@ impl DdlController {
         // check if performing drop table connector
         let mut drop_table_associated_source_id = None;
         if let StreamingJob::Table(None, _, _) = &stream_job {
-            let old_table_associate_source_id = self
+            drop_table_associated_source_id = self
                 .metadata_manager
-                .get_table_catalog_by_ids(vec![id])
-                .await?
-                .get(0)
-                .and_then(|table_catalog| table_catalog.optional_associated_source_id);
-
-            if old_table_associate_source_id.is_some() {
-                // new table catalog without source def but the old one has -> drop table connector
-                tracing::info!(
-                    "dropping table {}'s associated source {:?}",
-                    id,
-                    old_table_associate_source_id.unwrap()
-                );
-                drop_table_associated_source_id = old_table_associate_source_id.map(|id| {
-                    let OptionalAssociatedSourceId::AssociatedSourceId(source_id) = id;
-                    source_id
-                });
-            }
+                .get_table_associated_source_id(id as _)
+                .await?;
         }
 
         let old_fragments = self
@@ -1850,7 +1834,7 @@ impl DdlController {
                 // just need to remove the ref to the state table
                 to_change_streaming_job_id: id as i32,
                 to_remove_state_table_id: old_internal_table_ids[0] as i32, // asserted before
-                to_remove_source_id: drop_table_associated_source_id.unwrap() as i32,
+                to_remove_source_id: drop_table_associated_source_id.unwrap(),
             });
         } else {
             let old_internal_tables = self
