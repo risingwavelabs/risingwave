@@ -537,31 +537,34 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
     ) -> StreamExecutorResult<LogStorePostSealCurrentEpoch<'a, S::Local>> {
         let epoch = barrier.epoch.prev;
         let mut writer = write_state.start_writer(false);
+        // FIXME(kwannoel): Handle paused stream.
         writer.write_barrier(epoch, barrier.is_checkpoint())?;
 
         // FIXME(kwannoel): Flush all unflushed chunks
         // As an optimization we can also change it into flushed items instead.
         // This will reduce memory consumption of logstore.
 
-        for (epoch, item) in &mut buffer.buffer {
-            match item {
-                LogStoreBufferItem::StreamChunk {
-                    chunk,
-                    start_seq_id,
-                    end_seq_id,
-                    flushed,
-                    ..
-                } => {
-                    if !*flushed {
-                        writer.write_chunk(chunk, *epoch, *start_seq_id, *end_seq_id)?;
-                        *flushed = true;
+        if barrier.is_checkpoint() {
+            for (epoch, item) in &mut buffer.buffer {
+                match item {
+                    LogStoreBufferItem::StreamChunk {
+                        chunk,
+                        start_seq_id,
+                        end_seq_id,
+                        flushed,
+                        ..
+                    } => {
+                        if !*flushed {
+                            writer.write_chunk(chunk, *epoch, *start_seq_id, *end_seq_id)?;
+                            *flushed = true;
+                        }
                     }
+                    | LogStoreBufferItem::Flushed { .. } => {
+                        break;
+                    }
+                    LogStoreBufferItem::Barrier { .. }
+                    | LogStoreBufferItem::UpdateVnodes(_) => {}
                 }
-                | LogStoreBufferItem::Flushed { .. } => {
-                    break;
-                }
-                LogStoreBufferItem::Barrier { .. }
-                | LogStoreBufferItem::UpdateVnodes(_) => {}
             }
         }
 
