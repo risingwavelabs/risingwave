@@ -504,6 +504,17 @@ impl PlanRoot {
             ApplyOrder::BottomUp,
         ))?;
 
+        // Add Logstore for Unaligned join
+        // Apply this BEFORE delta join rule, because delta join removes
+        // the join
+        if ctx.session_ctx().config().streaming_enable_unaligned_join() {
+            plan = plan.optimize_by_rules(&OptimizationStage::new(
+                "Add Logstore for Unaligned join",
+                vec![AddLogstoreRule::create()],
+                ApplyOrder::BottomUp,
+            ))?;
+        }
+
         if ctx.session_ctx().config().streaming_enable_delta_join() {
             // TODO: make it a logical optimization.
             // Rewrite joins with index to delta join
@@ -513,7 +524,6 @@ impl PlanRoot {
                 ApplyOrder::BottomUp,
             ))?;
         }
-
         // Inline session timezone
         plan = inline_session_timezone_in_exprs(ctx.clone(), plan)?;
 
