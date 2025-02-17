@@ -626,7 +626,7 @@
         ├─BatchExchange { order: [], dist: HashShard(t.j) }
         │ └─BatchScan { table: t, columns: [t.k, t.j], distribution: SomeShard }
         └─BatchExchange { order: [], dist: HashShard(t.j) }
-          └─BatchProject { exprs: [t.j, JsonbPopulateRecord(null:Struct(StructType { field_names: ["a", "b"], field_types: [Int32, Int32] }), t.j) as $expr1] }
+          └─BatchProject { exprs: [t.j, JsonbPopulateRecord(null:Struct(StructType { fields: [("a", Int32), ("b", Int32)] }), t.j) as $expr1] }
             └─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
               ├─BatchExchange { order: [], dist: Single }
               │ └─BatchHashAgg { group_key: [t.j], aggs: [] }

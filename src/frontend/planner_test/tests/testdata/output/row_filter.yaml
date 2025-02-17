@@ -16,21 +16,21 @@
     select * from t where (v1,v3) > (2,3);
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchFilter { predicate: (Row(t.v1, t.v3) > '(2,3)':Struct(StructType { field_names: [], field_types: [Int32, Int32] })) }
+    └─BatchFilter { predicate: (Row(t.v1, t.v3) > '(2,3)':Struct(StructType { fields: [("f1", Int32), ("f2", Int32)] })) }
       └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], scan_ranges: [t.v1 >= Int32(2)], distribution: UpstreamHashShard(t.v1, t.v2, t.v3) }
 - sql: |
     create table t(v1 int, v2 int, v3 int, primary key(v1,v2,v3));
     select * from t where (v3,v2,v1) > (1,2,3);
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchFilter { predicate: (Row(t.v3, t.v2, t.v1) > '(1,2,3)':Struct(StructType { field_names: [], field_types: [Int32, Int32, Int32] })) }
+    └─BatchFilter { predicate: (Row(t.v3, t.v2, t.v1) > '(1,2,3)':Struct(StructType { fields: [("f1", Int32), ("f2", Int32), ("f3", Int32)] })) }
       └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: UpstreamHashShard(t.v1, t.v2, t.v3) }
 - sql: |
     create table t(v1 int, v2 int, v3 int, primary key(v1,v2,v3));
     select * from t where (v1,v2,v1) > (1,2,3);
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchFilter { predicate: (Row(t.v1, t.v2, t.v1) > '(1,2,3)':Struct(StructType { field_names: [], field_types: [Int32, Int32, Int32] })) }
+    └─BatchFilter { predicate: (Row(t.v1, t.v2, t.v1) > '(1,2,3)':Struct(StructType { fields: [("f1", Int32), ("f2", Int32), ("f3", Int32)] })) }
       └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], scan_ranges: [(t.v1, t.v2) >= (Int32(1), Int32(2))], distribution: UpstreamHashShard(t.v1, t.v2, t.v3) }
 - sql: |
     create table t1(v1 int, v2 int, v3 int);
@@ -38,5 +38,5 @@
     select * from mv1 where (v1,v2,v3) > (1,3,1);
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchFilter { predicate: (Row(mv1.v1, mv1.v2, mv1.v3) > '(1,3,1)':Struct(StructType { field_names: [], field_types: [Int32, Int32, Int32] })) }
+    └─BatchFilter { predicate: (Row(mv1.v1, mv1.v2, mv1.v3) > '(1,3,1)':Struct(StructType { fields: [("f1", Int32), ("f2", Int32), ("f3", Int32)] })) }
       └─BatchScan { table: mv1, columns: [mv1.v1, mv1.v2, mv1.v3], scan_ranges: [(mv1.v1, mv1.v2) >= (Int32(1), Int32(3))], distribution: UpstreamHashShard(mv1.v1, mv1.v2, mv1.v3) }
