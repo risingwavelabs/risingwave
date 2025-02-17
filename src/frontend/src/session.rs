@@ -803,6 +803,16 @@ impl SessionImpl {
         self.auth_context.read().database.clone()
     }
 
+    pub fn database_id(&self) -> DatabaseId {
+        let db_name = self.database();
+        self.env
+            .catalog_reader()
+            .read_guard()
+            .get_database_by_name(&db_name)
+            .map(|db| db.id())
+            .expect("session database not found")
+    }
+
     pub fn user_name(&self) -> String {
         self.auth_context.read().user_name.clone()
     }
@@ -1497,7 +1507,9 @@ impl Session for SessionImpl {
         let string = stmt.to_string();
         let sql_str = string.as_str();
         let sql: Arc<str> = Arc::from(sql_str);
-        let rsp = handle(self, stmt, sql.clone(), vec![format]).await?;
+        // The handle can be slow. Release potential large String early.
+        drop(string);
+        let rsp = handle(self, stmt, sql, vec![format]).await?;
         Ok(rsp)
     }
 
