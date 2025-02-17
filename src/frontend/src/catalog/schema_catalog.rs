@@ -169,9 +169,15 @@ impl SchemaCatalog {
     }
 
     pub fn drop_table(&mut self, id: TableId) {
-        let table_ref = self.table_by_id.remove(&id).unwrap();
-        self.table_by_name.remove(&table_ref.name).unwrap();
-        self.indexes_by_table_id.remove(&table_ref.id);
+        if let Some(table_ref) = self.table_by_id.remove(&id) {
+            self.table_by_name.remove(&table_ref.name).unwrap();
+            self.indexes_by_table_id.remove(&table_ref.id);
+        } else {
+            tracing::warn!(
+                id = ?id.table_id,
+                "table not found when dropping, frontend might not be notified yet"
+            );
+        }
     }
 
     pub fn create_index(&mut self, prost: &PbIndex) {
