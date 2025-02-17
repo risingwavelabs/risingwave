@@ -40,8 +40,9 @@ use risingwave_meta_model::{
     actor, connection, database, fragment, function, index, object, object_dependency, schema,
     secret, sink, source, streaming_job, subscription, table, user_privilege, view, ActorId,
     ActorUpstreamActors, ColumnCatalogArray, ConnectionId, CreateType, DatabaseId, FragmentId,
-    I32Array, IndexId, JobStatus, ObjectId, Property, SchemaId, SecretId, SinkId, SourceId,
-    StreamNode, StreamSourceInfo, StreamingParallelism, SubscriptionId, TableId, UserId, ViewId,
+    I32Array, IndexId, JobStatus, ObjectId, Property, SchemaId, SecretId, SinkFormatDesc, SinkId,
+    SourceId, StreamNode, StreamSourceInfo, StreamingParallelism, SubscriptionId, TableId, UserId,
+    ViewId,
 };
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::subscription::SubscriptionState;
@@ -250,6 +251,102 @@ impl CatalogController {
             )
             .await;
         Ok(version)
+    }
+
+    // for telemetry
+    pub async fn get_connector_usage(&self) -> MetaResult<jsonbb::Value> {
+        // get connector usage by source/sink
+        // the expect format is like:
+        // {
+        //     "source": {
+        //         "$actor_id": {
+        //             "connector": "kafka",
+        //             "format": "plain",
+        //             "encode": "json"
+        //         },
+        //     },
+        //     "sink": {
+        //         "$actor_id": {
+        //             "connector": "pulsar",
+        //             "format": "upsert",
+        //             "encode": "avro"
+        //         },
+        //     },
+        // }
+
+        let inner = self.inner.read().await;
+        let source_props_and_info: Vec<(i32, Property, Option<StreamSourceInfo>)> = Source::find()
+            .select_only()
+            .column(object::Column::Oid)
+            .column(source::Column::WithProperties)
+            .column(source::Column::SourceInfo)
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+        let sink_props_and_info: Vec<(i32, Property, Option<SinkFormatDesc>)> = Sink::find()
+            .select_only()
+            .column(object::Column::Oid)
+            .column(sink::Column::Properties)
+            .column(sink::Column::SinkFormatDesc)
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+        drop(inner);
+
+        let get_connector_from_property = |property: &Property| -> String {
+            property
+                .0
+                .get(UPSTREAM_SOURCE_KEY)
+                .map(|v| v.to_string())
+                .unwrap_or_default()
+        };
+
+        let source_report: Vec<serde_json::Value> = source_props_and_info
+            .iter()
+            .map(|(oid, property, info)| {
+                let connector_name = get_connector_from_property(property);
+                let mut format = None;
+                let mut encode = None;
+                if let Some(info) = info {
+                    let pb_info = info.to_protobuf();
+                    format = Some(pb_info.format().as_str_name());
+                    encode = Some(pb_info.row_encode().as_str_name());
+                }
+                serde_json::json!({
+                    oid.to_string(): {
+                        "connector": connector_name,
+                        "format": format,
+                        "encode": encode,
+                    },
+                })
+            })
+            .collect_vec();
+
+        let sink_report: Vec<serde_json::Value> = sink_props_and_info
+            .iter()
+            .map(|(oid, property, info)| {
+                let connector_name = get_connector_from_property(property);
+                let mut format = None;
+                let mut encode = None;
+                if let Some(info) = info {
+                    let pb_info = info.to_protobuf();
+                    format = Some(pb_info.format().as_str_name());
+                    encode = Some(pb_info.encode().as_str_name());
+                }
+                serde_json::json!({
+                    oid.to_string(): {
+                        "connector": connector_name,
+                        "format": format,
+                        "encode": encode,
+                    },
+                })
+            })
+            .collect_vec();
+
+        Ok(jsonbb::json!({
+                "source": source_report,
+                "sink": sink_report,
+        }))
     }
 
     pub async fn clean_dirty_subscription(
