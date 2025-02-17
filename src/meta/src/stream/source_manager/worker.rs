@@ -12,12 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#[cfg(not(debug_assertions))]
+use risingwave_connector::error::ConnectorError;
 use risingwave_connector::source::AnySplitEnumerator;
 
 use super::*;
 
 const MAX_FAIL_CNT: u32 = 10;
 const DEFAULT_SOURCE_TICK_TIMEOUT: Duration = Duration::from_secs(10);
+
+// The key used to load `SplitImpl` directly from source properties.
+// When this key is present, the enumerator will only return the given ones
+// instead of fetching them from the external source.
+// Only valid in debug builds - will return an error in release builds.
+const DEBUG_SPLITS_KEY: &str = "debug_splits";
 
 pub struct SharedSplitMap {
     pub splits: Option<BTreeMap<SplitId, SplitImpl>>,
@@ -38,6 +46,8 @@ pub struct ConnectorSourceWorker {
     connector_properties: ConnectorProperties,
     fail_cnt: u32,
     source_is_up: LabelGuardedIntGauge<2>,
+
+    debug_splits: Option<Vec<SplitImpl>>,
 }
 
 fn extract_prop_from_existing_source(source: &Source) -> ConnectorResult<ConnectorProperties> {
@@ -48,8 +58,24 @@ fn extract_prop_from_existing_source(source: &Source) -> ConnectorResult<Connect
     Ok(properties)
 }
 fn extract_prop_from_new_source(source: &Source) -> ConnectorResult<ConnectorProperties> {
-    let options_with_secret =
-        WithOptionsSecResolved::new(source.with_properties.clone(), source.secret_refs.clone());
+    let options_with_secret = WithOptionsSecResolved::new(
+        {
+            let mut with_properties = source.with_properties.clone();
+            let _removed = with_properties.remove(DEBUG_SPLITS_KEY);
+
+            #[cfg(not(debug_assertions))]
+            {
+                if _removed.is_some() {
+                    return Err(ConnectorError::from(anyhow::anyhow!(
+                        "`debug_splits` is not allowed in release mode"
+                    )));
+                }
+            }
+
+            with_properties
+        },
+        source.secret_refs.clone(),
+    );
     let mut properties = ConnectorProperties::extract(options_with_secret, true)?;
     properties.init_from_pb_source(source);
     Ok(properties)
@@ -220,6 +246,38 @@ impl ConnectorSourceWorker {
             connector_properties,
             fail_cnt: 0,
             source_is_up,
+            debug_splits: {
+                let debug_splits = source.with_properties.get(DEBUG_SPLITS_KEY);
+                #[cfg(not(debug_assertions))]
+                {
+                    if debug_splits.is_some() {
+                        return Err(ConnectorError::from(anyhow::anyhow!(
+                            "`debug_splits` is not allowed in release mode"
+                        ))
+                        .into());
+                    }
+                    None
+                }
+
+                #[cfg(debug_assertions)]
+                {
+                    use risingwave_common::types::JsonbVal;
+                    if let Some(debug_splits) = debug_splits {
+                        let mut splits = Vec::new();
+                        let debug_splits_value =
+                            jsonbb::serde_json::from_str::<serde_json::Value>(debug_splits)
+                                .context("failed to parse split impl")?;
+                        for split_impl_value in debug_splits_value.as_array().unwrap() {
+                            splits.push(SplitImpl::restore_from_json(JsonbVal::from(
+                                split_impl_value.clone(),
+                            ))?);
+                        }
+                        Some(splits)
+                    } else {
+                        None
+                    }
+                }
+            },
         })
     }
 
@@ -239,6 +297,12 @@ impl ConnectorSourceWorker {
                                 if let Err(e) = self.drop_fragments(fragment_ids).await {
                                     // when error happens, we just log it and ignore
                                     tracing::warn!(error = %e.as_report(), "error happened when drop fragment");
+                                }
+                            }
+                            SourceWorkerCommand::FinishBackfill(fragment_ids) => {
+                                if let Err(e) = self.finish_backfill(fragment_ids).await {
+                                    // when error happens, we just log it and ignore
+                                    tracing::warn!(error = %e.as_report(), "error happened when finish backfill");
                                 }
                             }
                             SourceWorkerCommand::Terminate => {
@@ -266,10 +330,18 @@ impl ConnectorSourceWorker {
         let source_is_up = |res: i64| {
             self.source_is_up.set(res);
         };
-        let splits = self.enumerator.list_splits().await.inspect_err(|_| {
-            source_is_up(0);
-            self.fail_cnt += 1;
-        })?;
+
+        let splits = {
+            if let Some(debug_splits) = &self.debug_splits {
+                debug_splits.clone()
+            } else {
+                self.enumerator.list_splits().await.inspect_err(|_| {
+                    source_is_up(0);
+                    self.fail_cnt += 1;
+                })?
+            }
+        };
+
         source_is_up(1);
         self.fail_cnt = 0;
         let mut current_splits = self.current_splits.lock().await;
@@ -285,6 +357,11 @@ impl ConnectorSourceWorker {
 
     async fn drop_fragments(&mut self, fragment_ids: Vec<FragmentId>) -> MetaResult<()> {
         self.enumerator.on_drop_fragments(fragment_ids).await?;
+        Ok(())
+    }
+
+    async fn finish_backfill(&mut self, fragment_ids: Vec<FragmentId>) -> MetaResult<()> {
+        self.enumerator.on_finish_backfill(fragment_ids).await?;
         Ok(())
     }
 }
@@ -354,13 +431,23 @@ impl ConnectorSourceWorkerHandle {
     }
 
     pub fn drop_fragments(&self, fragment_ids: Vec<FragmentId>) {
+        tracing::debug!("drop_fragments: {:?}", fragment_ids);
         if let Err(e) = self.send_command(SourceWorkerCommand::DropFragments(fragment_ids)) {
             // ignore drop fragment error, just log it
             tracing::warn!(error = %e.as_report(), "failed to drop fragments");
         }
     }
 
+    pub fn finish_backfill(&self, fragment_ids: Vec<FragmentId>) {
+        tracing::debug!("finish_backfill: {:?}", fragment_ids);
+        if let Err(e) = self.send_command(SourceWorkerCommand::FinishBackfill(fragment_ids)) {
+            // ignore error, just log it
+            tracing::warn!(error = %e.as_report(), "failed to finish backfill");
+        }
+    }
+
     pub fn terminate(&self, dropped_fragments: Option<BTreeSet<FragmentId>>) {
+        tracing::debug!("terminate: {:?}", dropped_fragments);
         if let Some(dropped_fragments) = dropped_fragments {
             self.drop_fragments(dropped_fragments.into_iter().collect());
         }
@@ -378,6 +465,8 @@ pub enum SourceWorkerCommand {
     Tick(#[educe(Debug(ignore))] oneshot::Sender<MetaResult<()>>),
     /// Async command to drop a fragment.
     DropFragments(Vec<FragmentId>),
+    /// Async command to finish backfill.
+    FinishBackfill(Vec<FragmentId>),
     /// Terminate the worker task.
     Terminate,
 }

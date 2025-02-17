@@ -359,9 +359,9 @@ impl HummockManager {
                     }
                     None => {
                         tracing::warn!(
-                            "table {} in SST {} doesn't belong to any compaction group",
-                            table_id,
-                            commit_sst.sst_info.object_id,
+                            table_id = *table_id,
+                            object_id = commit_sst.sst_info.object_id,
+                            "table doesn't belong to any compaction group",
                         );
                     }
                 }
@@ -405,10 +405,30 @@ impl HummockManager {
                     })
                     .sum();
 
+                if new_sst_size == 0 {
+                    tracing::warn!(
+                        id = sst.sst_info.sst_id,
+                        object_id = sst.sst_info.object_id,
+                        match_ids = ?match_ids,
+                        "Sstable doesn't contain any data for tables",
+                    );
+                }
+
+                let old_sst_size = origin_sst_size.saturating_sub(new_sst_size);
+                if old_sst_size == 0 {
+                    tracing::warn!(
+                        id = sst.sst_info.sst_id,
+                        object_id = sst.sst_info.object_id,
+                        match_ids = ?match_ids,
+                        origin_sst_size = origin_sst_size,
+                        new_sst_size = new_sst_size,
+                        "Sstable doesn't contain any data for tables",
+                    );
+                }
                 let (modified_sst_info, branch_sst) = split_sst_with_table_ids(
                     &sst.sst_info,
                     &mut new_sst_id,
-                    origin_sst_size - new_sst_size,
+                    old_sst_size,
                     new_sst_size,
                     match_ids,
                 );

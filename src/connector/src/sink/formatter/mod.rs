@@ -36,7 +36,10 @@ use super::encoder::{
     DateHandlingMode, JsonbHandlingMode, KafkaConnectParams, TimeHandlingMode,
     TimestamptzHandlingMode,
 };
-use super::redis::{KEY_FORMAT, VALUE_FORMAT};
+use super::redis::{
+    KEY_FORMAT, LAT_NAME, LON_NAME, MEMBER_NAME, REDIS_VALUE_TYPE, REDIS_VALUE_TYPE_GEO,
+    REDIS_VALUE_TYPE_STRING, VALUE_FORMAT,
+};
 use crate::sink::encoder::{
     AvroEncoder, AvroHeader, JsonEncoder, ProtoEncoder, ProtoHeader, TimestampHandlingMode,
 };
@@ -282,16 +285,56 @@ impl EncoderBuild for AvroEncoder {
 
 impl EncoderBuild for TemplateEncoder {
     async fn build(b: EncoderParams<'_>, pk_indices: Option<Vec<usize>>) -> Result<Self> {
-        let option_name = match pk_indices {
-            Some(_) => KEY_FORMAT,
-            None => VALUE_FORMAT,
-        };
-        let template = b.format_desc.options.get(option_name).ok_or_else(|| {
-            SinkError::Config(anyhow!(
-                "Cannot find '{option_name}',please set it or use JSON"
-            ))
-        })?;
-        Ok(TemplateEncoder::new(b.schema, pk_indices, template.clone()))
+        let redis_value_type = b
+            .format_desc
+            .options
+            .get(REDIS_VALUE_TYPE)
+            .map_or(REDIS_VALUE_TYPE_STRING, |s| s.as_str());
+        match redis_value_type {
+            REDIS_VALUE_TYPE_STRING => {
+                let option_name = match pk_indices {
+                    Some(_) => KEY_FORMAT,
+                    None => VALUE_FORMAT,
+                };
+                let template = b.format_desc.options.get(option_name).ok_or_else(|| {
+                    SinkError::Config(anyhow!("Cannot find '{option_name}',please set it."))
+                })?;
+                Ok(TemplateEncoder::new_string(
+                    b.schema,
+                    pk_indices,
+                    template.clone(),
+                ))
+            }
+            REDIS_VALUE_TYPE_GEO => match pk_indices {
+                Some(_) => {
+                    let member_name = b.format_desc.options.get(MEMBER_NAME).ok_or_else(|| {
+                        SinkError::Config(anyhow!("Cannot find `{MEMBER_NAME}`,please set it."))
+                    })?;
+                    let template = b.format_desc.options.get(KEY_FORMAT).ok_or_else(|| {
+                        SinkError::Config(anyhow!("Cannot find `{KEY_FORMAT}`,please set it."))
+                    })?;
+                    TemplateEncoder::new_geo_key(
+                        b.schema,
+                        pk_indices,
+                        member_name,
+                        template.clone(),
+                    )
+                }
+                None => {
+                    let lat_name = b.format_desc.options.get(LAT_NAME).ok_or_else(|| {
+                        SinkError::Config(anyhow!("Cannot find `{LAT_NAME}`, please set it."))
+                    })?;
+                    let lon_name = b.format_desc.options.get(LON_NAME).ok_or_else(|| {
+                        SinkError::Config(anyhow!("Cannot find `{LON_NAME}`,please set it."))
+                    })?;
+                    TemplateEncoder::new_geo_value(b.schema, pk_indices, lat_name, lon_name)
+                }
+            },
+            _ => Err(SinkError::Config(anyhow!(
+                "The value type {} is not supported",
+                redis_value_type
+            ))),
+        }
     }
 }
 

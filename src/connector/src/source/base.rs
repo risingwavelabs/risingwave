@@ -17,7 +17,6 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
-use aws_sdk_s3::types::Object;
 use bytes::Bytes;
 use enum_as_inner::EnumAsInner;
 use futures::future::try_join_all;
@@ -49,7 +48,6 @@ use super::{AZBLOB_CONNECTOR, GCS_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONN
 use crate::error::ConnectorResult as Result;
 use crate::parser::schema_change::SchemaChangeEnvelope;
 use crate::parser::ParserConfig;
-use crate::source::filesystem::FsPageItem;
 use crate::source::monitor::EnumeratorMetrics;
 use crate::source::SplitImpl::{CitusCdc, MongodbCdc, MysqlCdc, PostgresCdc, SqlServerCdc};
 use crate::with_options::WithOptions;
@@ -196,6 +194,10 @@ pub trait SplitEnumerator: Sized + Send {
     async fn on_drop_fragments(&mut self, _fragment_ids: Vec<u32>) -> Result<()> {
         Ok(())
     }
+    /// Do some cleanup work when a backfill fragment is finished, e.g., drop Kafka consumer group.
+    async fn on_finish_backfill(&mut self, _fragment_ids: Vec<u32>) -> Result<()> {
+        Ok(())
+    }
 }
 
 pub type SourceContextRef = Arc<SourceContext>;
@@ -206,6 +208,7 @@ pub type SourceEnumeratorContextRef = Arc<SourceEnumeratorContext>;
 pub trait AnySplitEnumerator: Send {
     async fn list_splits(&mut self) -> Result<Vec<SplitImpl>>;
     async fn on_drop_fragments(&mut self, _fragment_ids: Vec<u32>) -> Result<()>;
+    async fn on_finish_backfill(&mut self, _fragment_ids: Vec<u32>) -> Result<()>;
 }
 
 #[async_trait]
@@ -218,6 +221,10 @@ impl<T: SplitEnumerator<Split: Into<SplitImpl>>> AnySplitEnumerator for T {
 
     async fn on_drop_fragments(&mut self, _fragment_ids: Vec<u32>) -> Result<()> {
         SplitEnumerator::on_drop_fragments(self, _fragment_ids).await
+    }
+
+    async fn on_finish_backfill(&mut self, _fragment_ids: Vec<u32>) -> Result<()> {
+        SplitEnumerator::on_finish_backfill(self, _fragment_ids).await
     }
 }
 
@@ -814,17 +821,6 @@ pub trait SplitMetaData: Sized {
 /// split readers) [`SplitImpl`]. If no split is assigned to source executor, `ConnectorState` is
 /// [`None`] and the created source stream will be a pending stream.
 pub type ConnectorState = Option<Vec<SplitImpl>>;
-
-#[derive(Debug, Clone, Default)]
-pub struct FsFilterCtrlCtx;
-pub type FsFilterCtrlCtxRef = Arc<FsFilterCtrlCtx>;
-
-#[async_trait]
-pub trait FsListInner: Sized {
-    // fixme: better to implement as an Iterator, but the last page still have some contents
-    async fn get_next_page<T: for<'a> From<&'a Object>>(&mut self) -> Result<(Vec<T>, bool)>;
-    fn filter_policy(&self, ctx: &FsFilterCtrlCtx, page_num: usize, item: &FsPageItem) -> bool;
-}
 
 #[cfg(test)]
 mod tests {

@@ -599,7 +599,7 @@ impl Binder {
                     Ok(ExprImpl::literal_varchar(new_value.to_string()))
                 }))),
                 ("format_type", raw_call(ExprType::FormatType)),
-                ("pg_table_is_visible", raw_literal(ExprImpl::literal_bool(true))),
+                ("pg_table_is_visible", raw_call(ExprType::PgTableIsVisible)),
                 ("pg_type_is_visible", raw_literal(ExprImpl::literal_bool(true))),
                 ("pg_get_constraintdef", raw_literal(ExprImpl::literal_null(DataType::Varchar))),
                 ("pg_get_partkeydef", raw_literal(ExprImpl::literal_null(DataType::Varchar))),

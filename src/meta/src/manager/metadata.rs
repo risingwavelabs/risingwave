@@ -26,7 +26,7 @@ use risingwave_pb::common::worker_node::{PbResource, Property as AddNodeProperty
 use risingwave_pb::common::{HostAddress, PbWorkerNode, PbWorkerType, WorkerNode, WorkerType};
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::meta::table_fragments::{Fragment, PbFragment};
-use risingwave_pb::stream_plan::{PbDispatchStrategy, StreamActor};
+use risingwave_pb::stream_plan::{PbDispatchStrategy, PbStreamScanType};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 use tokio::sync::oneshot;
 use tokio::time::{sleep, Instant};
@@ -38,9 +38,9 @@ use crate::controller::cluster::{ClusterControllerRef, StreamingClusterInfo, Wor
 use crate::controller::fragment::FragmentParallelismInfo;
 use crate::manager::{LocalNotification, NotificationVersion};
 use crate::model::{
-    ActorId, ClusterId, FragmentId, StreamJobFragments, SubscriptionId, TableParallelism,
+    ActorId, ClusterId, FragmentId, StreamActorWithUpstreams, StreamJobFragments, SubscriptionId,
 };
-use crate::stream::SplitAssignment;
+use crate::stream::{JobReschedulePostUpdates, SplitAssignment};
 use crate::telemetry::MetaTelemetryJobDesc;
 use crate::{MetaError, MetaResult};
 
@@ -382,13 +382,13 @@ impl MetadataManager {
     pub async fn post_apply_reschedules(
         &self,
         reschedules: HashMap<FragmentId, Reschedule>,
-        table_parallelism_assignment: HashMap<TableId, TableParallelism>,
+        post_updates: &JobReschedulePostUpdates,
     ) -> MetaResult<()> {
         // temp convert u32 to i32
         let reschedules = reschedules.into_iter().map(|(k, v)| (k as _, v)).collect();
 
         self.catalog_controller
-            .post_apply_reschedules(reschedules, table_parallelism_assignment)
+            .post_apply_reschedules(reschedules, post_updates)
             .await
     }
 
@@ -588,13 +588,15 @@ impl MetadataManager {
         Ok(table_fragments)
     }
 
-    pub async fn all_active_actors(&self) -> MetaResult<HashMap<ActorId, StreamActor>> {
+    pub async fn all_active_actors(
+        &self,
+    ) -> MetaResult<HashMap<ActorId, StreamActorWithUpstreams>> {
         let table_fragments = self.catalog_controller.table_fragments().await?;
         let mut actor_maps = HashMap::new();
         for (_, tf) in table_fragments {
             for actor in tf.active_actors() {
                 actor_maps
-                    .try_insert(actor.actor_id, actor)
+                    .try_insert(actor.0.actor_id, actor)
                     .expect("non duplicate");
             }
         }
@@ -732,6 +734,21 @@ impl MetadataManager {
             .await
     }
 
+    pub async fn get_existing_job_resource_group(
+        &self,
+        streaming_job_id: ObjectId,
+    ) -> MetaResult<String> {
+        self.catalog_controller
+            .get_existing_job_resource_group(streaming_job_id)
+            .await
+    }
+
+    pub async fn get_database_resource_group(&self, database_id: ObjectId) -> MetaResult<String> {
+        self.catalog_controller
+            .get_database_resource_group(database_id)
+            .await
+    }
+
     pub fn cluster_id(&self) -> &ClusterId {
         self.cluster_controller.cluster_id()
     }
@@ -739,6 +756,17 @@ impl MetadataManager {
     pub async fn list_rate_limits(&self) -> MetaResult<Vec<RateLimitInfo>> {
         let rate_limits = self.catalog_controller.list_rate_limits().await?;
         Ok(rate_limits)
+    }
+
+    pub async fn get_job_backfill_scan_types(
+        &self,
+        job_id: &TableId,
+    ) -> MetaResult<HashMap<FragmentId, PbStreamScanType>> {
+        let backfill_types = self
+            .catalog_controller
+            .get_job_fragment_backfill_scan_type(job_id.table_id as _)
+            .await?;
+        Ok(backfill_types)
     }
 }
 

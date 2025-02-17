@@ -40,6 +40,8 @@ use crate::{impl_parse_to, parser_v2};
 pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
 pub(crate) const WEBHOOK_CONNECTOR: &str = "webhook";
 
+const WEBHOOK_WAIT_FOR_PERSISTENCE: &str = "webhook.wait_for_persistence";
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum ParserError {
     TokenizerError(String),
@@ -2603,10 +2605,19 @@ impl Parser<'_> {
                 parser_err!("VALIDATE is only supported for tables created with webhook source");
             }
 
-            self.expect_keyword(Keyword::SECRET)?;
-            let secret_ref = self.parse_secret_ref()?;
-            if secret_ref.ref_as == SecretRefAsType::File {
-                parser_err!("Secret for SECURE_COMPARE() does not support AS FILE");
+            let wait_for_persistence = with_options
+                .iter()
+                .find(|&opt| opt.name.real_value() == WEBHOOK_WAIT_FOR_PERSISTENCE)
+                .map(|opt| opt.value.to_string().eq_ignore_ascii_case("true"))
+                .unwrap_or(true);
+            let secret_ref = if self.parse_keyword(Keyword::SECRET) {
+                let secret_ref = self.parse_secret_ref()?;
+                if secret_ref.ref_as == SecretRefAsType::File {
+                    parser_err!("Secret for SECURE_COMPARE() does not support AS FILE");
+                };
+                Some(secret_ref)
+            } else {
+                None
             };
 
             self.expect_keyword(Keyword::AS)?;
@@ -2615,6 +2626,7 @@ impl Parser<'_> {
             Some(WebhookSourceInfo {
                 secret_ref,
                 signature_expr,
+                wait_for_persistence,
             })
         } else {
             None
@@ -3420,12 +3432,37 @@ impl Parser<'_> {
                     parallelism: value,
                     deferred,
                 }
+            } else if self.parse_keyword(Keyword::RESOURCE_GROUP) && materialized {
+                if self.expect_keyword(Keyword::TO).is_err()
+                    && self.expect_token(&Token::Eq).is_err()
+                {
+                    return self
+                        .expected("TO or = after ALTER MATERIALIZED VIEW SET RESOURCE_GROUP");
+                }
+                let value = self.parse_set_variable()?;
+                let deferred = self.parse_keyword(Keyword::DEFERRED);
+
+                AlterViewOperation::SetResourceGroup {
+                    resource_group: Some(value),
+                    deferred,
+                }
             } else if materialized
                 && let Some(rate_limit) = self.parse_alter_backfill_rate_limit()?
             {
                 AlterViewOperation::SetBackfillRateLimit { rate_limit }
             } else {
                 return self.expected("SCHEMA/PARALLELISM/BACKFILL_RATE_LIMIT after SET");
+            }
+        } else if self.parse_keyword(Keyword::RESET) {
+            if self.parse_keyword(Keyword::RESOURCE_GROUP) && materialized {
+                let deferred = self.parse_keyword(Keyword::DEFERRED);
+
+                AlterViewOperation::SetResourceGroup {
+                    resource_group: None,
+                    deferred,
+                }
+            } else {
+                return self.expected("RESOURCE_GROUP after RESET");
             }
         } else {
             return self.expected(&format!(

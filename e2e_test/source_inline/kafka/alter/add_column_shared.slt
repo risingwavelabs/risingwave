@@ -48,6 +48,12 @@ select * from mv_before_alter;
 statement ok
 alter source s add column v3 varchar;
 
+# Demonstrate definition change.
+query T
+SELECT SUBSTRING(definition, 1, POSITION(' WITH' IN definition) - 1) FROM rw_sources WHERE name = 's';
+----
+CREATE SOURCE s (v1 INT, v2 CHARACTER VARYING, v3 CHARACTER VARYING)
+
 # New MV will have v3.
 
 # Check it should still be shared source <https://github.com/risingwavelabs/risingwave/issues/19799>

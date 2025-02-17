@@ -429,7 +429,7 @@ impl CreateMviewProgressTracker {
         version_stats: &HummockVersionStats,
     ) -> Vec<TrackingJob> {
         let new_tracking_job_info =
-            if let Some(Command::CreateStreamingJob { info, job_type }) = command {
+            if let Some(Command::CreateStreamingJob { info, job_type, .. }) = command {
                 match job_type {
                     CreateStreamingJobType::Normal => Some((info, None)),
                     CreateStreamingJobType::SinkIntoTable(replace_stream_job) => {
@@ -535,7 +535,8 @@ impl CreateMviewProgressTracker {
             for (table_id, actors) in upstream_root_actors {
                 assert!(!actors.is_empty());
                 let dispatch_count: usize = dispatchers
-                    .iter()
+                    .values()
+                    .flatten()
                     .filter(|(upstream_actor_id, _)| actors.contains(upstream_actor_id))
                     .map(|(_, v)| v.len())
                     .sum();

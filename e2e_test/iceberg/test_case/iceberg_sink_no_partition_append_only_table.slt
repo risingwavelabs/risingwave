@@ -39,7 +39,8 @@ CREATE SINK s6 AS select * from mv6 WITH (
     s3.region = 'us-east-1',
     s3.access.key = 'hummockadmin',
     s3.secret.key = 'hummockadmin',
-    create_table_if_not_exists = 'true'
+    create_table_if_not_exists = 'true',
+    partition_by = 'year(v_date)'
 );
 
 statement ok

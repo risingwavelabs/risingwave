@@ -632,10 +632,17 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                     .await?;
                                 self.backfill_state_store
                                     .state_store
-                                    .commit(barrier.epoch)
+                                    .commit_assert_no_update_vnode_bitmap(barrier.epoch)
                                     .await?;
 
                                 if self.should_report_finished(&backfill_stage.states) {
+                                    // drop the backfill kafka consumers
+                                    backfill_stream = select_with_strategy(
+                                        input.by_ref().map(Either::Left),
+                                        futures::stream::pending().boxed().map(Either::Right),
+                                        select_strategy,
+                                    );
+
                                     self.progress.finish(
                                         barrier.epoch,
                                         backfill_stage.total_backfilled_rows(),
@@ -734,6 +741,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             }
         }
 
+        std::mem::drop(backfill_stream);
         let mut states = backfill_stage.states;
         // Make sure `Finished` state is persisted.
         self.backfill_state_store.set_states(states.clone()).await?;
@@ -774,7 +782,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                     }
                     self.backfill_state_store
                         .state_store
-                        .commit(barrier.epoch)
+                        .commit_assert_no_update_vnode_bitmap(barrier.epoch)
                         .await?;
                     yield Message::Barrier(barrier);
                 }
