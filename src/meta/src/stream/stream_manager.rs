@@ -36,6 +36,7 @@ use crate::barrier::{
     BarrierScheduler, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
     ReplaceStreamJobPlan, SnapshotBackfillInfo,
 };
+use crate::controller::catalog::DropTableConnectorContext;
 use crate::error::bail_invalid_parameter;
 use crate::manager::{
     MetaSrvEnv, MetadataManager, NotificationVersion, StreamingJob, StreamingJobType,
@@ -187,6 +188,9 @@ pub struct ReplaceStreamJobContext {
     pub streaming_job: StreamingJob,
 
     pub tmp_id: u32,
+
+    /// Used for dropping an associated source. Dropping source and related internal tables.
+    pub drop_table_connector_ctx: Option<DropTableConnectorContext>,
 }
 
 /// `GlobalStreamManager` manages all the streams in the system.
@@ -372,6 +376,7 @@ impl GlobalStreamManager {
                 init_split_assignment,
                 streaming_job,
                 tmp_id: tmp_table_id.table_id,
+                to_drop_state_table_ids: Vec::new(), /* the create streaming job command will not drop any state table */
             });
         }
 
@@ -455,6 +460,7 @@ impl GlobalStreamManager {
             dispatchers,
             tmp_id,
             streaming_job,
+            drop_table_connector_ctx,
             ..
         }: ReplaceStreamJobContext,
     ) -> MetaResult<()> {
@@ -466,6 +472,10 @@ impl GlobalStreamManager {
         } else {
             self.source_manager.allocate_splits(&tmp_table_id).await?
         };
+        tracing::info!(
+            "replace_stream_job - allocate split: {:?}",
+            init_split_assignment
+        );
 
         self.barrier_scheduler
             .run_config_change_command_with_pause(
@@ -478,6 +488,15 @@ impl GlobalStreamManager {
                     init_split_assignment,
                     streaming_job,
                     tmp_id,
+                    to_drop_state_table_ids: {
+                        if let Some(drop_table_connector_ctx) = &drop_table_connector_ctx {
+                            vec![TableId::new(
+                                drop_table_connector_ctx.to_remove_state_table_id as _,
+                            )]
+                        } else {
+                            Vec::new()
+                        }
+                    },
                 }),
             )
             .await?;
