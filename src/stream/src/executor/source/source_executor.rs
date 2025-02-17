@@ -1312,7 +1312,7 @@ mod tests {
         .await;
 
         source_state_handler
-            .init_epoch(EpochPair::new_test_epoch(5 * test_epoch(1)))
+            .init_epoch(EpochPair::new_test_epoch(test_epoch(5)))
             .await
             .unwrap();
 
