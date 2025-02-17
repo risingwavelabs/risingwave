@@ -16,18 +16,23 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use itertools::Itertools;
-use risingwave_common::bail;
 use risingwave_common::catalog::{internal_table_name_to_parts, Field, Schema, StreamJobStatus};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_expr::aggregate::AggType;
 pub use risingwave_pb::expr::agg_call::PbKind as PbAggKind;
+use risingwave_pb::plan_common::JoinType;
 
 use super::{ApplyResult, BoxedRule, FallibleRule};
 use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::catalog::table_catalog::TableType;
-use crate::expr::{AggCall, ExprImpl, ExprType, FunctionCall, InputRef, Literal, OrderBy, TableFunctionType};
+use crate::expr::{
+    AggCall, ExprImpl, ExprType, FunctionCall, InputRef, Literal, OrderBy, TableFunctionType,
+};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
-use crate::optimizer::plan_node::{LogicalAgg, LogicalJoin, LogicalProject, LogicalScan, LogicalTableFunction, LogicalUnion, LogicalValues};
+use crate::optimizer::plan_node::{
+    LogicalAgg, LogicalJoin, LogicalProject, LogicalScan, LogicalTableFunction, LogicalUnion,
+    LogicalValues,
+};
 use crate::optimizer::PlanRef;
 use crate::utils::{Condition, GroupBy};
 use crate::TableCatalog;
@@ -120,7 +125,7 @@ impl FallibleRule for TableFunctionToInternalBackfillProgressRule {
         }))]);
         let (agg, _rewritten_select_exprs, _rewritten_having_exprs) =
             LogicalAgg::create(select_exprs, group_key, None, union.into())?;
-        let project = LogicalProject::new(
+        let current_counts = LogicalProject::new(
             agg,
             vec![
                 ExprImpl::InputRef(Box::new(InputRef {
@@ -139,7 +144,9 @@ impl FallibleRule for TableFunctionToInternalBackfillProgressRule {
             let catalog = plan.ctx().session_ctx().env().catalog_reader().read_guard();
             let mut total_counts = vec![];
             for job_id in backfilling_job_ids {
-                let total_key_count = if let Some(stats) = catalog.table_stats().table_stats.get(&(job_id.table_id)) {
+                let total_key_count = if let Some(stats) =
+                    catalog.table_stats().table_stats.get(&(job_id.table_id))
+                {
                     stats.total_key_count
                 } else {
                     return ApplyResult::Err(
@@ -168,21 +175,19 @@ impl FallibleRule for TableFunctionToInternalBackfillProgressRule {
         };
 
         let join = {
-            let conjunctions = vec![
-                ExprImpl::FunctionCall(Box::new(FunctionCall::new(
-                    ExprType::Equal,
-                    vec![
-                        ExprImpl::InputRef(Box::new(InputRef {
-                            index: 0,
-                            data_type: DataType::Int32,
-                        })),
-                        ExprImpl::InputRef(Box::new(InputRef {
-                            index: 2,
-                            data_type: DataType::Int32,
-                        })),
-                    ],
-                )?)),
-            ];
+            let conjunctions = vec![ExprImpl::FunctionCall(Box::new(FunctionCall::new(
+                ExprType::Equal,
+                vec![
+                    ExprImpl::InputRef(Box::new(InputRef {
+                        index: 0,
+                        data_type: DataType::Int32,
+                    })),
+                    ExprImpl::InputRef(Box::new(InputRef {
+                        index: 2,
+                        data_type: DataType::Int32,
+                    })),
+                ],
+            )?))];
             let condition = Condition { conjunctions };
             LogicalJoin::new(
                 current_counts.into(),
@@ -196,11 +201,13 @@ impl FallibleRule for TableFunctionToInternalBackfillProgressRule {
             let op1 = ExprImpl::InputRef(Box::new(InputRef {
                 index: 1,
                 data_type: DataType::Int64,
-            })).cast_implicit(DataType::Decimal)?;
+            }))
+            .cast_implicit(DataType::Decimal)?;
             let op2 = ExprImpl::InputRef(Box::new(InputRef {
                 index: 3,
                 data_type: DataType::Int64,
-            })).cast_implicit(DataType::Decimal)?;
+            }))
+            .cast_implicit(DataType::Decimal)?;
             let div_expr = ExprImpl::FunctionCall(Box::new(FunctionCall::new(
                 ExprType::Divide,
                 vec![op1, op2],
