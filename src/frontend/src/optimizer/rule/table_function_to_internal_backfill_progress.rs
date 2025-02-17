@@ -19,6 +19,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{internal_table_name_to_parts, Field, Schema, StreamJobStatus};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_expr::aggregate::AggType;
+pub use risingwave_pb::expr::agg_call::PbKind as PbAggKind;
 
 use super::{ApplyResult, BoxedRule, FallibleRule};
 use crate::catalog::catalog_service::CatalogReadGuard;
@@ -31,7 +32,6 @@ use crate::optimizer::plan_node::{
 use crate::optimizer::PlanRef;
 use crate::utils::{Condition, GroupBy};
 use crate::TableCatalog;
-pub use risingwave_pb::expr::agg_call::PbKind as PbAggKind;
 
 /// Transform a special `TableFunction` (with `FILE_SCAN` table function type) into a `LogicalFileScan`
 pub struct TableFunctionToInternalBackfillProgressRule {}
@@ -90,10 +90,7 @@ impl FallibleRule for TableFunctionToInternalBackfillProgressRule {
                     index: row_count_column_index,
                     data_type: DataType::Int64,
                 }));
-                LogicalProject::new(
-                    scan.into(),
-                    vec![job_id_expr, row_count_expr],
-                )
+                LogicalProject::new(scan.into(), vec![job_id_expr, row_count_expr])
             };
             counts.push(project.into());
         }
@@ -105,21 +102,16 @@ impl FallibleRule for TableFunctionToInternalBackfillProgressRule {
             }));
             let sum_agg = ExprImpl::AggCall(Box::new(AggCall::new(
                 AggType::Builtin(PbAggKind::Sum),
-                vec![
-                    ExprImpl::InputRef(Box::new(InputRef {
-                        index: 1,
-                        data_type: DataType::Int64,
-                    })),
-                ],
+                vec![ExprImpl::InputRef(Box::new(InputRef {
+                    index: 1,
+                    data_type: DataType::Int64,
+                }))],
                 false,
                 OrderBy::any(),
                 Condition::true_cond(),
                 vec![],
             )?));
-            vec![
-                job_id,
-                sum_agg,
-            ]
+            vec![job_id, sum_agg]
         };
         let group_key = GroupBy::GroupKey(vec![ExprImpl::InputRef(Box::new(InputRef {
             index: 0,
@@ -137,7 +129,8 @@ impl FallibleRule for TableFunctionToInternalBackfillProgressRule {
                 ExprImpl::InputRef(Box::new(InputRef {
                     index: 1,
                     data_type: DataType::Decimal,
-                })).cast_explicit(DataType::Int64)?,
+                }))
+                .cast_explicit(DataType::Int64)?,
             ],
         );
         ApplyResult::Ok(project.into())
