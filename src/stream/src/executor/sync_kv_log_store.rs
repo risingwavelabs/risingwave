@@ -535,16 +535,14 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
         truncation_offset: Option<ReaderTruncationOffsetType>,
         buffer: &mut SyncedLogStoreBuffer,
     ) -> StreamExecutorResult<LogStorePostSealCurrentEpoch<'a, S::Local>> {
+        // TODO(kwannoel): As an optimization we can also change flushed chunks to be flushed items
+        // to reduce memory consumption of logstore.
+
         let epoch = barrier.epoch.prev;
-        let mut writer = write_state.start_writer(false);
-        // FIXME(kwannoel): Handle paused stream.
-        writer.write_barrier(epoch, barrier.is_checkpoint())?;
-
-        // FIXME(kwannoel): Flush all unflushed chunks
-        // As an optimization we can also change it into flushed items instead.
-        // This will reduce memory consumption of logstore.
-
         if barrier.is_checkpoint() {
+            let mut writer = write_state.start_writer(false);
+            writer.write_barrier(epoch, barrier.is_checkpoint())?;
+
             for (epoch, item) in &mut buffer.buffer {
                 match item {
                     LogStoreBufferItem::StreamChunk {
@@ -559,18 +557,16 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                             *flushed = true;
                         }
                     }
-                    | LogStoreBufferItem::Flushed { .. } => {
+                    LogStoreBufferItem::Flushed { .. } => {
                         break;
                     }
-                    LogStoreBufferItem::Barrier { .. }
-                    | LogStoreBufferItem::UpdateVnodes(_) => {}
+                    LogStoreBufferItem::Barrier { .. } | LogStoreBufferItem::UpdateVnodes(_) => {}
                 }
             }
+
+            let (flush_info, _) = writer.finish().await?;
+            flush_info.report(metrics);
         }
-
-        let (flush_info, _) = writer.finish().await?;
-        flush_info.report(metrics);
-
         // Apply truncation
         let post_seal = write_state.seal_current_epoch(barrier.epoch.curr, truncation_offset);
 
