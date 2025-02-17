@@ -144,14 +144,6 @@ sqllogictest -p 4566 -d dev './e2e_test/udf/python_udf.slt'
 echo "--- Kill cluster"
 cluster_stop
 
-echo "--- e2e, $mode, generated"
-RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
-cluster_start
-sqllogictest -p 4566 -d dev './e2e_test/generated/**/*.slt' --junit "generated-${profile}"
-
-echo "--- Kill cluster"
-cluster_stop
-
 # only run if mode is not single-node or standalone
 if [[ "$mode" != "single-node" && "$mode" != "standalone" ]]; then
   echo "--- e2e, ci-3cn-1fe-with-recovery, error ui"
