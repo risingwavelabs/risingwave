@@ -119,18 +119,15 @@ impl<Src: OpendalSource> OpendalReader<Src> {
                 yield chunk?;
             }
 
-            if let EncodingProperties::Parquet = &self.parser_config.specific.encoding_config {
-                // We no longer determine whether a file is finished by comparing `offset >= size`, the reader itself can sense whether it has reached the end.
-                // Therefore, after a file is read completely, we yield one more chunk marked as EOF, with its offset set to `usize::MAX` to indicate that it is finished.
-                // In fetch executor, if `offset = usize::MAX` is encountered, the corresponding file can be deleted from the state table.
+            // We no longer determine whether a file is finished by comparing `offset >= size`, the reader itself can sense whether it has reached the end.
+            // Therefore, after a file is read completely, we yield one more chunk marked as EOF, with its offset set to `usize::MAX` to indicate that it is finished.
+            // In fetch executor, if `offset = usize::MAX` is encountered, the corresponding file can be deleted from the state table.
 
-                // FIXME(wcy-fdu): The order of hidden columns in parquet encode and other encodes is inconsistent, maybe we can yeild a common eof chunk for both parquet encode and other encodes.
-                let eof_chunk = Self::generate_eof_chunk_for_parquet_encode(
-                    self.parser_config.common.rw_columns.clone(),
-                    object_name.clone(),
-                )?;
-                yield eof_chunk;
-            }
+            let eof_chunk = Self::generate_eof_chunk(
+                self.parser_config.common.rw_columns.clone(),
+                object_name.clone(),
+            )?;
+            yield eof_chunk;
         }
     }
 
@@ -236,20 +233,10 @@ impl<Src: OpendalSource> OpendalReader<Src> {
             batch.shrink_to_fit();
             yield batch;
         }
-
-        // For json and csv encodes, yield an eof message to mark the file has been read.
-        let eof_batch = vec![SourceMessage {
-            key: None,
-            payload: None,
-            offset: usize::MAX.to_string(),
-            split_id: split.id(),
-            meta: SourceMeta::Empty,
-        }];
-        yield eof_batch;
     }
 
     // Generate a special chunk to mark the end of reading. Its offset is usize::MAX and other fields are null.
-    fn generate_eof_chunk_for_parquet_encode(
+    fn generate_eof_chunk(
         rw_columns: Vec<SourceColumnDesc>,
         object_name: String,
     ) -> Result<StreamChunk, crate::error::ConnectorError> {
