@@ -345,7 +345,7 @@ pub struct SessionConfig {
 
     /// Whether the streaming join should be unaligned or not.
     #[parameter(default = false)]
-    streaming_unaligned_join: bool,
+    streaming_enable_unaligned_join: bool,
 }
 
 fn check_iceberg_engine_connection(val: &str) -> Result<(), String> {
