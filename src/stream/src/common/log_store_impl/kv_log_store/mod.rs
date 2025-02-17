@@ -92,15 +92,28 @@ impl KvLogStoreMetrics {
         sink_param: &SinkParam,
         connector: &'static str,
     ) -> Self {
-        let actor_id_str = actor_id.to_string();
-        let sink_id_str = sink_param.sink_id.sink_id.to_string();
+        let id = sink_param.sink_id.sink_id;
+        let name = &sink_param.sink_name;
+        Self::new_inner(metrics, actor_id, id, name, connector)
+    }
 
-        let labels = &[
-            &actor_id_str,
-            connector,
-            &sink_id_str,
-            &sink_param.sink_name,
-        ];
+    /// `id`: refers to a unique way to identify the logstore. This can be the sink id,
+    ///       or for joins, it can be the `fragment_id`.
+    /// `name`: refers to the MV / Sink that the log store is associated with.
+    /// `target`: refers to the target of the log store,
+    ///           for instance `MySql` Sink, PG sink, etc...
+    ///           or unaligned join.
+    pub(crate) fn new_inner(
+        metrics: &StreamingMetrics,
+        actor_id: ActorId,
+        id: u32,
+        name: &str,
+        target: &'static str,
+    ) -> Self {
+        let actor_id_str = actor_id.to_string();
+        let id_str = id.to_string();
+
+        let labels = &[&actor_id_str, target, &id_str, name];
         let storage_write_size = metrics
             .kv_log_store_storage_write_size
             .with_guarded_label_values(labels);
@@ -115,18 +128,18 @@ impl KvLogStoreMetrics {
             .kv_log_store_storage_read_size
             .with_guarded_label_values(&[
                 &actor_id_str,
-                connector,
-                &sink_id_str,
-                &sink_param.sink_name,
+                target,
+                &id_str,
+                name,
                 READ_PERSISTENT_LOG,
             ]);
         let persistent_log_read_count = metrics
             .kv_log_store_storage_read_count
             .with_guarded_label_values(&[
                 &actor_id_str,
-                connector,
-                &sink_id_str,
-                &sink_param.sink_name,
+                target,
+                &id_str,
+                name,
                 READ_PERSISTENT_LOG,
             ]);
 
@@ -134,18 +147,18 @@ impl KvLogStoreMetrics {
             .kv_log_store_storage_read_size
             .with_guarded_label_values(&[
                 &actor_id_str,
-                connector,
-                &sink_id_str,
-                &sink_param.sink_name,
+                target,
+                &id_str,
+                name,
                 READ_FLUSHED_BUFFER,
             ]);
         let flushed_buffer_read_count = metrics
             .kv_log_store_storage_read_count
             .with_guarded_label_values(&[
                 &actor_id_str,
-                connector,
-                &sink_id_str,
-                &sink_param.sink_name,
+                target,
+                &id_str,
+                name,
                 READ_FLUSHED_BUFFER,
             ]);
 
@@ -454,7 +467,7 @@ mod tests {
     use crate::common::log_store_impl::kv_log_store::test_utils::{
         calculate_vnode_bitmap, check_rows_eq, check_stream_chunk_eq,
         gen_multi_vnode_stream_chunks, gen_stream_chunk_with_info, gen_test_log_store_table,
-        TEST_DATA_SIZE,
+        LogWriterTestExt, TEST_DATA_SIZE,
     };
     use crate::common::log_store_impl::kv_log_store::{
         KvLogStoreFactory, KvLogStoreMetrics, KvLogStorePkInfo, KV_LOG_STORE_V2_INFO,
@@ -514,10 +527,16 @@ mod tests {
         test_env
             .storage
             .start_epoch(epoch2, HashSet::from_iter([TableId::new(table.id)]));
-        writer.flush_current_epoch(epoch2, false).await.unwrap();
+        writer
+            .flush_current_epoch_for_test(epoch2, false)
+            .await
+            .unwrap();
         writer.write_chunk(stream_chunk2.clone()).await.unwrap();
         let epoch3 = epoch2.next_epoch();
-        writer.flush_current_epoch(epoch3, true).await.unwrap();
+        writer
+            .flush_current_epoch_for_test(epoch3, true)
+            .await
+            .unwrap();
 
         let sync_result = test_env
             .storage
@@ -624,10 +643,16 @@ mod tests {
         test_env
             .storage
             .start_epoch(epoch2, HashSet::from_iter([TableId::new(table.id)]));
-        writer.flush_current_epoch(epoch2, false).await.unwrap();
+        writer
+            .flush_current_epoch_for_test(epoch2, false)
+            .await
+            .unwrap();
         writer.write_chunk(stream_chunk2.clone()).await.unwrap();
         let epoch3 = epoch2.next_epoch();
-        writer.flush_current_epoch(epoch3, true).await.unwrap();
+        writer
+            .flush_current_epoch_for_test(epoch3, true)
+            .await
+            .unwrap();
 
         reader.init().await.unwrap();
         match reader.next_item().await.unwrap() {
@@ -815,7 +840,10 @@ mod tests {
         test_env
             .storage
             .start_epoch(epoch2, HashSet::from_iter([TableId::new(table.id)]));
-        writer.flush_current_epoch(epoch2, true).await.unwrap();
+        writer
+            .flush_current_epoch_for_test(epoch2, true)
+            .await
+            .unwrap();
         writer.write_chunk(stream_chunk2.clone()).await.unwrap();
 
         test_env.commit_epoch(epoch1).await;
@@ -880,7 +908,10 @@ mod tests {
             })
             .unwrap();
         let epoch3 = epoch2.next_epoch();
-        writer.flush_current_epoch(epoch3, true).await.unwrap();
+        writer
+            .flush_current_epoch_for_test(epoch3, true)
+            .await
+            .unwrap();
 
         match reader.next_item().await.unwrap() {
             (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
@@ -1051,8 +1082,14 @@ mod tests {
         test_env
             .storage
             .start_epoch(epoch2, HashSet::from_iter([TableId::new(table.id)]));
-        writer1.flush_current_epoch(epoch2, false).await.unwrap();
-        writer2.flush_current_epoch(epoch2, false).await.unwrap();
+        writer1
+            .flush_current_epoch_for_test(epoch2, false)
+            .await
+            .unwrap();
+        writer2
+            .flush_current_epoch_for_test(epoch2, false)
+            .await
+            .unwrap();
         let [chunk2_1, chunk2_2] = gen_multi_vnode_stream_chunks::<2>(200, 100, pk_info);
         writer1.write_chunk(chunk2_1.clone()).await.unwrap();
         writer2.write_chunk(chunk2_2.clone()).await.unwrap();
@@ -1108,8 +1145,14 @@ mod tests {
         }
 
         let epoch3 = epoch2.next_epoch();
-        writer1.flush_current_epoch(epoch3, true).await.unwrap();
-        writer2.flush_current_epoch(epoch3, true).await.unwrap();
+        writer1
+            .flush_current_epoch_for_test(epoch3, true)
+            .await
+            .unwrap();
+        writer2
+            .flush_current_epoch_for_test(epoch3, true)
+            .await
+            .unwrap();
 
         match reader1.next_item().await.unwrap() {
             (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
@@ -1235,7 +1278,10 @@ mod tests {
             .unwrap();
         writer.write_chunk(stream_chunk1.clone()).await.unwrap();
         let epoch2 = epoch1.next_epoch();
-        writer.flush_current_epoch(epoch2, true).await.unwrap();
+        writer
+            .flush_current_epoch_for_test(epoch2, true)
+            .await
+            .unwrap();
 
         reader.init().await.unwrap();
 
@@ -1378,15 +1424,24 @@ mod tests {
         test_env
             .storage
             .start_epoch(epoch2, HashSet::from_iter([TableId::new(table.id)]));
-        writer.flush_current_epoch(epoch2, true).await.unwrap();
+        writer
+            .flush_current_epoch_for_test(epoch2, true)
+            .await
+            .unwrap();
         writer.write_chunk(stream_chunk2.clone()).await.unwrap();
         let epoch3 = epoch2.next_epoch();
         test_env
             .storage
             .start_epoch(epoch3, HashSet::from_iter([TableId::new(table.id)]));
-        writer.flush_current_epoch(epoch3, true).await.unwrap();
+        writer
+            .flush_current_epoch_for_test(epoch3, true)
+            .await
+            .unwrap();
         writer.write_chunk(stream_chunk3.clone()).await.unwrap();
-        writer.flush_current_epoch(u64::MAX, true).await.unwrap();
+        writer
+            .flush_current_epoch_for_test(u64::MAX, true)
+            .await
+            .unwrap();
 
         test_env.commit_epoch(epoch1).await;
         test_env.commit_epoch(epoch2).await;
@@ -1548,7 +1603,10 @@ mod tests {
         test_env
             .storage
             .start_epoch(epoch5, HashSet::from_iter([TableId::new(table.id)]));
-        writer.flush_current_epoch(epoch5, true).await.unwrap();
+        writer
+            .flush_current_epoch_for_test(epoch5, true)
+            .await
+            .unwrap();
         writer.write_chunk(stream_chunk5.clone()).await.unwrap();
 
         reader.init().await.unwrap();
@@ -1718,10 +1776,16 @@ mod tests {
         test_env
             .storage
             .start_epoch(epoch2, HashSet::from_iter([TableId::new(table.id)]));
-        writer.flush_current_epoch(epoch2, false).await.unwrap();
+        writer
+            .flush_current_epoch_for_test(epoch2, false)
+            .await
+            .unwrap();
         writer.write_chunk(stream_chunk2.clone()).await.unwrap();
         let epoch3 = epoch2.next_epoch();
-        writer.flush_current_epoch(epoch3, true).await.unwrap();
+        writer
+            .flush_current_epoch_for_test(epoch3, true)
+            .await
+            .unwrap();
 
         test_env.commit_epoch(epoch2).await;
 
@@ -1820,7 +1884,10 @@ mod tests {
             .truncate(TruncateOffset::Barrier { epoch: epoch1 })
             .unwrap();
         let epoch4 = epoch3.next_epoch();
-        writer.flush_current_epoch(epoch4, true).await.unwrap();
+        writer
+            .flush_current_epoch_for_test(epoch4, true)
+            .await
+            .unwrap();
         test_env.commit_epoch(epoch3).await;
 
         drop(writer);

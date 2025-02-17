@@ -271,7 +271,10 @@ impl<S: StateStore> LegacyFsSourceExecutor<S> {
             core.split_state_store.set_all_complete(completed).await?
         }
         // commit anyway, even if no message saved
-        core.split_state_store.state_table.commit(epoch).await?;
+        core.split_state_store
+            .state_table
+            .commit_assert_no_update_vnode_bitmap(epoch)
+            .await?;
 
         core.updated_splits_in_epoch.clear();
         Ok(())
