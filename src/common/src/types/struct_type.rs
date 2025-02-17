@@ -37,8 +37,10 @@ impl Debug for StructType {
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct StructTypeInner {
     /// The name and data type of each field.
+    ///
+    /// If fields are unnamed, the names will be `f1`, `f2`, etc.
     fields: Box<[(String, DataType)]>,
-    /// Whether the struct type is unnamed, i.e., "record".
+    /// Whether the fields are unnamed.
     is_unnamed: bool,
 }
 
@@ -56,13 +58,13 @@ impl StructType {
         }))
     }
 
-    /// Creates a struct type with no fields.
+    /// Creates a struct type with no fields. This makes no sense in practice.
     #[cfg(test)]
     pub fn empty() -> Self {
         Self::unnamed(Vec::new())
     }
 
-    /// Creates a struct type with unnamed fields.
+    /// Creates a struct type with unnamed fields. The names will be assigned `f1`, `f2`, etc.
     pub fn unnamed(fields: Vec<DataType>) -> Self {
         let fields = fields
             .into_iter()
@@ -76,7 +78,7 @@ impl StructType {
         }))
     }
 
-    /// Whether the struct type is unnamed, i.e., "record".
+    /// Whether the fields are unnamed.
     pub fn is_unnamed(&self) -> bool {
         self.0.is_unnamed
     }
@@ -93,7 +95,7 @@ impl StructType {
 
     /// Gets an iterator over the names of the fields.
     ///
-    /// If the struct type is unnamed, the field names will be `f1`, `f2`, etc.
+    /// If fields are unnamed, the field names will be `f1`, `f2`, etc.
     pub fn names(&self) -> impl ExactSizeIterator<Item = &str> {
         self.0.fields.iter().map(|(name, _)| name.as_str())
     }
@@ -105,7 +107,7 @@ impl StructType {
 
     /// Gets an iterator over the fields.
     ///
-    /// If the struct type is unnamed, the field names will be `f1`, `f2`, etc.
+    /// If fields are unnamed, the field names will be `f1`, `f2`, etc.
     pub fn iter(&self) -> impl ExactSizeIterator<Item = (&str, &DataType)> {
         self.0.fields.iter().map(|(name, ty)| (name.as_str(), ty))
     }
@@ -125,6 +127,7 @@ impl StructType {
 impl Display for StructType {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         if self.is_unnamed() {
+            // To be consistent with the return type of `ROW` in Postgres.
             write!(f, "record")
         } else {
             write!(
@@ -143,7 +146,6 @@ impl FromStr for StructType {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if s == "record" {
-            // XXX: is this correct?
             return Ok(StructType::unnamed(Vec::new()));
         }
         if !(s.starts_with("struct<") && s.ends_with('>')) {
