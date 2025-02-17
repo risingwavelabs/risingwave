@@ -281,7 +281,7 @@ db error: ERROR: Failed to run the query
 Caused by these errors (recent errors listed first):
   1: Failed to bind expression: map_from_entries(ARRAY[ROW('a', 1, 2)])
   2: Expr error
-  3: the underlying struct for map must have exactly two fields, got: StructType { field_names: [], field_types: [Varchar, Int32, Int32] }
+  3: the underlying struct for map must have exactly two fields, got: StructType { fields: [("f1", Varchar), ("f2", Int32), ("f3", Int32)] }
 
 
 query error
