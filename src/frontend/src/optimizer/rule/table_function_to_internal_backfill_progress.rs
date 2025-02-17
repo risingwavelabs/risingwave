@@ -120,7 +120,7 @@ impl FallibleRule for TableFunctionToInternalBackfillProgressRule {
         let (agg, _rewritten_select_exprs, _rewritten_having_exprs) =
             LogicalAgg::create(select_exprs, group_key, None, union.into())?;
         let project = LogicalProject::new(
-            agg.into(),
+            agg,
             vec![
                 ExprImpl::InputRef(Box::new(InputRef {
                     index: 0,
