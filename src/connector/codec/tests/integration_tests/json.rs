@@ -89,12 +89,9 @@ async fn test_json_schema_parse() {
         .await
         .unwrap()
         .into_iter()
-        .map(|c| ColumnDesc::from(c))
+        .map(ColumnDesc::from)
         .collect_vec();
-    let column_display = columns
-        .iter()
-        .map(|c| ColumnDescTestDisplay(c))
-        .collect_vec();
+    let column_display = columns.iter().map(ColumnDescTestDisplay).collect_vec();
 
     expect![[r#"
         {
