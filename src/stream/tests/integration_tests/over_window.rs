@@ -138,11 +138,11 @@ async fn test_over_window_lag_lead_append_only() {
             + 5 p1 102 18
         - !barrier 2
         - recovery
-        - !barrier 3
+        - !barrier 2
         - !chunk |2
               I  T  I   i
             + 10 p1 103 13
-        - !barrier 4
+        - !barrier 3
         "###,
         expect![[r#"
             - input: !barrier 1
@@ -186,9 +186,9 @@ async fn test_over_window_lag_lead_append_only() {
               - !barrier 2
             - input: recovery
               output: []
-            - input: !barrier 3
+            - input: !barrier 2
               output:
-              - !barrier 3
+              - !barrier 2
             - input: !chunk |-
                 +---+----+----+-----+----+
                 | + | 10 | p1 | 103 | 13 |
@@ -207,9 +207,9 @@ async fn test_over_window_lag_lead_append_only() {
                 | 5  | p1 | 102 | 18 | 16 | 13 |
                 | 10 | p1 | 103 | 13 | 18 |    |
                 +----+----+-----+----+----+----+
-            - input: !barrier 4
+            - input: !barrier 3
               output:
-              - !barrier 4
+              - !barrier 3
         "#]],
         snapshot_options(),
     )

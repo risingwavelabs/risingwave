@@ -1043,8 +1043,8 @@ impl<R: RangeKv> LocalStateStore for RangeKvLocalStateStore<R> {
             .epoch
             .as_mut()
             .expect("should have init epoch before seal the first epoch");
-        let prev_epoch = epoch.prev;
-        epoch.prev = epoch.curr;
+        let prev_epoch = epoch.curr;
+        epoch.prev = prev_epoch;
         epoch.curr = next_epoch;
         assert!(
             next_epoch > prev_epoch,
