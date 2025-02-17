@@ -38,7 +38,8 @@ RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=i
 echo "--- e2e, ci-3streaming-2serving-3fe, streaming"
 RUST_LOG=$RUST_LOG \
 risedev ci-start ci-3streaming-2serving-3fe
-sqllogictest "${host_args[@]}" -d dev './e2e_test/streaming/**/*.slt' -j 16 --junit "parallel-streaming-${profile}" --label "parallel"
+risedev slt "${host_args[@]}" -d dev './e2e_test/streaming/**/*.slt' -j 16 --junit "parallel-streaming-${profile}" --label "parallel"
+risedev slt "${host_args[@]}" -d dev './e2e_test/queryable_internal_state/**/*.slt' -j 16 --junit "parallel-queryable-internal-state-${profile}" --label "parallel"
 
 kill_cluster
 
@@ -47,13 +48,13 @@ RUST_LOG=$RUST_LOG \
 risedev ci-start ci-3streaming-2serving-3fe
 # Exclude files that contain ALTER SYSTEM commands
 find ./e2e_test/ddl -name "*.slt" -type f -exec grep -L "ALTER SYSTEM" {} \; | xargs -r sqllogictest "${host_args[@]}" -d dev --junit "parallel-batch-ddl-${profile}" --label "parallel"
-sqllogictest "${host_args[@]}" -d dev './e2e_test/visibility_mode/*.slt' -j 16 --junit "parallel-batch-${profile}" --label "parallel"
+risedev slt "${host_args[@]}" -d dev './e2e_test/visibility_mode/*.slt' -j 16 --junit "parallel-batch-${profile}" --label "parallel"
 
 kill_cluster
 
 echo "--- e2e, ci-3streaming-2serving-3fe, generated"
 RUST_LOG=$RUST_LOG \
 risedev ci-start ci-3streaming-2serving-3fe
-sqllogictest "${host_args[@]}" -d dev './e2e_test/generated/**/*.slt' -j 16 --junit "parallel-generated-${profile}" --label "parallel"
+risedev slt "${host_args[@]}" -d dev './e2e_test/generated/**/*.slt' -j 16 --junit "parallel-generated-${profile}" --label "parallel"
 
 kill_cluster
