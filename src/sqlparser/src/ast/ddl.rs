@@ -872,6 +872,7 @@ impl fmt::Display for ReferentialAction {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct WebhookSourceInfo {
-    pub secret_ref: SecretRefValue,
+    pub secret_ref: Option<SecretRefValue>,
     pub signature_expr: Expr,
+    pub wait_for_persistence: bool,
 }
