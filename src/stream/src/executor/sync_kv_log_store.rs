@@ -534,7 +534,6 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
         // As an optimization we can also change it into flushed items instead.
         // This will reduce memory consumption of logstore.
 
-        // TODO: may stop the for loop when seeing any of flushed item to avoid always iterating the whole buffer
         for (epoch, item) in &mut buffer.buffer {
             match item {
                 LogStoreBufferItem::StreamChunk {
@@ -549,8 +548,10 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                         *flushed = true;
                     }
                 }
-                LogStoreBufferItem::Flushed { .. }
-                | LogStoreBufferItem::Barrier { .. }
+                | LogStoreBufferItem::Flushed { .. } => {
+                    break;
+                }
+                LogStoreBufferItem::Barrier { .. }
                 | LogStoreBufferItem::UpdateVnodes(_) => {}
             }
         }
