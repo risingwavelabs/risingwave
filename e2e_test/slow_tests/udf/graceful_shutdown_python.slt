@@ -8,7 +8,7 @@ statement ok
 CREATE FUNCTION sleep(INT) RETURNS INT AS 'sleep' USING LINK 'http://localhost:8815';
 
 system ok
-sleep 1 && pkill python &
+sleep 1 && pkill -f e2e_test/udf/test.py &
 
 # python server should not exit until the query is finished
 query I
@@ -27,7 +27,7 @@ sleep 1s
 
 # force kill python server
 system ok
-sleep 1 && pkill -9 python &
+sleep 1 && pkill -9 -f e2e_test/udf/test.py &
 
 query error
 select sleep(2);

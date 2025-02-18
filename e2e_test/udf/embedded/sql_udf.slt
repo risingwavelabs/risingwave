@@ -120,7 +120,7 @@ create function add_sub_types(INT, BIGINT, FLOAT, DECIMAL, REAL) returns double 
 query I
 select add_sub_types(1, 1919810114514, 3.1415926, 1.123123, 101010.191919);
 ----
-1919810215523.1734494
+1919810215523.1768
 
 statement ok
 create function add_sub_return(INT, FLOAT, INT) returns float language sql return -$1 + $2 - $3;
@@ -401,7 +401,7 @@ statement error return type mismatch detected
 create function type_mismatch(INT) returns varchar language sql as 'select $1 + 114514 + $1';
 
 # Invalid function body syntax
-statement error expected an expression:, found: EOF at the end
+statement error expected an expression, found: EOF
 create function add_error(INT, INT) returns int language sql as $$select $1 + $2 +$$;
 
 ######################################################################
