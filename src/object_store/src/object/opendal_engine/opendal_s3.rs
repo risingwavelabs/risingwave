@@ -109,6 +109,9 @@ impl OpendalObjectStore {
             client_builder = client_builder.tcp_nodelay(*nodelay);
         }
 
+        client_builder = client_builder.danger_accept_invalid_certs(true);
+        client_builder = client_builder.danger_accept_invalid_hostnames(true);
+
         Ok(HttpClient::build(client_builder)?)
     }
 
