@@ -52,6 +52,12 @@ find ./e2e_test/ddl -name "*.slt" -type f -exec grep -L "ALTER SYSTEM" {} \; | x
 risedev slt "${host_args[@]}" -d dev './e2e_test/visibility_mode/*.slt' -j 16 --junit "parallel-batch-${profile}" --label "parallel"
 kill_cluster
 
+echo "--- e2e, parallel, udf"
+RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info,risingwave_storage::hummock::compactor::compactor_runner=warn" \
+start_cluster
+risedev slt "${host_args[@]}" -d dev './e2e_test/udf/general/**/*.slt' './e2e_test/udf/embedded/**/*.slt' -j 16 --junit "parallel-udf-${profile}" --label "parallel"
+kill_cluster
+
 echo "--- e2e, parallel, generated"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info,risingwave_storage::hummock::compactor::compactor_runner=warn" \
 start_cluster
