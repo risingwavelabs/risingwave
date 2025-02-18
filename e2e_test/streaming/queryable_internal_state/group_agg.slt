@@ -19,6 +19,7 @@ select * from mv;
 ----
 1 7
 
+skipif madsim
 system ok
 internal_table.mjs --db $__DATABASE__ --name mv --type hashaggstate --count
 ----
@@ -34,6 +35,7 @@ select * from mv order by foo;
 1 7
 2 7
 
+skipif madsim
 system ok
 internal_table.mjs --db $__DATABASE__ --name mv --type hashaggstate --count
 ----
@@ -48,6 +50,7 @@ select * from mv;
 ----
 2 7
 
+skipif madsim
 system ok
 internal_table.mjs --db $__DATABASE__ --name mv --type hashaggstate --count
 ----
