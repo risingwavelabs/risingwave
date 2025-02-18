@@ -21,7 +21,7 @@ use crate::error::Result;
 use crate::user::has_access_to_object;
 
 #[derive(Fields)]
-pub(crate) struct RwSubscription {
+struct RwSubscription {
     #[primary_key]
     id: i32,
     name: String,
