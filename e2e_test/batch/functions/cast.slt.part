@@ -38,3 +38,8 @@ select date(1);
 
 query error unexpected arguments number
 select date();
+
+query ?
+select cast('a' as char(1));
+----
+a
