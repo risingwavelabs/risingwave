@@ -31,19 +31,25 @@ use risingwave_common::catalog::{
 use risingwave_common::error::BoxedError;
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, Fields};
+use risingwave_connector::sink::catalog::SinkCatalog;
 use risingwave_pb::meta::list_streaming_job_states_response::StreamingJobState;
 use risingwave_pb::meta::table_parallelism::{PbFixedParallelism, PbParallelism};
 use risingwave_pb::user::grant_privilege::Object as GrantObject;
 
 use crate::catalog::catalog_service::CatalogReader;
+use crate::catalog::schema_catalog::SchemaCatalog;
+use crate::catalog::source_catalog::SourceCatalog;
+use crate::catalog::subscription_catalog::SubscriptionCatalog;
 use crate::catalog::view_catalog::ViewCatalog;
+use crate::catalog::IndexCatalog;
 use crate::meta_client::FrontendMetaClient;
 use crate::session::AuthContext;
 use crate::user::user_catalog::UserCatalog;
 use crate::user::user_privilege::available_prost_privilege;
 use crate::user::user_service::UserInfoReader;
 use crate::user::UserId;
+use crate::TableCatalog;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct SystemTableCatalog {
@@ -129,6 +135,57 @@ impl SysCatalogReaderImpl {
             system_params,
         }
     }
+}
+
+macro_rules! generate_read_all_method {
+    ($method_name:ident, $iter_method:ident, $catalog_type:ty) => {
+        fn $method_name<T, F>(
+            &self,
+            filter: impl Fn(&SchemaCatalog, &Arc<$catalog_type>) -> bool,
+            f: F,
+        ) -> crate::error::Result<Vec<T>>
+        where
+            T: Fields,
+            F: Fn(&SchemaCatalog, &Arc<$catalog_type>) -> T + Copy,
+        {
+            let catalog_reader = self.catalog_reader.read_guard();
+            let schemas = catalog_reader.iter_schemas(&self.auth_context.database)?;
+            Ok(schemas
+                .flat_map(|schema| {
+                    schema
+                        .$iter_method()
+                        .filter(|t| filter(schema, t))
+                        .map(|t| f(schema, t))
+                })
+                .collect())
+        }
+    };
+}
+
+impl SysCatalogReaderImpl {
+    generate_read_all_method!(read_all_tables, iter_user_table, TableCatalog);
+
+    generate_read_all_method!(read_all_mviews, iter_all_mvs, TableCatalog);
+
+    generate_read_all_method!(read_all_views, iter_view, ViewCatalog);
+
+    generate_read_all_method!(read_all_indexes, iter_index, IndexCatalog);
+
+    generate_read_all_method!(
+        read_all_system_tables,
+        iter_system_tables,
+        SystemTableCatalog
+    );
+
+    generate_read_all_method!(read_all_sources, iter_source, SourceCatalog);
+
+    generate_read_all_method!(read_all_sinks, iter_sink, SinkCatalog);
+
+    generate_read_all_method!(
+        read_all_subscriptions,
+        iter_subscription,
+        SubscriptionCatalog
+    );
 }
 
 pub struct BuiltinTable {

@@ -20,8 +20,7 @@ use serde_json::{json, Map as JsonMap};
 
 use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::catalog::system_catalog::{get_acl_items, SysCatalogReaderImpl};
-use crate::catalog::CatalogError;
-use crate::error::{Result, RwError};
+use crate::error::Result;
 use crate::handler::create_source::UPSTREAM_SOURCE_KEY;
 use crate::user::has_access_to_object;
 use crate::WithOptionsSecResolved;
@@ -56,7 +55,6 @@ struct RwSource {
 #[system_catalog(table, "rw_catalog.rw_sources")]
 fn read_rw_sources_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSource>> {
     let catalog_reader = reader.catalog_reader.read_guard();
-    let schemas = catalog_reader.iter_schemas(&reader.auth_context.database)?;
     let user_reader = reader.user_info_reader.read_guard();
     let current_user = user_reader
         .get_user_by_name(&reader.auth_context.user_name)
@@ -64,81 +62,68 @@ fn read_rw_sources_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSource>> 
     let users = user_reader.get_all_users();
     let username_map = user_reader.get_user_name_map();
 
-    schemas
-        .flat_map(|schema| {
-            schema
-                .iter_source()
-                .filter(|s| has_access_to_object(current_user, &schema.name, s.id, s.owner))
-                .map(|source| {
-                    let format_encode_props_with_secrets = WithOptionsSecResolved::new(
-                        source.info.format_encode_options.clone(),
-                        source.info.format_encode_secret_refs.clone(),
-                    );
-                    Ok(RwSource {
-                        id: source.id as i32,
-                        name: source.name.clone(),
-                        schema_id: schema.id() as i32,
-                        owner: source.owner as i32,
-                        connector: source
-                            .with_properties
-                            .get(UPSTREAM_SOURCE_KEY)
-                            .cloned()
-                            .unwrap_or("".to_owned())
-                            .to_uppercase(),
-                        columns: source.columns.iter().map(|c| c.name().into()).collect(),
-                        format: source
-                            .info
-                            .get_format()
-                            .ok()
-                            .map(|format| format.as_str_name().into()),
-                        row_encode: source
-                            .info
-                            .get_row_encode()
-                            .ok()
-                            .map(|row_encode| row_encode.as_str_name().into()),
-                        append_only: source.append_only,
-                        associated_table_id: source
-                            .associated_table_id
-                            .map(|id| id.table_id as i32),
-                        connection_id: source.connection_id.map(|id| id as i32),
-                        definition: source.create_sql_purified(),
-                        acl: get_acl_items(
-                            &Object::SourceId(source.id),
-                            false,
-                            &users,
-                            username_map,
-                        ),
-                        initialized_at: source.initialized_at_epoch.map(|e| e.as_timestamptz()),
-                        created_at: source.created_at_epoch.map(|e| e.as_timestamptz()),
-                        initialized_at_cluster_version: source
-                            .initialized_at_cluster_version
-                            .clone(),
-                        created_at_cluster_version: source.created_at_cluster_version.clone(),
-                        is_shared: source.info.is_shared(),
+    reader.read_all_sources::<RwSource, _>(
+        |schema, source| has_access_to_object(current_user, &schema.name, source.id, source.owner),
+        |schema, source| {
+            let format_encode_props_with_secrets = WithOptionsSecResolved::new(
+                source.info.format_encode_options.clone(),
+                source.info.format_encode_secret_refs.clone(),
+            );
+            RwSource {
+                id: source.id as i32,
+                name: source.name.clone(),
+                schema_id: schema.id() as i32,
+                owner: source.owner as i32,
+                connector: source
+                    .with_properties
+                    .get(UPSTREAM_SOURCE_KEY)
+                    .cloned()
+                    .unwrap_or("".to_owned())
+                    .to_uppercase(),
+                columns: source.columns.iter().map(|c| c.name().into()).collect(),
+                format: source
+                    .info
+                    .get_format()
+                    .ok()
+                    .map(|format| format.as_str_name().into()),
+                row_encode: source
+                    .info
+                    .get_row_encode()
+                    .ok()
+                    .map(|row_encode| row_encode.as_str_name().into()),
+                append_only: source.append_only,
+                associated_table_id: source.associated_table_id.map(|id| id.table_id as i32),
+                connection_id: source.connection_id.map(|id| id as i32),
+                definition: source.create_sql_purified(),
+                acl: get_acl_items(&Object::SourceId(source.id), false, &users, username_map),
+                initialized_at: source.initialized_at_epoch.map(|e| e.as_timestamptz()),
+                created_at: source.created_at_epoch.map(|e| e.as_timestamptz()),
+                initialized_at_cluster_version: source.initialized_at_cluster_version.clone(),
+                created_at_cluster_version: source.created_at_cluster_version.clone(),
+                is_shared: source.info.is_shared(),
 
-                        connector_props: serialize_props_with_secret(
-                            &catalog_reader,
-                            &reader.auth_context.database,
-                            source.with_properties.clone(),
-                        )?
-                        .into(),
-                        format_encode_options: serialize_props_with_secret(
-                            &catalog_reader,
-                            &reader.auth_context.database,
-                            format_encode_props_with_secrets,
-                        )?
-                        .into(),
-                    })
-                })
-        })
-        .collect::<Result<Vec<_>>>()
+                connector_props: serialize_props_with_secret(
+                    &catalog_reader,
+                    &reader.auth_context.database,
+                    source.with_properties.clone(),
+                )
+                .into(),
+                format_encode_options: serialize_props_with_secret(
+                    &catalog_reader,
+                    &reader.auth_context.database,
+                    format_encode_props_with_secrets,
+                )
+                .into(),
+            }
+        },
+    )
 }
 
 pub fn serialize_props_with_secret(
     catalog_reader: &CatalogReadGuard,
     db_name: &str,
     props_with_secret: WithOptionsSecResolved,
-) -> Result<jsonbb::Value> {
+) -> jsonbb::Value {
     let (inner, secret_ref) = props_with_secret.into_parts();
     // if not secret, {"some key": {"type": "plaintext", "value": "xxxx"}}
     // if secret, {"some key": {"type": "secret", "value": {"value": "<secret name>"}}}
@@ -149,16 +134,17 @@ pub fn serialize_props_with_secret(
     }
     for (k, v) in secret_ref {
         let secret = catalog_reader
-            .iter_schemas(db_name)?
-            .find_map(|schema| schema.get_secret_by_id(&SecretId(v.secret_id)))
-            .ok_or_else(|| {
-                RwError::from(CatalogError::NotFound("secret", v.secret_id.to_string()))
-            })?;
+            .iter_schemas(db_name)
+            .unwrap()
+            .find_map(|schema| schema.get_secret_by_id(&SecretId(v.secret_id)));
+        let secret_name = secret
+            .map(|s| s.name.to_owned())
+            .unwrap_or("not found".to_owned());
         result.insert(
             k,
-            json!({"type": "secret", "value": {"value": secret.name}}),
+            json!({"type": "secret", "value": {"value": secret_name}}),
         );
     }
 
-    Ok(jsonbb::Value::from(serde_json::Value::Object(result)))
+    jsonbb::Value::from(serde_json::Value::Object(result))
 }
