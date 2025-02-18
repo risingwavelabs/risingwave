@@ -619,7 +619,6 @@ mod tests {
             &Field {
                 data_type: DataType::Decimal,
                 name: "aaa".to_owned(),
-                ..mock_field.clone()
             },
             Some(ScalarImpl::Decimal(Decimal::try_from(1.1111111).unwrap()).as_scalar_ref_impl()),
             &doris_config,
@@ -719,55 +718,42 @@ mod tests {
 
     #[test]
     fn test_generate_json_converter_schema() {
-        let mock_field = Field {
-            data_type: DataType::Boolean,
-            name: Default::default(),
-        };
         let fields = vec![
             Field {
                 data_type: DataType::Boolean,
                 name: "v1".into(),
-                ..mock_field.clone()
             },
             Field {
                 data_type: DataType::Int16,
                 name: "v2".into(),
-                ..mock_field.clone()
             },
             Field {
                 data_type: DataType::Int32,
                 name: "v3".into(),
-                ..mock_field.clone()
             },
             Field {
                 data_type: DataType::Float32,
                 name: "v4".into(),
-                ..mock_field.clone()
             },
             Field {
                 data_type: DataType::Decimal,
                 name: "v5".into(),
-                ..mock_field.clone()
             },
             Field {
                 data_type: DataType::Date,
                 name: "v6".into(),
-                ..mock_field.clone()
             },
             Field {
                 data_type: DataType::Varchar,
                 name: "v7".into(),
-                ..mock_field.clone()
             },
             Field {
                 data_type: DataType::Time,
                 name: "v8".into(),
-                ..mock_field.clone()
             },
             Field {
                 data_type: DataType::Interval,
                 name: "v9".into(),
-                ..mock_field.clone()
             },
             Field {
                 data_type: DataType::Struct(StructType::new(vec![
@@ -782,29 +768,24 @@ mod tests {
                     ),
                 ])),
                 name: "v10".into(),
-                ..mock_field.clone()
             },
             Field {
                 data_type: DataType::List(Box::new(DataType::List(Box::new(DataType::Struct(
                     StructType::new(vec![("aa", DataType::Int64), ("bb", DataType::Float64)]),
                 ))))),
                 name: "v11".into(),
-                ..mock_field.clone()
             },
             Field {
                 data_type: DataType::Jsonb,
                 name: "12".into(),
-                ..mock_field.clone()
             },
             Field {
                 data_type: DataType::Serial,
                 name: "13".into(),
-                ..mock_field.clone()
             },
             Field {
                 data_type: DataType::Int256,
                 name: "14".into(),
-                ..mock_field.clone()
             },
         ];
         let schema = json_converter_with_schema(json!({}), "test".to_owned(), fields.iter())
