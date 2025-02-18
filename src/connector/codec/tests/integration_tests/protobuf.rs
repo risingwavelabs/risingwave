@@ -598,23 +598,20 @@ fn test_all_types() -> anyhow::Result<()> {
                 oneof_string(#21): Varchar,
                 oneof_int32(#22): Int32,
                 oneof_enum(#23): Varchar,
-                map_field(#26): Map(Varchar,Int32), type_name: all_types.AllTypes.MapFieldEntry, field_descs: [key(#24): Varchar, value(#25): Int32],
+                map_field(#26): Map(Varchar,Int32),
                 timestamp_field(#29): Struct {
                     seconds: Int64,
                     nanos: Int32,
-                }, type_name: google.protobuf.Timestamp, field_descs: [seconds(#27): Int64, nanos(#28): Int32],
+                },
                 duration_field(#32): Struct {
                     seconds: Int64,
                     nanos: Int32,
-                }, type_name: google.protobuf.Duration, field_descs: [seconds(#30): Int64, nanos(#31): Int32],
+                },
                 any_field(#33): Jsonb,
-                int32_value_field(#35): Struct { value: Int32 }, type_name: google.protobuf.Int32Value, field_descs: [value(#34): Int32],
-                string_value_field(#37): Struct { value: Varchar }, type_name: google.protobuf.StringValue, field_descs: [value(#36): Varchar],
-                map_struct_field(#42): Map(Varchar,Struct { id: Int32, name: Varchar }), type_name: all_types.AllTypes.MapStructFieldEntry, field_descs: [key(#38): Varchar, value(#41): Struct {
-                    id: Int32,
-                    name: Varchar,
-                }, type_name: all_types.AllTypes.NestedMessage, field_descs: [id(#39): Int32, name(#40): Varchar]],
-                map_enum_field(#45): Map(Int32,Varchar), type_name: all_types.AllTypes.MapEnumFieldEntry, field_descs: [key(#43): Int32, value(#44): Varchar],
+                int32_value_field(#35): Struct { value: Int32 },
+                string_value_field(#37): Struct { value: Varchar },
+                map_struct_field(#42): Map(Varchar,Struct { id: Int32, name: Varchar }),
+                map_enum_field(#45): Map(Int32,Varchar),
             ]"#]],
         expect![[r#"
             Owned(Float64(OrderedFloat(1.2345)))
