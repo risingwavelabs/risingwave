@@ -447,6 +447,9 @@ pub type BoxSourceMessageStream =
     BoxStream<'static, crate::error::ConnectorResult<Vec<SourceMessage>>>;
 /// Stream of [`StreamChunk`]s parsed from the messages from the external source.
 pub type BoxSourceChunkStream = BoxStream<'static, crate::error::ConnectorResult<StreamChunk>>;
+pub type StreamChunkWithState = (StreamChunk, HashMap<SplitId, SplitImpl>);
+pub type BoxSourceChunkWithStateStream =
+    BoxStream<'static, crate::error::ConnectorResult<StreamChunkWithState>>;
 
 // Manually expand the trait alias to improve IDE experience.
 pub trait SourceChunkStream:
