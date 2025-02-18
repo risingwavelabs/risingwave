@@ -42,7 +42,6 @@ echo "--- e2e, parallel, streaming"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info,risingwave_storage::hummock::compactor::compactor_runner=warn" \
 start_cluster
 risedev slt "${host_args[@]}" -d dev './e2e_test/streaming/**/*.slt' -j 16 --junit "parallel-streaming-${profile}" --label "parallel"
-risedev slt "${host_args[@]}" -d dev './e2e_test/queryable_internal_state/**/*.slt' -j 16 --junit "parallel-queryable-internal-state-${profile}" --label "parallel"
 kill_cluster
 
 echo "--- e2e, parallel, batch"

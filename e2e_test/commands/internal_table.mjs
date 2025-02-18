@@ -11,6 +11,9 @@ const {
 } = minimist(process.argv.slice(3), {
   string: ["db", "name", "type"],
   boolean: ["count"],
+  default: {
+    "db": "dev",
+  }
 });
 
 // Return an array of CSV string
