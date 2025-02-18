@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::min;
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
@@ -26,14 +27,14 @@ use risingwave_connector::source::SplitImpl;
 use risingwave_meta_model::actor::ActorStatus;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::object::ObjectType;
-use risingwave_meta_model::prelude::{Actor, Fragment, Sink, StreamingJob};
+use risingwave_meta_model::prelude::{Actor, Fragment, FragmentRelation, Sink, StreamingJob};
 use risingwave_meta_model::{
     actor, actor_dispatcher, database, fragment, object, sink, source, streaming_job, table,
     ActorId, ConnectorSplits, DatabaseId, ExprContext, FragmentId, I32Array, JobStatus, ObjectId,
     SchemaId, SinkId, SourceId, StreamNode, StreamingParallelism, TableId, VnodeBitmap, WorkerId,
 };
 use risingwave_meta_model_migration::{Alias, SelectStatement};
-use risingwave_pb::common::PbActorLocation;
+use risingwave_pb::common::{PbActorLocation, PbWorkerNode};
 use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Operation as NotificationOperation,
 };
@@ -61,8 +62,9 @@ use tracing::debug;
 use crate::barrier::SnapshotBackfillInfo;
 use crate::controller::catalog::{CatalogController, CatalogControllerInner};
 use crate::controller::utils::{
-    get_actor_dispatchers, get_fragment_mappings, rebuild_fragment_mapping_from_actors,
-    FragmentDesc, PartialActorLocation, PartialFragmentStateTables,
+    assign_vnodes, get_actor_dispatchers, get_fragment_mappings,
+    rebuild_fragment_mapping_from_actors, FragmentDesc, PartialActorLocation,
+    PartialFragmentStateTables,
 };
 use crate::manager::LocalNotification;
 use crate::model::{StreamContext, StreamJobFragments, TableParallelism};
@@ -1084,6 +1086,85 @@ impl CatalogController {
         debug!(?database_fragment_infos, "reload all actors");
 
         Ok(database_fragment_infos)
+    }
+
+    pub async fn recreate_actors(&self, workers: Vec<PbWorkerNode>) -> MetaResult<()> {
+        let inner = self.inner.read().await;
+        let txn = inner.db.begin().await?;
+
+        // The `schedulable` field should eventually be replaced by resource groups like `unschedulable`
+        let workers: HashMap<_, _> = workers
+            .into_iter()
+            .filter(|worker| worker.is_streaming_schedulable())
+            .map(|worker| (worker.id, worker))
+            .collect();
+
+        let available_worker_slots = workers
+            .iter()
+            //            .filter(|(id, _)| filtered_worker_ids.contains(&(**id as WorkerId)))
+            .map(|(_, worker)| (worker.id as WorkerId, worker.compute_node_parallelism()))
+            .collect::<HashMap<_, _>>();
+
+        let adaptive_parallelism = available_worker_slots.values().copied().sum::<usize>();
+
+        let jobs = StreamingJob::find().all(&txn).await?;
+        let jobs: HashMap<_, _> = jobs.into_iter().map(|job| (job.job_id, job)).collect();
+
+        let fragments: Vec<_> = Fragment::find().all(&txn).await?;
+
+        let fragments: HashMap<_, _> = fragments
+            .into_iter()
+            .map(|fragment| (fragment.fragment_id, fragment))
+            .collect();
+
+        let fragment_relations: Vec<_> = FragmentRelation::find().all(&txn).await?;
+
+        let fragment_relations_by_upstream = fragment_relations
+            .into_iter()
+            .map(|relation| (relation.source_fragment_id, relation))
+            .into_group_map();
+
+        let fragment_actors = HashMap::new();
+
+        for (
+            _,
+            fragment::Model {
+                fragment_id,
+                job_id,
+                fragment_type_mask,
+                distribution_type,
+                stream_node,
+                state_table_ids,
+                upstream_fragment_id,
+                vnode_count,
+            },
+        ) in fragments
+        {
+            let job = jobs.get(&job_id).expect("job not found");
+
+            let parallelism = match job.parallelism {
+                StreamingParallelism::Adaptive => adaptive_parallelism,
+                StreamingParallelism::Fixed(n) => min(n as usize, adaptive_parallelism),
+                StreamingParallelism::Custom => unimplemented!(),
+            };
+
+            let vnodes = assign_vnodes(available_worker_slots.clone(), vnode_count as usize);
+
+            for i in 0..parallelism {
+                let actor = actor::Model {
+                    actor_id: fragment_id << 10 + i,
+                    fragment_id,
+                    status: ActorStatus::Running,
+                    splits: None,
+                    worker_id: 0,
+                    upstream_actor_ids: Default::default(),
+                    vnode_bitmap: None,
+                    expr_context: Default::default(),
+                };
+            }
+        }
+
+        todo!()
     }
 
     pub async fn migrate_actors(

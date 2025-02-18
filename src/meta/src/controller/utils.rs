@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
+use std::hash::{DefaultHasher, Hash, Hasher};
 
 use anyhow::{anyhow, Context};
 use itertools::Itertools;
@@ -1475,6 +1476,7 @@ pub async fn rename_relation_refer(
     Ok(to_update_relations)
 }
 
+<<<<<<< HEAD
 /// Validate that subscription can be safely deleted, meeting any of the following conditions:
 /// 1. The upstream table is not referred to by any cross-db mv.
 /// 2. After deleting the subscription, the upstream table still has at least one subscription.
@@ -1534,6 +1536,47 @@ where
     }
 
     Ok(())
+}
+
+pub fn assign_vnodes(workers: HashMap<WorkerId, usize>, n: usize) -> HashMap<WorkerId, Vec<usize>> {
+    let mut worker_list: Vec<_> = workers.iter().collect();
+    worker_list.sort_by_key(|(id, _)| *id);
+
+    let mut result: HashMap<WorkerId, Vec<usize>> = HashMap::new();
+    for (worker_id, _) in &worker_list {
+        result.insert(**worker_id, Vec::new());
+    }
+
+    fn compute_score(worker_id: i32, vnode_id: usize, weight: usize) -> u64 {
+        let mut hasher = DefaultHasher::default();
+        worker_id.hash(&mut hasher);
+        vnode_id.hash(&mut hasher);
+        hasher.finish().wrapping_mul(weight as u64)
+    }
+
+    for vnode_id in 0..n {
+        let vnode_id = vnode_id as usize;
+        let mut max_score = 0u64;
+        let mut selected_worker = None;
+
+        for (worker_id, &weight) in &worker_list {
+            let score = compute_score(**worker_id, vnode_id, weight);
+            if score > max_score || selected_worker.is_none() {
+                max_score = score;
+                selected_worker = Some(worker_id);
+            }
+        }
+
+        if let Some(worker_id) = selected_worker {
+            result.get_mut(*worker_id).unwrap().push(vnode_id);
+        }
+    }
+
+    for vnodes in result.values_mut() {
+        vnodes.sort();
+    }
+
+    result
 }
 
 #[cfg(test)]

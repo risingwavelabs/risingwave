@@ -589,6 +589,158 @@ impl GlobalBarrierWorkerContextImpl {
         self.resolve_graph_info(None).await
     }
 
+    async fn recreate_actors(
+        &self,
+        active_nodes: &mut ActiveStreamingWorkerNodes,
+    ) -> MetaResult<HashMap<DatabaseId, InflightDatabaseInfo>> {
+        let mgr = &self.metadata_manager;
+
+        let workers = self
+            .metadata_manager
+            .list_active_streaming_compute_nodes()
+            .await?;
+
+
+
+        // all worker slots used by actors
+        let all_inuse_worker_slots: HashSet<_> = mgr
+            .catalog_controller
+            .all_inuse_worker_slots()
+            .await?
+            .into_iter()
+            .collect();
+
+        let active_worker_slots: HashSet<_> = active_nodes
+            .current()
+            .values()
+            .flat_map(|node| {
+                (0..node.compute_node_parallelism()).map(|idx| WorkerSlotId::new(node.id, idx))
+            })
+            .collect();
+
+        let expired_worker_slots: BTreeSet<_> = all_inuse_worker_slots
+            .difference(&active_worker_slots)
+            .cloned()
+            .collect();
+
+        if expired_worker_slots.is_empty() {
+            info!("no expired worker slots, skipping.");
+            return self.resolve_graph_info(None).await;
+        }
+
+        info!("start migrate actors.");
+        let mut to_migrate_worker_slots = expired_worker_slots.into_iter().rev().collect_vec();
+        info!("got to migrate worker slots {:#?}", to_migrate_worker_slots);
+
+        let mut inuse_worker_slots: HashSet<_> = all_inuse_worker_slots
+            .intersection(&active_worker_slots)
+            .cloned()
+            .collect();
+
+        let start = Instant::now();
+        let mut plan = HashMap::new();
+        'discovery: while !to_migrate_worker_slots.is_empty() {
+            let mut new_worker_slots = active_nodes
+                .current()
+                .values()
+                .flat_map(|worker| {
+                    (0..worker.compute_node_parallelism())
+                        .map(move |i| WorkerSlotId::new(worker.id, i as _))
+                })
+                .collect_vec();
+
+            new_worker_slots.retain(|worker_slot| !inuse_worker_slots.contains(worker_slot));
+            let to_migration_size = to_migrate_worker_slots.len();
+            let mut available_size = new_worker_slots.len();
+
+            if available_size < to_migration_size
+                && start.elapsed() > Self::RECOVERY_FORCE_MIGRATION_TIMEOUT
+            {
+                let mut factor = 2;
+
+                while available_size < to_migration_size {
+                    let mut extended_worker_slots = active_nodes
+                        .current()
+                        .values()
+                        .flat_map(|worker| {
+                            (0..worker.compute_node_parallelism() * factor)
+                                .map(move |i| WorkerSlotId::new(worker.id, i as _))
+                        })
+                        .collect_vec();
+
+                    extended_worker_slots
+                        .retain(|worker_slot| !inuse_worker_slots.contains(worker_slot));
+
+                    extended_worker_slots.sort_by(|a, b| {
+                        a.slot_idx()
+                            .cmp(&b.slot_idx())
+                            .then(a.worker_id().cmp(&b.worker_id()))
+                    });
+
+                    available_size = extended_worker_slots.len();
+                    new_worker_slots = extended_worker_slots;
+
+                    factor *= 2;
+                }
+
+                tracing::info!(
+                    "migration timed out, extending worker slots to {:?} by factor {}",
+                    new_worker_slots,
+                    factor,
+                );
+            }
+
+            if !new_worker_slots.is_empty() {
+                debug!("new worker slots found: {:#?}", new_worker_slots);
+                for target_worker_slot in new_worker_slots {
+                    if let Some(from) = to_migrate_worker_slots.pop() {
+                        debug!(
+                            "plan to migrate from worker slot {} to {}",
+                            from, target_worker_slot
+                        );
+                        inuse_worker_slots.insert(target_worker_slot);
+                        plan.insert(from, target_worker_slot);
+                    } else {
+                        break 'discovery;
+                    }
+                }
+            }
+
+            if to_migrate_worker_slots.is_empty() {
+                break;
+            }
+
+            // wait to get newly joined CN
+            let changed = active_nodes
+                .wait_changed(
+                    Duration::from_millis(5000),
+                    Self::RECOVERY_FORCE_MIGRATION_TIMEOUT,
+                    |active_nodes| {
+                        let current_nodes = active_nodes
+                            .current()
+                            .values()
+                            .map(|node| (node.id, &node.host, node.compute_node_parallelism()))
+                            .collect_vec();
+                        warn!(
+                            current_nodes = ?current_nodes,
+                            "waiting for new workers to join, elapsed: {}s",
+                            start.elapsed().as_secs()
+                        );
+                    },
+                )
+                .await;
+            warn!(?changed, "get worker changed or timed out. Retry migrate");
+        }
+
+        info!("migration plan {:?}", plan);
+
+        mgr.catalog_controller.migrate_actors(plan).await?;
+
+        info!("migrate actors succeed.");
+
+        self.resolve_graph_info(None).await
+    }
+
     async fn scale_actors(&self, active_nodes: &ActiveStreamingWorkerNodes) -> MetaResult<()> {
         let Ok(_guard) = self.scale_controller.reschedule_lock.try_write() else {
             return Err(anyhow!("scale_actors failed to acquire reschedule_lock").into());
