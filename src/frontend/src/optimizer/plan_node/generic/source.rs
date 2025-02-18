@@ -15,7 +15,9 @@
 use std::rc::Rc;
 
 use educe::Educe;
-use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, Field, Schema};
+use risingwave_common::catalog::{
+    is_row_id_column_name, ColumnCatalog, ColumnDesc, Field, Schema, ROWID_COLUMN_NAME,
+};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_connector::WithPropertiesExt;
@@ -198,6 +200,34 @@ impl Source {
     /// Currently, only iceberg source supports time travel.
     pub fn support_time_travel(&self) -> bool {
         self.is_iceberg_connector()
+    }
+
+    pub fn exclude_iceberg_hidden_columns(mut self) -> Self {
+        let Some(catalog) = &mut self.catalog else {
+            return self;
+        };
+        if catalog.info.is_shared() {
+            // for shared source, we should produce all columns
+            return self;
+        }
+        if self.kind != SourceNodeKind::CreateMViewOrBatch {
+            return self;
+        }
+
+        let prune = |col: &ColumnCatalog| col.is_hidden() && !col.is_row_id_column();
+
+        // minus the number of hidden columns before row_id_index.
+        self.row_id_index = self.row_id_index.map(|idx| {
+            let mut cnt = 0;
+            for col in self.column_catalog.iter().take(idx + 1) {
+                if prune(col) {
+                    cnt += 1;
+                }
+            }
+            idx - cnt
+        });
+        self.column_catalog.retain(|c| !prune(c));
+        self
     }
 
     /// The columns in stream/batch source node indicate the actual columns it will produce,

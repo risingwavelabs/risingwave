@@ -90,6 +90,9 @@ impl LogicalSource {
 
         let base = PlanBase::new_logical_with_core(&core);
 
+        // 不知道上面的算子是否用到这些 column。所以应该在 prune_col 中实现？
+        // let core = core.exclude_iceberg_hidden_columns();
+
         let output_exprs = Self::derive_output_exprs_from_generated_columns(&core.column_catalog)?;
         let (core, output_row_id_index) = core.exclude_generated_columns();
 

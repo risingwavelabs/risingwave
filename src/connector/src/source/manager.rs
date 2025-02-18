@@ -15,7 +15,7 @@
 use std::fmt::Debug;
 
 use risingwave_common::catalog::{
-    ColumnDesc, ColumnId, KAFKA_TIMESTAMP_COLUMN_NAME, OFFSET_COLUMN_NAME, ROWID_PREFIX,
+    ColumnDesc, ColumnId, KAFKA_TIMESTAMP_COLUMN_NAME, OFFSET_COLUMN_NAME, ROWID_COLUMN_NAME,
     TABLE_NAME_COLUMN_NAME,
 };
 use risingwave_common::types::DataType;
@@ -67,7 +67,7 @@ impl SourceColumnType {
         if name.starts_with(KAFKA_TIMESTAMP_COLUMN_NAME) || name.starts_with(TABLE_NAME_COLUMN_NAME)
         {
             Self::Meta
-        } else if name == (ROWID_PREFIX) {
+        } else if name == (ROWID_COLUMN_NAME) {
             Self::RowId
         } else if name == OFFSET_COLUMN_NAME {
             Self::Offset

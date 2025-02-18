@@ -495,6 +495,7 @@ pub async fn scan_task_to_chunk(
     let reader = table.reader_builder().with_batch_size(batch_size).build();
     let file_scan_stream = tokio_stream::once(Ok(data_file_scan_task));
 
+    // FIXME: what if the start position is not 0? The logic for index seems not correct.
     let mut record_batch_stream = reader.read(Box::pin(file_scan_stream)).await?.enumerate();
 
     while let Some((index, record_batch)) = record_batch_stream.next().await {

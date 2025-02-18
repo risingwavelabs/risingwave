@@ -26,7 +26,7 @@ use prost::Message as _;
 use risingwave_common::catalog::{
     CdcTableDesc, ColumnCatalog, ColumnDesc, ConflictBehavior, Engine, FieldLike, TableId,
     TableVersionId, DEFAULT_SCHEMA_NAME, INITIAL_TABLE_VERSION_ID, RISINGWAVE_ICEBERG_ROW_ID,
-    ROWID_PREFIX,
+    ROWID_COLUMN_NAME,
 };
 use risingwave_common::config::MetaBackend;
 use risingwave_common::license::Feature;
@@ -1709,7 +1709,7 @@ pub async fn create_iceberg_engine_table(
         pks = vec![RISINGWAVE_ICEBERG_ROW_ID.to_owned()];
         let [stmt]: [_; 1] = Parser::parse_sql(&format!(
             "select {} as {}, * from {}",
-            ROWID_PREFIX, RISINGWAVE_ICEBERG_ROW_ID, table_name
+            ROWID_COLUMN_NAME, RISINGWAVE_ICEBERG_ROW_ID, table_name
         ))
         .context("unable to parse query")?
         .try_into()
@@ -2078,7 +2078,7 @@ fn bind_webhook_info(
 #[cfg(test)]
 mod tests {
     use risingwave_common::catalog::{
-        Field, DEFAULT_DATABASE_NAME, ROWID_PREFIX, RW_TIMESTAMP_COLUMN_NAME,
+        Field, DEFAULT_DATABASE_NAME, ROWID_COLUMN_NAME, RW_TIMESTAMP_COLUMN_NAME,
     };
     use risingwave_common::types::{DataType, StructType};
 
@@ -2184,7 +2184,7 @@ mod tests {
             .collect::<HashMap<&str, DataType>>();
 
         let expected_columns = maplit::hashmap! {
-            ROWID_PREFIX => DataType::Serial,
+            ROWID_COLUMN_NAME => DataType::Serial,
             "v1" => DataType::Int16,
             "v2" => StructType::new(
                 vec![("v3", DataType::Int64),("v4", DataType::Float64),("v5", DataType::Float64)],

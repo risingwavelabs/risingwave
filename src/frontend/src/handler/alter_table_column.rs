@@ -437,7 +437,9 @@ pub fn fetch_table_catalog_for_alter(
 mod tests {
     use std::collections::HashMap;
 
-    use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, ROWID_PREFIX};
+    use risingwave_common::catalog::{
+        DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, ROWID_COLUMN_NAME,
+    };
     use risingwave_common::types::DataType;
 
     use crate::catalog::root_catalog::SchemaPath;
@@ -488,7 +490,10 @@ mod tests {
         // Check the old columns and IDs are not changed.
         assert_eq!(columns["i"], altered_columns["i"]);
         assert_eq!(columns["r"], altered_columns["r"]);
-        assert_eq!(columns[ROWID_PREFIX], altered_columns[ROWID_PREFIX]);
+        assert_eq!(
+            columns[ROWID_COLUMN_NAME],
+            altered_columns[ROWID_COLUMN_NAME]
+        );
 
         // Check the version is updated.
         assert_eq!(

@@ -37,10 +37,12 @@ pub async fn extract_iceberg_columns(
                     column_desc,
                     // hide the _row_id column for iceberg engine table
                     // This column is auto generated when users define a table without primary key
-                    is_hidden: field.name() == ROWID_PREFIX,
+                    is_hidden: field.name() == ROWID_COLUMN_NAME,
                 }
             })
             .collect();
+        // add hidden columns for iceberg
+        // TODO: make them additional columns, instead of normal columns?
         columns.push(ColumnCatalog::iceberg_sequence_num_column());
         columns.push(ColumnCatalog::iceberg_file_path_column());
         columns.push(ColumnCatalog::iceberg_file_pos_column());

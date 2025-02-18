@@ -15,14 +15,20 @@
 use std::collections::HashMap;
 use std::ops::Bound;
 
+use anyhow::Context;
 use either::Either;
 use futures::{stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
+use iceberg::scan::FileScanTask;
 use itertools::Itertools;
-use risingwave_common::array::Op;
-use risingwave_common::catalog::{ColumnId, TableId};
+use risingwave_common::array::{DataChunk, I64Array, Op, SerialArray};
+use risingwave_common::bitmap::Bitmap;
+use risingwave_common::catalog::{
+    ColumnId, TableId, ICEBERG_FILE_PATH_COLUMN_NAME, ICEBERG_FILE_POS_COLUMN_NAME,
+    ROWID_COLUMN_NAME,
+};
 use risingwave_common::hash::VnodeBitmapExt;
-use risingwave_common::types::ScalarRef;
+use risingwave_common::types::{JsonbVal, ScalarRef, Serial};
 use risingwave_connector::source::iceberg::{
     scan_task_to_chunk, IcebergFileScanTask, IcebergSplit,
 };
@@ -75,7 +81,7 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
         column_ids: Vec<ColumnId>,
         source_ctx: SourceContext,
         source_desc: SourceDesc,
-        stream: &mut StreamReaderWithPause<BIASED, StreamChunk>,
+        stream: &mut StreamReaderWithPause<BIASED, Vec<StreamChunk>>,
         rate_limit_rps: Option<u32>,
     ) -> StreamExecutorResult<()> {
         let mut batch = Vec::with_capacity(SPLIT_BATCH_SIZE);
@@ -93,13 +99,11 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
             let properties = source_desc.source.config.clone();
             while let Some(item) = table_iter.next().await {
                 let row = item?;
-                let split = match row.datum_at(1) {
-                    Some(ScalarRefImpl::Jsonb(jsonb_ref)) => match properties {
-                        risingwave_connector::source::ConnectorProperties::Iceberg(_) => {
-                            IcebergSplit::restore_from_json(jsonb_ref.to_owned_scalar())?
-                        }
-                        _ => unreachable!(),
-                    },
+                let split: FileScanTask = match row.datum_at(1) {
+                    Some(ScalarRefImpl::Jsonb(jsonb_ref)) => {
+                        serde_json::from_value(jsonb_ref.to_owned_scalar().take())
+                            .with_context(|| format!("invalid state: {:?}", jsonb_ref))?
+                    }
                     _ => unreachable!(),
                 };
                 batch.push(split);
@@ -127,12 +131,12 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
         Ok(())
     }
 
-    #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
+    #[try_stream(ok = Vec<StreamChunk>, error = StreamExecutorError)]
     async fn build_batched_stream_reader(
         column_ids: Vec<ColumnId>,
         source_ctx: SourceContext,
         source_desc: SourceDesc,
-        batch: Vec<IcebergSplit>,
+        batch: Vec<FileScanTask>,
         rate_limit_rps: Option<u32>,
     ) {
         // let (stream, _) = source_desc
@@ -149,31 +153,26 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
             _ => unreachable!(),
         };
         let table = properties.load_table().await?;
-        for data_file_scan_task in batch {
-            let tasks = match data_file_scan_task.task {
-                IcebergFileScanTask::Data(tasks) => tasks,
-                IcebergFileScanTask::EqualityDelete(_) | IcebergFileScanTask::PositionDelete(_) => {
-                    unreachable!()
-                }
-            };
 
-            for task in tasks {
-                #[for_await]
-                for chunk in scan_task_to_chunk(
-                    table.clone(),
-                    task,
-                    1024,
-                    // self.schema,
-                    false,
-                    true,
-                ) {
-                    let chunk = chunk?;
-                    yield StreamChunk::from_parts(
-                        itertools::repeat_n(Op::Insert, chunk.cardinality()).collect_vec(),
-                        chunk,
-                    );
-                }
+        for task in batch {
+            let mut chunks = vec![];
+            #[for_await]
+            for chunk in scan_task_to_chunk(
+                table.clone(),
+                task,
+                1024,
+                // self.schema,
+                true,
+                true,
+            ) {
+                let chunk = chunk?;
+                chunks.push(StreamChunk::from_parts(
+                    itertools::repeat_n(Op::Insert, chunk.cardinality()).collect_vec(),
+                    chunk,
+                ));
             }
+            // We yield one chunk for each file now, because iceberg-rs doesn't support read part of a file now.
+            yield chunks;
         }
     }
 
@@ -216,25 +215,34 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
             .build()
             .map_err(StreamExecutorError::connector_error)?;
 
-        // let (Some(split_idx), Some(offset_idx)) = get_split_offset_col_idx(&source_desc.columns)
-        // else {
-        //     unreachable!("Partition and offset columns must be set.");
-        // };
-        // See extract_iceberg_columns. 3 hidden columns that are not available are added in the source schema
-        // and row_id is also added
-        // and offset & split are 2 hidden include columns.
-        let split_idx = source_desc.columns.len() - 3 - 1 - 2;
-        let offset_idx = source_desc.columns.len() - 3 - 1 - 2 + 1;
+        let file_path_idx = source_desc
+            .columns
+            .iter()
+            .position(|c| c.name == ICEBERG_FILE_PATH_COLUMN_NAME)
+            .unwrap();
+        let file_pos_idx = source_desc
+            .columns
+            .iter()
+            .position(|c| c.name == ICEBERG_FILE_POS_COLUMN_NAME)
+            .unwrap();
+        // TODO: currently we generate row_id here. If for risingwave iceberg table engine, maybe we can use _risingwave_iceberg_row_id instead.
+        let row_id_idx = source_desc
+            .columns
+            .iter()
+            .position(|c| c.name == ROWID_COLUMN_NAME)
+            .unwrap();
         println!(
-            "source_desc.columns: {:#?}, split_idx: {}, offset_idx: {}",
-            source_desc.columns, split_idx, offset_idx
+            "source_desc.columns: {:#?}, file_path_idx: {}, file_pos_idx: {}, row_id_idx: {}",
+            source_desc.columns, file_path_idx, file_pos_idx, row_id_idx
         );
         // Initialize state table.
         state_store_handler.init_epoch(first_epoch).await?;
 
         let mut splits_on_fetch: usize = 0;
-        let mut stream =
-            StreamReaderWithPause::<true, StreamChunk>::new(upstream, stream::pending().boxed());
+        let mut stream = StreamReaderWithPause::<true, Vec<StreamChunk>>::new(
+            upstream,
+            stream::pending().boxed(),
+        );
 
         if is_pause_on_startup {
             stream.pause_stream();
@@ -264,7 +272,7 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
                     match msg {
                         // This branch will be preferred.
                         Either::Left(msg) => {
-                            match &msg {
+                            match msg {
                                 Message::Barrier(barrier) => {
                                     let mut need_rebuild_reader = false;
 
@@ -290,20 +298,20 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
                                         }
                                     }
 
-                                    state_store_handler
+                                    let post_commit = state_store_handler
                                         .state_table
                                         .commit(barrier.epoch)
                                         .await?;
 
-                                    if let Some(vnode_bitmap) =
-                                        barrier.as_update_vnode_bitmap(self.actor_ctx.id)
-                                    {
-                                        // if _cache_may_stale, we must rebuild the stream to adjust vnode mappings
-                                        let (_prev_vnode_bitmap, cache_may_stale) =
-                                            state_store_handler
-                                                .state_table
-                                                .update_vnode_bitmap(vnode_bitmap);
+                                    let update_vnode_bitmap =
+                                        barrier.as_update_vnode_bitmap(self.actor_ctx.id);
+                                    // Propagate the barrier.
+                                    yield Message::Barrier(barrier);
 
+                                    if let Some((_, cache_may_stale)) =
+                                        post_commit.post_yield_barrier(update_vnode_bitmap).await?
+                                    {
+                                        // if cache_may_stale, we must rebuild the stream to adjust vnode mappings
                                         if cache_may_stale {
                                             splits_on_fetch = 0;
                                         }
@@ -325,87 +333,98 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
                                         )
                                         .await?;
                                     }
-
-                                    // Propagate the barrier.
-                                    yield msg;
                                 }
                                 // Receiving file assignments from upstream list executor,
                                 // store into state table.
                                 Message::Chunk(chunk) => {
-                                    let file_assignment = chunk
+                                    let jsonb_values: Vec<(String, JsonbVal)> = chunk
                                         .data_chunk()
                                         .rows()
                                         .map(|row| {
+                                            let file_name = row.datum_at(0).unwrap().into_utf8();
                                             let split = row.datum_at(1).unwrap().into_jsonb();
-                                            IcebergSplit::restore_from_json(split.to_owned_scalar())
-                                                .unwrap()
+                                            (file_name.to_owned(), split.to_owned_scalar())
                                         })
                                         .collect();
-                                    state_store_handler.set_states(file_assignment).await?;
+                                    state_store_handler.set_states_json(jsonb_values).await?;
                                     state_store_handler.state_table.try_flush().await?;
                                 }
-                                _ => unreachable!(),
+                                Message::Watermark(_) => unreachable!(),
                             }
                         }
                         // StreamChunk from FsSourceReader, and the reader reads only one file.
-                        Either::Right(chunk) => {
-                            println!(
-                                "chunk:\n {:}, split_idx: {}, offset_idx: {}",
-                                chunk.to_pretty(),
-                                split_idx,
-                                offset_idx
-                            );
-                            // let mapping =
-                            //     get_split_offset_mapping_from_chunk(&chunk, split_idx, offset_idx)
-                            //         .unwrap();
-                            let mut mapping = HashMap::new();
-                            // All rows (including those visible or invisible) will be used to update the source offset.
-                            for i in 0..chunk.capacity() {
-                                let (_, row, _) = chunk.row_at(i);
-                                let split_id: Arc<str> =
-                                    row.datum_at(split_idx).unwrap().into_utf8().into();
-                                let offset = row.datum_at(offset_idx).unwrap().into_int64();
-                                mapping.insert(split_id, offset.to_owned());
-                            }
-                            debug_assert_eq!(mapping.len(), 1);
-                            if let Some((split_id, offset)) = mapping.into_iter().next() {
-                                let row = state_store_handler
-                                    .get(split_id.clone())
-                                    .await?
-                                    .expect("The fs_split should be in the state table.");
-                                let fs_split = match row.datum_at(1) {
-                                    Some(ScalarRefImpl::Jsonb(jsonb_ref)) => {
-                                        IcebergSplit::restore_from_json(
-                                            jsonb_ref.to_owned_scalar(),
-                                        )?
+                        Either::Right(chunks) => {
+                            for chunk in chunks {
+                                println!(
+                                    "chunk:\n {:}, file_path_idx: {}, file_pos_idx: {}",
+                                    chunk.to_pretty(),
+                                    file_path_idx,
+                                    file_pos_idx
+                                );
+                                // let mapping =
+                                //     get_split_offset_mapping_from_chunk(&chunk, split_idx, offset_idx)
+                                //         .unwrap();
+                                let mut mapping = HashMap::new();
+                                // All rows (including those visible or invisible) will be used to update the source offset.
+                                // TODO: maybe we can get offset separately, instead of in the chunk.
+                                for i in 0..chunk.capacity() {
+                                    let (_, row, _) = chunk.row_at(i);
+                                    let file_path: Arc<str> =
+                                        row.datum_at(file_path_idx).unwrap().into_utf8().into();
+                                    let file_pos = row.datum_at(file_pos_idx).unwrap().into_int64();
+                                    mapping.insert(file_path, file_pos.to_owned());
+                                }
+                                debug_assert_eq!(mapping.len(), 1);
+                                if let Some((file_path, file_pos)) = mapping.into_iter().next() {
+                                    let row = state_store_handler
+                                        .get(&file_path)
+                                        .await?
+                                        .expect("The fs_split should be in the state table.");
+                                    let fs_split: FileScanTask = match row.datum_at(1) {
+                                        Some(ScalarRefImpl::Jsonb(jsonb_ref)) => {
+                                            serde_json::from_value(
+                                                jsonb_ref.to_owned_scalar().take(),
+                                            )
+                                            .with_context(|| {
+                                                format!("invalid state: {:?}", jsonb_ref)
+                                            })?
+                                        }
+                                        _ => unreachable!(),
+                                    };
+
+                                    // TODO: support persist progress after supporting reading part of a file.
+                                    if true {
+                                        splits_on_fetch -= 1;
+                                        state_store_handler.delete(&file_path).await?;
                                     }
-                                    _ => unreachable!(),
-                                };
-                                // FIXME: not sure how to update state table yet.
-                                // we pass split ()
+                                }
 
-                                // FIXME(rc): Here we compare `offset` with `fs_split.size` to determine
-                                // whether the file is finished, where the `offset` is the starting position
-                                // of the NEXT message line in the file. However, In other source connectors,
-                                // we use the word `offset` to represent the offset of the current message.
-                                // We have to be careful about this semantical inconsistency.
-                                // if offset.parse::<usize>().unwrap() >= fs_split.size {
-                                //     splits_on_fetch -= 1;
-                                //     state_store_handler.delete(split_id).await?;
-                                // } else {
-                                // state_store_handler
-                                //     .set(split_id, fs_split.encode_to_json())
-                                //     .await?;
-                                // }
+                                let chunk = prune_additional_cols(
+                                    &chunk,
+                                    file_path_idx,
+                                    file_pos_idx,
+                                    &source_desc.columns,
+                                );
+                                // pad row_id
+                                let (mut chunk, op) = chunk.into_parts();
+                                let (mut columns, visibility) = chunk.into_parts();
+                                columns.insert(
+                                    row_id_idx,
+                                    Arc::new(
+                                        SerialArray::from_iter_bitmap(
+                                            itertools::repeat_n(Serial::from(0), columns[0].len()),
+                                            Bitmap::ones(columns[0].len()),
+                                        )
+                                        .into(),
+                                    ),
+                                );
+                                let chunk = StreamChunk::from_parts(
+                                    op,
+                                    DataChunk::from_parts(columns.into(), visibility),
+                                );
+
+                                yield Message::Chunk(chunk);
                             }
-
-                            let chunk = prune_additional_cols(
-                                &chunk,
-                                split_idx,
-                                offset_idx,
-                                &source_desc.columns,
-                            );
-                            yield Message::Chunk(chunk);
                         }
                     }
                 }

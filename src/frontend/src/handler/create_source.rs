@@ -28,7 +28,7 @@ use risingwave_common::array::arrow::{arrow_schema_iceberg, IcebergArrowConvert}
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{
     debug_assert_column_ids_distinct, ColumnCatalog, ColumnDesc, ColumnId, TableId,
-    INITIAL_SOURCE_VERSION_ID, KAFKA_TIMESTAMP_COLUMN_NAME, ROWID_PREFIX,
+    INITIAL_SOURCE_VERSION_ID, KAFKA_TIMESTAMP_COLUMN_NAME, ROWID_COLUMN_NAME,
 };
 use risingwave_common::license::Feature;
 use risingwave_common::secret::LocalSecretManager;
@@ -1021,7 +1021,9 @@ pub mod tests {
     use std::collections::HashMap;
     use std::sync::Arc;
 
-    use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, ROWID_PREFIX};
+    use risingwave_common::catalog::{
+        DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, ROWID_COLUMN_NAME,
+    };
     use risingwave_common::types::{DataType, StructType};
 
     use crate::catalog::root_catalog::SchemaPath;
@@ -1067,7 +1069,7 @@ pub mod tests {
         ])
         .into();
         let expected_columns = maplit::hashmap! {
-            ROWID_PREFIX => DataType::Serial,
+            ROWID_COLUMN_NAME => DataType::Serial,
             "id" => DataType::Int32,
             "zipcode" => DataType::Int64,
             "rate" => DataType::Float32,

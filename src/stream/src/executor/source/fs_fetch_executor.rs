@@ -372,7 +372,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                             debug_assert_eq!(mapping.len(), 1);
                             if let Some((split_id, offset)) = mapping.into_iter().next() {
                                 let row = state_store_handler
-                                    .get(split_id.clone())
+                                    .get(&split_id)
                                     .await?
                                     .expect("The fs_split should be in the state table.");
                                 let fs_split = match row.datum_at(1) {
@@ -390,10 +390,10 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                 // We have to be careful about this semantical inconsistency.
                                 if offset.parse::<usize>().unwrap() >= fs_split.size {
                                     splits_on_fetch -= 1;
-                                    state_store_handler.delete(split_id).await?;
+                                    state_store_handler.delete(&split_id).await?;
                                 } else {
                                     state_store_handler
-                                        .set(split_id, fs_split.encode_to_json())
+                                        .set(&split_id, fs_split.encode_to_json())
                                         .await?;
                                 }
                             }

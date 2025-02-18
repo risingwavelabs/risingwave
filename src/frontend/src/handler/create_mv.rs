@@ -280,7 +280,7 @@ pub mod tests {
 
     use pgwire::pg_response::StatementType::CREATE_MATERIALIZED_VIEW;
     use risingwave_common::catalog::{
-        DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, ROWID_PREFIX, RW_TIMESTAMP_COLUMN_NAME,
+        DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, ROWID_COLUMN_NAME, RW_TIMESTAMP_COLUMN_NAME,
     };
     use risingwave_common::types::{DataType, StructType};
 
@@ -330,7 +330,7 @@ pub mod tests {
         ])
         .into();
         let expected_columns = maplit::hashmap! {
-            ROWID_PREFIX => DataType::Serial,
+            ROWID_COLUMN_NAME => DataType::Serial,
             "country" => StructType::new(
                  vec![("address", DataType::Varchar),("city", city_type),("zipcode", DataType::Varchar)],
             ).into(),

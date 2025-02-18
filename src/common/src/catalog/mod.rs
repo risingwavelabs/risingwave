@@ -104,10 +104,10 @@ pub fn is_system_schema(schema_name: &str) -> bool {
     SYSTEM_SCHEMAS.iter().any(|s| *s == schema_name)
 }
 
-pub const ROWID_PREFIX: &str = "_row_id";
+pub const ROWID_COLUMN_NAME: &str = "_row_id";
 
 pub fn is_row_id_column_name(name: &str) -> bool {
-    name.starts_with(ROWID_PREFIX)
+    name.starts_with(ROWID_COLUMN_NAME)
 }
 
 /// The column ID preserved for the row ID column.
@@ -120,7 +120,7 @@ pub const USER_COLUMN_ID_OFFSET: i32 = ROW_ID_COLUMN_ID.next().get_id();
 
 /// Creates a row ID column (for implicit primary key). It'll always have the ID `0` for now.
 pub fn row_id_column_desc() -> ColumnDesc {
-    ColumnDesc::named(ROWID_PREFIX, ROW_ID_COLUMN_ID, DataType::Serial)
+    ColumnDesc::named(ROWID_COLUMN_NAME, ROW_ID_COLUMN_ID, DataType::Serial)
 }
 
 pub const RW_TIMESTAMP_COLUMN_NAME: &str = "_rw_timestamp";

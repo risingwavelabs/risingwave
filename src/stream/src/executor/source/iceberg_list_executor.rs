@@ -14,8 +14,8 @@
 
 use anyhow::{anyhow, Context};
 use either::Either;
-use futures::TryStreamExt;
 use futures_async_stream::try_stream;
+use iceberg::scan::FileScanTask;
 use risingwave_common::array::Op;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_connector::source::iceberg::{IcebergProperties, IcebergSplit};
@@ -121,36 +121,41 @@ impl<S: StateStore> IcebergListExecutor<S> {
             //   .select(require_names)
             .build()
             .context("failed to build iceberg scan")?;
-        let splits = IcebergSplitEnumerator::scan_to_splits(
-            table.metadata_ref(),
-            snapshot_scan,
-            IcebergScanType::DataScan,
-            10,
-        )
-        .await?;
-        for split in splits {
+
+        #[for_await]
+        for scan_task in snapshot_scan
+            .plan_files()
+            .await
+            .context("failed to plan iceberg files")?
+        {
+            let scan_task = scan_task.context("failed to get scan task")?;
             if let Some(chunk) = chunk_builder.append_row(
                 Op::Insert,
                 &[
-                    Some(ScalarImpl::Utf8(split.id().to_string().into())),
-                    Some(ScalarImpl::Jsonb(split.encode_to_json())),
+                    Some(ScalarImpl::Utf8(scan_task.data_file_path().into())),
+                    Some(ScalarImpl::Jsonb(
+                        serde_json::to_value(scan_task).unwrap().into(),
+                    )),
                 ],
             ) {
                 yield Message::Chunk(chunk);
             }
         }
+
         if let Some(chunk) = chunk_builder.take() {
             yield Message::Chunk(chunk);
         }
 
         let incremental_scan_stream =
             incremental_scan_stream(*iceberg_properties, last_position, 1).map(|res| match res {
-                Ok(split) => {
+                Ok(scan_task) => {
                     let row = (
                         Op::Insert,
                         OwnedRow::new(vec![
-                            Some(ScalarImpl::Utf8(split.id().to_string().into())),
-                            Some(ScalarImpl::Jsonb(split.encode_to_json())),
+                            Some(ScalarImpl::Utf8(scan_task.data_file_path().into())),
+                            Some(ScalarImpl::Jsonb(
+                                serde_json::to_value(scan_task).unwrap().into(),
+                            )),
                         ]),
                     );
                     Ok(StreamChunk::from_rows(
@@ -201,7 +206,7 @@ impl<S: StateStore> IcebergListExecutor<S> {
     }
 }
 
-#[try_stream(boxed, ok = IcebergSplit, error = StreamExecutorError)]
+#[try_stream(boxed, ok = FileScanTask, error = StreamExecutorError)]
 async fn incremental_scan_stream(
     iceberg_properties: IcebergProperties,
     mut last_position: i64,
@@ -235,16 +240,13 @@ async fn incremental_scan_stream(
             .build()
             .context("failed to build iceberg scan")?;
 
-        let splits = IcebergSplitEnumerator::scan_to_splits(
-            current_snapshot.snapshot_id(),
-            incremental_scan,
-            IcebergScanType::DataScan,
-            10, // TODO
-        )
-        .await?;
-
-        for split in splits {
-            yield split;
+        #[for_await]
+        for scan_task in incremental_scan
+            .plan_files()
+            .await
+            .context("failed to plan iceberg files")?
+        {
+            yield scan_task.context("failed to get scan task")?;
         }
 
         last_position = current_snapshot.snapshot_id();
