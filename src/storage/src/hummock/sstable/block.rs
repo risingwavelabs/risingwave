@@ -750,7 +750,7 @@ impl BlockBuilder {
             CompressionAlgorithm::None => unreachable!(),
             CompressionAlgorithm::Lz4 => {
                 let mut encoder = lz4::EncoderBuilder::new()
-                    .level(4)
+                    .level(1)
                     .build(compress_writer.writer())
                     .map_err(HummockError::encode_error)
                     .unwrap();

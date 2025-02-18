@@ -665,11 +665,12 @@ impl S3ObjectStore {
 
         http.enforce_http(false);
 
-        let conn = hyper_rustls::HttpsConnectorBuilder::new()
-            .with_webpki_roots()
-            .https_or_http()
-            .enable_all_versions()
-            .wrap_connector(http);
+        // let conn = hyper_rustls::HttpsConnectorBuilder::new()
+        //     .with_webpki_roots()
+        //     .https_or_http()
+        //     .enable_all_versions()
+        //     .wrap_connector(http);
+        let conn = http;
 
         let conn = monitor_connector(conn, "S3");
 
