@@ -16,7 +16,6 @@ use std::sync::Arc;
 
 use futures_async_stream::try_stream;
 use futures_util::stream::StreamExt;
-use iceberg::spec::TableMetadataRef;
 use itertools::Itertools;
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::{ArrayImpl, DataChunk, I64Array, Utf8Array};
@@ -39,7 +38,6 @@ pub struct IcebergScanExecutor {
     iceberg_config: IcebergProperties,
     #[allow(dead_code)]
     snapshot_id: Option<i64>,
-    table_meta: TableMetadataRef,
     file_scan_tasks: Option<IcebergFileScanTask>,
     batch_size: usize,
     schema: Schema,
@@ -67,7 +65,6 @@ impl IcebergScanExecutor {
     pub fn new(
         iceberg_config: IcebergProperties,
         snapshot_id: Option<i64>,
-        table_meta: TableMetadataRef,
         file_scan_tasks: IcebergFileScanTask,
         batch_size: usize,
         schema: Schema,
@@ -79,7 +76,6 @@ impl IcebergScanExecutor {
         Self {
             iceberg_config,
             snapshot_id,
-            table_meta,
             batch_size,
             schema,
             file_scan_tasks: Some(file_scan_tasks),
@@ -92,10 +88,7 @@ impl IcebergScanExecutor {
 
     #[try_stream(ok = DataChunk, error = BatchError)]
     async fn do_execute(mut self: Box<Self>) {
-        let table = self
-            .iceberg_config
-            .load_table_with_metadata(self.table_meta)
-            .await?;
+        let table = self.iceberg_config.load_table().await?;
         let data_types = self.schema.data_types();
         let table_name = table.identifier().name().to_owned();
 
@@ -231,7 +224,6 @@ impl BoxedExecutorBuilder for IcebergScanExecutorBuilder {
             Ok(Box::new(IcebergScanExecutor::new(
                 iceberg_properties,
                 Some(split.snapshot_id),
-                split.table_meta.clone(),
                 split.task,
                 source.context().get_config().developer.chunk_size,
                 schema,
