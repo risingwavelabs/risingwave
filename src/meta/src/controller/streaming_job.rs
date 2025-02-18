@@ -1054,7 +1054,7 @@ impl CatalogController {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
-        let (objects, fragment_mapping, notification_objs) =
+        let (objects, fragment_mapping, delete_notification_objs) =
             Self::finish_replace_streaming_job_inner(
                 tmp_id,
                 merge_updates,
@@ -1082,7 +1082,7 @@ impl CatalogController {
             )
             .await;
 
-        if let Some((user_infos, to_drop_objects)) = notification_objs {
+        if let Some((user_infos, to_drop_objects)) = delete_notification_objs {
             self.notify_users_update(user_infos).await;
             version = self
                 .notify_frontend(
