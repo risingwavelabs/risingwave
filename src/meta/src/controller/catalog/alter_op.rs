@@ -797,12 +797,6 @@ impl CatalogController {
             .await?;
         let to_drop_internal_table_objs: Vec<PartialObject> = Object::find()
             .select_only()
-            .columns([
-                object::Column::Oid,
-                object::Column::ObjType,
-                object::Column::SchemaId,
-                object::Column::DatabaseId,
-            ])
             .filter(
                 object::Column::Oid.is_in(vec![drop_table_connector_ctx.to_remove_state_table_id]),
             )
