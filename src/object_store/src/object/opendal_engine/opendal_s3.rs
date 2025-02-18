@@ -109,7 +109,7 @@ impl OpendalObjectStore {
             client_builder = client_builder.tcp_nodelay(*nodelay);
         }
 
-        client_builder = client_builder.http2_prior_knowledge();
+        // client_builder = client_builder.http2_prior_knowledge();
         client_builder = client_builder.pool_idle_timeout(std::time::Duration::from_secs(300));
         client_builder = client_builder.pool_max_idle_per_host(32);
         client_builder = client_builder.danger_accept_invalid_certs(true);
