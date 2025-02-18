@@ -937,6 +937,9 @@ impl Binder {
                     Err(ErrorCode::BindError(format!("Can't cast {} to regproc", lhs_ty)).into())
                 }
             }
+            // Redirect cast char to varchar to make system like Metabase happy.
+            // Char is not supported in RisingWave, but some ecosystem tools like Metabase will use it.
+            AstDataType::Char(_) => self.bind_cast_inner(expr, DataType::Varchar),
             _ => self.bind_cast_inner(expr, bind_data_type(&data_type)?),
         }
     }
@@ -1018,7 +1021,7 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
         AstDataType::Double | AstDataType::Float(Some(25..=53) | None) => DataType::Float64,
         AstDataType::Float(Some(0 | 54..)) => unreachable!(),
         AstDataType::Decimal(None, None) => DataType::Decimal,
-        AstDataType::Char(None) | AstDataType::Varchar | AstDataType::Text => DataType::Varchar,
+        AstDataType::Varchar | AstDataType::Text => DataType::Varchar,
         AstDataType::Date => DataType::Date,
         AstDataType::Time(false) => DataType::Time,
         AstDataType::Timestamp(false) => DataType::Timestamp,
