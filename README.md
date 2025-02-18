@@ -9,7 +9,7 @@
 
 <div align="center">
 
-### 🌊 Ride the Wave of Real-Time Data.
+### 🌊 Ride the Wave of Streaming Data.
 
 </div>
 <p align="center">
