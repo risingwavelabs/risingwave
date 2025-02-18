@@ -194,11 +194,11 @@ fn test_complex_schema() -> anyhow::Result<()> {
                         device_make_id: Int32,
                         ip: Varchar,
                     },
-                ), type_name: test.Xfa,
+                ),
                 contacts(#7): Struct {
                     emails: List(Varchar),
                     phones: List(Varchar),
-                }, type_name: test.Contacts, field_descs: [emails(#5): List(Varchar), phones(#6): List(Varchar)],
+                },
                 sex(#8): Varchar,
             ]"#]],
         expect![""],
@@ -593,7 +593,7 @@ fn test_all_types() -> anyhow::Result<()> {
                 nested_message_field(#19): Struct {
                     id: Int32,
                     name: Varchar,
-                }, type_name: all_types.AllTypes.NestedMessage, field_descs: [id(#17): Int32, name(#18): Varchar],
+                },
                 repeated_int_field(#20): List(Int32),
                 oneof_string(#21): Varchar,
                 oneof_int32(#22): Int32,

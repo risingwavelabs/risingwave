@@ -490,13 +490,10 @@ impl std::fmt::Debug for plan_common::column_desc::GeneratedOrDefaultColumn {
 impl std::fmt::Debug for plan_common::ColumnDesc {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // destruct here to avoid missing new fields in the future.
-        #[allow(deprecated)]
         let plan_common::ColumnDesc {
             column_type,
             column_id,
             name,
-            field_descs: _,
-            type_name: _,
             description,
             additional_column_type,
             additional_column,

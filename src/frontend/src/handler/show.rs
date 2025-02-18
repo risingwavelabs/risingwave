@@ -171,7 +171,7 @@ impl ShowColumnRow {
             .flatten()
             .into_iter()
             .map(|c| {
-                // TODO(struct): use struct's type name, if possible.
+                // TODO(struct): use struct's type name once supported.
                 let type_name = c.data_type.to_string();
                 ShowColumnRow {
                     name: c.name,

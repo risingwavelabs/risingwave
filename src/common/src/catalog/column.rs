@@ -190,13 +190,10 @@ impl ColumnDesc {
 
     /// Convert to proto
     pub fn to_protobuf(&self) -> PbColumnDesc {
-        #[allow(deprecated)]
         PbColumnDesc {
             column_type: Some(self.data_type.to_protobuf()),
             column_id: self.column_id.get_id(),
             name: self.name.clone(),
-            field_descs: Vec::new(),  // deprecated
-            type_name: String::new(), // deprecated
             generated_or_default_column: self.generated_or_default_column.clone(),
             description: self.description.clone(),
             additional_column_type: 0, // deprecated
@@ -211,6 +208,7 @@ impl ColumnDesc {
     /// and returns every tree node.
     ///
     /// The name will reflect the full path of the column, and the id will be the placeholder.
+    /// Should only be used for observability/debugging purposes.
     pub fn flatten(&self) -> Vec<ColumnDesc> {
         let mut descs = vec![self.clone()];
 
