@@ -173,6 +173,12 @@ impl FragmentActorBuilder {
             // "Leaf" node `StreamScan`.
             NodeBody::StreamScan(stream_scan) => {
                 let input = stream_node.get_input();
+                if stream_scan.stream_scan_type() == StreamScanType::CrossDbSnapshotBackfill {
+                    // CrossDbSnapshotBackfill is a special case, which doesn't have any upstream actor
+                    // and always reads from log store.
+                    assert!(input.is_empty());
+                    return Ok(stream_node.clone());
+                }
                 assert_eq!(input.len(), 2);
 
                 let merge_node = &input[0];
@@ -301,31 +307,21 @@ impl FragmentActorBuilder {
 
 impl ActorBuilder {
     /// Build an actor after all the upstreams and downstreams are processed.
-    fn build(
-        self,
-        job: &StreamingJob,
-        expr_context: ExprContext,
-        nodes: StreamNode,
-    ) -> MetaResult<StreamActor> {
+    fn build(self, job: &StreamingJob, expr_context: ExprContext) -> MetaResult<StreamActor> {
         // Only fill the definition when debug assertions enabled, otherwise use name instead.
         #[cfg(not(debug_assertions))]
         let mview_definition = job.name();
         #[cfg(debug_assertions)]
         let mview_definition = job.definition();
 
-        Ok(
-            #[expect(deprecated)]
-            StreamActor {
-                actor_id: self.actor_id.as_global_id(),
-                fragment_id: self.fragment_id.as_global_id(),
-                nodes: Some(nodes),
-                dispatcher: self.downstreams.into_values().collect(),
-                upstream_actor_id: vec![],
-                vnode_bitmap: self.vnode_bitmap.map(|b| b.to_protobuf()),
-                mview_definition,
-                expr_context: Some(expr_context),
-            },
-        )
+        Ok(StreamActor {
+            actor_id: self.actor_id.as_global_id(),
+            fragment_id: self.fragment_id.as_global_id(),
+            dispatcher: self.downstreams.into_values().collect(),
+            vnode_bitmap: self.vnode_bitmap.map(|b| b.to_protobuf()),
+            mview_definition,
+            expr_context: Some(expr_context),
+        })
     }
 }
 
@@ -872,7 +868,8 @@ impl ActorGraphBuilder {
 
         // Serialize the graph into a map of sealed fragments.
         let (graph, actor_upstreams) = {
-            let mut fragment_actors: HashMap<GlobalFragmentId, Vec<StreamActor>> = HashMap::new();
+            let mut fragment_actors: HashMap<GlobalFragmentId, (StreamNode, Vec<StreamActor>)> =
+                HashMap::new();
             let mut fragment_actor_upstreams: BTreeMap<_, FragmentActorUpstreams> = BTreeMap::new();
 
             // As all fragments are processed, we can now `build` the actors where the `Exchange`
@@ -885,10 +882,13 @@ impl ActorGraphBuilder {
                 fragment_actors
                     .try_insert(
                         fragment_id,
-                        builders
-                            .into_values()
-                            .map(|builder| builder.build(job, expr_context.clone(), node.clone()))
-                            .try_collect()?,
+                        (
+                            node,
+                            builders
+                                .into_values()
+                                .map(|builder| builder.build(job, expr_context.clone()))
+                                .try_collect()?,
+                        ),
                     )
                     .expect("non-duplicate");
             }
@@ -896,11 +896,14 @@ impl ActorGraphBuilder {
             (
                 fragment_actors
                     .into_iter()
-                    .map(|(fragment_id, actors)| {
+                    .map(|(fragment_id, (stream_node, actors))| {
                         let distribution = self.distributions[&fragment_id].clone();
-                        let fragment =
-                            self.fragment_graph
-                                .seal_fragment(fragment_id, actors, distribution);
+                        let fragment = self.fragment_graph.seal_fragment(
+                            fragment_id,
+                            actors,
+                            distribution,
+                            stream_node,
+                        );
                         let fragment_id = fragment_id.as_global_id();
                         (fragment_id, fragment)
                     })

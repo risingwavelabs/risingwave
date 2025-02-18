@@ -1,0 +1,249 @@
+control substitution on
+
+# cleanup
+system ok
+rpk topic delete 'avro_partial_schema_test' || true; \
+(rpk sr subject delete 'avro_partial_schema_test-value' && rpk sr subject delete 'avro_partial_schema_test-value' --permanent) || true;
+
+# create topic and sr subject
+system ok
+rpk topic create 'avro_partial_schema_test'
+
+# create a schema
+system ok
+sr_register avro_partial_schema_test-value AVRO <<< '{"type":"record","name":"Root","fields":[{"name":"bar","type":"int","default":0},{"name":"foo","type":"string"}]}'
+
+# Specify schema
+statement ok
+create table t1 (foo varchar, bar int)
+WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'avro_partial_schema_test'
+)
+FORMAT PLAIN ENCODE AVRO (
+    schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}'
+);
+
+# Specify partial schema
+statement ok
+create table t2 (bar int, gen_col int as bar + 1)
+WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'avro_partial_schema_test'
+)
+FORMAT PLAIN ENCODE AVRO (
+    schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}'
+);
+
+# Specify partial schema, with a generated column having the same name as a column in the source schema.
+# We should treat the generated column as a new column.
+statement ok
+create table t3 (bar int, foo varchar as 'generated')
+WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'avro_partial_schema_test'
+)
+FORMAT PLAIN ENCODE AVRO (
+    schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}'
+);
+
+# Specify incorrect schema: inexistent column
+statement error
+create table t (bar int, foo varchar, baz int)
+WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'avro_partial_schema_test'
+)
+FORMAT PLAIN ENCODE AVRO (
+    schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}'
+);
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Protocol error: Column "baz" is defined in SQL but not found in the source
+
+
+# Specify incorrect schema: data type mismatch
+statement error
+create table t (bar double)
+WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'avro_partial_schema_test'
+)
+FORMAT PLAIN ENCODE AVRO (
+    schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}'
+);
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Protocol error: Data type mismatch for column "bar". Defined in SQL as "double precision", but found in the source as "integer"
+
+
+# Resolve schema
+statement ok
+create table tstar (*, gen_col int as bar + 1)
+WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'avro_partial_schema_test'
+)
+FORMAT PLAIN ENCODE AVRO (
+    schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}'
+);
+
+# No wildcard will be interpreted as `*` for syntax backward compatibility
+statement ok
+create table tstar2 (gen_col int as bar + 1)
+WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'avro_partial_schema_test'
+)
+FORMAT PLAIN ENCODE AVRO (
+    schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}'
+);
+
+
+# Demonstrate purified definition
+query TT rowsort
+SELECT name, SUBSTRING(definition, 1, POSITION(' WITH' IN definition) - 1) FROM rw_tables WHERE name LIKE 't%';
+----
+t1	CREATE TABLE t1 (foo CHARACTER VARYING, bar INT)
+t2	CREATE TABLE t2 (bar INT, gen_col INT AS bar + 1)
+t3	CREATE TABLE t3 (bar INT, foo CHARACTER VARYING AS 'generated')
+tstar	CREATE TABLE tstar (bar INT, foo CHARACTER VARYING, gen_col INT AS bar + 1)
+tstar2	CREATE TABLE tstar2 (bar INT, foo CHARACTER VARYING, gen_col INT AS bar + 1)
+
+# create a new schema
+system ok
+sr_register avro_partial_schema_test-value AVRO <<< '{"type":"record","name":"Root","fields":[{"name":"bar","type":"int","default":0},{"name":"foo","type":"string"}, {"name":"baz", "type":"double", "default":0}]}'
+
+# Can perform `[ADD | DROP] COLUMN` no matter whether the schema is from resolved
+# However, the schema will be checked against the resolved schema
+statement ok
+alter table t1 drop column foo;
+
+statement error
+alter table t2 add column baz int;
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Protocol error: Data type mismatch for column "baz". Defined in SQL as "integer", but found in the source as "double precision"
+
+
+statement ok
+alter table t2 add column baz double;
+
+statement error
+alter table t2 add column bbaazz double;
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Protocol error: Column "bbaazz" is defined in SQL but not found in the source
+
+
+statement ok
+alter table t3 add column baz double;
+
+statement error
+alter table t3 add column foo varchar;
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Invalid input syntax: column "foo" of table "t3" already exists
+
+
+statement ok
+alter table tstar drop column foo;
+
+statement error
+alter table tstar add column baz int;
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Protocol error: Data type mismatch for column "baz". Defined in SQL as "integer", but found in the source as "double precision"
+
+
+statement ok
+alter table tstar add column baz double;
+
+statement error
+alter table tstar add column bbaazz double;
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Protocol error: Column "bbaazz" is defined in SQL but not found in the source
+
+
+# Demonstrate purified definition
+query TT rowsort
+SELECT name, SUBSTRING(definition, 1, POSITION(' WITH' IN definition) - 1) FROM rw_tables WHERE name LIKE 't%';
+----
+t1	CREATE TABLE t1 (bar INT)
+t2	CREATE TABLE t2 (bar INT, gen_col INT AS bar + 1, baz DOUBLE)
+t3	CREATE TABLE t3 (bar INT, foo CHARACTER VARYING AS 'generated', baz DOUBLE)
+tstar	CREATE TABLE tstar (bar INT, gen_col INT AS bar + 1, baz DOUBLE)
+tstar2	CREATE TABLE tstar2 (bar INT, foo CHARACTER VARYING, gen_col INT AS bar + 1)
+
+# Can refresh schema no matter whether the schema is from resolved
+statement ok
+alter table t1 refresh schema;
+
+statement ok
+alter table t2 refresh schema;
+
+
+# Refreshing schema for t3 will fail, because the name of the generated column conflicts with the one in the external schema.
+# After dropping it, the schema can be refreshed.
+statement error
+alter table t3 refresh schema;
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Invalid input syntax: column "foo" specified more than once
+
+
+statement ok
+alter table t3 drop column foo;
+
+statement ok
+alter table t3 refresh schema;
+
+
+statement ok
+alter table tstar refresh schema;
+
+statement ok
+alter table tstar2 refresh schema;
+
+# Demonstrate purified definition
+query TT rowsort
+SELECT name, SUBSTRING(definition, 1, POSITION(' WITH' IN definition) - 1) FROM rw_tables WHERE name LIKE 't%';
+----
+t1	CREATE TABLE t1 (bar INT, foo CHARACTER VARYING, baz DOUBLE)
+t2	CREATE TABLE t2 (bar INT, foo CHARACTER VARYING, baz DOUBLE, gen_col INT AS bar + 1)
+t3	CREATE TABLE t3 (bar INT, foo CHARACTER VARYING, baz DOUBLE)
+tstar	CREATE TABLE tstar (bar INT, foo CHARACTER VARYING, baz DOUBLE, gen_col INT AS bar + 1)
+tstar2	CREATE TABLE tstar2 (bar INT, foo CHARACTER VARYING, baz DOUBLE, gen_col INT AS bar + 1)
+
+# Cleanup
+statement ok
+DROP TABLE t1;
+
+statement ok
+DROP TABLE t2;
+
+statement ok
+DROP TABLE t3;
+
+statement ok
+DROP TABLE tstar;
+
+statement ok
+DROP TABLE tstar2;

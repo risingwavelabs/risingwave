@@ -314,9 +314,21 @@ fn build_fragment(
 
             NodeBody::StreamScan(node) => {
                 current_fragment.fragment_type_mask |= FragmentTypeFlag::StreamScan as u32;
-                if node.stream_scan_type() == StreamScanType::SnapshotBackfill {
-                    current_fragment.fragment_type_mask |=
-                        FragmentTypeFlag::SnapshotBackfillStreamScan as u32;
+                match node.stream_scan_type() {
+                    StreamScanType::SnapshotBackfill => {
+                        current_fragment.fragment_type_mask |=
+                            FragmentTypeFlag::SnapshotBackfillStreamScan as u32;
+                    }
+                    StreamScanType::CrossDbSnapshotBackfill => {
+                        current_fragment.fragment_type_mask |=
+                            FragmentTypeFlag::CrossDbSnapshotBackfillStreamScan as u32;
+                    }
+                    StreamScanType::Unspecified
+                    | StreamScanType::Chain
+                    | StreamScanType::Rearrange
+                    | StreamScanType::Backfill
+                    | StreamScanType::UpstreamOnly
+                    | StreamScanType::ArrangementBackfill => {}
                 }
                 // memorize table id for later use
                 // The table id could be a upstream CDC source

@@ -17,7 +17,7 @@ async function psql(query) {
   return (
     await $`
 psql -h $RISEDEV_RW_FRONTEND_LISTEN_ADDRESS -p $RISEDEV_RW_FRONTEND_PORT -U root -d dev \
---csv --tuples-only -c ${query}
+--csv --tuples-only --quiet -c ${query}
 `
   )
     .toString()

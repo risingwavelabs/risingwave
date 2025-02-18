@@ -58,7 +58,6 @@ use crate::session::{FrontendEnv, SessionImpl};
 // TODO(error-handling): use a concrete error type.
 pub type LocalQueryStream = ReceiverStream<Result<DataChunk, BoxedError>>;
 pub struct LocalQueryExecution {
-    sql: String,
     query: Query,
     front_env: FrontendEnv,
     batch_query_epoch: BatchQueryEpoch,
@@ -68,21 +67,18 @@ pub struct LocalQueryExecution {
 }
 
 impl LocalQueryExecution {
-    pub fn new<S: Into<String>>(
+    pub fn new(
         query: Query,
         front_env: FrontendEnv,
-        sql: S,
         support_barrier_read: bool,
         batch_query_epoch: BatchQueryEpoch,
         session: Arc<SessionImpl>,
         timeout: Option<Duration>,
     ) -> Self {
-        let sql = sql.into();
         let worker_node_manager =
             WorkerNodeSelector::new(front_env.worker_node_manager_ref(), support_barrier_read);
 
         Self {
-            sql,
             query,
             front_env,
             batch_query_epoch,
@@ -98,10 +94,11 @@ impl LocalQueryExecution {
 
     #[try_stream(ok = DataChunk, error = RwError)]
     pub async fn run_inner(self) {
-        debug!(%self.query.query_id, self.sql, "Starting to run query");
-
+        debug!(
+            query_id = %self.query.query_id,
+            "Starting to run query"
+        );
         let context = FrontendBatchTaskContext::create(self.session.clone());
-
         let task_id = TaskId {
             query_id: self.query.query_id.id.clone(),
             stage_id: 0,
@@ -120,6 +117,9 @@ impl LocalQueryExecution {
         );
 
         let executor = executor.build().await?;
+        // The following loop can be slow.
+        // Release potential large object in Query and PlanNode early.
+        drop(self);
 
         #[for_await]
         for chunk in executor.execute() {

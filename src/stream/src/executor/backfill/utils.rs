@@ -627,7 +627,7 @@ pub(crate) async fn flush_data<S: StateStore, const IS_REPLICATED: bool>(
             })
         });
     }
-    table.commit(epoch).await
+    table.commit_assert_no_update_vnode_bitmap(epoch).await
 }
 
 /// We want to avoid allocating a row for every vnode.
@@ -812,7 +812,7 @@ pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: 
         backfill_state.mark_committed(vnode);
     }
 
-    table.commit(epoch).await?;
+    table.commit_assert_no_update_vnode_bitmap(epoch).await?;
     Ok(())
 }
 
@@ -836,7 +836,7 @@ pub(crate) async fn persist_state<S: StateStore, const IS_REPLICATED: bool>(
         flush_data(table, epoch, old_state, current_state).await?;
         *old_state = Some(current_state.into());
     } else {
-        table.commit(epoch).await?;
+        table.commit_assert_no_update_vnode_bitmap(epoch).await?;
     }
     Ok(())
 }

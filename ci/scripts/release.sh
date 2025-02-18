@@ -134,6 +134,10 @@ if [[ -n "${BUILDKITE_TAG}" ]]; then
     tar -czvf risectl-"${BUILDKITE_TAG}"-"${ARCH}"-unknown-linux.tar.gz risectl
     gh release upload "${BUILDKITE_TAG}" risectl-"${BUILDKITE_TAG}"-"${ARCH}"-unknown-linux.tar.gz
 
+    echo "--- Release upload connector libs asset"
+    tar -czvf risingwave-connector-"${BUILDKITE_TAG}".tar.gz libs
+    gh release upload "${BUILDKITE_TAG}" risingwave-connector-"${BUILDKITE_TAG}".tar.gz
+
     echo "--- Release upload risingwave-all-in-one asset"
     tar -czvf risingwave-"${BUILDKITE_TAG}"-"${ARCH}"-unknown-linux-all-in-one.tar.gz risingwave libs
     gh release upload "${BUILDKITE_TAG}" risingwave-"${BUILDKITE_TAG}"-"${ARCH}"-unknown-linux-all-in-one.tar.gz

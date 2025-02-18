@@ -18,6 +18,7 @@ package com.risingwave.connector.catalog;
 
 import static com.google.common.base.Preconditions.checkArgument;
 
+import java.io.Closeable;
 import java.util.HashMap;
 import java.util.Objects;
 import org.apache.iceberg.CatalogUtil;
@@ -105,6 +106,17 @@ public class JniCatalogWrapper {
     public boolean dropTable(String tableIdentifier) {
         TableIdentifier id = TableIdentifier.parse(tableIdentifier);
         return catalog.dropTable(id);
+    }
+
+    /**
+     * Close the catalog.
+     *
+     * @throws Exception
+     */
+    public void close() throws Exception {
+        if (catalog instanceof Closeable) {
+            ((Closeable) catalog).close();
+        }
     }
 
     /**

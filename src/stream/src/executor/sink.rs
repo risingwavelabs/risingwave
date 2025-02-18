@@ -313,11 +313,16 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                     yield Message::Chunk(chunk);
                 }
                 Message::Barrier(barrier) => {
-                    log_writer
+                    let post_flush = log_writer
                         .flush_current_epoch(barrier.epoch.curr, barrier.kind.is_checkpoint())
                         .await?;
 
-                    if let Some(mutation) = barrier.mutation.as_deref() {
+                    let update_vnode_bitmap = barrier.as_update_vnode_bitmap(actor_id);
+                    let mutation = barrier.mutation.clone();
+                    yield Message::Barrier(barrier);
+                    post_flush.post_yield_barrier(update_vnode_bitmap).await?;
+
+                    if let Some(mutation) = mutation.as_deref() {
                         match mutation {
                             Mutation::Pause => {
                                 log_writer.pause()?;
@@ -347,11 +352,6 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                             _ => (),
                         }
                     }
-
-                    if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(actor_id) {
-                        log_writer.update_vnode_bitmap(vnode_bitmap).await?;
-                    }
-                    yield Message::Barrier(barrier);
                 }
             }
         }

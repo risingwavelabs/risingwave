@@ -67,7 +67,7 @@ pub async fn gen_basic_table(row_count: usize) -> BatchTable<MemoryStateStore> {
     }
 
     epoch.inc_for_test();
-    state.commit(epoch).await.unwrap();
+    state.commit_for_test(epoch).await.unwrap();
 
     table
 }

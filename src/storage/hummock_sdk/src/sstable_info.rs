@@ -142,7 +142,6 @@ impl From<&PbSstableInfo> for SstableInfoInner {
 
 impl From<SstableInfoInner> for PbSstableInfo {
     fn from(sstable_info: SstableInfoInner) -> Self {
-        assert!(sstable_info.sst_size > 0);
         assert!(sstable_info.table_ids.is_sorted());
         PbSstableInfo {
             object_id: sstable_info.object_id,
@@ -181,7 +180,6 @@ impl From<SstableInfoInner> for PbSstableInfo {
 
 impl From<&SstableInfoInner> for PbSstableInfo {
     fn from(sstable_info: &SstableInfoInner) -> Self {
-        assert!(sstable_info.sst_size > 0);
         assert!(sstable_info.table_ids.is_sorted());
         PbSstableInfo {
             object_id: sstable_info.object_id,

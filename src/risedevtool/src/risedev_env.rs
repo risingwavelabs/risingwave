@@ -117,6 +117,11 @@ pub fn generate_risedev_env(services: &Vec<ServiceConfig>) -> String {
                 writeln!(env, r#"PGUSER="{user}""#,).unwrap();
                 writeln!(env, r#"PGPASSWORD="{password}""#,).unwrap();
                 writeln!(env, r#"PGDATABASE="{database}""#,).unwrap();
+                writeln!(
+                    env,
+                    r#"RISEDEV_POSTGRES_WITH_OPTIONS_COMMON="connector='postgres-cdc',hostname='{host}',port='{port}'""#,
+                )
+                .unwrap();
             }
             ServiceConfig::SqlServer(c) => {
                 let host = &c.address;

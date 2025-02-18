@@ -237,6 +237,8 @@ impl<CS: 'static + Send + CreateSource> GenericExchangeExecutor<CS> {
         metrics: Option<BatchMetrics>,
     ) {
         let mut source = source_creator.create_source(context, &prost_source).await?;
+        // Release potential large objects in LocalExecutePlan early.
+        drop(prost_source);
         // create the collector
         let counter = metrics
             .as_ref()

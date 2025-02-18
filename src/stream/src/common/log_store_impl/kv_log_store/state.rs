@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::future::Future;
 use std::sync::Arc;
 
 use risingwave_common::array::StreamChunk;
@@ -49,6 +50,8 @@ pub(crate) struct LogStoreWriteState<S: LocalStateStore> {
     state_store: S,
     serde: LogStoreRowSerde,
     epoch: Option<EpochPair>,
+
+    on_post_seal: bool,
 }
 
 pub(crate) fn new_log_store_state<S: LocalStateStore>(
@@ -70,6 +73,7 @@ pub(crate) fn new_log_store_state<S: LocalStateStore>(
             state_store,
             serde,
             epoch: None,
+            on_post_seal: false,
         },
     )
 }
@@ -106,7 +110,8 @@ impl<S: LocalStateStore> LogStoreWriteState<S> {
         &mut self,
         next_epoch: u64,
         truncate_offset: Option<ReaderTruncationOffsetType>,
-    ) {
+    ) -> LogStorePostSealCurrentEpoch<'_, S> {
+        assert!(!self.on_post_seal);
         let watermark = truncate_offset
             .map(|truncation_offset| {
                 vec![VnodeWatermark::new(
@@ -130,11 +135,52 @@ impl<S: LocalStateStore> LogStoreWriteState<S> {
         let epoch = self.epoch.as_mut().expect("should have init");
         epoch.prev = epoch.curr;
         epoch.curr = next_epoch;
-    }
 
-    pub(crate) fn update_vnode_bitmap(&mut self, new_vnodes: &Arc<Bitmap>) {
-        self.serde.update_vnode_bitmap(new_vnodes.clone());
-        self.state_store.update_vnode_bitmap(new_vnodes.clone());
+        self.on_post_seal = true;
+        LogStorePostSealCurrentEpoch { inner: self }
+    }
+}
+
+#[must_use]
+pub(crate) struct LogStorePostSealCurrentEpoch<'a, S: LocalStateStore> {
+    inner: &'a mut LogStoreWriteState<S>,
+}
+
+impl<S: LocalStateStore> LogStorePostSealCurrentEpoch<'_, S> {
+    pub(crate) fn post_yield_barrier(self, new_vnodes: Option<Arc<Bitmap>>) {
+        if let Some(new_vnodes) = new_vnodes {
+            self.inner.serde.update_vnode_bitmap(new_vnodes.clone());
+            self.inner
+                .state_store
+                .update_vnode_bitmap(new_vnodes.clone());
+        }
+        self.inner.on_post_seal = false;
+    }
+}
+
+pub(crate) type LogStoreStateWriteChunkFuture<S: LocalStateStore> =
+    impl Future<Output = (LogStoreWriteState<S>, LogStoreResult<(FlushInfo, Bitmap)>)> + 'static;
+
+impl<S: LocalStateStore> LogStoreWriteState<S> {
+    pub(crate) fn into_write_chunk_future(
+        mut self,
+        chunk: StreamChunk,
+        epoch: u64,
+        start_seq_id: SeqIdType,
+        end_seq_id: SeqIdType,
+    ) -> LogStoreStateWriteChunkFuture<S> {
+        async move {
+            let result = try {
+                let mut writer = self.start_writer(true);
+                writer.write_chunk(&chunk, epoch, start_seq_id, end_seq_id)?;
+                let (flush_info, bitmap) = writer.finish().await?;
+                (
+                    flush_info,
+                    bitmap.expect("should exist when pass true when start_writer"),
+                )
+            };
+            (self, result)
+        }
     }
 }
 

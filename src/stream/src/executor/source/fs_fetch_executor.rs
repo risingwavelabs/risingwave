@@ -246,7 +246,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                     match msg {
                         // This branch will be preferred.
                         Either::Left(msg) => {
-                            match &msg {
+                            match msg {
                                 Message::Barrier(barrier) => {
                                     let mut need_rebuild_reader = false;
 
@@ -259,7 +259,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                                     actor_to_apply.get(&self.actor_ctx.id)
                                                     && *new_rate_limit != self.rate_limit_rps
                                                 {
-                                                    tracing::debug!(
+                                                    tracing::info!(
                                                         "updating rate limit from {:?} to {:?}",
                                                         self.rate_limit_rps,
                                                         *new_rate_limit
@@ -272,20 +272,20 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                         }
                                     }
 
-                                    state_store_handler
+                                    let post_commit = state_store_handler
                                         .state_table
                                         .commit(barrier.epoch)
                                         .await?;
 
-                                    if let Some(vnode_bitmap) =
-                                        barrier.as_update_vnode_bitmap(self.actor_ctx.id)
-                                    {
-                                        // if _cache_may_stale, we must rebuild the stream to adjust vnode mappings
-                                        let (_prev_vnode_bitmap, cache_may_stale) =
-                                            state_store_handler
-                                                .state_table
-                                                .update_vnode_bitmap(vnode_bitmap);
+                                    let update_vnode_bitmap =
+                                        barrier.as_update_vnode_bitmap(self.actor_ctx.id);
+                                    // Propagate the barrier.
+                                    yield Message::Barrier(barrier);
 
+                                    if let Some((_, cache_may_stale)) =
+                                        post_commit.post_yield_barrier(update_vnode_bitmap).await?
+                                    {
+                                        // if cache_may_stale, we must rebuild the stream to adjust vnode mappings
                                         if cache_may_stale {
                                             splits_on_fetch = 0;
                                         }
@@ -307,9 +307,6 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                         )
                                         .await?;
                                     }
-
-                                    // Propagate the barrier.
-                                    yield msg;
                                 }
                                 // Receiving file assignments from upstream list executor,
                                 // store into state table.
@@ -364,7 +361,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                     state_store_handler.set_states(file_assignment).await?;
                                     state_store_handler.state_table.try_flush().await?;
                                 }
-                                _ => unreachable!(),
+                                Message::Watermark(_) => unreachable!(),
                             }
                         }
                         // StreamChunk from FsSourceReader, and the reader reads only one file.

@@ -15,7 +15,6 @@
 use std::collections::HashMap;
 
 use itertools::Itertools;
-use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_pb::catalog::{PbDatabase, PbSchema};
 use risingwave_pb::user::grant_privilege::Object;
 
@@ -59,19 +58,6 @@ impl DatabaseCatalog {
             .flat_map(|schema| schema.iter_all().map(|t| t.id()))
     }
 
-    pub fn get_all_schema_info(&self) -> Vec<PbSchema> {
-        self.schema_by_name
-            .values()
-            .cloned()
-            .map(|schema| PbSchema {
-                id: schema.id(),
-                database_id: self.id,
-                name: schema.name(),
-                owner: schema.owner(),
-            })
-            .collect_vec()
-    }
-
     pub fn iter_schemas(&self) -> impl Iterator<Item = &SchemaCatalog> {
         self.schema_by_name.values()
     }
@@ -92,12 +78,6 @@ impl DatabaseCatalog {
     pub fn get_schema_mut(&mut self, schema_id: SchemaId) -> Option<&mut SchemaCatalog> {
         let name = self.schema_name_by_id.get(&schema_id).unwrap();
         self.schema_by_name.get_mut(name)
-    }
-
-    pub fn find_schema_containing_table_id(&self, table_id: &TableId) -> Option<&SchemaCatalog> {
-        self.schema_by_name
-            .values()
-            .find(|schema| schema.get_created_table_by_id(table_id).is_some())
     }
 
     pub fn get_grant_object_by_oid(&self, oid: u32) -> Option<Object> {
@@ -128,10 +108,6 @@ impl DatabaseCatalog {
             schema.database_id = prost.database_id;
             schema.owner = prost.owner;
         };
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.schema_by_name.len() == 1 && self.schema_by_name.contains_key(PG_CATALOG_SCHEMA_NAME)
     }
 
     pub fn id(&self) -> DatabaseId {

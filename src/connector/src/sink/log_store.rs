@@ -23,6 +23,7 @@ use std::time::Instant;
 
 use await_tree::InstrumentAwait;
 use either::Either;
+use futures::future::BoxFuture;
 use futures::{TryFuture, TryFutureExt};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
@@ -123,6 +124,24 @@ pub enum LogStoreReadItem {
     UpdateVnodeBitmap(Arc<Bitmap>),
 }
 
+pub trait LogWriterPostFlushCurrentEpochFn<'a> =
+    FnOnce(Option<Arc<Bitmap>>) -> BoxFuture<'a, LogStoreResult<()>>;
+
+#[must_use]
+pub struct LogWriterPostFlushCurrentEpoch<'a>(
+    Box<dyn LogWriterPostFlushCurrentEpochFn<'a> + Send + 'a>,
+);
+
+impl<'a> LogWriterPostFlushCurrentEpoch<'a> {
+    pub fn new(f: impl LogWriterPostFlushCurrentEpochFn<'a> + Send + 'a) -> Self {
+        Self(Box::new(f))
+    }
+
+    pub async fn post_yield_barrier(self, new_vnodes: Option<Arc<Bitmap>>) -> LogStoreResult<()> {
+        self.0(new_vnodes).await
+    }
+}
+
 pub trait LogWriter: Send {
     /// Initialize the log writer with an epoch
     fn init(
@@ -142,13 +161,7 @@ pub trait LogWriter: Send {
         &mut self,
         next_epoch: u64,
         is_checkpoint: bool,
-    ) -> impl Future<Output = LogStoreResult<()>> + Send + '_;
-
-    /// Update the vnode bitmap of the log writer
-    fn update_vnode_bitmap(
-        &mut self,
-        new_vnodes: Arc<Bitmap>,
-    ) -> impl Future<Output = LogStoreResult<()>> + Send + '_;
+    ) -> impl Future<Output = LogStoreResult<LogWriterPostFlushCurrentEpoch<'_>>> + Send + '_;
 
     fn pause(&mut self) -> LogStoreResult<()>;
 
@@ -607,18 +620,15 @@ impl<W: LogWriter> LogWriter for MonitoredLogWriter<W> {
         &mut self,
         next_epoch: u64,
         is_checkpoint: bool,
-    ) -> LogStoreResult<()> {
-        self.inner
+    ) -> LogStoreResult<LogWriterPostFlushCurrentEpoch<'_>> {
+        let post_flush = self
+            .inner
             .flush_current_epoch(next_epoch, is_checkpoint)
             .await?;
         self.metrics
             .log_store_latest_write_epoch
             .set(next_epoch as _);
-        Ok(())
-    }
-
-    async fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) -> LogStoreResult<()> {
-        self.inner.update_vnode_bitmap(new_vnodes).await
+        Ok(post_flush)
     }
 
     fn pause(&mut self) -> LogStoreResult<()> {

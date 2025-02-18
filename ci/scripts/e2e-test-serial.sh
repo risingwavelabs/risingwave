@@ -85,6 +85,7 @@ RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=i
 cluster_start
 # Please make sure the regression is expected before increasing the timeout.
 sqllogictest -p 4566 -d dev './e2e_test/streaming/**/*.slt' --junit "streaming-${profile}"
+risedev slt -p 4566 -d dev './e2e_test/queryable_internal_state/**/*.slt' --junit "queryable-internal-state-${profile}"
 sqllogictest -p 4566 -d dev './e2e_test/backfill/sink/different_pk_and_dist_key.slt'
 
 echo "--- Kill cluster"

@@ -78,7 +78,7 @@ format debezium encode json (timestamptz.handling.mode = 'milli');
 
 sleep 2s
 
-query TT
+query TT retry 3 backoff 5s
 select "case", (payload).after.at from plain_guess order by 1;
 ----
 0 number small  1970-01-01 00:01:40+00:00
@@ -86,7 +86,7 @@ select "case", (payload).after.at from plain_guess order by 1;
 2 string utc    2024-04-11 02:00:00.654321+00:00
 3 string naive  NULL
 
-query TT
+query TT retry 3 backoff 5s
 select "case", (payload).after.at from plain_milli order by 1;
 ----
 0 number small   1970-01-01 00:00:00.100+00:00
@@ -94,7 +94,7 @@ select "case", (payload).after.at from plain_milli order by 1;
 2 string utc     2024-04-11 02:00:00.654321+00:00
 3 string naive   NULL
 
-query TT
+query TT retry 3 backoff 5s
 select "case", (payload).after.at from plain_micro order by 1;
 ----
 0 number small  1970-01-01 00:00:00.000100+00:00
@@ -102,7 +102,7 @@ select "case", (payload).after.at from plain_micro order by 1;
 2 string utc    2024-04-11 02:00:00.654321+00:00
 3 string naive  NULL
 
-query TT
+query TT retry 3 backoff 5s
 select "case", (payload).after.at from plain_utc order by 1;
 ----
 0 number small  NULL
@@ -110,7 +110,7 @@ select "case", (payload).after.at from plain_utc order by 1;
 2 string utc    2024-04-11 02:00:00.654321+00:00
 3 string naive  NULL
 
-query TT
+query TT retry 3 backoff 5s
 select "case", (payload).after.at from plain_naive order by 1;
 ----
 0 number small  NULL
@@ -118,7 +118,7 @@ select "case", (payload).after.at from plain_naive order by 1;
 2 string utc    NULL
 3 string naive  2024-04-11 02:00:00.234321+00:00
 
-query TT
+query TT retry 3 backoff 5s
 select "case", at from debezium_milli order by 1;
 ----
 0 number small   1970-01-01 00:00:00.100+00:00

@@ -8,7 +8,11 @@ set -euo pipefail
 #
 # Also add addtional tags to the images:
 # nightly-yyyyMMdd: nightly build in main-cron
-# latest: only push to ghcr. dockerhub latest is latest release
+# vX.Y.Z-alpha.yyyyMMdd: nightly build in main-cron, semver tag for compatibility
+# latest: the latest stable build
+# nightly: the latest nightly build
+
+export PATH=$PATH:/var/lib/buildkite-agent/.local/bin
 
 date="$(date +%Y%m%d)"
 ghcraddr="ghcr.io/risingwavelabs/risingwave"
@@ -53,6 +57,26 @@ function pushDockerhub() {
   docker manifest push --insecure "$DOCKERTAG"
 }
 
+function isStableVersion() {
+    local version=$1
+    if [[ $version =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        return 0  # Stable version
+    else
+        return 1  # Not a stable version
+    fi
+}
+
+function isLatestVersion() {
+    local version=$1
+    git fetch origin 'refs/tags/*:refs/tags/*'
+    local latest_version=$(git tag -l --sort=-v:refname | egrep "^v[0-9]+\.[0-9]+\.[0-9]+$" | head -n 1)
+    if [[ $version == $latest_version ]]; then
+        return 0  # Latest version
+    else
+        return 1  # Not a latest version
+    fi
+}
+
 echo "--- ghcr login"
 echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
 
@@ -84,8 +108,13 @@ if [ "${BUILDKITE_SOURCE}" == "schedule" ]; then
   TAG="nightly-${date}"
   pushGchr "${TAG}"
   pushDockerhub "${TAG}"
-  TAG="latest"
+  pip install toml-cli
+  TAG="v$(toml get --toml-path Cargo.toml workspace.package.version).${date}"
   pushGchr ${TAG}
+  pushDockerhub "${TAG}"
+  TAG="nightly"
+  pushGchr ${TAG}
+  pushDockerhub "${TAG}"
 fi
 
 if [[ -n "${IMAGE_TAG+x}" ]]; then
@@ -100,8 +129,12 @@ if [[ -n "${BUILDKITE_TAG}" ]]; then
   pushGchr "${TAG}"
   pushDockerhub "${TAG}"
 
-  TAG="latest"
-  pushDockerhub ${TAG}
+  if isStableVersion "${TAG}" && isLatestVersion "${TAG}"; then
+    # If the tag is a latest stable version, we tag the image with "latest".
+    TAG="latest"
+    pushGchr "${TAG}"
+    pushDockerhub "${TAG}"
+  fi
 fi
 
 echo "--- delete the manifest images from dockerhub"

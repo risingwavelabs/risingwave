@@ -8,6 +8,16 @@ pub const DEFAULT_RESOURCE_GROUP: &str = "default";
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        // drop old node_label column
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(WorkerProperty::Table)
+                    .drop_column(WorkerProperty::Label)
+                    .to_owned(),
+            )
+            .await?;
+
         manager
             .alter_table(
                 Table::alter()
@@ -42,6 +52,16 @@ impl MigrationTrait for Migration {
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        // restore old node_label column
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(WorkerProperty::Table)
+                    .add_column(ColumnDef::new(WorkerProperty::Label).string())
+                    .to_owned(),
+            )
+            .await?;
+
         manager
             .alter_table(
                 Table::alter()
@@ -58,7 +78,6 @@ impl MigrationTrait for Migration {
                     .to_owned(),
             )
             .await?;
-
         manager
             .alter_table(
                 Table::alter()
@@ -74,6 +93,7 @@ impl MigrationTrait for Migration {
 enum WorkerProperty {
     Table,
     ResourceGroup,
+    Label,
 }
 
 #[derive(DeriveIden)]

@@ -19,6 +19,11 @@ select data ->> 'source', data->> 'auth_algo' from segment_hmac_sha1;
 segment hmac_sha1
 
 query TT
-select data ->> 'source', data->> 'auth_algo' from hubspot_sha256_v2;
+select data ->> 'source', data->> 'auth_algo' from test_primary_key;
 ----
-hubspot sha256_v2
+github hmac_sha1
+
+query TT
+select data ->> 'source', data->> 'auth_algo' from validate_raw_string;
+----
+github hmac_sha1
