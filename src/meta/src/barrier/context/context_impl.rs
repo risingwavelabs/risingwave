@@ -313,6 +313,7 @@ impl CommandContext {
                     new_fragments,
                     dispatchers,
                     init_split_assignment,
+                    to_drop_state_table_ids,
                     ..
                 },
             ) => {
@@ -338,6 +339,10 @@ impl CommandContext {
                         replace_plan,
                     )
                     .await;
+                barrier_manager_context
+                    .hummock_manager
+                    .unregister_table_ids(to_drop_state_table_ids.iter().cloned())
+                    .await?;
             }
 
             Command::CreateSubscription {
