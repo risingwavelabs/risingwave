@@ -179,8 +179,6 @@ impl CatalogController {
             }
         }
 
-        let mut objects = vec![];
-
         match streaming_job {
             StreamingJob::MaterializedView(table) => {
                 let job_id = Self::create_streaming_job_obj(
@@ -199,10 +197,6 @@ impl CatalogController {
                 table.id = job_id as _;
                 let table_model: table::ActiveModel = table.clone().into();
                 Table::insert(table_model).exec(&txn).await?;
-
-                objects.push(PbObject {
-                    object_info: Some(PbObjectInfo::Table(table.to_owned())),
-                });
             }
             StreamingJob::Sink(sink, _) => {
                 if let Some(target_table_id) = sink.target_table {
@@ -353,11 +347,6 @@ impl CatalogController {
 
         txn.commit().await?;
 
-        if !objects.is_empty() {
-            self.notify_frontend(Operation::Add, Info::ObjectGroup(PbObjectGroup { objects }))
-                .await;
-        }
-
         Ok(())
     }
 
@@ -401,21 +390,6 @@ impl CatalogController {
         }
         txn.commit().await?;
 
-        if job.is_materialized_view() {
-            self.notify_frontend(
-                Operation::Add,
-                Info::ObjectGroup(PbObjectGroup {
-                    objects: incomplete_internal_tables
-                        .iter()
-                        .map(|table| PbObject {
-                            object_info: Some(PbObjectInfo::Table(table.clone())),
-                        })
-                        .collect(),
-                }),
-            )
-            .await;
-        }
-
         Ok(table_id_map)
     }
 
@@ -429,10 +403,13 @@ impl CatalogController {
         streaming_job: &StreamingJob,
         for_replace: bool,
     ) -> MetaResult<()> {
+        let is_materialized_view = streaming_job.is_materialized_view();
         let fragment_actors =
             Self::extract_fragment_and_actors_from_fragments(stream_job_fragments)?;
-        let all_tables = stream_job_fragments.all_tables();
+        let mut all_tables = stream_job_fragments.all_tables();
         let inner = self.inner.write().await;
+
+        let mut objects = vec![];
         let txn = inner.db.begin().await?;
 
         let mut fragment_relations = BTreeMap::new();
@@ -478,16 +455,18 @@ impl CatalogController {
             Fragment::insert(fragment).exec(&txn).await?;
 
             // Fields including `fragment_id` and `vnode_count` were placeholder values before.
-            // After table fragments are created, update them for all internal tables.
+            // After table fragments are created, update them for all tables.
             if !for_replace {
                 for state_table_id in state_table_ids {
                     // Table's vnode count is not always the fragment's vnode count, so we have to
                     // look up the table from `TableFragments`.
                     // See `ActorGraphBuilder::new`.
                     let table = all_tables
-                        .get(&(state_table_id as u32))
+                        .get_mut(&(state_table_id as u32))
                         .unwrap_or_else(|| panic!("table {} not found", state_table_id));
+                    assert_eq!(table.id, state_table_id as u32);
                     assert_eq!(table.fragment_id, fragment_id as u32);
+                    table.job_id = Some(streaming_job.id());
                     let vnode_count = table.vnode_count();
 
                     table::ActiveModel {
@@ -498,6 +477,12 @@ impl CatalogController {
                     }
                     .update(&txn)
                     .await?;
+
+                    if is_materialized_view {
+                        objects.push(PbObject {
+                            object_info: Some(PbObjectInfo::Table(table.clone())),
+                        });
+                    }
                 }
             }
         }
@@ -537,6 +522,12 @@ impl CatalogController {
         }
 
         txn.commit().await?;
+
+        if !objects.is_empty() {
+            assert!(is_materialized_view);
+            self.notify_frontend(Operation::Add, Info::ObjectGroup(PbObjectGroup { objects }))
+                .await;
+        }
 
         Ok(())
     }
@@ -669,6 +660,27 @@ impl CatalogController {
         >,
         split_assignment: &SplitAssignment,
     ) -> MetaResult<()> {
+        self.post_collect_job_fragments_inner(
+            job_id,
+            actor_ids,
+            new_actor_dispatchers,
+            split_assignment,
+            false,
+        )
+        .await
+    }
+
+    pub async fn post_collect_job_fragments_inner(
+        &self,
+        job_id: ObjectId,
+        actor_ids: Vec<crate::model::ActorId>,
+        new_actor_dispatchers: &HashMap<
+            crate::model::FragmentId,
+            HashMap<crate::model::ActorId, Vec<PbDispatcher>>,
+        >,
+        split_assignment: &SplitAssignment,
+        is_mv: bool,
+    ) -> MetaResult<()> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
@@ -756,7 +768,16 @@ impl CatalogController {
         .update(&txn)
         .await?;
 
+        let fragment_mapping = if is_mv {
+            get_fragment_mappings(&txn, job_id as _).await?
+        } else {
+            vec![]
+        };
+
         txn.commit().await?;
+        self.notify_fragment_mapping(NotificationOperation::Add, fragment_mapping)
+            .await;
+
         Ok(())
     }
 
