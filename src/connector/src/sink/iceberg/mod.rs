@@ -18,12 +18,15 @@ mod prometheus;
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::Debug;
 use std::num::NonZeroU64;
+use std::str::FromStr;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
 use async_trait::async_trait;
 use iceberg::arrow::{arrow_schema_to_schema, schema_to_arrow_schema};
-use iceberg::spec::{DataFile, SerializedDataFile};
+use iceberg::spec::{
+    DataFile, SerializedDataFile, Transform, UnboundPartitionField, UnboundPartitionSpec,
+};
 use iceberg::table::Table;
 use iceberg::transaction::Transaction;
 use iceberg::writer::base_writer::data_file_writer::DataFileWriterBuilder;
@@ -47,6 +50,7 @@ use itertools::Itertools;
 use parquet::file::properties::WriterProperties;
 use prometheus::monitored_general_writer::MonitoredGeneralWriterBuilder;
 use prometheus::monitored_position_delete_writer::MonitoredPositionDeleteWriterBuilder;
+use regex::Regex;
 use risingwave_common::array::arrow::arrow_array_iceberg::{Int32Array, RecordBatch};
 use risingwave_common::array::arrow::arrow_schema_iceberg::{
     self, DataType as ArrowDataType, Field as ArrowField, Schema as ArrowSchema, SchemaRef,
@@ -108,6 +112,9 @@ pub struct IcebergConfig {
     // Props for java catalog props.
     #[serde(skip)]
     pub java_catalog_props: HashMap<String, String>,
+
+    #[serde(default)]
+    pub partition_by: Option<String>,
 
     /// Commit every n(>0) checkpoints, default is 10.
     #[serde(default = "default_commit_checkpoint_interval")]
@@ -311,13 +318,83 @@ impl IcebergSink {
                 }
             };
 
+            let partition_spec = match &self.config.partition_by {
+                Some(partition_field) => {
+                    let mut partition_fields = Vec::<UnboundPartitionField>::new();
+                    // captures column, transform(column), transform(n,column), transform(n, column)
+                    let re = Regex::new(
+                        r"(?<transform>\w+)(\(((?<n>\d+)?(?:,|(,\s)))?(?<field>\w+)\))?",
+                    )
+                    .unwrap();
+                    if !re.is_match(partition_field) {
+                        bail!(format!("Invalid partition fields: {}\nHINT: Supported formats are column, transform(column), transform(n,column), transform(n, column)", partition_field))
+                    }
+                    let caps = re.captures_iter(partition_field);
+                    for (i, mat) in caps.enumerate() {
+                        let (column, transform) =
+                            if mat.name("n").is_none() && mat.name("field").is_none() {
+                                (&mat["transform"], Transform::Identity)
+                            } else {
+                                let mut func = mat["transform"].to_owned();
+                                if func == "bucket" || func == "truncate" {
+                                    let n = &mat
+                                        .name("n")
+                                        .ok_or_else(|| {
+                                            SinkError::Iceberg(anyhow!(
+                                                "The `n` must be set with `bucket` and `truncate`"
+                                            ))
+                                        })?
+                                        .as_str();
+                                    func = format!("{func}[{n}]");
+                                }
+                                (
+                                    &mat["field"],
+                                    Transform::from_str(&func)
+                                        .map_err(|e| SinkError::Iceberg(anyhow!(e)))?,
+                                )
+                            };
+
+                        match iceberg_schema.field_id_by_name(column) {
+                            Some(id) => partition_fields.push(
+                                UnboundPartitionField::builder()
+                                    .source_id(id)
+                                    .transform(transform)
+                                    .name(column.to_owned())
+                                    .field_id(i as i32)
+                                    .build(),
+                            ),
+                            None => bail!(format!(
+                                "Partition source column does not exist in schema: {}",
+                                column
+                            )),
+                        };
+                    }
+                    Some(
+                        UnboundPartitionSpec::builder()
+                            .with_spec_id(0)
+                            .add_partition_fields(partition_fields)
+                            .map_err(|e| SinkError::Iceberg(anyhow!(e)))
+                            .context("failed to add partition columns")?
+                            .build(),
+                    )
+                }
+                None => None,
+            };
+
             let table_creation_builder = TableCreation::builder()
                 .name(self.config.common.table_name.clone())
                 .schema(iceberg_schema);
 
-            let table_creation = match location {
-                Some(location) => table_creation_builder.location(location).build(),
-                None => table_creation_builder.build(),
+            let table_creation = match (location, partition_spec) {
+                (Some(location), Some(partition_spec)) => table_creation_builder
+                    .location(location)
+                    .partition_spec(partition_spec)
+                    .build(),
+                (Some(location), None) => table_creation_builder.location(location).build(),
+                (None, Some(partition_spec)) => table_creation_builder
+                    .partition_spec(partition_spec)
+                    .build(),
+                (None, None) => table_creation_builder.build(),
             };
 
             catalog
@@ -1405,6 +1482,7 @@ mod test {
             ("connector", "iceberg"),
             ("type", "upsert"),
             ("primary_key", "v1"),
+            ("partition_by", "v1, identity(v1), truncate(4,v2), bucket(5,v1), year(v3), month(v4), day(v5), hour(v6), void(v1)"),
             ("warehouse.path", "s3://iceberg"),
             ("s3.endpoint", "http://127.0.0.1:9301"),
             ("s3.access.key", "hummockadmin"),
@@ -1449,6 +1527,7 @@ mod test {
             r#type: "upsert".to_owned(),
             force_append_only: false,
             primary_key: Some(vec!["v1".to_owned()]),
+            partition_by: Some("v1, identity(v1), truncate(4,v2), bucket(5,v1), year(v3), month(v4), day(v5), hour(v6), void(v1)".to_owned()),
             java_catalog_props: [("jdbc.user", "admin"), ("jdbc.password", "123456")]
                 .into_iter()
                 .map(|(k, v)| (k.to_owned(), v.to_owned()))

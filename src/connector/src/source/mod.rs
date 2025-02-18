@@ -166,14 +166,12 @@ impl WaitCheckpointTask {
                 ref ack_policy,
             ) => {
                 async fn ack(context: &JetStreamContext, reply_subject: String) {
-                    match context.publish(reply_subject.clone(), "".into()).await {
+                    match context.publish(reply_subject.clone(), "+ACK".into()).await {
                         Err(e) => {
                             tracing::error!(error = %e.as_report(), subject = ?reply_subject, "failed to ack NATS JetStream message");
                         }
                         Ok(ack_future) => {
-                            if let Err(e) = ack_future.into_future().await {
-                                tracing::error!(error = %e.as_report(), subject = ?reply_subject, "failed to ack NATS JetStream message");
-                            }
+                            let _ = ack_future.into_future().await;
                         }
                     }
                 }
@@ -193,6 +191,9 @@ impl WaitCheckpointTask {
                     JetStreamAckPolicy::None => (),
                     JetStreamAckPolicy::Explicit => {
                         for reply_subject in reply_subjects {
+                            if reply_subject.is_empty() {
+                                continue;
+                            }
                             ack(context, reply_subject).await;
                         }
                     }

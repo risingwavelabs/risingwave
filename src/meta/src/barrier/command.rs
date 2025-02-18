@@ -42,7 +42,7 @@ use risingwave_pb::stream_plan::{
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::warn;
 
-use super::info::{CommandFragmentChanges, InflightStreamingJobInfo};
+use super::info::{CommandFragmentChanges, InflightDatabaseInfo, InflightStreamingJobInfo};
 use crate::barrier::info::BarrierInfo;
 use crate::barrier::utils::collect_resp_info;
 use crate::barrier::InflightSubscriptionInfo;
@@ -50,7 +50,8 @@ use crate::controller::fragment::InflightFragmentInfo;
 use crate::hummock::{CommitEpochInfo, NewTableFragmentInfo};
 use crate::manager::{StreamingJob, StreamingJobType};
 use crate::model::{
-    ActorId, DispatcherId, FragmentId, StreamActorWithUpstreams, StreamJobFragments,
+    ActorId, DispatcherId, FragmentId, StreamActorWithUpstreams, StreamJobActorsToCreate,
+    StreamJobFragments,
 };
 use crate::stream::{
     build_actor_connector_splits, JobReschedulePostUpdates, SplitAssignment, ThrottleConfig,
@@ -112,6 +113,8 @@ pub struct ReplaceStreamJobPlan {
     pub streaming_job: StreamingJob,
     /// The temporary dummy job fragments id of new table fragment
     pub tmp_id: u32,
+    /// The state table ids to be dropped.
+    pub to_drop_state_table_ids: Vec<TableId>,
 }
 
 impl ReplaceStreamJobPlan {
@@ -121,6 +124,8 @@ impl ReplaceStreamJobPlan {
             let fragment_change = CommandFragmentChanges::NewFragment(
                 self.streaming_job.id().into(),
                 InflightFragmentInfo {
+                    fragment_id: fragment.fragment_id,
+                    nodes: fragment.nodes.clone().unwrap(),
                     actors: fragment
                         .actors
                         .iter()
@@ -142,14 +147,30 @@ impl ReplaceStreamJobPlan {
                         .collect(),
                 },
             );
-            assert!(fragment_changes
-                .insert(fragment.fragment_id, fragment_change)
-                .is_none());
+            fragment_changes
+                .try_insert(fragment.fragment_id, fragment_change)
+                .expect("non-duplicate");
         }
         for fragment in self.old_fragments.fragments.values() {
-            assert!(fragment_changes
-                .insert(fragment.fragment_id, CommandFragmentChanges::RemoveFragment)
-                .is_none());
+            fragment_changes
+                .try_insert(fragment.fragment_id, CommandFragmentChanges::RemoveFragment)
+                .expect("non-duplicate");
+        }
+        for (fragment_id, merge_updates) in &self.merge_updates {
+            let replace_map = merge_updates
+                .iter()
+                .filter_map(|m| {
+                    m.new_upstream_fragment_id.map(|new_upstream_fragment_id| {
+                        (m.upstream_fragment_id, new_upstream_fragment_id)
+                    })
+                })
+                .collect();
+            fragment_changes
+                .try_insert(
+                    *fragment_id,
+                    CommandFragmentChanges::ReplaceNodeUpstream(replace_map),
+                )
+                .expect("non-duplicate");
         }
         fragment_changes
     }
@@ -186,8 +207,6 @@ impl ReplaceStreamJobPlan {
 pub struct CreateStreamingJobCommandInfo {
     #[educe(Debug(ignore))]
     pub stream_job_fragments: StreamJobFragments,
-    /// Refer to the doc on [`crate::manager::MetadataManager::get_upstream_root_fragments`] for the meaning of "root".
-    pub upstream_root_actors: HashMap<TableId, Vec<ActorId>>,
     pub dispatchers: HashMap<FragmentId, HashMap<ActorId, Vec<Dispatcher>>>,
     pub init_split_assignment: SplitAssignment,
     pub definition: String,
@@ -208,6 +227,8 @@ impl CreateStreamingJobCommandInfo {
                 (
                     fragment.fragment_id,
                     InflightFragmentInfo {
+                        fragment_id: fragment.fragment_id,
+                        nodes: fragment.nodes.clone().unwrap(),
                         actors: fragment
                             .actors
                             .iter()
@@ -293,6 +314,7 @@ pub enum Command {
     CreateStreamingJob {
         info: CreateStreamingJobCommandInfo,
         job_type: CreateStreamingJobType,
+        cross_db_snapshot_backfill_info: SnapshotBackfillInfo,
     },
     MergeSnapshotBackfillStreamingJobs(
         HashMap<TableId, (SnapshotBackfillInfo, InflightStreamingJobInfo)>,
@@ -379,7 +401,7 @@ impl Command {
                     .map(|fragment_id| (*fragment_id, CommandFragmentChanges::RemoveFragment))
                     .collect(),
             ),
-            Command::CreateStreamingJob { info, job_type } => {
+            Command::CreateStreamingJob { info, job_type, .. } => {
                 assert!(
                     !matches!(job_type, CreateStreamingJobType::SnapshotBackfill(_)),
                     "should handle fragment changes separately for snapshot backfill"
@@ -552,26 +574,27 @@ impl CommandContext {
         let (sst_to_context, synced_ssts, new_table_watermarks, old_value_ssts) =
             collect_resp_info(resps);
 
-        let new_table_fragment_infos = if let Some(Command::CreateStreamingJob { info, job_type }) =
-            &self.command
-            && !matches!(job_type, CreateStreamingJobType::SnapshotBackfill(_))
-        {
-            let table_fragments = &info.stream_job_fragments;
-            let mut table_ids: HashSet<_> = table_fragments
-                .internal_table_ids()
-                .into_iter()
-                .map(TableId::new)
-                .collect();
-            if let Some(mv_table_id) = table_fragments.mv_table_id() {
-                table_ids.insert(TableId::new(mv_table_id));
-            }
+        let new_table_fragment_infos =
+            if let Some(Command::CreateStreamingJob { info, job_type, .. }) = &self.command
+                && !matches!(job_type, CreateStreamingJobType::SnapshotBackfill(_))
+            {
+                let table_fragments = &info.stream_job_fragments;
+                let mut table_ids: HashSet<_> = table_fragments
+                    .internal_table_ids()
+                    .into_iter()
+                    .map(TableId::new)
+                    .collect();
+                if let Some(mv_table_id) = table_fragments.mv_table_id() {
+                    table_ids.insert(TableId::new(mv_table_id));
+                }
 
-            vec![NewTableFragmentInfo { table_ids }]
-        } else {
-            vec![]
-        };
+                vec![NewTableFragmentInfo { table_ids }]
+            } else {
+                vec![]
+            };
 
         let mut mv_log_store_truncate_epoch = HashMap::new();
+        // TODO: may collect cross db snapshot backfill
         let mut update_truncate_epoch =
             |table_id: TableId, truncate_epoch| match mv_log_store_truncate_epoch
                 .entry(table_id.table_id)
@@ -688,6 +711,7 @@ impl Command {
                             ..
                         },
                     job_type,
+                    ..
                 } => {
                     let actor_dispatchers = dispatchers
                         .values()
@@ -956,9 +980,12 @@ impl Command {
         mutation
     }
 
-    pub fn actors_to_create(&self) -> Option<HashMap<WorkerId, Vec<StreamActorWithUpstreams>>> {
+    pub fn actors_to_create(
+        &self,
+        graph_info: &InflightDatabaseInfo,
+    ) -> Option<StreamJobActorsToCreate> {
         match self {
-            Command::CreateStreamingJob { info, job_type } => {
+            Command::CreateStreamingJob { info, job_type, .. } => {
                 let mut map = match job_type {
                     CreateStreamingJobType::Normal => HashMap::new(),
                     CreateStreamingJobType::SinkIntoTable(replace_table) => {
@@ -975,13 +1002,25 @@ impl Command {
                 Some(map)
             }
             Command::RescheduleFragment { reschedules, .. } => {
-                let mut map: HashMap<WorkerId, Vec<_>> = HashMap::new();
-                for (actor, status) in reschedules
-                    .values()
-                    .flat_map(|reschedule| reschedule.newly_created_actors.iter())
+                let mut map: HashMap<WorkerId, HashMap<_, (_, Vec<_>)>> = HashMap::new();
+                for (fragment_id, actor, status) in
+                    reschedules.iter().flat_map(|(fragment_id, reschedule)| {
+                        reschedule
+                            .newly_created_actors
+                            .iter()
+                            .map(|(actors, status)| (*fragment_id, actors, status))
+                    })
                 {
                     let worker_id = status.location.as_ref().unwrap().worker_node_id as _;
-                    map.entry(worker_id).or_default().push(actor.clone());
+                    map.entry(worker_id)
+                        .or_default()
+                        .entry(fragment_id)
+                        .or_insert_with(|| {
+                            let node = graph_info.fragment(fragment_id).nodes.clone();
+                            (node, vec![])
+                        })
+                        .1
+                        .push(actor.clone());
                 }
                 Some(map)
             }
