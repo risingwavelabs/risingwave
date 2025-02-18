@@ -555,6 +555,8 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                         if !*flushed {
                             writer.write_chunk(chunk, *epoch, *start_seq_id, *end_seq_id)?;
                             *flushed = true;
+                        } else {
+                            break;
                         }
                     }
                     LogStoreBufferItem::Flushed { .. } => {
