@@ -12,7 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod batch_iceberg_count_star;
-pub mod batch_iceberg_predicate_pushdown;
-pub(crate) mod batch_project_merge_rule;
-pub mod batch_push_limit_to_scan_rule;
+use crate::optimizer::plan_node::StreamSyncLogStore;
+use crate::optimizer::rule::{BoxedRule, Rule};
+use crate::PlanRef;
+
+pub struct AddLogstoreRule {}
+
+impl Rule for AddLogstoreRule {
+    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
+        plan.as_stream_hash_join()?;
+        let log_store_plan = StreamSyncLogStore::new(plan);
+        Some(log_store_plan.into())
+    }
+}
+
+impl AddLogstoreRule {
+    pub fn create() -> BoxedRule {
+        Box::new(Self {})
+    }
+}

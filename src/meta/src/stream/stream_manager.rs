@@ -36,6 +36,7 @@ use crate::barrier::{
     BarrierScheduler, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
     ReplaceStreamJobPlan, SnapshotBackfillInfo,
 };
+use crate::controller::catalog::DropTableConnectorContext;
 use crate::error::bail_invalid_parameter;
 use crate::manager::{
     MetaSrvEnv, MetadataManager, NotificationVersion, StreamingJob, StreamingJobType,
@@ -57,11 +58,6 @@ pub struct CreateStreamingJobOption {
 pub struct CreateStreamingJobContext {
     /// New dispatchers to add from upstream actors to downstream actors.
     pub dispatchers: HashMap<FragmentId, HashMap<ActorId, Vec<Dispatcher>>>,
-
-    /// Upstream root fragments' actor ids grouped by table id.
-    ///
-    /// Refer to the doc on [`MetadataManager::get_upstream_root_fragments`] for the meaning of "root".
-    pub upstream_root_actors: HashMap<TableId, Vec<ActorId>>,
 
     /// Internal tables in the streaming job.
     pub internal_tables: BTreeMap<u32, Table>,
@@ -192,6 +188,9 @@ pub struct ReplaceStreamJobContext {
     pub streaming_job: StreamingJob,
 
     pub tmp_id: u32,
+
+    /// Used for dropping an associated source. Dropping source and related internal tables.
+    pub drop_table_connector_ctx: Option<DropTableConnectorContext>,
 }
 
 /// `GlobalStreamManager` manages all the streams in the system.
@@ -341,7 +340,6 @@ impl GlobalStreamManager {
         CreateStreamingJobContext {
             streaming_job,
             dispatchers,
-            upstream_root_actors,
             definition,
             create_type,
             job_type,
@@ -378,6 +376,7 @@ impl GlobalStreamManager {
                 init_split_assignment,
                 streaming_job,
                 tmp_id: tmp_table_id.table_id,
+                to_drop_state_table_ids: Vec::new(), /* the create streaming job command will not drop any state table */
             });
         }
 
@@ -400,7 +399,6 @@ impl GlobalStreamManager {
 
         let info = CreateStreamingJobCommandInfo {
             stream_job_fragments,
-            upstream_root_actors,
             dispatchers,
             init_split_assignment,
             definition: definition.clone(),
@@ -462,6 +460,7 @@ impl GlobalStreamManager {
             dispatchers,
             tmp_id,
             streaming_job,
+            drop_table_connector_ctx,
             ..
         }: ReplaceStreamJobContext,
     ) -> MetaResult<()> {
@@ -473,6 +472,10 @@ impl GlobalStreamManager {
         } else {
             self.source_manager.allocate_splits(&tmp_table_id).await?
         };
+        tracing::info!(
+            "replace_stream_job - allocate split: {:?}",
+            init_split_assignment
+        );
 
         self.barrier_scheduler
             .run_config_change_command_with_pause(
@@ -485,6 +488,15 @@ impl GlobalStreamManager {
                     init_split_assignment,
                     streaming_job,
                     tmp_id,
+                    to_drop_state_table_ids: {
+                        if let Some(drop_table_connector_ctx) = &drop_table_connector_ctx {
+                            vec![TableId::new(
+                                drop_table_connector_ctx.to_remove_state_table_id as _,
+                            )]
+                        } else {
+                            Vec::new()
+                        }
+                    },
                 }),
             )
             .await?;
