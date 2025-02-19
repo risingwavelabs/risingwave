@@ -261,6 +261,10 @@ select map_from_entries(array[row('a',1), row('b',2), row('c',3)]);
 ----
 {a:1,b:2,c:3}
 
+query ?
+select map_from_entries_set([row('a',1), row('b',2), row('c',3)]);
+----
+{a:1,b:2,c:3}
 
 query error
 select map_from_entries(array[row('a',1), row('a',2), row('c',3)]);

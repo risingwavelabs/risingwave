@@ -72,6 +72,13 @@ fn map_from_entries(entries: ListRef<'_>) -> Result<MapValue, ExprError> {
     MapValue::try_from_entries(entries.to_owned()).map_err(ExprError::Custom)
 }
 
+#[function(
+    "map_from_entries(setof anyelement) -> anymap",
+    type_infer = "map_from_entries_type_infer"
+)]
+fn map_from_entries_set(entries: impl Iterator<Item = ListRef<'_>>) -> Result<MapValue, ExprError> {
+    MapValue::try_from_entries(entries.collect()).map_err(ExprError::Custom)
+}
 /// # Example
 ///
 /// ```slt
