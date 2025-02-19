@@ -204,12 +204,12 @@ impl<S: LocalStateStore> WriteFuture<S> {
 
     fn paused(
         duration: Duration,
-        future: StreamFuture<BoxedMessageStream>,
+        stream: BoxedMessageStream,
         write_state: LogStoreWriteState<S>,
     ) -> Self {
         Self::Paused {
             duration,
-            future,
+            future: stream.into_future(),
             write_state,
         }
     }
@@ -355,7 +355,8 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                                             initial_write_state = write_state;
                                             continue 'recreate_consume_stream;
                                         } else {
-                                            write_future = WriteFuture::receive_from_upstream(
+                                            write_future = WriteFuture::paused(
+                                                Duration::from_millis(256),
                                                 stream,
                                                 write_state,
                                             );
@@ -381,10 +382,21 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                                                 end_seq_id,
                                             );
                                         } else {
-                                            write_future = WriteFuture::receive_from_upstream(
-                                                stream,
-                                                write_state,
-                                            );
+                                            // If buffer 90% full, pause the stream for a while, let downstream do some processing
+                                            // to avoid flushing.
+                                            if buffer.buffer.len() >= self.buffer_max_size * 9 / 10
+                                            {
+                                                write_future = WriteFuture::paused(
+                                                    Duration::from_millis(256),
+                                                    stream,
+                                                    write_state,
+                                                );
+                                            } else {
+                                                write_future = WriteFuture::receive_from_upstream(
+                                                    stream,
+                                                    write_state,
+                                                );
+                                            }
                                         }
                                     }
                                     // FIXME(kwannoel): This should truncate the logstore,
