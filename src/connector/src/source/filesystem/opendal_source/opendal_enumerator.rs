@@ -84,17 +84,12 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
             match object_lister.next().await {
                 Some(Ok(object)) => {
                     let name = object.path().to_string();
-                    let om = object.metadata();
-
-                    let t = match om.last_modified() {
-                        Some(t) => t,
-                        None => DateTime::<Utc>::from_timestamp(0, 0).unwrap_or_default(),
-                    };
-                    let timestamp = Timestamptz::from(t);
-                    let size = om.content_length() as i64;
+                    let timestamp = Timestamptz::from(
+                        DateTime::<Utc>::from_timestamp(0, 0).unwrap_or_default(),
+                    );
                     let metadata = FsPageItem {
                         name,
-                        size,
+                        size: 0,
                         timestamp,
                     };
                     Some((Ok(metadata), object_lister))
