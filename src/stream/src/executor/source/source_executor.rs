@@ -695,6 +695,17 @@ impl<S: StateStore> SourceExecutor<S> {
                             * WAIT_BARRIER_MULTIPLE_TIMES;
                     }
 
+                    latest_state.iter().for_each(|(split_id, new_split_impl)| {
+                        self.stream_source_core
+                            .as_mut()
+                            .unwrap()
+                            .latest_split_info
+                            .get_mut(split_id)
+                            .map(|split_impl| {
+                                *split_impl = new_split_impl.clone();
+                            });
+                    });
+
                     self.stream_source_core
                         .as_mut()
                         .unwrap()
