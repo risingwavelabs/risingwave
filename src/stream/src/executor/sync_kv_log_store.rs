@@ -79,6 +79,7 @@ use risingwave_storage::store::{
 };
 use risingwave_storage::StateStore;
 use rw_futures_util::drop_either_future;
+use tokio::time::{sleep, Duration};
 
 use crate::common::log_store_impl::kv_log_store::buffer::LogStoreBufferItem;
 use crate::common::log_store_impl::kv_log_store::reader::timeout_auto_rebuild::TimeoutAutoRebuildIter;
@@ -144,6 +145,11 @@ struct FlushedChunkInfo {
 }
 
 enum WriteFuture<S: LocalStateStore> {
+    Paused {
+        duration: Duration,
+        future: StreamFuture<BoxedMessageStream>,
+        write_state: LogStoreWriteState<S>, // Just used to hold the state
+    },
     ReceiveFromUpstream {
         future: StreamFuture<BoxedMessageStream>,
         write_state: LogStoreWriteState<S>,
@@ -196,10 +202,35 @@ impl<S: LocalStateStore> WriteFuture<S> {
         }
     }
 
+    fn paused(
+        duration: Duration,
+        future: StreamFuture<BoxedMessageStream>,
+        write_state: LogStoreWriteState<S>,
+    ) -> Self {
+        Self::Paused {
+            duration,
+            future,
+            write_state,
+        }
+    }
+
     async fn next_event(
         &mut self,
     ) -> StreamExecutorResult<(BoxedMessageStream, LogStoreWriteState<S>, WriteFutureEvent)> {
         match self {
+            WriteFuture::Paused {
+                duration, future, ..
+            } => {
+                sleep(*duration).await;
+                let (opt, stream) = future.await;
+                must_match!(replace(self, WriteFuture::Empty), WriteFuture::Paused { write_state, .. } => {
+                    opt
+                    .ok_or_else(|| anyhow!("end of upstream input").into())
+                    .and_then(|result| result.map(|item| {
+                        (stream, write_state, WriteFutureEvent::UpstreamMessageReceived(item))
+                    }))
+                })
+            }
             WriteFuture::ReceiveFromUpstream { future, .. } => {
                 let (opt, stream) = future.await;
                 must_match!(replace(self, WriteFuture::Empty), WriteFuture::ReceiveFromUpstream { write_state, .. } => {
