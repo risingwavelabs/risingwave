@@ -173,7 +173,8 @@ impl JsonRef {
             }
             let mut new_used_refs = used_refs.clone();
             new_used_refs.push(ref_url_string);
-
+            Box::pin(self.deref(&mut schema, &ref_url_no_fragment, &new_used_refs)).await?;
+            
             *value = schema;
         }
 

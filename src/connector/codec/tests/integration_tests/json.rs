@@ -50,6 +50,17 @@ async fn test_json_schema_parse() {
                   "type": "string"
                 }}
               }}
+            }},
+            "recurrentType": {{
+              "type": "object",
+              "properties": {{
+                "id": {{
+                  "$ref": "file://{test_id_type_file_path}#/definitions/idType"
+                }},
+                "next": {{
+                  "$ref": "file://{test_id_type_file_path}#/definitions/recurrentType"
+                }}
+              }}
             }}
           }},
           "properties": {{
@@ -73,6 +84,9 @@ async fn test_json_schema_parse() {
                   "$ref": "#/definitions/marketArray"
                 }}
               }}
+            }},
+            "recurrent": {{
+              "$ref": "#/definitions/recurrentType"
             }}
           }},
           "required": [
@@ -108,8 +122,24 @@ async fn test_json_schema_parse() {
             },
             "marketObj": {
               "additionalProperties": {
-                "__reference__": {},
                 "type": "string"
+              },
+              "type": "object"
+            },
+            "recurrentType": {
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "next": {
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "next": {}
+                  },
+                  "type": "object"
+                }
               },
               "type": "object"
             },
@@ -119,7 +149,6 @@ async fn test_json_schema_parse() {
           },
           "properties": {
             "cats": {
-              "__reference__": {},
               "additionalProperties": {
                 "items": {
                   "type": "string"
@@ -129,21 +158,17 @@ async fn test_json_schema_parse() {
               "type": "object"
             },
             "id": {
-              "__reference__": {},
               "type": "string"
             },
             "meta": {
               "properties": {
                 "active": {
-                  "__reference__": {},
                   "additionalProperties": {
-                    "__reference__": {},
                     "type": "string"
                   },
                   "type": "object"
                 },
                 "tags": {
-                  "__reference__": {},
                   "additionalProperties": {
                     "items": {
                       "type": "string"
@@ -156,12 +181,25 @@ async fn test_json_schema_parse() {
               "type": "object"
             },
             "name": {
-              "__reference__": {
-                "description": "Name of the market subject"
-              },
               "additionalProperties": {
-                "__reference__": {},
                 "type": "string"
+              },
+              "type": "object"
+            },
+            "recurrent": {
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "next": {
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "next": {}
+                  },
+                  "type": "object"
+                }
               },
               "type": "object"
             }
@@ -175,15 +213,22 @@ async fn test_json_schema_parse() {
     .assert_eq(&serde_json::to_string_pretty(&json_schema.0).unwrap());
 
     expect![[r#"
-            [
-                cats(#1): Jsonb,
-                id(#2): Varchar,
-                meta(#3): Struct {
-                    active: Jsonb,
-                    tags: Jsonb,
+        [
+            cats(#1): Jsonb,
+            id(#2): Varchar,
+            meta(#3): Struct {
+                active: Jsonb,
+                tags: Jsonb,
+            },
+            name(#4): Jsonb,
+            recurrent(#5): Struct {
+                id: Varchar,
+                next: Struct {
+                    id: Varchar,
+                    next: Varchar,
                 },
-                name(#4): Jsonb,
-            ]
-        "#]]
+            },
+        ]
+    "#]]
     .assert_debug_eq(&column_display);
 }
