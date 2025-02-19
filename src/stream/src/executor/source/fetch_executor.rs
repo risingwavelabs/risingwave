@@ -340,7 +340,6 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                             if let Some((split_id, offset)) = mapping.into_iter().next() {
                                 // When `offset = usize::MAX` , it indicates that reading the current file (split_id) is finished.
                                 // At this point, it can be deleted from the state table.
-                                // This chunk serves only as an EOF marker, so it will be skipped and not yielded to downstream.
                                 if offset.parse::<usize>().unwrap() == usize::MAX {
                                     splits_on_fetch -= 1;
                                     state_store_handler.delete(split_id).await?;
@@ -361,14 +360,14 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                     state_store_handler
                                         .set(split_id, fs_split.encode_to_json())
                                         .await?;
-                                    let chunk = prune_additional_cols(
-                                        &chunk,
-                                        split_idx,
-                                        offset_idx,
-                                        &source_desc.columns,
-                                    );
-                                    yield Message::Chunk(chunk);
                                 }
+                                let chunk = prune_additional_cols(
+                                    &chunk,
+                                    split_idx,
+                                    offset_idx,
+                                    &source_desc.columns,
+                                );
+                                yield Message::Chunk(chunk);
                             }
                         }
                     }

@@ -303,7 +303,7 @@ async fn build_opendal_fs_list_stream<Src: OpendalSource>(
                 Ok(res) => {
                     if matcher
                         .as_ref()
-                        .map(|m| m.matches(&res.name))
+                        .map(|m| m.matches(&res.name) || m.to_string() == res.name)
                         .unwrap_or(true)
                     {
                         yield res
@@ -331,7 +331,7 @@ pub async fn build_opendal_fs_list_for_batch<Src: OpendalSource>(lister: Opendal
             Ok(res) => {
                 if matcher
                     .as_ref()
-                    .map(|m| m.matches(&res.name))
+                    .map(|m| m.matches(&res.name) || m.to_string() == res.name)
                     .unwrap_or(true)
                 {
                     let split = OpendalFsSplit::new(res.name, 0, res.size as usize);

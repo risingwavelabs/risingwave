@@ -19,6 +19,7 @@ use risingwave_common::array::arrow::arrow_array_iceberg::RecordBatch;
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::{ArrayBuilderImpl, DataChunk, StreamChunk};
 use risingwave_common::types::{Datum, ScalarImpl};
+use tokio_stream::StreamExt;
 
 use crate::parser::ConnectorResult;
 use crate::source::SourceColumnDesc;
@@ -51,11 +52,15 @@ impl ParquetParser {
             tokio_util::compat::Compat<opendal::FuturesAsyncReader>,
         >,
     ) {
-        #[for_await]
-        for record_batch in record_batch_stream {
+        let mut record_batch_stream = record_batch_stream.peekable();
+
+        while let Some(record_batch) = record_batch_stream.next().await {
             let record_batch: RecordBatch = record_batch?;
-            // Convert each record batch into a stream chunk according to user defined schema.
-            let chunk: StreamChunk = self.convert_record_batch_to_stream_chunk(record_batch)?;
+
+            let is_last = record_batch_stream.peek().await.is_none();
+
+            let chunk: StreamChunk =
+                self.convert_record_batch_to_stream_chunk(record_batch, is_last)?;
 
             yield chunk;
         }
@@ -89,6 +94,7 @@ impl ParquetParser {
     fn convert_record_batch_to_stream_chunk(
         &mut self,
         record_batch: RecordBatch,
+        is_last: bool,
     ) -> Result<StreamChunk, crate::error::ConnectorError> {
         const MAX_HIDDEN_COLUMN_NUMS: usize = 3;
         let column_size = self.rw_columns.len();
@@ -131,15 +137,20 @@ impl ParquetParser {
                                 risingwave_pb::plan_common::additional_column::ColumnType::Offset(_) =>{
                                     let mut array_builder =
                                     ArrayBuilderImpl::with_type(column_size, source_column.data_type.clone());
-                                    for _ in 0..record_batch.num_rows(){
-                                        let datum: Datum = Some(ScalarImpl::Utf8((self.offset).to_string().into()));
-                                        self.inc_offset();
+                                    for i in 0..record_batch.num_rows(){
+                                        let datum: Datum = if is_last && i == record_batch.num_rows() - 1 {
+                                            Some(ScalarImpl::Utf8((usize::MAX).to_string().into()))
+                                        } else {
+                                            Some(ScalarImpl::Utf8((self.offset).to_string().into()))
+                                        };
+                                        if !(is_last && i == record_batch.num_rows() - 1) {
+                                            self.inc_offset();
+                                        }
                                         array_builder.append(datum);
                                     }
                                     let res = array_builder.finish();
                                     let column = Arc::new(res);
                                     chunk_columns.push(column);
-
                                 },
                                 risingwave_pb::plan_common::additional_column::ColumnType::Filename(_) => {
                                     let mut array_builder =
