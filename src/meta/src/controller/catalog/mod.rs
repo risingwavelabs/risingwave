@@ -266,20 +266,20 @@ impl CatalogController {
         // get connector usage by source/sink
         // the expect format is like:
         // {
-        //     "source": {
-        //         "$actor_id": {
+        //     "source": [{
+        //         "$source_id": {
         //             "connector": "kafka",
         //             "format": "plain",
         //             "encode": "json"
         //         },
-        //     },
-        //     "sink": {
-        //         "$actor_id": {
+        //     }],
+        //     "sink": [{
+        //         "$sink_id": {
         //             "connector": "pulsar",
         //             "format": "upsert",
         //             "encode": "avro"
         //         },
-        //     },
+        //     }],
         // }
 
         let inner = self.inner.read().await;
@@ -309,7 +309,7 @@ impl CatalogController {
                 .unwrap_or_default()
         };
 
-        let source_report: Vec<serde_json::Value> = source_props_and_info
+        let source_report: Vec<jsonbb::Value> = source_props_and_info
             .iter()
             .map(|(oid, property, info)| {
                 let connector_name = get_connector_from_property(property);
@@ -320,7 +320,7 @@ impl CatalogController {
                     format = Some(pb_info.format().as_str_name());
                     encode = Some(pb_info.row_encode().as_str_name());
                 }
-                serde_json::json!({
+                jsonbb::json!({
                     oid.to_string(): {
                         "connector": connector_name,
                         "format": format,
@@ -330,7 +330,7 @@ impl CatalogController {
             })
             .collect_vec();
 
-        let sink_report: Vec<serde_json::Value> = sink_props_and_info
+        let sink_report: Vec<jsonbb::Value> = sink_props_and_info
             .iter()
             .map(|(oid, property, info)| {
                 let connector_name = get_connector_from_property(property);
@@ -341,7 +341,7 @@ impl CatalogController {
                     format = Some(pb_info.format().as_str_name());
                     encode = Some(pb_info.encode().as_str_name());
                 }
-                serde_json::json!({
+                jsonbb::json!({
                     oid.to_string(): {
                         "connector": connector_name,
                         "format": format,
