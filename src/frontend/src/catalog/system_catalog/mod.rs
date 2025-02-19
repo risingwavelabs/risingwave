@@ -42,13 +42,13 @@ use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::subscription_catalog::SubscriptionCatalog;
 use crate::catalog::view_catalog::ViewCatalog;
-use crate::catalog::IndexCatalog;
+use crate::catalog::{IndexCatalog, OwnedByUserCatalog};
 use crate::meta_client::FrontendMetaClient;
 use crate::session::AuthContext;
 use crate::user::user_catalog::UserCatalog;
 use crate::user::user_privilege::available_prost_privilege;
 use crate::user::user_service::UserInfoReader;
-use crate::user::UserId;
+use crate::user::{has_access_to_object, UserId};
 use crate::TableCatalog;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -135,57 +135,234 @@ impl SysCatalogReaderImpl {
             system_params,
         }
     }
-}
 
-macro_rules! generate_read_all_method {
-    ($method_name:ident, $iter_method:ident, $catalog_type:ty) => {
-        fn $method_name<T, F>(
-            &self,
-            filter: impl Fn(&SchemaCatalog, &Arc<$catalog_type>) -> bool,
-            f: F,
-        ) -> crate::error::Result<Vec<T>>
-        where
-            T: Fields,
-            F: Fn(&SchemaCatalog, &Arc<$catalog_type>) -> T + Copy,
-        {
-            let catalog_reader = self.catalog_reader.read_guard();
-            let schemas = catalog_reader.iter_schemas(&self.auth_context.database)?;
-            Ok(schemas
-                .flat_map(|schema| {
-                    schema
-                        .$iter_method()
-                        .filter(|t| filter(schema, t))
-                        .map(|t| f(schema, t))
-                })
-                .collect())
-        }
-    };
-}
+    fn list_all_generic<T, I, F1, F2>(
+        &self,
+        iter_fn: F1,
+        filter: impl Fn(&SchemaCatalog, &Arc<I>) -> bool,
+        transform: F2,
+    ) -> crate::error::Result<Vec<T>>
+    where
+        T: Fields,
+        I: 'static,
+        F1: Fn(&SchemaCatalog) -> Box<dyn Iterator<Item = &Arc<I>> + '_>,
+        F2: Fn(&SchemaCatalog, &Arc<I>) -> T + Copy,
+    {
+        let catalog_reader = self.catalog_reader.read_guard();
+        let schemas = catalog_reader.iter_schemas(&self.auth_context.database)?;
 
-impl SysCatalogReaderImpl {
-    generate_read_all_method!(read_all_tables, iter_user_table, TableCatalog);
+        Ok(schemas
+            .flat_map(|schema| {
+                iter_fn(schema)
+                    .filter(|t| filter(schema, t))
+                    .map(|t| transform(schema, t))
+            })
+            .collect())
+    }
 
-    generate_read_all_method!(read_all_mviews, iter_all_mvs, TableCatalog);
+    fn list_all_tables<T, F>(&self, transform: F) -> crate::error::Result<Vec<T>>
+    where
+        T: Fields,
+        F: Fn(&SchemaCatalog, &Arc<TableCatalog>) -> T + Copy,
+    {
+        self.list_all_generic(
+            |schema| Box::new(schema.iter_user_table()),
+            |_, _| true,
+            transform,
+        )
+    }
 
-    generate_read_all_method!(read_all_views, iter_view, ViewCatalog);
+    fn list_all_accessible_tables<T, F>(&self, transform: F) -> crate::error::Result<Vec<T>>
+    where
+        T: Fields,
+        F: Fn(&SchemaCatalog, &Arc<TableCatalog>) -> T + Copy,
+    {
+        let user_reader = self.user_info_reader.read_guard();
+        let current_user = user_reader
+            .get_user_by_name(&self.auth_context.user_name)
+            .expect("user not found");
 
-    generate_read_all_method!(read_all_indexes, iter_index, IndexCatalog);
+        self.list_all_generic(
+            |schema| Box::new(schema.iter_user_table()),
+            |schema, table| {
+                has_access_to_object(current_user, &schema.name, table.id().table_id, table.owner)
+            },
+            transform,
+        )
+    }
 
-    generate_read_all_method!(
-        read_all_system_tables,
-        iter_system_tables,
-        SystemTableCatalog
-    );
+    fn list_all_mviews<T, F>(&self, transform: F) -> crate::error::Result<Vec<T>>
+    where
+        T: Fields,
+        F: Fn(&SchemaCatalog, &Arc<TableCatalog>) -> T + Copy,
+    {
+        self.list_all_generic(
+            |schema| Box::new(schema.iter_all_mvs()),
+            |_, _| true,
+            transform,
+        )
+    }
 
-    generate_read_all_method!(read_all_sources, iter_source, SourceCatalog);
+    fn list_all_accessible_mviews<T, F>(&self, transform: F) -> crate::error::Result<Vec<T>>
+    where
+        T: Fields,
+        F: Fn(&SchemaCatalog, &Arc<TableCatalog>) -> T + Copy,
+    {
+        let user_reader = self.user_info_reader.read_guard();
+        let current_user = user_reader
+            .get_user_by_name(&self.auth_context.user_name)
+            .expect("user not found");
 
-    generate_read_all_method!(read_all_sinks, iter_sink, SinkCatalog);
+        self.list_all_generic(
+            |schema| Box::new(schema.iter_all_mvs()),
+            |schema, table| {
+                has_access_to_object(current_user, &schema.name, table.id().table_id, table.owner)
+            },
+            transform,
+        )
+    }
 
-    generate_read_all_method!(
-        read_all_subscriptions,
-        iter_subscription,
-        SubscriptionCatalog
-    );
+    fn list_all_views<T, F>(&self, transform: F) -> crate::error::Result<Vec<T>>
+    where
+        T: Fields,
+        F: Fn(&SchemaCatalog, &Arc<ViewCatalog>) -> T + Copy,
+    {
+        self.list_all_generic(
+            |schema| Box::new(schema.iter_view()),
+            |_, _| true,
+            transform,
+        )
+    }
+
+    fn list_all_accessible_views<T, F>(&self, transform: F) -> crate::error::Result<Vec<T>>
+    where
+        T: Fields,
+        F: Fn(&SchemaCatalog, &Arc<ViewCatalog>) -> T + Copy,
+    {
+        let user_reader = self.user_info_reader.read_guard();
+        let current_user = user_reader
+            .get_user_by_name(&self.auth_context.user_name)
+            .expect("user not found");
+
+        self.list_all_generic(
+            |schema| Box::new(schema.iter_view()),
+            |schema, view| {
+                view.is_system_view()
+                    || has_access_to_object(current_user, &schema.name, view.id, view.owner)
+            },
+            transform,
+        )
+    }
+
+    fn list_all_indexes<T, F>(&self, transform: F) -> crate::error::Result<Vec<T>>
+    where
+        T: Fields,
+        F: Fn(&SchemaCatalog, &Arc<IndexCatalog>) -> T + Copy,
+    {
+        self.list_all_generic(
+            |schema| Box::new(schema.iter_index()),
+            |_, _| true,
+            transform,
+        )
+    }
+
+    fn list_all_accessible_indexes<T, F>(&self, transform: F) -> crate::error::Result<Vec<T>>
+    where
+        T: Fields,
+        F: Fn(&SchemaCatalog, &Arc<IndexCatalog>) -> T + Copy,
+    {
+        let user_reader = self.user_info_reader.read_guard();
+        let current_user = user_reader
+            .get_user_by_name(&self.auth_context.user_name)
+            .expect("user not found");
+
+        self.list_all_generic(
+            |schema| Box::new(schema.iter_index()),
+            |schema, index| {
+                has_access_to_object(current_user, &schema.name, index.id.index_id, index.owner())
+            },
+            transform,
+        )
+    }
+
+    fn list_all_system_tables<T, F>(&self, transform: F) -> crate::error::Result<Vec<T>>
+    where
+        T: Fields,
+        F: Fn(&SchemaCatalog, &Arc<SystemTableCatalog>) -> T + Copy,
+    {
+        self.list_all_generic(
+            |schema| Box::new(schema.iter_system_tables()),
+            |_, _| true,
+            transform,
+        )
+    }
+
+    fn list_all_accessible_sources<T, F>(&self, transform: F) -> crate::error::Result<Vec<T>>
+    where
+        T: Fields,
+        F: Fn(&SchemaCatalog, &Arc<SourceCatalog>) -> T + Copy,
+    {
+        let user_reader = self.user_info_reader.read_guard();
+        let current_user = user_reader
+            .get_user_by_name(&self.auth_context.user_name)
+            .expect("user not found");
+
+        self.list_all_generic(
+            |schema| Box::new(schema.iter_source()),
+            |schema, source| {
+                has_access_to_object(current_user, &schema.name, source.id, source.owner)
+            },
+            transform,
+        )
+    }
+
+    fn list_all_accessible_sinks<T, F>(&self, transform: F) -> crate::error::Result<Vec<T>>
+    where
+        T: Fields,
+        F: Fn(&SchemaCatalog, &Arc<SinkCatalog>) -> T + Copy,
+    {
+        let user_reader = self.user_info_reader.read_guard();
+        let current_user = user_reader
+            .get_user_by_name(&self.auth_context.user_name)
+            .expect("user not found");
+
+        self.list_all_generic(
+            |schema| Box::new(schema.iter_sink()),
+            |schema, sink| {
+                has_access_to_object(
+                    current_user,
+                    &schema.name,
+                    sink.id.sink_id,
+                    sink.owner.user_id,
+                )
+            },
+            transform,
+        )
+    }
+
+    fn list_all_accessible_subscriptions<T, F>(&self, transform: F) -> crate::error::Result<Vec<T>>
+    where
+        T: Fields,
+        F: Fn(&SchemaCatalog, &Arc<SubscriptionCatalog>) -> T + Copy,
+    {
+        let user_reader = self.user_info_reader.read_guard();
+        let current_user = user_reader
+            .get_user_by_name(&self.auth_context.user_name)
+            .expect("user not found");
+
+        self.list_all_generic(
+            |schema| Box::new(schema.iter_subscription()),
+            |schema, subscription| {
+                has_access_to_object(
+                    current_user,
+                    &schema.name,
+                    subscription.id.subscription_id,
+                    subscription.owner.user_id,
+                )
+            },
+            transform,
+        )
+    }
 }
 
 pub struct BuiltinTable {

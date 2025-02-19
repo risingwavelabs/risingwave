@@ -19,7 +19,6 @@ use risingwave_pb::user::grant_privilege::Object;
 
 use crate::catalog::system_catalog::{get_acl_items, SysCatalogReaderImpl};
 use crate::error::Result;
-use crate::user::has_access_to_object;
 
 #[derive(Fields)]
 struct RwMaterializedView {
@@ -41,34 +40,26 @@ struct RwMaterializedView {
 #[system_catalog(table, "rw_catalog.rw_materialized_views")]
 fn read_rw_materialized_views(reader: &SysCatalogReaderImpl) -> Result<Vec<RwMaterializedView>> {
     let user_reader = reader.user_info_reader.read_guard();
-    let current_user = user_reader
-        .get_user_by_name(&reader.auth_context.user_name)
-        .expect("user not found");
     let users = user_reader.get_all_users();
     let username_map = user_reader.get_user_name_map();
 
-    reader.read_all_mviews::<RwMaterializedView, _>(
-        |schema, table| {
-            has_access_to_object(current_user, &schema.name, table.id().table_id, table.owner)
-        },
-        |_, table| RwMaterializedView {
-            id: table.id.table_id as i32,
-            name: table.name().to_owned(),
-            schema_id: table.schema_id as i32,
-            owner: table.owner as i32,
-            definition: table.create_sql(),
-            append_only: table.append_only,
-            acl: get_acl_items(
-                &Object::TableId(table.id.table_id),
-                false,
-                &users,
-                username_map,
-            ),
-            initialized_at: table.initialized_at_epoch.map(|e| e.as_timestamptz()),
-            created_at: table.created_at_epoch.map(|e| e.as_timestamptz()),
-            initialized_at_cluster_version: table.initialized_at_cluster_version.clone(),
-            created_at_cluster_version: table.created_at_cluster_version.clone(),
-            background_ddl: table.create_type == CreateType::Background,
-        },
-    )
+    reader.list_all_accessible_mviews::<RwMaterializedView, _>(|_, table| RwMaterializedView {
+        id: table.id.table_id as i32,
+        name: table.name().to_owned(),
+        schema_id: table.schema_id as i32,
+        owner: table.owner as i32,
+        definition: table.create_sql(),
+        append_only: table.append_only,
+        acl: get_acl_items(
+            &Object::TableId(table.id.table_id),
+            false,
+            &users,
+            username_map,
+        ),
+        initialized_at: table.initialized_at_epoch.map(|e| e.as_timestamptz()),
+        created_at: table.created_at_epoch.map(|e| e.as_timestamptz()),
+        initialized_at_cluster_version: table.initialized_at_cluster_version.clone(),
+        created_at_cluster_version: table.created_at_cluster_version.clone(),
+        background_ddl: table.create_type == CreateType::Background,
+    })
 }

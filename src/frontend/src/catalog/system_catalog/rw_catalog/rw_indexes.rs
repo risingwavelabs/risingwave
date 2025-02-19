@@ -18,7 +18,6 @@ use risingwave_frontend_macro::system_catalog;
 use crate::catalog::system_catalog::SysCatalogReaderImpl;
 use crate::catalog::OwnedByUserCatalog;
 use crate::error::Result;
-use crate::user::has_access_to_object;
 
 #[derive(Fields)]
 struct RwIndex {
@@ -40,53 +39,43 @@ struct RwIndex {
 
 #[system_catalog(table, "rw_catalog.rw_indexes")]
 fn read_rw_indexes(reader: &SysCatalogReaderImpl) -> Result<Vec<RwIndex>> {
-    let user_reader = reader.user_info_reader.read_guard();
-    let current_user = user_reader
-        .get_user_by_name(&reader.auth_context.user_name)
-        .expect("user not found");
-
-    reader.read_all_indexes(
-        |schema, index| {
-            has_access_to_object(current_user, &schema.name, index.id.index_id, index.owner())
-        },
-        |schema, index| RwIndex {
-            id: index.id.index_id as i32,
-            name: index.name.clone(),
-            primary_table_id: index.primary_table.id().table_id as i32,
-            key_columns: index
-                .index_item
-                .iter()
-                .take(index.index_columns_len as usize)
-                .map(|index| {
-                    let ind = if let Some(input_ref) = index.as_input_ref() {
-                        input_ref.index() + 1
-                    } else {
-                        0
-                    };
-                    ind as i16
-                })
-                .collect(),
-            include_columns: index
-                .index_item
-                .iter()
-                .skip(index.index_columns_len as usize)
-                .map(|index| {
-                    let ind = if let Some(input_ref) = index.as_input_ref() {
-                        input_ref.index() + 1
-                    } else {
-                        0
-                    };
-                    ind as i16
-                })
-                .collect(),
-            schema_id: schema.id() as i32,
-            owner: index.owner() as i32,
-            definition: index.index_table.create_sql(),
-            acl: vec![],
-            initialized_at: index.initialized_at_epoch.map(|e| e.as_timestamptz()),
-            created_at: index.created_at_epoch.map(|e| e.as_timestamptz()),
-            initialized_at_cluster_version: index.initialized_at_cluster_version.clone(),
-            created_at_cluster_version: index.created_at_cluster_version.clone(),
-        },
-    )
+    reader.list_all_accessible_indexes(|schema, index| RwIndex {
+        id: index.id.index_id as i32,
+        name: index.name.clone(),
+        primary_table_id: index.primary_table.id().table_id as i32,
+        key_columns: index
+            .index_item
+            .iter()
+            .take(index.index_columns_len as usize)
+            .map(|index| {
+                let ind = if let Some(input_ref) = index.as_input_ref() {
+                    input_ref.index() + 1
+                } else {
+                    0
+                };
+                ind as i16
+            })
+            .collect(),
+        include_columns: index
+            .index_item
+            .iter()
+            .skip(index.index_columns_len as usize)
+            .map(|index| {
+                let ind = if let Some(input_ref) = index.as_input_ref() {
+                    input_ref.index() + 1
+                } else {
+                    0
+                };
+                ind as i16
+            })
+            .collect(),
+        schema_id: schema.id() as i32,
+        owner: index.owner() as i32,
+        definition: index.index_table.create_sql(),
+        acl: vec![],
+        initialized_at: index.initialized_at_epoch.map(|e| e.as_timestamptz()),
+        created_at: index.created_at_epoch.map(|e| e.as_timestamptz()),
+        initialized_at_cluster_version: index.initialized_at_cluster_version.clone(),
+        created_at_cluster_version: index.created_at_cluster_version.clone(),
+    })
 }

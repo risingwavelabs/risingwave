@@ -37,20 +37,17 @@ fn read_system_table_info(reader: &SysCatalogReaderImpl) -> Result<Vec<SystemTab
     let users = user_reader.get_all_users();
     let username_map = user_reader.get_user_name_map();
 
-    reader.read_all_system_tables(
-        |_, _| true,
-        |schema, table| SystemTable {
-            id: table.id.table_id as i32,
-            name: table.name().to_owned(),
-            schema_id: schema.id() as i32,
-            owner: table.owner as i32,
-            definition: None,
-            acl: get_acl_items(
-                &Object::TableId(table.id.table_id),
-                false,
-                &users,
-                username_map,
-            ),
-        },
-    )
+    reader.list_all_system_tables(|schema, table| SystemTable {
+        id: table.id.table_id as i32,
+        name: table.name().to_owned(),
+        schema_id: schema.id() as i32,
+        owner: table.owner as i32,
+        definition: None,
+        acl: get_acl_items(
+            &Object::TableId(table.id.table_id),
+            false,
+            &users,
+            username_map,
+        ),
+    })
 }
