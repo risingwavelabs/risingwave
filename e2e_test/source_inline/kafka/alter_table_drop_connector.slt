@@ -95,7 +95,7 @@ FORMAT PLAIN ENCODE AVRO (
 
 sleep 1s
 
-query ??
+query ?? retry 3 backoff 5s
 select foo, bar from avro_drop_table_connector_test_table
 ----
 ABC	1
