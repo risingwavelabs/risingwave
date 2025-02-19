@@ -405,7 +405,7 @@ CREATE TABLE upper_orders_shared (
     name varchar
 ) FROM pg_source TABLE 'public.Orders';
 
-# FIXME(kexiang): Currently, the generated rows (next_id in this case) must be at the end of schema, otherwise the frontend panics.
+# FIXME(kexiang): Currently, the generated rows (next_id in this case) must be at the end of schema, otherwise the frontend will throw an error.
 statement ok
 CREATE TABLE person_new (
     id int,
