@@ -366,7 +366,10 @@ impl GlobalStreamManager {
                 .await?;
 
             let tmp_table_id = stream_job_fragments.stream_job_id();
-            let init_split_assignment = self.source_manager.allocate_splits(&tmp_table_id).await?;
+            let init_split_assignment = self
+                .source_manager
+                .allocate_splits(&stream_job_fragments)
+                .await?;
 
             replace_table_command = Some(ReplaceStreamJobPlan {
                 old_fragments: context.old_fragments,
@@ -380,16 +383,17 @@ impl GlobalStreamManager {
             });
         }
 
-        let table_id = stream_job_fragments.stream_job_id();
-
         // Here we need to consider:
         // - Shared source
         // - Table with connector
         // - MV on shared source
-        let mut init_split_assignment = self.source_manager.allocate_splits(&table_id).await?;
+        let mut init_split_assignment = self
+            .source_manager
+            .allocate_splits(&stream_job_fragments)
+            .await?;
         init_split_assignment.extend(
             self.source_manager
-                .allocate_splits_for_backfill(&table_id, &dispatchers)
+                .allocate_splits_for_backfill(&stream_job_fragments, &dispatchers)
                 .await?,
         );
 
@@ -464,13 +468,12 @@ impl GlobalStreamManager {
             ..
         }: ReplaceStreamJobContext,
     ) -> MetaResult<()> {
-        let tmp_table_id = new_fragments.stream_job_id();
         let init_split_assignment = if streaming_job.is_source() {
             self.source_manager
-                .allocate_splits_for_replace_source(&tmp_table_id, &merge_updates)
+                .allocate_splits_for_replace_source(&new_fragments, &merge_updates)
                 .await?
         } else {
-            self.source_manager.allocate_splits(&tmp_table_id).await?
+            self.source_manager.allocate_splits(&new_fragments).await?
         };
         tracing::info!(
             "replace_stream_job - allocate split: {:?}",
