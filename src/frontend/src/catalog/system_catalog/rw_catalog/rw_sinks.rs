@@ -69,7 +69,7 @@ fn read_rw_sinks_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSink>> {
                     WithOptionsSecResolved::new(desc.options.clone(), desc.secret_refs.clone()),
                 )
             })
-            .unwrap_or_else(|| jsonbb::Value::null())
+            .unwrap_or_else(jsonbb::Value::null)
             .into();
         RwSink {
             id: sink.id.sink_id as i32,
