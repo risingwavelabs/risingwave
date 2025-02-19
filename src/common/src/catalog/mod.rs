@@ -98,16 +98,16 @@ pub fn default_key_column_name_version_mapping(version: &ColumnDescVersion) -> &
 /// [this rfc](https://github.com/risingwavelabs/rfcs/pull/20).
 pub const KAFKA_TIMESTAMP_COLUMN_NAME: &str = "_rw_kafka_timestamp";
 
+/// RisingWave iceberg table engine will create the column `_risingwave_iceberg_row_id` in the iceberg table.
+///
+/// Iceberg V3 spec use `_row_id` as a reserved column name for row lineage, so if the table without primary key,
+/// we can't use `_row_id` directly for iceberg, so use `_risingwave_iceberg_row_id` instead.
 pub const RISINGWAVE_ICEBERG_ROW_ID: &str = "_risingwave_iceberg_row_id";
 pub fn is_system_schema(schema_name: &str) -> bool {
     SYSTEM_SCHEMAS.iter().any(|s| *s == schema_name)
 }
 
-pub const ROWID_PREFIX: &str = "_row_id";
-
-pub fn is_row_id_column_name(name: &str) -> bool {
-    name.starts_with(ROWID_PREFIX)
-}
+pub const ROW_ID_COLUMN_NAME: &str = "_row_id";
 
 /// The column ID preserved for the row ID column.
 pub const ROW_ID_COLUMN_ID: ColumnId = ColumnId::new(0);
@@ -119,7 +119,7 @@ pub const USER_COLUMN_ID_OFFSET: i32 = ROW_ID_COLUMN_ID.next().get_id();
 
 /// Creates a row ID column (for implicit primary key). It'll always have the ID `0` for now.
 pub fn row_id_column_desc() -> ColumnDesc {
-    ColumnDesc::named(ROWID_PREFIX, ROW_ID_COLUMN_ID, DataType::Serial)
+    ColumnDesc::named(ROW_ID_COLUMN_NAME, ROW_ID_COLUMN_ID, DataType::Serial)
 }
 
 pub const RW_TIMESTAMP_COLUMN_NAME: &str = "_rw_timestamp";
@@ -133,36 +133,18 @@ pub fn rw_timestamp_column_desc() -> ColumnDesc {
     )
 }
 
-pub const OFFSET_COLUMN_NAME: &str = "_rw_offset";
 pub const ICEBERG_SEQUENCE_NUM_COLUMN_NAME: &str = "_iceberg_sequence_number";
 pub const ICEBERG_FILE_PATH_COLUMN_NAME: &str = "_iceberg_file_path";
 pub const ICEBERG_FILE_POS_COLUMN_NAME: &str = "_iceberg_file_pos";
 
-// The number of columns output by the cdc source job
-// see `debezium_cdc_source_schema()` for details
+pub const CDC_OFFSET_COLUMN_NAME: &str = "_rw_offset";
+/// The number of columns output by the cdc source job
+/// see [`ColumnCatalog::debezium_cdc_source_cols()`] for details
 pub const CDC_SOURCE_COLUMN_NUM: u32 = 3;
-pub const TABLE_NAME_COLUMN_NAME: &str = "_rw_table_name";
+pub const CDC_TABLE_NAME_COLUMN_NAME: &str = "_rw_table_name";
 
 pub fn is_offset_column_name(name: &str) -> bool {
-    name.starts_with(OFFSET_COLUMN_NAME)
-}
-/// Creates a offset column for storing upstream offset
-/// Used in cdc source currently
-pub fn offset_column_desc() -> ColumnDesc {
-    ColumnDesc::named(
-        OFFSET_COLUMN_NAME,
-        ColumnId::placeholder(),
-        DataType::Varchar,
-    )
-}
-
-/// A column to store the upstream table name of the cdc table
-pub fn cdc_table_name_column_desc() -> ColumnDesc {
-    ColumnDesc::named(
-        TABLE_NAME_COLUMN_NAME,
-        ColumnId::placeholder(),
-        DataType::Varchar,
-    )
+    name.starts_with(CDC_OFFSET_COLUMN_NAME)
 }
 
 pub fn iceberg_sequence_num_column_desc() -> ColumnDesc {

@@ -25,10 +25,11 @@ use risingwave_pb::plan_common::{
 
 use super::schema::FieldLike;
 use super::{
-    iceberg_file_path_column_desc, iceberg_file_pos_column_desc, iceberg_sequence_num_column_desc,
-    row_id_column_desc, rw_timestamp_column_desc, USER_COLUMN_ID_OFFSET,
+    row_id_column_desc, rw_timestamp_column_desc, CDC_OFFSET_COLUMN_NAME,
+    CDC_TABLE_NAME_COLUMN_NAME, ICEBERG_FILE_PATH_COLUMN_NAME, ICEBERG_FILE_POS_COLUMN_NAME,
+    ICEBERG_SEQUENCE_NUM_COLUMN_NAME, USER_COLUMN_ID_OFFSET,
 };
-use crate::catalog::{cdc_table_name_column_desc, offset_column_desc, Field, ROW_ID_COLUMN_ID};
+use crate::catalog::{Field, ROW_ID_COLUMN_ID};
 use crate::types::{DataType, StructType};
 use crate::util::value_encoding::DatumToProtoExt;
 
@@ -319,13 +320,6 @@ impl ColumnDesc {
             Some(GeneratedOrDefaultColumn::GeneratedColumn(_))
         )
     }
-
-    pub fn is_default(&self) -> bool {
-        matches!(
-            self.generated_or_default_column,
-            Some(GeneratedOrDefaultColumn::DefaultColumn(_))
-        )
-    }
 }
 
 impl From<PbColumnDesc> for ColumnDesc {
@@ -430,11 +424,6 @@ impl ColumnCatalog {
         }
     }
 
-    /// If the column is a column with default expr
-    pub fn is_default(&self) -> bool {
-        self.column_desc.is_default()
-    }
-
     /// If the columns is an `INCLUDE ... AS ...` connector column.
     pub fn is_connector_additional_column(&self) -> bool {
         self.column_desc.additional_column.column_type.is_some()
@@ -465,10 +454,7 @@ impl ColumnCatalog {
 
     /// Creates a row ID column (for implicit primary key).
     pub fn row_id_column() -> Self {
-        Self {
-            column_desc: row_id_column_desc(),
-            is_hidden: true,
-        }
+        Self::hidden(row_id_column_desc())
     }
 
     pub fn is_rw_sys_column(&self) -> bool {
@@ -476,10 +462,7 @@ impl ColumnCatalog {
     }
 
     pub fn rw_timestamp_column() -> Self {
-        Self {
-            column_desc: rw_timestamp_column_desc(),
-            is_hidden: true,
-        }
+        Self::hidden(rw_timestamp_column_desc())
     }
 
     pub fn is_rw_timestamp_column(&self) -> bool {
@@ -489,39 +472,51 @@ impl ColumnCatalog {
         )
     }
 
-    pub fn offset_column() -> Self {
-        Self {
-            column_desc: offset_column_desc(),
-            is_hidden: true,
-        }
+    // XXX: should we use INCLUDE columns or SYSTEM columns instead of normal hidden columns?
+
+    pub fn iceberg_hidden_cols() -> [Self; 3] {
+        [
+            Self::hidden(ColumnDesc::named(
+                ICEBERG_SEQUENCE_NUM_COLUMN_NAME,
+                ColumnId::placeholder(),
+                DataType::Int64,
+            )),
+            Self::hidden(ColumnDesc::named(
+                ICEBERG_FILE_PATH_COLUMN_NAME,
+                ColumnId::placeholder(),
+                DataType::Varchar,
+            )),
+            Self::hidden(ColumnDesc::named(
+                ICEBERG_FILE_POS_COLUMN_NAME,
+                ColumnId::placeholder(),
+                DataType::Int64,
+            )),
+        ]
     }
 
-    pub fn iceberg_sequence_num_column() -> Self {
-        Self {
-            column_desc: iceberg_sequence_num_column_desc(),
-            is_hidden: true,
-        }
-    }
-
-    pub fn iceberg_file_path_column() -> Self {
-        Self {
-            column_desc: iceberg_file_path_column_desc(),
-            is_hidden: true,
-        }
-    }
-
-    pub fn iceberg_file_pos_column() -> Self {
-        Self {
-            column_desc: iceberg_file_pos_column_desc(),
-            is_hidden: true,
-        }
-    }
-
-    pub fn cdc_table_name_column() -> Self {
-        Self {
-            column_desc: cdc_table_name_column_desc(),
-            is_hidden: true,
-        }
+    /// Note: these columns are added in `SourceStreamChunkRowWriter::do_action`.
+    /// May also look for the usage of `SourceColumnType`.
+    pub fn debezium_cdc_source_cols() -> [Self; 3] {
+        [
+            ColumnCatalog::visible(ColumnDesc::named(
+                "payload",
+                ColumnId::placeholder(),
+                DataType::Jsonb,
+            )),
+            // Creates a offset column for storing upstream offset
+            // Used in cdc source currently
+            Self::hidden(ColumnDesc::named(
+                CDC_OFFSET_COLUMN_NAME,
+                ColumnId::placeholder(),
+                DataType::Varchar,
+            )),
+            // A column to store the upstream table name of the cdc table
+            Self::hidden(ColumnDesc::named(
+                CDC_TABLE_NAME_COLUMN_NAME,
+                ColumnId::placeholder(),
+                DataType::Varchar,
+            )),
+        ]
     }
 }
 

@@ -26,7 +26,7 @@ use prost::Message as _;
 use risingwave_common::catalog::{
     CdcTableDesc, ColumnCatalog, ColumnDesc, ConflictBehavior, Engine, FieldLike, TableId,
     TableVersionId, DEFAULT_SCHEMA_NAME, INITIAL_TABLE_VERSION_ID, RISINGWAVE_ICEBERG_ROW_ID,
-    ROWID_PREFIX,
+    ROW_ID_COLUMN_NAME,
 };
 use risingwave_common::config::MetaBackend;
 use risingwave_common::license::Feature;
@@ -70,7 +70,7 @@ use crate::binder::{bind_data_type, bind_struct_field, Clause, SecureCompareCont
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::table_catalog::{TableVersion, ICEBERG_SINK_PREFIX, ICEBERG_SOURCE_PREFIX};
-use crate::catalog::{check_valid_column_name, ColumnId, DatabaseId, SchemaId};
+use crate::catalog::{check_column_name_not_reserved, ColumnId, DatabaseId, SchemaId};
 use crate::error::{bail_bind_error, ErrorCode, Result, RwError};
 use crate::expr::{Expr, ExprImpl, ExprRewriter};
 use crate::handler::create_source::{
@@ -242,7 +242,7 @@ pub fn bind_sql_columns(
             // additional column name may have prefix _rw
             // When converting dropping the connector from table, the additional columns are converted to normal columns and keep the original name.
             // Under this case, we loosen the check for _rw prefix.
-            check_valid_column_name(&name.real_value())?;
+            check_column_name_not_reserved(&name.real_value())?;
         }
 
         let field_descs: Vec<ColumnDesc> = if let AstDataType::Struct(fields) = &data_type {
@@ -1747,7 +1747,7 @@ pub async fn create_iceberg_engine_table(
         pks = vec![RISINGWAVE_ICEBERG_ROW_ID.to_owned()];
         let [stmt]: [_; 1] = Parser::parse_sql(&format!(
             "select {} as {}, * from {}",
-            ROWID_PREFIX, RISINGWAVE_ICEBERG_ROW_ID, table_name
+            ROW_ID_COLUMN_NAME, RISINGWAVE_ICEBERG_ROW_ID, table_name
         ))
         .context("unable to parse query")?
         .try_into()
@@ -2147,7 +2147,7 @@ fn bind_webhook_info(
 #[cfg(test)]
 mod tests {
     use risingwave_common::catalog::{
-        Field, DEFAULT_DATABASE_NAME, ROWID_PREFIX, RW_TIMESTAMP_COLUMN_NAME,
+        Field, DEFAULT_DATABASE_NAME, ROW_ID_COLUMN_NAME, RW_TIMESTAMP_COLUMN_NAME,
     };
     use risingwave_common::types::{DataType, StructType};
 
@@ -2253,7 +2253,7 @@ mod tests {
             .collect::<HashMap<&str, DataType>>();
 
         let expected_columns = maplit::hashmap! {
-            ROWID_PREFIX => DataType::Serial,
+            ROW_ID_COLUMN_NAME => DataType::Serial,
             "v1" => DataType::Int16,
             "v2" => StructType::new(
                 vec![("v3", DataType::Int64),("v4", DataType::Float64),("v5", DataType::Float64)],

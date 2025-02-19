@@ -221,14 +221,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_emit_transactional_chunk() {
-        let schema = vec![
-            ColumnCatalog {
-                column_desc: ColumnDesc::named("payload", ColumnId::placeholder(), DataType::Jsonb),
-                is_hidden: false,
-            },
-            ColumnCatalog::offset_column(),
-            ColumnCatalog::cdc_table_name_column(),
-        ];
+        let schema = ColumnCatalog::debezium_cdc_source_cols();
 
         let columns = schema
             .iter()
@@ -388,14 +381,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_parse_transaction_metadata() {
-        let schema = vec![
-            ColumnCatalog {
-                column_desc: ColumnDesc::named("payload", ColumnId::placeholder(), DataType::Jsonb),
-                is_hidden: false,
-            },
-            ColumnCatalog::offset_column(),
-            ColumnCatalog::cdc_table_name_column(),
-        ];
+        let schema = ColumnCatalog::debezium_cdc_source_cols();
 
         let columns = schema
             .iter()
@@ -465,14 +451,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_parse_schema_change() {
-        let schema = vec![
-            ColumnCatalog {
-                column_desc: ColumnDesc::named("payload", ColumnId::placeholder(), DataType::Jsonb),
-                is_hidden: false,
-            },
-            ColumnCatalog::offset_column(),
-            ColumnCatalog::cdc_table_name_column(),
-        ];
+        let schema = ColumnCatalog::debezium_cdc_source_cols();
 
         let columns = schema
             .iter()

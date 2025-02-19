@@ -15,8 +15,8 @@
 use std::fmt::Debug;
 
 use risingwave_common::catalog::{
-    ColumnDesc, ColumnId, KAFKA_TIMESTAMP_COLUMN_NAME, OFFSET_COLUMN_NAME, ROWID_PREFIX,
-    TABLE_NAME_COLUMN_NAME,
+    ColumnDesc, ColumnId, CDC_OFFSET_COLUMN_NAME, CDC_TABLE_NAME_COLUMN_NAME,
+    KAFKA_TIMESTAMP_COLUMN_NAME, ROW_ID_COLUMN_ID, ROW_ID_COLUMN_NAME,
 };
 use risingwave_common::types::DataType;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
@@ -64,12 +64,13 @@ pub enum SourceColumnType {
 
 impl SourceColumnType {
     pub fn from_name(name: &str) -> Self {
-        if name.starts_with(KAFKA_TIMESTAMP_COLUMN_NAME) || name.starts_with(TABLE_NAME_COLUMN_NAME)
+        if name.starts_with(KAFKA_TIMESTAMP_COLUMN_NAME)
+            || name.starts_with(CDC_TABLE_NAME_COLUMN_NAME)
         {
             Self::Meta
-        } else if name == (ROWID_PREFIX) {
+        } else if name == ROW_ID_COLUMN_NAME {
             Self::RowId
-        } else if name == OFFSET_COLUMN_NAME {
+        } else if name == CDC_OFFSET_COLUMN_NAME {
             Self::Offset
         } else {
             Self::Normal
@@ -147,6 +148,12 @@ impl From<&ColumnDesc> for SourceColumnDesc {
             )
         }
 
+        let column_type = SourceColumnType::from_name(name);
+        if column_type == SourceColumnType::RowId {
+            debug_assert_eq!(name, ROW_ID_COLUMN_NAME);
+            debug_assert_eq!(*column_id, ROW_ID_COLUMN_ID);
+        }
+
         Self {
             name: name.clone(),
             data_type: data_type.clone(),
@@ -154,7 +161,7 @@ impl From<&ColumnDesc> for SourceColumnDesc {
             fields: field_descs.clone(),
             additional_column: additional_column.clone(),
             // additional fields below
-            column_type: SourceColumnType::from_name(name),
+            column_type,
             is_pk: false,
             is_hidden_addition_col: false,
         }

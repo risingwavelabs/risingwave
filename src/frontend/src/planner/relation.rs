@@ -19,7 +19,7 @@ use std::rc::Rc;
 use either::Either;
 use itertools::Itertools;
 use risingwave_common::catalog::{
-    ColumnCatalog, Engine, Field, Schema, RISINGWAVE_ICEBERG_ROW_ID, ROWID_PREFIX,
+    ColumnCatalog, Engine, Field, Schema, RISINGWAVE_ICEBERG_ROW_ID, ROW_ID_COLUMN_NAME,
 };
 use risingwave_common::types::{DataType, Interval, ScalarImpl};
 use risingwave_common::{bail, bail_not_implemented};
@@ -165,7 +165,7 @@ impl Planner {
                         .fields()
                         .iter()
                         .map(|field| {
-                            let source_filed_name = if field.name == ROWID_PREFIX {
+                            let source_filed_name = if field.name == ROW_ID_COLUMN_NAME {
                                 RISINGWAVE_ICEBERG_ROW_ID
                             } else {
                                 &field.name
