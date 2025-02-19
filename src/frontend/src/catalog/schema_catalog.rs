@@ -39,7 +39,8 @@ use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::view_catalog::ViewCatalog;
 use crate::catalog::{ConnectionId, DatabaseId, SchemaId, SecretId, SinkId, SourceId, ViewId};
 use crate::expr::{infer_type_name, infer_type_with_sigmap, Expr, ExprImpl};
-use crate::user::UserId;
+use crate::user::user_catalog::UserCatalog;
+use crate::user::{has_access_to_object, UserId};
 
 #[derive(Clone, Debug)]
 pub struct SchemaCatalog {
@@ -576,10 +577,28 @@ impl SchemaCatalog {
         self.table_by_name.values().filter(|v| v.is_user_table())
     }
 
+    pub fn iter_user_table_with_acl<'a>(
+        &'a self,
+        user: &'a UserCatalog,
+    ) -> impl Iterator<Item = &'a Arc<TableCatalog>> {
+        self.table_by_name.values().filter(|v| {
+            v.is_user_table() && has_access_to_object(user, &self.name, v.id.table_id, v.owner)
+        })
+    }
+
     pub fn iter_internal_table(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {
         self.table_by_name
             .values()
             .filter(|v| v.is_internal_table())
+    }
+
+    pub fn iter_internal_table_with_acl<'a>(
+        &'a self,
+        user: &'a UserCatalog,
+    ) -> impl Iterator<Item = &'a Arc<TableCatalog>> {
+        self.table_by_name.values().filter(|v| {
+            v.is_internal_table() && has_access_to_object(user, &self.name, v.id.table_id, v.owner)
+        })
     }
 
     /// Iterate all non-internal tables, including user tables, materialized views and indices.
@@ -589,9 +608,27 @@ impl SchemaCatalog {
             .filter(|v| !v.is_internal_table())
     }
 
+    pub fn iter_table_mv_indices_with_acl<'a>(
+        &'a self,
+        user: &'a UserCatalog,
+    ) -> impl Iterator<Item = &'a Arc<TableCatalog>> {
+        self.table_by_name.values().filter(|v| {
+            !v.is_internal_table() && has_access_to_object(user, &self.name, v.id.table_id, v.owner)
+        })
+    }
+
     /// Iterate all materialized views, excluding the indices.
     pub fn iter_all_mvs(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {
         self.table_by_name.values().filter(|v| v.is_mview())
+    }
+
+    pub fn iter_all_mvs_with_acl<'a>(
+        &'a self,
+        user: &'a UserCatalog,
+    ) -> impl Iterator<Item = &'a Arc<TableCatalog>> {
+        self.table_by_name.values().filter(|v| {
+            v.is_mview() && has_access_to_object(user, &self.name, v.id.table_id, v.owner)
+        })
     }
 
     /// Iterate created materialized views, excluding the indices.
@@ -601,9 +638,29 @@ impl SchemaCatalog {
             .filter(|v| v.is_mview() && v.is_created())
     }
 
+    pub fn iter_created_mvs_with_acl<'a>(
+        &'a self,
+        user: &'a UserCatalog,
+    ) -> impl Iterator<Item = &'a Arc<TableCatalog>> {
+        self.table_by_name.values().filter(|v| {
+            v.is_mview()
+                && v.is_created()
+                && has_access_to_object(user, &self.name, v.id.table_id, v.owner)
+        })
+    }
+
     /// Iterate all indices
     pub fn iter_index(&self) -> impl Iterator<Item = &Arc<IndexCatalog>> {
         self.index_by_name.values()
+    }
+
+    pub fn iter_index_with_acl<'a>(
+        &'a self,
+        user: &'a UserCatalog,
+    ) -> impl Iterator<Item = &'a Arc<IndexCatalog>> {
+        self.index_by_name
+            .values()
+            .filter(|idx| has_access_to_object(user, &self.name, idx.id.index_id, idx.owner()))
     }
 
     /// Iterate all sources
@@ -611,16 +668,52 @@ impl SchemaCatalog {
         self.source_by_name.values()
     }
 
+    pub fn iter_source_with_acl<'a>(
+        &'a self,
+        user: &'a UserCatalog,
+    ) -> impl Iterator<Item = &'a Arc<SourceCatalog>> {
+        self.source_by_name
+            .values()
+            .filter(|s| has_access_to_object(user, &self.name, s.id, s.owner))
+    }
+
     pub fn iter_sink(&self) -> impl Iterator<Item = &Arc<SinkCatalog>> {
         self.sink_by_name.values()
+    }
+
+    pub fn iter_sink_with_acl<'a>(
+        &'a self,
+        user: &'a UserCatalog,
+    ) -> impl Iterator<Item = &'a Arc<SinkCatalog>> {
+        self.sink_by_name
+            .values()
+            .filter(|s| has_access_to_object(user, &self.name, s.id.sink_id, s.owner.user_id))
     }
 
     pub fn iter_subscription(&self) -> impl Iterator<Item = &Arc<SubscriptionCatalog>> {
         self.subscription_by_name.values()
     }
 
+    pub fn iter_subscription_with_acl<'a>(
+        &'a self,
+        user: &'a UserCatalog,
+    ) -> impl Iterator<Item = &'a Arc<SubscriptionCatalog>> {
+        self.subscription_by_name.values().filter(|s| {
+            has_access_to_object(user, &self.name, s.id.subscription_id, s.owner.user_id)
+        })
+    }
+
     pub fn iter_view(&self) -> impl Iterator<Item = &Arc<ViewCatalog>> {
         self.view_by_name.values()
+    }
+
+    pub fn iter_view_with_acl<'a>(
+        &'a self,
+        user: &'a UserCatalog,
+    ) -> impl Iterator<Item = &'a Arc<ViewCatalog>> {
+        self.view_by_name
+            .values()
+            .filter(|v| v.is_system_view() || has_access_to_object(user, &self.name, v.id, v.owner))
     }
 
     pub fn iter_function(&self) -> impl Iterator<Item = &Arc<FunctionCatalog>> {

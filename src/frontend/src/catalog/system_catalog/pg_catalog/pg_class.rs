@@ -44,86 +44,83 @@ struct PgClass {
 
 #[system_catalog(table, "pg_catalog.pg_class")]
 fn read_pg_class_info(reader: &SysCatalogReaderImpl) -> Result<Vec<PgClass>> {
-    let tables = reader.list_all_tables(|_, table| PgClass {
-        oid: table.id.table_id as i32,
-        relname: table.name.clone(),
-        relnamespace: table.schema_id as i32,
-        relowner: table.owner as i32,
-        relpersistence: "p".to_owned(),
-        relkind: "r".to_owned(),
-        relpages: 0,
-        relam: 0,
-        reltablespace: 0,
-        reloptions: vec![],
-        relispartition: false,
-        relpartbound: None,
-    })?;
+    let catalog_reader = reader.catalog_reader.read_guard();
+    let schemas = catalog_reader.iter_schemas(&reader.auth_context.database)?;
 
-    let mviews = reader.list_all_mviews(|_, mview| PgClass {
-        oid: mview.id.table_id as i32,
-        relname: mview.name.clone(),
-        relnamespace: mview.schema_id as i32,
-        relowner: mview.owner as i32,
-        relpersistence: "p".to_owned(),
-        relkind: "m".to_owned(),
-        relpages: 0,
-        relam: 0,
-        reltablespace: 0,
-        reloptions: vec![],
-        relispartition: false,
-        relpartbound: None,
-    })?;
-
-    let system_tables = reader.list_all_system_tables(|schema, table| PgClass {
-        oid: table.id.table_id as i32,
-        relname: table.name.clone(),
-        relnamespace: schema.id() as i32,
-        relowner: table.owner as i32,
-        relpersistence: "p".to_owned(),
-        relkind: "r".to_owned(),
-        relpages: 0,
-        relam: 0,
-        reltablespace: 0,
-        reloptions: vec![],
-        relispartition: false,
-        relpartbound: None,
-    })?;
-
-    let indexes = reader.list_all_indexes(|schema, index| PgClass {
-        oid: index.id.index_id as i32,
-        relname: index.name.clone(),
-        relnamespace: schema.id() as i32,
-        relowner: index.owner() as i32,
-        relpersistence: "p".to_owned(),
-        relkind: "i".to_owned(),
-        relpages: 0,
-        relam: 0,
-        reltablespace: 0,
-        reloptions: vec![],
-        relispartition: false,
-        relpartbound: None,
-    })?;
-
-    let views = reader.list_all_views(|schema, view| PgClass {
-        oid: view.id as i32,
-        relname: view.name.clone(),
-        relnamespace: schema.id() as i32,
-        relowner: view.owner as i32,
-        relpersistence: "p".to_owned(),
-        relkind: "v".to_owned(),
-        relpages: 0,
-        relam: 0,
-        reltablespace: 0,
-        reloptions: vec![],
-        relispartition: false,
-        relpartbound: None,
-    })?;
-
-    Ok(tables
-        .into_iter()
-        .chain(mviews)
-        .chain(indexes)
-        .chain(views)
-        .chain(system_tables)
+    Ok(schemas
+        .flat_map(|schema| {
+            schema
+                .iter_user_table()
+                .map(|table| PgClass {
+                    oid: table.id.table_id as i32,
+                    relname: table.name.clone(),
+                    relnamespace: table.schema_id as i32,
+                    relowner: table.owner as i32,
+                    relpersistence: "p".to_owned(),
+                    relkind: "r".to_owned(),
+                    relpages: 0,
+                    relam: 0,
+                    reltablespace: 0,
+                    reloptions: vec![],
+                    relispartition: false,
+                    relpartbound: None,
+                })
+                .chain(schema.iter_all_mvs().map(|mview| PgClass {
+                    oid: mview.id.table_id as i32,
+                    relname: mview.name.clone(),
+                    relnamespace: mview.schema_id as i32,
+                    relowner: mview.owner as i32,
+                    relpersistence: "p".to_owned(),
+                    relkind: "m".to_owned(),
+                    relpages: 0,
+                    relam: 0,
+                    reltablespace: 0,
+                    reloptions: vec![],
+                    relispartition: false,
+                    relpartbound: None,
+                }))
+                .chain(schema.iter_system_tables().map(|table| PgClass {
+                    oid: table.id.table_id as i32,
+                    relname: table.name.clone(),
+                    relnamespace: schema.id() as i32,
+                    relowner: table.owner as i32,
+                    relpersistence: "p".to_owned(),
+                    relkind: "r".to_owned(),
+                    relpages: 0,
+                    relam: 0,
+                    reltablespace: 0,
+                    reloptions: vec![],
+                    relispartition: false,
+                    relpartbound: None,
+                }))
+                .chain(schema.iter_index().map(|index| PgClass {
+                    oid: index.id.index_id as i32,
+                    relname: index.name.clone(),
+                    relnamespace: schema.id() as i32,
+                    relowner: index.owner() as i32,
+                    relpersistence: "p".to_owned(),
+                    relkind: "i".to_owned(),
+                    relpages: 0,
+                    relam: 0,
+                    reltablespace: 0,
+                    reloptions: vec![],
+                    relispartition: false,
+                    relpartbound: None,
+                }))
+                .chain(schema.iter_view().map(|view| PgClass {
+                    oid: view.id as i32,
+                    relname: view.name.clone(),
+                    relnamespace: schema.id() as i32,
+                    relowner: view.owner as i32,
+                    relpersistence: "p".to_owned(),
+                    relkind: "v".to_owned(),
+                    relpages: 0,
+                    relam: 0,
+                    reltablespace: 0,
+                    reloptions: vec![],
+                    relispartition: false,
+                    relpartbound: None,
+                }))
+        })
         .collect())
 }

@@ -32,16 +32,25 @@ struct RwView {
 
 #[system_catalog(table, "rw_catalog.rw_views")]
 fn read_rw_view_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwView>> {
+    let catalog_reader = reader.catalog_reader.read_guard();
+    let schemas = catalog_reader.iter_schemas(&reader.auth_context.database)?;
     let user_reader = reader.user_info_reader.read_guard();
+    let current_user = user_reader
+        .get_user_by_name(&reader.auth_context.user_name)
+        .expect("user not found");
     let users = user_reader.get_all_users();
     let username_map = user_reader.get_user_name_map();
 
-    reader.list_all_accessible_views(|schema, view| RwView {
-        id: view.id as i32,
-        name: view.name().to_owned(),
-        schema_id: schema.id() as i32,
-        owner: view.owner as i32,
-        definition: view.create_sql(schema.name()),
-        acl: get_acl_items(&Object::ViewId(view.id), false, &users, username_map),
-    })
+    Ok(schemas
+        .flat_map(|schema| {
+            schema.iter_view_with_acl(current_user).map(|view| RwView {
+                id: view.id as i32,
+                name: view.name().to_owned(),
+                schema_id: schema.id() as i32,
+                owner: view.owner as i32,
+                definition: view.create_sql(schema.name()),
+                acl: get_acl_items(&Object::ViewId(view.id), false, &users, username_map),
+            })
+        })
+        .collect())
 }

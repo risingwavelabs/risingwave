@@ -17,9 +17,7 @@ use risingwave_frontend_macro::system_catalog;
 use serde_json::json;
 
 use crate::catalog::system_catalog::SysCatalogReaderImpl;
-use crate::catalog::OwnedByUserCatalog;
 use crate::error::Result;
-use crate::user::has_access_to_object;
 
 // TODO: `rw_relation_info` contains some extra streaming meta info that's only meaningful for
 // streaming jobs, we'd better query relation infos from `rw_relations` and move these streaming
@@ -56,55 +54,32 @@ async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelat
                 catalog_reader.get_schema_by_name(&reader.auth_context.database, schema)?;
 
             schema_catalog
-                .iter_created_mvs()
-                .filter(|m| {
-                    has_access_to_object(current_user, &schema_catalog.name, m.id.table_id, m.owner)
-                })
+                .iter_created_mvs_with_acl(current_user)
                 .for_each(|t| {
                     table_ids.push(t.id.table_id);
                 });
 
             schema_catalog
-                .iter_user_table()
-                .filter(|t| {
-                    has_access_to_object(current_user, &schema_catalog.name, t.id.table_id, t.owner)
-                })
+                .iter_user_table_with_acl(current_user)
                 .for_each(|t| {
                     table_ids.push(t.id.table_id);
                 });
 
             schema_catalog
-                .iter_source()
-                .filter(|s| has_access_to_object(current_user, &schema_catalog.name, s.id, s.owner))
+                .iter_source_with_acl(current_user)
                 .filter(|s| s.info.is_shared())
                 .for_each(|s| {
                     table_ids.push(s.id);
                 });
 
             schema_catalog
-                .iter_sink()
-                .filter(|s| {
-                    has_access_to_object(
-                        current_user,
-                        &schema_catalog.name,
-                        s.id.sink_id,
-                        s.owner.user_id,
-                    )
-                })
+                .iter_sink_with_acl(current_user)
                 .for_each(|t| {
                     table_ids.push(t.id.sink_id);
                 });
 
             schema_catalog
-                .iter_index()
-                .filter(|idx| {
-                    has_access_to_object(
-                        current_user,
-                        &schema_catalog.name,
-                        idx.id.index_id,
-                        idx.owner(),
-                    )
-                })
+                .iter_index_with_acl(current_user)
                 .for_each(|t| {
                     table_ids.push(t.index_table.id.table_id);
                 });
@@ -123,10 +98,7 @@ async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelat
         let schema_catalog =
             catalog_reader.get_schema_by_name(&reader.auth_context.database, schema)?;
         schema_catalog
-            .iter_created_mvs()
-            .filter(|m| {
-                has_access_to_object(current_user, &schema_catalog.name, m.id.table_id, m.owner)
-            })
+            .iter_created_mvs_with_acl(current_user)
             .for_each(|t| {
                 if let Some(fragments) = table_fragments.get(&t.id.table_id) {
                     rows.push(RwRelationInfo {
@@ -147,10 +119,7 @@ async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelat
             });
 
         schema_catalog
-            .iter_user_table()
-            .filter(|t| {
-                has_access_to_object(current_user, &schema_catalog.name, t.id.table_id, t.owner)
-            })
+            .iter_user_table_with_acl(current_user)
             .for_each(|t| {
                 if let Some(fragments) = table_fragments.get(&t.id.table_id) {
                     rows.push(RwRelationInfo {
@@ -171,15 +140,7 @@ async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelat
             });
 
         schema_catalog
-            .iter_sink()
-            .filter(|s| {
-                has_access_to_object(
-                    current_user,
-                    &schema_catalog.name,
-                    s.id.sink_id,
-                    s.owner.user_id,
-                )
-            })
+            .iter_sink_with_acl(current_user)
             .for_each(|t| {
                 if let Some(fragments) = table_fragments.get(&t.id.sink_id) {
                     rows.push(RwRelationInfo {
@@ -200,15 +161,7 @@ async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelat
             });
 
         schema_catalog
-            .iter_index()
-            .filter(|idx| {
-                has_access_to_object(
-                    current_user,
-                    &schema_catalog.name,
-                    idx.id.index_id,
-                    idx.owner(),
-                )
-            })
+            .iter_index_with_acl(current_user)
             .for_each(|t| {
                 if let Some(fragments) = table_fragments.get(&t.index_table.id.table_id) {
                     rows.push(RwRelationInfo {
@@ -230,8 +183,7 @@ async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelat
 
         // Sources have no fragments.
         schema_catalog
-            .iter_source()
-            .filter(|s| has_access_to_object(current_user, &schema_catalog.name, s.id, s.owner))
+            .iter_source_with_acl(current_user)
             .for_each(|t| {
                 let (timezone, fragments) = if t.info.is_shared()
                     && let Some(fragments) = table_fragments.get(&t.id)
@@ -261,15 +213,7 @@ async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelat
             });
 
         schema_catalog
-            .iter_subscription()
-            .filter(|s| {
-                has_access_to_object(
-                    current_user,
-                    &schema_catalog.name,
-                    s.id.subscription_id,
-                    s.owner.user_id,
-                )
-            })
+            .iter_subscription_with_acl(current_user)
             .for_each(|t| {
                 rows.push(RwRelationInfo {
                     schemaname: schema.clone(),

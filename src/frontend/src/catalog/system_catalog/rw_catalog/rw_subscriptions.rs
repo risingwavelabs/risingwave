@@ -35,28 +35,41 @@ struct RwSubscription {
 }
 
 #[system_catalog(table, "rw_catalog.rw_subscriptions")]
-fn read_rw_sinks_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSubscription>> {
+fn read_rw_subscriptions_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSubscription>> {
+    let catalog_reader = reader.catalog_reader.read_guard();
+    let schemas = catalog_reader.iter_schemas(&reader.auth_context.database)?;
     let user_reader = reader.user_info_reader.read_guard();
+    let current_user = user_reader
+        .get_user_by_name(&reader.auth_context.user_name)
+        .expect("user not found");
     let users = user_reader.get_all_users();
     let username_map = user_reader.get_user_name_map();
 
-    reader.list_all_accessible_subscriptions(|schema, subscription| RwSubscription {
-        id: subscription.id.subscription_id as i32,
-        name: subscription.name.clone(),
-        schema_id: schema.id() as i32,
-        owner: subscription.owner.user_id as i32,
-        definition: subscription.definition.clone(),
-        acl: get_acl_items(
-            &Object::SubscriptionId(subscription.id.subscription_id),
-            false,
-            &users,
-            username_map,
-        ),
-        initialized_at: subscription
-            .initialized_at_epoch
-            .map(|e| e.as_timestamptz()),
-        created_at: subscription.created_at_epoch.map(|e| e.as_timestamptz()),
-        initialized_at_cluster_version: subscription.initialized_at_cluster_version.clone(),
-        created_at_cluster_version: subscription.created_at_cluster_version.clone(),
-    })
+    Ok(schemas
+        .flat_map(|schema| {
+            schema
+                .iter_subscription_with_acl(current_user)
+                .map(|subscription| RwSubscription {
+                    id: subscription.id.subscription_id as i32,
+                    name: subscription.name.clone(),
+                    schema_id: schema.id() as i32,
+                    owner: subscription.owner.user_id as i32,
+                    definition: subscription.definition.clone(),
+                    acl: get_acl_items(
+                        &Object::SubscriptionId(subscription.id.subscription_id),
+                        false,
+                        &users,
+                        username_map,
+                    ),
+                    initialized_at: subscription
+                        .initialized_at_epoch
+                        .map(|e| e.as_timestamptz()),
+                    created_at: subscription.created_at_epoch.map(|e| e.as_timestamptz()),
+                    initialized_at_cluster_version: subscription
+                        .initialized_at_cluster_version
+                        .clone(),
+                    created_at_cluster_version: subscription.created_at_cluster_version.clone(),
+                })
+        })
+        .collect())
 }

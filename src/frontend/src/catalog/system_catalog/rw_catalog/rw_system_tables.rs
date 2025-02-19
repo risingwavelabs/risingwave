@@ -33,21 +33,27 @@ struct SystemTable {
 
 #[system_catalog(table, "rw_catalog.rw_system_tables")]
 fn read_system_table_info(reader: &SysCatalogReaderImpl) -> Result<Vec<SystemTable>> {
+    let catalog_reader = reader.catalog_reader.read_guard();
+    let schemas = catalog_reader.iter_schemas(&reader.auth_context.database)?;
     let user_reader = reader.user_info_reader.read_guard();
     let users = user_reader.get_all_users();
     let username_map = user_reader.get_user_name_map();
 
-    reader.list_all_system_tables(|schema, table| SystemTable {
-        id: table.id.table_id as i32,
-        name: table.name().to_owned(),
-        schema_id: schema.id() as i32,
-        owner: table.owner as i32,
-        definition: None,
-        acl: get_acl_items(
-            &Object::TableId(table.id.table_id),
-            false,
-            &users,
-            username_map,
-        ),
-    })
+    Ok(schemas
+        .flat_map(|schema| {
+            schema.iter_system_tables().map(|table| SystemTable {
+                id: table.id.table_id as i32,
+                name: table.name().to_owned(),
+                schema_id: schema.id() as i32,
+                owner: table.owner as i32,
+                definition: None,
+                acl: get_acl_items(
+                    &Object::TableId(table.id.table_id),
+                    false,
+                    &users,
+                    username_map,
+                ),
+            })
+        })
+        .collect())
 }

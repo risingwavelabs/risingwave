@@ -18,7 +18,6 @@ use risingwave_pb::user::grant_privilege::Object;
 
 use crate::catalog::system_catalog::{get_acl_items, SysCatalogReaderImpl};
 use crate::error::Result;
-use crate::user::has_access_to_object;
 
 #[derive(Fields)]
 struct RwInternalTable {
@@ -50,10 +49,7 @@ fn read_rw_internal_tables(reader: &SysCatalogReaderImpl) -> Result<Vec<RwIntern
     Ok(schemas
         .flat_map(|schema| {
             schema
-                .iter_internal_table()
-                .filter(|t| {
-                    has_access_to_object(current_user, &schema.name, t.id.table_id, t.owner)
-                })
+                .iter_internal_table_with_acl(current_user)
                 .map(|table| RwInternalTable {
                     id: table.id.table_id as i32,
                     name: table.name().into(),

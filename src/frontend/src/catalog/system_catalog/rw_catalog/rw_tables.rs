@@ -37,26 +37,37 @@ struct RwTable {
 
 #[system_catalog(table, "rw_catalog.rw_tables")]
 fn read_rw_table_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwTable>> {
+    let catalog_reader = reader.catalog_reader.read_guard();
+    let schemas = catalog_reader.iter_schemas(&reader.auth_context.database)?;
     let user_reader = reader.user_info_reader.read_guard();
     let users = user_reader.get_all_users();
+    let current_user = user_reader
+        .get_user_by_name(&reader.auth_context.user_name)
+        .expect("user not found");
     let username_map = user_reader.get_user_name_map();
 
-    reader.list_all_accessible_tables(|_, table| RwTable {
-        id: table.id.table_id as i32,
-        name: table.name().to_owned(),
-        schema_id: table.schema_id as i32,
-        owner: table.owner as i32,
-        definition: table.create_sql_purified(),
-        append_only: table.append_only,
-        acl: get_acl_items(
-            &GrantObject::TableId(table.id.table_id),
-            true,
-            &users,
-            username_map,
-        ),
-        initialized_at: table.initialized_at_epoch.map(|e| e.as_timestamptz()),
-        created_at: table.created_at_epoch.map(|e| e.as_timestamptz()),
-        initialized_at_cluster_version: table.initialized_at_cluster_version.clone(),
-        created_at_cluster_version: table.created_at_cluster_version.clone(),
-    })
+    Ok(schemas
+        .flat_map(|schema| {
+            schema
+                .iter_user_table_with_acl(current_user)
+                .map(|table| RwTable {
+                    id: table.id.table_id as i32,
+                    name: table.name().to_owned(),
+                    schema_id: schema.id() as i32,
+                    owner: table.owner as i32,
+                    definition: table.create_sql_purified(),
+                    append_only: table.append_only,
+                    acl: get_acl_items(
+                        &GrantObject::TableId(table.id.table_id),
+                        true,
+                        &users,
+                        username_map,
+                    ),
+                    initialized_at: table.initialized_at_epoch.map(|e| e.as_timestamptz()),
+                    created_at: table.created_at_epoch.map(|e| e.as_timestamptz()),
+                    initialized_at_cluster_version: table.initialized_at_cluster_version.clone(),
+                    created_at_cluster_version: table.created_at_cluster_version.clone(),
+                })
+        })
+        .collect())
 }

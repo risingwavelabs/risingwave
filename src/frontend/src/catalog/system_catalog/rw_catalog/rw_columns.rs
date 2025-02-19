@@ -19,7 +19,6 @@ use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::system_catalog::SysCatalogReaderImpl;
 use crate::error::Result;
 use crate::expr::{ExprDisplay, ExprImpl};
-use crate::user::has_access_to_object;
 use crate::user::user_catalog::UserCatalog;
 
 #[derive(Fields)]
@@ -57,53 +56,45 @@ fn read_rw_columns(reader: &SysCatalogReaderImpl) -> Result<Vec<RwColumn>> {
 }
 
 fn read_rw_columns_in_schema(current_user: &UserCatalog, schema: &SchemaCatalog) -> Vec<RwColumn> {
-    let view_rows = schema
-        .iter_view()
-        .filter(|v| {
-            v.is_system_view() || has_access_to_object(current_user, &schema.name, v.id, v.owner)
-        })
-        .flat_map(|view| {
-            view.columns
-                .iter()
-                .enumerate()
-                .map(|(index, column)| RwColumn {
-                    relation_id: view.id as i32,
-                    name: column.name.clone(),
-                    position: index as i32 + 1,
-                    is_hidden: false,
-                    is_primary_key: false,
-                    is_distribution_key: false,
-                    is_generated: false,
-                    generation_expression: None,
-                    data_type: column.data_type().to_string(),
-                    type_oid: column.data_type().to_oid(),
-                    type_len: column.data_type().type_len(),
-                    udt_type: column.data_type().pg_name().into(),
-                })
-        });
+    let view_rows = schema.iter_view_with_acl(current_user).flat_map(|view| {
+        view.columns
+            .iter()
+            .enumerate()
+            .map(|(index, column)| RwColumn {
+                relation_id: view.id as i32,
+                name: column.name.clone(),
+                position: index as i32 + 1,
+                is_hidden: false,
+                is_primary_key: false,
+                is_distribution_key: false,
+                is_generated: false,
+                generation_expression: None,
+                data_type: column.data_type().to_string(),
+                type_oid: column.data_type().to_oid(),
+                type_len: column.data_type().type_len(),
+                udt_type: column.data_type().pg_name().into(),
+            })
+    });
 
-    let sink_rows = schema
-        .iter_sink()
-        .filter(|s| has_access_to_object(current_user, &schema.name, s.id.sink_id, s.owner.user_id))
-        .flat_map(|sink| {
-            sink.full_columns()
-                .iter()
-                .enumerate()
-                .map(|(index, column)| RwColumn {
-                    relation_id: sink.id.sink_id as i32,
-                    name: column.name().into(),
-                    position: index as i32 + 1,
-                    is_hidden: column.is_hidden,
-                    is_primary_key: sink.downstream_pk.contains(&index),
-                    is_distribution_key: sink.distribution_key.contains(&index),
-                    is_generated: false,
-                    generation_expression: None,
-                    data_type: column.data_type().to_string(),
-                    type_oid: column.data_type().to_oid(),
-                    type_len: column.data_type().type_len(),
-                    udt_type: column.data_type().pg_name().into(),
-                })
-        });
+    let sink_rows = schema.iter_sink_with_acl(current_user).flat_map(|sink| {
+        sink.full_columns()
+            .iter()
+            .enumerate()
+            .map(|(index, column)| RwColumn {
+                relation_id: sink.id.sink_id as i32,
+                name: column.name().into(),
+                position: index as i32 + 1,
+                is_hidden: column.is_hidden,
+                is_primary_key: sink.downstream_pk.contains(&index),
+                is_distribution_key: sink.distribution_key.contains(&index),
+                is_generated: false,
+                generation_expression: None,
+                data_type: column.data_type().to_string(),
+                type_oid: column.data_type().to_oid(),
+                type_len: column.data_type().type_len(),
+                udt_type: column.data_type().pg_name().into(),
+            })
+    });
 
     let catalog_rows = schema.iter_system_tables().flat_map(|table| {
         table
@@ -127,8 +118,7 @@ fn read_rw_columns_in_schema(current_user: &UserCatalog, schema: &SchemaCatalog)
     });
 
     let table_rows = schema
-        .iter_table_mv_indices()
-        .filter(|t| has_access_to_object(current_user, &schema.name, t.id.table_id, t.owner))
+        .iter_table_mv_indices_with_acl(current_user)
         .flat_map(|table| {
             let schema = table.column_schema();
             table
@@ -159,8 +149,7 @@ fn read_rw_columns_in_schema(current_user: &UserCatalog, schema: &SchemaCatalog)
         });
 
     let schema_rows = schema
-        .iter_source()
-        .filter(|s| has_access_to_object(current_user, &schema.name, s.id, s.owner))
+        .iter_source_with_acl(current_user)
         .flat_map(|source| {
             source
                 .columns
