@@ -121,6 +121,48 @@ fn read_pg_class_info(reader: &SysCatalogReaderImpl) -> Result<Vec<PgClass>> {
                     relispartition: false,
                     relpartbound: None,
                 }))
+                .chain(schema.iter_source().map(|source| PgClass {
+                    oid: source.id as i32,
+                    relname: source.name.clone(),
+                    relnamespace: schema.id() as i32,
+                    relowner: source.owner as i32,
+                    relpersistence: "p".to_owned(),
+                    relkind: "s".to_owned(), // s for the source in rw.
+                    relpages: 0,
+                    relam: 0,
+                    reltablespace: 0,
+                    reloptions: vec![],
+                    relispartition: false,
+                    relpartbound: None,
+                }))
+                .chain(schema.iter_sink().map(|sink| PgClass {
+                    oid: sink.id.sink_id as i32,
+                    relname: sink.name.clone(),
+                    relnamespace: schema.id() as i32,
+                    relowner: sink.owner.user_id as i32,
+                    relpersistence: "p".to_owned(),
+                    relkind: "k".to_owned(), // k for the sink in rw.
+                    relpages: 0,
+                    relam: 0,
+                    reltablespace: 0,
+                    reloptions: vec![],
+                    relispartition: false,
+                    relpartbound: None,
+                }))
+                .chain(schema.iter_subscription().map(|subscription| PgClass {
+                    oid: subscription.id.subscription_id as i32,
+                    relname: subscription.name.clone(),
+                    relnamespace: schema.id() as i32,
+                    relowner: subscription.owner.user_id as i32,
+                    relpersistence: "p".to_owned(),
+                    relkind: "u".to_owned(), // u for the subscription in rw.
+                    relpages: 0,
+                    relam: 0,
+                    reltablespace: 0,
+                    reloptions: vec![],
+                    relispartition: false,
+                    relpartbound: None,
+                }))
         })
         .collect())
 }
