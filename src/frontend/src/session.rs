@@ -1249,7 +1249,11 @@ impl SessionImpl {
             return Ok(());
         }
 
-        let gen_message = |violated_limit: &ActorCountPerParallelism,
+        let gen_message = |ActorCountPerParallelism {
+                               worker_id_to_actor_count,
+                               hard_limit,
+                               soft_limit,
+                           }: ActorCountPerParallelism,
                            exceed_hard_limit: bool|
          -> String {
             let (limit_type, action) = if exceed_hard_limit {
@@ -1272,7 +1276,9 @@ HINT:
 - Contact us via slack or https://risingwave.com/contact-us/ for further enquiry.
 
 DETAILS:
-{violated_limit}"#,
+- hard limit: {hard_limit}
+- soft limit: {soft_limit}
+- worker_id_to_actor_count: {worker_id_to_actor_count:?}"#,
             )
         };
 
@@ -1282,10 +1288,10 @@ DETAILS:
                 cluster_limit::ClusterLimit::ActorCount(l) => {
                     if l.exceed_hard_limit() {
                         return Err(RwError::from(ErrorCode::ProtocolError(gen_message(
-                            &l, true,
+                            l, true,
                         ))));
                     } else if l.exceed_soft_limit() {
-                        self.notice_to_user(gen_message(&l, false));
+                        self.notice_to_user(gen_message(l, false));
                     }
                 }
             }
