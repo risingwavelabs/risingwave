@@ -686,7 +686,7 @@ impl DdlController {
     }
 
     async fn validate_cdc_table_inner(
-        node_body: &Option<stream_node::NodeBody>,
+        node_body: &Option<NodeBody>,
         table_id: u32,
     ) -> MetaResult<bool> {
         if let Some(NodeBody::StreamCdcScan(ref stream_cdc_scan)) = node_body
