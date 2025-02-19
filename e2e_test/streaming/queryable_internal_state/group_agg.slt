@@ -1,5 +1,7 @@
 # See https://github.com/risingwavelabs/risingwave/pull/20435 for the bug.
 
+control substitution on
+
 statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
@@ -17,8 +19,9 @@ select * from mv;
 ----
 1 7
 
+skipif madsim
 system ok
-internal_table.mjs --name mv --type hashaggstate --count
+internal_table.mjs --db $__DATABASE__ --name mv --type hashaggstate --count
 ----
 count: 1
 
@@ -32,8 +35,9 @@ select * from mv order by foo;
 1 7
 2 7
 
+skipif madsim
 system ok
-internal_table.mjs --name mv --type hashaggstate --count
+internal_table.mjs --db $__DATABASE__ --name mv --type hashaggstate --count
 ----
 count: 2
 
@@ -46,8 +50,9 @@ select * from mv;
 ----
 2 7
 
+skipif madsim
 system ok
-internal_table.mjs --name mv --type hashaggstate --count
+internal_table.mjs --db $__DATABASE__ --name mv --type hashaggstate --count
 ----
 count: 1
 

@@ -63,7 +63,7 @@ use tokio::time::sleep;
 use tracing::Instrument;
 
 use crate::barrier::BarrierManagerRef;
-use crate::controller::catalog::ReleaseContext;
+use crate::controller::catalog::{DropTableConnectorContext, ReleaseContext};
 use crate::controller::cluster::StreamingClusterInfo;
 use crate::controller::streaming_job::SinkIntoTableContext;
 use crate::error::{bail_invalid_parameter, bail_unavailable};
@@ -650,26 +650,66 @@ impl DdlController {
                 )
             })?;
 
-        {
-            if let Some(NodeBody::StreamCdcScan(ref stream_cdc_scan)) =
-                stream_scan_fragment.nodes.as_ref().unwrap().node_body
-                && let Some(ref cdc_table_desc) = stream_cdc_scan.cdc_table_desc
-            {
-                let options_with_secret = WithOptionsSecResolved::new(
-                    cdc_table_desc.connect_properties.clone(),
-                    cdc_table_desc.secret_refs.clone(),
-                );
-                let mut props = ConnectorProperties::extract(options_with_secret, true)?;
-                props.init_from_pb_cdc_table_desc(cdc_table_desc);
-
-                // try creating a split enumerator to validate
-                let _enumerator = props
-                    .create_split_enumerator(SourceEnumeratorContext::dummy().into())
-                    .await?;
-                tracing::debug!(?table.id, "validate cdc table success");
+        assert_eq!(
+            stream_scan_fragment.actors.len(),
+            1,
+            "Stream scan fragment should have only one actor"
+        );
+        let mut found_cdc_scan = false;
+        match &stream_scan_fragment.nodes.as_ref().unwrap().node_body {
+            Some(NodeBody::StreamCdcScan(_)) => {
+                if Self::validate_cdc_table_inner(
+                    &stream_scan_fragment.nodes.as_ref().unwrap().node_body,
+                    table.id,
+                )
+                .await?
+                {
+                    found_cdc_scan = true;
+                }
             }
+            // When there's generated columns, the cdc scan node is wrapped in a project node
+            Some(NodeBody::Project(_)) => {
+                for input in &stream_scan_fragment.nodes.as_ref().unwrap().input {
+                    if Self::validate_cdc_table_inner(&input.node_body, table.id).await? {
+                        found_cdc_scan = true;
+                    }
+                }
+            }
+            _ => {
+                bail!("Unexpected node body for stream cdc scan");
+            }
+        };
+        if !found_cdc_scan {
+            bail!("No stream cdc scan node found in stream scan fragment");
         }
         Ok(())
+    }
+
+    async fn validate_cdc_table_inner(
+        node_body: &Option<NodeBody>,
+        table_id: u32,
+    ) -> MetaResult<bool> {
+        if let Some(NodeBody::StreamCdcScan(ref stream_cdc_scan)) = node_body
+            && let Some(ref cdc_table_desc) = stream_cdc_scan.cdc_table_desc
+        {
+            let options_with_secret = WithOptionsSecResolved::new(
+                cdc_table_desc.connect_properties.clone(),
+                cdc_table_desc.secret_refs.clone(),
+            );
+
+            let mut props = ConnectorProperties::extract(options_with_secret, true)?;
+            props.init_from_pb_cdc_table_desc(cdc_table_desc);
+
+            // Try creating a split enumerator to validate
+            let _enumerator = props
+                .create_split_enumerator(SourceEnumeratorContext::dummy().into())
+                .await?;
+
+            tracing::debug!(?table_id, "validate cdc table success");
+            Ok(true)
+        } else {
+            Ok(false)
+        }
     }
 
     // Here we modify the union node of the downstream table by the TableFragments of the to-be-created sink upstream.
@@ -1288,6 +1328,7 @@ impl DdlController {
                                 dropping_sink_id: Some(sink_id),
                                 updated_sink_catalogs: vec![],
                             },
+                            None, // no source is dropped when dropping sink into table
                         )
                         .await?;
                     Ok(version)
@@ -1359,7 +1400,6 @@ impl DdlController {
         for secret in secret_ids {
             LocalSecretManager::global().remove_secret(secret as _);
         }
-
         Ok(version)
     }
 
@@ -1415,6 +1455,7 @@ impl DdlController {
         tracing::debug!(id = job_id, "building replace streaming job");
         let mut updated_sink_catalogs = vec![];
 
+        let mut drop_table_connector_ctx = None;
         let result: MetaResult<_> = try {
             let (mut ctx, mut stream_job_fragments) = self
                 .build_replace_job(
@@ -1425,6 +1466,7 @@ impl DdlController {
                     tmp_id as _,
                 )
                 .await?;
+            drop_table_connector_ctx = ctx.drop_table_connector_ctx.clone();
 
             if let StreamingJob::Table(_, table, ..) = &streaming_job {
                 let catalogs = self
@@ -1487,8 +1529,16 @@ impl DdlController {
                             dropping_sink_id: None,
                             updated_sink_catalogs,
                         },
+                        drop_table_connector_ctx.as_ref(),
                     )
                     .await?;
+                if let Some(drop_table_connector_ctx) = &drop_table_connector_ctx {
+                    self.source_manager
+                        .apply_source_change(SourceChange::DropSource {
+                            dropped_source_ids: vec![drop_table_connector_ctx.to_remove_source_id],
+                        })
+                        .await;
+                }
                 Ok(version)
             }
             Err(err) => {
@@ -1807,17 +1857,41 @@ impl DdlController {
         let id = stream_job.id();
         let expr_context = stream_ctx.to_expr_context();
 
+        // check if performing drop table connector
+        let mut drop_table_associated_source_id = None;
+        if let StreamingJob::Table(None, _, _) = &stream_job {
+            drop_table_associated_source_id = self
+                .metadata_manager
+                .get_table_associated_source_id(id as _)
+                .await?;
+        }
+
         let old_fragments = self
             .metadata_manager
             .get_job_fragments_by_id(&id.into())
             .await?;
         let old_internal_table_ids = old_fragments.internal_table_ids();
-        let old_internal_tables = self
-            .metadata_manager
-            .get_table_catalog_by_ids(old_internal_table_ids)
-            .await?;
 
-        fragment_graph.fit_internal_table_ids(old_internal_tables)?;
+        // handle drop table's associated source
+        let mut drop_table_connector_ctx = None;
+        if drop_table_associated_source_id.is_some() {
+            // drop table's associated source means the fragment containing the table has just one internal table (associated source's state table)
+            debug_assert!(old_internal_table_ids.len() == 1);
+
+            drop_table_connector_ctx = Some(DropTableConnectorContext {
+                // we do not remove the original table catalog as it's still needed for the streaming job
+                // just need to remove the ref to the state table
+                to_change_streaming_job_id: id as i32,
+                to_remove_state_table_id: old_internal_table_ids[0] as i32, // asserted before
+                to_remove_source_id: drop_table_associated_source_id.unwrap(),
+            });
+        } else {
+            let old_internal_tables = self
+                .metadata_manager
+                .get_table_catalog_by_ids(old_internal_table_ids)
+                .await?;
+            fragment_graph.fit_internal_table_ids(old_internal_tables)?;
+        }
 
         // 1. Resolve the edges to the downstream fragments, extend the fragment graph to a complete
         // graph that contains all information needed for building the actor graph.
@@ -1934,6 +2008,7 @@ impl DdlController {
             existing_locations,
             streaming_job: stream_job.clone(),
             tmp_id: tmp_job_id as _,
+            drop_table_connector_ctx,
         };
 
         Ok((ctx, stream_job_fragments))
