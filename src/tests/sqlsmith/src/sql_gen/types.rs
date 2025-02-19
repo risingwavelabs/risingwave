@@ -39,7 +39,7 @@ pub(super) fn data_type_to_ast_data_type(data_type: &DataType) -> AstDataType {
         DataType::Bytea => AstDataType::Bytea,
         DataType::Date => AstDataType::Date,
         DataType::Timestamp => AstDataType::Timestamp(false),
-        DataType::TimestampNanosecond => AstDataType::Timestamp(false),
+        DataType::TimestampNs => AstDataType::Custom(vec!["timestamp_ns".into()].into()),
         DataType::Timestamptz => AstDataType::Timestamp(true),
         DataType::Time => AstDataType::Time(false),
         DataType::Interval => AstDataType::Interval,

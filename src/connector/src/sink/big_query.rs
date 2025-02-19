@@ -317,7 +317,7 @@ impl BigQuerySink {
             DataType::Int32 => Ok("INT64".to_owned()),
             DataType::Int64 => Ok("INT64".to_owned()),
             DataType::Float32 => Err(SinkError::BigQuery(anyhow::anyhow!(
-                "Bigquery cannot support real"
+                "Bigquery don't support Real"
             ))),
             DataType::Float64 => Ok("FLOAT64".to_owned()),
             DataType::Decimal => Ok("NUMERIC".to_owned()),
@@ -325,7 +325,6 @@ impl BigQuerySink {
             DataType::Varchar => Ok("STRING".to_owned()),
             DataType::Time => Ok("TIME".to_owned()),
             DataType::Timestamp => Ok("DATETIME".to_owned()),
-            DataType::TimestampNanosecond => Ok("DATETIME".to_owned()),
             DataType::Timestamptz => Ok("TIMESTAMP".to_owned()),
             DataType::Interval => Ok("INTERVAL".to_owned()),
             DataType::Struct(structs) => {
@@ -345,10 +344,13 @@ impl BigQuerySink {
             DataType::Jsonb => Ok("JSON".to_owned()),
             DataType::Serial => Ok("INT64".to_owned()),
             DataType::Int256 => Err(SinkError::BigQuery(anyhow::anyhow!(
-                "Bigquery cannot support Int256"
+                "Bigquery don't support Int256"
             ))),
             DataType::Map(_) => Err(SinkError::BigQuery(anyhow::anyhow!(
-                "Bigquery cannot support Map"
+                "Bigquery don't support Map"
+            ))),
+            DataType::TimestampNs => Err(SinkError::BigQuery(anyhow::anyhow!(
+                "Bigquery don't support TimestampNs"
             ))),
         }
     }
@@ -361,7 +363,7 @@ impl BigQuerySink {
             }
             DataType::Float32 => {
                 return Err(SinkError::BigQuery(anyhow::anyhow!(
-                    "Bigquery cannot support real"
+                    "Bigquery don't support Real"
                 )))
             }
             DataType::Float64 => TableFieldSchema::float(&rw_field.name),
@@ -370,11 +372,15 @@ impl BigQuerySink {
             DataType::Varchar => TableFieldSchema::string(&rw_field.name),
             DataType::Time => TableFieldSchema::time(&rw_field.name),
             DataType::Timestamp => TableFieldSchema::date_time(&rw_field.name),
-            DataType::TimestampNanosecond => TableFieldSchema::date_time(&rw_field.name),
+            DataType::TimestampNs => {
+                return Err(SinkError::BigQuery(anyhow::anyhow!(
+                    "Bigquery don't support TimestampNs"
+                )))
+            }
             DataType::Timestamptz => TableFieldSchema::timestamp(&rw_field.name),
             DataType::Interval => {
                 return Err(SinkError::BigQuery(anyhow::anyhow!(
-                    "Bigquery cannot support Interval"
+                    "Bigquery don't support Interval"
                 )))
             }
             DataType::Struct(_) => {
@@ -397,12 +403,12 @@ impl BigQuerySink {
             DataType::Jsonb => TableFieldSchema::json(&rw_field.name),
             DataType::Int256 => {
                 return Err(SinkError::BigQuery(anyhow::anyhow!(
-                    "Bigquery cannot support Int256"
+                    "Bigquery don't support Int256"
                 )))
             }
             DataType::Map(_) => {
                 return Err(SinkError::BigQuery(anyhow::anyhow!(
-                    "Bigquery cannot support Map"
+                    "Bigquery don't support Map"
                 )))
             }
         };
@@ -896,9 +902,7 @@ fn build_protobuf_field(
         DataType::Varchar => field.r#type = Some(field_descriptor_proto::Type::String.into()),
         DataType::Time => field.r#type = Some(field_descriptor_proto::Type::String.into()),
         DataType::Timestamp => field.r#type = Some(field_descriptor_proto::Type::String.into()),
-        DataType::TimestampNanosecond => {
-            field.r#type = Some(field_descriptor_proto::Type::String.into())
-        }
+        DataType::TimestampNs => field.r#type = Some(field_descriptor_proto::Type::String.into()),
         DataType::Timestamptz => field.r#type = Some(field_descriptor_proto::Type::String.into()),
         DataType::Interval => field.r#type = Some(field_descriptor_proto::Type::String.into()),
         DataType::Struct(s) => {

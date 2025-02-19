@@ -18,7 +18,7 @@ use std::sync::LazyLock;
 use aho_corasick::{AhoCorasick, AhoCorasickBuilder};
 use chrono::format::{Item, StrftimeItems};
 use chrono::{Datelike, NaiveDate};
-use risingwave_common::types::{Interval, Timestamp, TimestampNanosecond, Timestamptz};
+use risingwave_common::types::{Interval, Timestamp, TimestampNs, Timestamptz};
 use risingwave_expr::{function, ExprError, Result};
 
 use super::timestamptz::time_zone_err;
@@ -198,11 +198,7 @@ fn timestamp_to_char(data: Timestamp, pattern: &ChronoPattern, writer: &mut impl
     "to_char(timestamp_ns, varchar) -> varchar",
     prebuild = "ChronoPattern::compile($1)"
 )]
-fn timestamp_ns_to_char(
-    data: TimestampNanosecond,
-    pattern: &ChronoPattern,
-    writer: &mut impl Write,
-) {
+fn timestamp_ns_to_char(data: TimestampNs, pattern: &ChronoPattern, writer: &mut impl Write) {
     let format = data.0.format_with_items(pattern.borrow_dependent().iter());
     write!(writer, "{}", format).unwrap();
 }

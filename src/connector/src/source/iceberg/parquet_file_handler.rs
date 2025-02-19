@@ -416,7 +416,7 @@ pub fn is_parquet_schema_match_source_schema(
             )
             | (
                 ArrowDateType::Timestamp(TimeUnit::Nanosecond, None),
-                RwDataType::TimestampNanosecond
+                RwDataType::TimestampNs
             )
             | (
                 ArrowDateType::Timestamp(_, Some(_)),

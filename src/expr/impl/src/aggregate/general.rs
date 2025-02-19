@@ -96,6 +96,7 @@ fn _var_samp() {}
 #[aggregate("min(time) -> auto", state = "ref")]
 #[aggregate("min(interval) -> auto", state = "ref")]
 #[aggregate("min(timestamp) -> auto", state = "ref")]
+#[aggregate("min(timestamp_ns) -> auto", state = "ref")]
 #[aggregate("min(timestamptz) -> auto", state = "ref")]
 #[aggregate("min(varchar) -> auto", state = "ref")]
 #[aggregate("min(bytea) -> auto", state = "ref")]

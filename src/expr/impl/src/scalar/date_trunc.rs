@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::types::{Interval, Timestamp, TimestampNanosecond, Timestamptz};
+use risingwave_common::types::{Interval, Timestamp, TimestampNs, Timestamptz};
 use risingwave_expr::{function, ExprError, Result};
 
 use super::timestamptz::timestamp_at_time_zone;
@@ -34,10 +34,7 @@ const CENTURY: &str = "century";
 const MILLENNIUM: &str = "millennium";
 
 #[function("date_trunc(varchar, timestamp_ns) -> timestamp_ns")]
-pub fn date_trunc_timestamp_ns(
-    field: &str,
-    ts: TimestampNanosecond,
-) -> Result<TimestampNanosecond> {
+pub fn date_trunc_timestamp_ns(field: &str, ts: TimestampNs) -> Result<TimestampNs> {
     Ok(match field.to_ascii_lowercase().as_str() {
         NANOSECONDS => ts,
         MICROSECONDS => ts.truncate_micros(),

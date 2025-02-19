@@ -232,8 +232,7 @@ impl MonotonicityAnalyzer {
                     // the result should have the same monotonicity.
                     // 2. For at_time_zone(timestamptz, const timezone) -> timestamp, when timestamptz has some monotonicity,
                     // the result only have the same monotonicity when the timezone is without DST (Daylight Saving Time).
-                    if ((func_call.inputs()[0].return_type() == DataType::Timestamp
-                        || func_call.inputs()[0].return_type() == DataType::TimestampNanosecond)
+                    if (func_call.inputs()[0].return_type() == DataType::Timestamp
                         && func_call.return_type() == DataType::Timestamptz)
                         || time_zone_is_without_dst(time_zone)
                     {

@@ -106,7 +106,7 @@ macro_rules! impl_chrono_wrapper {
         }
     };
 }
-impl_chrono_wrapper_without_pgsql_type!(TimestampNanosecond, NaiveDateTime);
+impl_chrono_wrapper_without_pgsql_type!(TimestampNs, NaiveDateTime);
 
 impl_chrono_wrapper!(Date, NaiveDate, DATE);
 impl_chrono_wrapper!(Timestamp, NaiveDateTime, TIMESTAMP);
@@ -198,26 +198,26 @@ impl FromStr for Timestamp {
     }
 }
 
-/// Parse a timestampns from varchar.
+/// Parse a `timestamp_ns` from varchar.
 ///
 /// # Example
 /// ```
 /// use std::str::FromStr;
 ///
-/// use risingwave_common::types::TimestampNanosecond;
+/// use risingwave_common::types::TimestampNs;
 ///
-/// TimestampNanosecond::from_str("1999-01-08 04:02").unwrap();
-/// TimestampNanosecond::from_str("1999-01-08 04:05:06").unwrap();
-/// TimestampNanosecond::from_str("1999-01-08T04:05:06").unwrap();
-/// TimestampNanosecond::from_str("1999-01-08T04:05:06.123456789").unwrap();
+/// TimestampNs::from_str("1999-01-08 04:02").unwrap();
+/// TimestampNs::from_str("1999-01-08 04:05:06").unwrap();
+/// TimestampNs::from_str("1999-01-08T04:05:06").unwrap();
+/// TimestampNs::from_str("1999-01-08T04:05:06.123456789").unwrap();
 /// ```
-impl FromStr for TimestampNanosecond {
+impl FromStr for TimestampNs {
     type Err = InvalidParamsError;
 
     fn from_str(s: &str) -> Result<Self> {
         let dt = s
             .parse::<jiff::civil::DateTime>()
-            .map_err(|_| ErrorKind::ParseTimestampNanosecond)?;
+            .map_err(|_| ErrorKind::ParseTimestampNs)?;
         Ok(Self::new(
             Date::from_ymd_uncheck(dt.year() as i32, dt.month() as u32, dt.day() as u32)
                 .0
@@ -256,14 +256,14 @@ impl From<Timestamp> for Date {
 /// ```
 /// use std::str::FromStr;
 ///
-/// use risingwave_common::types::{Date, TimestampNanosecond};
+/// use risingwave_common::types::{Date, TimestampNs};
 ///
-/// let ts = TimestampNanosecond::from_str("1999-01-08 04:02").unwrap();
+/// let ts = TimestampNs::from_str("1999-01-08 04:02").unwrap();
 /// let date = Date::from(ts);
 /// assert_eq!(date, Date::from_str("1999-01-08").unwrap());
 /// ```
-impl From<TimestampNanosecond> for Date {
-    fn from(ts: TimestampNanosecond) -> Self {
+impl From<TimestampNs> for Date {
+    fn from(ts: TimestampNs) -> Self {
         Date::new(ts.0.date())
     }
 }
@@ -290,14 +290,14 @@ impl From<Timestamp> for Time {
 /// ```
 /// use std::str::FromStr;
 ///
-/// use risingwave_common::types::{Time, TimestampNanosecond};
+/// use risingwave_common::types::{Time, TimestampNs};
 ///
-/// let ts = TimestampNanosecond::from_str("1999-01-08 04:02").unwrap();
+/// let ts = TimestampNs::from_str("1999-01-08 04:02").unwrap();
 /// let time = Time::from(ts);
 /// assert_eq!(time, Time::from_str("04:02").unwrap());
 /// ```
-impl From<TimestampNanosecond> for Time {
-    fn from(ts: TimestampNanosecond) -> Self {
+impl From<TimestampNs> for Time {
+    fn from(ts: TimestampNs) -> Self {
         Time::new(ts.0.time())
     }
 }
@@ -341,8 +341,8 @@ enum ErrorKind {
     ParseTime,
     #[error("Can't cast string to timestamp (expected format is YYYY-MM-DD HH:MM:SS[.D+{{up to 6 digits}}] or YYYY-MM-DD HH:MM or YYYY-MM-DD or ISO 8601 format)")]
     ParseTimestamp,
-    #[error("Can't cast string to timestampns (expected format is YYYY-MM-DD HH:MM:SS[.D+{{up to 9 digits}}] or YYYY-MM-DD HH:MM or YYYY-MM-DD or ISO 8601 format)")]
-    ParseTimestampNanosecond,
+    #[error("Can't cast string to timestamp_ns (expected format is YYYY-MM-DD HH:MM:SS[.D+{{up to 9 digits}}] or YYYY-MM-DD HH:MM or YYYY-MM-DD or ISO 8601 format)")]
+    ParseTimestampNs,
 }
 
 #[derive(Debug, Error)]
@@ -593,34 +593,6 @@ macro_rules! impl_timestamp {
             }
         }
 
-        impl ToText for $type {
-            fn write<W: std::fmt::Write>(&self, f: &mut W) -> std::fmt::Result {
-                let (ce, year) = self.0.year_ce();
-                let suffix = if ce { "" } else { " BC" };
-                write!(
-                    f,
-                    "{:04}-{:02}-{:02} {}{}",
-                    year,
-                    self.0.month(),
-                    self.0.day(),
-                    self.0.time(),
-                    suffix
-                )
-            }
-
-            fn write_with_type<W: std::fmt::Write>(
-                &self,
-                ty: &DataType,
-                f: &mut W,
-            ) -> std::fmt::Result {
-                match ty {
-                    super::DataType::Timestamp => self.write(f),
-                    super::DataType::TimestampNanosecond => self.write(f),
-                    _ => unreachable!(),
-                }
-            }
-        }
-
         impl $type {
             pub fn with_secs_nsecs(secs: i64, nsecs: u32) -> Result<Self> {
                 Ok(Self::new({
@@ -860,30 +832,76 @@ macro_rules! impl_timestamp {
     };
 }
 impl_timestamp!(Timestamp);
-impl_timestamp!(TimestampNanosecond);
+impl_timestamp!(TimestampNs);
 
-impl From<Timestamp> for TimestampNanosecond {
-    fn from(ts: Timestamp) -> Self {
-        TimestampNanosecond::new(ts.0)
+impl ToText for Timestamp {
+    fn write<W: std::fmt::Write>(&self, f: &mut W) -> std::fmt::Result {
+        let (ce, year) = self.0.year_ce();
+        let suffix = if ce { "" } else { " BC" };
+        write!(
+            f,
+            "{:04}-{:02}-{:02} {}{}",
+            year,
+            self.0.month(),
+            self.0.day(),
+            self.0.time(),
+            suffix
+        )
+    }
+
+    fn write_with_type<W: std::fmt::Write>(&self, ty: &DataType, f: &mut W) -> std::fmt::Result {
+        match ty {
+            super::DataType::Timestamp => self.write(f),
+            _ => unreachable!(),
+        }
     }
 }
 
-impl From<TimestampNanosecond> for Timestamp {
-    fn from(ts: TimestampNanosecond) -> Self {
+impl ToText for TimestampNs {
+    fn write<W: std::fmt::Write>(&self, f: &mut W) -> std::fmt::Result {
+        let (ce, year) = self.0.year_ce();
+        let suffix = if ce { "" } else { " BC" };
+        write!(
+            f,
+            "{:04}-{:02}-{:02} {}{}",
+            year,
+            self.0.month(),
+            self.0.day(),
+            self.0.time(),
+            suffix
+        )
+    }
+
+    fn write_with_type<W: std::fmt::Write>(&self, ty: &DataType, f: &mut W) -> std::fmt::Result {
+        match ty {
+            super::DataType::TimestampNs => self.write(f),
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl From<Timestamp> for TimestampNs {
+    fn from(ts: Timestamp) -> Self {
+        TimestampNs::new(ts.0)
+    }
+}
+
+impl From<TimestampNs> for Timestamp {
+    fn from(ts: TimestampNs) -> Self {
         let ts = ts.truncate_micros();
         Timestamp::new(ts.0)
     }
 }
 
-impl TimestampNanosecond {
-    pub fn from_protobuf(cur: &mut Cursor<&[u8]>) -> ArrayResult<TimestampNanosecond> {
+impl TimestampNs {
+    pub fn from_protobuf(cur: &mut Cursor<&[u8]>) -> ArrayResult<TimestampNs> {
         let secs = cur
             .read_i64::<BigEndian>()
-            .context("failed to read i64 from TimestampNanosecond buffer")?;
+            .context("failed to read i64 from TimestampNs buffer")?;
         let nsecs = cur
             .read_u32::<BigEndian>()
-            .context("failed to read u32 from TimestampNanosecond buffer")?;
-        Ok(TimestampNanosecond::with_secs_nsecs(secs, nsecs)?)
+            .context("failed to read u32 from TimestampNs buffer")?;
+        Ok(TimestampNs::with_secs_nsecs(secs, nsecs)?)
     }
 
     pub fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
@@ -915,7 +933,7 @@ impl Timestamp {
             .map_err(Into::into)
     }
 
-    pub fn get_timestamp_nanos(&self) -> i64 {
+    pub fn get_timestamp_ns(&self) -> i64 {
         self.0.and_utc().timestamp_nanos_opt().unwrap()
     }
 }

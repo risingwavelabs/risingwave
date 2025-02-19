@@ -107,14 +107,14 @@ impl SessionTimezone {
                     }
                     (DataType::Date, DataType::Timestamptz)
                     | (DataType::Timestamp, DataType::Timestamptz)
-                    | (DataType::TimestampNanosecond, DataType::Timestamptz) => {
+                    | (DataType::TimestampNs, DataType::Timestamptz) => {
                         input = input.cast_explicit(DataType::Timestamp).unwrap();
                         Some(self.at_timezone(input))
                     }
                     (DataType::Timestamptz, DataType::Date)
                     | (DataType::Timestamptz, DataType::Time)
                     | (DataType::Timestamptz, DataType::Timestamp)
-                    | (DataType::Timestamptz, DataType::TimestampNanosecond) => {
+                    | (DataType::Timestamptz, DataType::TimestampNs) => {
                         input = self.at_timezone(input);
                         input = input.cast_explicit(return_type).unwrap();
                         Some(input)
@@ -144,7 +144,7 @@ impl SessionTimezone {
                     if matches!(inputs[(idx + 1) % 2].return_type(), DataType::Timestamptz)
                         && matches!(
                             inputs[idx % 2].return_type(),
-                            DataType::Date | DataType::Timestamp | DataType::TimestampNanosecond
+                            DataType::Date | DataType::Timestamp
                         )
                     {
                         let mut to_cast = inputs[idx % 2].clone();

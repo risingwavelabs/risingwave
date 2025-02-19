@@ -76,7 +76,7 @@ pub use fields::Fields;
 pub use risingwave_fields_derive::Fields;
 
 pub use self::cow::DatumCow;
-pub use self::datetime::{Date, Time, Timestamp, TimestampNanosecond};
+pub use self::datetime::{Date, Time, Timestamp, TimestampNs};
 pub use self::decimal::{Decimal, PowError as DecimalPowError};
 pub use self::interval::{test_utils, DateTimeField, Interval, IntervalDisplay};
 pub use self::jsonb::{JsonbRef, JsonbVal};
@@ -151,8 +151,8 @@ pub enum DataType {
     #[from_str(regex = "(?i)^timestamp$|^timestamp without time zone$")]
     Timestamp,
     #[display("timestamp_ns without time zone")]
-    #[from_str(regex = "(?i)^timestamp_ns$|^timestamp_ns without time zone$")]
-    TimestampNanosecond,
+    #[from_str(regex = "(?i)^timestamp_ns$")]
+    TimestampNs,
     #[display("timestamp with time zone")]
     #[from_str(regex = "(?i)^timestamptz$|^timestamp with time zone$")]
     Timestamptz,
@@ -211,7 +211,7 @@ impl TryFrom<DataTypeName> for DataType {
             DataTypeName::Bytea => Ok(DataType::Bytea),
             DataTypeName::Date => Ok(DataType::Date),
             DataTypeName::Timestamp => Ok(DataType::Timestamp),
-            DataTypeName::TimestampNanosecond => Ok(DataType::TimestampNanosecond),
+            DataTypeName::TimestampNs => Ok(DataType::TimestampNs),
             DataTypeName::Timestamptz => Ok(DataType::Timestamptz),
             DataTypeName::Time => Ok(DataType::Time),
             DataTypeName::Interval => Ok(DataType::Interval),
@@ -238,7 +238,7 @@ impl From<&PbDataType> for DataType {
             PbTypeName::Date => DataType::Date,
             PbTypeName::Time => DataType::Time,
             PbTypeName::Timestamp => DataType::Timestamp,
-            PbTypeName::TimestampNanosecond => DataType::TimestampNanosecond,
+            PbTypeName::TimestampNs => DataType::TimestampNs,
             PbTypeName::Timestamptz => DataType::Timestamptz,
             PbTypeName::Decimal => DataType::Decimal,
             PbTypeName::Interval => DataType::Interval,
@@ -291,7 +291,7 @@ impl From<DataTypeName> for PbTypeName {
             DataTypeName::List => PbTypeName::List,
             DataTypeName::Int256 => PbTypeName::Int256,
             DataTypeName::Map => PbTypeName::Map,
-            DataTypeName::TimestampNanosecond => PbTypeName::TimestampNanosecond,
+            DataTypeName::TimestampNs => PbTypeName::TimestampNs,
         }
     }
 }
@@ -319,7 +319,7 @@ pub mod data_types {
             DataType::Date
                 | DataType::Time
                 | DataType::Timestamp
-                | DataType::TimestampNanosecond
+                | DataType::TimestampNs
                 | DataType::Timestamptz
                 | DataType::Interval
         };
@@ -369,7 +369,7 @@ impl DataType {
             | DataType::Varchar
             | DataType::Time
             | DataType::Timestamp
-            | DataType::TimestampNanosecond
+            | DataType::TimestampNs
             | DataType::Timestamptz
             | DataType::Interval
             | DataType::Bytea
@@ -414,7 +414,7 @@ impl DataType {
         match input {
             DataType::Timestamptz => Some(DataType::Timestamptz),
             DataType::Timestamp | DataType::Date => Some(DataType::Timestamp),
-            DataType::TimestampNanosecond => Some(DataType::TimestampNanosecond),
+            DataType::TimestampNs => Some(DataType::TimestampNs),
             _ => None,
         }
     }
@@ -899,10 +899,7 @@ impl ScalarImpl {
                     .ok_or_else(|| "invalid value of Jsonb".to_owned())?,
             ),
             DataType::Int256 => Self::Int256(Int256::from_binary(bytes)?),
-            DataType::Struct(_)
-            | DataType::List(_)
-            | DataType::Map(_)
-            | DataType::TimestampNanosecond => {
+            DataType::Struct(_) | DataType::List(_) | DataType::Map(_) | DataType::TimestampNs => {
                 return Err(format!("unsupported data type: {}", data_type).into());
             }
         };
@@ -926,7 +923,7 @@ impl ScalarImpl {
             DataType::Varchar => s.into(),
             DataType::Date => Date::from_str(s)?.into(),
             DataType::Timestamp => Timestamp::from_str(s)?.into(),
-            DataType::TimestampNanosecond => TimestampNanosecond::from_str(s)?.into(),
+            DataType::TimestampNs => TimestampNs::from_str(s)?.into(),
             // We only handle the case with timezone here, and leave the implicit session timezone case
             // for later phase.
             DataType::Timestamptz => Timestamptz::from_str(s)?.into(),
@@ -1032,7 +1029,7 @@ impl ScalarRefImpl<'_> {
                 v.0.and_utc().timestamp().serialize(&mut *ser)?;
                 v.0.and_utc().timestamp_subsec_nanos().serialize(ser)?;
             }
-            Self::TimestampNanosecond(v) => {
+            Self::TimestampNs(v) => {
                 v.0.and_utc().timestamp().serialize(&mut *ser)?;
                 v.0.and_utc().timestamp_subsec_nanos().serialize(ser)?;
             }
@@ -1091,10 +1088,10 @@ impl ScalarImpl {
                 Timestamp::with_secs_nsecs(secs, nsecs)
                     .map_err(|e| memcomparable::Error::Message(e.to_report_string()))?
             }),
-            Ty::TimestampNanosecond => Self::TimestampNanosecond({
+            Ty::TimestampNs => Self::TimestampNs({
                 let secs = i64::deserialize(&mut *de)?;
                 let nsecs = u32::deserialize(de)?;
-                TimestampNanosecond::with_secs_nsecs(secs, nsecs)
+                TimestampNs::with_secs_nsecs(secs, nsecs)
                     .map_err(|e| memcomparable::Error::Message(e.to_report_string()))?
             }),
             Ty::Timestamptz => Self::Timestamptz(Timestamptz::deserialize(de)?),
@@ -1261,11 +1258,9 @@ mod tests {
                     ScalarImpl::Timestamp(Timestamp::from_timestamp_uncheck(23333333, 2333)),
                     DataType::Timestamp,
                 ),
-                DataTypeName::TimestampNanosecond => (
-                    ScalarImpl::TimestampNanosecond(TimestampNanosecond::from_timestamp_uncheck(
-                        23333333, 2333,
-                    )),
-                    DataType::TimestampNanosecond,
+                DataTypeName::TimestampNs => (
+                    ScalarImpl::TimestampNs(TimestampNs::from_timestamp_uncheck(23333333, 2333)),
+                    DataType::TimestampNs,
                 ),
                 DataTypeName::Timestamptz => (
                     ScalarImpl::Timestamptz(Timestamptz::from_micros(233333333)),

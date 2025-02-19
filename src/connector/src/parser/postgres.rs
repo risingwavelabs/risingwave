@@ -68,7 +68,6 @@ fn postgres_cell_to_scalar_impl(
         | DataType::Date
         | DataType::Time
         | DataType::Timestamp
-        | DataType::TimestampNanosecond
         | DataType::Timestamptz
         | DataType::Jsonb
         | DataType::Interval
@@ -117,7 +116,7 @@ fn postgres_cell_to_scalar_impl(
                 }
             }
         },
-        DataType::Struct(_) | DataType::Serial | DataType::Map(_) => {
+        DataType::Struct(_) | DataType::Serial | DataType::Map(_) | DataType::TimestampNs => {
             // Is this branch reachable?
             // Struct and Serial are not supported
             tracing::warn!(name, ?data_type, "unsupported data type, set to null");

@@ -45,8 +45,8 @@ pub use bool_array::{BoolArray, BoolArrayBuilder};
 pub use bytes_array::*;
 pub use chrono_array::{
     DateArray, DateArrayBuilder, TimeArray, TimeArrayBuilder, TimestampArray,
-    TimestampArrayBuilder, TimestampNanosecondArray, TimestampNanosecondArrayBuilder,
-    TimestamptzArray, TimestamptzArrayBuilder,
+    TimestampArrayBuilder, TimestampNsArray, TimestampNsArrayBuilder, TimestamptzArray,
+    TimestamptzArrayBuilder,
 };
 pub use data_chunk::{DataChunk, DataChunkTestExt};
 pub use data_chunk_iter::RowRef;

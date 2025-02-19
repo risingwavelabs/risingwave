@@ -111,7 +111,7 @@ impl MapType {
             | DataType::Date
             | DataType::Time
             | DataType::Timestamp
-            | DataType::TimestampNanosecond
+            | DataType::TimestampNs
             | DataType::Timestamptz
             | DataType::Interval
             | DataType::Struct(_)

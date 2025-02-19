@@ -28,7 +28,7 @@ const TYPE_MATRIX: &str = "
     date        Date        DateArray           Date            Date                y
     time        Time        TimeArray           Time            Time                y
     timestamp   Timestamp   TimestampArray      Timestamp       Timestamp           y
-    timestamp_ns   TimestampNanosecond   TimestampNanosecondArray      TimestampNanosecond       TimestampNanosecond           y
+    timestamp_ns   TimestampNs   TimestampNsArray      TimestampNs       TimestampNs           y
     timestamptz Timestamptz TimestamptzArray    Timestamptz     Timestamptz         y
     interval    Interval    IntervalArray       Interval        Interval            y
     varchar     Varchar     Utf8Array           Box<str>        &str                _
@@ -142,7 +142,9 @@ pub fn min_compatible_type(types: &[impl AsRef<str>]) -> &str {
         ("decimal", "decimal") => "decimal",
 
         ("date", "timestamp") => "timestamp",
+        ("date", "timestamp_ns") => "timestamp_ns",
         ("timestamp", "date") => "timestamp",
+        ("timestamp_ns", "date") => "timestamp_ns",
         ("time", "interval") => "interval",
         ("interval", "time") => "interval",
 
