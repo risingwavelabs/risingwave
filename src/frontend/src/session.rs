@@ -1253,18 +1253,26 @@ impl SessionImpl {
                            exceed_hard_limit: bool|
          -> String {
             let (limit_type, action) = if exceed_hard_limit {
-                ("critical", "Please scale the cluster before proceeding!")
+                ("critical", "Scale the cluster immediately to proceed.")
             } else {
-                ("recommended", "Scaling the cluster is recommended.")
+                (
+                    "recommended",
+                    "Consider scaling the cluster for optimal performance.",
+                )
             };
             format!(
-                "\n- {}\n- {}\n- {}\n- {}\n- {}\n{}",
-                format_args!("Actor count per parallelism exceeds the {} limit.", limit_type),
-                format_args!("Depending on your workload, this may overload the cluster and cause performance/stability issues. {}", action),
-                "Contact us via slack or https://risingwave.com/contact-us/ for further enquiry.",
-                "You can bypass this check via SQL `SET bypass_cluster_limits TO true`.",
-                "You can check actor count distribution via SQL `SELECT * FROM rw_worker_actor_count`.",
-                violated_limit,
+                r#"Actor count per parallelism exceeds the {limit_type} limit.
+
+Depending on your workload, this may overload the cluster and cause performance/stability issues. {action}
+
+HINT:
+- For best practices on managing streaming jobs: https://docs.risingwave.com/operate/manage-a-large-number-of-streaming-jobs
+- To bypass the check (if the cluster load is acceptable): `[ALTER SYSTEM] SET bypass_cluster_limits TO true`.
+  See https://docs.risingwave.com/operate/view-configure-runtime-parameters#how-to-configure-runtime-parameters
+- Contact us via slack or https://risingwave.com/contact-us/ for further enquiry.
+
+DETAILS:
+{violated_limit}"#,
             )
         };
 
