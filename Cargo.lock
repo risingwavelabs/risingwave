@@ -11271,6 +11271,7 @@ dependencies = [
  "prost-reflect",
  "prost-types 0.13.1",
  "protox",
+ "reqwest 0.12.4",
  "risingwave_common",
  "risingwave_pb",
  "rust_decimal",
@@ -11279,6 +11280,7 @@ dependencies = [
  "thiserror-ext",
  "time",
  "tracing",
+ "url",
  "workspace-hack",
 ]
 
