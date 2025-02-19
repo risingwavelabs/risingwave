@@ -18,4 +18,16 @@ public class TestUtils {
 
         return DriverManager.getConnection(url, props);
     }
+
+    public static Connection establishExtendedConnection() throws SQLException {
+        final String url = "jdbc:postgresql://risingwave-standalone:4566/dev";
+        final String user = "root";
+        final String password = "";
+
+        Properties props = new Properties();
+        props.setProperty("user", user);
+        props.setProperty("password", password);
+
+        return DriverManager.getConnection(url, props);
+    }
 }

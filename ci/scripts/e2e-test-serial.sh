@@ -84,8 +84,7 @@ echo "--- e2e, $mode, streaming"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info,risingwave_stream::common::table::state_table=warn" \
 cluster_start
 # Please make sure the regression is expected before increasing the timeout.
-sqllogictest -p 4566 -d dev './e2e_test/streaming/**/*.slt' --junit "streaming-${profile}"
-risedev slt -p 4566 -d dev './e2e_test/queryable_internal_state/**/*.slt' --junit "queryable-internal-state-${profile}"
+risedev slt -p 4566 -d dev './e2e_test/streaming/**/*.slt' --junit "streaming-${profile}"
 sqllogictest -p 4566 -d dev './e2e_test/backfill/sink/different_pk_and_dist_key.slt'
 
 echo "--- Kill cluster"
@@ -141,14 +140,6 @@ sqllogictest -p 4566 -d dev './e2e_test/udf/wasm_udf.slt'
 sqllogictest -p 4566 -d dev './e2e_test/udf/rust_udf.slt'
 sqllogictest -p 4566 -d dev './e2e_test/udf/js_udf.slt'
 sqllogictest -p 4566 -d dev './e2e_test/udf/python_udf.slt'
-
-echo "--- Kill cluster"
-cluster_stop
-
-echo "--- e2e, $mode, generated"
-RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
-cluster_start
-sqllogictest -p 4566 -d dev './e2e_test/generated/**/*.slt' --junit "generated-${profile}"
 
 echo "--- Kill cluster"
 cluster_stop

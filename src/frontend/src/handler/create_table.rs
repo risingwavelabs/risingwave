@@ -42,7 +42,7 @@ use risingwave_connector::source::cdc::build_cdc_table_id;
 use risingwave_connector::source::cdc::external::{
     ExternalTableConfig, ExternalTableImpl, DATABASE_NAME_KEY, SCHEMA_NAME_KEY, TABLE_NAME_KEY,
 };
-use risingwave_connector::{source, WithOptionsSecResolved};
+use risingwave_connector::{source, WithOptionsSecResolved, WithPropertiesExt};
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::connection_params::ConnectionType;
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
@@ -556,6 +556,9 @@ pub(crate) async fn gen_create_table_plan_with_source(
 
     let session = &handler_args.session;
     let with_properties = bind_connector_props(&handler_args, &format_encode, false)?;
+    if with_properties.is_shareable_cdc_connector() {
+        generated_columns_check_for_cdc_table(&column_defs)?;
+    }
 
     let db_name: &str = &session.database();
     let (schema_name, _) = Binder::resolve_schema_qualified_name(db_name, table_name.clone())?;
@@ -1153,6 +1156,8 @@ pub(super) async fn handle_create_table_plan(
             let (format_encode, source_name) =
                 Binder::resolve_schema_qualified_name(db_name, cdc_table.source_name.clone())?;
 
+            generated_columns_check_for_cdc_table(&column_defs)?;
+
             let source = {
                 let catalog_reader = session.env().catalog_reader().read_guard();
                 let schema_path =
@@ -1204,18 +1209,12 @@ pub(super) async fn handle_create_table_plan(
                         .collect();
 
                     for col in &mut columns {
-                        let external_column_desc =
-                            *external_columns.get(col.name()).ok_or_else(|| {
-                                ErrorCode::ConnectorError(
-                                    format!(
-                                        "Column '{}' not found in the upstream database",
-                                        col.name()
-                                    )
-                                    .into(),
-                                )
-                            })?;
-                        col.column_desc.generated_or_default_column =
-                            external_column_desc.generated_or_default_column.clone();
+                        // Keep the default column aligned with external table.
+                        // Note the generated columns have not been initialized yet. If a column is not found here, it should be a generated column.
+                        if let Some(external_column_desc) = external_columns.get(col.name()) {
+                            col.column_desc.generated_or_default_column =
+                                external_column_desc.generated_or_default_column.clone();
+                        }
                     }
                     (columns, pk_names)
                 }
@@ -1255,6 +1254,32 @@ pub(super) async fn handle_create_table_plan(
         }
     };
     Ok((plan, source, table, job_type))
+}
+
+fn generated_columns_check_for_cdc_table(columns: &Vec<ColumnDef>) -> Result<()> {
+    let mut found_generated_column = false;
+    for column in columns {
+        let mut is_generated = false;
+
+        for option_def in &column.options {
+            if let ColumnOption::GeneratedColumns(_) = option_def.option {
+                is_generated = true;
+                break;
+            }
+        }
+
+        if is_generated {
+            found_generated_column = true;
+        } else if found_generated_column {
+            return Err(ErrorCode::NotSupported(
+                "Non-generated column found after a generated column.".into(),
+                "Ensure that all generated columns appear at the end of the cdc table definition."
+                    .into(),
+            )
+            .into());
+        }
+    }
+    Ok(())
 }
 
 fn sanity_check_for_cdc_table(
