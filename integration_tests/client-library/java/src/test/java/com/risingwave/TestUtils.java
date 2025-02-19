@@ -20,7 +20,6 @@ public class TestUtils {
     }
 
     public static Connection establishExtendedConnection() throws SQLException {
-        // TODO: remove preferQueryMode=simple.
         final String url = "jdbc:postgresql://risingwave-standalone:4566/dev";
         final String user = "root";
         final String password = "";
