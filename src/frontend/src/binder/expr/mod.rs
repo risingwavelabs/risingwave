@@ -939,6 +939,17 @@ impl Binder {
             }
             // Redirect cast char to varchar to make system like Metabase happy.
             // Char is not supported in RisingWave, but some ecosystem tools like Metabase will use it.
+            // Notice that the behavior of `char` and `varchar` is different in PostgreSQL.
+            // The following sql result should be different in PostgreSQL:
+            // ```
+            // select 'a'::char(2) = 'a '::char(2);
+            // ----------
+            // t
+            //
+            // select 'a'::varchar = 'a '::varchar;
+            // ----------
+            // f
+            // ```
             AstDataType::Char(_) => self.bind_cast_inner(expr, DataType::Varchar),
             _ => self.bind_cast_inner(expr, bind_data_type(&data_type)?),
         }
