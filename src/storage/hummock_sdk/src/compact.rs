@@ -67,6 +67,11 @@ pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
         .collect();
     let mut input_sst_table_ids: HashSet<u32> = HashSet::new();
     let mut dropped_table_ids = HashSet::new();
+    let to_print_key_range = if let Some(last_level) = compact_task.input_ssts.last() {
+        last_level.table_infos.len() == 1 && compact_task.target_level == 1
+    } else {
+        false
+    };
     for level_entry in &compact_task.input_ssts {
         let tables: Vec<String> = level_entry
             .table_infos
@@ -79,23 +84,47 @@ pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
                         input_sst_table_ids.insert(*tid);
                     }
                 }
-                if table.total_key_count != 0 {
-                    format!(
-                        "[id: {}, obj_id: {} object_size {}KB sst_size {}KB stale_ratio {}]",
-                        table.sst_id,
-                        table.object_id,
-                        table.file_size / 1024,
-                        table.sst_size / 1024,
-                        (table.stale_key_count * 100 / table.total_key_count),
-                    )
+
+                if !to_print_key_range {
+                    if table.total_key_count != 0 {
+                        format!(
+                            "[id: {}, obj_id: {} object_size {}KB sst_size {}KB stale_ratio {}]",
+                            table.sst_id,
+                            table.object_id,
+                            table.file_size / 1024,
+                            table.sst_size / 1024,
+                            (table.stale_key_count * 100 / table.total_key_count),
+                        )
+                    } else {
+                        format!(
+                            "[id: {}, obj_id: {} object_size {}KB sst_size {}KB]",
+                            table.sst_id,
+                            table.object_id,
+                            table.file_size / 1024,
+                            table.sst_size / 1024,
+                        )
+                    }
                 } else {
-                    format!(
-                        "[id: {}, obj_id: {} object_size {}KB sst_size {}KB]",
-                        table.sst_id,
-                        table.object_id,
-                        table.file_size / 1024,
-                        table.sst_size / 1024,
-                    )
+                    if table.total_key_count != 0 {
+                        format!(
+                            "[id: {}, obj_id: {} object_size {}KB sst_size {}KB stale_ratio {} key_range {:?}]",
+                            table.sst_id,
+                            table.object_id,
+                            table.file_size / 1024,
+                            table.sst_size / 1024,
+                            (table.stale_key_count * 100 / table.total_key_count),
+                            table.key_range,
+                        )
+                    } else {
+                        format!(
+                            "[id: {}, obj_id: {} object_size {}KB sst_size {}KB key_range {:?}]",
+                            table.sst_id,
+                            table.object_id,
+                            table.file_size / 1024,
+                            table.sst_size / 1024,
+                            table.key_range,
+                        )
+                    }
                 }
             })
             .collect();
