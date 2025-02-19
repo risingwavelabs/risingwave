@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::num::NonZeroU64;
+use std::num::NonZeroUsize;
 use std::sync::{LazyLock, RwLock};
 
 use jsonwebtoken::{Algorithm, DecodingKey, Validation};
@@ -81,7 +81,7 @@ pub struct License {
     pub tier: Tier,
 
     /// Maximum number of compute-node CPU cores allowed to use. Typically used for the paid tier.
-    pub cpu_core_limit: Option<NonZeroU64>,
+    pub cpu_core_limit: Option<NonZeroUsize>,
 
     /// Expiration time in seconds since UNIX epoch.
     ///
@@ -106,11 +106,21 @@ impl Default for License {
 
 /// The error type for invalid license key when verifying as JWT.
 #[derive(Debug, Clone, Error)]
-#[error("invalid license key")]
-pub struct LicenseKeyError(#[source] jsonwebtoken::errors::Error);
+pub enum LicenseError {
+    #[error("invalid license key")]
+    InvalidKey(#[source] jsonwebtoken::errors::Error),
+
+    #[error(
+        "the license key is currently not effective because the CPU core in the cluster \
+        ({actual}) exceeds the maximum allowed by the license key ({limit}); \
+        consider removing some nodes or acquiring a new license key with a higher limit"
+    )]
+    CpuCoreLimitExceeded { limit: NonZeroUsize, actual: usize },
+}
 
 struct Inner {
-    license: Result<License, LicenseKeyError>,
+    license: Result<License, LicenseError>,
+    cached_cpu_core_count: usize,
 }
 
 /// The singleton license manager.
@@ -129,6 +139,7 @@ impl LicenseManager {
         Self {
             inner: RwLock::new(Inner {
                 license: Ok(License::default()),
+                cached_cpu_core_count: 0,
             }),
         }
     }
@@ -162,7 +173,7 @@ impl LicenseManager {
 
         inner.license = match jsonwebtoken::decode(license_key, &PUBLIC_KEY, &validation) {
             Ok(data) => Ok(data.claims),
-            Err(error) => Err(LicenseKeyError(error)),
+            Err(error) => Err(LicenseError::InvalidKey(error)),
         };
 
         match &inner.license {
@@ -171,20 +182,38 @@ impl LicenseManager {
         }
     }
 
+    /// Update the cached CPU core count.
+    pub fn update_cpu_core_count(&self, cpu_core_count: usize) {
+        let mut inner = self.inner.write().unwrap();
+        inner.cached_cpu_core_count = cpu_core_count;
+    }
+
     /// Get the current license if it is valid.
     ///
     /// Since the license can expire, the returned license should not be cached by the caller.
     ///
     /// Prefer calling [`crate::Feature::check_available`] to check the availability of a feature,
     /// other than directly calling this method and checking the content of the license.
-    pub fn license(&self) -> Result<License, LicenseKeyError> {
-        let license = self.inner.read().unwrap().license.clone()?;
+    pub fn license(&self) -> Result<License, LicenseError> {
+        let inner = self.inner.read().unwrap();
+        let license = inner.license.clone()?;
 
         // Check the expiration time additionally.
         if license.exp < jsonwebtoken::get_current_timestamp() {
-            return Err(LicenseKeyError(
+            return Err(LicenseError::InvalidKey(
                 jsonwebtoken::errors::ErrorKind::ExpiredSignature.into(),
             ));
+        }
+
+        // Check the CPU core limit.
+        let actual_cpu_core = inner.cached_cpu_core_count;
+        if let Some(limit) = license.cpu_core_limit
+            && actual_cpu_core > limit.get()
+        {
+            return Err(LicenseError::CpuCoreLimitExceeded {
+                limit,
+                actual: actual_cpu_core,
+            });
         }
 
         Ok(license)

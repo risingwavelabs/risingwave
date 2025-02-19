@@ -399,7 +399,7 @@ mod tests {
             ColumnOrder::new(3, OrderType::ascending()), // _row_id
         ];
         let mut state = MaterializedInputState::new(
-            PbAggNodeVersion::Max,
+            PbAggNodeVersion::LATEST,
             &agg_call,
             &PkIndices::new(), // unused
             &order_columns,
@@ -426,7 +426,7 @@ mod tests {
             state.apply_chunk(&chunk)?;
 
             epoch.inc_for_test();
-            table.commit(epoch).await.unwrap();
+            table.commit_for_test(epoch).await.unwrap();
 
             let res = state
                 .get_output_no_stats(&table, group_key.as_ref(), &agg)
@@ -446,7 +446,7 @@ mod tests {
             state.apply_chunk(&chunk)?;
 
             epoch.inc_for_test();
-            table.commit(epoch).await.unwrap();
+            table.commit_for_test(epoch).await.unwrap();
 
             let res = state
                 .get_output_no_stats(&table, group_key.as_ref(), &agg)
@@ -457,7 +457,7 @@ mod tests {
         {
             // test recovery (cold start)
             let mut state = MaterializedInputState::new(
-                PbAggNodeVersion::Max,
+                PbAggNodeVersion::LATEST,
                 &agg_call,
                 &PkIndices::new(), // unused
                 &order_columns,
@@ -505,7 +505,7 @@ mod tests {
             ColumnOrder::new(3, OrderType::ascending()),  // _row_id
         ];
         let mut state = MaterializedInputState::new(
-            PbAggNodeVersion::Max,
+            PbAggNodeVersion::LATEST,
             &agg_call,
             &PkIndices::new(), // unused
             &order_columns,
@@ -532,7 +532,7 @@ mod tests {
             state.apply_chunk(&chunk)?;
 
             epoch.inc_for_test();
-            table.commit(epoch).await.unwrap();
+            table.commit_for_test(epoch).await.unwrap();
 
             let res = state
                 .get_output_no_stats(&table, group_key.as_ref(), &agg)
@@ -552,7 +552,7 @@ mod tests {
             state.apply_chunk(&chunk)?;
 
             epoch.inc_for_test();
-            table.commit(epoch).await.unwrap();
+            table.commit_for_test(epoch).await.unwrap();
 
             let res = state
                 .get_output_no_stats(&table, group_key.as_ref(), &agg)
@@ -563,7 +563,7 @@ mod tests {
         {
             // test recovery (cold start)
             let mut state = MaterializedInputState::new(
-                PbAggNodeVersion::Max,
+                PbAggNodeVersion::LATEST,
                 &agg_call,
                 &PkIndices::new(), // unused
                 &order_columns,
@@ -627,7 +627,7 @@ mod tests {
             ColumnOrder::new(3, OrderType::ascending()), // _row_id
         ];
         let mut state_1 = MaterializedInputState::new(
-            PbAggNodeVersion::Max,
+            PbAggNodeVersion::LATEST,
             &agg_call_1,
             &PkIndices::new(), // unused
             &order_columns_1,
@@ -642,7 +642,7 @@ mod tests {
             ColumnOrder::new(3, OrderType::ascending()),  // _row_id
         ];
         let mut state_2 = MaterializedInputState::new(
-            PbAggNodeVersion::Max,
+            PbAggNodeVersion::LATEST,
             &agg_call_2,
             &PkIndices::new(), // unused
             &order_columns_2,
@@ -682,8 +682,8 @@ mod tests {
             state_2.apply_chunk(&chunk_2)?;
 
             epoch.inc_for_test();
-            table_1.commit(epoch).await.unwrap();
-            table_2.commit(epoch).await.unwrap();
+            table_1.commit_for_test(epoch).await.unwrap();
+            table_2.commit_for_test(epoch).await.unwrap();
 
             let out1 = state_1
                 .get_output_no_stats(&table_1, group_key.as_ref(), &agg1)
@@ -730,7 +730,7 @@ mod tests {
             ColumnOrder::new(3, OrderType::ascending()),  // _row_id
         ];
         let mut state = MaterializedInputState::new(
-            PbAggNodeVersion::Max,
+            PbAggNodeVersion::LATEST,
             &agg_call,
             &PkIndices::new(), // unused
             &order_columns,
@@ -756,7 +756,7 @@ mod tests {
             state.apply_chunk(&chunk)?;
 
             epoch.inc_for_test();
-            table.commit(epoch).await.unwrap();
+            table.commit_for_test(epoch).await.unwrap();
 
             let res = state
                 .get_output_no_stats(&table, group_key.as_ref(), &agg)
@@ -776,7 +776,7 @@ mod tests {
             state.apply_chunk(&chunk)?;
 
             epoch.inc_for_test();
-            table.commit(epoch).await.unwrap();
+            table.commit_for_test(epoch).await.unwrap();
 
             let res = state
                 .get_output_no_stats(&table, group_key.as_ref(), &agg)
@@ -787,7 +787,7 @@ mod tests {
         {
             // test recovery (cold start)
             let mut state = MaterializedInputState::new(
-                PbAggNodeVersion::Max,
+                PbAggNodeVersion::LATEST,
                 &agg_call,
                 &PkIndices::new(), // unused
                 &order_columns,
@@ -837,7 +837,7 @@ mod tests {
             ColumnOrder::new(1, OrderType::ascending()), // _row_id
         ];
         let mut state = MaterializedInputState::new(
-            PbAggNodeVersion::Max,
+            PbAggNodeVersion::LATEST,
             &agg_call,
             &PkIndices::new(), // unused
             &order_columns,
@@ -877,7 +877,7 @@ mod tests {
             state.apply_chunk(&chunk)?;
 
             epoch.inc_for_test();
-            table.commit(epoch).await.unwrap();
+            table.commit_for_test(epoch).await.unwrap();
 
             let res = state
                 .get_output_no_stats(&table, group_key.as_ref(), &agg)
@@ -906,7 +906,7 @@ mod tests {
             state.apply_chunk(&chunk)?;
 
             epoch.inc_for_test();
-            table.commit(epoch).await.unwrap();
+            table.commit_for_test(epoch).await.unwrap();
 
             let res = state
                 .get_output_no_stats(&table, group_key.as_ref(), &agg)
@@ -945,7 +945,7 @@ mod tests {
             ColumnOrder::new(1, OrderType::ascending()), // _row_id
         ];
         let mut state = MaterializedInputState::new(
-            PbAggNodeVersion::Max,
+            PbAggNodeVersion::LATEST,
             &agg_call,
             &PkIndices::new(), // unused
             &order_columns,
@@ -970,7 +970,7 @@ mod tests {
             state.apply_chunk(&chunk)?;
 
             epoch.inc_for_test();
-            table.commit(epoch).await.unwrap();
+            table.commit_for_test(epoch).await.unwrap();
 
             let res = state
                 .get_output_no_stats(&table, group_key.as_ref(), &agg)
@@ -992,7 +992,7 @@ mod tests {
             state.apply_chunk(&chunk)?;
 
             epoch.inc_for_test();
-            table.commit(epoch).await.unwrap();
+            table.commit_for_test(epoch).await.unwrap();
 
             let res = state
                 .get_output_no_stats(&table, group_key.as_ref(), &agg)
@@ -1016,7 +1016,7 @@ mod tests {
             state.apply_chunk(&chunk)?;
 
             epoch.inc_for_test();
-            table.commit(epoch).await.unwrap();
+            table.commit_for_test(epoch).await.unwrap();
 
             let res = state
                 .get_output_no_stats(&table, group_key.as_ref(), &agg)
@@ -1064,7 +1064,7 @@ mod tests {
             ColumnOrder::new(4, OrderType::ascending()),  // _row_id ASC
         ];
         let mut state = MaterializedInputState::new(
-            PbAggNodeVersion::Max,
+            PbAggNodeVersion::LATEST,
             &agg_call,
             &PkIndices::new(), // unused
             &order_columns,
@@ -1090,7 +1090,7 @@ mod tests {
             state.apply_chunk(&chunk)?;
 
             epoch.inc_for_test();
-            table.commit(epoch).await.unwrap();
+            table.commit_for_test(epoch).await.unwrap();
 
             let res = state
                 .get_output_no_stats(&table, group_key.as_ref(), &agg)
@@ -1109,7 +1109,7 @@ mod tests {
             state.apply_chunk(&chunk)?;
 
             epoch.inc_for_test();
-            table.commit(epoch).await.unwrap();
+            table.commit_for_test(epoch).await.unwrap();
 
             let res = state
                 .get_output_no_stats(&table, group_key.as_ref(), &agg)
@@ -1153,7 +1153,7 @@ mod tests {
             ColumnOrder::new(3, OrderType::ascending()),  // _row_id ASC
         ];
         let mut state = MaterializedInputState::new(
-            PbAggNodeVersion::Max,
+            PbAggNodeVersion::LATEST,
             &agg_call,
             &PkIndices::new(), // unused
             &order_columns,
@@ -1178,7 +1178,7 @@ mod tests {
             state.apply_chunk(&chunk)?;
 
             epoch.inc_for_test();
-            table.commit(epoch).await.unwrap();
+            table.commit_for_test(epoch).await.unwrap();
 
             let res = state
                 .get_output_no_stats(&table, group_key.as_ref(), &agg)
@@ -1197,7 +1197,7 @@ mod tests {
             state.apply_chunk(&chunk)?;
 
             epoch.inc_for_test();
-            table.commit(epoch).await.unwrap();
+            table.commit_for_test(epoch).await.unwrap();
 
             let res = state
                 .get_output_no_stats(&table, group_key.as_ref(), &agg)

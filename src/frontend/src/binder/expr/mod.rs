@@ -97,7 +97,9 @@ impl Binder {
                     // TODO(Kexiang): Generated columns or INCLUDE clause should be supported.
                     if ident.real_value() == *"headers" {
                         Ok(InputRef::new(0, DataType::Jsonb).into())
-                    } else if ident.real_value() == ctx.secret_name {
+                    } else if ctx.secret_name.is_some()
+                        && ident.real_value() == *ctx.secret_name.as_ref().unwrap()
+                    {
                         Ok(InputRef::new(1, DataType::Varchar).into())
                     } else if ident.real_value() == ctx.column_name {
                         Ok(InputRef::new(2, DataType::Bytea).into())
@@ -1000,7 +1002,7 @@ pub fn bind_struct_field(column_def: &StructField) -> Result<ColumnDesc> {
         generated_or_default_column: None,
         description: None,
         additional_column: AdditionalColumn { column_type: None },
-        version: ColumnDescVersion::Pr13707,
+        version: ColumnDescVersion::LATEST,
         system_column: None,
     })
 }

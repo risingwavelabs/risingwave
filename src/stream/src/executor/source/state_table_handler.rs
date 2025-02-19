@@ -86,7 +86,7 @@ impl<S: StateStore> SourceStateTableHandler<S> {
             .map_err(StreamExecutorError::from)
     }
 
-    /// this method should only be used by [`FsSourceExecutor`](super::FsSourceExecutor)
+    /// this method should only be used by [`LegacyFsSourceExecutor`](super::LegacyFsSourceExecutor)
     pub(crate) async fn get_all_completed(&self) -> StreamExecutorResult<HashSet<SplitId>> {
         let start = Bound::Excluded(row::once(Some(Self::string_to_scalar(
             COMPLETE_SPLIT_PREFIX,
@@ -137,7 +137,7 @@ impl<S: StateStore> SourceStateTableHandler<S> {
     }
 
     /// set all complete
-    /// can only used by [`FsSourceExecutor`](super::FsSourceExecutor)
+    /// can only used by [`LegacyFsSourceExecutor`](super::LegacyFsSourceExecutor)
     pub(crate) async fn set_all_complete(
         &mut self,
         states: Vec<SplitImpl>,
@@ -285,7 +285,7 @@ pub(crate) mod tests {
 
         state_table.init_epoch(init_epoch).await.unwrap();
         state_table.insert(OwnedRow::new(vec![a.clone(), b.clone()]));
-        state_table.commit(next_epoch).await.unwrap();
+        state_table.commit_for_test(next_epoch).await.unwrap();
 
         let a: Arc<str> = String::from("a").into();
         let a: Datum = Some(ScalarImpl::Utf8(a.as_ref().into()));
@@ -312,9 +312,15 @@ pub(crate) mod tests {
         state_table_handler
             .set_states(vec![split_impl.clone()])
             .await?;
-        state_table_handler.state_table.commit(epoch_2).await?;
+        state_table_handler
+            .state_table
+            .commit_for_test(epoch_2)
+            .await?;
 
-        state_table_handler.state_table.commit(epoch_3).await?;
+        state_table_handler
+            .state_table
+            .commit_for_test(epoch_3)
+            .await?;
 
         match state_table_handler
             .try_recover_from_state_store(&split_impl)

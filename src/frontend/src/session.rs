@@ -42,7 +42,6 @@ use risingwave_batch::worker_manager::worker_node_manager::{
     WorkerNodeManager, WorkerNodeManagerRef,
 };
 use risingwave_common::acl::AclMode;
-use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
 #[cfg(test)]
 use risingwave_common::catalog::{
     DEFAULT_DATABASE_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID,
@@ -80,6 +79,7 @@ use risingwave_sqlparser::ast::{ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
 use thiserror::Error;
 use tokio::runtime::Builder;
+use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot::Sender;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
@@ -130,7 +130,7 @@ pub(crate) mod transaction;
 
 /// The global environment for the frontend server.
 #[derive(Clone)]
-pub struct FrontendEnv {
+pub(crate) struct FrontendEnv {
     // Different session may access catalog at the same time and catalog is protected by a
     // RwLock.
     meta_client: Arc<dyn FrontendMetaClient>,
@@ -162,6 +162,7 @@ pub struct FrontendEnv {
     spill_metrics: Arc<BatchSpillMetrics>,
 
     batch_config: BatchConfig,
+    #[expect(dead_code)]
     meta_config: MetaConfig,
     streaming_config: StreamingConfig,
 
@@ -521,10 +522,6 @@ impl FrontendEnv {
         &self.user_info_reader
     }
 
-    pub fn worker_node_manager(&self) -> &WorkerNodeManager {
-        &self.worker_node_manager
-    }
-
     pub fn worker_node_manager_ref(&self) -> WorkerNodeManagerRef {
         self.worker_node_manager.clone()
     }
@@ -563,10 +560,6 @@ impl FrontendEnv {
 
     pub fn batch_config(&self) -> &BatchConfig {
         &self.batch_config
-    }
-
-    pub fn meta_config(&self) -> &MetaConfig {
-        &self.meta_config
     }
 
     pub fn streaming_config(&self) -> &StreamingConfig {
@@ -647,8 +640,11 @@ pub struct SessionImpl {
     user_authenticator: UserAuthenticator,
     /// Stores the value of configurations.
     config_map: Arc<RwLock<SessionConfig>>,
-    /// buffer the Notices to users,
-    notices: RwLock<Vec<String>>,
+
+    /// Channel sender for frontend handler to send notices.
+    notice_tx: UnboundedSender<String>,
+    /// Channel receiver for pgwire to take notices and send to clients.
+    notice_rx: Mutex<UnboundedReceiver<String>>,
 
     /// Identified by `process_id`, `secret_key`. Corresponds to `SessionManager`.
     id: (i32, i32),
@@ -733,7 +729,7 @@ impl From<CheckRelationError> for RwError {
 }
 
 impl SessionImpl {
-    pub fn new(
+    pub(crate) fn new(
         env: FrontendEnv,
         auth_context: AuthContext,
         user_authenticator: UserAuthenticator,
@@ -742,6 +738,8 @@ impl SessionImpl {
         session_config: SessionConfig,
     ) -> Self {
         let cursor_metrics = env.cursor_metrics.clone();
+        let (notice_tx, notice_rx) = mpsc::unbounded_channel();
+
         Self {
             env,
             auth_context: Arc::new(RwLock::new(auth_context)),
@@ -751,7 +749,8 @@ impl SessionImpl {
             peer_addr,
             txn: Default::default(),
             current_query_cancel_flag: Mutex::new(None),
-            notices: Default::default(),
+            notice_tx,
+            notice_rx: Mutex::new(notice_rx),
             exec_context: Mutex::new(None),
             last_idle_instant: Default::default(),
             cursor_manager: Arc::new(CursorManager::new(cursor_metrics)),
@@ -762,6 +761,8 @@ impl SessionImpl {
     #[cfg(test)]
     pub fn mock() -> Self {
         let env = FrontendEnv::mock();
+        let (notice_tx, notice_rx) = mpsc::unbounded_channel();
+
         Self {
             env: FrontendEnv::mock(),
             auth_context: Arc::new(RwLock::new(AuthContext::new(
@@ -775,7 +776,8 @@ impl SessionImpl {
             id: (0, 0),
             txn: Default::default(),
             current_query_cancel_flag: Mutex::new(None),
-            notices: Default::default(),
+            notice_tx,
+            notice_rx: Mutex::new(notice_rx),
             exec_context: Mutex::new(None),
             peer_addr: Address::Tcp(SocketAddr::new(
                 IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
@@ -788,7 +790,7 @@ impl SessionImpl {
         }
     }
 
-    pub fn env(&self) -> &FrontendEnv {
+    pub(crate) fn env(&self) -> &FrontendEnv {
         &self.env
     }
 
@@ -799,6 +801,16 @@ impl SessionImpl {
 
     pub fn database(&self) -> String {
         self.auth_context.read().database.clone()
+    }
+
+    pub fn database_id(&self) -> DatabaseId {
+        let db_name = self.database();
+        self.env
+            .catalog_reader()
+            .read_guard()
+            .get_database_by_name(&db_name)
+            .map(|db| db.id())
+            .expect("session database not found")
     }
 
     pub fn user_name(&self) -> String {
@@ -1017,13 +1029,11 @@ impl SessionImpl {
         };
 
         check_schema_writable(&schema.name())?;
-        if schema.name() != DEFAULT_SCHEMA_NAME {
-            self.check_privileges(&[ObjectCheckItem::new(
-                schema.owner(),
-                AclMode::Create,
-                Object::SchemaId(schema.id()),
-            )])?;
-        }
+        self.check_privileges(&[ObjectCheckItem::new(
+            schema.owner(),
+            AclMode::Create,
+            Object::SchemaId(schema.id()),
+        )])?;
 
         let db_id = catalog_reader.get_database_by_name(db_name)?.id();
         Ok((db_id, schema.id()))
@@ -1146,10 +1156,6 @@ impl SessionImpl {
         shutdown_rx
     }
 
-    fn clear_notices(&self) {
-        *self.notices.write() = vec![];
-    }
-
     pub fn cancel_current_query(&self) {
         let mut flag_guard = self.current_query_cancel_flag.lock();
         if let Some(sender) = flag_guard.take() {
@@ -1161,12 +1167,10 @@ impl SessionImpl {
             info!("Trying to cancel query in distributed mode.");
             self.env.query_manager().cancel_queries_in_session(self.id)
         }
-        self.clear_notices()
     }
 
     pub fn cancel_current_creating_job(&self) {
         self.env.creating_streaming_job_tracker.abort_jobs(self.id);
-        self.clear_notices()
     }
 
     /// This function only used for test now.
@@ -1198,7 +1202,9 @@ impl SessionImpl {
     pub fn notice_to_user(&self, str: impl Into<String>) {
         let notice = str.into();
         tracing::trace!(notice, "notice to user");
-        self.notices.write().push(notice);
+        self.notice_tx
+            .send(notice)
+            .expect("notice channel should not be closed");
     }
 
     pub fn is_barrier_read(&self) -> bool {
@@ -1368,7 +1374,7 @@ impl SessionManagerImpl {
         })
     }
 
-    pub fn env(&self) -> &FrontendEnv {
+    pub(crate) fn env(&self) -> &FrontendEnv {
         &self.env
     }
 
@@ -1501,7 +1507,9 @@ impl Session for SessionImpl {
         let string = stmt.to_string();
         let sql_str = string.as_str();
         let sql: Arc<str> = Arc::from(sql_str);
-        let rsp = handle(self, stmt, sql.clone(), vec![format]).await?;
+        // The handle can be slow. Release potential large String early.
+        drop(string);
+        let rsp = handle(self, stmt, sql, vec![format]).await?;
         Ok(rsp)
     }
 
@@ -1589,9 +1597,10 @@ impl Session for SessionImpl {
         Self::set_config(self, key, value).map_err(Into::into)
     }
 
-    fn take_notices(self: Arc<Self>) -> Vec<String> {
-        let inner = &mut (*self.notices.write());
-        std::mem::take(inner)
+    async fn next_notice(self: &Arc<Self>) -> String {
+        std::future::poll_fn(|cx| self.clone().notice_rx.lock().poll_recv(cx))
+            .await
+            .expect("notice channel should not be closed")
     }
 
     fn transaction_status(&self) -> TransactionStatus {

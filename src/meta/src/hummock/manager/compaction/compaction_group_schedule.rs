@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::ops::DerefMut;
+use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -33,7 +33,7 @@ use risingwave_pb::hummock::{
 };
 use thiserror_ext::AsReport;
 
-use super::CompactionGroupStatistic;
+use super::{check_emergency_state, CompactionGroupStatistic, EmergencyState};
 use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::transaction::HummockVersionTransaction;
 use crate::hummock::manager::{commit_multi_var, HummockManager};
@@ -293,6 +293,20 @@ impl HummockManager {
                 );
             }
 
+            // clear `partition_vnode_count` for the hybrid group
+            {
+                if let Err(err) = compaction_groups_txn.update_compaction_config(
+                    &[left_group_id],
+                    &[MutableConfig::SplitWeightByVnode(0)], // default
+                ) {
+                    tracing::error!(
+                        error = %err.as_report(),
+                        "failed to update compaction config for group-{}",
+                        left_group_id
+                    );
+                }
+            }
+
             new_version_delta.pre_apply();
 
             // remove right_group_id
@@ -452,15 +466,15 @@ impl HummockManager {
             new_version_delta.group_deltas.insert(
                 new_compaction_group_id,
                 GroupDeltas {
-                    group_deltas: vec![GroupDelta::GroupConstruct(PbGroupConstruct {
+                    group_deltas: vec![GroupDelta::GroupConstruct(Box::new(PbGroupConstruct {
                         group_config: Some(config.clone()),
                         group_id: new_compaction_group_id,
                         parent_group_id,
                         new_sst_start_id,
                         table_ids: vec![],
-                        version: CompatibilityVersion::SplitGroupByTableId as i32, // for compatibility
+                        version: CompatibilityVersion::LATEST as _, // for compatibility
                         split_key: Some(split_key.into()),
-                    })],
+                    }))],
                 },
             );
             (new_compaction_group_id, config)
@@ -927,6 +941,52 @@ impl HummockManager {
                 "Not Merge high throughput group {} next group {}",
                 group.group_id, next_group.group_id
             )));
+        }
+
+        {
+            // Avoid merge when the group is in emergency state
+            let versioning_guard = self.versioning.read().await;
+            let levels = &versioning_guard.current_version.levels;
+            if !levels.contains_key(&group.group_id) {
+                return Err(Error::CompactionGroup(format!(
+                    "Not Merge group {} not exist",
+                    group.group_id
+                )));
+            }
+
+            if !levels.contains_key(&next_group.group_id) {
+                return Err(Error::CompactionGroup(format!(
+                    "Not Merge next group {} not exist",
+                    next_group.group_id
+                )));
+            }
+
+            if let EmergencyState::Emergency = check_emergency_state(
+                versioning_guard
+                    .current_version
+                    .get_compaction_group_levels(group.group_id),
+                group.compaction_group_config.compaction_config().deref(),
+            ) {
+                return Err(Error::CompactionGroup(format!(
+                    "Not Merge write limit group {} next group {}",
+                    group.group_id, next_group.group_id
+                )));
+            }
+
+            if let EmergencyState::Emergency = check_emergency_state(
+                versioning_guard
+                    .current_version
+                    .get_compaction_group_levels(next_group.group_id),
+                next_group
+                    .compaction_group_config
+                    .compaction_config()
+                    .deref(),
+            ) {
+                return Err(Error::CompactionGroup(format!(
+                    "Not Merge write limit next group {} group {}",
+                    next_group.group_id, group.group_id
+                )));
+            }
         }
 
         match self

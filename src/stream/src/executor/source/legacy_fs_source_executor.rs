@@ -25,7 +25,7 @@ use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_connector::error::ConnectorError;
-use risingwave_connector::source::reader::desc::{FsSourceDesc, SourceDescBuilder};
+use risingwave_connector::source::reader::desc::{LegacyFsSourceDesc, SourceDescBuilder};
 use risingwave_connector::source::{
     BoxSourceChunkStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitId, SplitImpl,
     SplitMetaData,
@@ -47,9 +47,9 @@ use crate::executor::UpdateMutation;
 /// some latencies in network and cost in meta.
 const WAIT_BARRIER_MULTIPLE_TIMES: u128 = 5;
 
-/// [`FsSourceExecutor`] is a streaming source, fir external file systems
+/// [`LegacyFsSourceExecutor`] is a streaming source, fir external file systems
 /// such as s3.
-pub struct FsSourceExecutor<S: StateStore> {
+pub struct LegacyFsSourceExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
 
     /// Streaming source  for external
@@ -68,7 +68,7 @@ pub struct FsSourceExecutor<S: StateStore> {
     rate_limit_rps: Option<u32>,
 }
 
-impl<S: StateStore> FsSourceExecutor<S> {
+impl<S: StateStore> LegacyFsSourceExecutor<S> {
     pub fn new(
         actor_ctx: ActorContextRef,
         stream_source_core: StreamSourceCore<S>,
@@ -89,7 +89,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
 
     async fn build_stream_source_reader(
         &mut self,
-        source_desc: &FsSourceDesc,
+        source_desc: &LegacyFsSourceDesc,
         state: ConnectorState,
     ) -> StreamExecutorResult<BoxSourceChunkStream> {
         let column_ids = source_desc
@@ -121,7 +121,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
 
     async fn rebuild_stream_reader<const BIASED: bool>(
         &mut self,
-        source_desc: &FsSourceDesc,
+        source_desc: &LegacyFsSourceDesc,
         stream: &mut StreamReaderWithPause<BIASED, StreamChunk>,
     ) -> StreamExecutorResult<()> {
         let target_state: Vec<SplitImpl> = self
@@ -141,7 +141,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
 
     async fn apply_split_change<const BIASED: bool>(
         &mut self,
-        source_desc: &FsSourceDesc,
+        source_desc: &LegacyFsSourceDesc,
         stream: &mut StreamReaderWithPause<BIASED, StreamChunk>,
         mapping: &HashMap<ActorId, Vec<SplitImpl>>,
     ) -> StreamExecutorResult<()> {
@@ -207,7 +207,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
 
     async fn replace_stream_reader_with_target_state<const BIASED: bool>(
         &mut self,
-        source_desc: &FsSourceDesc,
+        source_desc: &LegacyFsSourceDesc,
         stream: &mut StreamReaderWithPause<BIASED, StreamChunk>,
         target_state: Vec<SplitImpl>,
     ) -> StreamExecutorResult<()> {
@@ -271,7 +271,10 @@ impl<S: StateStore> FsSourceExecutor<S> {
             core.split_state_store.set_all_complete(completed).await?
         }
         // commit anyway, even if no message saved
-        core.split_state_store.state_table.commit(epoch).await?;
+        core.split_state_store
+            .state_table
+            .commit_assert_no_update_vnode_bitmap(epoch)
+            .await?;
 
         core.updated_splits_in_epoch.clear();
         Ok(())
@@ -506,15 +509,15 @@ impl<S: StateStore> FsSourceExecutor<S> {
     }
 }
 
-impl<S: StateStore> Execute for FsSourceExecutor<S> {
+impl<S: StateStore> Execute for LegacyFsSourceExecutor<S> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.into_stream().boxed()
     }
 }
 
-impl<S: StateStore> Debug for FsSourceExecutor<S> {
+impl<S: StateStore> Debug for LegacyFsSourceExecutor<S> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("FsSourceExecutor")
+        f.debug_struct("LegacyFsSourceExecutor")
             .field("source_id", &self.stream_source_core.source_id)
             .field("column_ids", &self.stream_source_core.column_ids)
             .finish()

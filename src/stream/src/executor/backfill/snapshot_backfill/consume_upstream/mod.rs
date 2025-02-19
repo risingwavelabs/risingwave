@@ -12,4 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod lister;
+mod executor;
+mod stream;
+mod upstream_table_trait;
+
+pub use executor::UpstreamTableExecutor;

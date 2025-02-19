@@ -32,7 +32,7 @@ use risingwave_common::error::BoxedError;
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::types::DataType;
-use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
+use risingwave_pb::meta::list_streaming_job_states_response::StreamingJobState;
 use risingwave_pb::meta::table_parallelism::{PbFixedParallelism, PbParallelism};
 use risingwave_pb::user::grant_privilege::Object;
 
@@ -216,7 +216,7 @@ pub fn infer_dummy_view_sql(columns: &[SystemCatalogColumnsDef<'_>]) -> String {
     )
 }
 
-fn extract_parallelism_from_table_state(state: &TableFragmentState) -> String {
+fn extract_parallelism_from_table_state(state: &StreamingJobState) -> String {
     match state
         .parallelism
         .as_ref()
@@ -312,6 +312,10 @@ pub fn get_sys_views_in_schema(schema_name: &str) -> Vec<Arc<ViewCatalog>> {
             _ => None,
         })
         .collect()
+}
+
+pub fn is_system_catalog(oid: u32) -> bool {
+    oid >= SYS_CATALOG_START_ID as u32
 }
 
 /// The global registry of all builtin catalogs.

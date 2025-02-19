@@ -147,5 +147,11 @@
             <artifactId>assertj-core</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- https://mvnrepository.com/artifact/org.apache.iceberg/iceberg-snowflake -->
+        <dependency>
+            <groupId>org.apache.iceberg</groupId>
+            <artifactId>iceberg-snowflake</artifactId>
+            <version>1.7.1</version>
+        </dependency>
     </dependencies>
 </project>

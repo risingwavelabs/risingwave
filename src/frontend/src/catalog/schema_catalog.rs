@@ -169,9 +169,15 @@ impl SchemaCatalog {
     }
 
     pub fn drop_table(&mut self, id: TableId) {
-        let table_ref = self.table_by_id.remove(&id).unwrap();
-        self.table_by_name.remove(&table_ref.name).unwrap();
-        self.indexes_by_table_id.remove(&table_ref.id);
+        if let Some(table_ref) = self.table_by_id.remove(&id) {
+            self.table_by_name.remove(&table_ref.name).unwrap();
+            self.indexes_by_table_id.remove(&table_ref.id);
+        } else {
+            tracing::warn!(
+                id = ?id.table_id,
+                "table not found when dropping, frontend might not be notified yet"
+            );
+        }
     }
 
     pub fn create_index(&mut self, prost: &PbIndex) {
@@ -643,6 +649,17 @@ impl SchemaCatalog {
             .filter(|&table| table.stream_job_status == StreamJobStatus::Created)
     }
 
+    /// Get a table by name, if it's a created table,
+    /// or if it's an internal table (whether created or not).
+    pub fn get_created_table_or_any_internal_table_by_name(
+        &self,
+        table_name: &str,
+    ) -> Option<&Arc<TableCatalog>> {
+        self.table_by_name.get(table_name).filter(|&table| {
+            table.stream_job_status == StreamJobStatus::Created || table.is_internal_table()
+        })
+    }
+
     pub fn get_table_by_id(&self, table_id: &TableId) -> Option<&Arc<TableCatalog>> {
         self.table_by_id.get(table_id)
     }
@@ -822,6 +839,17 @@ impl SchemaCatalog {
         } else {
             None
         }
+    }
+
+    pub fn contains_object(&self, oid: u32) -> bool {
+        self.table_by_id.contains_key(&TableId::new(oid))
+            || self.index_by_id.contains_key(&IndexId::new(oid))
+            || self.source_by_id.contains_key(&oid)
+            || self.sink_by_id.contains_key(&oid)
+            || self.view_by_id.contains_key(&oid)
+            || self.function_by_id.contains_key(&FunctionId::new(oid))
+            || self.subscription_by_id.contains_key(&oid)
+            || self.connection_by_id.contains_key(&oid)
     }
 
     pub fn id(&self) -> SchemaId {
