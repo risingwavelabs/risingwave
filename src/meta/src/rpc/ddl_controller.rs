@@ -51,12 +51,7 @@ use risingwave_pb::ddl_service::{
 };
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::PbFragment;
-<<<<<<< HEAD
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-=======
-use risingwave_pb::stream_plan::stream_node::{self, NodeBody};
-use risingwave_pb::stream_plan::update_mutation::PbMergeUpdate;
->>>>>>> aac8a0912a (fix(cdc): fix wrong default column matching)
 use risingwave_pb::stream_plan::{
     Dispatcher, DispatcherType, FragmentTypeFlag, MergeNode, PbStreamFragmentGraph,
     StreamFragmentGraph as StreamFragmentGraphProto,
@@ -660,34 +655,32 @@ impl DdlController {
             1,
             "Stream scan fragment should have only one actor"
         );
-        for actor in &stream_scan_fragment.actors {
-            let mut found_cdc_scan = false;
-            match &actor.nodes.as_ref().unwrap().node_body {
-                Some(NodeBody::StreamCdcScan(_)) => {
-                    if Self::validate_cdc_table_inner(
-                        &actor.nodes.as_ref().unwrap().node_body,
-                        table.id,
-                    )
-                    .await?
-                    {
+        let mut found_cdc_scan = false;
+        match &stream_scan_fragment.nodes.as_ref().unwrap().node_body {
+            Some(NodeBody::StreamCdcScan(_)) => {
+                if Self::validate_cdc_table_inner(
+                    &stream_scan_fragment.nodes.as_ref().unwrap().node_body,
+                    table.id,
+                )
+                .await?
+                {
+                    found_cdc_scan = true;
+                }
+            }
+            // When there's generated columns, the cdc scan node is wrapped in a project node
+            Some(NodeBody::Project(_)) => {
+                for input in &stream_scan_fragment.nodes.as_ref().unwrap().input {
+                    if Self::validate_cdc_table_inner(&input.node_body, table.id).await? {
                         found_cdc_scan = true;
                     }
                 }
-                // When there's generated columns, the cdc scan node is wrapped in a project node
-                Some(NodeBody::Project(_)) => {
-                    for input in &actor.nodes.as_ref().unwrap().input {
-                        if Self::validate_cdc_table_inner(&input.node_body, table.id).await? {
-                            found_cdc_scan = true;
-                        }
-                    }
-                }
-                _ => {
-                    bail!("Unexpected node body for stream cdc scan");
-                }
-            };
-            if !found_cdc_scan {
-                bail!("No stream cdc scan node found in stream scan fragment");
             }
+            _ => {
+                bail!("Unexpected node body for stream cdc scan");
+            }
+        };
+        if !found_cdc_scan {
+            bail!("No stream cdc scan node found in stream scan fragment");
         }
         Ok(())
     }
