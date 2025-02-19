@@ -12,8 +12,30 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// The MIT License (MIT)
+//
+// Copyright (c) 2021 David Raznick
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 use std::collections::HashMap;
-use std::{fs, mem};
+use std::fs;
 
 use anyhow::Context;
 use risingwave_pb::plan_common::ColumnDesc;
@@ -69,14 +91,12 @@ type Result<T, E = Error> = std::result::Result<T, E>;
 #[derive(Debug)]
 pub struct JsonRef {
     schema_cache: HashMap<String, Value>,
-    reference_key: Option<String>,
 }
 
 impl JsonRef {
     fn new() -> JsonRef {
         JsonRef {
             schema_cache: HashMap::new(),
-            reference_key: Some("__reference__".to_owned()),
         }
     }
 
@@ -154,14 +174,7 @@ impl JsonRef {
             let mut new_used_refs = used_refs.clone();
             new_used_refs.push(ref_url_string);
 
-            Box::pin(self.deref(&mut schema, &ref_url_no_fragment, &new_used_refs)).await?;
-            let old_value = mem::replace(value, schema);
-
-            if let Some(reference_key) = &self.reference_key {
-                if let Some(new_obj) = value.as_object_mut() {
-                    new_obj.insert(reference_key.clone(), old_value);
-                }
-            }
+            *value = schema;
         }
 
         if let Some(obj) = value.as_object_mut() {
