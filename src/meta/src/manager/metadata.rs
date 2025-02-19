@@ -566,6 +566,7 @@ impl MetadataManager {
         Ok(actor_ids.into_iter().map(|id| id as ActorId).collect())
     }
 
+    // (backfill_actor_id, upstream_source_actor_id)
     pub async fn get_running_actors_for_source_backfill(
         &self,
         source_backfill_fragment_id: FragmentId,
