@@ -593,7 +593,6 @@ impl<S: StateStore> SourceExecutor<S> {
                     }
 
                     let epoch = barrier.epoch;
-                    let updated_splits = self.persist_state_and_clear_cache(epoch).await?;
 
                     if let Some(mutation) = barrier.mutation.as_deref() {
                         match mutation {
@@ -649,6 +648,8 @@ impl<S: StateStore> SourceExecutor<S> {
                             _ => {}
                         }
                     }
+
+                    let updated_splits = self.persist_state_and_clear_cache(epoch).await?;
 
                     // when handle a checkpoint barrier, spawn a task to wait for epoch commit notification
                     if barrier.kind.is_checkpoint()
