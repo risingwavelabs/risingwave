@@ -45,23 +45,6 @@ impl ParquetParser {
         })
     }
 
-    // #[try_stream(boxed, ok = StreamChunk, error = crate::error::ConnectorError)]
-    // pub async fn into_stream(
-    //     mut self,
-    //     record_batch_stream: parquet::arrow::async_reader::ParquetRecordBatchStream<
-    //         tokio_util::compat::Compat<opendal::FuturesAsyncReader>,
-    //     >,
-    // ) {
-    //     #[for_await]
-    //     for record_batch in record_batch_stream {
-    //         let record_batch: RecordBatch = record_batch?;
-    //         // Convert each record batch into a stream chunk according to user defined schema.
-    //         let chunk: StreamChunk = self.convert_record_batch_to_stream_chunk(record_batch)?;
-
-    //         yield chunk;
-    //     }
-    // }
-
     #[try_stream(boxed, ok = StreamChunk, error = crate::error::ConnectorError)]
     pub async fn into_stream(
         mut self,
