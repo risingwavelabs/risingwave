@@ -696,14 +696,15 @@ impl<S: StateStore> SourceExecutor<S> {
                     }
 
                     latest_state.iter().for_each(|(split_id, new_split_impl)| {
-                        self.stream_source_core
+                        if let Some(split_impl) = self
+                            .stream_source_core
                             .as_mut()
                             .unwrap()
                             .latest_split_info
                             .get_mut(split_id)
-                            .map(|split_impl| {
-                                *split_impl = new_split_impl.clone();
-                            });
+                        {
+                            *split_impl = new_split_impl.clone();
+                        }
                     });
 
                     self.stream_source_core
