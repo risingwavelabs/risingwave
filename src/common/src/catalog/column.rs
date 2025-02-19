@@ -25,9 +25,9 @@ use risingwave_pb::plan_common::{
 
 use super::schema::FieldLike;
 use super::{
-    row_id_column_desc, rw_timestamp_column_desc, CDC_OFFSET_COLUMN_NAME,
-    CDC_TABLE_NAME_COLUMN_NAME, ICEBERG_FILE_PATH_COLUMN_NAME, ICEBERG_FILE_POS_COLUMN_NAME,
-    ICEBERG_SEQUENCE_NUM_COLUMN_NAME, USER_COLUMN_ID_OFFSET,
+    CDC_OFFSET_COLUMN_NAME, CDC_TABLE_NAME_COLUMN_NAME, ICEBERG_FILE_PATH_COLUMN_NAME,
+    ICEBERG_FILE_POS_COLUMN_NAME, ICEBERG_SEQUENCE_NUM_COLUMN_NAME, ROW_ID_COLUMN_NAME,
+    RW_TIMESTAMP_COLUMN_ID, RW_TIMESTAMP_COLUMN_NAME, USER_COLUMN_ID_OFFSET,
 };
 use crate::catalog::{Field, ROW_ID_COLUMN_ID};
 use crate::types::{DataType, StructType};
@@ -453,8 +453,13 @@ impl ColumnCatalog {
     }
 
     /// Creates a row ID column (for implicit primary key).
+    /// It'll always have the ID `0`.
     pub fn row_id_column() -> Self {
-        Self::hidden(row_id_column_desc())
+        Self::hidden(ColumnDesc::named(
+            ROW_ID_COLUMN_NAME,
+            ROW_ID_COLUMN_ID,
+            DataType::Serial,
+        ))
     }
 
     pub fn is_rw_sys_column(&self) -> bool {
@@ -462,7 +467,12 @@ impl ColumnCatalog {
     }
 
     pub fn rw_timestamp_column() -> Self {
-        Self::hidden(rw_timestamp_column_desc())
+        Self::hidden(ColumnDesc::named_with_system_column(
+            RW_TIMESTAMP_COLUMN_NAME,
+            RW_TIMESTAMP_COLUMN_ID,
+            DataType::Timestamptz,
+            SystemColumn::RwTimestamp,
+        ))
     }
 
     pub fn is_rw_timestamp_column(&self) -> bool {
@@ -494,23 +504,28 @@ impl ColumnCatalog {
         ]
     }
 
+    pub fn is_iceberg_hidden_col(&self) -> bool {
+        self.column_desc.name == ICEBERG_SEQUENCE_NUM_COLUMN_NAME
+            || self.column_desc.name == ICEBERG_FILE_PATH_COLUMN_NAME
+            || self.column_desc.name == ICEBERG_FILE_POS_COLUMN_NAME
+    }
+
     /// Note: these columns are added in `SourceStreamChunkRowWriter::do_action`.
     /// May also look for the usage of `SourceColumnType`.
     pub fn debezium_cdc_source_cols() -> [Self; 3] {
         [
-            ColumnCatalog::visible(ColumnDesc::named(
+            Self::visible(ColumnDesc::named(
                 "payload",
                 ColumnId::placeholder(),
                 DataType::Jsonb,
             )),
-            // Creates a offset column for storing upstream offset
-            // Used in cdc source currently
+            // upstream offset
             Self::hidden(ColumnDesc::named(
                 CDC_OFFSET_COLUMN_NAME,
                 ColumnId::placeholder(),
                 DataType::Varchar,
             )),
-            // A column to store the upstream table name of the cdc table
+            // upstream table name of the cdc table
             Self::hidden(ColumnDesc::named(
                 CDC_TABLE_NAME_COLUMN_NAME,
                 ColumnId::placeholder(),

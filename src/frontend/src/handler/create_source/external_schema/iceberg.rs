@@ -67,11 +67,7 @@ pub async fn check_iceberg_source(
     let schema = Schema {
         fields: columns
             .iter()
-            .filter(|&c| {
-                c.column_desc.name != ICEBERG_SEQUENCE_NUM_COLUMN_NAME
-                    && c.column_desc.name != ICEBERG_FILE_PATH_COLUMN_NAME
-                    && c.column_desc.name != ICEBERG_FILE_POS_COLUMN_NAME
-            })
+            .filter(|&c| !c.is_iceberg_hidden_col())
             .cloned()
             .map(|c| c.column_desc.into())
             .collect(),

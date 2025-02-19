@@ -211,13 +211,13 @@ mod tests {
     use futures::StreamExt;
     use futures_async_stream::try_stream;
     use itertools::Itertools;
-    use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId};
+    use risingwave_common::catalog::ColumnCatalog;
     use risingwave_pb::connector_service::cdc_message;
 
     use super::*;
     use crate::parser::{MessageMeta, SourceStreamChunkBuilder, TransactionControl};
     use crate::source::cdc::DebeziumCdcMeta;
-    use crate::source::{ConnectorProperties, DataType, SourceCtrlOpts, SourceMessage, SplitId};
+    use crate::source::{ConnectorProperties, SourceCtrlOpts, SourceMessage, SplitId};
 
     #[tokio::test]
     async fn test_emit_transactional_chunk() {
