@@ -107,7 +107,7 @@ pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
                 } else {
                     if table.total_key_count != 0 {
                         format!(
-                            "[id: {}, obj_id: {} object_size {}KB sst_size {}KB stale_ratio {} key_range {:?}]",
+                            "[DEBUG-KEYRANGE id: {}, obj_id: {} object_size {}KB sst_size {}KB stale_ratio {} key_range {:?}]",
                             table.sst_id,
                             table.object_id,
                             table.file_size / 1024,
@@ -117,7 +117,7 @@ pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
                         )
                     } else {
                         format!(
-                            "[id: {}, obj_id: {} object_size {}KB sst_size {}KB key_range {:?}]",
+                            "[DEBUG-KEYRANGE id: {}, obj_id: {} object_size {}KB sst_size {}KB key_range {:?}]",
                             table.sst_id,
                             table.object_id,
                             table.file_size / 1024,
