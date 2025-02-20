@@ -200,7 +200,7 @@ impl ShowColumnRow {
                 }));
             }
 
-            DataType::List(inner) => {
+            DataType::List(inner @ box DataType::Struct(_)) => {
                 rows.extend(Self::flatten(
                     format!("{}[1]", name),
                     *inner,
@@ -881,7 +881,7 @@ mod tests {
                 ),
                 (
                     "country",
-                    "test.Country",
+                    "struct",
                 ),
                 (
                     "country.address",
@@ -889,7 +889,7 @@ mod tests {
                 ),
                 (
                     "country.city",
-                    "test.City",
+                    "struct",
                 ),
                 (
                     "country.city.address",
