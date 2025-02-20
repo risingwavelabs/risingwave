@@ -85,19 +85,18 @@ pub fn avro_schema_to_column_descs(
         resolved.get_names(),
         map_handling,
     )?;
-    if let DataType::Struct(root_struct) = root_type {
-        let fields = root_struct
-            .iter()
-            .map(|(name, data_type)| {
-                use risingwave_common::catalog::{ColumnDesc, ColumnId};
-                let desc = ColumnDesc::named(name, ColumnId::placeholder(), data_type.clone());
-                desc.to_protobuf()
-            })
-            .collect();
-        Ok(fields)
-    } else {
+    let DataType::Struct(root_struct) = root_type else {
         bail!("schema invalid, record type required at top level of the schema.");
-    }
+    };
+    let fields = root_struct
+        .iter()
+        .map(|(name, data_type)| {
+            use risingwave_common::catalog::{ColumnDesc, ColumnId};
+            let desc = ColumnDesc::named(name, ColumnId::placeholder(), data_type.clone());
+            desc.to_protobuf()
+        })
+        .collect();
+    Ok(fields)
 }
 
 const DBZ_VARIABLE_SCALE_DECIMAL_NAME: &str = "VariableScaleDecimal";
