@@ -245,16 +245,11 @@ impl ToJsonb for MapRef<'_> {
 impl ToJsonb for StructRef<'_> {
     fn add_to(self, data_type: &DataType, builder: &mut Builder) -> Result<()> {
         builder.begin_object();
-        for (i, (value, (field_name, field_type))) in self
+        for (value, (field_name, field_type)) in self
             .iter_fields_ref()
             .zip_eq_debug(data_type.as_struct().iter())
-            .enumerate()
         {
-            if field_name.is_empty() {
-                builder.display(format_args!("f{}", i + 1));
-            } else {
-                builder.add_string(field_name);
-            };
+            builder.add_string(field_name);
             value.add_to(field_type, builder)?;
         }
         builder.end_object();
