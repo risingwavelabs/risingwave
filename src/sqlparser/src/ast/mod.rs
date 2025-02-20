@@ -2391,8 +2391,12 @@ pub enum GrantObjects {
     AllTablesInSchema { schemas: Vec<ObjectName> },
     /// Grant privileges on `ALL SOURCES IN SCHEMA <schema_name> [, ...]`
     AllSourcesInSchema { schemas: Vec<ObjectName> },
+    /// Grant privileges on `ALL SINKS IN SCHEMA <schema_name> [, ...]`
+    AllSinksInSchema { schemas: Vec<ObjectName> },
     /// Grant privileges on `ALL MATERIALIZED VIEWS IN SCHEMA <schema_name> [, ...]`
     AllMviewsInSchema { schemas: Vec<ObjectName> },
+    /// Grant privileges on `ALL VIEWS IN SCHEMA <schema_name> [, ...]`
+    AllViewsInSchema { schemas: Vec<ObjectName> },
     /// Grant privileges on specific databases
     Databases(Vec<ObjectName>),
     /// Grant privileges on specific schemas
@@ -2407,6 +2411,8 @@ pub enum GrantObjects {
     Tables(Vec<ObjectName>),
     /// Grant privileges on specific sinks
     Sinks(Vec<ObjectName>),
+    /// Grant privileges on specific views
+    Views(Vec<ObjectName>),
 }
 
 impl fmt::Display for GrantObjects {
@@ -2449,6 +2455,20 @@ impl fmt::Display for GrantObjects {
                     display_comma_separated(schemas)
                 )
             }
+            GrantObjects::AllSinksInSchema { schemas } => {
+                write!(
+                    f,
+                    "ALL SINKS IN SCHEMA {}",
+                    display_comma_separated(schemas)
+                )
+            }
+            GrantObjects::AllViewsInSchema { schemas } => {
+                write!(
+                    f,
+                    "ALL VIEWS IN SCHEMA {}",
+                    display_comma_separated(schemas)
+                )
+            }
             GrantObjects::Databases(databases) => {
                 write!(f, "DATABASE {}", display_comma_separated(databases))
             }
@@ -2460,6 +2480,9 @@ impl fmt::Display for GrantObjects {
             }
             GrantObjects::Sinks(sinks) => {
                 write!(f, "SINK {}", display_comma_separated(sinks))
+            }
+            GrantObjects::Views(views) => {
+                write!(f, "VIEW {}", display_comma_separated(views))
             }
         }
     }

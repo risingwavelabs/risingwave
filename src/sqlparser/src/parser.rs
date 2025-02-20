@@ -5154,6 +5154,11 @@ impl Parser<'_> {
             GrantObjects::AllSourcesInSchema {
                 schemas: self.parse_comma_separated(Parser::parse_object_name)?,
             }
+        } else if self.parse_keywords(&[Keyword::ALL, Keyword::SINKS, Keyword::IN, Keyword::SCHEMA])
+        {
+            GrantObjects::AllSinksInSchema {
+                schemas: self.parse_comma_separated(Parser::parse_object_name)?,
+            }
         } else if self.parse_keywords(&[
             Keyword::ALL,
             Keyword::MATERIALIZED,
@@ -5162,6 +5167,11 @@ impl Parser<'_> {
             Keyword::SCHEMA,
         ]) {
             GrantObjects::AllMviewsInSchema {
+                schemas: self.parse_comma_separated(Parser::parse_object_name)?,
+            }
+        } else if self.parse_keywords(&[Keyword::ALL, Keyword::VIEWS, Keyword::IN, Keyword::SCHEMA])
+        {
+            GrantObjects::AllViewsInSchema {
                 schemas: self.parse_comma_separated(Parser::parse_object_name)?,
             }
         } else if self.parse_keywords(&[Keyword::MATERIALIZED, Keyword::VIEW]) {
@@ -5174,6 +5184,7 @@ impl Parser<'_> {
                 Keyword::TABLE,
                 Keyword::SOURCE,
                 Keyword::SINK,
+                Keyword::VIEWS,
             ]);
             let objects = self.parse_comma_separated(Parser::parse_object_name);
             match object_type {
@@ -5182,6 +5193,7 @@ impl Parser<'_> {
                 Some(Keyword::SEQUENCE) => GrantObjects::Sequences(objects?),
                 Some(Keyword::SOURCE) => GrantObjects::Sources(objects?),
                 Some(Keyword::SINK) => GrantObjects::Sinks(objects?),
+                Some(Keyword::VIEW) => GrantObjects::Views(objects?),
                 Some(Keyword::TABLE) | None => GrantObjects::Tables(objects?),
                 _ => unreachable!(),
             }

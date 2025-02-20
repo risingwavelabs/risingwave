@@ -217,6 +217,7 @@ fn gen_bound(
 
     let mut binder = Binder::new_with_param_types(session, specific_param_types);
     let bound = binder.bind(stmt)?;
+
     session.check_privileges_for_stmt(&bound)?;
 
     Ok(BoundResult {

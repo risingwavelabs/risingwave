@@ -221,6 +221,7 @@ impl CatalogController {
         user_ids: Vec<UserId>,
         new_grant_privileges: &[PbGrantPrivilege],
         grantor: UserId,
+        with_grant_option: bool,
     ) -> MetaResult<NotificationVersion> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
@@ -239,7 +240,7 @@ impl CatalogController {
                     oid: Set(id),
                     granted_by: Set(grantor),
                     action: Set(action),
-                    with_grant_option: Set(action_with_opt.with_grant_option),
+                    with_grant_option: Set(with_grant_option),
                     ..Default::default()
                 });
                 if action == Action::Select {
@@ -251,7 +252,7 @@ impl CatalogController {
                                 oid: Set(tid),
                                 granted_by: Set(grantor),
                                 action: Set(Action::Select),
-                                with_grant_option: Set(action_with_opt.with_grant_option),
+                                with_grant_option: Set(with_grant_option),
                                 ..Default::default()
                             }),
                     );
@@ -282,10 +283,12 @@ impl CatalogController {
                     .one(&txn)
                     .await?;
                 let Some(privilege_id) = privilege_id else {
-                    return Err(MetaError::permission_denied(format!(
+                    tracing::warn!(
                         "user {} don't have privilege {:?} or grant option",
-                        grantor, privilege.action,
-                    )));
+                        grantor,
+                        privilege.action
+                    );
+                    continue;
                 };
                 privilege.dependent_id = Set(Some(privilege_id));
             }
@@ -579,6 +582,7 @@ mod tests {
             vec![user_1.user_id],
             &[conn_with_option.clone()],
             TEST_ROOT_USER_ID,
+            true,
         )
         .await?;
         // ROOT grant CREATE without grant option to user_1.
@@ -586,6 +590,7 @@ mod tests {
             vec![user_1.user_id],
             &[create_without_option.clone()],
             TEST_ROOT_USER_ID,
+            false,
         )
         .await?;
         // user_1 grant CONN with grant option to user_2.
@@ -593,6 +598,7 @@ mod tests {
             vec![user_2.user_id],
             &[conn_with_option.clone()],
             user_1.user_id,
+            true,
         )
         .await?;
         // user_1 grant CREATE without grant option to user_2.
@@ -600,7 +606,8 @@ mod tests {
             mgr.grant_privilege(
                 vec![user_2.user_id],
                 &[create_without_option.clone()],
-                user_1.user_id
+                user_1.user_id,
+                false,
             )
             .await
             .is_err(),
