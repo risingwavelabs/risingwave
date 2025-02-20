@@ -202,30 +202,6 @@ impl ColumnDesc {
         }
     }
 
-    /// Flatten a nested column to a list of columns (including itself).
-    /// If the type is atomic, it returns simply itself.
-    /// If the type has multiple nesting levels, it traverses for the tree-like schema,
-    /// and returns every tree node.
-    ///
-    /// The name will reflect the full path of the column, and the id will be the placeholder.
-    /// Should only be used for observability/debugging purposes.
-    pub fn flatten(&self) -> Vec<ColumnDesc> {
-        let mut descs = vec![self.clone()];
-
-        if let DataType::Struct(st) = &self.data_type {
-            descs.extend(st.iter().flat_map(|(field_name, field_data_type)| {
-                Self::named(
-                    format!("{}.{}", self.name, field_name),
-                    ColumnId::placeholder(),
-                    field_data_type.clone(),
-                )
-                .flatten()
-            }));
-        }
-
-        descs
-    }
-
     // TODO(struct): deprecate and use `named` instead
     pub fn new_atomic(data_type: DataType, name: &str, column_id: i32) -> Self {
         Self::named(name, ColumnId::new(column_id), data_type)
