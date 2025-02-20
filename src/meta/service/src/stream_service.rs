@@ -297,21 +297,21 @@ impl StreamManagerService for StreamServiceImpl {
             .await?;
         let distributions = fragment_descs
             .into_iter()
-            .map(
-                |fragment_desc| list_fragment_distribution_response::FragmentDistribution {
+            .map(|(fragment_desc, upstreams)| {
+                list_fragment_distribution_response::FragmentDistribution {
                     fragment_id: fragment_desc.fragment_id as _,
                     table_id: fragment_desc.job_id as _,
                     distribution_type: PbFragmentDistributionType::from(
                         fragment_desc.distribution_type,
                     ) as _,
                     state_table_ids: fragment_desc.state_table_ids.into_u32_array(),
-                    upstream_fragment_ids: fragment_desc.upstream_fragment_id.into_u32_array(),
+                    upstream_fragment_ids: upstreams.iter().map(|id| *id as _).collect(),
                     fragment_type_mask: fragment_desc.fragment_type_mask as _,
                     parallelism: fragment_desc.parallelism as _,
                     vnode_count: fragment_desc.vnode_count as _,
                     node: Some(fragment_desc.stream_node.to_protobuf()),
-                },
-            )
+                }
+            })
             .collect_vec();
 
         Ok(Response::new(ListFragmentDistributionResponse {
