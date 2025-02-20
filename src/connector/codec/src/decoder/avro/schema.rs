@@ -83,13 +83,15 @@ pub fn avro_schema_to_column_descs(
         let fields = fields
             .iter()
             .map(|field| {
-                avro_field_to_column_desc(
-                    &field.name,
+                use risingwave_common::catalog::{ColumnDesc, ColumnId};
+                let data_type = avro_type_mapping(
                     &field.schema,
                     &mut ancestor_records,
                     resolved.get_names(),
                     map_handling,
-                )
+                )?;
+                let desc = ColumnDesc::named(&field.name, ColumnId::placeholder(), data_type);
+                Ok(desc.to_protobuf())
             })
             .collect::<anyhow::Result<_>>()?;
         Ok(fields)
@@ -100,19 +102,6 @@ pub fn avro_schema_to_column_descs(
 
 const DBZ_VARIABLE_SCALE_DECIMAL_NAME: &str = "VariableScaleDecimal";
 const DBZ_VARIABLE_SCALE_DECIMAL_NAMESPACE: &str = "io.debezium.data";
-
-fn avro_field_to_column_desc(
-    name: &str,
-    schema: &Schema,
-    ancestor_records: &mut Vec<String>,
-    refs: &NamesRef<'_>,
-    map_handling: Option<MapHandling>,
-) -> anyhow::Result<ColumnDesc> {
-    use risingwave_common::catalog::{ColumnDesc, ColumnId};
-    let data_type = avro_type_mapping(schema, ancestor_records, refs, map_handling)?;
-    let desc = ColumnDesc::named(name, ColumnId::placeholder(), data_type);
-    Ok(desc.to_protobuf())
-}
 
 /// This function expects original schema (with `Ref`).
 fn avro_type_mapping(
