@@ -177,7 +177,7 @@ impl ShowColumnRow {
         // TODO(struct): use struct's type name once supported.
         let r#type = match &data_type {
             DataType::Struct(_) => "struct".to_owned(),
-            DataType::List(_) => "list".to_owned(),
+            DataType::List(box DataType::Struct(_)) => "struct[]".to_owned(),
             d => d.to_string(),
         };
 

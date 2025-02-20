@@ -266,12 +266,12 @@ create table t5 (v struct<a int, b struct<b int, c struct<d int, e int>[]>>[]);
 query TTTT
 show columns from t5;
 ----
-v	            list	                    false	NULL
+v	            struct[]	                false	NULL
 v[1]	        struct	                    false	NULL
 v[1].a	        integer	                    false	NULL
 v[1].b	        struct	                    false	NULL
 v[1].b.b	    integer	                    false	NULL
-v[1].b.c	    list	                    false	NULL
+v[1].b.c	    struct[]	                false	NULL
 v[1].b.c[1]	    struct	                    false	NULL
 v[1].b.c[1].d	integer	                    false	NULL
 v[1].b.c[1].e	integer	                    false	NULL
