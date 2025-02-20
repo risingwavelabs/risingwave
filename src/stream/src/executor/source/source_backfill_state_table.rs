@@ -138,6 +138,13 @@ impl<S: StateStore> BackfillStateTableHandler<S> {
         Ok(())
     }
 
+    /// When calling `try_recover_from_state_store`, we may read the state written by other source parallelisms in
+    /// the previous `epoch`. Therefore, we need to explicitly create a `BackfillStateTableCommittedReader` to do
+    /// `try_recover_from_state_store`. Before returning the reader, we will do `try_wait_committed_epoch` to ensure
+    /// that we are able to read all data committed in `epoch`.
+    ///
+    /// Note that, we need to ensure that the barrier of `epoch` must have been yielded before creating the committed reader,
+    /// and otherwise the `try_wait_committed_epoch` will block the barrier of `epoch`, and cause deadlock.
     pub(super) async fn new_committed_reader(
         &self,
         epoch: EpochPair,
