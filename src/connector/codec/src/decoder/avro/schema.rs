@@ -78,22 +78,22 @@ pub fn avro_schema_to_column_descs(
     map_handling: Option<MapHandling>,
 ) -> anyhow::Result<Vec<ColumnDesc>> {
     let resolved = ResolvedSchema::try_from(schema)?;
-    if let Schema::Record(RecordSchema { fields, .. }) = schema {
-        let mut ancestor_records: Vec<String> = vec![];
-        let fields = fields
+    let mut ancestor_records: Vec<String> = vec![];
+    let root_type = avro_type_mapping(
+        schema,
+        &mut ancestor_records,
+        resolved.get_names(),
+        map_handling,
+    )?;
+    if let DataType::Struct(root_struct) = root_type {
+        let fields = root_struct
             .iter()
-            .map(|field| {
+            .map(|(name, data_type)| {
                 use risingwave_common::catalog::{ColumnDesc, ColumnId};
-                let data_type = avro_type_mapping(
-                    &field.schema,
-                    &mut ancestor_records,
-                    resolved.get_names(),
-                    map_handling,
-                )?;
-                let desc = ColumnDesc::named(&field.name, ColumnId::placeholder(), data_type);
-                Ok(desc.to_protobuf())
+                let desc = ColumnDesc::named(name, ColumnId::placeholder(), data_type.clone());
+                desc.to_protobuf()
             })
-            .collect::<anyhow::Result<_>>()?;
+            .collect();
         Ok(fields)
     } else {
         bail!("schema invalid, record type required at top level of the schema.");
