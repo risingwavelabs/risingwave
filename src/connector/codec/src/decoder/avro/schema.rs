@@ -123,30 +123,8 @@ fn avro_field_to_column_desc(
                 map_handling,
             )
         }
-        Schema::Record(RecordSchema {
-            // TODO(struct): assign type name once supported.
-            name: _type_name,
-            fields,
-            ..
-        }) => {
-            // TODO(struct): since we deprecated `field_descs` in `ColumnDesc`, there's no need to
-            // traverse the fields here except for maintaining the same column id (index) as the
-            // original implementation.
-            let _field_descs: Vec<ColumnDesc> = fields
-                .iter()
-                .map(|f| {
-                    avro_field_to_column_desc(
-                        &f.name,
-                        &f.schema,
-                        index,
-                        ancestor_records,
-                        refs,
-                        map_handling,
-                    )
-                })
-                .collect::<anyhow::Result<_>>()?;
+        _ => {
             *index += 1;
-
             Ok(ColumnDesc {
                 column_type: Some(data_type.to_protobuf()),
                 column_id: *index,
@@ -156,17 +134,7 @@ fn avro_field_to_column_desc(
                 additional_column_type: 0, // deprecated
                 additional_column: Some(AdditionalColumn { column_type: None }),
                 version: ColumnDescVersion::LATEST as _,
-            })
-        }
-        _ => {
-            *index += 1;
-            Ok(ColumnDesc {
-                column_type: Some(data_type.to_protobuf()),
-                column_id: *index,
-                name: name.to_owned(),
-                additional_column: Some(AdditionalColumn { column_type: None }),
-                version: ColumnDescVersion::LATEST as _,
-                ..Default::default()
+                // ..Default::default()
             })
         }
     }
