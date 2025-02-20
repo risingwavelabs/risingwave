@@ -1235,18 +1235,12 @@ impl CompleteStreamFragmentGraph {
             .chain(materialized_fragment_id)
             .collect();
 
-        let upstream_fragment_ids = self
-            .get_upstreams(id)
-            .map(|(id, _)| id.as_global_id())
-            .collect();
-
         Fragment {
             fragment_id: inner.fragment_id,
             fragment_type_mask: inner.fragment_type_mask,
             distribution_type,
             actors,
             state_table_ids,
-            upstream_fragment_ids,
             maybe_vnode_count: VnodeCount::set(vnode_count).to_protobuf(),
             nodes: Some(stream_node),
         }

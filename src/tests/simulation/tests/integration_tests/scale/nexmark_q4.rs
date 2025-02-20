@@ -18,9 +18,7 @@ use anyhow::Result;
 use itertools::Itertools;
 use risingwave_common::hash::WorkerSlotId;
 use risingwave_simulation::cluster::{Configuration, KillOpts};
-use risingwave_simulation::ctl_ext::predicate::{
-    BoxedPredicate, identity_contains, upstream_fragment_count,
-};
+use risingwave_simulation::ctl_ext::predicate::{BoxedPredicate, identity_contains};
 use risingwave_simulation::nexmark::queries::q4::*;
 use risingwave_simulation::nexmark::{NexmarkCluster, THROUGHPUT};
 use risingwave_simulation::utils::AssertResult;
@@ -160,11 +158,7 @@ async fn nexmark_q4_source_with_recovery() -> Result<()> {
 #[tokio::test]
 async fn nexmark_q4_agg_join() -> Result<()> {
     nexmark_q4_common(
-        [
-            identity_contains("hashagg"),
-            identity_contains("hashjoin"),
-            upstream_fragment_count(2),
-        ],
+        [identity_contains("hashagg"), identity_contains("hashjoin")],
         false,
     )
     .await
@@ -183,11 +177,7 @@ async fn nexmark_q4_cascade() -> Result<()> {
     let id_1 = fragment_1.id();
 
     let fragment_2 = cluster
-        .locate_one_fragment([
-            identity_contains("hashagg"),
-            identity_contains("hashjoin"),
-            upstream_fragment_count(2),
-        ])
+        .locate_one_fragment([identity_contains("hashagg"), identity_contains("hashjoin")])
         .await?;
     let id_2 = fragment_2.id();
 
