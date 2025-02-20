@@ -112,32 +112,18 @@ fn avro_field_to_column_desc(
     map_handling: Option<MapHandling>,
 ) -> anyhow::Result<ColumnDesc> {
     let data_type = avro_type_mapping(schema, ancestor_records, refs, map_handling)?;
-    match schema {
-        Schema::Ref { name: ref_name } => {
-            avro_field_to_column_desc(
-                name,
-                refs[ref_name], // `ResolvedSchema::try_from` already handles lookup failure
-                index,
-                ancestor_records,
-                refs,
-                map_handling,
-            )
-        }
-        _ => {
-            *index += 1;
-            Ok(ColumnDesc {
-                column_type: Some(data_type.to_protobuf()),
-                column_id: *index,
-                name: name.to_owned(),
-                generated_or_default_column: None,
-                description: None,
-                additional_column_type: 0, // deprecated
-                additional_column: Some(AdditionalColumn { column_type: None }),
-                version: ColumnDescVersion::LATEST as _,
-                // ..Default::default()
-            })
-        }
-    }
+    *index += 1;
+    Ok(ColumnDesc {
+        column_type: Some(data_type.to_protobuf()),
+        column_id: *index,
+        name: name.to_owned(),
+        generated_or_default_column: None,
+        description: None,
+        additional_column_type: 0, // deprecated
+        additional_column: Some(AdditionalColumn { column_type: None }),
+        version: ColumnDescVersion::LATEST as _,
+        // ..Default::default()
+    })
 }
 
 /// This function expects original schema (with `Ref`).
