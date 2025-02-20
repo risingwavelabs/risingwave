@@ -86,7 +86,7 @@ impl<Src: OpendalSource> OpendalReader<Src> {
             if let EncodingProperties::Parquet = &self.parser_config.specific.encoding_config {
                 chunk_stream = read_parquet_file(
                     self.connector.op.clone(),
-                    object_name,
+                    object_name.clone(),
                     self.columns.clone(),
                     Some(self.parser_config.common.rw_columns.clone()),
                     self.source_ctx.source_ctrl_opts.chunk_size,
@@ -132,11 +132,16 @@ impl<Src: OpendalSource> OpendalReader<Src> {
         let source_name = source_ctx.source_name.clone();
         let object_name = split.name.clone();
         let start_offset = split.offset;
-        let reader = op
-            .read_with(&object_name)
-            .range(start_offset as u64..)
-            .into_future() // Unlike `rustc`, `try_stream` seems require manual `into_future`.
-            .await?;
+        let reader = match object_name.ends_with(".gz") || object_name.ends_with(".gzip") {
+            true => op.read_with(&object_name).into_future().await?,
+
+            false => {
+                op.read_with(&object_name)
+                    .range(start_offset as u64..)
+                    .into_future()
+                    .await?
+            }
+        };
         let stream_reader = StreamReader::new(
             reader.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)),
         );
@@ -157,7 +162,10 @@ impl<Src: OpendalSource> OpendalReader<Src> {
             }
         };
 
-        let mut offset = start_offset;
+        let mut offset = match object_name.ends_with(".gz") || object_name.ends_with(".gzip") {
+            true => 0,
+            false => start_offset,
+        };
         let partition_input_bytes_metrics = source_ctx
             .metrics
             .partition_input_bytes
@@ -179,22 +187,29 @@ impl<Src: OpendalSource> OpendalReader<Src> {
                 // EOF
                 break;
             }
+            let remaining = buf_reader.fill_buf().await?;
+            let msg_offset = if remaining.is_empty() {
+                usize::MAX.to_string()
+            } else {
+                (offset + n_read).to_string()
+            };
             // note that the buffer contains the newline character
             debug_assert_eq!(n_read, line_buf.len());
+            if (object_name.ends_with(".gz") || object_name.ends_with(".gzip"))
+                && offset + n_read <= start_offset
+            {
 
-            // FIXME(rc): Here we have to use `offset + n_read`, i.e. the offset of the next line,
-            // as the *message offset*, because we check whether a file is finished by comparing the
-            // message offset with the file size in `FsFetchExecutor::into_stream`. However, we must
-            // understand that this message offset is not semantically consistent with the offset of
-            // other source connectors.
-            let msg_offset = (offset + n_read).to_string();
-            batch.push(SourceMessage {
-                key: None,
-                payload: Some(std::mem::take(&mut line_buf).into_bytes()),
-                offset: msg_offset,
-                split_id: split.id(),
-                meta: SourceMeta::Empty,
-            });
+                // For gzip compressed files, the reader needs to read from the beginning each time,
+                // but it needs to skip the previously read part and start yielding chunks from a position greater than or equal to start_offset.
+            } else {
+                batch.push(SourceMessage {
+                    key: None,
+                    payload: Some(std::mem::take(&mut line_buf).into_bytes()),
+                    offset: msg_offset,
+                    split_id: split.id(),
+                    meta: SourceMeta::Empty,
+                });
+            }
             offset += n_read;
             partition_input_bytes_metrics.inc_by(n_read as _);
 
