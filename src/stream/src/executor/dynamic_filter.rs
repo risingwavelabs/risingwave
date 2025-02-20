@@ -488,20 +488,22 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
                         }
                     }
 
-                    self.left_table.commit(barrier.epoch).await?;
-                    self.right_table.commit(barrier.epoch).await?;
+                    let left_post_commit = self.left_table.commit(barrier.epoch).await?;
+                    self.right_table
+                        .commit_assert_no_update_vnode_bitmap(barrier.epoch)
+                        .await?;
 
                     // Update the last committed RHS row and value.
                     committed_rhs_row.clone_from(&staging_rhs_row);
                     committed_rhs_value = Some(curr);
 
-                    // Update the vnode bitmap for the left state table if asked.
-                    if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.ctx.id) {
-                        let (_previous_vnode_bitmap, _cache_may_stale) =
-                            self.left_table.update_vnode_bitmap(vnode_bitmap);
-                    }
-
+                    let update_vnode_bitmap = barrier.as_update_vnode_bitmap(self.ctx.id);
                     yield Message::Barrier(barrier);
+
+                    // Update the vnode bitmap for the left state table if asked.
+                    left_post_commit
+                        .post_yield_barrier(update_vnode_bitmap)
+                        .await?;
                 }
             }
         }
@@ -524,7 +526,7 @@ mod tests {
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_hummock_sdk::HummockReadEpoch;
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::table::batch_table::storage_table::StorageTable;
+    use risingwave_storage::table::batch_table::BatchTable;
 
     use super::*;
     use crate::common::table::test_utils::gen_pbtable;
@@ -1184,7 +1186,7 @@ mod tests {
         Ok(())
     }
 
-    async fn in_table(table: &StorageTable<MemoryStateStore>, x: i64) -> bool {
+    async fn in_table(table: &BatchTable<MemoryStateStore>, x: i64) -> bool {
         let row = table
             .get_row(
                 &OwnedRow::new(vec![Some(x.into())]),
@@ -1226,7 +1228,7 @@ mod tests {
         let (mut tx_l, mut tx_r, mut dynamic_filter) =
             create_executor(PbExprNodeType::LessThanOrEqual, mem_store.clone(), true).await;
         let column_descs = ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64);
-        let table = StorageTable::for_test(
+        let table = BatchTable::for_test(
             mem_store.clone(),
             TableId::new(0),
             vec![column_descs],

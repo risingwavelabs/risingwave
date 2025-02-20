@@ -161,7 +161,9 @@ impl<S: StateStore> NowExecutor<S> {
                     paused = is_pause_on_startup;
                     initialized = true;
                 } else {
-                    state_table.commit(barrier.epoch).await?;
+                    state_table
+                        .commit_assert_no_update_vnode_bitmap(barrier.epoch)
+                        .await?;
                     yield Message::Barrier(barrier);
                 }
 

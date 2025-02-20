@@ -109,6 +109,7 @@ mod row_merge;
 
 #[cfg(test)]
 mod integration_tests;
+mod sync_kv_log_store;
 pub mod test_utils;
 mod utils;
 
@@ -153,6 +154,7 @@ pub use simple_agg::SimpleAggExecutor;
 pub use sink::SinkExecutor;
 pub use sort::*;
 pub use stateless_simple_agg::StatelessSimpleAggExecutor;
+pub use sync_kv_log_store::SyncedKvLogStoreExecutor;
 pub use temporal_join::TemporalJoinExecutor;
 pub use top_n::{
     AppendOnlyGroupTopNExecutor, AppendOnlyTopNExecutor, GroupTopNExecutor, TopNExecutor,
@@ -388,6 +390,10 @@ impl Barrier {
     pub fn is_stop(&self, actor_id: ActorId) -> bool {
         self.all_stop_actors()
             .map_or(false, |actors| actors.contains(&actor_id))
+    }
+
+    pub fn is_checkpoint(&self) -> bool {
+        self.kind == BarrierKind::Checkpoint
     }
 
     /// Get the initial split assignments for the actor with `actor_id`.

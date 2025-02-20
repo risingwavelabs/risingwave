@@ -18,9 +18,10 @@ use risingwave_frontend_macro::system_catalog;
 use risingwave_pb::user::grant_privilege::Object;
 use serde_json::{json, Map as JsonMap};
 
-use crate::catalog::schema_catalog::SchemaCatalog;
+use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::catalog::system_catalog::{get_acl_items, SysCatalogReaderImpl};
-use crate::error::Result;
+use crate::catalog::CatalogError;
+use crate::error::{Result, RwError};
 use crate::handler::create_source::UPSTREAM_SOURCE_KEY;
 use crate::WithOptionsSecResolved;
 
@@ -59,14 +60,14 @@ fn read_rw_sources_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSource>> 
     let users = user_reader.get_all_users();
     let username_map = user_reader.get_user_name_map();
 
-    Ok(schemas
+    schemas
         .flat_map(|schema| {
             schema.iter_source().map(|source| {
                 let format_encode_props_with_secrets = WithOptionsSecResolved::new(
                     source.info.format_encode_options.clone(),
                     source.info.format_encode_secret_refs.clone(),
                 );
-                RwSource {
+                Ok(RwSource {
                     id: source.id as i32,
                     name: source.name.clone(),
                     schema_id: schema.id() as i32,
@@ -100,25 +101,28 @@ fn read_rw_sources_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSource>> 
                     is_shared: source.info.is_shared(),
 
                     connector_props: serialize_props_with_secret(
-                        schema,
+                        &catalog_reader,
+                        &reader.auth_context.database,
                         source.with_properties.clone(),
-                    )
+                    )?
                     .into(),
                     format_encode_options: serialize_props_with_secret(
-                        schema,
+                        &catalog_reader,
+                        &reader.auth_context.database,
                         format_encode_props_with_secrets,
-                    )
+                    )?
                     .into(),
-                }
+                })
             })
         })
-        .collect())
+        .collect::<Result<Vec<_>>>()
 }
 
 pub fn serialize_props_with_secret(
-    schema: &SchemaCatalog,
+    catalog_reader: &CatalogReadGuard,
+    db_name: &str,
     props_with_secret: WithOptionsSecResolved,
-) -> jsonbb::Value {
+) -> Result<jsonbb::Value> {
     let (inner, secret_ref) = props_with_secret.into_parts();
     // if not secret, {"some key": {"type": "plaintext", "value": "xxxx"}}
     // if secret, {"some key": {"type": "secret", "value": {"value": "<secret name>"}}}
@@ -128,16 +132,17 @@ pub fn serialize_props_with_secret(
         result.insert(k, json!({"type": "plaintext", "value": v}));
     }
     for (k, v) in secret_ref {
-        let secret_name = schema
-            .get_secret_by_id(&SecretId(v.secret_id))
-            .unwrap()
-            .name
-            .clone();
+        let secret = catalog_reader
+            .iter_schemas(db_name)?
+            .find_map(|schema| schema.get_secret_by_id(&SecretId(v.secret_id)))
+            .ok_or_else(|| {
+                RwError::from(CatalogError::NotFound("secret", v.secret_id.to_string()))
+            })?;
         result.insert(
             k,
-            json!({"type": "secret", "value": {"value": secret_name}}),
+            json!({"type": "secret", "value": {"value": secret.name}}),
         );
     }
 
-    jsonbb::Value::from(serde_json::Value::Object(result))
+    Ok(jsonbb::Value::from(serde_json::Value::Object(result)))
 }

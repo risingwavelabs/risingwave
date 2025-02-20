@@ -1,4 +1,10 @@
 statement ok
+DROP TABLE validate_raw_string;
+
+statement ok
+DROP TABLE test_primary_key;
+
+statement ok
 DROP TABLE hubspot_sha256_v2;
 
 statement ok
