@@ -30,20 +30,20 @@ pub use state_table_handler::*;
 mod executor_core;
 pub use executor_core::StreamSourceCore;
 
-mod fs_source_executor;
+mod legacy_fs_source_executor;
 #[expect(deprecated)]
-pub use fs_source_executor::*;
+pub use legacy_fs_source_executor::*;
 mod source_executor;
 pub use source_executor::*;
 mod source_backfill_executor;
 pub use source_backfill_executor::*;
-mod list_executor;
-pub use list_executor::*;
-mod fetch_executor;
-pub use fetch_executor::*;
+mod fs_list_executor;
+pub use fs_list_executor::*;
+mod fs_fetch_executor;
+pub use fs_fetch_executor::*;
 
 mod source_backfill_state_table;
-pub use source_backfill_state_table::BackfillStateTableHandler;
+pub(crate) use source_backfill_state_table::BackfillStateTableHandler;
 
 pub mod state_table_handler;
 use futures_async_stream::try_stream;

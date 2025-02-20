@@ -37,8 +37,7 @@ use crate::sstable_info::SstableInfo;
 use crate::table_watermark::{ReadTableWatermark, TableWatermarks};
 use crate::version::{
     GroupDelta, GroupDeltaCommon, HummockVersion, HummockVersionCommon, HummockVersionDeltaCommon,
-    HummockVersionStateTableInfo, IntraLevelDelta, IntraLevelDeltaCommon, ObjectIdReader,
-    SstableIdReader,
+    IntraLevelDelta, IntraLevelDeltaCommon, ObjectIdReader, SstableIdReader,
 };
 use crate::{can_concat, CompactionGroupId, HummockSstableId, HummockSstableObjectId};
 #[derive(Debug, Clone, Default)]
@@ -116,17 +115,12 @@ impl<L> HummockVersionCommon<SstableInfo, L> {
         &self,
         existing_table_ids: &[u32],
     ) -> BTreeMap<u32, TableWatermarks> {
-        safe_epoch_table_watermarks_impl(
-            &self.table_watermarks,
-            &self.state_table_info,
-            existing_table_ids,
-        )
+        safe_epoch_table_watermarks_impl(&self.table_watermarks, existing_table_ids)
     }
 }
 
 pub fn safe_epoch_table_watermarks_impl(
     table_watermarks: &HashMap<TableId, Arc<TableWatermarks>>,
-    _state_table_info: &HummockVersionStateTableInfo,
     existing_table_ids: &[u32],
 ) -> BTreeMap<u32, TableWatermarks> {
     fn extract_single_table_watermark(
@@ -136,6 +130,7 @@ pub fn safe_epoch_table_watermarks_impl(
             Some(TableWatermarks {
                 watermarks: vec![(*first_epoch, first_epoch_watermark.clone())],
                 direction: table_watermarks.direction,
+                watermark_type: table_watermarks.watermark_type,
             })
         } else {
             None
@@ -156,10 +151,10 @@ pub fn safe_epoch_table_watermarks_impl(
 }
 
 pub fn safe_epoch_read_table_watermarks_impl(
-    safe_epoch_watermarks: &BTreeMap<u32, TableWatermarks>,
+    safe_epoch_watermarks: BTreeMap<u32, TableWatermarks>,
 ) -> BTreeMap<TableId, ReadTableWatermark> {
     safe_epoch_watermarks
-        .iter()
+        .into_iter()
         .map(|(table_id, watermarks)| {
             assert_eq!(watermarks.watermarks.len(), 1);
             let vnode_watermarks = &watermarks.watermarks.first().expect("should exist").1;
@@ -177,7 +172,7 @@ pub fn safe_epoch_read_table_watermarks_impl(
                 }
             }
             (
-                TableId::from(*table_id),
+                TableId::from(table_id),
                 ReadTableWatermark {
                     direction: watermarks.direction,
                     vnode_watermarks: vnode_watermark_map,
@@ -1147,12 +1142,22 @@ fn split_sst_info_for_level(
             .filter(|table_id| member_table_ids.contains(table_id))
             .cloned()
             .collect_vec();
+        let sst_size = sst_info.sst_size;
+        if sst_size / 2 == 0 {
+            tracing::warn!(
+                id = sst_info.sst_id,
+                object_id = sst_info.object_id,
+                sst_size = sst_info.sst_size,
+                file_size = sst_info.file_size,
+                "Sstable sst_size is under expected",
+            );
+        };
         if !removed_table_ids.is_empty() {
             let (modified_sst, branch_sst) = split_sst_with_table_ids(
                 sst_info,
                 new_sst_id,
-                sst_info.sst_size / 2,
-                sst_info.sst_size / 2,
+                sst_size / 2,
+                sst_size / 2,
                 member_table_ids.iter().cloned().collect_vec(),
             );
             *sst_info = modified_sst;
@@ -1610,13 +1615,13 @@ mod tests {
                 (
                     2,
                     GroupDeltas {
-                        group_deltas: vec![GroupDelta::GroupConstruct(GroupConstruct {
+                        group_deltas: vec![GroupDelta::GroupConstruct(Box::new(GroupConstruct {
                             group_config: Some(CompactionConfig {
                                 max_level: 6,
                                 ..Default::default()
                             }),
                             ..Default::default()
-                        })],
+                        }))],
                     },
                 ),
                 (

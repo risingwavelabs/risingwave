@@ -38,3 +38,19 @@ select date(1);
 
 query error unexpected arguments number
 select date();
+
+query ?
+select cast('a' as char(1));
+----
+a
+
+# since we don't support char type, cast to char(2) will be the same as cast to varchar, so its behavior is the same as cast to varchar and not the same as postgresql.
+query ?
+select 'a'::char(2) = 'a '::char(2);
+----
+f
+
+query ?
+select 'a'::varchar = 'a '::varchar;
+----
+f

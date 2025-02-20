@@ -1164,6 +1164,10 @@ pub struct StreamingDeveloperConfig {
     /// will be switched from jdbc postgresql sinks to rust native (connector='postgres') sinks.
     pub switch_jdbc_pg_to_native: bool,
 
+    /// The maximum number of consecutive barriers allowed in a message when sent between actors.
+    #[serde(default = "default::developer::stream_max_barrier_batch_size")]
+    pub max_barrier_batch_size: u32,
+
     /// Configure the system-wide cache row cardinality of hash join.
     /// For example, if this is set to 1000, it means we can have at most 1000 rows in cache.
     #[serde(default = "default::developer::streaming_hash_join_entry_state_max_rows")]
@@ -2031,6 +2035,10 @@ pub mod default {
             32768
         }
 
+        pub fn stream_max_barrier_batch_size() -> u32 {
+            1024
+        }
+
         pub fn stream_hash_agg_max_dirty_groups_heap_size() -> usize {
             64 << 20 // 64MB
         }
@@ -2215,6 +2223,11 @@ pub mod default {
         const DEFAULT_MAX_LEVEL: u32 = 6;
         const DEFAULT_MAX_L0_COMPACT_LEVEL_COUNT: u32 = 42;
         const DEFAULT_SST_ALLOWED_TRIVIAL_MOVE_MIN_SIZE: u64 = 4 * MB;
+        const DEFAULT_SST_ALLOWED_TRIVIAL_MOVE_MAX_COUNT: u32 = 64;
+        const DEFAULT_EMERGENCY_LEVEL0_SST_FILE_COUNT: u32 = 2000; // > 50G / 32M = 1600
+        const DEFAULT_EMERGENCY_LEVEL0_SUB_LEVEL_PARTITION: u32 = 256;
+        const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_MAX_SST_COUNT: u32 = 10000; // 10000 * 32M = 320G
+        const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_MAX_SIZE: u64 = 300 * 1024 * MB; // 300GB
 
         use crate::catalog::hummock::CompactionFilterFlag;
 
@@ -2296,6 +2309,26 @@ pub mod default {
 
         pub fn max_overlapping_level_size() -> u64 {
             256 * MB
+        }
+
+        pub fn sst_allowed_trivial_move_max_count() -> u32 {
+            DEFAULT_SST_ALLOWED_TRIVIAL_MOVE_MAX_COUNT
+        }
+
+        pub fn emergency_level0_sst_file_count() -> u32 {
+            DEFAULT_EMERGENCY_LEVEL0_SST_FILE_COUNT
+        }
+
+        pub fn emergency_level0_sub_level_partition() -> u32 {
+            DEFAULT_EMERGENCY_LEVEL0_SUB_LEVEL_PARTITION
+        }
+
+        pub fn level0_stop_write_threshold_max_sst_count() -> u32 {
+            DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_MAX_SST_COUNT
+        }
+
+        pub fn level0_stop_write_threshold_max_size() -> u64 {
+            DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_MAX_SIZE
         }
     }
 
@@ -2676,6 +2709,24 @@ pub struct CompactionConfig {
     pub enable_emergency_picker: bool,
     #[serde(default = "default::compaction_config::max_level")]
     pub max_level: u32,
+    #[serde(default = "default::compaction_config::sst_allowed_trivial_move_min_size")]
+    pub sst_allowed_trivial_move_min_size: u64,
+    #[serde(default = "default::compaction_config::sst_allowed_trivial_move_max_count")]
+    pub sst_allowed_trivial_move_max_count: u32,
+    #[serde(default = "default::compaction_config::max_l0_compact_level_count")]
+    pub max_l0_compact_level_count: u32,
+    #[serde(default = "default::compaction_config::disable_auto_group_scheduling")]
+    pub disable_auto_group_scheduling: bool,
+    #[serde(default = "default::compaction_config::max_overlapping_level_size")]
+    pub max_overlapping_level_size: u64,
+    #[serde(default = "default::compaction_config::emergency_level0_sst_file_count")]
+    pub emergency_level0_sst_file_count: u32,
+    #[serde(default = "default::compaction_config::emergency_level0_sub_level_partition")]
+    pub emergency_level0_sub_level_partition: u32,
+    #[serde(default = "default::compaction_config::level0_stop_write_threshold_max_sst_count")]
+    pub level0_stop_write_threshold_max_sst_count: u32,
+    #[serde(default = "default::compaction_config::level0_stop_write_threshold_max_size")]
+    pub level0_stop_write_threshold_max_size: u64,
 }
 
 /// Note: only applies to meta store backends other than `SQLite`.

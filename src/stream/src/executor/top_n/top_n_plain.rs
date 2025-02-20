@@ -20,6 +20,7 @@ use risingwave_common::util::sort_util::ColumnOrder;
 use super::top_n_cache::TopNStaging;
 use super::utils::*;
 use super::{ManagedTopNState, TopNCache, TopNCacheTrait};
+use crate::common::table::state_table::StateTablePostCommit;
 use crate::executor::prelude::*;
 
 /// `TopNExecutor` works with input with modification, it keeps all the data
@@ -127,6 +128,8 @@ impl<S: StateStore, const WITH_TIES: bool> TopNExecutorBase for InnerTopNExecuto
 where
     TopNCache<WITH_TIES>: TopNCacheTrait,
 {
+    type State = S;
+
     async fn apply_chunk(
         &mut self,
         chunk: StreamChunk,
@@ -173,7 +176,10 @@ where
         Ok(chunk_builder.take())
     }
 
-    async fn flush_data(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
+    async fn flush_data(
+        &mut self,
+        epoch: EpochPair,
+    ) -> StreamExecutorResult<StateTablePostCommit<'_, S>> {
         self.managed_state.flush(epoch).await
     }
 

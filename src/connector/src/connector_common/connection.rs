@@ -135,6 +135,10 @@ pub struct IcebergConnection {
     /// Path of iceberg warehouse, only applicable in storage catalog.
     #[serde(rename = "warehouse.path")]
     pub warehouse_path: Option<String>,
+    /// Catalog id, can be omitted for storage catalog or when
+    /// caller's AWS account ID matches glue id
+    #[serde(rename = "glue.id")]
+    pub glue_id: Option<String>,
     /// Catalog name, can be omitted for storage catalog, but
     /// must be set for other catalogs.
     #[serde(rename = "catalog.name")]
@@ -210,7 +214,7 @@ impl Connection for IcebergConnection {
             }
         };
 
-        // test storage
+        // Test warehouse
         if let Some((scheme, bucket, root)) = info {
             match scheme.as_str() {
                 "s3" | "s3a" => {
@@ -246,7 +250,11 @@ impl Connection for IcebergConnection {
             }
         }
 
-        // test catalog
+        if self.catalog_type.is_none() {
+            bail!("`catalog.type` must be set");
+        }
+
+        // Test catalog
         let iceberg_common = IcebergCommon {
             catalog_type: self.catalog_type.clone(),
             region: self.region.clone(),
@@ -255,6 +263,7 @@ impl Connection for IcebergConnection {
             secret_key: self.secret_key.clone(),
             gcs_credential: self.gcs_credential.clone(),
             warehouse_path: self.warehouse_path.clone(),
+            glue_id: self.glue_id.clone(),
             catalog_name: self.catalog_name.clone(),
             catalog_uri: self.catalog_uri.clone(),
             credential: self.credential.clone(),

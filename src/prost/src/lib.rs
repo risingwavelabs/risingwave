@@ -32,6 +32,7 @@ use risingwave_error::tonic::ToTonicStatus;
 use thiserror::Error;
 
 use crate::common::WorkerType;
+use crate::stream_plan::PbStreamScanType;
 
 #[rustfmt::skip]
 #[cfg_attr(madsim, path = "sim/catalog.rs")]
@@ -405,6 +406,19 @@ impl catalog::StreamSourceInfo {
     }
 }
 
+impl stream_plan::PbStreamScanType {
+    pub fn is_reschedulable(&self) -> bool {
+        match self {
+            // todo: should this be true?
+            PbStreamScanType::UpstreamOnly => false,
+            PbStreamScanType::ArrangementBackfill => true,
+            // todo: true when stable
+            PbStreamScanType::SnapshotBackfill => false,
+            _ => false,
+        }
+    }
+}
+
 impl catalog::Sink {
     // TODO: remove this placeholder
     // creating table sink does not have an id, so we need a placeholder
@@ -480,8 +494,6 @@ impl std::fmt::Debug for plan_common::ColumnDesc {
             column_type,
             column_id,
             name,
-            field_descs,
-            type_name,
             description,
             additional_column_type,
             additional_column,
@@ -496,12 +508,6 @@ impl std::fmt::Debug for plan_common::ColumnDesc {
             s.field("column_type", &"Unknown");
         }
         s.field("column_id", column_id).field("name", name);
-        if !self.field_descs.is_empty() {
-            s.field("field_descs", field_descs);
-        }
-        if !self.type_name.is_empty() {
-            s.field("type_name", type_name);
-        }
         if let Some(description) = description {
             s.field("description", description);
         }

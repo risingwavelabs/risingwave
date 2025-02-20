@@ -25,3 +25,14 @@
     select * from a join b on a.a1 = b.b1 ;
   expected_outputs:
   - stream_plan
+- name: unaligned delta join
+  sql: |
+    set rw_streaming_enable_delta_join = true;
+    set streaming_enable_unaligned_join = true;
+    create table a (a1 int primary key, a2 int);
+    create table b (b1 int primary key, b2 int);
+    /* should generate delta join plan, and stream index scan */
+    select * from a join b on a.a1 = b.b1 ;
+  expected_outputs:
+  - stream_plan
+

@@ -70,6 +70,7 @@ use self::plan_visitor::{has_batch_exchange, CardinalityVisitor, StreamKeyChecke
 use self::property::{Cardinality, RequiredDist};
 use self::rule::*;
 use crate::catalog::table_catalog::TableType;
+use crate::catalog::{DatabaseId, SchemaId};
 use crate::error::{ErrorCode, Result};
 use crate::expr::TimestamptzExprFinder;
 use crate::handler::create_table::{CreateTableInfo, CreateTableProps};
@@ -413,6 +414,12 @@ impl PlanRoot {
             ApplyOrder::BottomUp,
         ))?;
 
+        let plan = plan.optimize_by_rules(&OptimizationStage::new(
+            "Iceberg Count Star",
+            vec![BatchIcebergCountStar::create()],
+            ApplyOrder::TopDown,
+        ))?;
+
         // For iceberg scan, we do iceberg predicate pushdown
         // BatchFilter -> BatchIcebergScan
         let plan = plan.optimize_by_rules(&OptimizationStage::new(
@@ -464,6 +471,12 @@ impl PlanRoot {
             ApplyOrder::BottomUp,
         ))?;
 
+        let plan = plan.optimize_by_rules(&OptimizationStage::new(
+            "Iceberg Count Star",
+            vec![BatchIcebergCountStar::create()],
+            ApplyOrder::TopDown,
+        ))?;
+
         assert_eq!(plan.convention(), Convention::Batch);
         Ok(plan)
     }
@@ -504,6 +517,17 @@ impl PlanRoot {
             ApplyOrder::BottomUp,
         ))?;
 
+        // Add Logstore for Unaligned join
+        // Apply this BEFORE delta join rule, because delta join removes
+        // the join
+        if ctx.session_ctx().config().streaming_enable_unaligned_join() {
+            plan = plan.optimize_by_rules(&OptimizationStage::new(
+                "Add Logstore for Unaligned join",
+                vec![AddLogstoreRule::create()],
+                ApplyOrder::BottomUp,
+            ))?;
+        }
+
         if ctx.session_ctx().config().streaming_enable_delta_join() {
             // TODO: make it a logical optimization.
             // Rewrite joins with index to delta join
@@ -513,7 +537,6 @@ impl PlanRoot {
                 ApplyOrder::BottomUp,
             ))?;
         }
-
         // Inline session timezone
         plan = inline_session_timezone_in_exprs(ctx.clone(), plan)?;
 
@@ -652,6 +675,8 @@ impl PlanRoot {
         mut self,
         context: OptimizerContextRef,
         table_name: String,
+        database_id: DatabaseId,
+        schema_id: SchemaId,
         CreateTableInfo {
             columns,
             pk_column_ids,
@@ -884,6 +909,8 @@ impl PlanRoot {
         StreamMaterialize::create_for_table(
             stream_plan,
             table_name,
+            database_id,
+            schema_id,
             table_required_dist,
             Order::any(),
             columns,
@@ -902,6 +929,8 @@ impl PlanRoot {
     /// Optimize and generate a create materialized view plan.
     pub fn gen_materialize_plan(
         mut self,
+        database_id: DatabaseId,
+        schema_id: SchemaId,
         mv_name: String,
         definition: String,
         emit_on_window_close: bool,
@@ -915,6 +944,8 @@ impl PlanRoot {
         StreamMaterialize::create(
             stream_plan,
             mv_name,
+            database_id,
+            schema_id,
             self.required_dist.clone(),
             self.required_order.clone(),
             self.out_fields.clone(),
@@ -930,6 +961,8 @@ impl PlanRoot {
     pub fn gen_index_plan(
         mut self,
         index_name: String,
+        database_id: DatabaseId,
+        schema_id: SchemaId,
         definition: String,
         retention_seconds: Option<NonZeroU32>,
     ) -> Result<StreamMaterialize> {
@@ -943,6 +976,8 @@ impl PlanRoot {
         StreamMaterialize::create(
             stream_plan,
             index_name,
+            database_id,
+            schema_id,
             self.required_dist.clone(),
             self.required_order.clone(),
             self.out_fields.clone(),

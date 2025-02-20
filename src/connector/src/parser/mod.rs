@@ -28,7 +28,7 @@ pub use json_parser::*;
 pub use parquet_parser::ParquetParser;
 pub use protobuf::*;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::catalog::{KAFKA_TIMESTAMP_COLUMN_NAME, TABLE_NAME_COLUMN_NAME};
+use risingwave_common::catalog::{CDC_TABLE_NAME_COLUMN_NAME, KAFKA_TIMESTAMP_COLUMN_NAME};
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::types::{DatumCow, DatumRef};
@@ -113,7 +113,7 @@ impl<'a> MessageMeta<'a> {
             SourceColumnType::Meta if let SourceMeta::DebeziumCdc(cdc_meta) = self.source_meta => {
                 assert_eq!(
                     desc.name.as_str(),
-                    TABLE_NAME_COLUMN_NAME,
+                    CDC_TABLE_NAME_COLUMN_NAME,
                     "unexpected cdc meta column name"
                 );
                 Some(cdc_meta.full_table_name.as_str().into())

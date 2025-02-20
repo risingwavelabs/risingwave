@@ -54,10 +54,7 @@ use crate::expr::{rewrite_now_to_proctime, ExprImpl, InputRef};
 use crate::handler::alter_table_column::fetch_table_catalog_for_alter;
 use crate::handler::create_mv::parse_column_names;
 use crate::handler::create_table::{generate_stream_graph_for_replace_table, ColumnIdGenerator};
-use crate::handler::privilege::resolve_query_privileges;
-use crate::handler::util::{
-    check_connector_match_connection_type, ensure_connection_type_allowed, SourceSchemaCompatExt,
-};
+use crate::handler::util::{check_connector_match_connection_type, ensure_connection_type_allowed};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::{generic, LogicalSource, PartitionComputeInfo, StreamProject};
 use crate::optimizer::{OptimizerContext, PlanRef, RelationCollectorVisitor};
@@ -161,15 +158,13 @@ pub async fn gen_sink_plan(
             bound,
         )
     };
-
-    let check_items = resolve_query_privileges(&bound);
-    session.check_privileges(&check_items)?;
+    session.check_privileges_for_query(&bound)?;
 
     let col_names = if sink_into_table_name.is_some() {
         parse_column_names(&stmt.columns)
     } else {
         // If column names not specified, use the name in the bound query, which is equal with the plan root's original field name.
-        get_column_names(&bound, session, stmt.columns)?
+        get_column_names(&bound, stmt.columns)?
     };
 
     if sink_into_table_name.is_some() {
@@ -503,62 +498,23 @@ pub(crate) async fn reparse_table_for_sink(
 ) -> Result<(StreamFragmentGraph, Table, Option<PbSource>)> {
     // Retrieve the original table definition and parse it to AST.
     let definition = table_catalog.create_sql_ast_purified()?;
-    let Statement::CreateTable {
-        name,
-        format_encode,
-        ..
-    } = &definition
-    else {
+    let Statement::CreateTable { name, .. } = &definition else {
         panic!("unexpected statement: {:?}", definition);
     };
-
     let table_name = name.clone();
-    let format_encode = format_encode
-        .clone()
-        .map(|format_encode| format_encode.into_v2_with_warning());
 
     // Create handler args as if we're creating a new table with the altered definition.
     let handler_args = HandlerArgs::new(session.clone(), &definition, Arc::from(""))?;
     let col_id_gen = ColumnIdGenerator::new_alter(table_catalog);
-    let Statement::CreateTable {
-        columns,
-        wildcard_idx,
-        constraints,
-        source_watermarks,
-        append_only,
-        on_conflict,
-        with_version_column,
-        include_column_options,
-        engine,
-        ..
-    } = definition
-    else {
-        panic!("unexpected statement type: {:?}", definition);
-    };
-
-    let engine = match engine {
-        risingwave_sqlparser::ast::Engine::Hummock => risingwave_common::catalog::Engine::Hummock,
-        risingwave_sqlparser::ast::Engine::Iceberg => risingwave_common::catalog::Engine::Iceberg,
-    };
 
     let (graph, table, source, _) = generate_stream_graph_for_replace_table(
         session,
         table_name,
         table_catalog,
-        format_encode,
         handler_args,
+        definition,
         col_id_gen,
-        columns,
-        wildcard_idx,
-        constraints,
-        source_watermarks,
-        append_only,
-        on_conflict,
-        with_version_column,
-        None,
-        include_column_options,
-        engine,
-        SqlColumnStrategy::Follow,
+        SqlColumnStrategy::FollowUnchecked,
     )
     .await?;
 

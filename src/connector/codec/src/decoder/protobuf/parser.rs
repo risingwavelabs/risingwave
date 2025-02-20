@@ -61,7 +61,12 @@ fn pb_field_to_col_desc(
     if let Kind::Message(m) = field_descriptor.kind()
         && !messages_as_jsonb.contains(m.full_name())
     {
-        let field_descs = if let DataType::List { .. } = field_type {
+        // TODO(struct): assign type name once supported.
+        let _type_name = m.full_name().to_owned();
+        // TODO(struct): since we deprecated `field_descs` in `ColumnDesc`, there's no need to
+        // traverse the fields here except for maintaining the same column id (index) as the
+        // original implementation.
+        let _field_descs = if let DataType::List { .. } = field_type {
             vec![]
         } else {
             m.fields()
@@ -69,17 +74,16 @@ fn pb_field_to_col_desc(
                 .try_collect()?
         };
         *index += 1;
+
         Ok(ColumnDesc {
             column_id: *index,
             name: field_descriptor.name().to_owned(),
             column_type: Some(field_type.to_protobuf()),
-            field_descs,
-            type_name: m.full_name().to_owned(),
             generated_or_default_column: None,
             description: None,
             additional_column_type: 0, // deprecated
             additional_column: Some(AdditionalColumn { column_type: None }),
-            version: ColumnDescVersion::Pr13707 as i32,
+            version: ColumnDescVersion::LATEST as _,
         })
     } else {
         *index += 1;
@@ -88,7 +92,7 @@ fn pb_field_to_col_desc(
             name: field_descriptor.name().to_owned(),
             column_type: Some(field_type.to_protobuf()),
             additional_column: Some(AdditionalColumn { column_type: None }),
-            version: ColumnDescVersion::Pr13707 as i32,
+            version: ColumnDescVersion::LATEST as _,
             ..Default::default()
         })
     }

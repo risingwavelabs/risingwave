@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::num::NonZeroUsize;
 
 use anyhow::anyhow;
@@ -20,23 +20,18 @@ use itertools::Itertools;
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
-use risingwave_common::util::stream_graph_visitor::visit_stream_node;
+use risingwave_common::util::stream_graph_visitor::{visit_stream_node, visit_stream_node_mut};
 use risingwave_common::{bail, current_cluster_version};
 use risingwave_connector::WithPropertiesExt;
 use risingwave_meta_model::actor::ActorStatus;
 use risingwave_meta_model::actor_dispatcher::DispatcherType;
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::{
-    Actor, ActorDispatcher, Fragment, Index, Object, ObjectDependency, Sink, Source,
-    StreamingJob as StreamingJobModel, Table,
+    Actor, ActorDispatcher, Fragment, FragmentRelation, Index, Object, ObjectDependency, Sink,
+    Source, StreamingJob as StreamingJobModel, Table,
 };
 use risingwave_meta_model::table::TableType;
-use risingwave_meta_model::{
-    actor, actor_dispatcher, fragment, index, object, object_dependency, sink, source,
-    streaming_job, table, ActorId, ActorUpstreamActors, ColumnCatalogArray, CreateType, DatabaseId,
-    ExprNodeArray, FragmentId, I32Array, IndexId, JobStatus, ObjectId, SchemaId, SinkId, SourceId,
-    StreamNode, StreamingParallelism, UserId,
-};
+use risingwave_meta_model::*;
 use risingwave_pb::catalog::source::PbOptionalAssociatedTableId;
 use risingwave_pb::catalog::table::PbOptionalAssociatedSourceId;
 use risingwave_pb::catalog::{PbCreateType, PbTable};
@@ -49,10 +44,11 @@ use risingwave_pb::meta::{PbFragmentWorkerSlotMapping, PbObject, PbObjectGroup};
 use risingwave_pb::source::{PbConnectorSplit, PbConnectorSplits};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
-use risingwave_pb::stream_plan::update_mutation::PbMergeUpdate;
+use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use risingwave_pb::stream_plan::{
     PbDispatcher, PbDispatcherType, PbFragmentTypeFlag, PbStreamActor, PbStreamNode,
 };
+use risingwave_pb::user::PbUserInfo;
 use sea_orm::sea_query::{BinOper, Expr, Query, SimpleExpr};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
@@ -62,7 +58,7 @@ use sea_orm::{
 };
 
 use crate::barrier::{ReplaceStreamJobPlan, Reschedule};
-use crate::controller::catalog::CatalogController;
+use crate::controller::catalog::{CatalogController, DropTableConnectorContext};
 use crate::controller::rename::ReplaceTableExprRewriter;
 use crate::controller::utils::{
     build_object_group_for_delete, check_relation_name_duplicate, check_sink_into_table_cycle,
@@ -178,8 +174,6 @@ impl CatalogController {
             }
         }
 
-        let mut objects = vec![];
-
         match streaming_job {
             StreamingJob::MaterializedView(table) => {
                 let job_id = Self::create_streaming_job_obj(
@@ -198,10 +192,6 @@ impl CatalogController {
                 table.id = job_id as _;
                 let table_model: table::ActiveModel = table.clone().into();
                 Table::insert(table_model).exec(&txn).await?;
-
-                objects.push(PbObject {
-                    object_info: Some(PbObjectInfo::Table(table.to_owned())),
-                });
             }
             StreamingJob::Sink(sink, _) => {
                 if let Some(target_table_id) = sink.target_table {
@@ -352,11 +342,6 @@ impl CatalogController {
 
         txn.commit().await?;
 
-        if !objects.is_empty() {
-            self.notify_frontend(Operation::Add, Info::ObjectGroup(PbObjectGroup { objects }))
-                .await;
-        }
-
         Ok(())
     }
 
@@ -400,21 +385,6 @@ impl CatalogController {
         }
         txn.commit().await?;
 
-        if job.is_materialized_view() {
-            self.notify_frontend(
-                Operation::Add,
-                Info::ObjectGroup(PbObjectGroup {
-                    objects: incomplete_internal_tables
-                        .iter()
-                        .map(|table| PbObject {
-                            object_info: Some(PbObjectInfo::Table(table.clone())),
-                        })
-                        .collect(),
-                }),
-            )
-            .await;
-        }
-
         Ok(table_id_map)
     }
 
@@ -428,11 +398,44 @@ impl CatalogController {
         streaming_job: &StreamingJob,
         for_replace: bool,
     ) -> MetaResult<()> {
+        let is_materialized_view = streaming_job.is_materialized_view();
         let fragment_actors =
-            Self::extract_fragment_and_actors_from_fragments(stream_job_fragments.to_protobuf())?;
-        let all_tables = stream_job_fragments.all_tables();
+            Self::extract_fragment_and_actors_from_fragments(stream_job_fragments)?;
+        let mut all_tables = stream_job_fragments.all_tables();
         let inner = self.inner.write().await;
+
+        let mut objects = vec![];
         let txn = inner.db.begin().await?;
+
+        let mut fragment_relations = BTreeMap::new();
+
+        // Fill in the fragment relation based on the actor dispatcher.
+        for (fragment, actors, actor_dispatchers) in &fragment_actors {
+            for actor in actors {
+                if let Some(dispatcher) = actor_dispatchers.get(&actor.actor_id) {
+                    for dispatcher in dispatcher {
+                        let key = (fragment.fragment_id, dispatcher.dispatcher_id);
+
+                        if fragment_relations.contains_key(&key) {
+                            continue;
+                        }
+
+                        let target_fragment_id = dispatcher.dispatcher_id;
+
+                        fragment_relations.insert(
+                            key,
+                            fragment_relation::Model {
+                                source_fragment_id: fragment.fragment_id,
+                                target_fragment_id,
+                                dispatcher_type: dispatcher.dispatcher_type,
+                                dist_key_indices: dispatcher.dist_key_indices.clone(),
+                                output_indices: dispatcher.output_indices.clone(),
+                            },
+                        );
+                    }
+                }
+            }
+        }
 
         // Add fragments.
         let (fragments, actor_with_dispatchers): (Vec<_>, Vec<_>) = fragment_actors
@@ -447,16 +450,18 @@ impl CatalogController {
             Fragment::insert(fragment).exec(&txn).await?;
 
             // Fields including `fragment_id` and `vnode_count` were placeholder values before.
-            // After table fragments are created, update them for all internal tables.
+            // After table fragments are created, update them for all tables.
             if !for_replace {
                 for state_table_id in state_table_ids {
                     // Table's vnode count is not always the fragment's vnode count, so we have to
                     // look up the table from `TableFragments`.
                     // See `ActorGraphBuilder::new`.
                     let table = all_tables
-                        .get(&(state_table_id as u32))
+                        .get_mut(&(state_table_id as u32))
                         .unwrap_or_else(|| panic!("table {} not found", state_table_id));
+                    assert_eq!(table.id, state_table_id as u32);
                     assert_eq!(table.fragment_id, fragment_id as u32);
+                    table.job_id = Some(streaming_job.id());
                     let vnode_count = table.vnode_count();
 
                     table::ActiveModel {
@@ -467,8 +472,20 @@ impl CatalogController {
                     }
                     .update(&txn)
                     .await?;
+
+                    if is_materialized_view {
+                        objects.push(PbObject {
+                            object_info: Some(PbObjectInfo::Table(table.clone())),
+                        });
+                    }
                 }
             }
+        }
+
+        for (_, relation) in fragment_relations {
+            FragmentRelation::insert(relation.into_active_model())
+                .exec(&txn)
+                .await?;
         }
 
         // Add actors and actor dispatchers.
@@ -500,6 +517,12 @@ impl CatalogController {
         }
 
         txn.commit().await?;
+
+        if !objects.is_empty() {
+            assert!(is_materialized_view);
+            self.notify_frontend(Operation::Add, Info::ObjectGroup(PbObjectGroup { objects }))
+                .await;
+        }
 
         Ok(())
     }
@@ -626,8 +649,32 @@ impl CatalogController {
         &self,
         job_id: ObjectId,
         actor_ids: Vec<crate::model::ActorId>,
-        new_actor_dispatchers: HashMap<crate::model::ActorId, Vec<PbDispatcher>>,
+        new_actor_dispatchers: &HashMap<
+            crate::model::FragmentId,
+            HashMap<crate::model::ActorId, Vec<PbDispatcher>>,
+        >,
         split_assignment: &SplitAssignment,
+    ) -> MetaResult<()> {
+        self.post_collect_job_fragments_inner(
+            job_id,
+            actor_ids,
+            new_actor_dispatchers,
+            split_assignment,
+            false,
+        )
+        .await
+    }
+
+    pub async fn post_collect_job_fragments_inner(
+        &self,
+        job_id: ObjectId,
+        actor_ids: Vec<crate::model::ActorId>,
+        new_actor_dispatchers: &HashMap<
+            crate::model::FragmentId,
+            HashMap<crate::model::ActorId, Vec<PbDispatcher>>,
+        >,
+        split_assignment: &SplitAssignment,
+        is_mv: bool,
     ) -> MetaResult<()> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
@@ -658,11 +705,44 @@ impl CatalogController {
             }
         }
 
+        let mut fragment_relations = BTreeMap::new();
+
+        // Fill in the fragment relation based on the new creating actor dispatchers.
+        for (&fragment_id, actor_dispatchers) in new_actor_dispatchers {
+            for dispatchers in actor_dispatchers.values() {
+                for dispatcher in dispatchers {
+                    let key = (fragment_id, dispatcher.dispatcher_id);
+
+                    if fragment_relations.contains_key(&key) {
+                        continue;
+                    }
+
+                    fragment_relations.insert(
+                        key,
+                        fragment_relation::Model {
+                            source_fragment_id: fragment_id as FragmentId,
+                            target_fragment_id: dispatcher.dispatcher_id as FragmentId,
+                            dispatcher_type: dispatcher.r#type().into(),
+                            dist_key_indices: I32Array::from(dispatcher.dist_key_indices.clone()),
+                            output_indices: I32Array::from(dispatcher.output_indices.clone()),
+                        },
+                    );
+                }
+            }
+        }
+
+        for (_, relation) in fragment_relations {
+            FragmentRelation::insert(relation.into_active_model())
+                .exec(&txn)
+                .await?;
+        }
+
         let mut actor_dispatchers = vec![];
-        for (actor_id, dispatchers) in new_actor_dispatchers {
+        for (actor_id, dispatchers) in new_actor_dispatchers.values().flatten() {
             for dispatcher in dispatchers {
                 let mut actor_dispatcher =
-                    actor_dispatcher::Model::from((actor_id, dispatcher)).into_active_model();
+                    actor_dispatcher::Model::from((*actor_id, dispatcher.clone()))
+                        .into_active_model();
                 actor_dispatcher.id = NotSet;
                 actor_dispatchers.push(actor_dispatcher);
             }
@@ -683,7 +763,15 @@ impl CatalogController {
         .update(&txn)
         .await?;
 
+        let fragment_mapping = if is_mv {
+            get_fragment_mappings(&txn, job_id as _).await?
+        } else {
+            vec![]
+        };
+
         txn.commit().await?;
+        self.notify_fragment_mapping(NotificationOperation::Add, fragment_mapping)
+            .await;
 
         Ok(())
     }
@@ -919,7 +1007,7 @@ impl CatalogController {
             }) => {
                 let incoming_sink_id = job_id;
 
-                let (relations, fragment_mapping) = Self::finish_replace_streaming_job_inner(
+                let (relations, fragment_mapping, _) = Self::finish_replace_streaming_job_inner(
                     tmp_id as ObjectId,
                     merge_updates,
                     None,
@@ -930,6 +1018,7 @@ impl CatalogController {
                     },
                     &txn,
                     streaming_job,
+                    None, // will not drop table connector when creating a streaming job
                 )
                 .await?;
 
@@ -973,22 +1062,25 @@ impl CatalogController {
         &self,
         tmp_id: ObjectId,
         streaming_job: StreamingJob,
-        merge_updates: Vec<PbMergeUpdate>,
+        merge_updates: HashMap<crate::model::FragmentId, Vec<MergeUpdate>>,
         col_index_mapping: Option<ColIndexMapping>,
         sink_into_table_context: SinkIntoTableContext,
+        drop_table_connector_ctx: Option<&DropTableConnectorContext>,
     ) -> MetaResult<NotificationVersion> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
-        let (objects, fragment_mapping) = Self::finish_replace_streaming_job_inner(
-            tmp_id,
-            merge_updates,
-            col_index_mapping,
-            sink_into_table_context,
-            &txn,
-            streaming_job,
-        )
-        .await?;
+        let (objects, fragment_mapping, delete_notification_objs) =
+            Self::finish_replace_streaming_job_inner(
+                tmp_id,
+                merge_updates,
+                col_index_mapping,
+                sink_into_table_context,
+                &txn,
+                streaming_job,
+                drop_table_connector_ctx,
+            )
+            .await?;
 
         txn.commit().await?;
 
@@ -999,19 +1091,29 @@ impl CatalogController {
         //     .await;
         self.notify_fragment_mapping(NotificationOperation::Add, fragment_mapping)
             .await;
-        let version = self
+        let mut version = self
             .notify_frontend(
                 NotificationOperation::Update,
                 NotificationInfo::ObjectGroup(PbObjectGroup { objects }),
             )
             .await;
 
+        if let Some((user_infos, to_drop_objects)) = delete_notification_objs {
+            self.notify_users_update(user_infos).await;
+            version = self
+                .notify_frontend(
+                    NotificationOperation::Delete,
+                    build_object_group_for_delete(to_drop_objects),
+                )
+                .await;
+        }
+
         Ok(version)
     }
 
     pub async fn finish_replace_streaming_job_inner(
         tmp_id: ObjectId,
-        merge_updates: Vec<PbMergeUpdate>,
+        merge_updates: HashMap<crate::model::FragmentId, Vec<MergeUpdate>>,
         col_index_mapping: Option<ColIndexMapping>,
         SinkIntoTableContext {
             creating_sink_id,
@@ -1020,7 +1122,12 @@ impl CatalogController {
         }: SinkIntoTableContext,
         txn: &DatabaseTransaction,
         streaming_job: StreamingJob,
-    ) -> MetaResult<(Vec<PbObject>, Vec<PbFragmentWorkerSlotMapping>)> {
+        drop_table_connector_ctx: Option<&DropTableConnectorContext>,
+    ) -> MetaResult<(
+        Vec<PbObject>,
+        Vec<PbFragmentWorkerSlotMapping>,
+        Option<(Vec<PbUserInfo>, Vec<PartialObject>)>,
+    )> {
         let original_job_id = streaming_job.id() as ObjectId;
         let job_type = streaming_job.job_type();
 
@@ -1053,6 +1160,12 @@ impl CatalogController {
                 if let Some(sink_id) = creating_sink_id {
                     debug_assert!(!incoming_sinks.contains(&{ sink_id }));
                     incoming_sinks.push(sink_id as _);
+                }
+                if let Some(drop_table_connector_ctx) = drop_table_connector_ctx
+                    && drop_table_connector_ctx.to_change_streaming_job_id == original_job_id
+                {
+                    // drop table connector, the rest logic is in `drop_table_associated_source`
+                    table.optional_associated_source_id = Set(None);
                 }
 
                 if let Some(sink_id) = dropping_sink_id {
@@ -1112,66 +1225,10 @@ impl CatalogController {
             .await?;
 
         // 2. update merges.
-        let fragment_replace_map: HashMap<_, _> = merge_updates
-            .iter()
-            .map(|update| {
-                (
-                    update.upstream_fragment_id,
-                    (
-                        update.new_upstream_fragment_id.unwrap(),
-                        update.added_upstream_actor_id.clone(),
-                    ),
-                )
-            })
-            .collect();
-
-        // TODO: remove cache upstream fragment/actor ids and derive them from `actor_dispatcher` table.
-        let mut to_update_fragment_ids = HashSet::new();
-        // 2.1 update downstream actor's upstream_actor_ids
-        for merge_update in merge_updates {
-            assert!(merge_update.removed_upstream_actor_id.is_empty());
-            assert!(merge_update.new_upstream_fragment_id.is_some());
-            let (actor_id, fragment_id, mut upstream_actors) =
-                Actor::find_by_id(merge_update.actor_id as ActorId)
-                    .select_only()
-                    .columns([
-                        actor::Column::ActorId,
-                        actor::Column::FragmentId,
-                        actor::Column::UpstreamActorIds,
-                    ])
-                    .into_tuple::<(ActorId, FragmentId, ActorUpstreamActors)>()
-                    .one(txn)
-                    .await?
-                    .ok_or_else(|| {
-                        MetaError::catalog_id_not_found("actor", merge_update.actor_id)
-                    })?;
-
-            assert!(upstream_actors
-                .0
-                .remove(&(merge_update.upstream_fragment_id as FragmentId))
-                .is_some());
-            upstream_actors.0.insert(
-                merge_update.new_upstream_fragment_id.unwrap() as _,
-                merge_update
-                    .added_upstream_actor_id
-                    .iter()
-                    .map(|id| *id as _)
-                    .collect(),
-            );
-            actor::ActiveModel {
-                actor_id: Set(actor_id),
-                upstream_actor_ids: Set(upstream_actors),
-                ..Default::default()
-            }
-            .update(txn)
-            .await?;
-
-            to_update_fragment_ids.insert(fragment_id);
-        }
-        // 2.2 update downstream fragment's Merge node, and upstream_fragment_id
-        for fragment_id in to_update_fragment_ids {
+        // update downstream fragment's Merge node, and upstream_fragment_id
+        for (fragment_id, merge_updates) in merge_updates {
             let (fragment_id, mut stream_node, mut upstream_fragment_id) =
-                Fragment::find_by_id(fragment_id)
+                Fragment::find_by_id(fragment_id as FragmentId)
                     .select_only()
                     .columns([
                         fragment::Column::FragmentId,
@@ -1183,17 +1240,25 @@ impl CatalogController {
                     .await?
                     .map(|(id, node, upstream)| (id, node.to_protobuf(), upstream))
                     .ok_or_else(|| MetaError::catalog_id_not_found("fragment", fragment_id))?;
-            visit_stream_node(&mut stream_node, |body| {
+            let fragment_replace_map: HashMap<_, _> = merge_updates
+                .iter()
+                .map(|update| {
+                    (
+                        update.upstream_fragment_id,
+                        update.new_upstream_fragment_id.unwrap(),
+                    )
+                })
+                .collect();
+
+            visit_stream_node_mut(&mut stream_node, |body| {
                 if let PbNodeBody::Merge(m) = body
-                    && let Some((new_fragment_id, new_actor_ids)) =
-                        fragment_replace_map.get(&m.upstream_fragment_id)
+                    && let Some(new_fragment_id) = fragment_replace_map.get(&m.upstream_fragment_id)
                 {
                     m.upstream_fragment_id = *new_fragment_id;
-                    m.upstream_actor_id.clone_from(new_actor_ids);
                 }
             });
             for fragment_id in &mut upstream_fragment_id.0 {
-                if let Some((new_fragment_id, _)) = fragment_replace_map.get(&(*fragment_id as _)) {
+                if let Some(new_fragment_id) = fragment_replace_map.get(&(*fragment_id as _)) {
                     *fragment_id = *new_fragment_id as _;
                 }
             }
@@ -1276,7 +1341,13 @@ impl CatalogController {
 
         let fragment_mapping: Vec<_> = get_fragment_mappings(txn, original_job_id as _).await?;
 
-        Ok((objects, fragment_mapping))
+        let mut notification_objs: Option<(Vec<PbUserInfo>, Vec<PartialObject>)> = None;
+        if let Some(drop_table_connector_ctx) = drop_table_connector_ctx {
+            notification_objs =
+                Some(Self::drop_table_associated_source(txn, drop_table_connector_ctx).await?);
+        }
+
+        Ok((objects, fragment_mapping, notification_objs))
     }
 
     /// Abort the replacing streaming job by deleting the temporary job object.
@@ -1356,7 +1427,7 @@ impl CatalogController {
         fragments.retain_mut(|(_, fragment_type_mask, stream_node)| {
             let mut found = false;
             if *fragment_type_mask & PbFragmentTypeFlag::Source as i32 != 0 {
-                visit_stream_node(stream_node, |node| {
+                visit_stream_node_mut(stream_node, |node| {
                     if let PbNodeBody::Source(node) = node {
                         if let Some(node_inner) = &mut node.source_inner
                             && node_inner.source_id == source_id as u32
@@ -1370,7 +1441,7 @@ impl CatalogController {
             if is_fs_source {
                 // in older versions, there's no fragment type flag for `FsFetch` node,
                 // so we just scan all fragments for StreamFsFetch node if using fs connector
-                visit_stream_node(stream_node, |node| {
+                visit_stream_node_mut(stream_node, |node| {
                     if let PbNodeBody::StreamFsFetch(node) = node {
                         *fragment_type_mask |= PbFragmentTypeFlag::FsFetch as i32;
                         if let Some(node_inner) = &mut node.node_inner
@@ -1486,7 +1557,7 @@ impl CatalogController {
             |fragment_type_mask: &mut i32, stream_node: &mut PbStreamNode| {
                 let mut found = false;
                 if *fragment_type_mask & PbFragmentTypeFlag::backfill_rate_limit_fragments() != 0 {
-                    visit_stream_node(stream_node, |node| match node {
+                    visit_stream_node_mut(stream_node, |node| match node {
                         PbNodeBody::StreamCdcScan(node) => {
                             node.rate_limit = rate_limit;
                             found = true;
@@ -1528,7 +1599,7 @@ impl CatalogController {
             |fragment_type_mask: &mut i32, stream_node: &mut PbStreamNode| {
                 let mut found = false;
                 if *fragment_type_mask & PbFragmentTypeFlag::sink_rate_limit_fragments() != 0 {
-                    visit_stream_node(stream_node, |node| {
+                    visit_stream_node_mut(stream_node, |node| {
                         if let PbNodeBody::Sink(node) = node {
                             node.rate_limit = rate_limit;
                             found = true;
@@ -1551,7 +1622,7 @@ impl CatalogController {
             |fragment_type_mask: &mut i32, stream_node: &mut PbStreamNode| {
                 let mut found = false;
                 if *fragment_type_mask & PbFragmentTypeFlag::dml_rate_limit_fragments() != 0 {
-                    visit_stream_node(stream_node, |node| {
+                    visit_stream_node_mut(stream_node, |node| {
                         if let PbNodeBody::Dml(node) = node {
                             node.rate_limit = rate_limit;
                             found = true;
@@ -1617,7 +1688,7 @@ impl CatalogController {
                 newly_created_actors,
                 upstream_fragment_dispatcher_ids,
                 upstream_dispatcher_mapping,
-                downstream_fragment_ids,
+                ..
             },
         ) in reschedules
         {
@@ -1635,9 +1706,7 @@ impl CatalogController {
                 PbStreamActor {
                     actor_id,
                     fragment_id,
-                    mut nodes,
                     dispatcher,
-                    upstream_actor_id,
                     vnode_bitmap,
                     expr_context,
                     ..
@@ -1645,40 +1714,7 @@ impl CatalogController {
                 actor_status,
             ) in newly_created_actors
             {
-                let mut actor_upstreams = BTreeMap::<FragmentId, BTreeSet<ActorId>>::new();
                 let mut new_actor_dispatchers = vec![];
-
-                if let Some(nodes) = &mut nodes {
-                    visit_stream_node(nodes, |node| {
-                        if let PbNodeBody::Merge(node) = node {
-                            actor_upstreams
-                                .entry(node.upstream_fragment_id as FragmentId)
-                                .or_default()
-                                .extend(node.upstream_actor_id.iter().map(|id| *id as ActorId));
-                        }
-                    });
-                }
-
-                let actor_upstreams: BTreeMap<FragmentId, Vec<ActorId>> = actor_upstreams
-                    .into_iter()
-                    .map(|(k, v)| (k, v.into_iter().collect()))
-                    .collect();
-
-                debug_assert_eq!(
-                    actor_upstreams
-                        .values()
-                        .flatten()
-                        .cloned()
-                        .sorted()
-                        .collect_vec(),
-                    upstream_actor_id
-                        .iter()
-                        .map(|actor_id| *actor_id as i32)
-                        .sorted()
-                        .collect_vec()
-                );
-
-                let actor_upstreams = ActorUpstreamActors(actor_upstreams);
 
                 let splits = actor_splits
                     .get(&actor_id)
@@ -1690,7 +1726,7 @@ impl CatalogController {
                     status: Set(ActorStatus::Running),
                     splits: Set(splits.map(|splits| (&PbConnectorSplits { splits }).into())),
                     worker_id: Set(actor_status.worker_id() as _),
-                    upstream_actor_ids: Set(actor_upstreams),
+                    upstream_actor_ids: Set(Default::default()),
                     vnode_bitmap: Set(vnode_bitmap.as_ref().map(|bitmap| bitmap.into())),
                     expr_context: Set(expr_context.as_ref().unwrap().into()),
                 })
@@ -1834,35 +1870,6 @@ impl CatalogController {
                     dispatcher.update(&txn).await?;
                 }
             }
-
-            // second step, downstream fragment
-            for downstream_fragment_id in downstream_fragment_ids {
-                let actors = Actor::find()
-                    .filter(actor::Column::FragmentId.eq(downstream_fragment_id as FragmentId))
-                    .all(&txn)
-                    .await?;
-
-                for actor in actors {
-                    if new_created_actors.contains(&actor.actor_id) {
-                        continue;
-                    }
-
-                    let mut actor = actor.into_active_model();
-
-                    let mut new_upstream_actor_ids =
-                        actor.upstream_actor_ids.as_ref().inner_ref().clone();
-
-                    update_actors(
-                        new_upstream_actor_ids.get_mut(&fragment_id).unwrap(),
-                        &removed_actor_ids,
-                        &added_actor_ids,
-                    );
-
-                    actor.upstream_actor_ids = Set(new_upstream_actor_ids.into());
-
-                    actor.update(&txn).await?;
-                }
-            }
         }
 
         let JobReschedulePostUpdates {
@@ -1922,15 +1929,15 @@ impl CatalogController {
 
         let mut rate_limits = Vec::new();
         for (fragment_id, job_id, fragment_type_mask, stream_node) in fragments {
-            let mut stream_node = stream_node.to_protobuf();
+            let stream_node = stream_node.to_protobuf();
             let mut rate_limit = None;
             let mut node_name = None;
 
-            visit_stream_node(&mut stream_node, |node| {
+            visit_stream_node(&stream_node, |node| {
                 match node {
                     // source rate limit
                     PbNodeBody::Source(node) => {
-                        if let Some(node_inner) = &mut node.source_inner {
+                        if let Some(node_inner) = &node.source_inner {
                             debug_assert!(
                                 rate_limit.is_none(),
                                 "one fragment should only have 1 rate limit node"
@@ -1940,7 +1947,7 @@ impl CatalogController {
                         }
                     }
                     PbNodeBody::StreamFsFetch(node) => {
-                        if let Some(node_inner) = &mut node.node_inner {
+                        if let Some(node_inner) = &node.node_inner {
                             debug_assert!(
                                 rate_limit.is_none(),
                                 "one fragment should only have 1 rate limit node"

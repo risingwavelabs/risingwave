@@ -14,18 +14,18 @@
 pub mod enumerator;
 use std::collections::HashMap;
 
-pub use enumerator::S3SplitEnumerator;
+pub use enumerator::LegacyS3SplitEnumerator;
 
 use crate::source::filesystem::file_common::CompressionFormat;
 mod source;
 use serde::Deserialize;
-pub use source::S3FileReader;
+pub use source::LegacyS3FileReader;
 
 use crate::connector_common::AwsAuthProps;
-use crate::source::filesystem::FsSplit;
+use crate::source::filesystem::LegacyFsSplit;
 use crate::source::{SourceProperties, UnknownFields};
 
-pub const S3_CONNECTOR: &str = "s3";
+pub const LEGACY_S3_CONNECTOR: &str = "s3";
 
 /// These are supported by both `s3` and `s3_v2` (opendal) sources.
 #[derive(Clone, Debug, Deserialize, PartialEq, with_options::WithOptions)]
@@ -47,7 +47,7 @@ pub struct S3PropertiesCommon {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, with_options::WithOptions)]
-pub struct S3Properties {
+pub struct LegacyS3Properties {
     #[serde(flatten)]
     pub common: S3PropertiesCommon,
 
@@ -55,7 +55,7 @@ pub struct S3Properties {
     pub unknown_fields: HashMap<String, String>,
 }
 
-impl From<S3PropertiesCommon> for S3Properties {
+impl From<S3PropertiesCommon> for LegacyS3Properties {
     fn from(common: S3PropertiesCommon) -> Self {
         Self {
             common,
@@ -64,22 +64,22 @@ impl From<S3PropertiesCommon> for S3Properties {
     }
 }
 
-impl SourceProperties for S3Properties {
-    type Split = FsSplit;
-    type SplitEnumerator = S3SplitEnumerator;
-    type SplitReader = S3FileReader;
+impl SourceProperties for LegacyS3Properties {
+    type Split = LegacyFsSplit;
+    type SplitEnumerator = LegacyS3SplitEnumerator;
+    type SplitReader = LegacyS3FileReader;
 
-    const SOURCE_NAME: &'static str = S3_CONNECTOR;
+    const SOURCE_NAME: &'static str = LEGACY_S3_CONNECTOR;
 }
 
-impl UnknownFields for S3Properties {
+impl UnknownFields for LegacyS3Properties {
     fn unknown_fields(&self) -> HashMap<String, String> {
         self.unknown_fields.clone()
     }
 }
 
-impl From<&S3Properties> for AwsAuthProps {
-    fn from(props: &S3Properties) -> Self {
+impl From<&LegacyS3Properties> for AwsAuthProps {
+    fn from(props: &LegacyS3Properties) -> Self {
         let props = &props.common;
         Self {
             region: Some(props.region_name.clone()),
