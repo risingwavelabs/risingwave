@@ -487,7 +487,8 @@ impl StreamSink {
         ) {
             (true, true, _) => Ok(SinkType::AppendOnly),
             (false, true, true) => Ok(SinkType::ForceAppendOnly),
-            (_, false, false) => Ok(SinkType::Upsert),
+            (true, false, false) => Ok(SinkType::AppendOnly),
+            (false, false, false) => Ok(SinkType::Upsert),
             (false, true, false) => {
                 Err(ErrorCode::SinkError(Box::new(Error::new(
                     ErrorKind::InvalidInput,

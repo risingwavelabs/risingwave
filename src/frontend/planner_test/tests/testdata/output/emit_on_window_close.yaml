@@ -206,7 +206,7 @@
     emit on window close
     WITH (connector = 'blackhole');
   explain_output: |
-    StreamSink { type: upsert, columns: [tm, foo, bar, t._row_id(hidden), lag, max, sum], downstream_pk: [] }
+    StreamSink { type: append-only, columns: [tm, foo, bar, t._row_id(hidden), lag, max, sum] }
     └─StreamEowcOverWindow { window_functions: [first_value(t.foo) OVER(PARTITION BY t.bar ORDER BY t.tm ASC ROWS BETWEEN 2 PRECEDING AND 2 PRECEDING), max(t.foo) OVER(PARTITION BY t.bar ORDER BY t.tm ASC ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING), sum(t.foo) OVER(PARTITION BY t.bar ORDER BY t.tm ASC ROWS BETWEEN 2 PRECEDING AND CURRENT ROW EXCLUDE CURRENT ROW)] }
       └─StreamEowcSort { sort_column: t.tm }
         └─StreamExchange { dist: HashShard(t.bar) }
