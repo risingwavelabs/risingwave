@@ -815,7 +815,7 @@ impl OwnedByUserCatalog for TableCatalog {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::catalog::{row_id_column_desc, ColumnDesc, ColumnId};
+    use risingwave_common::catalog::{ColumnDesc, ColumnId};
     use risingwave_common::test_prelude::*;
     use risingwave_common::types::*;
     use risingwave_common::util::sort_util::OrderType;
@@ -835,10 +835,7 @@ mod tests {
             name: "test".to_owned(),
             table_type: PbTableType::Table as i32,
             columns: vec![
-                PbColumnCatalog {
-                    column_desc: Some((&row_id_column_desc()).into()),
-                    is_hidden: true,
-                },
+                ColumnCatalog::row_id_column().to_protobuf(),
                 PbColumnCatalog {
                     column_desc: Some(PbColumnDesc::new_struct(
                         "country",
