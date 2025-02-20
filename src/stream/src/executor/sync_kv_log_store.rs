@@ -111,18 +111,22 @@ pub struct SyncedKvLogStoreExecutor<S: StateStore> {
 
     // Log store state
     state_store: S,
-    buffer_max_size: usize,
+    buffer_size: usize,
+
+    pause_duration_ms: Duration,
 }
 // Stream interface
 impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
+    #[expect(clippy::too_many_arguments)]
     pub(crate) fn new(
         actor_context: ActorContextRef,
         table_id: u32,
         metrics: KvLogStoreMetrics,
         serde: LogStoreRowSerde,
         state_store: S,
-        buffer_max_size: usize,
+        buffer_size: usize,
         upstream: Executor,
+        pause_duration_ms: Duration,
     ) -> Self {
         Self {
             actor_context,
@@ -131,7 +135,8 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
             serde,
             state_store,
             upstream,
-            buffer_max_size,
+            buffer_size,
+            pause_duration_ms,
         }
     }
 }
@@ -301,7 +306,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
             let mut truncation_offset = None;
             let mut buffer = SyncedLogStoreBuffer {
                 buffer: VecDeque::new(),
-                max_size: self.buffer_max_size,
+                max_size: self.buffer_size,
                 next_chunk_id: 0,
                 metrics: self.metrics.clone(),
             };
@@ -356,7 +361,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                                             continue 'recreate_consume_stream;
                                         } else {
                                             write_future = WriteFuture::paused(
-                                                Duration::from_millis(256),
+                                                self.pause_duration_ms,
                                                 stream,
                                                 write_state,
                                             );
@@ -384,10 +389,9 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                                         } else {
                                             // If buffer 90% full, pause the stream for a while, let downstream do some processing
                                             // to avoid flushing.
-                                            if buffer.buffer.len() >= self.buffer_max_size * 9 / 10
-                                            {
+                                            if buffer.buffer.len() >= self.buffer_size * 9 / 10 {
                                                 write_future = WriteFuture::paused(
-                                                    Duration::from_millis(256),
+                                                    self.pause_duration_ms,
                                                     stream,
                                                     write_state,
                                                 );
@@ -795,6 +799,7 @@ mod tests {
             MemoryStateStore::new(),
             10,
             source,
+            Duration::from_millis(256),
         )
         .boxed();
 
@@ -886,6 +891,7 @@ mod tests {
             MemoryStateStore::new(),
             10,
             source,
+            Duration::from_millis(256),
         )
         .boxed();
 
@@ -975,6 +981,7 @@ mod tests {
             MemoryStateStore::new(),
             0,
             source,
+            Duration::from_millis(256),
         )
         .boxed();
 
