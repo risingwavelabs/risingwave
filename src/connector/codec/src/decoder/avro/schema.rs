@@ -22,7 +22,7 @@ use risingwave_common::error::NotImplemented;
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::types::{DataType, Decimal, MapType, StructType};
 use risingwave_common::{bail, bail_not_implemented};
-use risingwave_pb::plan_common::{AdditionalColumn, ColumnDesc, ColumnDescVersion};
+use risingwave_pb::plan_common::ColumnDesc;
 
 use super::get_nullable_union_inner;
 
@@ -79,7 +79,6 @@ pub fn avro_schema_to_column_descs(
 ) -> anyhow::Result<Vec<ColumnDesc>> {
     let resolved = ResolvedSchema::try_from(schema)?;
     if let Schema::Record(RecordSchema { fields, .. }) = schema {
-        let mut index = 0;
         let mut ancestor_records: Vec<String> = vec![];
         let fields = fields
             .iter()
@@ -87,7 +86,6 @@ pub fn avro_schema_to_column_descs(
                 avro_field_to_column_desc(
                     &field.name,
                     &field.schema,
-                    &mut index,
                     &mut ancestor_records,
                     resolved.get_names(),
                     map_handling,
@@ -106,24 +104,14 @@ const DBZ_VARIABLE_SCALE_DECIMAL_NAMESPACE: &str = "io.debezium.data";
 fn avro_field_to_column_desc(
     name: &str,
     schema: &Schema,
-    index: &mut i32,
     ancestor_records: &mut Vec<String>,
     refs: &NamesRef<'_>,
     map_handling: Option<MapHandling>,
 ) -> anyhow::Result<ColumnDesc> {
+    use risingwave_common::catalog::{ColumnDesc, ColumnId};
     let data_type = avro_type_mapping(schema, ancestor_records, refs, map_handling)?;
-    *index += 1;
-    Ok(ColumnDesc {
-        column_type: Some(data_type.to_protobuf()),
-        column_id: *index,
-        name: name.to_owned(),
-        generated_or_default_column: None,
-        description: None,
-        additional_column_type: 0, // deprecated
-        additional_column: Some(AdditionalColumn { column_type: None }),
-        version: ColumnDescVersion::LATEST as _,
-        // ..Default::default()
-    })
+    let desc = ColumnDesc::named(name, ColumnId::placeholder(), data_type);
+    Ok(desc.to_protobuf())
 }
 
 /// This function expects original schema (with `Ref`).
