@@ -100,7 +100,7 @@ db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
   1: cannot cast type "record" to "struct<v1 integer, v2 integer>"
-  2: cannot cast to struct field "v1"
+  2: cannot cast struct field "f1" to struct field "v1"
   3: cannot cast type "character varying" to "integer" in Assign context
 
 

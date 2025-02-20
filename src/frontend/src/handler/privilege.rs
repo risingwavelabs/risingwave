@@ -212,6 +212,7 @@ impl SessionImpl {
             BoundStatement::DeclareCursor(ref declare_cursor) => {
                 resolve_query_privileges(&mut items, &mut check_databases, &declare_cursor.query);
             }
+            BoundStatement::DeclareSubscriptionCursor(_) => unimplemented!(),
             BoundStatement::FetchCursor(_) => unimplemented!(),
             BoundStatement::CreateView(ref create_view) => {
                 resolve_query_privileges(&mut items, &mut check_databases, &create_view.query);

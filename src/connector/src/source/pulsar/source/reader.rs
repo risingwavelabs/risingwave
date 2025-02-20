@@ -29,7 +29,6 @@ use pulsar::{Consumer, ConsumerBuilder, ConsumerOptions, Pulsar, SubType, TokioE
 use risingwave_common::array::arrow::arrow_array_iceberg::{Int32Array, Int64Array, RecordBatch};
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::catalog::ROWID_PREFIX;
 use risingwave_common::{bail, ensure};
 use thiserror_ext::AsReport;
 
@@ -510,7 +509,7 @@ impl PulsarIcebergReader {
             .common
             .rw_columns
             .iter()
-            .filter(|col| col.name != ROWID_PREFIX)
+            .filter(|col| !col.is_row_id())
             .map(|col| record_batch.schema().index_of(col.name.as_str()))
             .try_collect()
             .context("failed to look up column name in arrow record batch")?;

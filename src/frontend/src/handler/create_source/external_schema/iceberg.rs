@@ -37,13 +37,11 @@ pub async fn extract_iceberg_columns(
                     column_desc,
                     // hide the _row_id column for iceberg engine table
                     // This column is auto generated when users define a table without primary key
-                    is_hidden: field.name() == ROWID_PREFIX,
+                    is_hidden: field.name() == ROW_ID_COLUMN_NAME,
                 }
             })
             .collect();
-        columns.push(ColumnCatalog::iceberg_sequence_num_column());
-        columns.push(ColumnCatalog::iceberg_file_path_column());
-        columns.push(ColumnCatalog::iceberg_file_pos_column());
+        columns.extend(ColumnCatalog::iceberg_hidden_cols());
 
         Ok(columns)
     } else {
@@ -69,11 +67,7 @@ pub async fn check_iceberg_source(
     let schema = Schema {
         fields: columns
             .iter()
-            .filter(|&c| {
-                c.column_desc.name != ICEBERG_SEQUENCE_NUM_COLUMN_NAME
-                    && c.column_desc.name != ICEBERG_FILE_PATH_COLUMN_NAME
-                    && c.column_desc.name != ICEBERG_FILE_POS_COLUMN_NAME
-            })
+            .filter(|&c| !c.is_iceberg_hidden_col())
             .cloned()
             .map(|c| c.column_desc.into())
             .collect(),

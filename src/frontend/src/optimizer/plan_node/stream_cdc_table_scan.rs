@@ -14,10 +14,9 @@
 
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::catalog::Field;
+use risingwave_common::catalog::{ColumnCatalog, Field};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_connector::parser::debezium_cdc_source_schema;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::PbStreamNode;
 
@@ -151,15 +150,11 @@ impl StreamCdcTableScan {
             .map(|x| *x as u32)
             .collect_vec();
 
-        // The schema of the shared cdc source upstream is different from snapshot,
-        // refer to `debezium_cdc_source_schema()` for details.
-        let cdc_source_schema = {
-            let columns = debezium_cdc_source_schema();
-            columns
-                .into_iter()
-                .map(|c| Field::from(c.column_desc).to_prost())
-                .collect_vec()
-        };
+        // The schema of the shared cdc source upstream is different from snapshot.
+        let cdc_source_schema = ColumnCatalog::debezium_cdc_source_cols()
+            .into_iter()
+            .map(|c| Field::from(c.column_desc).to_prost())
+            .collect_vec();
 
         let catalog = self
             .build_backfill_state_catalog(state)

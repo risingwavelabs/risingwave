@@ -341,8 +341,12 @@ impl DataType {
         };
         match self {
             DataType::Struct(t) => {
+                if !t.is_unnamed() {
+                    // To be consistent with `From<&PbDataType>`,
+                    // we only set field names when it's a named struct.
+                    pb.field_names = t.names().map(|s| s.into()).collect();
+                }
                 pb.field_type = t.types().map(|f| f.to_protobuf()).collect();
-                pb.field_names = t.names().map(|s| s.into()).collect();
             }
             DataType::List(datatype) => {
                 pb.field_type = vec![datatype.to_protobuf()];

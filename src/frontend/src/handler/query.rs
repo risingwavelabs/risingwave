@@ -156,20 +156,31 @@ pub async fn handle_execute(
             )
             .await
         }
-        Statement::DeclareCursor { stmt } => {
-            let session = handler_args.session.clone();
-            let plan_fragmenter_result = {
-                let context = OptimizerContext::from_handler_args(handler_args.clone());
-                let plan_result = gen_batch_query_plan(&session, context.into(), bound_result)?;
-                gen_batch_plan_fragmenter(&session, plan_result)?
-            };
-            declare_cursor::handle_bound_declare_query_cursor(
-                handler_args,
-                stmt.cursor_name,
-                plan_fragmenter_result,
-            )
-            .await
-        }
+        Statement::DeclareCursor { stmt } => match stmt.declare_cursor {
+            risingwave_sqlparser::ast::DeclareCursor::Query(_) => {
+                let session = handler_args.session.clone();
+                let plan_fragmenter_result = {
+                    let context = OptimizerContext::from_handler_args(handler_args.clone());
+                    let plan_result = gen_batch_query_plan(&session, context.into(), bound_result)?;
+                    gen_batch_plan_fragmenter(&session, plan_result)?
+                };
+                declare_cursor::handle_bound_declare_query_cursor(
+                    handler_args,
+                    stmt.cursor_name,
+                    plan_fragmenter_result,
+                )
+                .await
+            }
+            risingwave_sqlparser::ast::DeclareCursor::Subscription(sub_name, rw_timestamp) => {
+                declare_cursor::handle_declare_subscription_cursor(
+                    handler_args,
+                    sub_name,
+                    stmt.cursor_name,
+                    rw_timestamp,
+                )
+                .await
+            }
+        },
         _ => unreachable!(),
     }
 }
