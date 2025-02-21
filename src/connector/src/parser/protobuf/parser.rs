@@ -16,10 +16,10 @@ use std::collections::HashSet;
 
 use anyhow::Context;
 use prost_reflect::{DescriptorPool, DynamicMessage, FileDescriptor, MessageDescriptor};
+use risingwave_common::catalog::Field;
 use risingwave_common::{bail, try_match_expand};
 use risingwave_connector_codec::decoder::protobuf::ProtobufAccess;
 pub use risingwave_connector_codec::decoder::protobuf::parser::{PROTOBUF_MESSAGES_AS_JSONB, *};
-use risingwave_pb::plan_common::ColumnDesc;
 
 use crate::error::ConnectorResult;
 use crate::parser::unified::AccessImpl;
@@ -127,7 +127,7 @@ impl ProtobufParserConfig {
     }
 
     /// Maps the protobuf schema to relational schema.
-    pub fn map_to_columns(&self) -> ConnectorResult<Vec<ColumnDesc>> {
+    pub fn map_to_columns(&self) -> ConnectorResult<Vec<Field>> {
         pb_schema_to_column_descs(&self.message_descriptor, &self.messages_as_jsonb)
             .map_err(|e| e.into())
     }

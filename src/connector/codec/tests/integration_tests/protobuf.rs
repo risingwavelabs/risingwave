@@ -53,7 +53,7 @@ fn check(
     let rw_schema = rw_schema
         .unwrap()
         .iter()
-        .map(ColumnDesc::from)
+        .map(ColumnDesc::from_field_without_column_id)
         .collect_vec();
     expected_risingwave_schema.assert_eq(&format!(
         "{:#?}",
