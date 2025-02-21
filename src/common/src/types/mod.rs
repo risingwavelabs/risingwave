@@ -329,8 +329,12 @@ impl DataType {
         })
     }
 
+    pub fn type_name(&self) -> DataTypeName {
+        DataTypeName::from(self)
+    }
+
     pub fn prost_type_name(&self) -> PbTypeName {
-        DataTypeName::from(self).into()
+        self.type_name().into()
     }
 
     pub fn to_protobuf(&self) -> PbDataType {
