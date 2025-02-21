@@ -262,9 +262,8 @@ impl HummockStorageReadSnapshot {
     ) -> StorageResult<Option<O>> {
         let key_range = (Bound::Included(key.clone()), Bound::Included(key.clone()));
 
-        let (key_range, read_version_tuple) = self
-            .build_read_version_tuple(self.raw_epoch, key_range, &read_options)
-            .await?;
+        let (key_range, read_version_tuple) =
+            self.build_read_version_tuple(self.epoch, key_range).await?;
 
         if is_empty_key_range(&key_range) {
             return Ok(None);
@@ -273,7 +272,8 @@ impl HummockStorageReadSnapshot {
         self.hummock_version_reader
             .get(
                 key,
-                self.raw_epoch,
+                self.epoch.get_epoch(),
+                self.table_id,
                 read_options,
                 read_version_tuple,
                 on_key_value_fn,
@@ -286,12 +286,17 @@ impl HummockStorageReadSnapshot {
         key_range: TableKeyRange,
         read_options: ReadOptions,
     ) -> StorageResult<HummockStorageIterator> {
-        let (key_range, read_version_tuple) = self
-            .build_read_version_tuple(self.raw_epoch, key_range, &read_options)
-            .await?;
+        let (key_range, read_version_tuple) =
+            self.build_read_version_tuple(self.epoch, key_range).await?;
 
         self.hummock_version_reader
-            .iter(key_range, self.raw_epoch, read_options, read_version_tuple)
+            .iter(
+                key_range,
+                self.epoch.get_epoch(),
+                self.table_id,
+                read_options,
+                read_version_tuple,
+            )
             .await
     }
 
@@ -300,14 +305,14 @@ impl HummockStorageReadSnapshot {
         key_range: TableKeyRange,
         read_options: ReadOptions,
     ) -> StorageResult<HummockStorageRevIterator> {
-        let (key_range, read_version_tuple) = self
-            .build_read_version_tuple(self.raw_epoch, key_range, &read_options)
-            .await?;
+        let (key_range, read_version_tuple) =
+            self.build_read_version_tuple(self.epoch, key_range).await?;
 
         self.hummock_version_reader
             .rev_iter(
                 key_range,
-                self.raw_epoch,
+                self.epoch.get_epoch(),
+                self.table_id,
                 read_options,
                 read_version_tuple,
                 None,
@@ -340,18 +345,23 @@ impl HummockStorageReadSnapshot {
 
     async fn build_read_version_tuple(
         &self,
-        epoch: u64,
+        epoch: HummockReadEpoch,
         key_range: TableKeyRange,
-        read_options: &ReadOptions,
     ) -> StorageResult<(TableKeyRange, ReadVersionTuple)> {
-        if read_options.read_version_from_backup {
-            self.build_read_version_tuple_from_backup(epoch, self.table_id, key_range)
-                .await
-        } else if read_options.read_committed {
-            self.build_read_version_tuple_from_committed(epoch, self.table_id, key_range)
-                .await
-        } else {
-            self.build_read_version_tuple_from_all(epoch, self.table_id, key_range)
+        match epoch {
+            HummockReadEpoch::Backup(epoch) => {
+                self.build_read_version_tuple_from_backup(epoch, self.table_id, key_range)
+                    .await
+            }
+            HummockReadEpoch::Committed(epoch)
+            | HummockReadEpoch::BatchQueryCommitted(epoch, _)
+            | HummockReadEpoch::TimeTravel(epoch) => {
+                self.build_read_version_tuple_from_committed(epoch, self.table_id, key_range)
+                    .await
+            }
+            HummockReadEpoch::NoWait(epoch) => {
+                self.build_read_version_tuple_from_all(epoch, self.table_id, key_range)
+            }
         }
     }
 
@@ -604,7 +614,7 @@ impl HummockStorage {
 
 #[derive(Clone)]
 pub struct HummockStorageReadSnapshot {
-    raw_epoch: u64,
+    epoch: HummockReadEpoch,
     table_id: TableId,
     recent_versions: Arc<ArcSwap<RecentVersions>>,
     hummock_version_reader: HummockVersionReader,
@@ -808,7 +818,7 @@ impl StateStore for HummockStorage {
     ) -> StorageResult<Self::ReadSnapshot> {
         self.try_wait_epoch_impl(epoch, options.table_id).await?;
         Ok(HummockStorageReadSnapshot {
-            raw_epoch: epoch.get_epoch(),
+            epoch,
             table_id: options.table_id,
             recent_versions: self.recent_versions.clone(),
             hummock_version_reader: self.hummock_version_reader.clone(),
