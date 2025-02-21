@@ -198,7 +198,7 @@ mod tests {
     use itertools::Itertools;
     use maplit::{btreemap, convert_args};
     use risingwave_common::array::Op;
-    use risingwave_common::catalog::ColumnDesc as CatColumnDesc;
+    use risingwave_common::catalog::{ColumnDesc as CatColumnDesc, ColumnId};
     use risingwave_common::row::{OwnedRow, Row};
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_pb::catalog::StreamSourceInfo;
@@ -374,22 +374,22 @@ mod tests {
 
         assert_eq!(columns.len(), 4);
         assert_eq!(
-            CatColumnDesc::new_atomic(DataType::Int32, "id", 1),
+            CatColumnDesc::named("id", ColumnId::placeholder(), DataType::Int32),
             columns[0]
         );
 
         assert_eq!(
-            CatColumnDesc::new_atomic(DataType::Varchar, "first_name", 2),
+            CatColumnDesc::named("first_name", ColumnId::placeholder(), DataType::Varchar),
             columns[1]
         );
 
         assert_eq!(
-            CatColumnDesc::new_atomic(DataType::Varchar, "last_name", 3),
+            CatColumnDesc::named("last_name", ColumnId::placeholder(), DataType::Varchar),
             columns[2]
         );
 
         assert_eq!(
-            CatColumnDesc::new_atomic(DataType::Varchar, "email", 4),
+            CatColumnDesc::named("email", ColumnId::placeholder(), DataType::Varchar),
             columns[3]
         );
     }
