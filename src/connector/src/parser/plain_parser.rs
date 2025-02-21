@@ -505,8 +505,6 @@ mod tests {
                                         data_type: Int32,
                                         column_id: #2147483646,
                                         name: "id",
-                                        field_descs: [],
-                                        type_name: "",
                                         generated_or_default_column: None,
                                         description: None,
                                         additional_column: AdditionalColumn {
@@ -522,8 +520,6 @@ mod tests {
                                         data_type: Timestamptz,
                                         column_id: #2147483646,
                                         name: "v1",
-                                        field_descs: [],
-                                        type_name: "",
                                         generated_or_default_column: None,
                                         description: None,
                                         additional_column: AdditionalColumn {
@@ -539,8 +535,6 @@ mod tests {
                                         data_type: Varchar,
                                         column_id: #2147483646,
                                         name: "v2",
-                                        field_descs: [],
-                                        type_name: "",
                                         generated_or_default_column: None,
                                         description: None,
                                         additional_column: AdditionalColumn {

@@ -161,29 +161,67 @@ struct ShowObjectRow {
 pub struct ShowColumnRow {
     pub name: String,
     pub r#type: String,
-    pub is_hidden: Option<String>,
+    pub is_hidden: Option<String>, // XXX: why not bool?
     pub description: Option<String>,
 }
 
 impl ShowColumnRow {
+    /// Create a row with the given information. If the data type is a struct or list,
+    /// flatten the data type to also generate rows for its fields.
+    fn flatten(
+        name: String,
+        data_type: DataType,
+        is_hidden: bool,
+        description: Option<String>,
+    ) -> Vec<Self> {
+        // TODO(struct): use struct's type name once supported.
+        let r#type = match &data_type {
+            DataType::Struct(_) => "struct".to_owned(),
+            DataType::List(box DataType::Struct(_)) => "struct[]".to_owned(),
+            d => d.to_string(),
+        };
+
+        let mut rows = vec![ShowColumnRow {
+            name: name.clone(),
+            r#type,
+            is_hidden: Some(is_hidden.to_string()),
+            description,
+        }];
+
+        match data_type {
+            DataType::Struct(st) => {
+                rows.extend(st.iter().flat_map(|(field_name, field_data_type)| {
+                    Self::flatten(
+                        format!("{}.{}", name, field_name),
+                        field_data_type.clone(),
+                        is_hidden,
+                        None,
+                    )
+                }));
+            }
+
+            DataType::List(inner @ box DataType::Struct(_)) => {
+                rows.extend(Self::flatten(
+                    format!("{}[1]", name),
+                    *inner,
+                    is_hidden,
+                    None,
+                ));
+            }
+
+            _ => {}
+        }
+
+        rows
+    }
+
     pub fn from_catalog(col: ColumnCatalog) -> Vec<Self> {
-        col.column_desc
-            .flatten()
-            .into_iter()
-            .map(|c| {
-                let type_name = if let DataType::Struct { .. } = c.data_type {
-                    c.type_name.clone()
-                } else {
-                    c.data_type.to_string()
-                };
-                ShowColumnRow {
-                    name: c.name,
-                    r#type: type_name,
-                    is_hidden: Some(col.is_hidden.to_string()),
-                    description: c.description,
-                }
-            })
-            .collect()
+        Self::flatten(
+            col.column_desc.name,
+            col.column_desc.data_type,
+            col.is_hidden,
+            col.column_desc.description,
+        )
     }
 }
 
@@ -843,7 +881,7 @@ mod tests {
                 ),
                 (
                     "country",
-                    "test.Country",
+                    "struct",
                 ),
                 (
                     "country.address",
@@ -851,7 +889,7 @@ mod tests {
                 ),
                 (
                     "country.city",
-                    "test.City",
+                    "struct",
                 ),
                 (
                     "country.city.address",

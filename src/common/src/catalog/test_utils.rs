@@ -41,11 +41,13 @@ impl ColumnDescTestExt for ColumnDesc {
         }
     }
 
-    fn new_struct(name: &str, column_id: i32, type_name: &str, fields: Vec<ColumnDesc>) -> Self {
+    fn new_struct(name: &str, column_id: i32, _type_name: &str, fields: Vec<ColumnDesc>) -> Self {
+        // TODO(struct): assign type name to the struct once supported
         let field_type = fields
             .iter()
             .map(|f| f.column_type.as_ref().unwrap().clone())
             .collect_vec();
+
         Self {
             column_type: Some(DataType {
                 type_name: TypeName::Struct as i32,
@@ -56,8 +58,6 @@ impl ColumnDescTestExt for ColumnDesc {
             }),
             column_id,
             name: name.to_owned(),
-            type_name: type_name.to_owned(),
-            field_descs: fields,
             generated_or_default_column: None,
             description: None,
             additional_column_type: 0, // deprecated
