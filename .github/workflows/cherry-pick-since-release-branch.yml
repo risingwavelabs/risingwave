@@ -28,9 +28,9 @@ jobs:
 
           # Get all release branches, extract their versions, and filter those with base or higher versions
           branches=$(git branch -r | grep "origin/release-" | sed 's|origin/||' | sed 's/release-//' | sort -V)
-          
+
           target_branches=()
-          
+
           for version in $branches; do
             if [[ $(printf "%s\\n%s" "$base_version" "$version" | sort -V | head -n1) == "$base_version" ]]; then
               target_branches+=("release-$version")
@@ -55,7 +55,7 @@ jobs:
     steps:
       - name: checkout
         uses: actions/checkout@v4
-      
+
       - name: Create PR to branch
         uses: risingwavelabs/github-action-cherry-pick@master
         with:
