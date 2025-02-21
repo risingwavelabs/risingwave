@@ -19,6 +19,7 @@ use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::ColumnCatalog;
 use risingwave_common::hash::VnodeCount;
+use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::{bail, bail_not_implemented};
 use risingwave_connector::sink::catalog::SinkCatalog;
@@ -121,7 +122,24 @@ pub async fn get_replace_table_plan(
             .iter()
             .map(|old_c| {
                 table.columns.iter().position(|new_c| {
-                    new_c.get_column_desc().unwrap().column_id == old_c.column_id().get_id()
+                    let new_c = new_c.get_column_desc().unwrap();
+
+                    let id_matches = || new_c.column_id == old_c.column_id().get_id();
+                    let type_matches = || {
+                        let original_data_type = old_c.data_type();
+                        let new_data_type = DataType::from(new_c.column_type.as_ref().unwrap());
+                        let matches = original_data_type == &new_data_type;
+                        if !matches {
+                            // TODO: transform the data type if possible
+                            tracing::warn!(
+                                "the data type column \"{}\" has changed, currently treating as a new column",
+                                old_c.name()
+                            );
+                        }
+                        matches
+                    };
+
+                    id_matches() && type_matches()
                 })
             })
             .collect(),

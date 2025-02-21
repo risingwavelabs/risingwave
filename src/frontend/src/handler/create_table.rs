@@ -32,7 +32,7 @@ use risingwave_common::config::MetaBackend;
 use risingwave_common::license::Feature;
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_common::system_param::reader::SystemParamsRead;
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, MapType, StructType};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_common::{bail, bail_not_implemented};
@@ -88,6 +88,8 @@ use crate::stream_fragmenter::build_graph;
 use crate::utils::OverwriteOptions;
 use crate::{Binder, TableCatalog, WithOptions};
 
+type Existing = HashMap<Path, (ColumnId, DataType)>;
+
 /// Column ID generator for a new table or a new version of an existing table to alter.
 #[derive(Debug)]
 pub struct ColumnIdGenerator {
@@ -97,21 +99,194 @@ pub struct ColumnIdGenerator {
     /// exists and the data type matches, its ID is reused. Otherwise, a new ID is generated.
     ///
     /// For a new table, this is empty.
-    pub existing: HashMap<String, (ColumnId, DataType)>,
+    existing: HashMap<String, (ColumnId, DataType)>,
+
+    new_existing: Existing,
 
     /// The next column ID to generate, used for new columns that do not exist in `existing`.
-    pub next_column_id: ColumnId,
+    next_column_id: ColumnId,
 
     /// The version ID of the table to be created or altered.
     ///
     /// For a new table, this is 0. For altering an existing table, this is the **next** version ID
     /// of the `version_id` field in the original table catalog.
-    pub version_id: TableVersionId,
+    version_id: TableVersionId,
 }
 
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+enum Segment {
+    Field(String),
+    ListElement,
+    MapKey,
+    MapValue,
+}
+
+impl std::fmt::Display for Segment {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Segment::Field(name) => write!(f, "{}", name),
+            Segment::ListElement => write!(f, "element"),
+            Segment::MapKey => write!(f, "key"),
+            Segment::MapValue => write!(f, "value"),
+        }
+    }
+}
+
+type Path = Vec<Segment>;
+
 impl ColumnIdGenerator {
+    pub fn new_new_alter(original: &TableCatalog) -> Self {
+        let mut existing = Existing::new();
+
+        fn handle(existing: &mut Existing, path: &mut Path, id: ColumnId, data_type: DataType) {
+            macro_rules! with_segment {
+                ($segment:expr, $block:block) => {
+                    path.push($segment);
+                    $block
+                    path.pop();
+                };
+            }
+
+            match &data_type {
+                DataType::Struct(fields) => {
+                    for (field_name, field_data_type) in fields.iter() {
+                        with_segment!(Segment::Field(field_name.to_owned()), {
+                            // TODO: specify id for fields
+                            handle(
+                                existing,
+                                path,
+                                ColumnId::placeholder(),
+                                field_data_type.clone(),
+                            );
+                        });
+                    }
+                }
+                DataType::List(inner) => {
+                    with_segment!(Segment::ListElement, {
+                        handle(existing, path, ColumnId::placeholder(), *inner.clone());
+                    });
+                }
+                DataType::Map(map) => {
+                    with_segment!(Segment::MapKey, {
+                        handle(existing, path, ColumnId::placeholder(), map.key().clone());
+                    });
+                    with_segment!(Segment::MapValue, {
+                        handle(existing, path, ColumnId::placeholder(), map.value().clone());
+                    });
+                }
+                _ => {}
+            }
+
+            existing.try_insert(path.clone(), (id, data_type)).unwrap();
+        }
+
+        for col in original.columns() {
+            let mut path = vec![Segment::Field(col.name().to_owned())];
+            handle(
+                &mut existing,
+                &mut path,
+                col.column_id(),
+                col.data_type().clone(),
+            );
+        }
+
+        let version = original.version().expect("version field not set");
+
+        Self {
+            existing: HashMap::new(),
+            new_existing: existing,
+            next_column_id: version.next_column_id,
+            version_id: version.version_id + 1,
+        }
+    }
+
+    pub fn generate_new(&mut self, col: &mut ColumnCatalog) -> Result<()> {
+        fn handle(
+            this: &mut ColumnIdGenerator,
+            path: &mut Path,
+            data_type: DataType,
+        ) -> Result<(ColumnId, DataType)> {
+            macro_rules! with_segment {
+                ($segment:expr, $block:block) => {{
+                    path.push($segment);
+                    let ret = $block;
+                    path.pop();
+                    ret
+                }};
+            }
+
+            let original_column_id = match this.new_existing.get(&*path) {
+                Some((original_column_id, original_data_type)) => {
+                    if original_data_type.type_name() != data_type.type_name() {
+                        let path = path.iter().join(".");
+                        bail!(
+                            "Incompatible data type change from {:?} to {:?} at path \"{}\"",
+                            original_data_type.type_name(),
+                            data_type.type_name(),
+                            path
+                        );
+                    }
+                    *original_column_id
+                }
+                None => ColumnId::placeholder(),
+            };
+
+            let new_data_type = match data_type {
+                DataType::Struct(fields) => {
+                    let mut new_fields = Vec::new();
+                    for (field_name, field_data_type) in fields.iter() {
+                        // TODO: use id
+                        let (_id, new_field_data_type) =
+                            with_segment!(Segment::Field(field_name.to_owned()), {
+                                handle(this, path, field_data_type.clone())?
+                            });
+                        new_fields.push((field_name.to_owned(), new_field_data_type));
+                    }
+                    DataType::Struct(StructType::new(new_fields))
+                }
+                DataType::List(inner) => {
+                    let (_id, new_inner) =
+                        with_segment!(Segment::ListElement, { handle(this, path, *inner)? });
+                    DataType::List(Box::new(new_inner))
+                }
+                DataType::Map(map) => {
+                    let (_key_id, new_key) =
+                        with_segment!(Segment::MapKey, { handle(this, path, map.key().clone())? });
+                    let (_value_id, new_value) = with_segment!(Segment::MapValue, {
+                        handle(this, path, map.value().clone())?
+                    });
+                    DataType::Map(MapType::from_kv(new_key, new_value))
+                }
+
+                _ => data_type,
+            };
+
+            let need_gen_id = matches!(path.last().unwrap(), Segment::Field(_));
+
+            let new_id = if need_gen_id && original_column_id == ColumnId::placeholder() {
+                let id = this.next_column_id;
+                this.next_column_id = this.next_column_id.next();
+                id
+            } else {
+                original_column_id
+            };
+
+            Ok((new_id, new_data_type))
+        }
+
+        let mut path = vec![Segment::Field(col.name().to_owned())];
+        let (new_column_id, new_data_type) = handle(self, &mut path, col.data_type().clone())?;
+
+        col.column_desc.column_id = new_column_id;
+        col.column_desc.data_type = new_data_type;
+
+        Ok(())
+    }
+
     /// Creates a new [`ColumnIdGenerator`] for altering an existing table.
     pub fn new_alter(original: &TableCatalog) -> Self {
+        let new_existing = Self::new_new_alter(original).new_existing;
+
         let existing = original
             .columns()
             .iter()
@@ -127,6 +302,7 @@ impl ColumnIdGenerator {
 
         Self {
             existing,
+            new_existing,
             next_column_id: version.next_column_id,
             version_id: version.version_id + 1,
         }
@@ -136,6 +312,7 @@ impl ColumnIdGenerator {
     pub fn new_initial() -> Self {
         Self {
             existing: HashMap::new(),
+            new_existing: Existing::new(),
             next_column_id: ColumnId::first_user_column(),
             version_id: INITIAL_TABLE_VERSION_ID,
         }
@@ -613,7 +790,8 @@ pub(crate) fn gen_create_table_plan(
 ) -> Result<(PlanRef, PbTable)> {
     let mut columns = bind_sql_columns(&column_defs, is_for_replace_plan)?;
     for c in &mut columns {
-        c.column_desc.column_id = col_id_gen.generate(&*c)?;
+        col_id_gen.generate_new(c)?;
+        // c.column_desc.column_id = col_id_gen.generate(&*c)?;
     }
 
     let (_, secret_refs, connection_refs) = context.with_options().clone().into_parts();
