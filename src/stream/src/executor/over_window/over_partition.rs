@@ -420,7 +420,8 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         // Generate delete changes first, because deletes are skipped during iteration over
         // `part_with_delta` in the next step.
         for (key, change) in delta {
-            if change.is_delete() {
+            if change.is_delete() && snapshot.contains_key(key) {
+                // propagate the delete
                 part_changes.insert(
                     key.as_normal_expect().clone(),
                     Record::Delete {

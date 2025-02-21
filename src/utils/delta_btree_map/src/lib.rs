@@ -229,6 +229,10 @@ impl<'a, K: Ord, V> CursorWithDelta<'a, K, V> {
                 } else {
                     dt_cursor.prev().unwrap()
                 };
+                if change.is_delete() {
+                    // XXX: ignore delete-non-existence
+                    continue;
+                }
                 return Some((key, change.as_insert().unwrap()));
             } else {
                 return if NEXT {
