@@ -92,6 +92,7 @@ pub struct MetaTelemetryReport {
     // Get the ENV from key `TELEMETRY_CLUSTER_TYPE`
     cluster_type: PbTelemetryClusterType,
     object_store_media_type: &'static str,
+    connector_usage_json_str: String,
 }
 
 impl From<MetaTelemetryJobDesc> for risingwave_pb::telemetry::StreamJobDesc {
@@ -138,6 +139,7 @@ impl TelemetryToProtobuf for MetaTelemetryReport {
             stream_jobs: self.job_desc.into_iter().map(|job| job.into()).collect(),
             cluster_type: self.cluster_type as i32,
             object_store_media_type: self.object_store_media_type.to_owned(),
+            connector_usage_json_str: self.connector_usage_json_str,
         };
         pb_report.encode_to_vec()
     }
@@ -204,6 +206,13 @@ impl TelemetryReportCreator for MetaReportCreator {
             .list_stream_job_desc()
             .await
             .map_err(|err| err.as_report().to_string())?;
+        let connector_usage = self
+            .metadata_manager
+            .catalog_controller
+            .get_connector_usage()
+            .await
+            .map_err(|err| err.as_report().to_string())?
+            .to_string();
 
         Ok(MetaTelemetryReport {
             rw_version: RwVersion {
@@ -231,6 +240,7 @@ impl TelemetryReportCreator for MetaReportCreator {
             // it blocks the report if the cluster type is not valid or leak from test env
             cluster_type: telemetry_cluster_type_from_env_var()?,
             object_store_media_type: self.object_store_media_type,
+            connector_usage_json_str: connector_usage,
         })
     }
 
@@ -283,6 +293,7 @@ mod test {
             job_desc: vec![],
             cluster_type: PbTelemetryClusterType::Unspecified,
             object_store_media_type: "s3",
+            connector_usage_json_str: jsonbb::json!({}).to_string(),
         };
 
         let pb_bytes = report.to_pb_bytes();
