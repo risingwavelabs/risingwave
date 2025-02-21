@@ -773,6 +773,9 @@ impl CatalogController {
         self.notify_fragment_mapping(NotificationOperation::Add, fragment_mapping)
             .await;
 
+        self.notify_fragment_mapping(NotificationOperation::Add, fragment_mapping)
+            .await;
+
         Ok(())
     }
 
