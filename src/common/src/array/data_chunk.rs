@@ -43,7 +43,7 @@ use crate::util::value_encoding::{
 };
 
 /// [`DataChunk`] is a collection of Columns,
-/// a with visibility mask for each row.
+/// with a visibility mask for each row.
 /// For instance, we could have a [`DataChunk`] of this format.
 ///
 /// | v1 | v2 | v3 |

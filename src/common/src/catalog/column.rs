@@ -401,12 +401,6 @@ impl ColumnCatalog {
         ]
     }
 
-    pub fn is_iceberg_hidden_col(&self) -> bool {
-        self.column_desc.name == ICEBERG_SEQUENCE_NUM_COLUMN_NAME
-            || self.column_desc.name == ICEBERG_FILE_PATH_COLUMN_NAME
-            || self.column_desc.name == ICEBERG_FILE_POS_COLUMN_NAME
-    }
-
     /// Note: these columns are added in `SourceStreamChunkRowWriter::do_action`.
     /// May also look for the usage of `SourceColumnType`.
     pub fn debezium_cdc_source_cols() -> [Self; 3] {
