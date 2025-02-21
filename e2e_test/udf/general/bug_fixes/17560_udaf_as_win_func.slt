@@ -1,6 +1,9 @@
 # https://github.com/risingwavelabs/risingwave/issues/17560
 
 statement ok
+set rw_implicit_flush to true;
+
+statement ok
 create aggregate sum00(value int) returns int language python as $$
 def create_state():
     return 0
@@ -67,7 +70,7 @@ def finish(state):
         return sum / weight
 $$;
 
-query
+query iiiTT
 SELECT
     *,
     weighted_avg(score, 1) OVER (
@@ -83,3 +86,9 @@ ORDER BY "student_id", "exam_date";
 2	101	1002	92	2022-01-10 00:00:00	92
 3	101	1003	78.5	2022-01-10 00:00:00	78.5
 5	102	1003	88.9	2022-02-15 00:00:00	83.70000076293945
+
+statement ok
+drop aggregate weighted_avg;
+
+statement ok
+drop table exam_scores;
