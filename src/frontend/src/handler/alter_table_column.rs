@@ -26,7 +26,9 @@ use risingwave_pb::catalog::{Source, Table};
 use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{ProjectNode, StreamFragmentGraph};
-use risingwave_sqlparser::ast::{AlterTableOperation, ColumnOption, ObjectName, Statement};
+use risingwave_sqlparser::ast::{
+    AlterColumnOperation, AlterTableOperation, ColumnOption, Ident, ObjectName, Statement,
+};
 
 use super::create_source::SqlColumnStrategy;
 use super::create_table::{ColumnIdGenerator, generate_stream_graph_for_replace_table};
@@ -241,6 +243,27 @@ pub async fn handle_alter_table_column(
         ))?;
     }
 
+    // Check if the column to drop is referenced by any generated columns.
+    let check_column_referred_by_generated_column = |column_name: &Ident| {
+        for column in original_catalog.columns() {
+            if let Some(expr) = column.generated_expr() {
+                let expr = ExprImpl::from_expr_proto(expr)?;
+                let refs = expr.collect_input_refs(original_catalog.columns().len());
+                for idx in refs.ones() {
+                    let refed_column = &original_catalog.columns()[idx];
+                    if refed_column.name() == column_name.real_value() {
+                        bail!(format!(
+                            "failed to drop column \"{}\" because it's referenced by a generated column \"{}\"",
+                            column_name,
+                            column.name()
+                        ))
+                    }
+                }
+            }
+        }
+        Result::Ok(())
+    };
+
     // The `sql_column_strategy` will be `FollowChecked` if the operation is `AddColumn`, and
     // `FollowUnchecked` if the operation is `DropColumn`.
     //
@@ -300,22 +323,7 @@ pub async fn handle_alter_table_column(
             }
 
             // Check if the column to drop is referenced by any generated columns.
-            for column in original_catalog.columns() {
-                if let Some(expr) = column.generated_expr() {
-                    let expr = ExprImpl::from_expr_proto(expr)?;
-                    let refs = expr.collect_input_refs(original_catalog.columns().len());
-                    for idx in refs.ones() {
-                        let refed_column = &original_catalog.columns()[idx];
-                        if refed_column.name() == column_name.real_value() {
-                            bail!(format!(
-                                "failed to drop column \"{}\" because it's referenced by a generated column \"{}\"",
-                                column_name,
-                                column.name()
-                            ))
-                        }
-                    }
-                }
-            }
+            check_column_referred_by_generated_column(&column_name)?;
 
             // Locate the column by name and remove it.
             let column_name = column_name.real_value();
@@ -342,6 +350,35 @@ pub async fn handle_alter_table_column(
             }
 
             SqlColumnStrategy::FollowUnchecked
+        }
+
+        AlterTableOperation::AlterColumn { column_name, op } => {
+            let AlterColumnOperation::SetDataType {
+                data_type,
+                using: None,
+            } = op
+            else {
+                bail_not_implemented!(issue = 6903, "{op}");
+            };
+
+            // Check if the column to alter is referenced by any generated columns.
+            check_column_referred_by_generated_column(&column_name)?;
+
+            // Locate the column by name and update its data type.
+            let column_name = column_name.real_value();
+            let column = columns
+                .iter_mut()
+                .find(|c| c.name.real_value() == column_name)
+                .ok_or_else(|| {
+                    ErrorCode::InvalidInputSyntax(format!(
+                        "column \"{}\" of table \"{}\" does not exist",
+                        column_name, table_name
+                    ))
+                })?;
+
+            column.data_type = Some(data_type);
+
+            SqlColumnStrategy::FollowChecked
         }
 
         _ => unreachable!(),
