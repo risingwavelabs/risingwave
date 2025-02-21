@@ -71,10 +71,12 @@ pub async fn handle_create_as(
                 .fields()
                 .iter()
                 .map(|field| {
-                    col_id_gen.generate(field).map(|id| ColumnCatalog {
-                        column_desc: ColumnDesc::from_field_with_column_id(field, id.get_id()),
+                    let mut col = ColumnCatalog {
+                        column_desc: ColumnDesc::from_field_without_column_id(field),
                         is_hidden: false,
-                    })
+                    };
+                    col_id_gen.generate_new(&mut col)?;
+                    Result::Ok(col)
                 })
                 .try_collect()?
         } else {

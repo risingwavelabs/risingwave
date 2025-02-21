@@ -12,56 +12,254 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
-use risingwave_common::bail_not_implemented;
-use risingwave_common::catalog::{FieldLike, INITIAL_TABLE_VERSION_ID, TableVersionId};
-use risingwave_common::types::DataType;
+use itertools::Itertools;
+use risingwave_common::bail;
+use risingwave_common::catalog::{
+    ColumnCatalog, FieldLike, INITIAL_TABLE_VERSION_ID, TableVersionId,
+};
+use risingwave_common::types::{DataType, MapType, StructType};
 
 use crate::TableCatalog;
 use crate::catalog::ColumnId;
 use crate::catalog::table_catalog::TableVersion;
 use crate::error::Result;
 
+type Existing = HashMap<Path, (ColumnId, DataType)>;
+
 /// Column ID generator for a new table or a new version of an existing table to alter.
 #[derive(Debug)]
 pub struct ColumnIdGenerator {
-    /// Existing column names and their IDs and data types.
-    ///
-    /// This is used for aligning column IDs between versions (`ALTER`s). If a column already
-    /// exists and the data type matches, its ID is reused. Otherwise, a new ID is generated.
-    ///
-    /// For a new table, this is empty.
-    pub existing: HashMap<String, (ColumnId, DataType)>,
+    // /// Existing column names and their IDs and data types.
+    // ///
+    // /// This is used for aligning column IDs between versions (`ALTER`s). If a column already
+    // /// exists and the data type matches, its ID is reused. Otherwise, a new ID is generated.
+    // ///
+    // /// For a new table, this is empty.
+    // existing: HashMap<String, (ColumnId, DataType)>,
+    existing: Existing,
+
+    unalterable_columns: HashSet<String>,
 
     /// The next column ID to generate, used for new columns that do not exist in `existing`.
-    pub next_column_id: ColumnId,
+    next_column_id: ColumnId,
 
     /// The version ID of the table to be created or altered.
     ///
     /// For a new table, this is 0. For altering an existing table, this is the **next** version ID
     /// of the `version_id` field in the original table catalog.
-    pub version_id: TableVersionId,
+    version_id: TableVersionId,
 }
 
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+enum Segment {
+    Field(String),
+    ListElement,
+    MapKey,
+    MapValue,
+}
+
+impl std::fmt::Display for Segment {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Segment::Field(name) => write!(f, "{}", name),
+            Segment::ListElement => write!(f, "element"),
+            Segment::MapKey => write!(f, "key"),
+            Segment::MapValue => write!(f, "value"),
+        }
+    }
+}
+
+type Path = Vec<Segment>;
+
 impl ColumnIdGenerator {
+    /// Generate [`ColumnId`]s for the given column and its nested fields (if any).
+    ///
+    /// Returns an error if there's incompatible data type change.
+    pub fn generate_new(&mut self, col: &mut ColumnCatalog) -> Result<()> {
+        let mut path = vec![Segment::Field(col.name().to_owned())];
+
+        if self.unalterable_columns.contains(col.name()) {
+            let (original_column_id, original_data_type) = self.existing.get(&path).unwrap();
+
+            if original_data_type != col.data_type() {
+                bail!(
+                    "column \"{}\" was persisted with legacy encoding thus cannot be altered, \
+                     consider dropping and readding the column",
+                    col.name()
+                );
+            } else {
+                col.column_desc.column_id = *original_column_id;
+                return Ok(());
+            }
+        }
+
+        fn handle(
+            this: &mut ColumnIdGenerator,
+            path: &mut Path,
+            data_type: DataType,
+        ) -> Result<(ColumnId, DataType)> {
+            macro_rules! with_segment {
+                ($segment:expr, $block:block) => {{
+                    path.push($segment);
+                    let ret = $block;
+                    path.pop();
+                    ret
+                }};
+            }
+
+            let original_column_id = match this.existing.get(&*path) {
+                Some((original_column_id, original_data_type)) => {
+                    if original_data_type.type_name() != data_type.type_name() {
+                        let path = path.iter().join(".");
+                        bail!(
+                            "incompatible data type change from {:?} to {:?} at path \"{}\"",
+                            original_data_type.type_name(),
+                            data_type.type_name(),
+                            path
+                        );
+                    }
+                    Some(*original_column_id)
+                }
+                None => None,
+            };
+
+            let new_data_type = match data_type {
+                DataType::Struct(fields) => {
+                    let mut new_fields = Vec::new();
+                    let mut ids = Vec::new();
+                    for (field_name, field_data_type) in fields.iter() {
+                        let (id, new_field_data_type) =
+                            with_segment!(Segment::Field(field_name.to_owned()), {
+                                handle(this, path, field_data_type.clone())?
+                            });
+                        new_fields.push((field_name.to_owned(), new_field_data_type));
+                        ids.push(id);
+                    }
+                    DataType::Struct(StructType::new(new_fields).with_ids(ids))
+                }
+                DataType::List(inner) => {
+                    let (_id, new_inner) =
+                        with_segment!(Segment::ListElement, { handle(this, path, *inner)? });
+                    DataType::List(Box::new(new_inner))
+                }
+                DataType::Map(map) => {
+                    let (_key_id, new_key) =
+                        with_segment!(Segment::MapKey, { handle(this, path, map.key().clone())? });
+                    let (_value_id, new_value) = with_segment!(Segment::MapValue, {
+                        handle(this, path, map.value().clone())?
+                    });
+                    DataType::Map(MapType::from_kv(new_key, new_value))
+                }
+
+                _ => data_type,
+            };
+
+            let need_gen_id = matches!(path.last().unwrap(), Segment::Field(_));
+
+            let new_id = if need_gen_id {
+                if let Some(id) = original_column_id {
+                    assert!(
+                        id != ColumnId::placeholder(),
+                        "original column id should not be placeholder"
+                    );
+                    id
+                } else {
+                    let id = this.next_column_id;
+                    this.next_column_id = this.next_column_id.next();
+                    id
+                }
+            } else {
+                // Column ID is actually unused by caller (for list and map types), just use a placeholder.
+                ColumnId::placeholder()
+            };
+
+            Ok((new_id, new_data_type))
+        }
+
+        let (new_column_id, new_data_type) = handle(self, &mut path, col.data_type().clone())?;
+
+        col.column_desc.column_id = new_column_id;
+        col.column_desc.data_type = new_data_type;
+
+        Ok(())
+    }
+
     /// Creates a new [`ColumnIdGenerator`] for altering an existing table.
     pub fn new_alter(original: &TableCatalog) -> Self {
-        let existing = original
-            .columns()
-            .iter()
-            .map(|col| {
-                (
-                    col.name().to_owned(),
-                    (col.column_id(), col.data_type().clone()),
-                )
-            })
-            .collect();
+        fn handle(
+            existing: &mut Existing,
+            alterable: &mut bool,
+            path: &mut Path,
+            id: ColumnId,
+            data_type: DataType,
+        ) {
+            macro_rules! with_segment {
+                ($segment:expr, $block:block) => {
+                    path.push($segment);
+                    $block
+                    path.pop();
+                };
+            }
+
+            const P: ColumnId = ColumnId::placeholder();
+
+            match &data_type {
+                DataType::Struct(fields) => {
+                    if fields.ids().is_none() {
+                        *alterable = false;
+                    }
+
+                    for ((field_name, field_data_type), field_id) in
+                        fields.iter().zip_eq(fields.ids_or_placeholder())
+                    {
+                        with_segment!(Segment::Field(field_name.to_owned()), {
+                            handle(existing, alterable, path, field_id, field_data_type.clone());
+                        });
+                    }
+                }
+                DataType::List(inner) => {
+                    with_segment!(Segment::ListElement, {
+                        handle(existing, alterable, path, P, *inner.clone());
+                    });
+                }
+                DataType::Map(map) => {
+                    with_segment!(Segment::MapKey, {
+                        handle(existing, alterable, path, P, map.key().clone());
+                    });
+                    with_segment!(Segment::MapValue, {
+                        handle(existing, alterable, path, P, map.value().clone());
+                    });
+                }
+                _ => {}
+            }
+
+            existing.try_insert(path.clone(), (id, data_type)).unwrap();
+        }
+
+        let mut existing = Existing::new();
+        let mut unalterable_columns = HashSet::new();
+        for col in original.columns() {
+            let mut path = vec![Segment::Field(col.name().to_owned())];
+            let mut alterable = true;
+            handle(
+                &mut existing,
+                &mut alterable,
+                &mut path,
+                col.column_id(),
+                col.data_type().clone(),
+            );
+            if !alterable {
+                unalterable_columns.insert(col.name().to_owned());
+            }
+        }
 
         let version = original.version().expect("version field not set");
 
         Self {
             existing,
+            unalterable_columns,
             next_column_id: version.next_column_id,
             version_id: version.version_id + 1,
         }
@@ -70,7 +268,8 @@ impl ColumnIdGenerator {
     /// Creates a new [`ColumnIdGenerator`] for a new table.
     pub fn new_initial() -> Self {
         Self {
-            existing: HashMap::new(),
+            existing: Existing::new(),
+            unalterable_columns: HashSet::new(),
             next_column_id: ColumnId::first_user_column(),
             version_id: INITIAL_TABLE_VERSION_ID,
         }
@@ -80,28 +279,30 @@ impl ColumnIdGenerator {
     ///
     /// Returns an error if the data type of the column has been changed.
     pub fn generate(&mut self, field: impl FieldLike) -> Result<ColumnId> {
-        if let Some((id, original_type)) = self.existing.get(field.name()) {
-            // Intentionally not using `datatype_equals` here because we want nested types to be
-            // exactly the same, **NOT** ignoring field names as they may be referenced in expressions
-            // of generated columns or downstream jobs.
-            // TODO: support compatible changes on types, typically for `STRUCT` types.
-            //       https://github.com/risingwavelabs/risingwave/issues/19755
-            if original_type == field.data_type() {
-                Ok(*id)
-            } else {
-                bail_not_implemented!(
-                    "The data type of column \"{}\" has been changed from \"{}\" to \"{}\". \
-                     This is currently not supported, even if it could be a compatible change in external systems.",
-                    field.name(),
-                    original_type,
-                    field.data_type()
-                );
-            }
-        } else {
-            let id = self.next_column_id;
-            self.next_column_id = self.next_column_id.next();
-            Ok(id)
-        }
+        // if let Some((id, original_type)) = self.existing.get(field.name()) {
+        //     // Intentionally not using `datatype_equals` here because we want nested types to be
+        //     // exactly the same, **NOT** ignoring field names as they may be referenced in expressions
+        //     // of generated columns or downstream jobs.
+        //     // TODO: support compatible changes on types, typically for `STRUCT` types.
+        //     //       https://github.com/risingwavelabs/risingwave/issues/19755
+        //     if original_type == field.data_type() {
+        //         Ok(*id)
+        //     } else {
+        //         bail_not_implemented!(
+        //             "The data type of column \"{}\" has been changed from \"{}\" to \"{}\". \
+        //              This is currently not supported, even if it could be a compatible change in external systems.",
+        //             field.name(),
+        //             original_type,
+        //             field.data_type()
+        //         );
+        //     }
+        // } else {
+        //     let id = self.next_column_id;
+        //     self.next_column_id = self.next_column_id.next();
+        //     Ok(id)
+        // }
+
+        todo!()
     }
 
     /// Consume this generator and return a [`TableVersion`] for the table to be created or altered.
