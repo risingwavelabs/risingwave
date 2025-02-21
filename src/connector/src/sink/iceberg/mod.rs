@@ -53,8 +53,8 @@ use prometheus::monitored_position_delete_writer::MonitoredPositionDeleteWriterB
 use regex::Regex;
 use risingwave_common::array::arrow::arrow_array_iceberg::{Int32Array, RecordBatch};
 use risingwave_common::array::arrow::arrow_schema_iceberg::{
-    self, DataType as ArrowDataType, Field as ArrowField, FieldRef as ArrowFieldRef,
-    Fields as ArrowFields, Schema as ArrowSchema, SchemaRef,
+    self, DataType as ArrowDataType, Field as ArrowField, Fields as ArrowFields,
+    Schema as ArrowSchema, SchemaRef,
 };
 use risingwave_common::array::arrow::{IcebergArrowConvert, IcebergCreateTableArrowConvert};
 use risingwave_common::array::{Op, StreamChunk};
@@ -1382,21 +1382,6 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
 const MAP_KEY: &str = "key";
 const MAP_VALUE: &str = "value";
 
-fn map_to_struct<'a>(
-    key: &ArrowDataType,
-    value: &ArrowDataType,
-    our_field_type: &'a risingwave_common::types::DataType,
-    schema_fields: &mut HashMap<&str, &'a risingwave_common::types::DataType>,
-) -> ArrowFields {
-    let map = our_field_type.as_map();
-    schema_fields.insert(MAP_KEY, map.key());
-    schema_fields.insert(MAP_VALUE, map.value());
-    ArrowFields::from(vec![
-        ArrowField::new("key", key.clone(), false),
-        ArrowField::new("value", value.clone(), true),
-    ])
-}
-
 fn get_fields<'a>(
     our_field_type: &'a risingwave_common::types::DataType,
     data_type: &ArrowDataType,
@@ -1404,35 +1389,44 @@ fn get_fields<'a>(
 ) -> Option<ArrowFields> {
     match data_type {
         ArrowDataType::Struct(fields) => {
-            our_field_type
-                .as_struct()
-                .iter()
-                .for_each(|(name, data_type)| {
-                    let res = schema_fields.insert(name, data_type);
-                    // This assert is to make sure there is no duplicate field name in the schema.
-                    assert!(res.is_none())
-                });
+            match our_field_type {
+                risingwave_common::types::DataType::Struct(struct_fields) => {
+                    struct_fields.iter().for_each(|(name, data_type)| {
+                        println!("{}", name);
+                        let res = schema_fields.insert(name, data_type);
+                        // This assert is to make sure there is no duplicate field name in the schema.
+                        assert!(res.is_none())
+                    });
+                }
+                risingwave_common::types::DataType::Map(map_fields) => {
+                    schema_fields.insert(MAP_KEY, map_fields.key());
+                    schema_fields.insert(MAP_VALUE, map_fields.value());
+                }
+                risingwave_common::types::DataType::List(list_field) => {
+                    list_field.as_struct().iter().for_each(|(name, data_type)| {
+                        println!("{}", name);
+                        let res = schema_fields.insert(name, data_type);
+                        // This assert is to make sure there is no duplicate field name in the schema.
+                        assert!(res.is_none())
+                    });
+                }
+                _ => {}
+            };
             Some(fields.clone())
         }
-        ArrowDataType::Dictionary(key, value) => {
-            Some(map_to_struct(key, value, our_field_type, schema_fields))
+        ArrowDataType::List(field) | ArrowDataType::Map(field, _) => {
+            get_fields(our_field_type, field.data_type(), schema_fields)
         }
-        ArrowDataType::List(field)
-        | ArrowDataType::LargeList(field)
-        | ArrowDataType::FixedSizeList(field, _)
-        | ArrowDataType::Map(field, _)
-        | ArrowDataType::RunEndEncoded(_, field) => {
-            Some(ArrowFields::from(vec![field.clone() as ArrowFieldRef]))
-        }
-        _ => None, // not a complex type or Union or RunEndEncoded
+        _ => None, // not a supported complex type and unlikely to show up
     }
 }
 
 fn check_compatibility(
-    fields: &ArrowFields,
     schema_fields: HashMap<&str, &risingwave_common::types::DataType>,
+    fields: &ArrowFields,
 ) -> anyhow::Result<bool> {
     for arrow_field in fields {
+        println!("{}", arrow_field.name());
         let our_field_type = schema_fields
             .get(arrow_field.name().as_str())
             .ok_or_else(|| anyhow!("Field {} not found in our schema", arrow_field.name()))?;
@@ -1448,25 +1442,18 @@ fn check_compatibility(
             (ArrowDataType::Decimal128(_, _), ArrowDataType::Decimal128(_, _)) => true,
             (ArrowDataType::Binary, ArrowDataType::LargeBinary) => true,
             (ArrowDataType::LargeBinary, ArrowDataType::Binary) => true,
-            (ArrowDataType::Dictionary(_, _), ArrowDataType::Dictionary(key, value)) => {
-                let mut schema_fields = HashMap::new();
-                let fields = map_to_struct(key, value, our_field_type, &mut schema_fields);
-                check_compatibility(&fields, schema_fields)?
-            }
             (ArrowDataType::List(_), ArrowDataType::List(field))
-            | (ArrowDataType::ListView(_), ArrowDataType::ListView(field))
-            | (ArrowDataType::FixedSizeList(_, _), ArrowDataType::FixedSizeList(field, _))
-            | (ArrowDataType::LargeList(_), ArrowDataType::LargeList(field))
-            | (ArrowDataType::LargeListView(_), ArrowDataType::LargeListView(field))
             | (ArrowDataType::Map(_, _), ArrowDataType::Map(field, _)) => {
+                println!("list/map");
                 let mut schema_fields = HashMap::new();
                 get_fields(our_field_type, field.data_type(), &mut schema_fields)
                     .map_or(true, |fields| {
-                        check_compatibility(&fields, schema_fields).unwrap()
+                        check_compatibility(schema_fields, &fields).unwrap()
                     })
             }
             // validate nested structs
             (ArrowDataType::Struct(_), ArrowDataType::Struct(fields)) => {
+                println!("struct");
                 let mut schema_fields = HashMap::new();
                 our_field_type
                     .as_struct()
@@ -1476,7 +1463,7 @@ fn check_compatibility(
                         // This assert is to make sure there is no duplicate field name in the schema.
                         assert!(res.is_none())
                     });
-                check_compatibility(fields, schema_fields)?
+                check_compatibility(schema_fields, fields)?
             }
             // cases where left != right (metadata, field name mismatch)
             //
@@ -1516,7 +1503,7 @@ pub fn try_matches_arrow_schema(
         assert!(res.is_none())
     });
 
-    check_compatibility(&arrow_schema.fields, schema_fields)?;
+    check_compatibility(schema_fields, &arrow_schema.fields)?;
     Ok(())
 }
 
@@ -1524,8 +1511,10 @@ pub fn try_matches_arrow_schema(
 mod test {
     use std::collections::BTreeMap;
 
+    use risingwave_common::array::arrow::arrow_schema_iceberg::FieldRef as ArrowFieldRef;
     use risingwave_common::catalog::Field;
-    use risingwave_common::types::{StructType, MapType};
+    use risingwave_common::types::{MapType, StructType};
+
     use crate::connector_common::IcebergCommon;
     use crate::sink::decouple_checkpoint_log_sink::DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE;
     use crate::sink::iceberg::IcebergConfig;
@@ -1564,38 +1553,136 @@ mod test {
         try_matches_arrow_schema(&risingwave_schema, &arrow_schema).unwrap();
 
         let risingwave_schema = Schema::new(vec![
-            Field::with_name(DataType::Struct(StructType::new(vec![("a1", DataType::Int32), ("a2", DataType::Struct(StructType::new(vec![("a21", DataType::Bytea), ("a22", DataType::Map(MapType::from_kv(DataType::Varchar, DataType::Jsonb)))])))])), "a"),
-            Field::with_name(DataType::List(Box::new(DataType::Struct(StructType::new(vec![("b1", DataType::Int32), ("b2", DataType::Bytea), ("b3", DataType::Map(MapType::from_kv(DataType::Varchar, DataType::Jsonb)))])))), "b"),
+            Field::with_name(
+                DataType::Struct(StructType::new(vec![
+                    ("a1", DataType::Int32),
+                    (
+                        "a2",
+                        DataType::Struct(StructType::new(vec![
+                            ("a21", DataType::Bytea),
+                            (
+                                "a22",
+                                DataType::Map(MapType::from_kv(DataType::Varchar, DataType::Jsonb)),
+                            ),
+                        ])),
+                    ),
+                ])),
+                "a",
+            ),
+            Field::with_name(
+                DataType::List(Box::new(DataType::Struct(StructType::new(vec![
+                    ("b1", DataType::Int32),
+                    ("b2", DataType::Bytea),
+                    (
+                        "b3",
+                        DataType::Map(MapType::from_kv(DataType::Varchar, DataType::Jsonb)),
+                    ),
+                ])))),
+                "b",
+            ),
+            Field::with_name(
+                DataType::Map(MapType::from_kv(
+                    DataType::Varchar,
+                    DataType::List(Box::new(DataType::Struct(StructType::new([
+                        ("c1", DataType::Int32),
+                        ("c2", DataType::Bytea),
+                        (
+                            "c3",
+                            DataType::Map(MapType::from_kv(DataType::Varchar, DataType::Jsonb)),
+                        ),
+                    ])))),
+                )),
+                "c",
+            ),
         ]);
         let arrow_schema = ArrowSchema::new(vec![
             ArrowField::new(
                 "a",
-                ArrowDataType::Struct(
-                    ArrowFields::from(vec![
-                        ArrowField::new("a1", ArrowDataType::Int32, false),
-                        ArrowField::new("a2", ArrowDataType::Struct(
-                            ArrowFields::from(vec![
-                                ArrowField::new("a21", ArrowDataType::LargeBinary, false),
-                                ArrowField::new("a22", ArrowDataType::Dictionary(Box::new(ArrowDataType::Utf8), Box::new(ArrowDataType::Utf8)),false)
-                            ])
-                        ), false)
-                    ])
-                ), false),
+                ArrowDataType::Struct(ArrowFields::from(vec![
+                    ArrowField::new("a1", ArrowDataType::Int32, false),
+                    ArrowField::new(
+                        "a2",
+                        ArrowDataType::Struct(ArrowFields::from(vec![
+                            ArrowField::new("a21", ArrowDataType::LargeBinary, false),
+                            ArrowField::new_map(
+                                "a22",
+                                "entries",
+                                ArrowFieldRef::new(ArrowField::new(
+                                    "key",
+                                    ArrowDataType::Utf8,
+                                    false,
+                                )),
+                                ArrowFieldRef::new(ArrowField::new(
+                                    "value",
+                                    ArrowDataType::Utf8,
+                                    false,
+                                )),
+                                false,
+                                false,
+                            ),
+                        ])),
+                        false,
+                    ),
+                ])),
+                false,
+            ),
             ArrowField::new(
                 "b",
-                ArrowDataType::List(
-                    ArrowFieldRef::new(
-                        ArrowField::new_list_field(
-                            ArrowDataType::Struct(
-                                ArrowFields::from(vec![
-                                    ArrowField::new("b2", ArrowDataType::Int32, false),
-                                    ArrowField::new("b2", ArrowDataType::LargeBinary, false),
-                                    ArrowField::new("b3", ArrowDataType::Dictionary(Box::new(ArrowDataType::Utf8), Box::new(ArrowDataType::Utf8)),false)
-                                ])
-                            )
-                        , false)
-                    )
-                ), false),
+                ArrowDataType::List(ArrowFieldRef::new(ArrowField::new_list_field(
+                    ArrowDataType::Struct(ArrowFields::from(vec![
+                        ArrowField::new("b1", ArrowDataType::Int32, false),
+                        ArrowField::new("b2", ArrowDataType::LargeBinary, false),
+                        ArrowField::new_map(
+                            "b3",
+                            "entries",
+                            ArrowFieldRef::new(ArrowField::new("key", ArrowDataType::Utf8, false)),
+                            ArrowFieldRef::new(ArrowField::new(
+                                "value",
+                                ArrowDataType::Utf8,
+                                false,
+                            )),
+                            false,
+                            false,
+                        ),
+                    ])),
+                    false,
+                ))),
+                false,
+            ),
+            ArrowField::new_map(
+                "c",
+                "entries",
+                ArrowFieldRef::new(ArrowField::new("key", ArrowDataType::Utf8, false)),
+                ArrowFieldRef::new(ArrowField::new(
+                    "value",
+                    ArrowDataType::List(ArrowFieldRef::new(ArrowField::new_list_field(
+                        ArrowDataType::Struct(ArrowFields::from(vec![
+                            ArrowField::new("c1", ArrowDataType::Int32, false),
+                            ArrowField::new("c2", ArrowDataType::LargeBinary, false),
+                            ArrowField::new_map(
+                                "c3",
+                                "entries",
+                                ArrowFieldRef::new(ArrowField::new(
+                                    "key",
+                                    ArrowDataType::Utf8,
+                                    false,
+                                )),
+                                ArrowFieldRef::new(ArrowField::new(
+                                    "value",
+                                    ArrowDataType::Utf8,
+                                    false,
+                                )),
+                                false,
+                                false,
+                            ),
+                        ])),
+                        false,
+                    ))),
+                    false,
+                )),
+                false,
+                false,
+            ),
         ]);
         try_matches_arrow_schema(&risingwave_schema, &arrow_schema).unwrap();
     }
