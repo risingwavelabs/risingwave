@@ -721,10 +721,10 @@ mod tests {
                 ],
             };
             MockSource::with_messages(vec![
-                Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
                 Message::Chunk(std::mem::take(&mut chunks[0])),
                 Message::Chunk(std::mem::take(&mut chunks[1])),
-                Message::Barrier(Barrier::new_test_barrier(test_epoch(4))),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
             ])
             .into_executor(schema, pk_indices())
         }
@@ -1101,10 +1101,10 @@ mod tests {
                 ],
             };
             MockSource::with_messages(vec![
-                Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
                 Message::Chunk(std::mem::take(&mut chunks[0])),
                 Message::Chunk(std::mem::take(&mut chunks[1])),
-                Message::Barrier(Barrier::new_test_barrier(test_epoch(4))),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
             ])
             .into_executor(schema, pk_indices())
         }
