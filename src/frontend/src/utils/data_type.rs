@@ -32,6 +32,7 @@ impl DataType {
             DataType::Varchar => AstDataType::Varchar,
             DataType::Time => AstDataType::Time(false),
             DataType::Timestamp => AstDataType::Timestamp(false),
+            DataType::TimestampNs => AstDataType::Custom(vec!["timestamp_ns".into()].into()),
             DataType::Timestamptz => AstDataType::Timestamp(true),
             DataType::Interval => AstDataType::Interval,
             DataType::Jsonb => AstDataType::Jsonb,

@@ -12,17 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{PrimitiveArray, PrimitiveArrayBuilder};
+use super::{PrimitiveArray, PrimitiveArrayBuilder, TimestampNs};
 use crate::types::{Date, Time, Timestamp, Timestamptz};
 
 pub type DateArray = PrimitiveArray<Date>;
 pub type TimeArray = PrimitiveArray<Time>;
 pub type TimestampArray = PrimitiveArray<Timestamp>;
+pub type TimestampNsArray = PrimitiveArray<TimestampNs>;
 pub type TimestamptzArray = PrimitiveArray<Timestamptz>;
 
 pub type DateArrayBuilder = PrimitiveArrayBuilder<Date>;
 pub type TimeArrayBuilder = PrimitiveArrayBuilder<Time>;
 pub type TimestampArrayBuilder = PrimitiveArrayBuilder<Timestamp>;
+pub type TimestampNsArrayBuilder = PrimitiveArrayBuilder<TimestampNs>;
 pub type TimestamptzArrayBuilder = PrimitiveArrayBuilder<Timestamptz>;
 
 #[cfg(test)]

@@ -94,6 +94,8 @@ impl SessionTimezone {
             // => `(input_timestamptz AT TIME ZONE zone_string)::time`
             // `input_timestamptz::timestamp`
             // => `input_timestamptz AT TIME ZONE zone_string`
+            // `input_timestamptz::timestamp_ns`
+            // => `input_timestamptz AT TIME ZONE zone_string`
             ExprType::Cast => {
                 assert_eq!(inputs.len(), 1);
                 let mut input = inputs[0].clone();
@@ -104,13 +106,15 @@ impl SessionTimezone {
                         Some(self.cast_with_timezone(input, return_type))
                     }
                     (DataType::Date, DataType::Timestamptz)
-                    | (DataType::Timestamp, DataType::Timestamptz) => {
+                    | (DataType::Timestamp, DataType::Timestamptz)
+                    | (DataType::TimestampNs, DataType::Timestamptz) => {
                         input = input.cast_explicit(DataType::Timestamp).unwrap();
                         Some(self.at_timezone(input))
                     }
                     (DataType::Timestamptz, DataType::Date)
                     | (DataType::Timestamptz, DataType::Time)
-                    | (DataType::Timestamptz, DataType::Timestamp) => {
+                    | (DataType::Timestamptz, DataType::Timestamp)
+                    | (DataType::Timestamptz, DataType::TimestampNs) => {
                         input = self.at_timezone(input);
                         input = input.cast_explicit(return_type).unwrap();
                         Some(input)

@@ -15,7 +15,9 @@
 use std::str::FromStr;
 
 use chrono::{Datelike, NaiveTime, Timelike};
-use risingwave_common::types::{Date, Decimal, Interval, Time, Timestamp, Timestamptz, F64};
+use risingwave_common::types::{
+    Date, Decimal, Interval, Time, Timestamp, TimestampNs, Timestamptz, F64,
+};
 use risingwave_expr::{function, ExprError, Result};
 
 use self::Unit::*;
@@ -41,7 +43,7 @@ fn extract_from_datelike(date: impl Datelike, unit: Unit) -> Decimal {
 }
 
 /// Extract field from `Timelike`.
-fn extract_from_timelike(time: impl Timelike, unit: Unit) -> Decimal {
+fn extract_from_timelike_ns(time: impl Timelike, unit: Unit) -> Decimal {
     let nanos = || time.second() as u64 * 1_000_000_000 + time.nanosecond() as u64;
     match unit {
         Hour => time.hour().into(),
@@ -54,6 +56,24 @@ fn extract_from_timelike(time: impl Timelike, unit: Unit) -> Decimal {
             let nanos =
                 time.num_seconds_from_midnight() as u64 * 1_000_000_000 + time.nanosecond() as u64;
             Decimal::from_i128_with_scale(nanos as i128, 9)
+        }
+        u => unreachable!("invalid unit {:?} for time", u),
+    }
+}
+
+/// Extract field from `Timelike`.
+fn extract_from_timelike(time: impl Timelike, unit: Unit) -> Decimal {
+    let usecs = || time.second() as u64 * 1_000_000 + (time.nanosecond() / 1000) as u64;
+    match unit {
+        Hour => time.hour().into(),
+        Minute => time.minute().into(),
+        Second => Decimal::from_i128_with_scale(usecs() as i128, 6),
+        Millisecond => Decimal::from_i128_with_scale(usecs() as i128, 3),
+        Microsecond => usecs().into(),
+        Epoch => {
+            let usecs = time.num_seconds_from_midnight() as u64 * 1_000_000
+                + (time.nanosecond() / 1000) as u64;
+            Decimal::from_i128_with_scale(usecs as i128, 6)
         }
         u => unreachable!("invalid unit {:?} for time", u),
     }
@@ -93,24 +113,45 @@ fn extract_from_time(time: Time, unit: &Unit) -> Decimal {
 fn extract_from_timestamp(timestamp: Timestamp, unit: &Unit) -> Decimal {
     match unit {
         Epoch => {
-            if let Some(nanos) = timestamp.0.and_utc().timestamp_nanos_opt() {
-                Decimal::from_i128_with_scale(nanos as i128, 9)
-            } else {
-                let micros = timestamp.0.and_utc().timestamp_micros();
-                Decimal::from_i128_with_scale(micros as i128, 6)
-            }
+            let micros = timestamp.0.and_utc().timestamp_micros();
+            Decimal::from_i128_with_scale(micros as i128, 6)
         }
         Julian => {
-            let epoch = if let Some(nanos) = timestamp.0.and_utc().timestamp_nanos_opt() {
-                Decimal::from_i128_with_scale(nanos as i128, 9)
-            } else {
-                let epoch = timestamp.0.and_utc().timestamp_micros();
-                Decimal::from_i128_with_scale(epoch as i128, 6)
-            };
+            let epoch =
+                Decimal::from_i128_with_scale(timestamp.0.and_utc().timestamp_micros() as i128, 6);
             epoch / (24 * 60 * 60).into() + 2_440_588.into()
         }
         _ if unit.is_date_unit() => extract_from_datelike(timestamp.0.date(), *unit),
         _ if unit.is_time_unit() => extract_from_timelike(timestamp.0.time(), *unit),
+        u => unreachable!("invalid unit {:?} for timestamp", u),
+    }
+}
+
+#[function(
+    "extract(varchar, timestamp_ns) -> decimal",
+    prebuild = "Unit::from_str($0)?.ensure_timestamp()?"
+)]
+fn extract_from_timestamp_ns(timestamp_ns: TimestampNs, unit: &Unit) -> Decimal {
+    match unit {
+        Epoch => {
+            if let Some(nanos) = timestamp_ns.0.and_utc().timestamp_nanos_opt() {
+                Decimal::from_i128_with_scale(nanos as i128, 9)
+            } else {
+                let micros = timestamp_ns.0.and_utc().timestamp_micros();
+                Decimal::from_i128_with_scale(micros as i128, 6)
+            }
+        }
+        Julian => {
+            let epoch = if let Some(nanos) = timestamp_ns.0.and_utc().timestamp_nanos_opt() {
+                Decimal::from_i128_with_scale(nanos as i128, 9)
+            } else {
+                let epoch = timestamp_ns.0.and_utc().timestamp_micros();
+                Decimal::from_i128_with_scale(epoch as i128, 6)
+            };
+            epoch / (24 * 60 * 60).into() + 2_440_588.into()
+        }
+        _ if unit.is_date_unit() => extract_from_datelike(timestamp_ns.0.date(), *unit),
+        _ if unit.is_time_unit() => extract_from_timelike_ns(timestamp_ns.0.time(), *unit),
         u => unreachable!("invalid unit {:?} for timestamp", u),
     }
 }
@@ -447,10 +488,10 @@ mod tests {
         let extract = |unit| extract_from_time(time, &unit).to_string();
         assert_eq!(extract(Hour), "23");
         assert_eq!(extract(Minute), "22");
-        assert_eq!(extract(Second), "57.123450000");
-        assert_eq!(extract(Millisecond), "57123.450000");
-        assert_eq!(extract(Microsecond), "57123450.000");
-        assert_eq!(extract(Epoch), "84177.123450000");
+        assert_eq!(extract(Second), "57.123450");
+        assert_eq!(extract(Millisecond), "57123.450");
+        assert_eq!(extract(Microsecond), "57123450");
+        assert_eq!(extract(Epoch), "84177.123450");
     }
 
     #[test]
@@ -474,10 +515,10 @@ mod tests {
         assert_eq!(extract(Doy), "326");
         assert_eq!(extract(Hour), "12");
         assert_eq!(extract(Minute), "4");
-        assert_eq!(extract(Second), "2.575400000");
-        assert_eq!(extract(Millisecond), "2575.400000");
-        assert_eq!(extract(Microsecond), "2575400.000");
-        assert_eq!(extract(Epoch), "1637582642.575400000");
+        assert_eq!(extract(Second), "2.575400");
+        assert_eq!(extract(Millisecond), "2575.400");
+        assert_eq!(extract(Microsecond), "2575400");
+        assert_eq!(extract(Epoch), "1637582642.575400");
         assert_eq!(extract(Julian), "2459541.5028075856481481481481");
     }
 

@@ -580,6 +580,7 @@ fn bind_params(
                 },
                 ScalarRefImpl::Date(v) => query.bind(v.0),
                 ScalarRefImpl::Timestamp(v) => query.bind(v.0),
+                ScalarRefImpl::TimestampNs(v) => query.bind(v.0),
                 ScalarRefImpl::Timestamptz(v) => query.bind(v.timestamp_micros()),
                 ScalarRefImpl::Time(v) => query.bind(v.0),
                 ScalarRefImpl::Bytea(v) => query.bind(v.to_vec()),
@@ -638,6 +639,7 @@ fn bind_params(
                 DataType::Serial => return Err(data_type_not_supported("Serial")),
                 DataType::Int256 => return Err(data_type_not_supported("Int256")),
                 DataType::Map(_) => return Err(data_type_not_supported("Map")),
+                DataType::TimestampNs => return Err(data_type_not_supported("TimestampNs")),
             },
         };
     }
@@ -672,6 +674,7 @@ fn check_data_type_compatibility(data_type: &DataType) -> Result<()> {
         DataType::Serial => Err(data_type_not_supported("Serial")),
         DataType::Int256 => Err(data_type_not_supported("Int256")),
         DataType::Map(_) => Err(data_type_not_supported("Map")),
+        DataType::TimestampNs => Err(data_type_not_supported("TimestampNs")),
     }
 }
 

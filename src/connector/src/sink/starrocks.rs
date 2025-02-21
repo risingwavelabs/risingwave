@@ -251,6 +251,9 @@ impl StarrocksSink {
             risingwave_common::types::DataType::Map(_) => Err(SinkError::Starrocks(
                 "MAP is not supported for Starrocks sink.".to_owned(),
             )),
+            risingwave_common::types::DataType::TimestampNs => Err(SinkError::Starrocks(
+                "TIMESTAMPNS is not supported for Starrocks sink.".to_owned(),
+            )),
         }
     }
 }

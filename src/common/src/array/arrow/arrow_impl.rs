@@ -107,6 +107,7 @@ pub trait ToArrow {
             ArrayImpl::Date(array) => self.date_to_arrow(array),
             ArrayImpl::Time(array) => self.time_to_arrow(array),
             ArrayImpl::Timestamp(array) => self.timestamp_to_arrow(array),
+            ArrayImpl::TimestampNs(array) => self.timestamp_ns_to_arrow(array),
             ArrayImpl::Timestamptz(array) => self.timestamptz_to_arrow(array),
             ArrayImpl::Interval(array) => self.interval_to_arrow(array),
             ArrayImpl::Utf8(array) => self.utf8_to_arrow(array),
@@ -178,6 +179,14 @@ pub trait ToArrow {
         Ok(Arc::new(arrow_array::TimestampMicrosecondArray::from(
             array,
         )))
+    }
+
+    #[inline]
+    fn timestamp_ns_to_arrow(
+        &self,
+        array: &TimestampNsArray,
+    ) -> Result<arrow_array::ArrayRef, ArrayError> {
+        Ok(Arc::new(arrow_array::TimestampNanosecondArray::from(array)))
     }
 
     #[inline]
@@ -319,6 +328,7 @@ pub trait ToArrow {
             DataType::Date => self.date_type_to_arrow(),
             DataType::Time => self.time_type_to_arrow(),
             DataType::Timestamp => self.timestamp_type_to_arrow(),
+            DataType::TimestampNs => self.timestamp_ns_type_to_arrow(),
             DataType::Timestamptz => self.timestamptz_type_to_arrow(),
             DataType::Interval => self.interval_type_to_arrow(),
             DataType::Varchar => self.varchar_type_to_arrow(),
@@ -381,6 +391,10 @@ pub trait ToArrow {
     #[inline]
     fn timestamp_type_to_arrow(&self) -> arrow_schema::DataType {
         arrow_schema::DataType::Timestamp(arrow_schema::TimeUnit::Microsecond, None)
+    }
+    #[inline]
+    fn timestamp_ns_type_to_arrow(&self) -> arrow_schema::DataType {
+        arrow_schema::DataType::Timestamp(arrow_schema::TimeUnit::Nanosecond, None)
     }
 
     #[inline]
@@ -523,7 +537,7 @@ pub trait FromArrow {
             Timestamp(Second, Some(_)) => DataType::Timestamptz,
             Timestamp(Millisecond, None) => DataType::Timestamp,
             Timestamp(Millisecond, Some(_)) => DataType::Timestamptz,
-            Timestamp(Nanosecond, None) => DataType::Timestamp,
+            Timestamp(Nanosecond, None) => DataType::TimestampNs,
             Timestamp(Nanosecond, Some(_)) => DataType::Timestamptz,
             Interval(MonthDayNano) => DataType::Interval,
             Utf8 => DataType::Varchar,
@@ -622,10 +636,10 @@ pub trait FromArrow {
                 self.from_timestampus_some_array(array.as_any().downcast_ref().unwrap())
             }
             Timestamp(Nanosecond, None) => {
-                self.from_timestampns_array(array.as_any().downcast_ref().unwrap())
+                self.from_timestamp_ns_array(array.as_any().downcast_ref().unwrap())
             }
             Timestamp(Nanosecond, Some(_)) => {
-                self.from_timestampns_some_array(array.as_any().downcast_ref().unwrap())
+                self.from_timestamp_ns_some_array(array.as_any().downcast_ref().unwrap())
             }
             Interval(MonthDayNano) => {
                 self.from_interval_array(array.as_any().downcast_ref().unwrap())
@@ -797,14 +811,14 @@ pub trait FromArrow {
         Ok(ArrayImpl::Timestamptz(array.into()))
     }
 
-    fn from_timestampns_array(
+    fn from_timestamp_ns_array(
         &self,
         array: &arrow_array::TimestampNanosecondArray,
     ) -> Result<ArrayImpl, ArrayError> {
-        Ok(ArrayImpl::Timestamp(array.into()))
+        Ok(ArrayImpl::TimestampNs(array.into()))
     }
 
-    fn from_timestampns_some_array(
+    fn from_timestamp_ns_some_array(
         &self,
         array: &arrow_array::TimestampNanosecondArray,
     ) -> Result<ArrayImpl, ArrayError> {
@@ -1046,6 +1060,11 @@ converts_with_timeunit!(TimestamptzArray, arrow_array::TimestampMillisecondArray
 converts_with_timeunit!(TimestamptzArray, arrow_array::TimestampMicrosecondArray, TimeUnit::Microsecond, @map);
 converts_with_timeunit!(TimestamptzArray, arrow_array::TimestampNanosecondArray, TimeUnit::Nanosecond, @map);
 
+converts_with_timeunit!(TimestampNsArray, arrow_array::TimestampSecondArray, TimeUnit::Second, @map);
+converts_with_timeunit!(TimestampNsArray, arrow_array::TimestampMillisecondArray, TimeUnit::Millisecond, @map);
+converts_with_timeunit!(TimestampNsArray, arrow_array::TimestampMicrosecondArray, TimeUnit::Microsecond, @map);
+converts_with_timeunit!(TimestampNsArray, arrow_array::TimestampNanosecondArray, TimeUnit::Nanosecond, @map);
+
 /// Converts RisingWave value from and into Arrow value.
 trait FromIntoArrow {
     /// The corresponding element type in the Arrow array.
@@ -1149,6 +1168,35 @@ impl FromIntoArrowWithUnit for Timestamp {
                 Timestamp(DateTime::from_timestamp_micros(value).unwrap().naive_utc())
             }
             TimeUnit::Nanosecond => Timestamp(DateTime::from_timestamp_nanos(value).naive_utc()),
+        }
+    }
+
+    fn into_arrow_with_unit(self, time_unit: Self::TimestampType) -> Self::ArrowType {
+        match time_unit {
+            TimeUnit::Second => self.0.and_utc().timestamp(),
+            TimeUnit::Millisecond => self.0.and_utc().timestamp_millis(),
+            TimeUnit::Microsecond => self.0.and_utc().timestamp_micros(),
+            TimeUnit::Nanosecond => self.0.and_utc().timestamp_nanos_opt().unwrap(),
+        }
+    }
+}
+
+impl FromIntoArrowWithUnit for TimestampNs {
+    type ArrowType = i64;
+    type TimestampType = TimeUnit;
+
+    fn from_arrow_with_unit(value: Self::ArrowType, time_unit: Self::TimestampType) -> Self {
+        match time_unit {
+            TimeUnit::Second => {
+                TimestampNs(DateTime::from_timestamp(value as _, 0).unwrap().naive_utc())
+            }
+            TimeUnit::Millisecond => {
+                TimestampNs(DateTime::from_timestamp_millis(value).unwrap().naive_utc())
+            }
+            TimeUnit::Microsecond => {
+                TimestampNs(DateTime::from_timestamp_micros(value).unwrap().naive_utc())
+            }
+            TimeUnit::Nanosecond => TimestampNs(DateTime::from_timestamp_nanos(value).naive_utc()),
         }
     }
 

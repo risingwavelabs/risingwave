@@ -27,7 +27,7 @@ use anyhow::anyhow;
 use chrono::NaiveDate;
 use risingwave_common::bail;
 use risingwave_common::types::{
-    DataType, Date, Datum, Decimal, JsonbVal, ScalarImpl, Time, Timestamp, Timestamptz,
+    DataType, Date, Datum, Decimal, JsonbVal, ScalarImpl, Time, Timestamp, TimestampNs, Timestamptz,
 };
 use rust_decimal::Decimal as RustDecimal;
 
@@ -152,6 +152,15 @@ pub fn mysql_datum_to_rw_datum(
                 column_name,
                 chrono::NaiveDateTime,
                 Timestamp
+            )
+        }
+        DataType::TimestampNs => {
+            handle_data_type!(
+                mysql_row,
+                mysql_datum_index,
+                column_name,
+                chrono::NaiveDateTime,
+                TimestampNs
             )
         }
         DataType::Timestamptz => {

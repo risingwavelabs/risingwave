@@ -22,8 +22,8 @@ use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::cast::{i64_to_timestamp, i64_to_timestamptz, str_to_bytea};
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::types::{
-    DataType, Date, Decimal, Int256, Interval, JsonbVal, ScalarImpl, Time, Timestamp, Timestamptz,
-    ToOwnedDatum,
+    DataType, Date, Decimal, Int256, Interval, JsonbVal, ScalarImpl, Time, Timestamp, TimestampNs,
+    Timestamptz, ToOwnedDatum,
 };
 use risingwave_connector_codec::decoder::utils::scaled_bigint_to_rust_decimal;
 use simd_json::base::ValueAsObject;
@@ -484,6 +484,12 @@ impl JsonParseOptions {
                 DataType::Timestamp,
                 ValueType::I64 | ValueType::I128 | ValueType::U64 | ValueType::U128,
             ) => i64_to_timestamp(value.as_i64().unwrap())
+                .map_err(|_| create_error())?
+                .into(),
+            (DataType::TimestampNs, ValueType::String) => value
+                .as_str()
+                .unwrap()
+                .parse::<TimestampNs>()
                 .map_err(|_| create_error())?
                 .into(),
             // ---- Timestamptz -----
