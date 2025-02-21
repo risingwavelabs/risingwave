@@ -284,7 +284,7 @@ impl CatalogController {
         let inner = self.inner.read().await;
         let source_props_and_info: Vec<(i32, Property, Option<StreamSourceInfo>)> = Source::find()
             .select_only()
-            .column(object::Column::Oid)
+            .column(source::Column::SourceId)
             .column(source::Column::WithProperties)
             .column(source::Column::SourceInfo)
             .into_tuple()
@@ -292,7 +292,7 @@ impl CatalogController {
             .await?;
         let sink_props_and_info: Vec<(i32, Property, Option<SinkFormatDesc>)> = Sink::find()
             .select_only()
-            .column(object::Column::Oid)
+            .column(sink::Column::SinkId)
             .column(sink::Column::Properties)
             .column(sink::Column::SinkFormatDesc)
             .into_tuple()
