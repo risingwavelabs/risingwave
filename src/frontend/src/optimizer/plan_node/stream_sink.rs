@@ -440,7 +440,7 @@ impl StreamSink {
                 .into());
             }
         }
-        return Ok(None);
+        Ok(None)
     }
 
     fn is_user_force_append_only(properties: &WithOptionsSecResolved) -> Result<bool> {
@@ -487,10 +487,10 @@ impl StreamSink {
         if let Some(user_defined_sink_type) = user_defined_sink_type {
             if user_defined_sink_type == SinkType::AppendOnly {
                 if user_force_append_only {
-                    Ok(SinkType::ForceAppendOnly)
-                } else {
-                    if !frontend_derived_append_only {
-                        Err(ErrorCode::SinkError(Box::new(Error::new(
+                    return Ok(SinkType::ForceAppendOnly);
+                }
+                if !frontend_derived_append_only {
+                    return Err(ErrorCode::SinkError(Box::new(Error::new(
                             ErrorKind::InvalidInput,
                             format!(
                                 "The sink cannot be append-only. Please add \"force_append_only='true'\" in {} options to force the sink to be append-only. \
@@ -498,17 +498,16 @@ impl StreamSink {
                                 if syntax_legacy { "WITH" } else { "FORMAT ENCODE" }
                             ),
                         )))
-                            .into())
-                    } else {
-                        Ok(SinkType::AppendOnly)
-                    }
+                            .into());
+                } else {
+                    return Ok(SinkType::AppendOnly);
                 }
-            } else {
-                Ok(user_defined_sink_type)
             }
+
+            Ok(user_defined_sink_type)
         } else {
             if user_force_append_only {
-                Err(ErrorCode::SinkError(Box::new(Error::new(
+                return Err(ErrorCode::SinkError(Box::new(Error::new(
                     ErrorKind::InvalidInput,
                     format!(
                         "Cannot force the sink to be append-only without \"{}\".",
@@ -519,12 +518,11 @@ impl StreamSink {
                         }
                     ),
                 )))
-                .into())
-            } else {
-                match frontend_derived_append_only {
-                    true => Ok(SinkType::AppendOnly),
-                    false => Ok(SinkType::Upsert),
-                }
+                .into());
+            }
+            match frontend_derived_append_only {
+                true => Ok(SinkType::AppendOnly),
+                false => Ok(SinkType::Upsert),
             }
         }
     }
