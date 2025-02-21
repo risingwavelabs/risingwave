@@ -260,6 +260,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
             new_log_store_state(self.table_id, local_state_store, self.serde);
         initial_write_state.init(first_write_epoch).await?;
 
+        let mut pause_stream = false;
         let mut initial_write_epoch = first_write_epoch;
 
         // We only recreate the consume stream when:
@@ -274,11 +275,15 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                 next_chunk_id: 0,
                 metrics: self.metrics.clone(),
             };
-            let mut read_future = ReadFuture::ReadingPersistedStream(
-                read_state
-                    .read_persisted_log_store(&self.metrics, initial_write_epoch.prev, None)
-                    .await?,
-            );
+            let mut read_future = if pause_stream {
+                ReadFuture::Paused
+            } else {
+                ReadFuture::ReadingPersistedStream(
+                    read_state
+                        .read_persisted_log_store(&self.metrics, initial_write_epoch.prev, None)
+                        .await?,
+                )
+            };
 
             let mut write_future = WriteFuture::receive_from_upstream(input, initial_write_state);
 
@@ -301,6 +306,18 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                             WriteFutureEvent::UpstreamMessageReceived(msg) => {
                                 match msg {
                                     Message::Barrier(barrier) => {
+                                        if let Some(mutation) = barrier.mutation.as_deref() {
+                                            match mutation {
+                                                Mutation::Pause => {
+                                                    pause_stream = true;
+                                                }
+                                                Mutation::Resume => {
+                                                    pause_stream = false;
+                                                }
+                                                _ => {}
+                                            }
+                                        }
+
                                         let write_state_post_write_barrier = Self::write_barrier(
                                             &mut write_state,
                                             barrier.clone(),
@@ -403,6 +420,7 @@ enum ReadFuture<S: StateStoreRead> {
         truncate_offset: ReaderTruncationOffsetType,
     },
     Idle,
+    Paused,
 }
 
 // Read methods
@@ -414,6 +432,9 @@ impl<S: StateStoreRead> ReadFuture<S> {
         buffer: &mut SyncedLogStoreBuffer,
         metrics: &KvLogStoreMetrics,
     ) -> StreamExecutorResult<(StreamChunk, Option<ReaderTruncationOffsetType>)> {
+        if let ReadFuture::Paused = self {
+            return pending().await;
+        }
         match self {
             ReadFuture::ReadingPersistedStream(stream) => {
                 while let Some((_, item)) = stream.try_next().await? {
@@ -430,6 +451,9 @@ impl<S: StateStoreRead> ReadFuture<S> {
                 *self = ReadFuture::Idle;
             }
             ReadFuture::ReadingFlushedChunk { .. } | ReadFuture::Idle => {}
+            ReadFuture::Paused => {
+                unreachable!("should not be polled after paused")
+            }
         }
         match self {
             ReadFuture::ReadingPersistedStream(_) => {
@@ -478,6 +502,9 @@ impl<S: StateStoreRead> ReadFuture<S> {
                     }
                 }
             },
+            ReadFuture::Paused => {
+                unreachable!("should not be polled after paused")
+            }
         }
 
         let (future, truncate_offset) = match self {
@@ -488,6 +515,9 @@ impl<S: StateStoreRead> ReadFuture<S> {
                 future,
                 truncate_offset,
             } => (future, *truncate_offset),
+            ReadFuture::Paused => {
+                unreachable!("should not be polled after paused")
+            }
         };
 
         let (_, chunk, _) = future.await?;
@@ -507,7 +537,6 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
     ) -> StreamExecutorResult<LogStorePostSealCurrentEpoch<'a, S::Local>> {
         let epoch = barrier.epoch.prev;
         let mut writer = write_state.start_writer(false);
-        // FIXME(kwannoel): Handle paused stream.
         writer.write_barrier(epoch, barrier.is_checkpoint())?;
 
         // FIXME(kwannoel): Flush all unflushed chunks
