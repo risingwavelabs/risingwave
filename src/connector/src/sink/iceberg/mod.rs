@@ -1392,7 +1392,6 @@ fn get_fields<'a>(
             match our_field_type {
                 risingwave_common::types::DataType::Struct(struct_fields) => {
                     struct_fields.iter().for_each(|(name, data_type)| {
-                        println!("{}", name);
                         let res = schema_fields.insert(name, data_type);
                         // This assert is to make sure there is no duplicate field name in the schema.
                         assert!(res.is_none())
@@ -1404,7 +1403,6 @@ fn get_fields<'a>(
                 }
                 risingwave_common::types::DataType::List(list_field) => {
                     list_field.as_struct().iter().for_each(|(name, data_type)| {
-                        println!("{}", name);
                         let res = schema_fields.insert(name, data_type);
                         // This assert is to make sure there is no duplicate field name in the schema.
                         assert!(res.is_none())
@@ -1426,7 +1424,6 @@ fn check_compatibility(
     fields: &ArrowFields,
 ) -> anyhow::Result<bool> {
     for arrow_field in fields {
-        println!("{}", arrow_field.name());
         let our_field_type = schema_fields
             .get(arrow_field.name().as_str())
             .ok_or_else(|| anyhow!("Field {} not found in our schema", arrow_field.name()))?;
@@ -1444,7 +1441,6 @@ fn check_compatibility(
             (ArrowDataType::LargeBinary, ArrowDataType::Binary) => true,
             (ArrowDataType::List(_), ArrowDataType::List(field))
             | (ArrowDataType::Map(_, _), ArrowDataType::Map(field, _)) => {
-                println!("list/map");
                 let mut schema_fields = HashMap::new();
                 get_fields(our_field_type, field.data_type(), &mut schema_fields)
                     .map_or(true, |fields| {
@@ -1453,7 +1449,6 @@ fn check_compatibility(
             }
             // validate nested structs
             (ArrowDataType::Struct(_), ArrowDataType::Struct(fields)) => {
-                println!("struct");
                 let mut schema_fields = HashMap::new();
                 our_field_type
                     .as_struct()
