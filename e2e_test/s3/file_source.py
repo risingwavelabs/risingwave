@@ -10,6 +10,7 @@ from time import sleep
 import time
 from io import StringIO
 from minio import Minio
+import gzip
 from functools import partial
 
 def gen_data(file_num, item_num_per_file):
@@ -72,23 +73,42 @@ def do_test(config, file_num, item_num_per_file, prefix, fmt, need_drop_table=Tr
             return ''
 
     # Execute a SELECT statement
-    cur.execute(f'''CREATE TABLE {_table()}(
-        id int,
-        name TEXT,
-        sex int,
-        mark int,
-    )
-    {_include_clause()}
-    WITH (
-        connector = 's3',
-        match_pattern = '{prefix}*.{fmt}',
-        s3.region_name = '{config['S3_REGION']}',
-        s3.bucket_name = '{config['S3_BUCKET']}',
-        s3.credentials.access = '{config['S3_ACCESS_KEY']}',
-        s3.credentials.secret = '{config['S3_SECRET_KEY']}',
-        s3.endpoint_url = 'https://{config['S3_ENDPOINT']}',
-        refresh.interval.sec = 1
-    ) FORMAT PLAIN ENCODE {_encode()};''')
+    if fmt == 'json':
+        cur.execute(f'''CREATE TABLE {_table()}(
+            id int,
+            name TEXT,
+            sex int,
+            mark int,
+        )
+        {_include_clause()}
+        WITH (
+            connector = 's3',
+            match_pattern = '*.{fmt}.gz',
+            s3.region_name = 'custom',
+            s3.bucket_name = 'hummock001',
+            s3.credentials.access = 'hummockadmin',
+            s3.credentials.secret = 'hummockadmin',
+            s3.endpoint_url = 'http://hummock001.127.0.0.1:9301',
+            refresh.interval.sec = 1
+        ) FORMAT PLAIN ENCODE {_encode()};''')
+    else:
+        cur.execute(f'''CREATE TABLE {_table()}(
+            id int,
+            name TEXT,
+            sex int,
+            mark int,
+        )
+        {_include_clause()}
+        WITH (
+            connector = 's3',
+            match_pattern = '*.{fmt}',
+            s3.region_name = 'custom',
+            s3.bucket_name = 'hummock001',
+            s3.credentials.access = 'hummockadmin',
+            s3.credentials.secret = 'hummockadmin',
+            s3.endpoint_url = 'http://hummock001.127.0.0.1:9301',
+            refresh.interval.sec = 1
+        ) FORMAT PLAIN ENCODE {_encode()};''')
 
     total_rows = file_num * item_num_per_file
     MAX_RETRIES = 40
@@ -164,20 +184,36 @@ def test_batch_read(config, file_num, item_num_per_file, prefix, fmt):
             return f"CSV (delimiter = ',', without_header = {str('without' in fmt).lower()})"
 
     # Execute a SELECT statement
-    cur.execute(f'''CREATE SOURCE {_source()}(
-        id int,
-        name TEXT,
-        sex int,
-        mark int,
-    ) WITH (
-        connector = 's3',
-        match_pattern = '{prefix}*.{fmt}',
-        s3.region_name = '{config['S3_REGION']}',
-        s3.bucket_name = '{config['S3_BUCKET']}',
-        s3.credentials.access = '{config['S3_ACCESS_KEY']}',
-        s3.credentials.secret = '{config['S3_SECRET_KEY']}',
-        s3.endpoint_url = 'https://{config['S3_ENDPOINT']}'
-    ) FORMAT PLAIN ENCODE {_encode()};''')
+    if fmt == 'json':
+        cur.execute(f'''CREATE SOURCE {_source()}(
+            id int,
+            name TEXT,
+            sex int,
+            mark int,
+        ) WITH (
+            connector = 's3',
+            match_pattern = '*.{fmt}.gz',
+            s3.region_name = 'custom',
+            s3.bucket_name = 'hummock001',
+            s3.credentials.access = 'hummockadmin',
+            s3.credentials.secret = 'hummockadmin',
+            s3.endpoint_url = 'http://hummock001.127.0.0.1:9301',
+        ) FORMAT PLAIN ENCODE {_encode()};''')
+    else:
+        cur.execute(f'''CREATE SOURCE {_source()}(
+            id int,
+            name TEXT,
+            sex int,
+            mark int,
+        ) WITH (
+            connector = 's3',
+            match_pattern = '{prefix}*.{fmt}',
+            s3.region_name = 'custom',
+            s3.bucket_name = 'hummock001',
+            s3.credentials.access = 'hummockadmin',
+            s3.credentials.secret = 'hummockadmin',
+            s3.endpoint_url = 'http://hummock001.127.0.0.1:9301',
+        ) FORMAT PLAIN ENCODE {_encode()};''')
 
     total_rows = file_num * item_num_per_file
     MAX_RETRIES = 40
@@ -220,7 +256,7 @@ def upload_to_s3_bucket(config, minio_client, run_id, files, start_bias):
             os.fsync(f.fileno())
 
         minio_client.fput_object(
-            config["S3_BUCKET"], _s3(idx, start_bias), _local(idx, start_bias)
+            "hummock001", _s3(idx, start_bias), _local(idx, start_bias)
         )
 
 
@@ -259,25 +295,51 @@ if __name__ == "__main__":
 
     config = json.loads(os.environ["S3_SOURCE_TEST_CONF"])
     client = Minio(
-        config["S3_ENDPOINT"],
-        access_key=config["S3_ACCESS_KEY"],
-        secret_key=config["S3_SECRET_KEY"],
-        secure=True,
+        "127.0.0.1:9301",
+        "hummockadmin",
+        "hummockadmin",
+        secure=False,
     )
     run_id = str(random.randint(1000, 9999))
+    
     _local = lambda idx: f'data_{idx}.{fmt}'
-    _s3 = lambda idx: f"{run_id}_data_{idx}.{fmt}"
+    if fmt == 'json':
+        _s3 = lambda idx: f"{run_id}_data_{idx}.{fmt}.gz"
+        for idx, file_str in enumerate(formatted_files):
+            with open(_local(idx), "w") as f:
+                with gzip.open(_local(idx) + '.gz', 'wb') as f_gz:
+                    f_gz.write(file_str.encode('utf-8'))  
+                    os.fsync(f.fileno())
+
+            client.fput_object(
+                "hummock001",
+                _s3(idx),
+                _local(idx) + '.gz'
+            )
+    else:
+        _s3 = lambda idx: f"{run_id}_data_{idx}.{fmt}"
+        for idx, file_str in enumerate(formatted_files):
+            with open(_local(idx), "w") as f:
+                f.write(file_str)
+                os.fsync(f.fileno())
+
+            client.fput_object(
+                "hummock001",
+                _s3(idx),
+                _local(idx) 
+            )
 
     # put s3 files
     for idx, file_str in enumerate(formatted_files):
         with open(_local(idx), "w") as f:
-            f.write(file_str)
-            os.fsync(f.fileno())
+            with gzip.open(_local(idx) + '.gz', 'wb') as f_gz:
+                f_gz.write(file_str.encode('utf-8'))  
+                os.fsync(f.fileno())
 
         client.fput_object(
-            config["S3_BUCKET"],
+            "hummock001",
             _s3(idx),
-            _local(idx)
+            _local(idx) + '.gz'
         )
 
     # do test
@@ -287,6 +349,7 @@ if __name__ == "__main__":
     print("Test batch read file source...\n")
     test_batch_read(config, FILE_NUM, ITEM_NUM_PER_FILE, run_id, fmt)
 
+        
     # test file source handle incremental files
     data = gen_data(FILE_NUM, ITEM_NUM_PER_FILE)
     fmt = "json"
@@ -318,4 +381,4 @@ if __name__ == "__main__":
 
     # clean up s3 files
     for idx, _ in enumerate(formatted_files):
-        client.remove_object(config["S3_BUCKET"], _s3(idx, 0))
+        client.remove_object("hummock001", _s3(idx, 0))
