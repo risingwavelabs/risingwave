@@ -50,3 +50,7 @@ labels:
 - label: "ci/run-e2e-test-other-backends"
   files:
   - "src\\/meta\\/.*.rs"
+
+- label: "ci/run-e2e-iceberg-tests"
+  files:
+  - ".*iceberg.*"
