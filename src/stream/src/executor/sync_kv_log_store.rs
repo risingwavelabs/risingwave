@@ -79,6 +79,7 @@ use risingwave_storage::store::{
 };
 use risingwave_storage::StateStore;
 use rw_futures_util::drop_either_future;
+use tokio::time::{sleep, Duration};
 
 use crate::common::log_store_impl::kv_log_store::buffer::LogStoreBufferItem;
 use crate::common::log_store_impl::kv_log_store::reader::timeout_auto_rebuild::TimeoutAutoRebuildIter;
@@ -110,18 +111,22 @@ pub struct SyncedKvLogStoreExecutor<S: StateStore> {
 
     // Log store state
     state_store: S,
-    buffer_max_size: usize,
+    buffer_size: usize,
+
+    pause_duration_ms: Duration,
 }
 // Stream interface
 impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
+    #[expect(clippy::too_many_arguments)]
     pub(crate) fn new(
         actor_context: ActorContextRef,
         table_id: u32,
         metrics: KvLogStoreMetrics,
         serde: LogStoreRowSerde,
         state_store: S,
-        buffer_max_size: usize,
+        buffer_size: usize,
         upstream: Executor,
+        pause_duration_ms: Duration,
     ) -> Self {
         Self {
             actor_context,
@@ -130,7 +135,8 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
             serde,
             state_store,
             upstream,
-            buffer_max_size,
+            buffer_size,
+            pause_duration_ms,
         }
     }
 }
@@ -144,6 +150,11 @@ struct FlushedChunkInfo {
 }
 
 enum WriteFuture<S: LocalStateStore> {
+    Paused {
+        duration: Duration,
+        future: StreamFuture<BoxedMessageStream>,
+        write_state: LogStoreWriteState<S>, // Just used to hold the state
+    },
     ReceiveFromUpstream {
         future: StreamFuture<BoxedMessageStream>,
         write_state: LogStoreWriteState<S>,
@@ -196,10 +207,35 @@ impl<S: LocalStateStore> WriteFuture<S> {
         }
     }
 
+    fn paused(
+        duration: Duration,
+        stream: BoxedMessageStream,
+        write_state: LogStoreWriteState<S>,
+    ) -> Self {
+        Self::Paused {
+            duration,
+            future: stream.into_future(),
+            write_state,
+        }
+    }
+
     async fn next_event(
         &mut self,
     ) -> StreamExecutorResult<(BoxedMessageStream, LogStoreWriteState<S>, WriteFutureEvent)> {
         match self {
+            WriteFuture::Paused {
+                duration, future, ..
+            } => {
+                sleep(*duration).await;
+                let (opt, stream) = future.await;
+                must_match!(replace(self, WriteFuture::Empty), WriteFuture::Paused { write_state, .. } => {
+                    opt
+                    .ok_or_else(|| anyhow!("end of upstream input").into())
+                    .and_then(|result| result.map(|item| {
+                        (stream, write_state, WriteFutureEvent::UpstreamMessageReceived(item))
+                    }))
+                })
+            }
             WriteFuture::ReceiveFromUpstream { future, .. } => {
                 let (opt, stream) = future.await;
                 must_match!(replace(self, WriteFuture::Empty), WriteFuture::ReceiveFromUpstream { write_state, .. } => {
@@ -270,7 +306,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
             let mut truncation_offset = None;
             let mut buffer = SyncedLogStoreBuffer {
                 buffer: VecDeque::new(),
-                max_size: self.buffer_max_size,
+                max_size: self.buffer_size,
                 next_chunk_id: 0,
                 metrics: self.metrics.clone(),
             };
@@ -324,7 +360,8 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                                             initial_write_state = write_state;
                                             continue 'recreate_consume_stream;
                                         } else {
-                                            write_future = WriteFuture::receive_from_upstream(
+                                            write_future = WriteFuture::paused(
+                                                self.pause_duration_ms,
                                                 stream,
                                                 write_state,
                                             );
@@ -350,10 +387,20 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                                                 end_seq_id,
                                             );
                                         } else {
-                                            write_future = WriteFuture::receive_from_upstream(
-                                                stream,
-                                                write_state,
-                                            );
+                                            // If buffer 90% full, pause the stream for a while, let downstream do some processing
+                                            // to avoid flushing.
+                                            if buffer.buffer.len() >= self.buffer_size * 9 / 10 {
+                                                write_future = WriteFuture::paused(
+                                                    self.pause_duration_ms,
+                                                    stream,
+                                                    write_state,
+                                                );
+                                            } else {
+                                                write_future = WriteFuture::receive_from_upstream(
+                                                    stream,
+                                                    write_state,
+                                                );
+                                            }
                                         }
                                     }
                                     // FIXME(kwannoel): This should truncate the logstore,
@@ -752,6 +799,7 @@ mod tests {
             MemoryStateStore::new(),
             10,
             source,
+            Duration::from_millis(256),
         )
         .boxed();
 
@@ -843,6 +891,7 @@ mod tests {
             MemoryStateStore::new(),
             10,
             source,
+            Duration::from_millis(256),
         )
         .boxed();
 
@@ -932,6 +981,7 @@ mod tests {
             MemoryStateStore::new(),
             0,
             source,
+            Duration::from_millis(256),
         )
         .boxed();
 
