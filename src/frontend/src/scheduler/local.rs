@@ -115,10 +115,10 @@ impl LocalQueryExecution {
             self.batch_query_epoch,
             self.shutdown_rx().clone(),
         );
-
         let executor = executor.build().await?;
         // The following loop can be slow.
         // Release potential large object in Query and PlanNode early.
+        drop(plan_node);
         drop(self);
 
         #[for_await]

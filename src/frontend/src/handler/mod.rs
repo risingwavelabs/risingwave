@@ -20,6 +20,7 @@ use futures::stream::{self, BoxStream};
 use futures::{Stream, StreamExt};
 use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
+use pgwire::pg_protocol::print_malloc_stats;
 use pgwire::pg_response::StatementType::{self, ABORT, BEGIN, COMMIT, ROLLBACK, START_TRANSACTION};
 use pgwire::pg_response::{PgResponse, PgResponseBuilder, RowSetResult};
 use pgwire::pg_server::BoxedError;
@@ -255,6 +256,7 @@ pub async fn handle(
     session.clear_cancel_query_flag();
     let _guard = session.txn_begin_implicit();
     let handler_args = HandlerArgs::new(session, &stmt, sql)?;
+    print_malloc_stats("handle");
 
     check_ban_ddl_for_iceberg_engine_table(handler_args.session.clone(), &stmt)?;
 

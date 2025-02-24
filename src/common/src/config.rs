@@ -630,6 +630,14 @@ pub struct BatchConfig {
     /// Enable the spill out to disk feature for batch queries.
     #[serde(default = "default::batch::enable_spill")]
     pub enable_spill: bool,
+
+    /// Total maximum memory allowed for running message in the frontend.
+    #[serde(default = "default::batch::frontend_max_running_message_bytes")]
+    pub frontend_max_running_message_bytes: u64,
+
+    /// Messages under this threshold will not be throttled for memory constraints.
+    #[serde(default = "default::batch::frontend_throttling_filter_bytes")]
+    pub frontend_throttling_filter_bytes: u64,
 }
 
 /// The section `[streaming]` in `risingwave.toml`.
@@ -2197,6 +2205,14 @@ pub mod default {
             .into_iter()
             .map(str::to_string)
             .collect()
+        }
+
+        pub fn frontend_max_running_message_bytes() -> u64 {
+            1 * 1024 * 1024 * 1024
+        }
+
+        pub fn frontend_throttling_filter_bytes() -> u64 {
+            1 * 1024 * 1024
         }
     }
 

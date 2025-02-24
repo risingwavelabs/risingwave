@@ -18,6 +18,7 @@ use std::time::Instant;
 
 use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
+use pgwire::pg_protocol::print_malloc_stats;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Format;
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
@@ -56,14 +57,18 @@ pub async fn handle_query(
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
     let plan_fragmenter_result = {
+        print_malloc_stats(">plan");
         let context = OptimizerContext::from_handler_args(handler_args);
         let plan_result = gen_batch_plan_by_statement(&session, context.into(), stmt)?;
         // Time zone is used by Hummock time travel query.
-        risingwave_expr::expr_context::TIME_ZONE::sync_scope(
+        let ret = risingwave_expr::expr_context::TIME_ZONE::sync_scope(
             session.config().timezone().to_owned(),
             || gen_batch_plan_fragmenter(&session, plan_result),
-        )?
+        )?;
+        print_malloc_stats("<plan");
+        ret
     };
+    print_malloc_stats("handle_query");
     execute(session, plan_fragmenter_result, formats).await
 }
 
@@ -462,6 +467,7 @@ pub async fn create_stream(
             ))
         }
     };
+    print_malloc_stats("create_stream");
 
     Ok((row_stream, pg_descs))
 }
@@ -479,6 +485,7 @@ async fn execute(
     let query_start_time = Instant::now();
     let (row_stream, pg_descs) =
         create_stream(session.clone(), plan_fragmenter_result, formats).await?;
+    print_malloc_stats("execute");
 
     // We need to do some post work after the query is finished and before the `Complete` response
     // it sent. This is achieved by the `callback` in `PgResponse`.
@@ -579,6 +586,7 @@ pub async fn local_execute(
         session,
         timeout,
     );
+    print_malloc_stats("local_execute");
 
     Ok(execution.stream_rows())
 }

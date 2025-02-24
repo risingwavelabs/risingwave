@@ -28,6 +28,7 @@ use pgwire::error::{PsqlError, PsqlResult};
 use pgwire::net::{Address, AddressRef};
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_message::TransactionStatus;
+use pgwire::pg_protocol::print_malloc_stats;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::pg_server::{
     BoxedError, ExecContext, ExecContextGuard, Session, SessionId, SessionManager,
@@ -1523,6 +1524,7 @@ impl Session for SessionImpl {
         let sql: Arc<str> = Arc::from(sql_str);
         // The handle can be slow. Release potential large String early.
         drop(string);
+        print_malloc_stats("run_one_query");
         let rsp = handle(self, stmt, sql, vec![format]).await?;
         Ok(rsp)
     }

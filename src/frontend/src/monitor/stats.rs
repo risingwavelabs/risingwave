@@ -35,6 +35,10 @@ pub struct FrontendMetrics {
     pub latency_local_execution: Histogram,
     pub active_sessions: IntGauge,
     pub batch_total_mem: TrAdderGauge,
+    pub jemalloc_allocated_bytes: IntGauge,
+    pub jemalloc_active_bytes: IntGauge,
+    pub jemalloc_resident_bytes: IntGauge,
+    pub jemalloc_metadata_bytes: IntGauge,
 }
 
 pub static GLOBAL_FRONTEND_METRICS: LazyLock<FrontendMetrics> =
@@ -42,6 +46,34 @@ pub static GLOBAL_FRONTEND_METRICS: LazyLock<FrontendMetrics> =
 
 impl FrontendMetrics {
     fn new(registry: &Registry) -> Self {
+        let jemalloc_allocated_bytes = register_int_gauge_with_registry!(
+            "jemalloc_allocated_bytes",
+            "The allocated memory jemalloc, got from jemalloc_ctl",
+            registry
+        )
+        .unwrap();
+
+        let jemalloc_active_bytes = register_int_gauge_with_registry!(
+            "jemalloc_active_bytes",
+            "The active memory jemalloc, got from jemalloc_ctl",
+            registry
+        )
+        .unwrap();
+
+        let jemalloc_resident_bytes = register_int_gauge_with_registry!(
+            "jemalloc_resident_bytes",
+            "The active memory jemalloc, got from jemalloc_ctl",
+            registry
+        )
+        .unwrap();
+
+        let jemalloc_metadata_bytes = register_int_gauge_with_registry!(
+            "jemalloc_metadata_bytes",
+            "The active memory jemalloc, got from jemalloc_ctl",
+            registry
+        )
+        .unwrap();
+
         let query_counter_local_execution = register_int_counter_with_registry!(
             "frontend_query_counter_local_execution",
             "Total query number of local execution mode",
@@ -78,6 +110,10 @@ impl FrontendMetrics {
             latency_local_execution,
             active_sessions,
             batch_total_mem,
+            jemalloc_allocated_bytes,
+            jemalloc_active_bytes,
+            jemalloc_resident_bytes,
+            jemalloc_metadata_bytes,
         }
     }
 
