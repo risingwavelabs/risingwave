@@ -508,14 +508,10 @@ mod test {
             Field {
                 data_type: DataType::Int32,
                 name: "id".to_owned(),
-                sub_fields: vec![],
-                type_name: "string".to_owned(),
             },
             Field {
                 data_type: DataType::Varchar,
                 name: "name".to_owned(),
-                sub_fields: vec![],
-                type_name: "string".to_owned(),
             },
         ]);
 
@@ -581,14 +577,10 @@ mod test {
             Field {
                 data_type: DataType::Int32,
                 name: "id".to_owned(),
-                sub_fields: vec![],
-                type_name: "string".to_owned(),
             },
             Field {
                 data_type: DataType::Varchar,
                 name: "name".to_owned(),
-                sub_fields: vec![],
-                type_name: "string".to_owned(),
             },
         ]);
 

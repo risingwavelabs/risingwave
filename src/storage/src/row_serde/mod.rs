@@ -95,8 +95,6 @@ mod test {
                             data_type: Int64,
                             column_id: #2,
                             name: "",
-                            field_descs: [],
-                            type_name: "",
                             generated_or_default_column: None,
                             description: None,
                             additional_column: AdditionalColumn {
@@ -109,8 +107,6 @@ mod test {
                             data_type: Int16,
                             column_id: #3,
                             name: "",
-                            field_descs: [],
-                            type_name: "",
                             generated_or_default_column: None,
                             description: None,
                             additional_column: AdditionalColumn {
@@ -143,8 +139,6 @@ mod test {
                             data_type: Int64,
                             column_id: #2,
                             name: "",
-                            field_descs: [],
-                            type_name: "",
                             generated_or_default_column: None,
                             description: None,
                             additional_column: AdditionalColumn {
@@ -157,8 +151,6 @@ mod test {
                             data_type: Varchar,
                             column_id: #1,
                             name: "",
-                            field_descs: [],
-                            type_name: "",
                             generated_or_default_column: None,
                             description: None,
                             additional_column: AdditionalColumn {

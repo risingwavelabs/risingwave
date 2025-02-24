@@ -50,17 +50,20 @@ fn read_rw_sinks_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSink>> {
     let catalog_reader = reader.catalog_reader.read_guard();
     let schemas = catalog_reader.iter_schemas(&reader.auth_context.database)?;
     let user_reader = reader.user_info_reader.read_guard();
+    let current_user = user_reader
+        .get_user_by_name(&reader.auth_context.user_name)
+        .expect("user not found");
     let users = user_reader.get_all_users();
     let username_map = user_reader.get_user_name_map();
 
-    schemas
+    Ok(schemas
         .flat_map(|schema| {
-            schema.iter_sink().map(|sink| {
+            schema.iter_sink_with_acl(current_user).map(|sink| {
                 let connector_props = serialize_props_with_secret(
                     &catalog_reader,
                     &reader.auth_context.database,
                     WithOptionsSecResolved::new(sink.properties.clone(), sink.secret_refs.clone()),
-                )?
+                )
                 .into();
                 let format_encode_options = sink
                     .format_desc
@@ -75,9 +78,9 @@ fn read_rw_sinks_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSink>> {
                             ),
                         )
                     })
-                    .unwrap_or_else(|| Ok(jsonbb::Value::null()))?
+                    .unwrap_or_else(jsonbb::Value::null)
                     .into();
-                Ok(RwSink {
+                RwSink {
                     id: sink.id.sink_id as i32,
                     name: sink.name.clone(),
                     schema_id: schema.id() as i32,
@@ -103,10 +106,10 @@ fn read_rw_sinks_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSink>> {
                     created_at_cluster_version: sink.created_at_cluster_version.clone(),
                     connector_props,
                     format_encode_options,
-                })
+                }
             })
         })
-        .collect::<Result<Vec<_>>>()
+        .collect())
 }
 
 #[system_catalog(

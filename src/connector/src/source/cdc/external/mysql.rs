@@ -24,7 +24,7 @@ use mysql_async::prelude::*;
 use mysql_common::params::Params;
 use mysql_common::value::Value;
 use risingwave_common::bail;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, OFFSET_COLUMN_NAME};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, CDC_OFFSET_COLUMN_NAME};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Decimal, ScalarImpl, F32};
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -410,7 +410,7 @@ impl MySqlExternalTableReader {
         let field_names = rw_schema
             .fields
             .iter()
-            .filter(|f| f.name != OFFSET_COLUMN_NAME)
+            .filter(|f| f.name != CDC_OFFSET_COLUMN_NAME)
             .map(|f| Self::quote_column(f.name.as_str()))
             .join(",");
 

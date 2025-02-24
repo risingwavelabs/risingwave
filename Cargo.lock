@@ -777,8 +777,7 @@ dependencies = [
 [[package]]
 name = "arrow-udf-python"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c0b80da061a53aac237e711fddb01709002ba2e006f9fd4c72a430d4938dd921"
+source = "git+https://github.com/arrow-udf/arrow-udf?rev=0b185be96a37bdcd644fe40d1f0ccf0b7972a99a#0b185be96a37bdcd644fe40d1f0ccf0b7972a99a"
 dependencies = [
  "anyhow",
  "arrow-array 53.2.0",
@@ -1171,11 +1170,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "aws-lc-fips-sys"
+version = "0.13.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "33e4aa2478e3ff7e6c2624558abfdad004a57ba975974b4769a4c0d12831f143"
+dependencies = [
+ "bindgen 0.69.5",
+ "cc",
+ "cmake",
+ "dunce",
+ "fs_extra",
+ "paste",
+ "regex",
+]
+
+[[package]]
 name = "aws-lc-rs"
 version = "1.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ea835662a0af02443aa1396d39be523bbf8f11ee6fad20329607c480bea48c3"
 dependencies = [
+ "aws-lc-fips-sys",
  "aws-lc-sys",
  "paste",
  "zeroize",
@@ -11055,6 +11070,7 @@ dependencies = [
  "prost-reflect",
  "prost-types 0.13.4",
  "protox",
+ "reqwest 0.12.4",
  "risingwave_common",
  "risingwave_pb",
  "rust_decimal",
@@ -11063,6 +11079,7 @@ dependencies = [
  "thiserror-ext",
  "time",
  "tracing",
+ "url",
  "workspace-hack",
 ]
 
@@ -13554,9 +13571,9 @@ dependencies = [
 
 [[package]]
 name = "sqllogictest"
-version = "0.26.3"
+version = "0.27.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2dba5b678841955201299013ad50dc34e4b75acf89d7cfbb0769a59910d9081b"
+checksum = "07a06aea5e52b0a63b9d8328b46ea2740cdab4cac13def8ef4f2e5288610f9ed"
 dependencies = [
  "async-trait",
  "educe",
@@ -13568,6 +13585,7 @@ dependencies = [
  "libtest-mimic",
  "md-5",
  "owo-colors",
+ "rand 0.8.5",
  "regex",
  "similar",
  "subst",
@@ -16390,6 +16408,7 @@ dependencies = [
 name = "workspace-config"
 version = "2.3.0-alpha"
 dependencies = [
+ "aws-lc-rs",
  "libz-sys",
  "log",
  "lzma-sys",
