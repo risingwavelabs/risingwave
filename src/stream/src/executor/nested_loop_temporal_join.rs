@@ -17,19 +17,19 @@ use std::sync::Arc;
 
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use risingwave_common::array::stream_chunk_builder::StreamChunkBuilder;
 use risingwave_common::array::StreamChunk;
+use risingwave_common::array::stream_chunk_builder::StreamChunkBuilder;
 use risingwave_common::bitmap::BitmapBuilder;
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::NonStrictExpression;
 use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
+use risingwave_storage::StateStore;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::BatchTable;
-use risingwave_storage::StateStore;
 
 use super::join::{JoinType, JoinTypePrimitive};
-use super::temporal_join::{align_input, apply_indices_map, phase1, InternalMessage};
+use super::temporal_join::{InternalMessage, align_input, apply_indices_map, phase1};
 use super::{Execute, ExecutorInfo, Message, StreamExecutorError};
 use crate::common::metrics::MetricsInfo;
 use crate::executor::join::builder::JoinStreamChunkBuilder;

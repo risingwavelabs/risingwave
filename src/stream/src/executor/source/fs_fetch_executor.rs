@@ -16,17 +16,17 @@ use std::marker::PhantomData;
 use std::ops::Bound;
 
 use either::Either;
-use futures::{stream, StreamExt, TryStreamExt};
+use futures::{StreamExt, TryStreamExt, stream};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::{ColumnId, TableId};
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::types::ScalarRef;
-use risingwave_connector::parser::parquet_parser::get_total_row_nums_for_parquet_file;
 use risingwave_connector::parser::EncodingProperties;
+use risingwave_connector::parser::parquet_parser::get_total_row_nums_for_parquet_file;
+use risingwave_connector::source::filesystem::OpendalFsSplit;
 use risingwave_connector::source::filesystem::opendal_source::{
     OpendalAzblob, OpendalGcs, OpendalPosixFs, OpendalS3, OpendalSource,
 };
-use risingwave_connector::source::filesystem::OpendalFsSplit;
 use risingwave_connector::source::reader::desc::SourceDesc;
 use risingwave_connector::source::{
     BoxSourceChunkStream, SourceContext, SourceCtrlOpts, SplitImpl, SplitMetaData,
@@ -35,8 +35,8 @@ use risingwave_storage::store::PrefetchOptions;
 use thiserror_ext::AsReport;
 
 use super::{
-    apply_rate_limit, get_split_offset_col_idx, get_split_offset_mapping_from_chunk,
-    prune_additional_cols, SourceStateTableHandler, StreamSourceCore,
+    SourceStateTableHandler, StreamSourceCore, apply_rate_limit, get_split_offset_col_idx,
+    get_split_offset_mapping_from_chunk, prune_additional_cols,
 };
 use crate::common::rate_limit::limited_chunk_size;
 use crate::executor::prelude::*;

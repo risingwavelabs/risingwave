@@ -16,8 +16,8 @@ use enum_as_inner::EnumAsInner;
 use parse_display::Display;
 use risingwave_common::catalog::FunctionId;
 use risingwave_common::types::DataType;
-use risingwave_pb::catalog::function::PbKind;
 use risingwave_pb::catalog::PbFunction;
+use risingwave_pb::catalog::function::PbKind;
 use risingwave_pb::expr::PbUserDefinedFunctionMetadata;
 
 use crate::catalog::OwnedByUserCatalog;

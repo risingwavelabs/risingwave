@@ -17,7 +17,7 @@ use std::sync::Arc;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
-use super::report::{start_telemetry_reporting, TelemetryInfoFetcher, TelemetryReportCreator};
+use super::report::{TelemetryInfoFetcher, TelemetryReportCreator, start_telemetry_reporting};
 
 pub struct TelemetryManager<F, I>
 where

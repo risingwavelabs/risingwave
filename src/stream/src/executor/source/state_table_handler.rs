@@ -27,7 +27,7 @@ use std::collections::HashSet;
 use std::ops::{Bound, Deref};
 use std::sync::Arc;
 
-use futures::{pin_mut, StreamExt};
+use futures::{StreamExt, pin_mut};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row};
@@ -37,12 +37,12 @@ use risingwave_common::{bail, row};
 use risingwave_connector::source::{SplitId, SplitImpl, SplitMetaData};
 use risingwave_hummock_sdk::key::next_key;
 use risingwave_pb::catalog::PbTable;
-use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
+use risingwave_storage::store::PrefetchOptions;
 
 use crate::common::table::state_table::{StateTable, StateTablePostCommit};
-use crate::executor::error::StreamExecutorError;
 use crate::executor::StreamExecutorResult;
+use crate::executor::error::StreamExecutorError;
 
 const COMPLETE_SPLIT_PREFIX: &str = "SsGLdzRDqBuKzMf9bDap";
 

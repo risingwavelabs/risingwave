@@ -1,7 +1,7 @@
 #![allow(clippy::enum_variant_names)]
 
-pub use sea_orm_migration::prelude::*;
 pub use sea_orm_migration::MigrationStatus;
+pub use sea_orm_migration::prelude::*;
 mod m20230908_072257_init;
 mod m20231008_020431_hummock;
 mod m20240304_074901_subscription;

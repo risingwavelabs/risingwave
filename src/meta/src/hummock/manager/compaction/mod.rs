@@ -47,13 +47,13 @@ use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::level::Levels;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::{
-    add_prost_table_stats_map, purge_prost_table_stats, PbTableStatsMap,
+    PbTableStatsMap, add_prost_table_stats_map, purge_prost_table_stats,
 };
 use risingwave_hummock_sdk::table_watermark::WatermarkSerdeType;
 use risingwave_hummock_sdk::version::{GroupDelta, IntraLevelDelta};
 use risingwave_hummock_sdk::{
-    compact_task_to_string, statistics_compact_task, CompactionGroupId, HummockCompactionTaskId,
-    HummockSstableObjectId, HummockVersionId,
+    CompactionGroupId, HummockCompactionTaskId, HummockSstableObjectId, HummockVersionId,
+    compact_task_to_string, statistics_compact_task,
 };
 use risingwave_pb::hummock::compact_task::{TaskStatus, TaskType};
 use risingwave_pb::hummock::subscribe_compaction_event_request::{
@@ -63,15 +63,15 @@ use risingwave_pb::hummock::subscribe_compaction_event_response::{
     Event as ResponseEvent, PullTaskAck,
 };
 use risingwave_pb::hummock::{
-    compact_task, CompactTaskAssignment, CompactionConfig, PbCompactStatus,
-    PbCompactTaskAssignment, SubscribeCompactionEventRequest, TableOption, TableSchema,
+    CompactTaskAssignment, CompactionConfig, PbCompactStatus, PbCompactTaskAssignment,
+    SubscribeCompactionEventRequest, TableOption, TableSchema, compact_task,
 };
 use rw_futures_util::pending_on_none;
 use thiserror_ext::AsReport;
-use tokio::sync::mpsc::error::SendError;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
-use tokio::sync::oneshot::{Receiver as OneShotReceiver, Sender};
 use tokio::sync::RwLockWriteGuard;
+use tokio::sync::mpsc::error::SendError;
+use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
+use tokio::sync::oneshot::{Receiver as OneShotReceiver, Sender};
 use tokio::task::JoinHandle;
 use tonic::Streaming;
 use tracing::warn;
@@ -94,7 +94,7 @@ use crate::hummock::metrics_utils::{
 };
 use crate::hummock::model::CompactionGroup;
 use crate::hummock::sequence::next_compaction_task_id;
-use crate::hummock::{commit_multi_var, start_measure_real_process_timer, HummockManager};
+use crate::hummock::{HummockManager, commit_multi_var, start_measure_real_process_timer};
 use crate::manager::META_NODE_ID;
 use crate::model::BTreeMapTransaction;
 
@@ -989,15 +989,15 @@ impl HummockManager {
                 .observe(compact_task_statistics.total_file_count as _);
 
             tracing::trace!(
-                    "For compaction group {}: pick up {} {} sub_level in level {} to compact to target {}. cost time: {:?} compact_task_statistics {:?}",
-                    compaction_group_id,
-                    level_count,
-                    compact_task.input_ssts[0].level_type.as_str_name(),
-                    compact_task.input_ssts[0].level_idx,
-                    compact_task.target_level,
-                    start_time.elapsed(),
-                    compact_task_statistics
-                );
+                "For compaction group {}: pick up {} {} sub_level in level {} to compact to target {}. cost time: {:?} compact_task_statistics {:?}",
+                compaction_group_id,
+                level_count,
+                compact_task.input_ssts[0].level_type.as_str_name(),
+                compact_task.input_ssts[0].level_idx,
+                compact_task.target_level,
+                start_time.elapsed(),
+                compact_task_statistics
+            );
         }
 
         #[cfg(test)]

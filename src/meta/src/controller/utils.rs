@@ -14,7 +14,7 @@
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash::{ActorMapping, WorkerSlotId, WorkerSlotMapping};
@@ -26,11 +26,10 @@ use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::*;
 use risingwave_meta_model::table::TableType;
 use risingwave_meta_model::{
-    actor, actor_dispatcher, connection, database, fragment, function, index, object,
-    object_dependency, schema, secret, sink, source, streaming_job, subscription, table, user,
-    user_privilege, view, ActorId, ConnectorSplits, DataTypeArray, DatabaseId, FragmentId,
-    I32Array, ObjectId, PrivilegeId, SchemaId, SourceId, StreamNode, TableId, UserId, VnodeBitmap,
-    WorkerId,
+    ActorId, ConnectorSplits, DataTypeArray, DatabaseId, FragmentId, I32Array, ObjectId,
+    PrivilegeId, SchemaId, SourceId, StreamNode, TableId, UserId, VnodeBitmap, WorkerId, actor,
+    actor_dispatcher, connection, database, fragment, function, index, object, object_dependency,
+    schema, secret, sink, source, streaming_job, subscription, table, user, user_privilege, view,
 };
 use risingwave_meta_model_migration::WithQuery;
 use risingwave_pb::catalog::{

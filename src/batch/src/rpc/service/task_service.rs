@@ -18,8 +18,8 @@ use risingwave_common::util::tracing::TracingContext;
 use risingwave_pb::batch_plan::TaskOutputId;
 use risingwave_pb::task_service::task_service_server::TaskService;
 use risingwave_pb::task_service::{
-    fast_insert_response, CancelTaskRequest, CancelTaskResponse, CreateTaskRequest, ExecuteRequest,
-    FastInsertRequest, FastInsertResponse, GetDataResponse, TaskInfoResponse,
+    CancelTaskRequest, CancelTaskResponse, CreateTaskRequest, ExecuteRequest, FastInsertRequest,
+    FastInsertResponse, GetDataResponse, TaskInfoResponse, fast_insert_response,
 };
 use risingwave_storage::dispatch_state_store;
 use thiserror_ext::AsReport;
@@ -171,8 +171,7 @@ impl BatchServiceImpl {
         let context = ComputeNodeContext::create(env.clone());
         trace!(
             "local execute request: plan:{:?} with task id:{:?}",
-            plan,
-            task_id
+            plan, task_id
         );
         let task = BatchTaskExecution::new(&task_id, plan, context, epoch, mgr.runtime())?;
         let task = Arc::new(task);
@@ -226,8 +225,8 @@ impl BatchServiceImpl {
             dispatch_state_store!(self.env.state_store(), store, {
                 use risingwave_common::catalog::TableId;
                 use risingwave_hummock_sdk::HummockReadEpoch;
-                use risingwave_storage::store::TryWaitEpochOptions;
                 use risingwave_storage::StateStore;
+                use risingwave_storage::store::TryWaitEpochOptions;
 
                 store
                     .try_wait_epoch(

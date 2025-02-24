@@ -21,7 +21,7 @@ use std::num::NonZeroU64;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use async_trait::async_trait;
 use iceberg::arrow::{arrow_schema_to_schema, schema_to_arrow_schema};
 use iceberg::spec::{
@@ -34,14 +34,14 @@ use iceberg::writer::base_writer::equality_delete_writer::{
     EqualityDeleteFileWriterBuilder, EqualityDeleteWriterConfig,
 };
 use iceberg::writer::base_writer::sort_position_delete_writer::{
-    SortPositionDeleteWriterBuilder, POSITION_DELETE_SCHEMA,
+    POSITION_DELETE_SCHEMA, SortPositionDeleteWriterBuilder,
 };
+use iceberg::writer::file_writer::ParquetWriterBuilder;
 use iceberg::writer::file_writer::location_generator::{
     DefaultFileNameGenerator, DefaultLocationGenerator,
 };
-use iceberg::writer::file_writer::ParquetWriterBuilder;
 use iceberg::writer::function_writer::equality_delta_writer::{
-    EqualityDeltaWriterBuilder, DELETE_OP, INSERT_OP,
+    DELETE_OP, EqualityDeltaWriterBuilder, INSERT_OP,
 };
 use iceberg::writer::function_writer::fanout_partition_writer::FanoutPartitionWriterBuilder;
 use iceberg::writer::{IcebergWriter, IcebergWriterBuilder};
@@ -63,12 +63,12 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntCounter};
 use risingwave_common_estimate_size::EstimateSize;
+use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
-use risingwave_pb::connector_service::SinkMetadata;
 use serde_derive::Deserialize;
 use serde_json::from_value;
-use serde_with::{serde_as, DisplayFromStr};
+use serde_with::{DisplayFromStr, serde_as};
 use thiserror_ext::AsReport;
 use tokio::sync::{mpsc, oneshot};
 use tracing::warn;
@@ -77,11 +77,11 @@ use uuid::Uuid;
 use with_options::WithOptions;
 
 use super::decouple_checkpoint_log_sink::{
-    default_commit_checkpoint_interval, DecoupleCheckpointLogSinkerOf,
+    DecoupleCheckpointLogSinkerOf, default_commit_checkpoint_interval,
 };
 use super::{
-    Sink, SinkError, SinkWriterMetrics, SinkWriterParam, GLOBAL_SINK_METRICS,
-    SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
+    GLOBAL_SINK_METRICS, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, Sink,
+    SinkError, SinkWriterMetrics, SinkWriterParam,
 };
 use crate::connector_common::IcebergCommon;
 use crate::sink::coordinate::CoordinatedSinkWriter;
@@ -328,7 +328,10 @@ impl IcebergSink {
                     )
                     .unwrap();
                     if !re.is_match(partition_field) {
-                        bail!(format!("Invalid partition fields: {}\nHINT: Supported formats are column, transform(column), transform(n,column), transform(n, column)", partition_field))
+                        bail!(format!(
+                            "Invalid partition fields: {}\nHINT: Supported formats are column, transform(column), transform(n,column), transform(n, column)",
+                            partition_field
+                        ))
                     }
                     let caps = re.captures_iter(partition_field);
                     for (i, mat) in caps.enumerate() {
@@ -1470,9 +1473,12 @@ fn check_compatibility(
             (left, right) => left.equals_datatype(right),
         };
         if !compatible {
-            bail!("field {}'s type is incompatible\nRisingWave converted data type: {}\niceberg's data type: {}",
-                    arrow_field.name(), converted_arrow_data_type, arrow_field.data_type()
-                );
+            bail!(
+                "field {}'s type is incompatible\nRisingWave converted data type: {}\niceberg's data type: {}",
+                arrow_field.name(),
+                converted_arrow_data_type,
+                arrow_field.data_type()
+            );
         }
     }
     Ok(true)

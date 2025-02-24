@@ -14,9 +14,9 @@
 
 mod schema;
 
+use apache_avro::Schema;
 use apache_avro::schema::{DecimalSchema, NamesRef, UnionSchema};
 use apache_avro::types::{Value, ValueKind};
-use apache_avro::Schema;
 use chrono::Datelike;
 use itertools::Itertools;
 use num_bigint::BigInt;
@@ -26,9 +26,9 @@ use risingwave_common::types::{
     Timestamptz, ToOwnedDatum,
 };
 
-pub use self::schema::{avro_schema_to_column_descs, MapHandling, ResolvedAvroSchema};
+pub use self::schema::{MapHandling, ResolvedAvroSchema, avro_schema_to_column_descs};
 use super::utils::scaled_bigint_to_rust_decimal;
-use super::{bail_uncategorized, uncategorized, Access, AccessError, AccessResult};
+use super::{Access, AccessError, AccessResult, bail_uncategorized, uncategorized};
 use crate::decoder::avro::schema::avro_schema_to_struct_field_name;
 
 #[derive(Clone)]
@@ -543,7 +543,7 @@ pub(crate) fn avro_to_jsonb(avro: &Value, builder: &mut jsonbb::Builder) -> Acce
 mod tests {
     use std::str::FromStr;
 
-    use apache_avro::{from_avro_datum, Decimal as AvroDecimal};
+    use apache_avro::{Decimal as AvroDecimal, from_avro_datum};
     use expect_test::expect;
     use risingwave_common::types::{Datum, Decimal};
 

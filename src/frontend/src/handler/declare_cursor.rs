@@ -22,16 +22,16 @@ use risingwave_sqlparser::ast::{
     DeclareCursorStatement, Ident, ObjectName, Query, Since, Statement,
 };
 
+use super::RwPgResponse;
 use super::query::{
-    gen_batch_plan_by_statement, gen_batch_plan_fragmenter, BatchPlanFragmenterResult,
+    BatchPlanFragmenterResult, gen_batch_plan_by_statement, gen_batch_plan_fragmenter,
 };
 use super::util::convert_unix_millis_to_logstore_u64;
-use super::RwPgResponse;
 use crate::error::{ErrorCode, Result};
-use crate::handler::query::{distribute_execute, local_execute};
 use crate::handler::HandlerArgs;
-use crate::session::cursor_manager::CursorDataChunkStream;
+use crate::handler::query::{distribute_execute, local_execute};
 use crate::session::SessionImpl;
+use crate::session::cursor_manager::CursorDataChunkStream;
 use crate::{Binder, OptimizerContext};
 
 pub async fn handle_declare_cursor(

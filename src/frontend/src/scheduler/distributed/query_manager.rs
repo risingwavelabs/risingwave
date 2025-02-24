@@ -30,10 +30,10 @@ use risingwave_pb::common::HostAddress;
 use risingwave_rpc_client::ComputeClientPoolRef;
 use tokio::sync::OwnedSemaphorePermit;
 
-use super::stats::DistributedQueryMetrics;
 use super::QueryExecution;
-use crate::catalog::catalog_service::CatalogReader;
+use super::stats::DistributedQueryMetrics;
 use crate::catalog::TableId;
+use crate::catalog::catalog_service::CatalogReader;
 use crate::scheduler::plan_fragmenter::{Query, QueryId};
 use crate::scheduler::{ExecutionContextRef, SchedulerResult};
 

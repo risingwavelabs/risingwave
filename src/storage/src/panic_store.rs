@@ -18,8 +18,8 @@ use std::sync::Arc;
 use bytes::Bytes;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash::VirtualNode;
-use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
 
 use crate::error::StorageResult;
 use crate::store::*;

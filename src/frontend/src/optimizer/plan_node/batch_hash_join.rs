@@ -13,15 +13,15 @@
 // limitations under the License.
 
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::HashJoinNode;
+use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::plan_common::{AsOfJoinDesc, JoinType};
 
 use super::batch::prelude::*;
-use super::utils::{childless_record, Distill};
+use super::utils::{Distill, childless_record};
 use super::{
-    generic, EqJoinPredicate, ExprRewritable, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary,
-    ToBatchPb, ToDistributedBatch,
+    EqJoinPredicate, ExprRewritable, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, ToBatchPb,
+    ToDistributedBatch, generic,
 };
 use crate::error::Result;
 use crate::expr::{Expr, ExprRewriter, ExprVisitor};

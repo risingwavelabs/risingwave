@@ -17,9 +17,9 @@ use std::fmt::Write;
 use chrono::LocalResult;
 use num_traits::CheckedNeg;
 use risingwave_common::types::{
-    write_date_time_tz, CheckedAdd, Interval, IntoOrdered, Timestamp, Timestamptz, F64,
+    CheckedAdd, F64, Interval, IntoOrdered, Timestamp, Timestamptz, write_date_time_tz,
 };
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_expr::{ExprError, Result, function};
 use thiserror_ext::AsReport;
 
 /// Just a wrapper to reuse the `map_err` logic.

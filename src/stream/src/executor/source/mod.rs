@@ -23,8 +23,8 @@ use risingwave_common::row::Row;
 use risingwave_common_rate_limit::RateLimiter;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::source::{BoxSourceChunkStream, SourceColumnDesc, SplitId};
-use risingwave_pb::plan_common::additional_column::ColumnType;
 use risingwave_pb::plan_common::AdditionalColumn;
+use risingwave_pb::plan_common::additional_column::ColumnType;
 pub use state_table_handler::*;
 
 mod executor_core;
@@ -50,7 +50,7 @@ pub(crate) use source_backfill_state_table::BackfillStateTableHandler;
 pub mod state_table_handler;
 use futures_async_stream::try_stream;
 use tokio::sync::mpsc::UnboundedReceiver;
-use tokio_retry::strategy::{jitter, ExponentialBackoff};
+use tokio_retry::strategy::{ExponentialBackoff, jitter};
 
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{Barrier, Message};

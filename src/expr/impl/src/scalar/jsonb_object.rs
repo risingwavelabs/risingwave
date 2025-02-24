@@ -15,7 +15,7 @@
 use jsonbb::Builder;
 use risingwave_common::types::{JsonbVal, ListRef};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_expr::{ExprError, Result, function};
 
 /// Builds a JSON object out of a text array.
 ///
@@ -60,7 +60,7 @@ fn jsonb_object_1d(array: ListRef<'_>) -> Result<JsonbVal> {
                 return Err(ExprError::InvalidParam {
                     name: "array",
                     reason: "null value not allowed for object key".into(),
-                })
+                });
             }
         }
         match value {
@@ -118,7 +118,7 @@ fn jsonb_object_2d(array: ListRef<'_>) -> Result<JsonbVal> {
                 return Err(ExprError::InvalidParam {
                     name: "array",
                     reason: "null value not allowed for object key".into(),
-                })
+                });
             }
         }
         match kv.get(1).unwrap() {
@@ -165,7 +165,7 @@ fn jsonb_object_kv(keys: ListRef<'_>, values: ListRef<'_>) -> Result<JsonbVal> {
                 return Err(ExprError::InvalidParam {
                     name: "keys",
                     reason: "null value not allowed for object key".into(),
-                })
+                });
             }
         }
         match value {

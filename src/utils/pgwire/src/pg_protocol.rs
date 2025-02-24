@@ -22,8 +22,8 @@ use std::time::{Duration, Instant};
 use std::{io, str};
 
 use bytes::{Bytes, BytesMut};
-use futures::stream::StreamExt;
 use futures::FutureExt;
+use futures::stream::StreamExt;
 use itertools::Itertools;
 use openssl::ssl::{SslAcceptor, SslContext, SslContextRef, SslMethod};
 use risingwave_common::types::DataType;
@@ -1321,6 +1321,9 @@ mod tests {
             v4 = '',
         ) FORMAT plain ENCODE json (a='1',b='2')
         ";
-        assert_eq!(redact_sql(sql, keywords), "CREATE SOURCE temp (k BIGINT, v CHARACTER VARYING) WITH (connector = 'datagen', v1 = 123, v2 = [REDACTED], v3 = false, v4 = [REDACTED]) FORMAT PLAIN ENCODE JSON (a = '1', b = [REDACTED])");
+        assert_eq!(
+            redact_sql(sql, keywords),
+            "CREATE SOURCE temp (k BIGINT, v CHARACTER VARYING) WITH (connector = 'datagen', v1 = 123, v2 = [REDACTED], v3 = false, v4 = [REDACTED]) FORMAT PLAIN ENCODE JSON (a = '1', b = [REDACTED])"
+        );
     }
 }

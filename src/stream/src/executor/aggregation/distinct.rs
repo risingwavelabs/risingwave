@@ -291,7 +291,7 @@ impl<S: StateStore> DistinctDeduplicater<S> {
 mod tests {
     use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
     use risingwave_common::test_prelude::StreamChunkTestExt;
-    use risingwave_common::util::epoch::{test_epoch, EpochPair};
+    use risingwave_common::util::epoch::{EpochPair, test_epoch};
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
 

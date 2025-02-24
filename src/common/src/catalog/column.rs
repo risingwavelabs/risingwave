@@ -16,8 +16,8 @@ use std::borrow::Cow;
 
 use itertools::Itertools;
 use risingwave_common::types::Datum;
-use risingwave_pb::expr::expr_node::{RexNode, Type as ExprType};
 use risingwave_pb::expr::ExprNode;
+use risingwave_pb::expr::expr_node::{RexNode, Type as ExprType};
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::{
     AdditionalColumn, ColumnDescVersion, DefaultColumnDesc, PbColumnCatalog, PbColumnDesc,

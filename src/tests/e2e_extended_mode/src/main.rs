@@ -15,7 +15,7 @@
 use std::process::exit;
 
 use clap::Parser;
-use risingwave_e2e_extended_mode_test::{run_test_suit, Opts};
+use risingwave_e2e_extended_mode_test::{Opts, run_test_suit};
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 5)]
 async fn main() {

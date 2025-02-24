@@ -15,7 +15,7 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::time::Duration;
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use futures::future::try_join_all;
 use itertools::Itertools;
 use risingwave_common::bail;
@@ -39,7 +39,7 @@ use crate::stream::{
     JobParallelismTarget, JobReschedulePolicy, JobRescheduleTarget, JobResourceGroupTarget,
     RescheduleOptions, SourceChange,
 };
-use crate::{model, MetaResult};
+use crate::{MetaResult, model};
 
 impl GlobalBarrierWorkerContextImpl {
     /// Clean catalogs for creating streaming jobs that are in foreground mode or table fragments not persisted.

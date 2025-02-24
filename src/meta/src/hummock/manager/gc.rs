@@ -20,12 +20,12 @@ use std::time::{Duration, SystemTime};
 
 use chrono::DateTime;
 use futures::future::try_join_all;
-use futures::{future, StreamExt, TryStreamExt};
+use futures::{StreamExt, TryStreamExt, future};
 use itertools::Itertools;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::{
-    get_object_id_from_path, get_sst_data_path, HummockSstableObjectId, OBJECT_SUFFIX,
+    HummockSstableObjectId, OBJECT_SUFFIX, get_object_id_from_path, get_sst_data_path,
 };
 use risingwave_meta_model::hummock_sequence::HUMMOCK_NOW;
 use risingwave_meta_model::{hummock_gc_history, hummock_sequence, hummock_version_delta};
@@ -35,11 +35,11 @@ use risingwave_pb::stream_service::GetMinUncommittedSstIdRequest;
 use risingwave_rpc_client::StreamClientPool;
 use sea_orm::{ActiveValue, ColumnTrait, EntityTrait, QueryFilter, Set};
 
-use crate::backup_restore::BackupManagerRef;
-use crate::hummock::error::{Error, Result};
-use crate::hummock::HummockManager;
-use crate::manager::MetadataManager;
 use crate::MetaResult;
+use crate::backup_restore::BackupManagerRef;
+use crate::hummock::HummockManager;
+use crate::hummock::error::{Error, Result};
+use crate::manager::MetadataManager;
 
 pub(crate) struct GcManager {
     store: ObjectStoreRef,
@@ -588,8 +588,8 @@ mod tests {
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_rpc_client::HummockMetaClient;
 
-    use crate::hummock::test_utils::{add_test_tables, setup_compute_env};
     use crate::hummock::MockHummockMetaClient;
+    use crate::hummock::test_utils::{add_test_tables, setup_compute_env};
 
     #[tokio::test]
     async fn test_full_gc() {

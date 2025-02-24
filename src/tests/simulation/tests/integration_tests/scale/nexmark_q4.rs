@@ -19,7 +19,7 @@ use itertools::Itertools;
 use risingwave_common::hash::WorkerSlotId;
 use risingwave_simulation::cluster::{Configuration, KillOpts};
 use risingwave_simulation::ctl_ext::predicate::{
-    identity_contains, upstream_fragment_count, BoxedPredicate,
+    BoxedPredicate, identity_contains, upstream_fragment_count,
 };
 use risingwave_simulation::nexmark::queries::q4::*;
 use risingwave_simulation::nexmark::{NexmarkCluster, THROUGHPUT};

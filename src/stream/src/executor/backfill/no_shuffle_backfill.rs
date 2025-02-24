@@ -26,8 +26,8 @@ use risingwave_storage::table::batch_table::BatchTable;
 
 use crate::executor::backfill::utils;
 use crate::executor::backfill::utils::{
-    compute_bounds, construct_initial_finished_state, create_builder, get_new_pos, mapping_chunk,
-    mapping_message, mark_chunk, METADATA_STATE_LEN,
+    METADATA_STATE_LEN, compute_bounds, construct_initial_finished_state, create_builder,
+    get_new_pos, mapping_chunk, mapping_message, mark_chunk,
 };
 use crate::executor::prelude::*;
 use crate::task::CreateMviewProgressReporter;
@@ -226,14 +226,16 @@ where
                     let left_upstream = upstream.by_ref().map(Either::Left);
                     let paused =
                         paused || matches!(self.rate_limiter.rate_limit(), RateLimit::Pause);
-                    let right_snapshot = pin!(Self::make_snapshot_stream(
-                        &self.upstream_table,
-                        snapshot_read_epoch,
-                        current_pos.clone(),
-                        paused,
-                        &self.rate_limiter,
-                    )
-                    .map(Either::Right));
+                    let right_snapshot = pin!(
+                        Self::make_snapshot_stream(
+                            &self.upstream_table,
+                            snapshot_read_epoch,
+                            current_pos.clone(),
+                            paused,
+                            &self.rate_limiter,
+                        )
+                        .map(Either::Right)
+                    );
 
                     // Prefer to select upstream, so we can stop snapshot stream as soon as the
                     // barrier comes.

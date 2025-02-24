@@ -21,8 +21,8 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::PbExchangeSource;
+use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::plan_common::Field as NodeField;
 use risingwave_rpc_client::ComputeClientPoolRef;
 use rw_futures_util::select_all;
@@ -98,8 +98,7 @@ impl CreateSource for DefaultCreateSource {
         } else {
             trace!(
                 "Exchange remotely from {} [{:?}]",
-                &peer_addr,
-                task_output_id,
+                &peer_addr, task_output_id,
             );
 
             let mask_failed_serving_worker = || {

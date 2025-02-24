@@ -18,14 +18,14 @@ use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use super::expr_visitable::ExprVisitable;
 use super::utils::impl_distill_by_unit;
 use super::{
-    generic, ColPrunable, ColumnPruningContext, ExprRewritable, Logical, LogicalProject, PlanBase,
+    ColPrunable, ColumnPruningContext, ExprRewritable, Logical, LogicalProject, PlanBase,
     PredicatePushdown, PredicatePushdownContext, RewriteStreamContext, ToBatch, ToStream,
-    ToStreamContext,
+    ToStreamContext, generic,
 };
+use crate::PlanRef;
 use crate::binder::ShareId;
 use crate::error::Result;
 use crate::utils::Condition;
-use crate::PlanRef;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalCteRef {

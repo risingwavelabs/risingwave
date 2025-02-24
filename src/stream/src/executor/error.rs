@@ -24,8 +24,8 @@ use risingwave_rpc_client::error::RpcError;
 use risingwave_storage::error::StorageError;
 use strum_macros::AsRefStr;
 
-use super::exchange::error::ExchangeChannelClosed;
 use super::Barrier;
+use super::exchange::error::ExchangeChannelClosed;
 
 /// A specialized Result type for streaming executors.
 pub type StreamExecutorResult<T> = std::result::Result<T, StreamExecutorError>;

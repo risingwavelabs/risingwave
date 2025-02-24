@@ -22,8 +22,8 @@ use super::{
     SourceStreamChunkRowWriter, SpecificParserConfig,
 };
 use crate::error::ConnectorResult;
-use crate::parser::unified::kv_event::KvEvent;
 use crate::parser::ParserFormat;
+use crate::parser::unified::kv_event::KvEvent;
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
 #[derive(Debug)]

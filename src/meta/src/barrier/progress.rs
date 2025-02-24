@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::mem::take;
 
 use risingwave_common::catalog::TableId;
@@ -22,16 +22,16 @@ use risingwave_meta_model::ObjectId;
 use risingwave_pb::catalog::CreateType;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
-use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 use risingwave_pb::stream_service::PbBarrierCompleteResponse;
+use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 
+use crate::MetaResult;
 use crate::barrier::info::BarrierInfo;
 use crate::barrier::{
     Command, CreateStreamingJobCommandInfo, CreateStreamingJobType, ReplaceStreamJobPlan,
 };
 use crate::manager::{MetadataManager, StreamingJobType};
 use crate::model::{ActorId, BackfillUpstreamType, StreamJobFragments};
-use crate::MetaResult;
 
 type ConsumedRows = u64;
 

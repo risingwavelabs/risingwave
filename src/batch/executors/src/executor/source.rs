@@ -20,13 +20,13 @@ use itertools::Itertools;
 use risingwave_common::array::{DataChunk, Op, StreamChunk};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
 use risingwave_common::types::DataType;
+use risingwave_connector::WithOptionsSecResolved;
 use risingwave_connector::parser::SpecificParserConfig;
 use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_connector::source::reader::reader::SourceReader;
 use risingwave_connector::source::{
     ConnectorProperties, SourceColumnDesc, SourceContext, SourceCtrlOpts, SplitImpl, SplitMetaData,
 };
-use risingwave_connector::WithOptionsSecResolved;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use super::Executor;

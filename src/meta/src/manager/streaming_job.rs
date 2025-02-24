@@ -19,7 +19,7 @@ use risingwave_common::util::epoch::Epoch;
 use risingwave_common::{bail_not_implemented, current_cluster_version};
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::{SourceModel, TableModel};
-use risingwave_meta_model::{source, table, SourceId, TableId, TableVersion};
+use risingwave_meta_model::{SourceId, TableId, TableVersion, source, table};
 use risingwave_pb::catalog::{CreateType, Index, PbSource, Sink, Table};
 use risingwave_pb::ddl_service::TableJobType;
 use sea_orm::entity::prelude::*;

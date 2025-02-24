@@ -20,7 +20,7 @@
 
 use std::sync::LazyLock;
 
-use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
+use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use futures::{FutureExt, StreamExt, TryStreamExt};
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;

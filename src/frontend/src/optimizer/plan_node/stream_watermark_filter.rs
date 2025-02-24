@@ -20,12 +20,12 @@ use risingwave_pb::catalog::WatermarkDesc;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::stream::prelude::*;
-use super::utils::{childless_record, watermark_pretty, Distill, TableCatalogBuilder};
+use super::utils::{Distill, TableCatalogBuilder, childless_record, watermark_pretty};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use crate::TableCatalog;
 use crate::expr::{ExprDisplay, ExprImpl};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::TableCatalog;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamWatermarkFilter {
@@ -150,9 +150,11 @@ impl StreamNode for StreamWatermarkFilter {
 
         PbNodeBody::WatermarkFilter(Box::new(WatermarkFilterNode {
             watermark_descs: self.watermark_descs.clone(),
-            tables: vec![table
-                .with_id(state.gen_table_id_wrapped())
-                .to_internal_table_prost()],
+            tables: vec![
+                table
+                    .with_id(state.gen_table_id_wrapped())
+                    .to_internal_table_prost(),
+            ],
         }))
     }
 }

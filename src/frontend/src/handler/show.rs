@@ -28,20 +28,20 @@ use risingwave_connector::source::kafka::PRIVATELINK_CONNECTION;
 use risingwave_expr::scalar::like::{i_like_default, like_default};
 use risingwave_pb::catalog::connection;
 use risingwave_sqlparser::ast::{
-    display_comma_separated, Ident, ObjectName, ShowCreateType, ShowObject, ShowStatementFilter,
+    Ident, ObjectName, ShowCreateType, ShowObject, ShowStatementFilter, display_comma_separated,
 };
 
-use super::{fields_to_descriptors, RwPgResponse, RwPgResponseBuilderExt};
+use super::{RwPgResponse, RwPgResponseBuilderExt, fields_to_descriptors};
 use crate::binder::{Binder, Relation};
 use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::{CatalogError, IndexCatalog};
 use crate::error::{Result, RwError};
-use crate::handler::create_connection::print_connection_params;
 use crate::handler::HandlerArgs;
-use crate::session::cursor_manager::SubscriptionCursor;
+use crate::handler::create_connection::print_connection_params;
 use crate::session::SessionImpl;
+use crate::session::cursor_manager::SubscriptionCursor;
 use crate::user::has_access_to_object;
 
 pub fn get_columns_from_table(
@@ -826,7 +826,7 @@ mod tests {
 
     use futures_async_stream::for_await;
 
-    use crate::test_utils::{create_proto_file, LocalFrontend, PROTO_FILE_DATA};
+    use crate::test_utils::{LocalFrontend, PROTO_FILE_DATA, create_proto_file};
 
     #[tokio::test]
     async fn test_show_source() {

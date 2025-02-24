@@ -16,8 +16,8 @@ use std::ops::RangeInclusive;
 use std::sync::{Arc, LazyLock};
 
 use crate::bitmap::{Bitmap, BitmapBuilder};
-use crate::hash::table_distribution::SINGLETON_VNODE;
 use crate::hash::VirtualNode;
+use crate::hash::table_distribution::SINGLETON_VNODE;
 
 /// An extension trait for `Bitmap` to support virtual node operations.
 #[easy_ext::ext(VnodeBitmapExt)]

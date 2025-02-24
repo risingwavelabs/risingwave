@@ -614,7 +614,7 @@ impl Binder {
                                         "DISTINCT ON \"{}\" is ambiguous",
                                         name.real_value()
                                     ))
-                                    .into())
+                                    .into());
                                 }
                                 _ => select_items[*index].clone(),
                             }
@@ -629,7 +629,7 @@ impl Binder {
                                     "Invalid ordinal number in DISTINCT ON: {}",
                                     number
                                 ))
-                                .into())
+                                .into());
                             }
                         },
                         expr => self.bind_expr(expr)?,
@@ -659,7 +659,7 @@ impl Binder {
                         return Err(ErrorCode::BindError(
                             "Only support column name in except list".into(),
                         )
-                        .into())
+                        .into());
                     }
                 }
             }

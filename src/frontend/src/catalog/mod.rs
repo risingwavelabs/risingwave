@@ -19,7 +19,7 @@
 //! [`catalog_service::CatalogWriter`], which is held by [`crate::session::FrontendEnv`].
 
 use risingwave_common::catalog::{
-    is_system_schema, ROW_ID_COLUMN_NAME, RW_RESERVED_COLUMN_NAME_PREFIX,
+    ROW_ID_COLUMN_NAME, RW_RESERVED_COLUMN_NAME_PREFIX, is_system_schema,
 };
 use risingwave_connector::sink::catalog::SinkCatalog;
 use thiserror::Error;

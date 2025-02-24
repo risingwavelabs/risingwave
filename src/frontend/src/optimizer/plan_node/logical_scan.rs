@@ -24,14 +24,16 @@ use risingwave_pb::stream_plan::StreamScanType;
 use risingwave_sqlparser::ast::AsOf;
 
 use super::generic::{GenericPlanNode, GenericPlanRef};
-use super::utils::{childless_record, Distill};
+use super::utils::{Distill, childless_record};
 use super::{
-    generic, BatchFilter, BatchProject, ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef,
-    PredicatePushdown, StreamTableScan, ToBatch, ToStream,
+    BatchFilter, BatchProject, ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef,
+    PredicatePushdown, StreamTableScan, ToBatch, ToStream, generic,
 };
+use crate::TableCatalog;
 use crate::catalog::{ColumnId, IndexCatalog};
 use crate::error::Result;
 use crate::expr::{CorrelatedInputRef, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
+use crate::optimizer::ApplyResult;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
@@ -40,9 +42,7 @@ use crate::optimizer::plan_node::{
 };
 use crate::optimizer::property::{Cardinality, Order, WatermarkColumns};
 use crate::optimizer::rule::IndexSelectionRule;
-use crate::optimizer::ApplyResult;
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
-use crate::TableCatalog;
 
 /// `LogicalScan` returns contents of a table or other equivalent object
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -354,9 +354,11 @@ impl ColPrunable for LogicalScan {
             .iter()
             .map(|i| self.required_col_idx()[*i])
             .collect();
-        assert!(output_col_idx
-            .iter()
-            .all(|i| self.output_col_idx().contains(i)));
+        assert!(
+            output_col_idx
+                .iter()
+                .all(|i| self.output_col_idx().contains(i))
+        );
 
         self.clone_with_output_indices(output_col_idx).into()
     }

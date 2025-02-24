@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use fail::fail_point;
-use futures::{stream, StreamExt};
+use futures::{StreamExt, stream};
 use opendal::layers::{RetryLayer, TimeoutLayer};
 use opendal::raw::BoxedStaticFuture;
 use opendal::services::Memory;
@@ -29,8 +29,8 @@ use thiserror_ext::AsReport;
 
 use crate::object::object_metrics::ObjectStoreMetrics;
 use crate::object::{
-    prefix, ObjectDataStream, ObjectError, ObjectMetadata, ObjectMetadataIter, ObjectRangeBounds,
-    ObjectResult, ObjectStore, OperationType, StreamingUploader,
+    ObjectDataStream, ObjectError, ObjectMetadata, ObjectMetadataIter, ObjectRangeBounds,
+    ObjectResult, ObjectStore, OperationType, StreamingUploader, prefix,
 };
 
 /// Opendal object storage.

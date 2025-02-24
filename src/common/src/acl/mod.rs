@@ -17,7 +17,7 @@
 use std::fmt::Formatter;
 use std::sync::LazyLock;
 
-use enumflags2::{bitflags, make_bitflags, BitFlags};
+use enumflags2::{BitFlags, bitflags, make_bitflags};
 use parse_display::Display;
 use risingwave_pb::user::grant_privilege::PbAction;
 

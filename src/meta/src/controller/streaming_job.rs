@@ -49,8 +49,8 @@ use risingwave_pb::stream_plan::{
     PbDispatcher, PbDispatcherType, PbFragmentTypeFlag, PbStreamActor, PbStreamNode,
 };
 use risingwave_pb::user::PbUserInfo;
-use sea_orm::sea_query::{BinOper, Expr, Query, SimpleExpr};
 use sea_orm::ActiveValue::Set;
+use sea_orm::sea_query::{BinOper, Expr, Query, SimpleExpr};
 use sea_orm::{
     ActiveEnum, ActiveModelTrait, ColumnTrait, DatabaseTransaction, EntityTrait, IntoActiveModel,
     IntoSimpleExpr, JoinType, ModelTrait, NotSet, PaginatorTrait, QueryFilter, QuerySelect,
@@ -58,14 +58,14 @@ use sea_orm::{
 };
 
 use crate::barrier::{ReplaceStreamJobPlan, Reschedule};
+use crate::controller::ObjectModel;
 use crate::controller::catalog::{CatalogController, DropTableConnectorContext};
 use crate::controller::rename::ReplaceTableExprRewriter;
 use crate::controller::utils::{
-    build_object_group_for_delete, check_relation_name_duplicate, check_sink_into_table_cycle,
-    ensure_object_id, ensure_user_id, get_fragment_actor_ids, get_fragment_mappings,
-    get_internal_tables_by_id, rebuild_fragment_mapping_from_actors, PartialObject,
+    PartialObject, build_object_group_for_delete, check_relation_name_duplicate,
+    check_sink_into_table_cycle, ensure_object_id, ensure_user_id, get_fragment_actor_ids,
+    get_fragment_mappings, get_internal_tables_by_id, rebuild_fragment_mapping_from_actors,
 };
-use crate::controller::ObjectModel;
 use crate::manager::{NotificationVersion, StreamingJob, StreamingJobType};
 use crate::model::{StreamContext, StreamJobFragments, TableParallelism};
 use crate::stream::{JobReschedulePostUpdates, SplitAssignment};

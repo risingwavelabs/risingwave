@@ -32,7 +32,7 @@ pub use local_metrics::*;
 mod hitmap;
 pub use hitmap::*;
 pub use risingwave_object_store::object::object_metrics::{
-    ObjectStoreMetrics, GLOBAL_OBJECT_STORE_METRICS,
+    GLOBAL_OBJECT_STORE_METRICS, ObjectStoreMetrics,
 };
 
 // include only when hummock trace enabled

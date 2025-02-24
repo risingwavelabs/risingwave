@@ -19,7 +19,7 @@ use std::time::SystemTime;
 use bytes::{Bytes, BytesMut};
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
-use risingwave_hummock_sdk::key::{user_key, FullKey, MAX_KEY_LEN};
+use risingwave_hummock_sdk::key::{FullKey, MAX_KEY_LEN, user_key};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
 use risingwave_hummock_sdk::table_stats::{TableStats, TableStatsMap};
@@ -28,14 +28,14 @@ use risingwave_pb::hummock::BloomFilterType;
 
 use super::utils::CompressionAlgorithm;
 use super::{
-    BlockBuilder, BlockBuilderOptions, BlockMeta, SstableMeta, SstableWriter, DEFAULT_BLOCK_SIZE,
-    DEFAULT_ENTRY_SIZE, DEFAULT_RESTART_INTERVAL, VERSION,
+    BlockBuilder, BlockBuilderOptions, BlockMeta, DEFAULT_BLOCK_SIZE, DEFAULT_ENTRY_SIZE,
+    DEFAULT_RESTART_INTERVAL, SstableMeta, SstableWriter, VERSION,
 };
 use crate::compaction_catalog_manager::{
     CompactionCatalogAgent, CompactionCatalogAgentRef, FilterKeyExtractorImpl,
     FullKeyFilterKeyExtractor,
 };
-use crate::hummock::sstable::{utils, FilterBuilder};
+use crate::hummock::sstable::{FilterBuilder, utils};
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
     Block, BlockHolder, BlockIterator, HummockResult, MemoryLimiter, Xor16FilterBuilder,
@@ -325,7 +325,12 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             assert!(
                 could_switch_block,
                 "is_new_user_key {} sst_id {} block_idx {} table_id {} last_table_id {:?} full_key {:?}",
-                is_new_user_key, self.sstable_id, self.block_metas.len(), table_id, self.last_table_id, full_key
+                is_new_user_key,
+                self.sstable_id,
+                self.block_metas.len(),
+                table_id,
+                self.last_table_id,
+                full_key
             );
             self.table_ids.insert(table_id);
             self.finalize_last_table_stats();
@@ -726,8 +731,8 @@ pub(super) mod tests {
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::sstable::xor_filter::BlockedXor16FilterBuilder;
     use crate::hummock::test_utils::{
-        default_builder_opt_for_test, gen_test_sstable_impl, mock_sst_writer, test_key_of,
-        test_value_of, TEST_KEYS_COUNT,
+        TEST_KEYS_COUNT, default_builder_opt_for_test, gen_test_sstable_impl, mock_sst_writer,
+        test_key_of, test_value_of,
     };
     use crate::hummock::{CachePolicy, Sstable, SstableWriterOptions, Xor8FilterBuilder};
     use crate::monitor::StoreLocalStatistic;

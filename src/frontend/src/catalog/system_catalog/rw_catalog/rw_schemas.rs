@@ -16,8 +16,8 @@ use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 use risingwave_pb::user::grant_privilege::Object;
 
-use crate::catalog::system_catalog::{get_acl_items, SysCatalogReaderImpl};
 use crate::catalog::OwnedByUserCatalog;
+use crate::catalog::system_catalog::{SysCatalogReaderImpl, get_acl_items};
 use crate::error::Result;
 
 #[derive(Fields)]

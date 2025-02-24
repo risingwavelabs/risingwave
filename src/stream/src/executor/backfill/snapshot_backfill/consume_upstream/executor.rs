@@ -15,7 +15,7 @@
 use std::future::ready;
 
 use anyhow::anyhow;
-use futures::future::{select, Either};
+use futures::future::{Either, select};
 use futures::{FutureExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::TableId;

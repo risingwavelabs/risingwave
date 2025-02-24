@@ -18,7 +18,7 @@ use risingwave_frontend_macro::system_catalog;
 use risingwave_pb::user::grant_privilege::Object;
 
 use crate::catalog::system_catalog::rw_catalog::rw_sources::serialize_props_with_secret;
-use crate::catalog::system_catalog::{get_acl_items, SysCatalogReaderImpl};
+use crate::catalog::system_catalog::{SysCatalogReaderImpl, get_acl_items};
 use crate::error::Result;
 use crate::handler::create_source::UPSTREAM_SOURCE_KEY;
 

@@ -28,7 +28,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::metrics::LabelGuardedUintGaugeVec;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common_metrics::{
-    register_guarded_uint_gauge_vec_with_registry, LabelGuardedUintGauge,
+    LabelGuardedUintGauge, register_guarded_uint_gauge_vec_with_registry,
 };
 use tokio::sync::oneshot;
 use tokio::time::Sleep;
@@ -473,10 +473,10 @@ impl LeakBucket {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::Ordering;
     use std::sync::Arc;
+    use std::sync::atomic::Ordering;
 
-    use rand::{thread_rng, Rng};
+    use rand::{Rng, thread_rng};
 
     use super::*;
 

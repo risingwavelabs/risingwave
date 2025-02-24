@@ -14,7 +14,7 @@
 
 use thiserror::Error;
 
-use super::{report_telemetry, LicenseError, LicenseManager, Tier};
+use super::{LicenseError, LicenseManager, Tier, report_telemetry};
 
 /// Define all features that are available based on the tier of the license.
 ///

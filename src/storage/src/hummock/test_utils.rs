@@ -34,8 +34,9 @@ use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch, HummockSstableObjectId}
 
 use super::iterator::test_utils::iterator_test_table_key_of;
 use super::{
-    HummockResult, InMemWriter, SstableMeta, SstableWriterOptions, DEFAULT_RESTART_INTERVAL,
+    DEFAULT_RESTART_INTERVAL, HummockResult, InMemWriter, SstableMeta, SstableWriterOptions,
 };
+use crate::StateStoreIter;
 use crate::compaction_catalog_manager::{
     CompactionCatalogAgent, FilterKeyExtractorImpl, FullKeyFilterKeyExtractor,
 };
@@ -50,7 +51,6 @@ use crate::hummock::{
 use crate::monitor::StoreLocalStatistic;
 use crate::opts::StorageOpts;
 use crate::storage_value::StorageValue;
-use crate::StateStoreIter;
 
 pub fn default_opts_for_test() -> StorageOpts {
     StorageOpts {

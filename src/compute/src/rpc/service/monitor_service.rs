@@ -38,8 +38,8 @@ use risingwave_rpc_client::error::ToTonicStatus;
 use risingwave_storage::hummock::compactor::await_tree_key::Compaction;
 use risingwave_storage::hummock::{Block, Sstable, SstableBlockIndex};
 use risingwave_stream::executor::monitor::global_streaming_metrics;
-use risingwave_stream::task::await_tree_key::{Actor, BarrierAwait};
 use risingwave_stream::task::LocalStreamManager;
+use risingwave_stream::task::await_tree_key::{Actor, BarrierAwait};
 use thiserror_ext::AsReport;
 use tonic::{Code, Request, Response, Status};
 
@@ -513,8 +513,8 @@ impl MonitorService for MonitorServiceImpl {
 pub use grpc_middleware::*;
 
 pub mod grpc_middleware {
-    use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::task::{Context, Poll};
 
     use either::Either;

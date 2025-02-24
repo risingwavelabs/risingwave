@@ -13,20 +13,20 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use risingwave_pb::batch_plan::ExpandNode;
 use risingwave_pb::batch_plan::expand_node::Subset;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::batch_plan::ExpandNode;
 
 use super::batch::prelude::*;
 use super::utils::impl_distill_by_unit;
-use super::{generic, ExprRewritable};
+use super::{ExprRewritable, generic};
 use crate::error::Result;
+use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
     PlanBase, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch, ToLocalBatch,
 };
 use crate::optimizer::property::{Distribution, Order};
-use crate::optimizer::PlanRef;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchExpand {

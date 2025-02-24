@@ -20,10 +20,10 @@ use risingwave_common::bitmap::BitmapBuilder;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common_estimate_size::EstimateSize;
+use risingwave_expr::Result;
 use risingwave_expr::aggregate::{
     AggStateDyn, AggregateFunction, AggregateState, BoxedAggregateFunction,
 };
-use risingwave_expr::Result;
 
 /// `Distinct` is a wrapper of `Aggregator` that only keeps distinct rows.
 pub struct Distinct {
