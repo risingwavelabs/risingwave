@@ -23,24 +23,70 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use ahash::HashMap;
-use bitflags::bitflags;
+use bitfield_struct::bitfield;
 
 use super::*;
 use crate::catalog::ColumnId;
 
-bitflags! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    struct Flag: u8 {
-        const EMPTY = 0b_1000_0000;
-        const OFFSET8 = 0b01;
-        const OFFSET16 = 0b10;
-        const OFFSET32 = 0b11;
+/// The width of the offset of the encoded data, i.e., how many bytes are used to represent the offset.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+enum OffsetWidth {
+    Unset = 0b00,
+    /// The offset of encoded data can be represented by u8.
+    Offset8 = 0b01,
+    /// The offset of encoded data can be represented by u16.
+    Offset16 = 0b10,
+    /// The offset of encoded data can be represented by u32.
+    Offset32 = 0b11,
+}
+
+impl OffsetWidth {
+    /// Get the width of the offset in bytes.
+    const fn width(self) -> Option<usize> {
+        Some(match self {
+            OffsetWidth::Unset => return None,
+            OffsetWidth::Offset8 => 1,
+            OffsetWidth::Offset16 => 2,
+            OffsetWidth::Offset32 => 4,
+        })
     }
+
+    const fn into_bits(self) -> u8 {
+        self as u8
+    }
+
+    const fn from_bits(bits: u8) -> Self {
+        match bits {
+            0b00 => OffsetWidth::Unset,
+            0b01 => OffsetWidth::Offset8,
+            0b10 => OffsetWidth::Offset16,
+            0b11 => OffsetWidth::Offset32,
+            _ => unreachable!(),
+        }
+    }
+}
+
+#[bitfield(u8, order = Msb)]
+#[derive(PartialEq, Eq)]
+struct Header {
+    /// Magic bit to indicate it's column-aware encoding.
+    /// Note that in plain value encoding, the first byte is always 0 or 1 for nullability,
+    /// of which the most significant bit is always 0.
+    #[bits(1, default = true, access = RO)]
+    magic: bool,
+
+    #[bits(5)]
+    _reserved: u8,
+
+    /// Indicate the offset width of the encoded data.
+    #[bits(2)]
+    offset: OffsetWidth,
 }
 
 /// `RowEncoding` holds row-specific information for Column-Aware Encoding
 struct RowEncoding {
-    flag: Flag,
+    header: Header,
     offsets: Vec<u8>,
     buf: Vec<u8>,
 }
@@ -48,34 +94,38 @@ struct RowEncoding {
 impl RowEncoding {
     fn new() -> Self {
         RowEncoding {
-            flag: Flag::EMPTY,
+            header: Header::new(),
             offsets: vec![],
             buf: vec![],
         }
     }
 
-    fn set_offsets(&mut self, usize_offsets: &[usize], max_offset: usize) {
-        debug_assert!(self.offsets.is_empty());
-        match max_offset {
-            _n @ ..=const { u8::MAX as usize } => {
-                self.flag |= Flag::OFFSET8;
-                usize_offsets
-                    .iter()
-                    .for_each(|m| self.offsets.put_u8(*m as u8));
-            }
-            _n @ ..=const { u16::MAX as usize } => {
-                self.flag |= Flag::OFFSET16;
-                usize_offsets
-                    .iter()
-                    .for_each(|m| self.offsets.put_u16_le(*m as u16));
-            }
-            _n @ ..=const { u32::MAX as usize } => {
-                self.flag |= Flag::OFFSET32;
-                usize_offsets
-                    .iter()
-                    .for_each(|m| self.offsets.put_u32_le(*m as u32));
-            }
-            _ => unreachable!("encoding length exceeds u32"),
+    fn set_offsets(&mut self, usize_offsets: &[usize]) {
+        debug_assert!(
+            self.offsets.is_empty(),
+            "should not set offsets multiple times"
+        );
+
+        // Use 0 if no data is present.
+        let max_offset = usize_offsets.last().copied().unwrap_or(0);
+
+        if max_offset <= u8::MAX as usize {
+            self.header.set_offset(OffsetWidth::Offset8);
+            usize_offsets
+                .iter()
+                .for_each(|m| self.offsets.put_u8(*m as u8));
+        } else if max_offset <= u16::MAX as usize {
+            self.header.set_offset(OffsetWidth::Offset16);
+            usize_offsets
+                .iter()
+                .for_each(|m| self.offsets.put_u16_le(*m as u16));
+        } else if max_offset <= u32::MAX as usize {
+            self.header.set_offset(OffsetWidth::Offset32);
+            usize_offsets
+                .iter()
+                .for_each(|m| self.offsets.put_u32_le(*m as u32));
+        } else {
+            panic!("encoding length {} exceeds u32", max_offset);
         }
     }
 
@@ -91,10 +141,7 @@ impl RowEncoding {
                 serialize_scalar(v, &mut self.buf);
             }
         }
-        let max_offset = *offset_usize
-            .last()
-            .expect("should encode at least one column");
-        self.set_offsets(&offset_usize, max_offset);
+        self.set_offsets(&offset_usize);
     }
 
     // TODO: Avoid duplicated code. `encode_slice` is the same as `encode` except it doesn't require column type.
@@ -110,10 +157,7 @@ impl RowEncoding {
                 self.buf.put_slice(v);
             }
         }
-        let max_offset = *offset_usize
-            .last()
-            .expect("should encode at least one column");
-        self.set_offsets(&offset_usize, max_offset);
+        self.set_offsets(&offset_usize);
     }
 }
 
@@ -144,7 +188,7 @@ impl Serializer {
         let mut row_bytes = Vec::with_capacity(
             5 + self.encoded_column_ids.len() + encoding.offsets.len() + encoding.buf.len(), /* 5 comes from u8+u32 */
         );
-        row_bytes.put_u8(encoding.flag.bits());
+        row_bytes.put_u8(encoding.header.into_bits());
         row_bytes.put_u32_le(self.datum_num);
         row_bytes.extend(&self.encoded_column_ids);
         row_bytes.extend(&encoding.offsets);
@@ -200,13 +244,14 @@ impl Deserializer {
 
 impl ValueRowDeserializer for Deserializer {
     fn deserialize(&self, mut encoded_bytes: &[u8]) -> Result<Vec<Datum>> {
-        let flag = Flag::from_bits(encoded_bytes.get_u8()).expect("should be a valid flag");
-        let offset_bytes = match flag - Flag::EMPTY {
-            Flag::OFFSET8 => 1,
-            Flag::OFFSET16 => 2,
-            Flag::OFFSET32 => 4,
-            _ => return Err(ValueEncodingError::InvalidFlag(flag.bits())),
-        };
+        let header_bits = encoded_bytes.get_u8();
+        let header = Header::from_bits(header_bits);
+        if !header.magic() {
+            return Err(ValueEncodingError::InvalidFlag(header_bits));
+        }
+        let offset_bytes =
+            (header.offset().width()).ok_or(ValueEncodingError::InvalidFlag(header_bits))?;
+
         let datum_num = encoded_bytes.get_u32_le() as usize;
         let offsets_start_idx = 4 * datum_num;
         let data_start_idx = offsets_start_idx + datum_num * offset_bytes;
@@ -286,7 +331,12 @@ pub fn try_drop_invalid_columns(
     mut encoded_bytes: &[u8],
     valid_column_ids: &HashSet<i32>,
 ) -> Option<Vec<u8>> {
-    let flag = Flag::from_bits(encoded_bytes.get_u8()).expect("should be a valid flag");
+    let header = Header::from_bits(encoded_bytes.get_u8());
+    if !header.magic() {
+        // invalid flag, do not proceed
+        return None;
+    }
+
     let datum_num = encoded_bytes.get_u32_le() as usize;
     let mut is_column_dropped = false;
     let mut encoded_bytes_copy = encoded_bytes;
@@ -302,12 +352,7 @@ pub fn try_drop_invalid_columns(
     }
 
     // Slow path that drops columns. Should be rare.
-    let offset_bytes = match flag - Flag::EMPTY {
-        Flag::OFFSET8 => 1,
-        Flag::OFFSET16 => 2,
-        Flag::OFFSET32 => 4,
-        _ => panic!("invalid flag {}", flag.bits()),
-    };
+    let offset_bytes = header.offset().width().expect("offset width is unset");
     let offsets_start_idx = 4 * datum_num;
     let data_start_idx = offsets_start_idx + datum_num * offset_bytes;
     let offsets = &encoded_bytes[offsets_start_idx..data_start_idx];
@@ -356,7 +401,7 @@ pub fn try_drop_invalid_columns(
     let mut row_bytes = Vec::with_capacity(
         5 + encoded_column_ids.len() + encoding.offsets.len() + encoding.buf.len(), /* 5 comes from u8+u32 */
     );
-    row_bytes.put_u8(encoding.flag.bits());
+    row_bytes.put_u8(encoding.header.into_bits());
     row_bytes.put_u32_le(datum_num);
     row_bytes.extend(&encoded_column_ids);
     row_bytes.extend(&encoding.offsets);
