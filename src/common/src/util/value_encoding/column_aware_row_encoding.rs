@@ -91,6 +91,29 @@ struct RowEncoding {
     buf: Vec<u8>,
 }
 
+trait Encode {
+    fn encode_to(self, data: &mut Vec<u8>);
+}
+
+impl<T> Encode for T
+where
+    T: ToDatumRef,
+{
+    fn encode_to(self, data: &mut Vec<u8>) {
+        if let Some(v) = self.to_datum_ref() {
+            serialize_scalar(v, data);
+        }
+    }
+}
+
+impl Encode for Option<&[u8]> {
+    fn encode_to(self, data: &mut Vec<u8>) {
+        if let Some(v) = self {
+            data.extend(v);
+        }
+    }
+}
+
 impl RowEncoding {
     fn new() -> Self {
         RowEncoding {
@@ -129,33 +152,15 @@ impl RowEncoding {
         }
     }
 
-    fn encode(&mut self, datum_refs: impl Iterator<Item = impl ToDatumRef>) {
+    fn encode<T: Encode>(&mut self, datums: impl IntoIterator<Item = T>) {
         debug_assert!(
             self.buf.is_empty(),
             "should not encode one RowEncoding object multiple times."
         );
         let mut offset_usize = vec![];
-        for datum in datum_refs {
+        for datum in datums {
             offset_usize.push(self.buf.len());
-            if let Some(v) = datum.to_datum_ref() {
-                serialize_scalar(v, &mut self.buf);
-            }
-        }
-        self.set_offsets(&offset_usize);
-    }
-
-    // TODO: Avoid duplicated code. `encode_slice` is the same as `encode` except it doesn't require column type.
-    fn encode_slice<'a>(&mut self, datum_refs: impl Iterator<Item = Option<&'a [u8]>>) {
-        debug_assert!(
-            self.buf.is_empty(),
-            "should not encode one RowEncoding object multiple times."
-        );
-        let mut offset_usize = vec![];
-        for datum in datum_refs {
-            offset_usize.push(self.buf.len());
-            if let Some(v) = datum {
-                self.buf.put_slice(v);
-            }
+            datum.encode_to(&mut self.buf);
         }
         self.set_offsets(&offset_usize);
     }
@@ -184,7 +189,13 @@ impl Serializer {
         }
     }
 
-    fn serialize_inner(&self, encoding: RowEncoding) -> Vec<u8> {
+    fn serialize_raw<T: Encode>(&self, datums: impl IntoIterator<Item = T>) -> Vec<u8> {
+        let mut encoding = RowEncoding::new();
+        encoding.encode(datums);
+        self.finish(encoding)
+    }
+
+    fn finish(&self, encoding: RowEncoding) -> Vec<u8> {
         let mut row_bytes = Vec::with_capacity(
             5 + self.encoded_column_ids.len() + encoding.offsets.len() + encoding.buf.len(), /* 5 comes from u8+u32 */
         );
@@ -202,9 +213,7 @@ impl ValueRowSerializer for Serializer {
     /// Serialize a row under the schema of the Serializer
     fn serialize(&self, row: impl Row) -> Vec<u8> {
         assert_eq!(row.len(), self.datum_num as usize);
-        let mut encoding = RowEncoding::new();
-        encoding.encode(row.iter());
-        self.serialize_inner(encoding)
+        self.serialize_raw(row.iter())
     }
 }
 
@@ -365,7 +374,7 @@ pub fn try_drop_invalid_columns(
 
     for (id, data) in encoded_bytes {
         if valid_column_ids.contains(&id) {
-            column_ids.push(id);
+            column_ids.push(ColumnId::new(id));
             datums.push(if data.is_empty() { None } else { Some(data) });
         }
     }
@@ -375,21 +384,6 @@ pub fn try_drop_invalid_columns(
         return None;
     }
 
-    let mut encoding = RowEncoding::new();
-    encoding.encode_slice(datums.into_iter());
-    let mut encoded_column_ids = Vec::with_capacity(column_ids.len() * 4);
-    let datum_num = column_ids.len() as u32;
-    for id in column_ids {
-        encoded_column_ids.put_i32_le(id);
-    }
-    let mut row_bytes = Vec::with_capacity(
-        5 + encoded_column_ids.len() + encoding.offsets.len() + encoding.buf.len(), /* 5 comes from u8+u32 */
-    );
-    row_bytes.put_u8(encoding.header.into_bits());
-    row_bytes.put_u32_le(datum_num);
-    row_bytes.extend(&encoded_column_ids);
-    row_bytes.extend(&encoding.offsets);
-    row_bytes.extend(&encoding.buf);
-
+    let row_bytes = Serializer::new(&column_ids).serialize_raw(datums);
     Some(row_bytes)
 }
