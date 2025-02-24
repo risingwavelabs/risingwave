@@ -214,6 +214,9 @@ async fn monitor_memory(metrics: Arc<FrontendMetrics>) {
     min_trigger_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         min_trigger_interval.tick().await;
+        if let Err(e) = tikv_jemalloc_ctl::epoch::advance() {
+            tracing::warn!("Jemalloc epoch advance failed! {:?}", e);
+        }
         let jemalloc_allocated_bytes = tikv_jemalloc_ctl::stats::allocated::read().unwrap();
         let jemalloc_active_bytes = tikv_jemalloc_ctl::stats::active::read().unwrap();
         let jemalloc_resident_bytes = tikv_jemalloc_ctl::stats::resident::read().unwrap();
