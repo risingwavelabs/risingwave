@@ -181,6 +181,75 @@ impl LogicalScan {
             .collect()
     }
 
+    /// Return indexes can satisfy the required order.
+    /// The `prefix` refers to optionally matching columns of the index
+    /// It is unordered initially.
+    /// If any are used, we will return the fixed `Order` prefix.
+    pub fn indexes_satisfy_order_with_prefix(
+        &self,
+        required_order: &Order,
+        prefix: &HashSet<ColumnOrder>,
+    ) -> Vec<(&Rc<IndexCatalog>, Order)> {
+        let output_col_map = self
+            .output_col_idx()
+            .iter()
+            .cloned()
+            .enumerate()
+            .map(|(id, col)| (col, id))
+            .collect::<BTreeMap<_, _>>();
+        let unmatched_idx = output_col_map.len();
+        let mut index_catalog_and_orders = vec![];
+        for index in self.indexes() {
+            let s2p_mapping = index.secondary_to_primary_mapping();
+            let index_orders: Vec<ColumnOrder> = index
+                .index_table
+                .pk()
+                .iter()
+                .map(|idx_item| {
+                    let idx = match s2p_mapping.get(&idx_item.column_index) {
+                        Some(col_idx) => *output_col_map.get(col_idx).unwrap_or(&unmatched_idx),
+                        // After we support index on expressions, we need to handle the case where the column is not in the `s2p_mapping`.
+                        None => unmatched_idx,
+                    };
+                    ColumnOrder::new(idx, idx_item.order_type)
+                })
+                .collect();
+
+            let mut index_orders_iter = index_orders.iter();
+
+            // First check the prefix
+            let fixed_prefix = {
+                let mut fixed_prefix = vec![];
+                for index_col_order in &mut index_orders_iter {
+                    if prefix.contains(index_col_order) {
+                        fixed_prefix.push(index_col_order.clone());
+                    } else {
+                        break;
+                    }
+                }
+                Order {
+                    column_orders: fixed_prefix,
+                }
+            };
+
+            // Next check required order
+            let remaining_len = index_orders_iter.len();
+            if remaining_len < required_order.column_orders.len() {
+                continue;
+            }
+
+            #[expect(clippy::disallowed_methods)]
+            for (order, other_order) in index_orders_iter.zip(required_order.column_orders.iter()) {
+                if order != other_order {
+                    continue;
+                }
+            }
+
+            index_catalog_and_orders.push((index, fixed_prefix));
+        }
+        index_catalog_and_orders
+    }
+
     /// If the index can cover the scan, transform it to the index scan.
     pub fn to_index_scan_if_index_covered(&self, index: &Rc<IndexCatalog>) -> Option<LogicalScan> {
         let p2s_mapping = index.primary_to_secondary_mapping();
