@@ -484,6 +484,30 @@ impl StreamSink {
             ),
         };
 
+        if user_force_append_only && frontend_derived_append_only {
+            return Err(ErrorCode::SinkError(Box::new(Error::new(
+                ErrorKind::InvalidInput,
+                "The sink has been append only, please remove the force_append_only option"
+                    .to_string(),
+            )))
+            .into());
+        }
+
+        if user_force_append_only && user_defined_sink_type != Some(SinkType::AppendOnly) {
+            return Err(ErrorCode::SinkError(Box::new(Error::new(
+                ErrorKind::InvalidInput,
+                format!(
+                    "Cannot force the sink to be append-only without \"{}\".",
+                    if syntax_legacy {
+                        "type='append-only'"
+                    } else {
+                        "FORMAT PLAIN"
+                    }
+                ),
+            )))
+            .into());
+        }
+
         if let Some(user_defined_sink_type) = user_defined_sink_type {
             if user_defined_sink_type == SinkType::AppendOnly {
                 if user_force_append_only {
@@ -506,20 +530,6 @@ impl StreamSink {
 
             Ok(user_defined_sink_type)
         } else {
-            if user_force_append_only {
-                return Err(ErrorCode::SinkError(Box::new(Error::new(
-                    ErrorKind::InvalidInput,
-                    format!(
-                        "Cannot force the sink to be append-only without \"{}\".",
-                        if syntax_legacy {
-                            "type='append-only'"
-                        } else {
-                            "FORMAT PLAIN"
-                        }
-                    ),
-                )))
-                .into());
-            }
             match frontend_derived_append_only {
                 true => Ok(SinkType::AppendOnly),
                 false => Ok(SinkType::Upsert),

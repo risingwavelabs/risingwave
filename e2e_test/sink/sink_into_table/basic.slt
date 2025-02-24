@@ -336,9 +336,6 @@ insert into t_s3 values (1, 11), (2, 12), (3, 13);
 statement ok
 create table t_primary_key_append_only (v1 int primary key, v2 int, v3 int default 1000, v4 int as v1 + v2) APPEND ONLY;
 
-statement error
-create sink s3 into t_primary_key_append_only as select v1, v2 from t_s3;
-
 statement ok
 create sink s3 into t_primary_key_append_only as select v1, v2 from t_s3  with (type = 'append-only');
 
