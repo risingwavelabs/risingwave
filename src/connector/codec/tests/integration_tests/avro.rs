@@ -49,7 +49,7 @@ struct Config {
 fn avro_schema_str_to_risingwave_schema(
     avro_schema: &str,
     config: &Config,
-) -> anyhow::Result<(ResolvedAvroSchema, Vec<ColumnDesc>)> {
+) -> anyhow::Result<(ResolvedAvroSchema, Vec<Field>)> {
     // manually implement some logic in AvroParserConfig::map_to_columns
     let avro_schema = AvroSchema::parse_str(avro_schema).context("failed to parse Avro schema")?;
     let resolved_schema =
@@ -57,10 +57,7 @@ fn avro_schema_str_to_risingwave_schema(
 
     let rw_schema =
         avro_schema_to_column_descs(&resolved_schema.original_schema, config.map_handling)
-            .context("failed to convert Avro schema to RisingWave schema")?
-            .iter()
-            .map(ColumnDesc::from_field_without_column_id)
-            .collect_vec();
+            .context("failed to convert Avro schema to RisingWave schema")?;
     Ok((resolved_schema, rw_schema))
 }
 
@@ -88,7 +85,7 @@ fn check(
         };
     expected_risingwave_schema.assert_eq(&format!(
         "{:#?}",
-        rw_schema.iter().map(ColumnDescTestDisplay).collect_vec()
+        rw_schema.iter().map(FieldTestDisplay).collect_vec()
     ));
 
     // manually implement some logic in AvroAccessBuilder, and some in PlainParser::parse_inner
@@ -202,17 +199,17 @@ fn test_simple() {
         },
         expect![[r#"
             [
-                id(#2147483646): Int32,
-                sequence_id(#2147483646): Int64,
-                name(#2147483646): Varchar,
-                score(#2147483646): Float32,
-                avg_score(#2147483646): Float64,
-                is_lasted(#2147483646): Boolean,
-                entrance_date(#2147483646): Date,
-                birthday(#2147483646): Timestamptz,
-                anniversary(#2147483646): Timestamptz,
-                passed(#2147483646): Interval,
-                bytes(#2147483646): Bytea,
+                id: Int32,
+                sequence_id: Int64,
+                name: Varchar,
+                score: Float32,
+                avg_score: Float64,
+                is_lasted: Boolean,
+                entrance_date: Date,
+                birthday: Timestamptz,
+                anniversary: Timestamptz,
+                passed: Interval,
+                bytes: Bytea,
             ]"#]],
         expect![[r#"
             Owned(Int32(32))
@@ -343,16 +340,16 @@ fn test_nullable_union() {
         },
         expect![[r#"
             [
-                id(#2147483646): Int32,
-                age(#2147483646): Int32,
-                sequence_id(#2147483646): Int64,
-                name(#2147483646): Varchar,
-                score(#2147483646): Float32,
-                avg_score(#2147483646): Float64,
-                is_lasted(#2147483646): Boolean,
-                entrance_date(#2147483646): Date,
-                birthday(#2147483646): Timestamptz,
-                anniversary(#2147483646): Timestamptz,
+                id: Int32,
+                age: Int32,
+                sequence_id: Int64,
+                name: Varchar,
+                score: Float32,
+                avg_score: Float64,
+                is_lasted: Boolean,
+                entrance_date: Date,
+                birthday: Timestamptz,
+                anniversary: Timestamptz,
             ]"#]],
         expect![[r#"
             Owned(Int32(5))
@@ -518,20 +515,20 @@ fn test_1() {
         },
         expect![[r#"
             [
-                op_type(#2147483646): Varchar,
-                ID(#2147483646): Varchar,
-                CLASS_ID(#2147483646): Varchar,
-                ITEM_ID(#2147483646): Varchar,
-                ATTR_ID(#2147483646): Varchar,
-                ATTR_VALUE(#2147483646): Varchar,
-                ORG_ID(#2147483646): Varchar,
-                UNIT_INFO(#2147483646): Varchar,
-                UPD_TIME(#2147483646): Varchar,
-                DEC_VAL(#2147483646): Decimal,
-                REFERRED(#2147483646): Struct { a: Varchar },
-                REF(#2147483646): Struct { a: Varchar },
-                uuid(#2147483646): Varchar,
-                rate(#2147483646): Float64,
+                op_type: Varchar,
+                ID: Varchar,
+                CLASS_ID: Varchar,
+                ITEM_ID: Varchar,
+                ATTR_ID: Varchar,
+                ATTR_VALUE: Varchar,
+                ORG_ID: Varchar,
+                UNIT_INFO: Varchar,
+                UPD_TIME: Varchar,
+                DEC_VAL: Decimal,
+                REFERRED: Struct { a: Varchar },
+                REF: Struct { a: Varchar },
+                uuid: Varchar,
+                rate: Float64,
             ]"#]],
         expect![[r#"
             Borrowed(Utf8("update"))
@@ -809,7 +806,7 @@ fn test_union() {
         },
         expect![[r#"
             [
-                metrics(#2147483646): List(
+                metrics: List(
                     Struct {
                         id: Varchar,
                         name: Varchar,
@@ -910,8 +907,8 @@ fn test_map() {
         },
         expect![[r#"
             [
-                map_str(#2147483646): Map(Varchar,Varchar),
-                map_map_int(#2147483646): Map(Varchar,Map(Varchar,Int32)),
+                map_str: Map(Varchar,Varchar),
+                map_map_int: Map(Varchar,Map(Varchar,Int32)),
             ]"#]],
         expect![[r#"
             Owned([
@@ -966,8 +963,8 @@ fn test_map() {
         },
         expect![[r#"
             [
-                map_str(#2147483646): Jsonb,
-                map_map_int(#2147483646): Jsonb,
+                map_str: Jsonb,
+                map_map_int: Jsonb,
             ]"#]],
         expect![[r#"
             Owned(Jsonb({"a": "x", "b": "y"}))
