@@ -152,14 +152,22 @@ impl StreamReaderBuilder {
         };
 
         'build_consume_loop: loop {
-            tracing::debug!("build stream source reader with state: {:?}", state);
+            let bootstrap_state = if latest_splits_info.is_empty() {
+                None
+            } else {
+                Some(latest_splits_info.values().cloned().collect_vec())
+            };
+            tracing::debug!(
+                "build stream source reader with state: {:?}",
+                bootstrap_state
+            );
             let build_stream_result = if let Some(exist_stream) = self.reader_stream.take() {
                 Ok((exist_stream, CreateSplitReaderResult::default()))
             } else {
                 self.source_desc
                     .source
                     .build_stream(
-                        state.clone(),
+                        bootstrap_state,
                         column_ids.clone(),
                         source_ctx_ref.clone(),
                         // just `seek_to_latest` for initial build
