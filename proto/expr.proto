@@ -200,6 +200,9 @@ message ExprNode {
     HMAC = 332;
     SECURE_COMPARE = 333;
 
+    // Constraints Check
+    CHECK_NOT_NULL = 350;
+
     // Unary operators
     NEG = 401;
     // Nested selection operators

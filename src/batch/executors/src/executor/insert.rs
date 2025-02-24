@@ -21,9 +21,8 @@ use itertools::Itertools;
 use risingwave_common::array::{
     ArrayBuilder, DataChunk, Op, PrimitiveArrayBuilder, SerialArray, StreamChunk,
 };
-use risingwave_common::catalog::{Field, Schema, TableId, TableVersionId};
+use risingwave_common::catalog::{Schema, TableId, TableVersionId};
 use risingwave_common::transaction::transaction_id::TxnId;
-use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_dml::dml_manager::DmlManagerRef;
 use risingwave_expr::expr::{BoxedExpression, build_from_prost};
@@ -78,13 +77,7 @@ impl InsertExecutor {
             dml_manager,
             child,
             chunk_size,
-            schema: if returning {
-                table_schema
-            } else {
-                Schema {
-                    fields: vec![Field::unnamed(DataType::Serial)],
-                }
-            },
+            schema: table_schema,
             identity,
             column_indices,
             sorted_default_columns,
@@ -137,6 +130,7 @@ impl InsertExecutor {
                 .enumerate()
                 .map(|(i, idx)| (*idx, columns[i].clone()))
                 .collect_vec();
+
             ordered_columns.reserve(ordered_columns.len() + self.sorted_default_columns.len());
 
             for (idx, expr) in &self.sorted_default_columns {
@@ -349,6 +343,7 @@ mod tests {
             row_id_index,
             false,
             0,
+            vec![true, true, true],
         ));
         let handle = tokio::spawn(async move {
             let mut stream = insert_executor.execute();
