@@ -26,7 +26,7 @@ use crate::error::Result;
 use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{ToLocalBatch, TryToBatchPb};
-use crate::optimizer::property::{Distribution, DistributionDisplay, Order, OrderDisplay};
+use crate::optimizer::property::{Distribution, DistributionDisplay, Order};
 use crate::scheduler::SchedulerResult;
 
 /// `BatchSeqScan` implements [`super::LogicalScan`] to scan from a row-oriented table
@@ -167,12 +167,6 @@ impl Distill for BatchSeqScan {
                 input_schema: self.base.schema(),
             });
             vec.push(("distribution", dist));
-            let order = OrderDisplay {
-                order: self.order(),
-                input_schema: self.base.schema(),
-            }
-            .distill();
-            vec.push(("order", order));
         }
 
         childless_record("BatchScan", vec)
