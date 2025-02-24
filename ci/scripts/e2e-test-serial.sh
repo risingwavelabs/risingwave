@@ -71,14 +71,12 @@ cluster_stop() {
 download_and_prepare_rw "$profile" common
 
 echo "--- Download artifacts"
-download-and-decompress-artifact e2e_test_generated ./
-download-and-decompress-artifact risingwave_e2e_extended_mode_test-"$profile" target/debug/
-mkdir -p e2e_test/udf/wasm/target/wasm32-wasi/release/
-buildkite-agent artifact download udf.wasm e2e_test/udf/wasm/target/wasm32-wasi/release/
+# preparing for external java udf tests
 mkdir -p e2e_test/udf/java/target/
 buildkite-agent artifact download udf.jar e2e_test/udf/java/target/
+# preparing for extended mode tests
+download-and-decompress-artifact risingwave_e2e_extended_mode_test-"$profile" target/debug/
 mv target/debug/risingwave_e2e_extended_mode_test-"$profile" target/debug/risingwave_e2e_extended_mode_test
-
 chmod +x ./target/debug/risingwave_e2e_extended_mode_test
 
 echo "--- e2e, $mode, streaming"

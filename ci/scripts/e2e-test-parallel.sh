@@ -24,6 +24,10 @@ shift $((OPTIND -1))
 download_and_prepare_rw "$profile" common
 
 echo "--- Download artifacts"
+# preparing for embedded udf tests
+mkdir -p e2e_test/udf/wasm/target/wasm32-wasi/release/
+buildkite-agent artifact download udf.wasm e2e_test/udf/wasm/target/wasm32-wasi/release/
+# preparing for generated tests
 download-and-decompress-artifact e2e_test_generated ./
 
 start_cluster() {
