@@ -118,6 +118,7 @@ tracing-subscriber = "0.3.17"
 twox-hash = "2"
 url = "2"
 uuid = { version = "1", features = ["v4"] }
+lazy_static = "1.4.0"
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
