@@ -1,18 +1,19 @@
-system ok
-python3 e2e_test/udf/test.py &
-
-# wait for server to start
-sleep 1s
-
 # Test `ALTER FUNCTION xxx SET SCHEMA xxx`
+
 statement ok
 CREATE SCHEMA test_schema;
 
 statement ok
-CREATE FUNCTION test_func() RETURNS INT LANGUAGE python as int_42 using link 'http://localhost:8815';
+CREATE FUNCTION test_func() RETURNS INT LANGUAGE python AS $$
+def test_func():
+    return 42;
+$$;
 
 statement ok
-CREATE FUNCTION test_func(INT) RETURNS INT LANGUAGE python as sleep using link 'http://localhost:8815';
+CREATE FUNCTION test_func(INT) RETURNS INT LANGUAGE python AS $$
+def test_func(x):
+    return x;
+$$;
 
 statement error
 ALTER FUNCTION test_func SET SCHEMA test_schema;
@@ -40,6 +41,3 @@ DROP FUNCTION test_schema.test_func(INT);
 
 statement ok
 DROP SCHEMA test_schema;
-
-system ok
-pkill python
