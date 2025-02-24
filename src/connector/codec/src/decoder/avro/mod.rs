@@ -414,6 +414,16 @@ impl Access for AvroAccess<'_> {
                     else {
                         return Err(create_error());
                     };
+                    assert_eq!(
+                        fields.iter().map(|(name, _)| name.as_str()).collect_vec(),
+                        record_schema
+                            .fields
+                            .iter()
+                            .map(|f| f.name.as_str())
+                            .collect_vec(),
+                        "in record {}",
+                        record_schema.name.fullname(None),
+                    );
                     if let Some(idx) = record_schema.lookup.get(key) {
                         value = &fields[*idx].1;
                         unresolved_schema = &record_schema.fields[*idx].schema;
