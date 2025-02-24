@@ -151,7 +151,10 @@ impl AvroAccessBuilder {
                 let SourceMeta::Pulsar(pulsar_meta) = source_meta else {
                     unreachable!();
                 };
-                let schema_version = pulsar_meta.schema_version.as_deref().map(|mut buf| buf.get_i64());
+                let schema_version = pulsar_meta
+                    .schema_version
+                    .as_deref()
+                    .map(|mut buf| buf.get_i64());
                 let writer_schema = resolver.get(schema_version).await?;
                 let mut raw_payload = payload;
                 Ok(Some(from_avro_datum(

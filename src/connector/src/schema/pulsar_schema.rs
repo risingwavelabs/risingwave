@@ -81,8 +81,8 @@ impl Client {
         if let Some(token) = &self.token {
             q = q.bearer_auth(token);
         }
-        let res = q.send().await?;
-        let res: GetSchemaResponse = res.json().await.unwrap();
+        let res = q.send().await?.error_for_status()?;
+        let res: GetSchemaResponse = res.json().await?;
         let schema = match res.r#type.as_str() {
             "PROTOBUF_NATIVE" => {
                 use base64::prelude::*;
@@ -100,7 +100,8 @@ impl Client {
                 PulsarSchema::ProtobufNative(message)
             }
             "AVRO" => {
-                let s = apache_avro::Schema::parse_str(&res.data).unwrap();
+                let s = apache_avro::Schema::parse_str(&res.data)
+                    .expect(&format!("invalid avro: {}", res.data));
                 PulsarSchema::Avro(s)
             }
             _ => unimplemented!(),
