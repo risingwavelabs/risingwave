@@ -400,15 +400,16 @@ pub(crate) fn bind_all_columns(
 }
 
 /// TODO: perhaps put the hint in notice is better. The error message format might be not that reliable.
-fn hint_upsert(encode: &Encode) -> String {
+fn hint_format_encode(format_encode: &FormatEncodeOptions) -> String {
     format!(
-        r#"Hint: For FORMAT UPSERT ENCODE {encode:}, INCLUDE KEY must be specified and the key column must be used as primary key.
+        r#"Hint: For FORMAT {0} ENCODE {1}, INCLUDE KEY must be specified and the key column must be used as primary key.
 example:
     CREATE TABLE <table_name> ( PRIMARY KEY ([rw_key | <key_name>]) )
     INCLUDE KEY [AS <key_name>]
     WITH (...)
-    FORMAT UPSERT ENCODE {encode:} (...)
-"#
+    FORMAT {0} ENCODE {1} (...)
+"#,
+        format_encode.format, format_encode.row_encode
     )
 }
 
@@ -454,10 +455,7 @@ pub(crate) async fn bind_source_pk(
 
         // For all Upsert formats, we only accept one and only key column as primary key.
         // Additional KEY columns must be set in this case and must be primary key.
-        (
-            Format::Upsert,
-            encode @ Encode::Json | encode @ Encode::Avro | encode @ Encode::Protobuf,
-        ) => {
+        (Format::Upsert, Encode::Json | Encode::Avro | Encode::Protobuf) => {
             if let Some(ref key_column_name) = include_key_column_name
                 && sql_defined_pk
             {
@@ -471,7 +469,7 @@ pub(crate) async fn bind_source_pk(
                     return Err(RwError::from(ProtocolError(format!(
                         "Only \"{}\" can be used as primary key\n\n{}",
                         key_column_name,
-                        hint_upsert(encode)
+                        hint_format_encode(format_encode)
                     ))));
                 }
                 sql_defined_pk_names
@@ -481,12 +479,12 @@ pub(crate) async fn bind_source_pk(
                     Err(RwError::from(ProtocolError(format!(
                         "Primary key must be specified to {}\n\n{}",
                         include_key_column_name,
-                        hint_upsert(encode)
+                        hint_format_encode(format_encode)
                     ))))
                 } else {
                     Err(RwError::from(ProtocolError(format!(
                         "INCLUDE KEY clause not set\n\n{}",
-                        hint_upsert(encode)
+                        hint_format_encode(format_encode)
                     ))))
                 };
             }
@@ -752,10 +750,15 @@ pub async fn bind_create_source_or_table_with_connector(
     }
     if is_create_source {
         match format_encode.format {
-            Format::Upsert => {
+            Format::Upsert
+            | Format::Debezium
+            | Format::DebeziumMongo
+            | Format::Maxwell
+            | Format::Canal => {
                 return Err(ErrorCode::BindError(format!(
-                    "can't CREATE SOURCE with FORMAT UPSERT\n\nHint: use CREATE TABLE instead\n\n{}",
-                    hint_upsert(&format_encode.row_encode)
+                    "can't CREATE SOURCE with {}\n\nHint: use CREATE TABLE instead\n\n{}",
+                    format_encode.format,
+                    hint_format_encode(&format_encode)
                 ))
                 .into());
             }
