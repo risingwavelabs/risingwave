@@ -22,7 +22,7 @@ use risingwave_common::error::NotImplemented;
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::types::{DataType, Decimal, MapType, StructType};
 use risingwave_common::{bail, bail_not_implemented};
-use risingwave_pb::plan_common::{AdditionalColumn, ColumnDesc, ColumnDescVersion};
+use risingwave_pb::plan_common::ColumnDesc;
 
 use super::get_nullable_union_inner;
 
@@ -78,99 +78,29 @@ pub fn avro_schema_to_column_descs(
     map_handling: Option<MapHandling>,
 ) -> anyhow::Result<Vec<ColumnDesc>> {
     let resolved = ResolvedSchema::try_from(schema)?;
-    if let Schema::Record(RecordSchema { fields, .. }) = schema {
-        let mut index = 0;
-        let mut ancestor_records: Vec<String> = vec![];
-        let fields = fields
-            .iter()
-            .map(|field| {
-                avro_field_to_column_desc(
-                    &field.name,
-                    &field.schema,
-                    &mut index,
-                    &mut ancestor_records,
-                    resolved.get_names(),
-                    map_handling,
-                )
-            })
-            .collect::<anyhow::Result<_>>()?;
-        Ok(fields)
-    } else {
+    let mut ancestor_records: Vec<String> = vec![];
+    let root_type = avro_type_mapping(
+        schema,
+        &mut ancestor_records,
+        resolved.get_names(),
+        map_handling,
+    )?;
+    let DataType::Struct(root_struct) = root_type else {
         bail!("schema invalid, record type required at top level of the schema.");
-    }
+    };
+    let fields = root_struct
+        .iter()
+        .map(|(name, data_type)| {
+            use risingwave_common::catalog::{ColumnDesc, ColumnId};
+            let desc = ColumnDesc::named(name, ColumnId::placeholder(), data_type.clone());
+            desc.to_protobuf()
+        })
+        .collect();
+    Ok(fields)
 }
 
 const DBZ_VARIABLE_SCALE_DECIMAL_NAME: &str = "VariableScaleDecimal";
 const DBZ_VARIABLE_SCALE_DECIMAL_NAMESPACE: &str = "io.debezium.data";
-
-fn avro_field_to_column_desc(
-    name: &str,
-    schema: &Schema,
-    index: &mut i32,
-    ancestor_records: &mut Vec<String>,
-    refs: &NamesRef<'_>,
-    map_handling: Option<MapHandling>,
-) -> anyhow::Result<ColumnDesc> {
-    let data_type = avro_type_mapping(schema, ancestor_records, refs, map_handling)?;
-    match schema {
-        Schema::Ref { name: ref_name } => {
-            avro_field_to_column_desc(
-                name,
-                refs[ref_name], // `ResolvedSchema::try_from` already handles lookup failure
-                index,
-                ancestor_records,
-                refs,
-                map_handling,
-            )
-        }
-        Schema::Record(RecordSchema {
-            // TODO(struct): assign type name once supported.
-            name: _type_name,
-            fields,
-            ..
-        }) => {
-            // TODO(struct): since we deprecated `field_descs` in `ColumnDesc`, there's no need to
-            // traverse the fields here except for maintaining the same column id (index) as the
-            // original implementation.
-            let _field_descs: Vec<ColumnDesc> = fields
-                .iter()
-                .map(|f| {
-                    avro_field_to_column_desc(
-                        &f.name,
-                        &f.schema,
-                        index,
-                        ancestor_records,
-                        refs,
-                        map_handling,
-                    )
-                })
-                .collect::<anyhow::Result<_>>()?;
-            *index += 1;
-
-            Ok(ColumnDesc {
-                column_type: Some(data_type.to_protobuf()),
-                column_id: *index,
-                name: name.to_owned(),
-                generated_or_default_column: None,
-                description: None,
-                additional_column_type: 0, // deprecated
-                additional_column: Some(AdditionalColumn { column_type: None }),
-                version: ColumnDescVersion::LATEST as _,
-            })
-        }
-        _ => {
-            *index += 1;
-            Ok(ColumnDesc {
-                column_type: Some(data_type.to_protobuf()),
-                column_id: *index,
-                name: name.to_owned(),
-                additional_column: Some(AdditionalColumn { column_type: None }),
-                version: ColumnDescVersion::LATEST as _,
-                ..Default::default()
-            })
-        }
-    }
-}
 
 /// This function expects original schema (with `Ref`).
 fn avro_type_mapping(
