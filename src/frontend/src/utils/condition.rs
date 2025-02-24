@@ -632,6 +632,14 @@ impl Condition {
         Ok(None)
     }
 
+    /// x = 1 AND y = 2 AND z = 3 => [x, y, z]
+    pub fn get_eq_literal_cond_input_refs(&self) -> Vec<InputRef> {
+        self.conjunctions
+            .iter()
+            .filter_map(|expr| expr.as_eq_literal_cond().map(|(input_ref, _)| input_ref))
+            .collect()
+    }
+
     /// See also [`ScanRange`](risingwave_pb::batch_plan::ScanRange).
     pub fn split_to_scan_ranges(
         self,

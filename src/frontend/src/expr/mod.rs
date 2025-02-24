@@ -727,6 +727,18 @@ impl ExprImpl {
         }
     }
 
+    pub fn as_eq_literal_cond(&self) -> Option<(InputRef, Literal)> {
+        if let ExprImpl::FunctionCall(function_call) = self
+            && function_call.func_type() == ExprType::Equal
+            && let (_, ExprImpl::InputRef(x), ExprImpl::Literal(y)) =
+                function_call.clone().decompose_as_binary()
+        {
+            Some((*x, *y))
+        } else {
+            None
+        }
+    }
+
     pub fn as_is_not_distinct_from_cond(&self) -> Option<(InputRef, InputRef)> {
         if let ExprImpl::FunctionCall(function_call) = self
             && function_call.func_type() == ExprType::IsNotDistinctFrom
