@@ -56,6 +56,7 @@ pub mod handler;
 pub use handler::PgResponseStream;
 mod observer;
 pub mod optimizer;
+use monitor::FrontendMetrics;
 pub use optimizer::{Explain, OptimizerContext, OptimizerContextRef, PlanRef};
 mod planner;
 use pgwire::net::TcpKeepalive;
@@ -204,6 +205,34 @@ use pgwire::pg_protocol::TlsConfig;
 
 use crate::session::SESSION_MANAGER;
 
+async fn monitor_memory(metrics: Arc<FrontendMetrics>) {
+    let interval_sec = std::env::var("RW_FRONTEND_MEMORY_MONITOR_TICK_SEC")
+        .unwrap_or("1".into())
+        .parse()
+        .unwrap();
+    let mut min_trigger_interval = tokio::time::interval(Duration::from_secs(interval_sec));
+    min_trigger_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        min_trigger_interval.tick().await;
+        let jemalloc_allocated_bytes = tikv_jemalloc_ctl::stats::allocated::read().unwrap();
+        let jemalloc_active_bytes = tikv_jemalloc_ctl::stats::active::read().unwrap();
+        let jemalloc_resident_bytes = tikv_jemalloc_ctl::stats::resident::read().unwrap();
+        let jemalloc_metadata_bytes = tikv_jemalloc_ctl::stats::metadata::read().unwrap();
+        metrics
+            .jemalloc_allocated_bytes
+            .set(jemalloc_allocated_bytes as _);
+        metrics
+            .jemalloc_active_bytes
+            .set(jemalloc_active_bytes as _);
+        metrics
+            .jemalloc_resident_bytes
+            .set(jemalloc_resident_bytes as _);
+        metrics
+            .jemalloc_metadata_bytes
+            .set(jemalloc_metadata_bytes as _);
+    }
+}
+
 /// Start frontend
 pub fn start(
     opts: FrontendOpts,
@@ -231,6 +260,8 @@ pub fn start(
 
         let webhook_service = crate::webhook::WebhookService::new(webhook_listen_addr);
         let _task = tokio::spawn(webhook_service.serve());
+        let _monitor_memory =
+            tokio::spawn(monitor_memory(session_mgr.env().frontend_metrics.clone()));
 
         pg_serve(
             &listen_addr,
