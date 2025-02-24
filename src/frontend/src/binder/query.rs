@@ -24,9 +24,9 @@ use risingwave_sqlparser::ast::{
 };
 use thiserror_ext::AsReport;
 
+use super::BoundValues;
 use super::bind_context::BindingCteState;
 use super::statement::RewriteExprsRecursive;
-use super::BoundValues;
 use crate::binder::bind_context::{BindingCte, RecursiveUnion};
 use crate::binder::{Binder, BoundSetExpr};
 use crate::error::{ErrorCode, Result, RwError};
@@ -302,7 +302,7 @@ impl Binder {
                             "ORDER BY \"{}\" is ambiguous",
                             name.real_value()
                         ))
-                        .into())
+                        .into());
                     }
                 }
             }
@@ -313,7 +313,7 @@ impl Binder {
                         "Invalid ordinal number in ORDER BY: {}",
                         number
                     ))
-                    .into())
+                    .into());
                 }
             },
             expr => {

@@ -20,8 +20,8 @@ use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::meta::PausedReason;
 use risingwave_pb::stream_plan::PbFragmentTypeFlag;
-use risingwave_pb::stream_service::streaming_control_stream_request::PbInitRequest;
 use risingwave_pb::stream_service::WaitEpochCommitRequest;
+use risingwave_pb::stream_service::streaming_control_stream_request::PbInitRequest;
 use risingwave_rpc_client::StreamingControlHandle;
 
 use crate::barrier::command::CommandContext;

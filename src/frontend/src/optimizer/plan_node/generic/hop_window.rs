@@ -22,7 +22,7 @@ use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_expr::ExprError;
 
 use super::super::utils::IndicesDisplay;
-use super::{impl_distill_unit_from_fields, GenericPlanNode, GenericPlanRef};
+use super::{GenericPlanNode, GenericPlanRef, impl_distill_unit_from_fields};
 use crate::error::Result;
 use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef, InputRefDisplay, Literal};
 use crate::optimizer::optimizer_context::OptimizerContextRef;

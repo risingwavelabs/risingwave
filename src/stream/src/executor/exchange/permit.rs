@@ -17,7 +17,7 @@
 use std::sync::Arc;
 
 use risingwave_pb::task_service::permits;
-use tokio::sync::{mpsc, AcquireError, Semaphore, SemaphorePermit};
+use tokio::sync::{AcquireError, Semaphore, SemaphorePermit, mpsc};
 
 use crate::executor::DispatcherMessageBatch as Message;
 
@@ -233,7 +233,7 @@ mod tests {
         ); // recv successfully
 
         assert_matches!(send().now_or_never(), Some(Ok(_))); // send successfully
-                                                             // do not recv, so that the channel is full
+        // do not recv, so that the channel is full
 
         let mut send_fut = pin!(send());
         assert_matches!((&mut send_fut).now_or_never(), None); // would block due to no permits

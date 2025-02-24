@@ -1,7 +1,7 @@
 use sea_orm_migration::prelude::{Table as MigrationTable, *};
 
-use crate::utils::ColumnDefExt;
 use crate::SubQueryStatement::SelectStatement;
+use crate::utils::ColumnDefExt;
 
 #[derive(DeriveMigrationName)]
 pub struct Migration;

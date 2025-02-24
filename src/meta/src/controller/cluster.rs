@@ -20,36 +20,36 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use itertools::Itertools;
+use risingwave_common::RW_VERSION;
 use risingwave_common::hash::WorkerSlotId;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
 use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
-use risingwave_common::RW_VERSION;
 use risingwave_license::LicenseManager;
 use risingwave_meta_model::prelude::{Worker, WorkerProperty};
 use risingwave_meta_model::worker::{WorkerStatus, WorkerType};
-use risingwave_meta_model::{worker, worker_property, TransactionId, WorkerId};
+use risingwave_meta_model::{TransactionId, WorkerId, worker, worker_property};
 use risingwave_pb::common::worker_node::{
     PbProperty, PbProperty as AddNodeProperty, PbResource, PbState,
 };
 use risingwave_pb::common::{HostAddress, PbHostAddress, PbWorkerNode, PbWorkerType, WorkerNode};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
-use sea_orm::prelude::Expr;
 use sea_orm::ActiveValue::Set;
+use sea_orm::prelude::Expr;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QuerySelect,
     TransactionTrait,
 };
 use thiserror_ext::AsReport;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
+use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 use tokio::sync::oneshot::Sender;
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tokio::task::JoinHandle;
 
 use crate::controller::utils::filter_workers_by_resource_group;
-use crate::manager::{LocalNotification, MetaSrvEnv, WorkerKey, META_NODE_ID};
+use crate::manager::{LocalNotification, META_NODE_ID, MetaSrvEnv, WorkerKey};
 use crate::model::ClusterId;
 use crate::{MetaError, MetaResult};
 

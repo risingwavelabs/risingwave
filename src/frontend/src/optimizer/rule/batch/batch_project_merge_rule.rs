@@ -14,7 +14,7 @@
 
 use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_expr_visitor::InputRefCounter;
-use crate::optimizer::plan_node::{generic, BatchProject, PlanTreeNodeUnary};
+use crate::optimizer::plan_node::{BatchProject, PlanTreeNodeUnary, generic};
 use crate::optimizer::rule::Rule;
 use crate::optimizer::{BoxedRule, PlanRef};
 use crate::utils::Substitute;

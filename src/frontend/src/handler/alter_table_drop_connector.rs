@@ -25,13 +25,13 @@ use crate::catalog::source_catalog::SourceCatalog;
 use crate::error::{ErrorCode, Result};
 use crate::handler::create_source::SqlColumnStrategy;
 use crate::handler::{
-    get_replace_table_plan, HandlerArgs, ObjectName, PgResponse, RwPgResponse, Statement,
-    StatementType,
+    HandlerArgs, ObjectName, PgResponse, RwPgResponse, Statement, StatementType,
+    get_replace_table_plan,
 };
 use crate::session::SessionImpl;
 use crate::utils::data_type::DataTypeToAst;
 use crate::utils::options::RETENTION_SECONDS;
-use crate::{bind_data_type, Binder, TableCatalog};
+use crate::{Binder, TableCatalog, bind_data_type};
 
 // allowed in with clause but irrelevant to connector
 static TABLE_PROPS: LazyLock<HashSet<&str>> =

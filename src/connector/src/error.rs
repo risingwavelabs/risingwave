@@ -20,8 +20,8 @@ use risingwave_pb::PbFieldNotFound;
 use risingwave_rpc_client::error::RpcError;
 
 use crate::parser::AccessError;
-use crate::schema::schema_registry::{ConcurrentRequestError, WireFormatError};
 use crate::schema::InvalidOptionError;
+use crate::schema::schema_registry::{ConcurrentRequestError, WireFormatError};
 use crate::sink::SinkError;
 use crate::source::mqtt::MqttError;
 use crate::source::nats::NatsJetStreamError;

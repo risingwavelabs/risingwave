@@ -20,16 +20,16 @@ use risingwave_meta_model::compaction_task::CompactionTask;
 use risingwave_meta_model::hummock_version_delta::FullVersionDelta;
 use risingwave_meta_model::hummock_version_stats::TableStats;
 use risingwave_meta_model::{
-    compaction_config, compaction_status, compaction_task, hummock_pinned_snapshot,
-    hummock_pinned_version, hummock_version_delta, hummock_version_stats, CompactionGroupId,
-    CompactionTaskId, HummockVersionId, WorkerId,
+    CompactionGroupId, CompactionTaskId, HummockVersionId, WorkerId, compaction_config,
+    compaction_status, compaction_task, hummock_pinned_snapshot, hummock_pinned_version,
+    hummock_version_delta, hummock_version_stats,
 };
 use risingwave_pb::hummock::{
     CompactTaskAssignment, HummockPinnedSnapshot, HummockPinnedVersion, HummockVersionStats,
 };
-use sea_orm::sea_query::OnConflict;
 use sea_orm::ActiveValue::Set;
 use sea_orm::EntityTrait;
+use sea_orm::sea_query::OnConflict;
 
 use crate::hummock::compaction::CompactStatus;
 use crate::hummock::model::CompactionGroup;

@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
+use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::plan_common::{AdditionalColumn, ColumnDesc, ColumnDescVersion};
 
 pub trait ColumnDescTestExt {

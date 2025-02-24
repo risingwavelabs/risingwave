@@ -27,11 +27,11 @@ use risingwave_common::row::{Row, RowExt};
 use risingwave_common::types::ScalarImpl;
 use risingwave_hummock_sdk::{HummockReadEpoch, HummockVersionId};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::common::{batch_query_epoch, BatchQueryEpoch};
+use risingwave_pb::common::{BatchQueryEpoch, batch_query_epoch};
 use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_storage::table::batch_table::BatchTable;
 use risingwave_storage::table::collect_data_chunk;
-use risingwave_storage::{dispatch_state_store, StateStore};
+use risingwave_storage::{StateStore, dispatch_state_store};
 
 use super::{BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
 use crate::error::{BatchError, Result};

@@ -15,9 +15,9 @@
 use std::sync::Arc;
 
 use super::task_progress::TaskProgressManagerRef;
+use crate::hummock::MemoryLimiter;
 use crate::hummock::compactor::CompactionExecutor;
 use crate::hummock::sstable_store::SstableStoreRef;
-use crate::hummock::MemoryLimiter;
 use crate::monitor::CompactorMetrics;
 use crate::opts::StorageOpts;
 

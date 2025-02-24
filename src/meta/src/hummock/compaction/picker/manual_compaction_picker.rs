@@ -658,13 +658,15 @@ pub mod tests {
         };
         let mut picker =
             ManualCompactionPicker::new(Arc::new(RangeOverlapStrategy::default()), option, 0);
-        assert!(picker
-            .pick_compaction(
-                &levels,
-                &levels_handler,
-                &mut LocalPickerStatistic::default()
-            )
-            .is_none());
+        assert!(
+            picker
+                .pick_compaction(
+                    &levels,
+                    &levels_handler,
+                    &mut LocalPickerStatistic::default()
+                )
+                .is_none()
+        );
     }
 
     #[test]
@@ -688,9 +690,11 @@ pub mod tests {
             0,
         );
         let mut local_stats = LocalPickerStatistic::default();
-        assert!(picker
-            .pick_compaction(&levels, &levels_handler, &mut local_stats)
-            .is_none());
+        assert!(
+            picker
+                .pick_compaction(&levels, &levels_handler, &mut local_stats)
+                .is_none()
+        );
 
         // pick_l0_to_base_level
         let mut picker =
@@ -827,9 +831,11 @@ pub mod tests {
                 option,
                 target_level,
             );
-            assert!(picker
-                .pick_compaction(&levels, &levels_handler, &mut local_stats)
-                .is_none())
+            assert!(
+                picker
+                    .pick_compaction(&levels, &levels_handler, &mut local_stats)
+                    .is_none()
+            )
         }
 
         {
@@ -981,9 +987,11 @@ pub mod tests {
                 target_level,
             );
             // Because top sub-level is pending.
-            assert!(picker
-                .pick_compaction(&levels, &levels_handler, &mut local_stats)
-                .is_none());
+            assert!(
+                picker
+                    .pick_compaction(&levels, &levels_handler, &mut local_stats)
+                    .is_none()
+            );
 
             clean_task_state(&mut levels_handler[0]);
             clean_task_state(&mut levels_handler[1]);
@@ -1013,9 +1021,11 @@ pub mod tests {
                 option,
                 target_level,
             );
-            assert!(picker
-                .pick_compaction(&levels, &levels_handler, &mut local_stats)
-                .is_none())
+            assert!(
+                picker
+                    .pick_compaction(&levels, &levels_handler, &mut local_stats)
+                    .is_none()
+            )
         }
 
         {

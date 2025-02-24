@@ -15,17 +15,17 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
-use bk_tree::{metrics, BKTree};
+use bk_tree::{BKTree, metrics};
 use itertools::Itertools;
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_common::types::{DataType, ListValue, ScalarImpl, Timestamptz};
 use risingwave_common::{bail_not_implemented, current_cluster_version, no_function};
 use thiserror_ext::AsReport;
 
+use crate::Binder;
 use crate::binder::Clause;
 use crate::error::{ErrorCode, Result};
 use crate::expr::{CastContext, Expr, ExprImpl, ExprType, FunctionCall, Literal, Now};
-use crate::Binder;
 
 impl Binder {
     pub(super) fn bind_builtin_scalar_function(
@@ -728,7 +728,7 @@ impl Binder {
                         "VARIADIC argument is not allowed in function \"{}\"",
                         function_name
                     ))
-                    .into())
+                    .into());
                 }
             };
             return Ok(FunctionCall::new(func, inputs)?.into());

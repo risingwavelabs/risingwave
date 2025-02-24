@@ -30,6 +30,7 @@ use risingwave_pb::stream_service::BarrierCompleteResponse;
 use status::{CreatingJobInjectBarrierInfo, CreatingStreamingJobStatus};
 use tracing::info;
 
+use crate::MetaResult;
 use crate::barrier::info::{BarrierInfo, InflightStreamingJobInfo};
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::rpc::ControlStreamManager;
@@ -37,7 +38,6 @@ use crate::barrier::{Command, CreateStreamingJobCommandInfo, SnapshotBackfillInf
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::model::StreamJobActorsToCreate;
 use crate::rpc::metrics::GLOBAL_META_METRICS;
-use crate::MetaResult;
 
 #[derive(Debug)]
 pub(crate) struct CreatingStreamingJobControl {

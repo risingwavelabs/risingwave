@@ -19,10 +19,10 @@ use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc};
 use risingwave_common::types::Fields;
-use risingwave_sqlparser::ast::{display_comma_separated, ObjectName};
+use risingwave_sqlparser::ast::{ObjectName, display_comma_separated};
 
 use super::show::ShowColumnRow;
-use super::{fields_to_descriptors, RwPgResponse};
+use super::{RwPgResponse, fields_to_descriptors};
 use crate::binder::{Binder, Relation};
 use crate::catalog::CatalogError;
 use crate::error::Result;

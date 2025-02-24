@@ -16,24 +16,24 @@ use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::plan_common::{AsOfJoinDesc, AsOfJoinType, JoinType};
-use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::AsOfJoinNode;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 
 use super::stream::prelude::*;
 use super::utils::{
-    childless_record, plan_node_name, watermark_pretty, Distill, TableCatalogBuilder,
+    Distill, TableCatalogBuilder, childless_record, plan_node_name, watermark_pretty,
 };
 use super::{
-    generic, ExprRewritable, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, StreamJoinCommon,
-    StreamNode,
+    ExprRewritable, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, StreamJoinCommon,
+    StreamNode, generic,
 };
+use crate::TableCatalog;
 use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{EqJoinPredicate, EqJoinPredicateDisplay};
 use crate::optimizer::property::{MonotonicityMap, WatermarkColumns};
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::TableCatalog;
 
 /// [`StreamAsOfJoin`] implements [`super::LogicalJoin`] with hash tables.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

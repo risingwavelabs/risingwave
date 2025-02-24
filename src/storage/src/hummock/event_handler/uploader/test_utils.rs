@@ -15,20 +15,20 @@
 #![cfg(test)]
 
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::future::{poll_fn, Future};
+use std::future::{Future, poll_fn};
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::{Arc, LazyLock};
 use std::task::Poll;
 
 use bytes::Bytes;
-use futures::future::BoxFuture;
 use futures::FutureExt;
+use futures::future::BoxFuture;
 use itertools::Itertools;
 use prometheus::core::GenericGauge;
 use risingwave_common::catalog::TableId;
 use risingwave_common::must_match;
-use risingwave_common::util::epoch::{test_epoch, EpochExt};
+use risingwave_common::util::epoch::{EpochExt, test_epoch};
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::{FullKey, TableKey};
 use risingwave_hummock_sdk::key_range::KeyRange;

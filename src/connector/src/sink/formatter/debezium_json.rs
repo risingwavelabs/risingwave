@@ -16,7 +16,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use risingwave_common::array::Op;
 use risingwave_common::catalog::{Field, Schema};
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 use tracing::warn;
 
 use super::{Result, SinkFormatter, StreamChunk};

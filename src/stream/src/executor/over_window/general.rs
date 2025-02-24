@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{btree_map, BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashSet, btree_map};
 use std::marker::PhantomData;
 use std::ops::RangeInclusive;
 
 use delta_btree_map::Change;
 use itertools::Itertools;
-use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::Op;
+use risingwave_common::array::stream_record::Record;
 use risingwave_common::row::RowExt;
 use risingwave_common::session_config::OverWindowCachePolicy as CachePolicy;
 use risingwave_common::types::DefaultOrdered;
@@ -31,8 +31,8 @@ use risingwave_expr::window_function::{
 
 use super::frame_finder::merge_rows_frames;
 use super::over_partition::{
-    new_empty_partition_cache, shrink_partition_cache, CacheKey, OverPartition, PartitionCache,
-    PartitionDelta,
+    CacheKey, OverPartition, PartitionCache, PartitionDelta, new_empty_partition_cache,
+    shrink_partition_cache,
 };
 use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;

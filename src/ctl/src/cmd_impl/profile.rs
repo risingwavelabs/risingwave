@@ -20,7 +20,7 @@ use risingwave_pb::common::WorkerType;
 use risingwave_pb::monitor_service::ProfilingResponse;
 use risingwave_rpc_client::ComputeClientPool;
 use thiserror_ext::AsReport;
-use tokio::fs::{create_dir_all, File};
+use tokio::fs::{File, create_dir_all};
 use tokio::io::AsyncWriteExt;
 
 use crate::CtlContext;

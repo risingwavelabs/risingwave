@@ -26,7 +26,7 @@ pub use query_mode::QueryMode;
 use risingwave_common_proc_macro::{ConfigDoc, SessionConfig};
 pub use search_path::{SearchPath, USER_NAME_WILD_CARD};
 use serde::{Deserialize, Serialize};
-use serde_with::{serde_as, DisplayFromStr};
+use serde_with::{DisplayFromStr, serde_as};
 use thiserror::Error;
 
 use self::non_zero64::ConfigNonZeroU64;

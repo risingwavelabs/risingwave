@@ -17,7 +17,7 @@ use std::sync::Arc;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::hash::{HashKey, HashKeyDispatcher};
 use risingwave_common::types::DataType;
-use risingwave_expr::expr::{build_non_strict_from_prost, NonStrictExpression};
+use risingwave_expr::expr::{NonStrictExpression, build_non_strict_from_prost};
 use risingwave_pb::plan_common::{JoinType as JoinTypeProto, StorageTableDesc};
 use risingwave_storage::table::batch_table::BatchTable;
 

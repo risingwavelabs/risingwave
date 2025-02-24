@@ -26,7 +26,7 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_hummock_sdk::key::{
-    prefixed_range_with_vnode, FullKey, TableKey, TableKeyRange, UserKey,
+    FullKey, TableKey, TableKeyRange, UserKey, prefixed_range_with_vnode,
 };
 use risingwave_hummock_sdk::table_watermark::WatermarkDirection;
 use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
@@ -35,11 +35,11 @@ use tokio::task::yield_now;
 use tracing::error;
 
 use crate::error::StorageResult;
+use crate::hummock::HummockError;
 use crate::hummock::utils::{
     do_delete_sanity_check, do_insert_sanity_check, do_update_sanity_check, merge_stream,
     sanity_check_enabled,
 };
-use crate::hummock::HummockError;
 use crate::mem_table::{KeyOp, MemTable};
 use crate::storage_value::StorageValue;
 use crate::store::*;
@@ -275,11 +275,11 @@ pub mod sled {
         use bytes::Bytes;
         use risingwave_common::catalog::TableId;
         use risingwave_common::util::epoch::EPOCH_SPILL_TIME_MASK;
-        use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
         use risingwave_hummock_sdk::EpochWithGap;
+        use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
 
-        use crate::memory::sled::SledRangeKv;
         use crate::memory::RangeKv;
+        use crate::memory::sled::SledRangeKv;
 
         #[test]
         fn test_filter_variable_key_length_false_positive() {
@@ -303,30 +303,38 @@ pub mod sled {
             let included_long_full_key = to_full_key(&included_long_table_key[..]);
             let excluded_short_full_key = to_full_key(&excluded_short_table_key[..]);
 
-            assert!((
-                Bound::Included(left_full_key.to_ref()),
-                Bound::Included(right_full_key.to_ref())
-            )
-                .contains(&included_long_full_key.to_ref()));
-            assert!(!(
-                Bound::Included(left_full_key.to_ref()),
-                Bound::Included(right_full_key.to_ref())
-            )
-                .contains(&excluded_short_full_key.to_ref()));
+            assert!(
+                (
+                    Bound::Included(left_full_key.to_ref()),
+                    Bound::Included(right_full_key.to_ref())
+                )
+                    .contains(&included_long_full_key.to_ref())
+            );
+            assert!(
+                !(
+                    Bound::Included(left_full_key.to_ref()),
+                    Bound::Included(right_full_key.to_ref())
+                )
+                    .contains(&excluded_short_full_key.to_ref())
+            );
 
             let left_encoded = left_full_key.encode_reverse_epoch();
             let right_encoded = right_full_key.encode_reverse_epoch();
 
-            assert!((
-                Bound::Included(left_encoded.clone()),
-                Bound::Included(right_encoded.clone())
-            )
-                .contains(&included_long_full_key.encode_reverse_epoch()));
-            assert!((
-                Bound::Included(left_encoded),
-                Bound::Included(right_encoded)
-            )
-                .contains(&excluded_short_full_key.encode_reverse_epoch()));
+            assert!(
+                (
+                    Bound::Included(left_encoded.clone()),
+                    Bound::Included(right_encoded.clone())
+                )
+                    .contains(&included_long_full_key.encode_reverse_epoch())
+            );
+            assert!(
+                (
+                    Bound::Included(left_encoded),
+                    Bound::Included(right_encoded)
+                )
+                    .contains(&excluded_short_full_key.encode_reverse_epoch())
+            );
 
             let sled_range_kv = SledRangeKv::new_temp();
             sled_range_kv

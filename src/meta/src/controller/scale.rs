@@ -26,8 +26,8 @@ use risingwave_meta_model::prelude::{
     Actor, ActorDispatcher, Fragment, Sink, Source, StreamingJob, Table,
 };
 use risingwave_meta_model::{
-    actor, actor_dispatcher, fragment, sink, source, streaming_job, table, ActorId, ActorMapping,
-    ConnectorSplits, FragmentId, I32Array, ObjectId, VnodeBitmap,
+    ActorId, ActorMapping, ConnectorSplits, FragmentId, I32Array, ObjectId, VnodeBitmap, actor,
+    actor_dispatcher, fragment, sink, source, streaming_job, table,
 };
 use risingwave_meta_model_migration::{
     Alias, CommonTableExpression, Expr, IntoColumnRef, QueryStatementBuilder, SelectStatement,
@@ -676,7 +676,10 @@ impl CatalogController {
 
             crit_check_in_loop!(
                 flag,
-                downstream_fragment.upstream_fragment_id.inner_ref().contains(&actor.fragment_id),
+                downstream_fragment
+                    .upstream_fragment_id
+                    .inner_ref()
+                    .contains(&actor.fragment_id),
                 format!(
                     "ActorDispatcher {} has downstream fragment {} which does not have upstream fragment {}",
                     id, dispatcher_id, actor.fragment_id
@@ -687,8 +690,8 @@ impl CatalogController {
                 flag,
                 fragment_actors.contains_key(dispatcher_id),
                 format!(
-                "ActorDispatcher {id} has downstream fragment {dispatcher_id} which has no actors",
-            )
+                    "ActorDispatcher {id} has downstream fragment {dispatcher_id} which has no actors",
+                )
             );
 
             let dispatcher_downstream_actor_ids: HashSet<_> =

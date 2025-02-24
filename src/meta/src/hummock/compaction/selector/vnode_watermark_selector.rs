@@ -16,18 +16,18 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 
 use risingwave_common::catalog::TableId;
+use risingwave_hummock_sdk::HummockCompactionTaskId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     safe_epoch_read_table_watermarks_impl, safe_epoch_table_watermarks_impl,
 };
 use risingwave_hummock_sdk::table_watermark::{
     ReadTableWatermark, TableWatermarks, WatermarkSerdeType,
 };
-use risingwave_hummock_sdk::HummockCompactionTaskId;
 use risingwave_pb::hummock::compact_task::TaskType;
 
 use crate::hummock::compaction::picker::VnodeWatermarkCompactionPicker;
 use crate::hummock::compaction::selector::{CompactionSelectorContext, DynamicLevelSelectorCore};
-use crate::hummock::compaction::{create_compaction_task, CompactionSelector, CompactionTask};
+use crate::hummock::compaction::{CompactionSelector, CompactionTask, create_compaction_task};
 #[derive(Default)]
 pub struct VnodeWatermarkCompactionSelector {}
 

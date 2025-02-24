@@ -31,8 +31,8 @@ use winnow::{PResult, Parser as _};
 use crate::ast::*;
 use crate::keywords::{self, Keyword};
 use crate::parser_v2::{
-    dollar_quoted_string, keyword, literal_i64, literal_uint, single_quoted_string, token_number,
-    ParserExt as _,
+    ParserExt as _, dollar_quoted_string, keyword, literal_i64, literal_uint, single_quoted_string,
+    token_number,
 };
 use crate::tokenizer::*;
 use crate::{impl_parse_to, parser_v2};

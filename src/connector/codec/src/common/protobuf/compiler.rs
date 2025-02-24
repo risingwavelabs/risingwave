@@ -15,8 +15,8 @@
 use std::collections::HashMap;
 
 use prost_types::FileDescriptorSet;
-use protox::file::{ChainFileResolver, File, FileResolver, GoogleFileResolver};
 use protox::Error;
+use protox::file::{ChainFileResolver, File, FileResolver, GoogleFileResolver};
 
 // name -> content
 pub fn compile_pb(

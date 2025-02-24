@@ -20,8 +20,8 @@ use std::time::Duration;
 
 use anyhow::anyhow;
 use fail::fail_point;
-use futures::future::try_join_all;
 use futures::StreamExt;
+use futures::future::try_join_all;
 use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::util::epoch::Epoch;
@@ -44,8 +44,8 @@ use risingwave_pb::stream_service::streaming_control_stream_request::{
     RemovePartialGraphRequest, ResetDatabaseRequest,
 };
 use risingwave_pb::stream_service::{
-    streaming_control_stream_request, streaming_control_stream_response, InjectBarrierRequest,
-    StreamingControlStreamRequest,
+    InjectBarrierRequest, StreamingControlStreamRequest, streaming_control_stream_request,
+    streaming_control_stream_response,
 };
 use risingwave_rpc_client::StreamingControlHandle;
 use thiserror_ext::AsReport;
@@ -126,16 +126,17 @@ impl ControlStreamManager {
         for i in 1..=MAX_RETRY {
             match context.new_control_stream(&node, &init_request).await {
                 Ok(handle) => {
-                    assert!(self
-                        .nodes
-                        .insert(
-                            node_id,
-                            ControlStreamNode {
-                                worker: node.clone(),
-                                handle,
-                            }
-                        )
-                        .is_none());
+                    assert!(
+                        self.nodes
+                            .insert(
+                                node_id,
+                                ControlStreamNode {
+                                    worker: node.clone(),
+                                    handle,
+                                }
+                            )
+                            .is_none()
+                    );
                     info!(?node_host, "add control stream worker");
                     return;
                 }

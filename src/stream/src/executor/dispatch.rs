@@ -25,21 +25,21 @@ use risingwave_common::bitmap::BitmapBuilder;
 use risingwave_common::hash::{ActorMapping, ExpandedActorMapping, VirtualNode};
 use risingwave_common::metrics::LabelGuardedIntCounter;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_pb::stream_plan::update_mutation::PbDispatcherUpdate;
 use risingwave_pb::stream_plan::PbDispatcher;
-use smallvec::{smallvec, SmallVec};
+use risingwave_pb::stream_plan::update_mutation::PbDispatcherUpdate;
+use smallvec::{SmallVec, smallvec};
 use tokio::time::Instant;
-use tokio_stream::adapters::Peekable;
 use tokio_stream::StreamExt;
-use tracing::{event, Instrument};
+use tokio_stream::adapters::Peekable;
+use tracing::{Instrument, event};
 
-use super::exchange::output::{new_output, BoxedOutput};
+use super::exchange::output::{BoxedOutput, new_output};
 use super::{
     AddMutation, DispatcherBarriers, DispatcherMessageBatch, MessageBatch, TroublemakerExecutor,
     UpdateMutation,
 };
-use crate::executor::prelude::*;
 use crate::executor::StreamConsumer;
+use crate::executor::prelude::*;
 use crate::task::{DispatcherId, SharedContext};
 
 /// [`DispatchExecutor`] consumes messages and send them into downstream actors. Usually,

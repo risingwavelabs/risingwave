@@ -24,10 +24,10 @@ use risingwave_common::catalog::Field;
 use risingwave_common::types::{Decimal, ScalarImpl};
 
 use crate::expr::{Expr, ExprImpl, ExprType, Literal};
+use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{BatchFilter, BatchIcebergScan, PlanTreeNodeUnary};
 use crate::optimizer::rule::{BoxedRule, Rule};
-use crate::optimizer::PlanRef;
 use crate::utils::Condition;
 
 /// NOTE(kwannoel): We do predicate pushdown to the iceberg-sdk here.
@@ -293,7 +293,7 @@ fn rw_predicate_to_iceberg_predicate(
                 Condition {
                     conjunctions: ignored_conjunctions,
                 },
-            )
+            );
         }
     };
 

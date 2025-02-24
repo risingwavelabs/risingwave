@@ -22,13 +22,13 @@ use std::sync::Arc;
 use risingwave_sqlparser::ast::{ExplainFormat, ExplainOptions, ExplainType};
 
 use super::property::WatermarkGroupId;
+use crate::PlanRef;
 use crate::binder::ShareId;
 use crate::expr::{CorrelatedId, SessionTimezone};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::PlanNodeId;
 use crate::session::SessionImpl;
 use crate::utils::{OverwriteOptions, WithOptions};
-use crate::PlanRef;
 
 const RESERVED_ID_NUM: u16 = 10000;
 

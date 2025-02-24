@@ -57,13 +57,13 @@ pub mod group_split {
     use risingwave_common::hash::VirtualNode;
     use risingwave_pb::hummock::PbLevelType;
 
-    use super::hummock_version_ext::insert_new_sub_level;
     use super::StateTableId;
+    use super::hummock_version_ext::insert_new_sub_level;
     use crate::key::{FullKey, TableKey};
     use crate::key_range::KeyRange;
     use crate::level::{Level, Levels};
     use crate::sstable_info::SstableInfo;
-    use crate::{can_concat, HummockEpoch, KeyComparator};
+    use crate::{HummockEpoch, KeyComparator, can_concat};
 
     // By default, the split key is constructed with vnode = 0 and epoch = MAX, so that we can split table_id to the right group
     pub fn build_split_key(table_id: StateTableId, vnode: VirtualNode) -> Bytes {

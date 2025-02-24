@@ -33,7 +33,7 @@ use core::str::Chars;
 use serde::{Deserialize, Serialize};
 
 use crate::ast::{CstyleEscapedString, DollarQuotedString};
-use crate::keywords::{Keyword, ALL_KEYWORDS, ALL_KEYWORDS_INDEX};
+use crate::keywords::{ALL_KEYWORDS, ALL_KEYWORDS_INDEX, Keyword};
 
 /// SQL Token enumeration
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

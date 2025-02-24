@@ -20,21 +20,21 @@ use itertools::Itertools;
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::{ArrayImpl, DataChunk, I64Array, Utf8Array};
 use risingwave_common::catalog::{
-    Field, Schema, ICEBERG_FILE_PATH_COLUMN_NAME, ICEBERG_SEQUENCE_NUM_COLUMN_NAME,
+    Field, ICEBERG_FILE_PATH_COLUMN_NAME, ICEBERG_SEQUENCE_NUM_COLUMN_NAME, Schema,
 };
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common_estimate_size::EstimateSize;
+use risingwave_connector::WithOptionsSecResolved;
 use risingwave_connector::source::iceberg::{IcebergFileScanTask, IcebergProperties, IcebergSplit};
 use risingwave_connector::source::{ConnectorProperties, SplitImpl, SplitMetaData};
-use risingwave_connector::WithOptionsSecResolved;
 use risingwave_expr::expr::LiteralExpression;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder, ExecutorBuilder};
+use crate::ValuesExecutor;
 use crate::error::BatchError;
 use crate::executor::Executor;
 use crate::monitor::BatchMetrics;
-use crate::ValuesExecutor;
 
 pub struct IcebergScanExecutor {
     iceberg_config: IcebergProperties,

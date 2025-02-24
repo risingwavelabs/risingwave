@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use criterion::{black_box, BatchSize, BenchmarkId, Criterion};
+use criterion::{BatchSize, BenchmarkId, Criterion, black_box};
 use futures::StreamExt;
-use risingwave_batch_executors::test_utils::{gen_data, MockExecutor};
+use risingwave_batch_executors::test_utils::{MockExecutor, gen_data};
 use risingwave_batch_executors::{BoxedExecutor, JoinType};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;

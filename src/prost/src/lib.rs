@@ -531,7 +531,7 @@ impl std::fmt::Debug for plan_common::ColumnDesc {
 
 #[cfg(test)]
 mod tests {
-    use crate::data::{data_type, DataType};
+    use crate::data::{DataType, data_type};
     use crate::plan_common::Field;
     use crate::stream_plan::stream_node::NodeBody;
 

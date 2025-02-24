@@ -15,8 +15,8 @@
 use std::sync::{Arc, LazyLock};
 
 use anyhow::Context;
-use apache_avro::schema::{DecimalSchema, NamesRef, RecordSchema, ResolvedSchema, Schema};
 use apache_avro::AvroResult;
+use apache_avro::schema::{DecimalSchema, NamesRef, RecordSchema, ResolvedSchema, Schema};
 use itertools::Itertools;
 use risingwave_common::error::NotImplemented;
 use risingwave_common::log::LogSuppresser;

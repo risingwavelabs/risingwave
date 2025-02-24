@@ -22,8 +22,8 @@ use risingwave_sqlparser::ast::{
     ObjectName, Query, TrimWhereField, UnaryOperator,
 };
 
-use crate::binder::expr::function::is_sys_function_without_args;
 use crate::binder::Binder;
+use crate::binder::expr::function::is_sys_function_without_args;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall, InputRef, Parameter, SubqueryKind};
 use crate::handler::create_sql_function::SQL_UDF_PATTERN;
@@ -1054,7 +1054,7 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
                         "Column type SERIAL is not supported".into(),
                         "Please remove the SERIAL column".into(),
                     )
-                    .into())
+                    .into());
                 }
                 _ => return Err(new_err().into()),
             }

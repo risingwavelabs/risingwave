@@ -26,15 +26,15 @@ use risingwave_common::bitmap::{Bitmap, BitmapBuilder, FilterByBitmap};
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::{HashKey, HashKeyDispatcher, PrecomputedBuildHasher};
 use risingwave_common::memory::{MemoryContext, MonitoredGlobalAlloc};
-use risingwave_common::row::{repeat_n, Row, RowExt};
+use risingwave_common::row::{Row, RowExt, repeat_n};
 use risingwave_common::types::{DataType, Datum, DefaultOrd};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common_estimate_size::EstimateSize;
-use risingwave_expr::expr::{build_from_prost, BoxedExpression, Expression};
+use risingwave_expr::expr::{BoxedExpression, Expression, build_from_prost};
+use risingwave_pb::Message;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::data::DataChunk as PbDataChunk;
-use risingwave_pb::Message;
 
 use super::{AsOfDesc, AsOfInequalityType, ChunkedData, JoinType, RowId};
 use crate::error::{BatchError, Result};
@@ -46,7 +46,7 @@ use crate::monitor::BatchSpillMetrics;
 use crate::risingwave_common::hash::NullBitmap;
 use crate::spill::spill_op::SpillBackend::Disk;
 use crate::spill::spill_op::{
-    SpillBackend, SpillBuildHasher, SpillOp, DEFAULT_SPILL_PARTITION_NUM, SPILL_AT_LEAST_MEMORY,
+    DEFAULT_SPILL_PARTITION_NUM, SPILL_AT_LEAST_MEMORY, SpillBackend, SpillBuildHasher, SpillOp,
 };
 use crate::task::ShutdownToken;
 
@@ -2514,14 +2514,14 @@ mod tests {
     use risingwave_common::util::iter_util::ZipEqDebug;
     use risingwave_common::util::memcmp_encoding::encode_chunk;
     use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-    use risingwave_expr::expr::{build_from_pretty, BoxedExpression};
+    use risingwave_expr::expr::{BoxedExpression, build_from_pretty};
 
     use super::{
         ChunkedData, HashJoinExecutor, JoinType, LeftNonEquiJoinState, RightNonEquiJoinState, RowId,
     };
     use crate::error::Result;
-    use crate::executor::test_utils::MockExecutor;
     use crate::executor::BoxedExecutor;
+    use crate::executor::test_utils::MockExecutor;
     use crate::monitor::BatchSpillMetrics;
     use crate::spill::spill_op::SpillBackend;
     use crate::task::ShutdownToken;

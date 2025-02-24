@@ -17,8 +17,8 @@ use risingwave_pb::catalog::PbComment;
 use risingwave_sqlparser::ast::{CommentObject, ObjectName};
 
 use super::{HandlerArgs, RwPgResponse};
-use crate::error::{ErrorCode, Result};
 use crate::Binder;
+use crate::error::{ErrorCode, Result};
 
 pub async fn handle_comment(
     handler_args: HandlerArgs,

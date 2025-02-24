@@ -23,8 +23,8 @@ use super::{
 use crate::error::ConnectorResult;
 use crate::parser::bytes_parser::BytesAccessBuilder;
 use crate::parser::simd_json_parser::DebeziumJsonAccessBuilder;
-use crate::parser::unified::debezium::{parse_schema_change, parse_transaction_meta};
 use crate::parser::unified::AccessImpl;
+use crate::parser::unified::debezium::{parse_schema_change, parse_transaction_meta};
 use crate::parser::upsert_parser::get_key_column_name;
 use crate::parser::{BytesProperties, ParseResult, ParserFormat};
 use crate::source::cdc::CdcMessageType;
@@ -207,8 +207,8 @@ mod tests {
     use std::sync::Arc;
 
     use expect_test::expect;
-    use futures::executor::block_on;
     use futures::StreamExt;
+    use futures::executor::block_on;
     use futures_async_stream::try_stream;
     use itertools::Itertools;
     use risingwave_common::catalog::ColumnCatalog;

@@ -23,8 +23,8 @@ use serde::{Deserialize, Serialize};
 use winnow::PResult;
 
 use crate::ast::{
-    display_separated, AstString, Encode, Format, FormatEncodeOptions, Ident, ObjectName, ParseTo,
-    SqlOption, Value,
+    AstString, Encode, Format, FormatEncodeOptions, Ident, ObjectName, ParseTo, SqlOption, Value,
+    display_separated,
 };
 use crate::keywords::Keyword;
 use crate::parser::{Parser, StrError};

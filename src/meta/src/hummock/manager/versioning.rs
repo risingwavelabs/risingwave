@@ -17,10 +17,10 @@ use std::collections::Bound::{Excluded, Included};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use itertools::Itertools;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
-    get_compaction_group_ids, get_table_compaction_group_id_mapping, BranchedSstInfo,
-};
 use risingwave_hummock_sdk::compaction_group::StateTableId;
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
+    BranchedSstInfo, get_compaction_group_ids, get_table_compaction_group_id_mapping,
+};
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::add_prost_table_stats_map;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
@@ -33,16 +33,16 @@ use risingwave_pb::hummock::{HummockPinnedVersion, HummockVersionStats, TableSta
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 
 use super::check_cg_write_limit;
+use crate::MetaResult;
+use crate::hummock::HummockManager;
 use crate::hummock::error::Result;
 use crate::hummock::manager::checkpoint::HummockVersionCheckpoint;
 use crate::hummock::manager::commit_multi_var;
 use crate::hummock::manager::context::ContextInfo;
 use crate::hummock::manager::transaction::HummockVersionTransaction;
-use crate::hummock::metrics_utils::{trigger_write_stop_stats, LocalTableMetrics};
+use crate::hummock::metrics_utils::{LocalTableMetrics, trigger_write_stop_stats};
 use crate::hummock::model::CompactionGroup;
-use crate::hummock::HummockManager;
 use crate::model::VarTransaction;
-use crate::MetaResult;
 
 #[derive(Default)]
 pub struct Versioning {
@@ -340,7 +340,12 @@ fn estimate_table_stats(sst: &SstableInfo) -> HashMap<u32, TableStats> {
     let mut estimated_total_key_size = estimated_key_size * sst.total_key_count;
     if estimated_total_key_size > sst.uncompressed_file_size {
         estimated_total_key_size = sst.uncompressed_file_size / 2;
-        tracing::warn!(sst.sst_id, "Calculated estimated_total_key_size {} > uncompressed_file_size {}. Use uncompressed_file_size/2 as estimated_total_key_size instead.", estimated_total_key_size, sst.uncompressed_file_size);
+        tracing::warn!(
+            sst.sst_id,
+            "Calculated estimated_total_key_size {} > uncompressed_file_size {}. Use uncompressed_file_size/2 as estimated_total_key_size instead.",
+            estimated_total_key_size,
+            sst.uncompressed_file_size
+        );
     }
     let estimated_total_value_size = sst.uncompressed_file_size - estimated_total_key_size;
     for table_id in &sst.table_ids {

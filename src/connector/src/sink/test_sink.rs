@@ -88,11 +88,13 @@ impl Drop for TestSinkRegistryGuard {
 }
 
 pub fn registry_build_sink(build_box_writer: impl BuildBoxWriterTrait) -> TestSinkRegistryGuard {
-    assert!(get_registry()
-        .build_box_writer
-        .lock()
-        .replace(Box::new(build_box_writer))
-        .is_none());
+    assert!(
+        get_registry()
+            .build_box_writer
+            .lock()
+            .replace(Box::new(build_box_writer))
+            .is_none()
+    );
     TestSinkRegistryGuard
 }
 

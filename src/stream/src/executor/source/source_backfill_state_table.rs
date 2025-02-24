@@ -14,7 +14,7 @@
 
 use std::ops::Bound;
 
-use futures::{pin_mut, StreamExt};
+use futures::{StreamExt, pin_mut};
 use risingwave_common::row;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{ScalarImpl, ScalarRef, ScalarRefImpl};
@@ -25,8 +25,8 @@ use risingwave_storage::StateStore;
 
 use super::source_backfill_executor::{BackfillStateWithProgress, BackfillStates};
 use crate::common::table::state_table::StateTable;
-use crate::executor::error::StreamExecutorError;
 use crate::executor::StreamExecutorResult;
+use crate::executor::error::StreamExecutorError;
 
 pub struct BackfillStateTableHandler<S: StateStore> {
     state_store: StateTable<S>,

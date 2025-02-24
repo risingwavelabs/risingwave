@@ -22,8 +22,8 @@ use risingwave_connector_codec::common::protobuf::compile_pb;
 use super::loader::{LoadedSchema, SchemaLoader};
 use super::schema_registry::Subject;
 use super::{
-    invalid_option_error, InvalidOptionError, SchemaFetchError, MESSAGE_NAME_KEY,
-    SCHEMA_LOCATION_KEY, SCHEMA_REGISTRY_KEY,
+    InvalidOptionError, MESSAGE_NAME_KEY, SCHEMA_LOCATION_KEY, SCHEMA_REGISTRY_KEY,
+    SchemaFetchError, invalid_option_error,
 };
 use crate::connector_common::AwsAuthProps;
 use crate::parser::{EncodingProperties, ProtobufParserConfig, ProtobufProperties};
@@ -45,13 +45,13 @@ pub async fn fetch_descriptor(
             return Err(invalid_option_error!(
                 "cannot use {SCHEMA_LOCATION_KEY} and {SCHEMA_REGISTRY_KEY} together"
             )
-            .into())
+            .into());
         }
         (None, None) => {
             return Err(invalid_option_error!(
                 "requires one of {SCHEMA_LOCATION_KEY} or {SCHEMA_REGISTRY_KEY}"
             )
-            .into())
+            .into());
         }
         (None, Some(_)) => {
             let (md, sid) = fetch_from_registry(&message_name, format_options, topic).await?;
@@ -95,7 +95,7 @@ pub async fn fetch_from_registry(
         super::SchemaVersion::Glue(_) => {
             return Err(
                 invalid_option_error!("Protobuf with Glue Schema Registry unsupported").into(),
-            )
+            );
         }
     };
 

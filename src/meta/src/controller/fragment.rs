@@ -16,8 +16,8 @@ use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use anyhow::Context;
-use futures::stream::BoxStream;
 use futures::TryStreamExt;
+use futures::stream::BoxStream;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::hash::{VnodeCount, VnodeCountCompat, WorkerSlotId};
@@ -28,9 +28,9 @@ use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::{Actor, Fragment, Sink, StreamingJob};
 use risingwave_meta_model::{
-    actor, actor_dispatcher, database, fragment, object, sink, source, streaming_job, table,
     ActorId, ConnectorSplits, DatabaseId, ExprContext, FragmentId, I32Array, JobStatus, ObjectId,
     SchemaId, SinkId, SourceId, StreamNode, StreamingParallelism, TableId, VnodeBitmap, WorkerId,
+    actor, actor_dispatcher, database, fragment, object, sink, source, streaming_job, table,
 };
 use risingwave_meta_model_migration::{Alias, SelectStatement};
 use risingwave_pb::common::PbActorLocation;
@@ -49,8 +49,8 @@ use risingwave_pb::stream_plan::{
     DispatchStrategy, PbFragmentTypeFlag, PbStreamActor, PbStreamContext, PbStreamNode,
     PbStreamScanType, StreamActor, StreamScanType,
 };
-use sea_orm::sea_query::Expr;
 use sea_orm::ActiveValue::Set;
+use sea_orm::sea_query::Expr;
 use sea_orm::{
     ColumnTrait, DbErr, EntityTrait, FromQueryResult, JoinType, ModelTrait, PaginatorTrait,
     QueryFilter, QuerySelect, RelationTrait, SelectGetableTuple, Selector, TransactionTrait, Value,
@@ -62,13 +62,13 @@ use crate::barrier::SnapshotBackfillInfo;
 use crate::controller::catalog::{CatalogController, CatalogControllerInner};
 use crate::controller::scale::resolve_streaming_job_definition;
 use crate::controller::utils::{
-    get_actor_dispatchers, get_fragment_mappings, rebuild_fragment_mapping_from_actors,
-    FragmentDesc, PartialActorLocation, PartialFragmentStateTables,
+    FragmentDesc, PartialActorLocation, PartialFragmentStateTables, get_actor_dispatchers,
+    get_fragment_mappings, rebuild_fragment_mapping_from_actors,
 };
 use crate::manager::LocalNotification;
 use crate::model::{StreamContext, StreamJobFragments, TableParallelism};
-use crate::stream::{build_actor_split_impls, SplitAssignment};
-use crate::{model, MetaError, MetaResult};
+use crate::stream::{SplitAssignment, build_actor_split_impls};
+use crate::{MetaError, MetaResult, model};
 
 #[derive(Clone, Debug)]
 pub struct InflightFragmentInfo {
@@ -1715,8 +1715,8 @@ mod tests {
     use risingwave_meta_model::actor::ActorStatus;
     use risingwave_meta_model::fragment::DistributionType;
     use risingwave_meta_model::{
-        actor, actor_dispatcher, fragment, ActorId, ConnectorSplits, ExprContext, FragmentId,
-        I32Array, ObjectId, StreamNode, TableId, VnodeBitmap,
+        ActorId, ConnectorSplits, ExprContext, FragmentId, I32Array, ObjectId, StreamNode, TableId,
+        VnodeBitmap, actor, actor_dispatcher, fragment,
     };
     use risingwave_pb::common::PbActorLocation;
     use risingwave_pb::meta::table_fragments::actor_status::PbActorState;
@@ -1730,9 +1730,9 @@ mod tests {
         PbStreamNode, PbUnionNode,
     };
 
+    use crate::MetaResult;
     use crate::controller::catalog::CatalogController;
     use crate::model::{ActorUpstreams, FragmentActorUpstreams};
-    use crate::MetaResult;
 
     const TEST_FRAGMENT_ID: FragmentId = 1;
 
@@ -2027,10 +2027,12 @@ mod tests {
 
             visit_stream_node(stream_node, |body| {
                 if let PbNodeBody::Merge(m) = body {
-                    assert!(actor_upstreams
-                        .get(&(actor_id as _))
-                        .unwrap()
-                        .contains_key(&m.upstream_fragment_id));
+                    assert!(
+                        actor_upstreams
+                            .get(&(actor_id as _))
+                            .unwrap()
+                            .contains_key(&m.upstream_fragment_id)
+                    );
                 }
             });
 

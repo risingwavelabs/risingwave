@@ -13,15 +13,15 @@
 // limitations under the License.
 
 use std::ops::Bound::Unbounded;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use crate::hummock::compactor::fast_compactor_runner::BlockStreamIterator;
 use crate::hummock::compactor::{SstableStreamIterator, TaskProgress};
 use crate::hummock::iterator::test_utils::{
-    gen_iterator_test_sstable_base, gen_iterator_test_sstable_info, iterator_test_bytes_key_of,
-    iterator_test_key_of, iterator_test_user_key_of, iterator_test_value_of, mock_sstable_store,
-    TEST_KEYS_COUNT,
+    TEST_KEYS_COUNT, gen_iterator_test_sstable_base, gen_iterator_test_sstable_info,
+    iterator_test_bytes_key_of, iterator_test_key_of, iterator_test_user_key_of,
+    iterator_test_value_of, mock_sstable_store,
 };
 use crate::hummock::iterator::{
     BackwardConcatIterator, BackwardUserIterator, ConcatIterator, HummockIterator, MergeIterator,

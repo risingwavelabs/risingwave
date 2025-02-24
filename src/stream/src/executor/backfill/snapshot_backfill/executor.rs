@@ -14,13 +14,13 @@
 
 use std::cmp::min;
 use std::collections::VecDeque;
-use std::future::{pending, ready, Future};
+use std::future::{Future, pending, ready};
 use std::mem::take;
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use futures::future::{try_join_all, Either};
-use futures::{pin_mut, Stream, TryFutureExt, TryStreamExt};
+use futures::future::{Either, try_join_all};
+use futures::{Stream, TryFutureExt, TryStreamExt, pin_mut};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::metrics::LabelGuardedIntCounter;
@@ -28,10 +28,10 @@ use risingwave_common::row::OwnedRow;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common_rate_limit::RateLimit;
 use risingwave_hummock_sdk::HummockReadEpoch;
-use risingwave_storage::store::PrefetchOptions;
-use risingwave_storage::table::batch_table::BatchTable;
-use risingwave_storage::table::ChangeLogRow;
 use risingwave_storage::StateStore;
+use risingwave_storage::store::PrefetchOptions;
+use risingwave_storage::table::ChangeLogRow;
+use risingwave_storage::table::batch_table::BatchTable;
 use tokio::select;
 use tokio::sync::mpsc::UnboundedReceiver;
 
@@ -40,11 +40,10 @@ use crate::executor::backfill::snapshot_backfill::state::{BackfillState, EpochBa
 use crate::executor::backfill::snapshot_backfill::vnode_stream::VnodeStream;
 use crate::executor::backfill::utils::{create_builder, mapping_message};
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::prelude::{try_stream, StateTable, StreamExt};
+use crate::executor::prelude::{StateTable, StreamExt, try_stream};
 use crate::executor::{
-    expect_first_barrier, ActorContextRef, Barrier, BoxedMessageStream, DispatcherBarrier,
-    DispatcherMessage, Execute, MergeExecutorInput, Message, StreamExecutorError,
-    StreamExecutorResult,
+    ActorContextRef, Barrier, BoxedMessageStream, DispatcherBarrier, DispatcherMessage, Execute,
+    MergeExecutorInput, Message, StreamExecutorError, StreamExecutorResult, expect_first_barrier,
 };
 use crate::task::CreateMviewProgressReporter;
 
@@ -157,9 +156,11 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
 
         let (mut barrier_epoch, mut need_report_finish) = {
             if should_backfill {
-                assert!(backfill_state
-                    .latest_progress()
-                    .all(|(_, progress)| progress.is_none()));
+                assert!(
+                    backfill_state
+                        .latest_progress()
+                        .all(|(_, progress)| progress.is_none())
+                );
                 let table_id_str = format!("{}", self.upstream_table.table_id().table_id);
                 let actor_id_str = format!("{}", self.actor_ctx.id);
 

@@ -15,9 +15,9 @@
 use std::sync::OnceLock;
 
 use prometheus::{
-    exponential_buckets, histogram_opts, register_histogram_with_registry,
-    register_int_counter_with_registry, register_int_gauge_with_registry, Histogram, IntCounter,
-    IntGauge, Registry,
+    Histogram, IntCounter, IntGauge, Registry, exponential_buckets, histogram_opts,
+    register_histogram_with_registry, register_int_counter_with_registry,
+    register_int_gauge_with_registry,
 };
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::MetricLevel;

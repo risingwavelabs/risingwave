@@ -192,11 +192,11 @@ mod tests {
     use std::ops::Deref;
     use std::sync::Arc;
 
-    use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId, CDC_SOURCE_COLUMN_NUM};
+    use risingwave_common::catalog::{CDC_SOURCE_COLUMN_NUM, ColumnCatalog, ColumnDesc, ColumnId};
     use risingwave_common::row::Row;
     use risingwave_common::types::Timestamptz;
     use risingwave_pb::plan_common::{
-        additional_column, AdditionalColumn, AdditionalColumnTimestamp,
+        AdditionalColumn, AdditionalColumnTimestamp, additional_column,
     };
 
     use super::*;

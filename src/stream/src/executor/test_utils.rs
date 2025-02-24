@@ -17,7 +17,7 @@ use futures::{FutureExt, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::{DataType, ScalarImpl};
-use risingwave_common::util::epoch::{test_epoch, EpochExt};
+use risingwave_common::util::epoch::{EpochExt, test_epoch};
 use tokio::sync::mpsc;
 
 use super::error::StreamExecutorError;
@@ -27,16 +27,16 @@ use super::{
 };
 
 pub mod prelude {
-    pub use std::sync::atomic::AtomicU64;
     pub use std::sync::Arc;
+    pub use std::sync::atomic::AtomicU64;
 
     pub use risingwave_common::array::StreamChunk;
     pub use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
     pub use risingwave_common::test_prelude::StreamChunkTestExt;
     pub use risingwave_common::types::DataType;
     pub use risingwave_common::util::sort_util::OrderType;
-    pub use risingwave_storage::memory::MemoryStateStore;
     pub use risingwave_storage::StateStore;
+    pub use risingwave_storage::memory::MemoryStateStore;
 
     pub use crate::common::table::state_table::StateTable;
     pub use crate::executor::test_utils::expr::build_from_pretty;
@@ -269,8 +269,8 @@ pub mod expr {
 }
 
 pub mod agg_executor {
-    use std::sync::atomic::AtomicU64;
     use std::sync::Arc;
+    use std::sync::atomic::AtomicU64;
 
     use futures::future;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
@@ -281,9 +281,9 @@ pub mod agg_executor {
     use risingwave_pb::stream_plan::PbAggNodeVersion;
     use risingwave_storage::StateStore;
 
+    use crate::common::StateTableColumnMapping;
     use crate::common::table::state_table::StateTable;
     use crate::common::table::test_utils::gen_pbtable;
-    use crate::common::StateTableColumnMapping;
     use crate::executor::agg_common::{
         AggExecutorArgs, HashAggExecutorExtraArgs, SimpleAggExecutorExtraArgs,
     };
@@ -626,8 +626,8 @@ pub mod top_n_executor {
 }
 
 pub mod hash_join_executor {
-    use std::sync::atomic::AtomicU64;
     use std::sync::Arc;
+    use std::sync::atomic::AtomicU64;
 
     use itertools::Itertools;
     use risingwave_common::array::{I64Array, Op};

@@ -15,7 +15,7 @@
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 
-use crate::catalog::system_catalog::{extract_parallelism_from_table_state, SysCatalogReaderImpl};
+use crate::catalog::system_catalog::{SysCatalogReaderImpl, extract_parallelism_from_table_state};
 use crate::error::Result;
 
 #[derive(Fields)]

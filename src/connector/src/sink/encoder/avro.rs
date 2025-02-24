@@ -152,7 +152,7 @@ impl SerTo<Vec<u8>> for AvroEncoded {
                 return Err(crate::sink::SinkError::Encode(format!(
                     "{:?} unsupported yet",
                     self.header
-                )))
+                )));
             }
         };
 
@@ -272,7 +272,7 @@ impl MaybeData for DatumRef<'_> {
             true => {
                 let ni = match opt_idx {
                     NotUnion | Single => {
-                        return Err(FieldEncodeError::new("found null but required"))
+                        return Err(FieldEncodeError::new("found null but required"));
                     }
                     NullLeft => 0,
                     NullRight => 1,

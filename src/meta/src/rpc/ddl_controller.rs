@@ -18,7 +18,7 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::config::DefaultParallelism;
@@ -30,11 +30,11 @@ use risingwave_common::util::stream_graph_visitor::{
     visit_stream_node, visit_stream_node_cont_mut,
 };
 use risingwave_common::{bail, bail_not_implemented, hash, must_match};
+use risingwave_connector::WithOptionsSecResolved;
 use risingwave_connector::connector_common::validate_connection;
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, UPSTREAM_SOURCE_KEY,
 };
-use risingwave_connector::WithOptionsSecResolved;
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::{
     ConnectionId, DatabaseId, FunctionId, IndexId, ObjectId, SchemaId, SecretId, SinkId, SourceId,
@@ -46,8 +46,8 @@ use risingwave_pb::catalog::{
 };
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::{
-    alter_name_request, alter_set_schema_request, alter_swap_rename_request, DdlProgress,
-    TableJobType, WaitVersion,
+    DdlProgress, TableJobType, WaitVersion, alter_name_request, alter_set_schema_request,
+    alter_swap_rename_request,
 };
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::{Fragment, PbFragment};
@@ -68,15 +68,15 @@ use crate::controller::cluster::StreamingClusterInfo;
 use crate::controller::streaming_job::SinkIntoTableContext;
 use crate::error::{bail_invalid_parameter, bail_unavailable};
 use crate::manager::{
-    LocalNotification, MetaSrvEnv, MetadataManager, NotificationVersion, StreamingJob,
-    StreamingJobType, IGNORED_NOTIFICATION_VERSION,
+    IGNORED_NOTIFICATION_VERSION, LocalNotification, MetaSrvEnv, MetadataManager,
+    NotificationVersion, StreamingJob, StreamingJobType,
 };
 use crate::model::{StreamContext, StreamJobFragments, TableParallelism};
 use crate::stream::{
-    create_source_worker, validate_sink, ActorGraphBuildResult, ActorGraphBuilder,
-    CompleteStreamFragmentGraph, CreateStreamingJobContext, CreateStreamingJobOption,
-    GlobalStreamManagerRef, JobRescheduleTarget, ReplaceStreamJobContext, SourceChange,
-    SourceManagerRef, StreamFragmentGraph,
+    ActorGraphBuildResult, ActorGraphBuilder, CompleteStreamFragmentGraph,
+    CreateStreamingJobContext, CreateStreamingJobOption, GlobalStreamManagerRef,
+    JobRescheduleTarget, ReplaceStreamJobContext, SourceChange, SourceManagerRef,
+    StreamFragmentGraph, create_source_worker, validate_sink,
 };
 use crate::telemetry::report_event;
 use crate::{MetaError, MetaResult};
@@ -801,7 +801,10 @@ impl DdlController {
                                         .filter(|dispatcher| {
                                             dispatcher.downstream_actor_id.contains(&actor.actor_id)
                                         });
-                                assert!(upstream_dispatchers_to_actor.next().is_some(), "All the mergers for the union should have been fully assigned beforehand.");
+                                assert!(
+                                    upstream_dispatchers_to_actor.next().is_some(),
+                                    "All the mergers for the union should have been fully assigned beforehand."
+                                );
                             } else {
                                 let mut upstream_dispatchers_to_actor = stream_job_fragments
                                     .fragments
@@ -813,7 +816,10 @@ impl DdlController {
                                     .filter(|dispatcher| {
                                         dispatcher.downstream_actor_id.contains(&actor.actor_id)
                                     });
-                                assert!(upstream_dispatchers_to_actor.next().is_some(), "All the mergers for the union should have been fully assigned beforehand.");
+                                assert!(
+                                    upstream_dispatchers_to_actor.next().is_some(),
+                                    "All the mergers for the union should have been fully assigned beforehand."
+                                );
                             }
                         }
                     });
@@ -1062,7 +1068,10 @@ impl DdlController {
 
         let affected_table_replace_info = match affected_table_replace_info {
             Some(replace_table_info) => {
-                assert!(specific_resource_group.is_none(), "specific_resource_group is not supported for replace table (alter column or sink into table)");
+                assert!(
+                    specific_resource_group.is_none(),
+                    "specific_resource_group is not supported for replace table (alter column or sink into table)"
+                );
 
                 let ReplaceStreamJobInfo {
                     mut streaming_job,

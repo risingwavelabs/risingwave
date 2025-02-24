@@ -18,9 +18,9 @@ use std::process::Command;
 
 use anyhow::Result;
 
-use super::{risingwave_cmd, ExecuteContext, Task};
+use super::{ExecuteContext, Task, risingwave_cmd};
 use crate::util::{get_program_args, get_program_env_cmd, get_program_name};
-use crate::{add_meta_node, add_tempo_endpoint, ComputeNodeConfig};
+use crate::{ComputeNodeConfig, add_meta_node, add_tempo_endpoint};
 
 pub struct ComputeNodeService {
     config: ComputeNodeConfig,

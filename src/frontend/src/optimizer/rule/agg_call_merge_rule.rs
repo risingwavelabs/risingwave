@@ -13,9 +13,9 @@
 // limitations under the License.
 
 use super::{BoxedRule, Rule};
+use crate::PlanRef;
 use crate::optimizer::plan_node::generic::Agg;
 use crate::optimizer::plan_node::{LogicalProject, PlanTreeNodeUnary};
-use crate::PlanRef;
 
 /// Merges duplicated aggregate function calls in `LogicalAgg`, and project them back to the desired schema.
 pub struct AggCallMergeRule {}

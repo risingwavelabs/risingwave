@@ -195,7 +195,7 @@ mod tests {
 
     use futures::StreamExt;
     use risingwave_common::catalog::{
-        schema_test_utils, ColumnDesc, ColumnId, INITIAL_TABLE_VERSION_ID,
+        ColumnDesc, ColumnId, INITIAL_TABLE_VERSION_ID, schema_test_utils,
     };
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_dml::dml_manager::DmlManager;

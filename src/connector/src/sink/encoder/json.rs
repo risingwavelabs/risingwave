@@ -16,8 +16,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::Context;
-use base64::engine::general_purpose;
 use base64::Engine as _;
+use base64::engine::general_purpose;
 use chrono::{Datelike, NaiveDateTime, Timelike};
 use indexmap::IndexMap;
 use itertools::Itertools;
@@ -26,7 +26,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, DatumRef, JsonbVal, ScalarRefImpl, ToText};
 use risingwave_common::util::iter_util::ZipEqDebug;
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 use thiserror_ext::AsReport;
 
 use super::{
@@ -348,9 +348,10 @@ fn datum_to_json_object(
         }
         // TODO(map): support map
         (data_type, scalar_ref) => {
-            return Err(ArrayError::internal(
-                format!("datum_to_json_object: unsupported data type: field name: {:?}, logical type: {:?}, physical type: {:?}", field.name, data_type, scalar_ref),
-            ));
+            return Err(ArrayError::internal(format!(
+                "datum_to_json_object: unsupported data type: field name: {:?}, logical type: {:?}, physical type: {:?}",
+                field.name, data_type, scalar_ref
+            )));
         }
     };
 
@@ -788,9 +789,9 @@ mod tests {
                 name: "14".into(),
             },
         ];
-        let schema = json_converter_with_schema(json!({}), "test".to_owned(), fields.iter())
-            ["schema"]
-            .to_string();
+        let schema =
+            json_converter_with_schema(json!({}), "test".to_owned(), fields.iter())["schema"]
+                .to_string();
         let ans = r#"{"fields":[{"field":"v1","optional":true,"type":"boolean"},{"field":"v2","optional":true,"type":"int16"},{"field":"v3","optional":true,"type":"int32"},{"field":"v4","optional":true,"type":"float"},{"field":"v5","optional":true,"type":"string"},{"field":"v6","optional":true,"type":"int32"},{"field":"v7","optional":true,"type":"string"},{"field":"v8","optional":true,"type":"int64"},{"field":"v9","optional":true,"type":"string"},{"field":"v10","fields":[{"field":"a","optional":true,"type":"int64"},{"field":"b","optional":true,"type":"string"},{"field":"c","fields":[{"field":"aa","optional":true,"type":"int64"},{"field":"bb","optional":true,"type":"double"}],"optional":true,"type":"struct"}],"optional":true,"type":"struct"},{"field":"v11","items":{"items":{"fields":[{"field":"aa","optional":true,"type":"int64"},{"field":"bb","optional":true,"type":"double"}],"optional":true,"type":"struct"},"optional":true,"type":"array"},"optional":true,"type":"array"},{"field":"12","optional":true,"type":"string"},{"field":"13","optional":true,"type":"string"},{"field":"14","optional":true,"type":"string"}],"name":"test","optional":false,"type":"struct"}"#;
         assert_eq!(schema, ans);
     }

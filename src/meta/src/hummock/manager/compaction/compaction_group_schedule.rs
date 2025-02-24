@@ -22,10 +22,10 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::compact_task::ReportTask;
 use risingwave_hummock_sdk::compaction_group::{
-    group_split, StateTableId, StaticCompactionGroupId,
+    StateTableId, StaticCompactionGroupId, group_split,
 };
 use risingwave_hummock_sdk::version::{GroupDelta, GroupDeltas};
-use risingwave_hummock_sdk::{can_concat, CompactionGroupId};
+use risingwave_hummock_sdk::{CompactionGroupId, can_concat};
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
 use risingwave_pb::hummock::{
@@ -33,10 +33,10 @@ use risingwave_pb::hummock::{
 };
 use thiserror_ext::AsReport;
 
-use super::{check_emergency_state, CompactionGroupStatistic, EmergencyState};
+use super::{CompactionGroupStatistic, EmergencyState, check_emergency_state};
 use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::transaction::HummockVersionTransaction;
-use crate::hummock::manager::{commit_multi_var, HummockManager};
+use crate::hummock::manager::{HummockManager, commit_multi_var};
 use crate::hummock::metrics_utils::remove_compaction_group_in_sst_stat;
 use crate::hummock::sequence::{next_compaction_group_id, next_sstable_object_id};
 use crate::hummock::table_write_throughput_statistic::{
@@ -223,7 +223,13 @@ impl HummockManager {
                 if !can_concat(&[left_last_sst, right_first_sst]) {
                     return Err(Error::CompactionGroup(format!(
                         "invalid merge group_1 {} group_2 {} level_idx {} left_last_sst_id {} right_first_sst_id {} left_obj_id {} right_obj_id {}",
-                        left_group_id, right_group_id, level_idx, left_sst_id, right_sst_id, left_obj_id, right_obj_id
+                        left_group_id,
+                        right_group_id,
+                        level_idx,
+                        left_sst_id,
+                        right_sst_id,
+                        left_obj_id,
+                        right_obj_id
                     )));
                 }
             }
@@ -261,16 +267,18 @@ impl HummockManager {
                     .info()
                     .get(&table_id)
                     .expect("have check exist previously");
-                assert!(new_version_delta
-                    .state_table_info_delta
-                    .insert(
-                        table_id,
-                        PbStateTableInfoDelta {
-                            committed_epoch: info.committed_epoch,
-                            compaction_group_id: target_compaction_group_id,
-                        }
-                    )
-                    .is_none());
+                assert!(
+                    new_version_delta
+                        .state_table_info_delta
+                        .insert(
+                            table_id,
+                            PbStateTableInfoDelta {
+                                committed_epoch: info.committed_epoch,
+                                compaction_group_id: target_compaction_group_id,
+                            }
+                        )
+                        .is_none()
+                );
             }
         });
 
@@ -488,16 +496,18 @@ impl HummockManager {
                     .info()
                     .get(&table_id)
                     .expect("have check exist previously");
-                assert!(new_version_delta
-                    .state_table_info_delta
-                    .insert(
-                        table_id,
-                        PbStateTableInfoDelta {
-                            committed_epoch: info.committed_epoch,
-                            compaction_group_id: new_compaction_group_id,
-                        }
-                    )
-                    .is_none());
+                assert!(
+                    new_version_delta
+                        .state_table_info_delta
+                        .insert(
+                            table_id,
+                            PbStateTableInfoDelta {
+                                committed_epoch: info.committed_epoch,
+                                compaction_group_id: new_compaction_group_id,
+                            }
+                        )
+                        .is_none()
+                );
             }
         });
 
@@ -789,7 +799,13 @@ impl HummockManager {
             .await;
         match ret {
             Ok(split_result) => {
-                tracing::info!("split state table [{}] from group-{} success table_vnode_partition_count {:?} split result {:?}", table_id, parent_group_id, self.env.opts.partition_vnode_count, split_result);
+                tracing::info!(
+                    "split state table [{}] from group-{} success table_vnode_partition_count {:?} split result {:?}",
+                    table_id,
+                    parent_group_id,
+                    self.env.opts.partition_vnode_count,
+                    split_result
+                );
             }
             Err(e) => {
                 tracing::info!(
@@ -921,7 +937,11 @@ impl HummockManager {
         if (group.group_size + next_group.group_size) > size_limit {
             return Err(Error::CompactionGroup(format!(
                 "Not Merge huge group {} group_size {} next_group {} next_group_size {} size_limit {}",
-                group.group_id, group.group_size, next_group.group_id, next_group.group_size, size_limit
+                group.group_id,
+                group.group_size,
+                next_group.group_id,
+                next_group.group_size,
+                size_limit
             )));
         }
 

@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::StackTraceResponseExt;
+use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::monitor_service::StackTraceResponse;
 use risingwave_rpc_client::{CompactorClient, ComputeClientPool};

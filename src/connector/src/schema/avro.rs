@@ -14,9 +14,9 @@
 
 use apache_avro::Schema as AvroSchema;
 
+use super::SchemaFetchError;
 use super::loader::LoadedSchema;
 use super::schema_registry::Subject;
-use super::SchemaFetchError;
 
 impl LoadedSchema for AvroSchema {
     fn compile(primary: Subject, _: Vec<Subject>) -> Result<Self, SchemaFetchError> {

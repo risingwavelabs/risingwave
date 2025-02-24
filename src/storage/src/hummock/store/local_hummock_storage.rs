@@ -23,11 +23,11 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::MAX_SPILL_TIMES;
-use risingwave_hummock_sdk::key::{is_empty_key_range, vnode_range, TableKey, TableKeyRange};
+use risingwave_hummock_sdk::EpochWithGap;
+use risingwave_hummock_sdk::key::{TableKey, TableKeyRange, is_empty_key_range, vnode_range};
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_watermark::WatermarkSerdeType;
-use risingwave_hummock_sdk::EpochWithGap;
-use tracing::{warn, Instrument};
+use tracing::{Instrument, warn};
 
 use super::version::{StagingData, VersionUpdate};
 use crate::error::StorageResult;
@@ -42,7 +42,7 @@ use crate::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatch, SharedBufferBatchIterator, SharedBufferBatchOldValues, SharedBufferItem,
     SharedBufferValue,
 };
-use crate::hummock::store::version::{read_filter_for_version, HummockVersionReader};
+use crate::hummock::store::version::{HummockVersionReader, read_filter_for_version};
 use crate::hummock::utils::{
     do_delete_sanity_check, do_insert_sanity_check, do_update_sanity_check, sanity_check_enabled,
     wait_for_epoch,
@@ -555,8 +555,11 @@ impl LocalStateStore for LocalHummockStorage {
 
     fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
         let mut read_version = self.read_version.write();
-        assert!(read_version.staging().is_empty(), "There is uncommitted staging data in read version table_id {:?} instance_id {:?} on vnode bitmap update",
-            self.table_id(), self.instance_id()
+        assert!(
+            read_version.staging().is_empty(),
+            "There is uncommitted staging data in read version table_id {:?} instance_id {:?} on vnode bitmap update",
+            self.table_id(),
+            self.instance_id()
         );
         read_version.update_vnode_bitmap(vnodes)
     }

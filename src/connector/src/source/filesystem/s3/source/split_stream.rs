@@ -14,8 +14,8 @@
 
 use anyhow::Context as _;
 use bytes::BytesMut;
-use futures::io::Cursor;
 use futures::AsyncBufReadExt;
+use futures::io::Cursor;
 use futures_async_stream::try_stream;
 
 use crate::source::{BoxSourceMessageStream, SourceMessage};

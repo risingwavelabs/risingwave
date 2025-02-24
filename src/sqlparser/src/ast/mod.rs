@@ -42,7 +42,7 @@ pub use self::ddl::{
     ColumnOptionDef, ReferentialAction, SourceWatermark, TableConstraint, WebhookSourceInfo,
 };
 pub use self::legacy_source::{
-    get_delimiter, AvroSchema, CompatibleFormatEncode, DebeziumAvroSchema, ProtobufSchema,
+    AvroSchema, CompatibleFormatEncode, DebeziumAvroSchema, ProtobufSchema, get_delimiter,
 };
 pub use self::operator::{BinaryOperator, QualifiedOperator, UnaryOperator};
 pub use self::query::{
@@ -1664,14 +1664,20 @@ impl fmt::Display for Statement {
                 write!(f, "DESCRIBE {}", name)?;
                 Ok(())
             }
-            Statement::ShowObjects { object: show_object, filter } => {
+            Statement::ShowObjects {
+                object: show_object,
+                filter,
+            } => {
                 write!(f, "SHOW {}", show_object)?;
                 if let Some(filter) = filter {
                     write!(f, " {}", filter)?;
                 }
                 Ok(())
             }
-            Statement::ShowCreateObject { create_type: show_type, name } => {
+            Statement::ShowCreateObject {
+                create_type: show_type,
+                name,
+            } => {
                 write!(f, "SHOW CREATE {} {}", show_type, name)?;
                 Ok(())
             }
@@ -1685,7 +1691,7 @@ impl fmt::Display for Statement {
                 source,
                 returning,
             } => {
-                write!(f, "INSERT INTO {table_name} ", table_name = table_name, )?;
+                write!(f, "INSERT INTO {table_name} ", table_name = table_name,)?;
                 if !columns.is_empty() {
                     write!(f, "({}) ", display_comma_separated(columns))?;
                 }
@@ -1883,7 +1889,11 @@ impl fmt::Display for Statement {
                     name = name,
                 )?;
                 if !columns.is_empty() || !constraints.is_empty() {
-                    write!(f, " {}", fmt_create_items(columns, constraints, source_watermarks, *wildcard_idx)?)?;
+                    write!(
+                        f,
+                        " {}",
+                        fmt_create_items(columns, constraints, source_watermarks, *wildcard_idx)?
+                    )?;
                 } else if query.is_none() {
                     // PostgreSQL allows `CREATE TABLE t ();`, but requires empty parens
                     write!(f, " ()")?;
@@ -1891,7 +1901,6 @@ impl fmt::Display for Statement {
                 if *append_only {
                     write!(f, " APPEND ONLY")?;
                 }
-
 
                 if let Some(on_conflict_behavior) = on_conflict {
                     write!(f, " ON CONFLICT {}", on_conflict_behavior)?;
@@ -1915,7 +1924,7 @@ impl fmt::Display for Statement {
                     write!(f, " FROM {}", info.source_name)?;
                     write!(f, " TABLE '{}'", info.external_table_name)?;
                 }
-                if let Some(info)= webhook_info {
+                if let Some(info) = webhook_info {
                     if let Some(secret) = &info.secret_ref {
                         write!(f, " VALIDATE SECRET {}", secret.secret_name)?;
                     } else {
@@ -1924,10 +1933,10 @@ impl fmt::Display for Statement {
                     write!(f, " AS {}", info.signature_expr)?;
                 }
                 match engine {
-                    Engine::Hummock => {},
+                    Engine::Hummock => {}
                     Engine::Iceberg => {
                         write!(f, " ENGINE = {}", engine)?;
-                    },
+                    }
                 }
                 Ok(())
             }
@@ -1955,16 +1964,13 @@ impl fmt::Display for Statement {
                 distributed_by = if distributed_by.is_empty() {
                     "".to_owned()
                 } else {
-                    format!(" DISTRIBUTED BY({})", display_separated(distributed_by, ","))
+                    format!(
+                        " DISTRIBUTED BY({})",
+                        display_separated(distributed_by, ",")
+                    )
                 }
             ),
-            Statement::CreateSource {
-                stmt,
-            } => write!(
-                f,
-                "CREATE SOURCE {}",
-                stmt,
-            ),
+            Statement::CreateSource { stmt } => write!(f, "CREATE SOURCE {}", stmt,),
             Statement::CreateSink { stmt } => write!(f, "CREATE SINK {}", stmt,),
             Statement::CreateSubscription { stmt } => write!(f, "CREATE SUBSCRIPTION {}", stmt,),
             Statement::CreateConnection { stmt } => write!(f, "CREATE CONNECTION {}", stmt,),
@@ -1984,8 +1990,18 @@ impl fmt::Display for Statement {
             Statement::AlterIndex { name, operation } => {
                 write!(f, "ALTER INDEX {} {}", name, operation)
             }
-            Statement::AlterView { materialized, name, operation } => {
-                write!(f, "ALTER {}VIEW {} {}", if *materialized { "MATERIALIZED " } else { "" }, name, operation)
+            Statement::AlterView {
+                materialized,
+                name,
+                operation,
+            } => {
+                write!(
+                    f,
+                    "ALTER {}VIEW {} {}",
+                    if *materialized { "MATERIALIZED " } else { "" },
+                    name,
+                    operation
+                )
             }
             Statement::AlterSink { name, operation } => {
                 write!(f, "ALTER SINK {} {}", name, operation)
@@ -1996,7 +2012,11 @@ impl fmt::Display for Statement {
             Statement::AlterSource { name, operation } => {
                 write!(f, "ALTER SOURCE {} {}", name, operation)
             }
-            Statement::AlterFunction { name, args, operation } => {
+            Statement::AlterFunction {
+                name,
+                args,
+                operation,
+            } => {
                 write!(f, "ALTER FUNCTION {}", name)?;
                 if let Some(args) = args {
                     write!(f, "({})", display_comma_separated(args))?;
@@ -2006,7 +2026,11 @@ impl fmt::Display for Statement {
             Statement::AlterConnection { name, operation } => {
                 write!(f, "ALTER CONNECTION {} {}", name, operation)
             }
-            Statement::AlterSecret { name, with_options, operation } => {
+            Statement::AlterSecret {
+                name,
+                with_options,
+                operation,
+            } => {
                 write!(f, "ALTER SECRET {}", name)?;
                 if !with_options.is_empty() {
                     write!(f, " WITH ({})", display_comma_separated(with_options))?;
@@ -2056,11 +2080,7 @@ impl fmt::Display for Statement {
                 if *local {
                     f.write_str("LOCAL ")?;
                 }
-                write!(
-                    f,
-                    "{name} = {value}",
-                    name = variable,
-                )
+                write!(f, "{name} = {value}", name = variable,)
             }
             Statement::ShowVariable { variable } => {
                 write!(f, "SHOW")?;
@@ -2107,10 +2127,10 @@ impl fmt::Display for Statement {
                 Ok(())
             }
             Statement::Commit { chain } => {
-                write!(f, "COMMIT{}", if *chain { " AND CHAIN" } else { "" }, )
+                write!(f, "COMMIT{}", if *chain { " AND CHAIN" } else { "" },)
             }
             Statement::Rollback { chain } => {
-                write!(f, "ROLLBACK{}", if *chain { " AND CHAIN" } else { "" }, )
+                write!(f, "ROLLBACK{}", if *chain { " AND CHAIN" } else { "" },)
             }
             Statement::CreateSchema {
                 schema_name,
@@ -2127,7 +2147,7 @@ impl fmt::Display for Statement {
                     write!(f, " AUTHORIZATION {}", user)?;
                 }
                 Ok(())
-            },
+            }
             Statement::Grant {
                 privileges,
                 objects,
@@ -2216,10 +2236,7 @@ impl fmt::Display for Statement {
             }
             Statement::AlterSystem { param, value } => {
                 f.write_str("ALTER SYSTEM SET ")?;
-                write!(
-                    f,
-                    "{param} = {value}",
-                )
+                write!(f, "{param} = {value}",)
             }
             Statement::Flush => {
                 write!(f, "FLUSH")

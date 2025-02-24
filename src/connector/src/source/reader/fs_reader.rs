@@ -17,16 +17,16 @@
 use std::sync::Arc;
 
 use anyhow::Context;
-use futures::stream::pending;
 use futures::StreamExt;
+use futures::stream::pending;
 use risingwave_common::catalog::ColumnId;
 
+use crate::WithOptionsSecResolved;
 use crate::error::ConnectorResult;
 use crate::parser::{CommonParserConfig, ParserConfig, SpecificParserConfig};
 use crate::source::{
     BoxSourceChunkStream, ConnectorProperties, ConnectorState, SourceColumnDesc, SourceContext,
 };
-use crate::WithOptionsSecResolved;
 
 #[derive(Clone, Debug)]
 pub struct LegacyFsSourceReader {

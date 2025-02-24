@@ -13,17 +13,17 @@
 // limitations under the License.
 
 use risingwave_common::session_config::SearchPath;
-use risingwave_expr::{capture_context, function, ExprError};
+use risingwave_expr::{ExprError, capture_context, function};
 use risingwave_sqlparser::parser::{Parser, ParserError};
 use thiserror::Error;
 use thiserror_ext::AsReport;
 
 use super::context::{AUTH_CONTEXT, CATALOG_READER, DB_NAME, SEARCH_PATH};
+use crate::Binder;
 use crate::binder::ResolveQualifiedNameError;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::{CatalogError, CatalogReader};
 use crate::session::AuthContext;
-use crate::Binder;
 
 #[derive(Error, Debug)]
 enum ResolveRegclassError {

@@ -20,7 +20,7 @@ use std::ffi::OsString;
 use std::str::FromStr;
 
 use clap::error::Result as ClapResult;
-use clap::{command, ArgMatches, Args, Command, CommandFactory, FromArgMatches};
+use clap::{ArgMatches, Args, Command, CommandFactory, FromArgMatches, command};
 use risingwave_cmd::{compactor, compute, ctl, frontend, meta};
 use risingwave_cmd_all::{SingleNodeOpts, StandaloneOpts};
 use risingwave_common::git_sha;
@@ -258,7 +258,7 @@ mod tests {
 
     use clap::error::ErrorKind;
 
-    use super::{parse_args, Component};
+    use super::{Component, parse_args};
 
     #[test]
     fn test_basic() {

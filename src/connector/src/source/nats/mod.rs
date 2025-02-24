@@ -24,14 +24,14 @@ use std::time::Duration;
 use async_nats::jetstream::consumer::pull::Config;
 use async_nats::jetstream::consumer::{AckPolicy, ReplayPolicy};
 use serde::Deserialize;
-use serde_with::{serde_as, DisplayFromStr};
+use serde_with::{DisplayFromStr, serde_as};
 use thiserror::Error;
 use with_options::WithOptions;
 
 use crate::connector_common::NatsCommon;
 use crate::error::{ConnectorError, ConnectorResult};
-use crate::source::nats::source::{NatsSplit, NatsSplitReader};
 use crate::source::SourceProperties;
+use crate::source::nats::source::{NatsSplit, NatsSplitReader};
 use crate::{
     deserialize_optional_string_seq_from_string, deserialize_optional_u64_seq_from_string,
 };

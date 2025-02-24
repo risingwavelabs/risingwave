@@ -22,16 +22,16 @@ use risingwave_common::bail;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::{Row, RowExt};
 use serde_derive::Deserialize;
-use serde_with::{serde_as, DisplayFromStr};
+use serde_with::{DisplayFromStr, serde_as};
 use simd_json::prelude::ArrayTrait;
 use thiserror_ext::AsReport;
 use tokio_postgres::types::Type as PgType;
 
 use super::{
-    LogSinker, SinkError, SinkLogReader, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
+    LogSinker, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, SinkError, SinkLogReader,
 };
-use crate::connector_common::{create_pg_client, PostgresExternalTable, SslMode};
-use crate::parser::scalar_adapter::{validate_pg_type_to_rw_type, ScalarAdapter};
+use crate::connector_common::{PostgresExternalTable, SslMode, create_pg_client};
+use crate::parser::scalar_adapter::{ScalarAdapter, validate_pg_type_to_rw_type};
 use crate::sink::log_store::{LogStoreReadItem, TruncateOffset};
 use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkParam, SinkWriterParam};
 
@@ -132,7 +132,8 @@ impl Sink for PostgresSink {
     async fn validate(&self) -> Result<()> {
         if !self.is_append_only && self.pk_indices.is_empty() {
             return Err(SinkError::Config(anyhow!(
-                "Primary key not defined for upsert Postgres sink (please define in `primary_key` field)")));
+                "Primary key not defined for upsert Postgres sink (please define in `primary_key` field)"
+            )));
         }
 
         // Verify our sink schema is compatible with Postgres
@@ -157,10 +158,10 @@ impl Sink for PostgresSink {
                 let sink_columns = self.schema.fields();
                 if pg_columns.len() < sink_columns.len() {
                     return Err(SinkError::Config(anyhow!(
-                    "Column count mismatch: Postgres table has {} columns, but sink schema has {} columns, sink should have less or equal columns to the Postgres table",
-                    pg_columns.len(),
-                    sink_columns.len()
-                )));
+                        "Column count mismatch: Postgres table has {} columns, but sink schema has {} columns, sink should have less or equal columns to the Postgres table",
+                        pg_columns.len(),
+                        sink_columns.len()
+                    )));
                 }
 
                 let pg_columns_lookup = pg_columns
@@ -175,17 +176,17 @@ impl Sink for PostgresSink {
                                 "Column `{}` not found in Postgres table `{}`",
                                 sink_column.name,
                                 self.config.table
-                            )))
+                            )));
                         }
                         Some(pg_column) => {
                             if !validate_pg_type_to_rw_type(pg_column, &sink_column.data_type()) {
                                 return Err(SinkError::Config(anyhow!(
-                                "Column `{}` in Postgres table `{}` has type `{}`, but sink schema defines it as type `{}`",
-                                sink_column.name,
-                                self.config.table,
-                                pg_column,
-                                sink_column.data_type()
-                            )));
+                                    "Column `{}` in Postgres table `{}` has type `{}`, but sink schema defines it as type `{}`",
+                                    sink_column.name,
+                                    self.config.table,
+                                    pg_column,
+                                    sink_column.data_type()
+                                )));
                             }
                         }
                     }
@@ -202,17 +203,17 @@ impl Sink for PostgresSink {
                     .collect::<HashSet<_>>();
                 if pg_pk_names.len() != sink_pk_names.len() {
                     return Err(SinkError::Config(anyhow!(
-                    "Primary key mismatch: Postgres table has primary key on columns {:?}, but sink schema defines primary key on columns {:?}",
-                    pg_pk_names,
-                    sink_pk_names
-                )));
+                        "Primary key mismatch: Postgres table has primary key on columns {:?}, but sink schema defines primary key on columns {:?}",
+                        pg_pk_names,
+                        sink_pk_names
+                    )));
                 }
                 for name in pg_pk_names {
                     if !sink_pk_names.contains(name) {
                         return Err(SinkError::Config(anyhow!(
-                        "Primary key mismatch: Postgres table has primary key on column `{}`, but sink schema does not define it as a primary key",
-                        name
-                    )));
+                            "Primary key mismatch: Postgres table has primary key on column `{}`, but sink schema does not define it as a primary key",
+                            name
+                        )));
                     }
                 }
             }
@@ -390,7 +391,9 @@ impl PostgresSinkWriter {
                     parameter_buffer.add_row(row);
                 }
                 Op::UpdateInsert | Op::Delete | Op::UpdateDelete => {
-                    bail!("append-only sink should not receive update insert, update delete and delete operations")
+                    bail!(
+                        "append-only sink should not receive update insert, update delete and delete operations"
+                    )
                 }
             }
         }
@@ -585,7 +588,7 @@ fn create_delete_sql(
 mod tests {
     use std::fmt::Display;
 
-    use expect_test::{expect, Expect};
+    use expect_test::{Expect, expect};
     use risingwave_common::catalog::Field;
     use risingwave_common::types::DataType;
 

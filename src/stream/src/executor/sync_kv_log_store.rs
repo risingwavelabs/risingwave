@@ -65,7 +65,7 @@ use std::mem::replace;
 use std::pin::Pin;
 
 use anyhow::anyhow;
-use futures::future::{select, BoxFuture, Either};
+use futures::future::{BoxFuture, Either, select};
 use futures::stream::StreamFuture;
 use futures::{FutureExt, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
@@ -74,10 +74,10 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::must_match;
 use risingwave_connector::sink::log_store::{ChunkId, LogStoreResult};
+use risingwave_storage::StateStore;
 use risingwave_storage::store::{
     LocalStateStore, NewLocalOptions, OpConsistencyLevel, StateStoreRead,
 };
-use risingwave_storage::StateStore;
 use rw_futures_util::drop_either_future;
 
 use crate::common::log_store_impl::kv_log_store::buffer::LogStoreBufferItem;
@@ -86,11 +86,11 @@ use crate::common::log_store_impl::kv_log_store::serde::{
     KvLogStoreItem, LogStoreItemMergeStream, LogStoreRowSerde,
 };
 use crate::common::log_store_impl::kv_log_store::state::{
-    new_log_store_state, LogStorePostSealCurrentEpoch, LogStoreReadState,
-    LogStoreStateWriteChunkFuture, LogStoreWriteState,
+    LogStorePostSealCurrentEpoch, LogStoreReadState, LogStoreStateWriteChunkFuture,
+    LogStoreWriteState, new_log_store_state,
 };
 use crate::common::log_store_impl::kv_log_store::{
-    FlushInfo, KvLogStoreMetrics, ReaderTruncationOffsetType, SeqIdType, FIRST_SEQ_ID,
+    FIRST_SEQ_ID, FlushInfo, KvLogStoreMetrics, ReaderTruncationOffsetType, SeqIdType,
 };
 use crate::executor::prelude::*;
 use crate::executor::{
@@ -625,7 +625,9 @@ impl SyncedLogStoreBuffer {
                     chunk_id,
                 },
             ));
-            tracing::trace!("Adding flushed item to buffer: start_seq_id: {start_seq_id}, end_seq_id: {end_seq_id}, chunk_id: {chunk_id}");
+            tracing::trace!(
+                "Adding flushed item to buffer: start_seq_id: {start_seq_id}, end_seq_id: {end_seq_id}, chunk_id: {chunk_id}"
+            );
         }
         // FIXME(kwannoel): Seems these metrics are updated _after_ the flush info is reported.
         self.update_unconsumed_buffer_metrics();
@@ -712,10 +714,10 @@ mod tests {
     use risingwave_storage::memory::MemoryStateStore;
 
     use super::*;
+    use crate::common::log_store_impl::kv_log_store::KV_LOG_STORE_V2_INFO;
     use crate::common::log_store_impl::kv_log_store::test_utils::{
         check_stream_chunk_eq, gen_test_log_store_table, test_payload_schema,
     };
-    use crate::common::log_store_impl::kv_log_store::KV_LOG_STORE_V2_INFO;
     use crate::executor::test_utils::MockSource;
 
     fn init_logger() {

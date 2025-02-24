@@ -15,12 +15,12 @@
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use risingwave_common::hash::VnodeCount;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_meta_model::{
-    connection, database, function, index, object, schema, secret, sink, source, subscription,
-    table, view, PrivateLinkService,
+    PrivateLinkService, connection, database, function, index, object, schema, secret, sink,
+    source, subscription, table, view,
 };
 use risingwave_meta_model_migration::{MigrationStatus, Migrator, MigratorTrait};
 use risingwave_pb::catalog::connection::PbInfo as PbConnectionInfo;

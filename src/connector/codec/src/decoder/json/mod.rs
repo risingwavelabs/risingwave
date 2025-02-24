@@ -43,7 +43,7 @@ use serde_json::Value;
 use thiserror::Error;
 use url::Url;
 
-use super::avro::{avro_schema_to_column_descs, MapHandling};
+use super::avro::{MapHandling, avro_schema_to_column_descs};
 
 #[derive(Debug, Error, thiserror_ext::ContextInto)]
 pub enum Error {
@@ -66,7 +66,9 @@ pub enum Error {
         url: String,
         source: serde_json::Error,
     },
-    #[error("ref `{ref_string}` can not be resolved as pointer, `{ref_fragment}` can not be found in the schema")]
+    #[error(
+        "ref `{ref_string}` can not be resolved as pointer, `{ref_fragment}` can not be found in the schema"
+    )]
     JsonRefPointerNotFound {
         ref_string: String,
         ref_fragment: String,

@@ -27,19 +27,19 @@ use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::scan_range::ScanRange;
-use risingwave_expr::expr::{build_from_prost, BoxedExpression};
+use risingwave_expr::expr::{BoxedExpression, build_from_prost};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_storage::store::PrefetchOptions;
-use risingwave_storage::table::batch_table::BatchTable;
 use risingwave_storage::table::TableIter;
-use risingwave_storage::{dispatch_state_store, StateStore};
+use risingwave_storage::table::batch_table::BatchTable;
+use risingwave_storage::{StateStore, dispatch_state_store};
 
 use crate::error::Result;
 use crate::executor::join::JoinType;
 use crate::executor::{
-    unix_timestamp_sec_to_epoch, AsOf, BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder,
-    BufferChunkExecutor, Executor, ExecutorBuilder, LookupExecutorBuilder, LookupJoinBase,
+    AsOf, BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, BufferChunkExecutor, Executor,
+    ExecutorBuilder, LookupExecutorBuilder, LookupJoinBase, unix_timestamp_sec_to_epoch,
 };
 
 /// Distributed Lookup Join Executor.

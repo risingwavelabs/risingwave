@@ -17,7 +17,7 @@ use risingwave_common::array::{ArrayImpl, ArrayRef, DataChunk};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_expr::expr::{BoxedExpression, Expression};
-use risingwave_expr::{build_function, Result};
+use risingwave_expr::{Result, build_function};
 
 /// `FieldExpression` access a field from a struct.
 #[derive(Debug)]

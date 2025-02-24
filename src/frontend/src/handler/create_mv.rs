@@ -26,8 +26,8 @@ use crate::catalog::check_column_name_not_reserved;
 use crate::error::ErrorCode::ProtocolError;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::HandlerArgs;
-use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::Explain;
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, RelationCollectorVisitor};
 use crate::planner::Planner;
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
@@ -285,7 +285,7 @@ pub mod tests {
     use risingwave_common::types::{DataType, StructType};
 
     use crate::catalog::root_catalog::SchemaPath;
-    use crate::test_utils::{create_proto_file, LocalFrontend, PROTO_FILE_DATA};
+    use crate::test_utils::{LocalFrontend, PROTO_FILE_DATA, create_proto_file};
 
     #[tokio::test]
     async fn test_create_mv_handler() {

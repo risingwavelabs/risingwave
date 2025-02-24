@@ -33,7 +33,7 @@ use std::hash::Hash;
 use std::ops::Deref;
 use std::rc::Rc;
 
-use downcast_rs::{impl_downcast, Downcast};
+use downcast_rs::{Downcast, impl_downcast};
 use dyn_clone::DynClone;
 use itertools::Itertools;
 use paste::paste;
@@ -57,7 +57,7 @@ use super::property::{
 use crate::error::{ErrorCode, Result};
 use crate::optimizer::ExpressionSimplifyRewriter;
 use crate::session::current::notice_to_user;
-use crate::utils::{build_graph_from_pretty, PrettySerde};
+use crate::utils::{PrettySerde, build_graph_from_pretty};
 
 /// A marker trait for different conventions, used for enforcing type safety.
 ///

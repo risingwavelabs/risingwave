@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::types::{Decimal, F64};
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_expr::{ExprError, Result, function};
 
 #[function("round_digit(decimal, int4) -> decimal")]
 pub fn round_digits(input: Decimal, digits: i32) -> Result<Decimal> {

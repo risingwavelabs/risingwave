@@ -17,9 +17,9 @@ use risingwave_sqlparser::ast::ObjectName;
 
 use super::RwPgResponse;
 use crate::binder::Binder;
+use crate::catalog::CatalogError;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::table_catalog::TableType;
-use crate::catalog::CatalogError;
 use crate::error::ErrorCode::PermissionDenied;
 use crate::error::Result;
 use crate::handler::HandlerArgs;

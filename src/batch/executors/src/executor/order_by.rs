@@ -25,9 +25,9 @@ use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::memcmp_encoding::encode_chunk;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_common_estimate_size::EstimateSize;
+use risingwave_pb::Message;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::data::DataChunk as PbDataChunk;
-use risingwave_pb::Message;
 
 use super::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
@@ -38,7 +38,7 @@ use crate::executor::merge_sort::MergeSortExecutor;
 use crate::monitor::BatchSpillMetrics;
 use crate::spill::spill_op::SpillBackend::Disk;
 use crate::spill::spill_op::{
-    SpillBackend, SpillOp, DEFAULT_SPILL_PARTITION_NUM, SPILL_AT_LEAST_MEMORY,
+    DEFAULT_SPILL_PARTITION_NUM, SPILL_AT_LEAST_MEMORY, SpillBackend, SpillOp,
 };
 
 /// Sort Executor
@@ -425,7 +425,7 @@ mod tests {
     use futures::StreamExt;
     use risingwave_common::array::*;
     use risingwave_common::catalog::Field;
-    use risingwave_common::types::{Date, Interval, Scalar, StructType, Time, Timestamp, F32};
+    use risingwave_common::types::{Date, F32, Interval, Scalar, StructType, Time, Timestamp};
     use risingwave_common::util::sort_util::OrderType;
 
     use super::*;
