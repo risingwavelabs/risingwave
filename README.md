@@ -54,31 +54,37 @@ curl -L https://risingwave.com/sh | sh
 
 To learn about other installation options, such as using a Docker image, see [Quick Start](https://docs.risingwave.com/docs/current/get-started/).
 
-## What is RisingWave optimized for?
-RisingWave simplifies the development of real-time data pipelines and applications. It is purpose-built to:
+## Not just a stream processor!
 
-* **Ingestion**: Ingest millions of events per second from both streaming and batch data sources.
-* **Stream processing**: Perform real-time incremental data processing to join and analyze live data streams with historical tables.
-* **Serving**: Persist data and serve ad-hoc queries with single-digit millisecond latency.
-* **Delivery**: Deliver fresh, consistent results to data lakes (e.g., Apache Iceberg) or any destination.
+RisingWave simplifies **end-to-end** development of real-time data pipelines and applications - going beyond traditional stream processors.
 
+Like other stream processors, RisingWave supports:
 
-## Why is RisingWave special?
-RisingWave stands apart from traditional stream processing systems due to its:
+* **Ingestion:** Ingest millions of events per second from streaming and batch sources.
+* **Stream processing:** Perform real-time incremental processing to join and analyze live data with historical tables.
+* **Delivery:** Deliver fresh, consistent results to data lakes (e.g., Apache Iceberg) or any destination.
+
+But RisingWave does more. It provides both **online and offline storage**:
+
+* **Online serving:** Row-based storage for ad-hoc point/range queries with single-digit millisecond latency.
+* **Offline persistence:** Apache Iceberg-based storage that persists streaming data at low cost, enabling open access by other query engines.
+
+## Key design decisions
+
+RisingWave is designed to be easier to use and more cost-efficient:
 
 ### PostgreSQL compatibility
-Connect via the PostgreSQL wire protocol - using psql, JDBC, or any Postgres tool.
-* **Seamless integration**: Works with a wide range of tools in the PostgreSQL ecosystem.
-* **Expressive SQL**: Supports structured, semi-structured, and unstructured data using a rich, familiar SQL dialect.
-* **No manual state tuning**: Eliminates the need for complex state management configurations.
+
+* **Seamless integration:** Connects via the PostgreSQL wire protocol, working with psql, JDBC, and any Postgres tool.  
+* **Expressive SQL:** Supports structured, semi-structured, and unstructured data with a familiar SQL dialect.
+* **No manual state tuning:** Eliminates complex state management configurations.
 
 ### Zero disk architecture
-All data lives in S3 (or equivalent), with local disk used only as a cache.
-* **Optimized for complex queries**: Ensures high performance for stateful operations like joins and time windowing.
-* **Fast failure recovery**: Recovers from system crashes within seconds.
-* **Dynamic scaling**: Adjusts resources instantly to handle workload spikes.
 
-
+* **Cloud-native storage:** Stores data in S3 (or equivalent), using local disk as a cache.
+* **High performance:** Optimized for complex queries like joins and time windowing.
+* **Fast recovery:** Recovers from system crashes within seconds.
+* **Dynamic scaling:** Instantly adjusts resources for workload spikes.
 
 ## In what use cases does RisingWave excel?
 RisingWave is particularly effective for the following use cases:
