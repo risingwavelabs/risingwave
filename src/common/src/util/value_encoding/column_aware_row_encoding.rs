@@ -32,7 +32,6 @@ use crate::catalog::ColumnId;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 enum OffsetWidth {
-    Unset = 0b00,
     /// The offset of encoded data can be represented by u8.
     Offset8 = 0b01,
     /// The offset of encoded data can be represented by u16.
@@ -45,7 +44,6 @@ impl OffsetWidth {
     /// Get the width of the offset in bytes.
     const fn width(self) -> usize {
         match self {
-            OffsetWidth::Unset => unreachable!(),
             OffsetWidth::Offset8 => 1,
             OffsetWidth::Offset16 => 2,
             OffsetWidth::Offset32 => 4,
@@ -58,11 +56,10 @@ impl OffsetWidth {
 
     const fn from_bits(bits: u8) -> Self {
         match bits {
-            0b00 => OffsetWidth::Unset,
             0b01 => OffsetWidth::Offset8,
             0b10 => OffsetWidth::Offset16,
             0b11 => OffsetWidth::Offset32,
-            _ => unreachable!(),
+            _ => panic!("invalid offset width bits"),
         }
     }
 }
@@ -80,7 +77,7 @@ struct Header {
     _reserved: u8,
 
     /// Indicate the offset width of the encoded data.
-    #[bits(2)]
+    #[bits(2, default = OffsetWidth::Offset8)]
     offset: OffsetWidth,
 }
 
@@ -129,26 +126,29 @@ impl RowEncoding {
             "should not set offsets multiple times"
         );
 
-        // Use 0 if no data is present.
+        // Use 0 if there's no data.
         let max_offset = usize_offsets.last().copied().unwrap_or(0);
 
-        if max_offset <= u8::MAX as usize {
-            self.header.set_offset(OffsetWidth::Offset8);
-            usize_offsets
-                .iter()
-                .for_each(|m| self.offsets.put_u8(*m as u8));
-        } else if max_offset <= u16::MAX as usize {
-            self.header.set_offset(OffsetWidth::Offset16);
-            usize_offsets
-                .iter()
-                .for_each(|m| self.offsets.put_u16_le(*m as u16));
-        } else if max_offset <= u32::MAX as usize {
-            self.header.set_offset(OffsetWidth::Offset32);
-            usize_offsets
-                .iter()
-                .for_each(|m| self.offsets.put_u32_le(*m as u32));
-        } else {
-            panic!("encoding length {} exceeds u32", max_offset);
+        match max_offset {
+            _n @ ..=const { u8::MAX as usize } => {
+                self.header.set_offset(OffsetWidth::Offset8);
+                usize_offsets
+                    .iter()
+                    .for_each(|m| self.offsets.put_u8(*m as u8));
+            }
+            _n @ ..=const { u16::MAX as usize } => {
+                self.header.set_offset(OffsetWidth::Offset16);
+                usize_offsets
+                    .iter()
+                    .for_each(|m| self.offsets.put_u16_le(*m as u16));
+            }
+            _n @ ..=const { u32::MAX as usize } => {
+                self.header.set_offset(OffsetWidth::Offset32);
+                usize_offsets
+                    .iter()
+                    .for_each(|m| self.offsets.put_u32_le(*m as u32));
+            }
+            _ => panic!("encoding length {} exceeds u32", max_offset),
         }
     }
 
