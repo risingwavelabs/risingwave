@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::{Ordering, min};
+use std::cmp::{Ordering, max, min};
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::hash::{Hash, Hasher};
@@ -137,6 +137,8 @@ impl CustomFragmentInfo {
 }
 
 use educe::Educe;
+use risingwave_common::system_param::AdaptiveParallelismStrategy;
+use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 
@@ -1929,6 +1931,12 @@ impl ScaleController {
             "generate_table_resize_plan, after build_index"
         );
 
+        let adaptive_parallelism_strategy = self
+            .env
+            .system_params_reader()
+            .await
+            .adaptive_parallelism_strategy();
+
         let mut target_plan = HashMap::new();
 
         for (
@@ -2012,6 +2020,17 @@ impl ScaleController {
                     }
                     FragmentDistributionType::Hash => match parallelism {
                         TableParallelism::Adaptive => {
+                            let available_slot_count = match adaptive_parallelism_strategy {
+                                AdaptiveParallelismStrategy::Auto
+                                | AdaptiveParallelismStrategy::Full => available_slot_count,
+                                AdaptiveParallelismStrategy::Bounded(n) => {
+                                    min(n.get(), available_slot_count)
+                                }
+                                AdaptiveParallelismStrategy::Ratio(r) => {
+                                    max(1, (r as f64 * available_slot_count as f64) as usize)
+                                }
+                            };
+
                             if available_slot_count > max_parallelism {
                                 tracing::warn!(
                                     "available parallelism for table {table_id} is larger than max parallelism, force limit to {max_parallelism}"
@@ -2597,6 +2616,8 @@ impl GlobalStreamManager {
             .map(|worker| (worker.id, worker))
             .collect();
 
+        let mut previous_adaptive_parallelism_strategy = AdaptiveParallelismStrategy::default();
+
         let mut should_trigger = false;
 
         loop {
@@ -2638,6 +2659,14 @@ impl GlobalStreamManager {
                     };
 
                     match notification {
+                        LocalNotification::SystemParamsChange(reader) => {
+                            let new_strategy = reader.adaptive_parallelism_strategy();
+                            if new_strategy != previous_adaptive_parallelism_strategy {
+                                tracing::info!("adaptive parallelism strategy changed from {:?} to {:?}", previous_adaptive_parallelism_strategy, new_strategy);
+                                should_trigger = true;
+                                previous_adaptive_parallelism_strategy = new_strategy;
+                            }
+                        }
                         LocalNotification::WorkerNodeActivated(worker) => {
                             if !worker_is_streaming_compute(&worker) {
                                 continue;

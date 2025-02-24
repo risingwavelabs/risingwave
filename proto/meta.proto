@@ -681,6 +681,7 @@ message SystemParams {
   optional bool use_new_object_prefix_strategy = 16;
   optional string license_key = 17;
   optional uint64 time_travel_retention_ms = 18;
+  optional string adaptive_parallelism_strategy = 19;
 }
 
 message GetSystemParamsRequest {}
