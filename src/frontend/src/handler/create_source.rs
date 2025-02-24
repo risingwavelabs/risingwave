@@ -407,9 +407,15 @@ example:
     CREATE TABLE <table_name> ( PRIMARY KEY ([rw_key | <key_name>]) )
     INCLUDE KEY [AS <key_name>]
     WITH (...)
-    FORMAT {0} ENCODE {1} (...)
+    FORMAT {0} ENCODE {1}{2}
 "#,
-        format_encode.format, format_encode.row_encode
+        format_encode.format,
+        format_encode.row_encode,
+        if format_encode.row_encode == Encode::Json || format_encode.row_encode == Encode::Bytes {
+            "".to_owned()
+        } else {
+            " (...)".to_owned()
+        }
     )
 }
 
