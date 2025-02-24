@@ -1327,7 +1327,7 @@ impl CatalogController {
             &inner.db,
             &HashSet::from_iter(job_ids.iter().copied()),
         )
-            .await?;
+        .await?;
 
         let all_upstream_fragments = Fragment::find()
             .filter(fragment::Column::JobId.is_in(upstream_job_ids))
