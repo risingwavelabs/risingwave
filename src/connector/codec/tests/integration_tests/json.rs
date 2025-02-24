@@ -102,8 +102,8 @@ async fn test_json_schema_parse() {
         .json_schema_to_columns(Url::parse("http://test_schema_uri.test").unwrap())
         .await
         .unwrap()
-        .into_iter()
-        .map(ColumnDesc::from)
+        .iter()
+        .map(ColumnDesc::from_field_without_column_id)
         .collect_vec();
     let column_display = columns.iter().map(ColumnDescTestDisplay).collect_vec();
 

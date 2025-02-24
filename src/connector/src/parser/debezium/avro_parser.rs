@@ -18,12 +18,12 @@ use std::sync::Arc;
 use anyhow::Context;
 use apache_avro::types::Value;
 use apache_avro::{Schema, from_avro_datum};
+use risingwave_common::catalog::Field;
 use risingwave_common::try_match_expand;
 use risingwave_connector_codec::decoder::avro::{
     AvroAccess, AvroParseOptions, ResolvedAvroSchema, avro_schema_to_column_descs,
     get_nullable_union_inner,
 };
-use risingwave_pb::plan_common::ColumnDesc;
 
 use crate::error::ConnectorResult;
 use crate::parser::avro::ConfluentSchemaCache;
@@ -120,7 +120,7 @@ impl DebeziumAvroParserConfig {
         })
     }
 
-    pub fn extract_pks(&self) -> ConnectorResult<Vec<ColumnDesc>> {
+    pub fn extract_pks(&self) -> ConnectorResult<Vec<Field>> {
         avro_schema_to_column_descs(
             &self.key_schema,
             // TODO: do we need to support map type here?
@@ -129,7 +129,7 @@ impl DebeziumAvroParserConfig {
         .map_err(Into::into)
     }
 
-    pub fn map_to_columns(&self) -> ConnectorResult<Vec<ColumnDesc>> {
+    pub fn map_to_columns(&self) -> ConnectorResult<Vec<Field>> {
         // Refer to debezium_avro_msg_schema.avsc for how the schema looks like:
 
         // "fields": [
@@ -352,7 +352,7 @@ mod tests {
         let schema = Schema::parse_str(test_schema_str).unwrap();
         let columns = avro_schema_to_column_descs(&schema, None).unwrap();
         for col in &columns {
-            let dtype = col.column_type.as_ref().unwrap();
+            let dtype = col.data_type.to_protobuf();
             println!("name = {}, type = {:?}", col.name, dtype.type_name);
             if col.name.contains("unconstrained") {
                 assert_eq!(dtype.type_name, TypeName::Decimal as i32);
@@ -368,8 +368,8 @@ mod tests {
             None,
         )
         .unwrap()
-        .into_iter()
-        .map(CatColumnDesc::from)
+        .iter()
+        .map(CatColumnDesc::from_field_without_column_id)
         .collect_vec();
 
         assert_eq!(columns.len(), 4);
@@ -411,8 +411,8 @@ mod tests {
         let config = DebeziumAvroParserConfig::new(parser_config.clone().encoding_config).await?;
         let columns = config
             .map_to_columns()?
-            .into_iter()
-            .map(CatColumnDesc::from)
+            .iter()
+            .map(CatColumnDesc::from_field_without_column_id)
             .map(|c| SourceColumnDesc::from(&c))
             .collect_vec();
         let parser = DebeziumParser::new(

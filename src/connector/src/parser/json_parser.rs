@@ -24,8 +24,8 @@
 use std::collections::BTreeMap;
 
 use anyhow::Context as _;
+use risingwave_common::catalog::Field;
 use risingwave_connector_codec::JsonSchema;
-use risingwave_pb::plan_common::ColumnDesc;
 
 use super::utils::{bytes_from_url, get_kafka_topic};
 use super::{JsonProperties, SchemaRegistryAuth};
@@ -82,7 +82,7 @@ pub async fn fetch_json_schema_and_map_to_columns(
     schema_location: &str,
     schema_registry_auth: Option<SchemaRegistryAuth>,
     props: &BTreeMap<String, String>,
-) -> ConnectorResult<Vec<ColumnDesc>> {
+) -> ConnectorResult<Vec<Field>> {
     let url = handle_sr_list(schema_location)?;
     let mut json_schema = if let Some(schema_registry_auth) = schema_registry_auth {
         let client = Client::new(url.clone(), &schema_registry_auth)?;
