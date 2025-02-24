@@ -43,13 +43,13 @@ enum OffsetWidth {
 
 impl OffsetWidth {
     /// Get the width of the offset in bytes.
-    const fn width(self) -> Option<usize> {
-        Some(match self {
-            OffsetWidth::Unset => return None,
+    const fn width(self) -> usize {
+        match self {
+            OffsetWidth::Unset => unreachable!(),
             OffsetWidth::Offset8 => 1,
             OffsetWidth::Offset16 => 2,
             OffsetWidth::Offset32 => 4,
-        })
+        }
     }
 
     const fn into_bits(self) -> u8 {
@@ -242,65 +242,85 @@ impl Deserializer {
     }
 }
 
-impl ValueRowDeserializer for Deserializer {
-    fn deserialize(&self, mut encoded_bytes: &[u8]) -> Result<Vec<Datum>> {
-        let header_bits = encoded_bytes.get_u8();
-        let header = Header::from_bits(header_bits);
+#[derive(Clone)]
+struct EncodedBytes<'a> {
+    header: Header,
+    column_ids: &'a [u8],
+    offsets: &'a [u8],
+    data: &'a [u8],
+}
+
+impl<'a> EncodedBytes<'a> {
+    fn new(mut encoded_bytes: &'a [u8]) -> Result<Self> {
+        let header = Header::from_bits(encoded_bytes.get_u8());
         if !header.magic() {
-            return Err(ValueEncodingError::InvalidFlag(header_bits));
+            return Err(ValueEncodingError::InvalidFlag(header.into_bits()));
         }
-        let offset_bytes =
-            (header.offset().width()).ok_or(ValueEncodingError::InvalidFlag(header_bits))?;
+        let offset_bytes = header.offset().width();
 
         let datum_num = encoded_bytes.get_u32_le() as usize;
         let offsets_start_idx = 4 * datum_num;
         let data_start_idx = offsets_start_idx + datum_num * offset_bytes;
-        let offsets = &encoded_bytes[offsets_start_idx..data_start_idx];
-        let data = &encoded_bytes[data_start_idx..];
 
-        let mut row = self.default_row.clone();
-        for i in 0..datum_num {
-            let this_id = encoded_bytes.get_i32_le();
-            if let Some(&decoded_idx) = self.required_column_ids.get(&this_id) {
-                let this_offset_start_idx = i * offset_bytes;
-                let mut this_offset_slice =
-                    &offsets[this_offset_start_idx..(this_offset_start_idx + offset_bytes)];
-                let this_offset = deserialize_width(offset_bytes, &mut this_offset_slice);
-                let data = if i + 1 < datum_num {
-                    let mut next_offset_slice = &offsets[(this_offset_start_idx + offset_bytes)
-                        ..(this_offset_start_idx + 2 * offset_bytes)];
-                    let next_offset = deserialize_width(offset_bytes, &mut next_offset_slice);
-                    if this_offset == next_offset {
-                        None
-                    } else {
-                        let mut data_slice = &data[this_offset..next_offset];
-                        Some(deserialize_value(
-                            &self.schema[decoded_idx],
-                            &mut data_slice,
-                        )?)
-                    }
-                } else if this_offset == data.len() {
-                    None
-                } else {
-                    let mut data_slice = &data[this_offset..];
-                    Some(deserialize_value(
-                        &self.schema[decoded_idx],
-                        &mut data_slice,
-                    )?)
-                };
-                row[decoded_idx] = data;
-            }
-        }
-        Ok(row)
+        Ok(EncodedBytes {
+            header,
+            column_ids: &encoded_bytes[..offsets_start_idx],
+            offsets: &encoded_bytes[offsets_start_idx..data_start_idx],
+            data: &encoded_bytes[data_start_idx..],
+        })
+    }
+
+    fn offset_width(&self) -> usize {
+        self.header.offset().width()
     }
 }
 
-fn deserialize_width(len: usize, data: &mut impl Buf) -> usize {
-    match len {
-        1 => data.get_u8() as usize,
-        2 => data.get_u16_le() as usize,
-        4 => data.get_u32_le() as usize,
-        _ => unreachable!("Width's len should be either 1, 2, or 4"),
+impl<'a> Iterator for EncodedBytes<'a> {
+    type Item = (i32, &'a [u8]);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.column_ids.is_empty() {
+            assert!(self.offsets.is_empty());
+            return None;
+        }
+
+        let id = self.column_ids.get_i32_le();
+
+        let this_offset = self.offsets.get_uint_le(self.offset_width()) as usize;
+        let next_offset = if self.offsets.is_empty() {
+            self.data.len()
+        } else {
+            let mut peek_offsets = self.offsets;
+            peek_offsets.get_uint_le(self.offset_width()) as usize
+        };
+
+        let data = &self.data[this_offset..next_offset];
+
+        Some((id, data))
+    }
+}
+
+impl ValueRowDeserializer for Deserializer {
+    fn deserialize(&self, encoded_bytes: &[u8]) -> Result<Vec<Datum>> {
+        let encoded_bytes = EncodedBytes::new(encoded_bytes)?;
+
+        let mut row = self.default_row.clone();
+
+        for (id, mut data) in encoded_bytes {
+            let Some(&decoded_idx) = self.required_column_ids.get(&id) else {
+                continue;
+            };
+
+            let datum = if data.is_empty() {
+                None
+            } else {
+                Some(deserialize_value(&self.schema[decoded_idx], &mut data)?)
+            };
+
+            row[decoded_idx] = datum;
+        }
+
+        Ok(row)
     }
 }
 
@@ -328,64 +348,28 @@ impl ValueRowDeserializer for ColumnAwareSerde {
 /// If no column is dropped, returns None.
 // TODO: Avoid duplicated code. The current code combines`Serializer` and `Deserializer` with unavailable parameter removed, e.g. `Deserializer::schema`.
 pub fn try_drop_invalid_columns(
-    mut encoded_bytes: &[u8],
+    encoded_bytes: &[u8],
     valid_column_ids: &HashSet<i32>,
 ) -> Option<Vec<u8>> {
-    let header = Header::from_bits(encoded_bytes.get_u8());
-    if !header.magic() {
-        // invalid flag, do not proceed
-        return None;
-    }
+    let encoded_bytes = EncodedBytes::new(encoded_bytes).ok()?;
 
-    let datum_num = encoded_bytes.get_u32_le() as usize;
-    let mut is_column_dropped = false;
-    let mut encoded_bytes_copy = encoded_bytes;
-    for _ in 0..datum_num {
-        let this_id = encoded_bytes_copy.get_i32_le();
-        if !valid_column_ids.contains(&this_id) {
-            is_column_dropped = true;
-            break;
-        }
-    }
-    if !is_column_dropped {
+    let has_invalid_column = (encoded_bytes.clone()).any(|(id, _)| !valid_column_ids.contains(&id));
+    if !has_invalid_column {
         return None;
     }
 
     // Slow path that drops columns. Should be rare.
-    let offset_bytes = header.offset().width().expect("offset width is unset");
-    let offsets_start_idx = 4 * datum_num;
-    let data_start_idx = offsets_start_idx + datum_num * offset_bytes;
-    let offsets = &encoded_bytes[offsets_start_idx..data_start_idx];
-    let data = &encoded_bytes[data_start_idx..];
+
     let mut datums: Vec<Option<&[u8]>> = Vec::with_capacity(valid_column_ids.len());
     let mut column_ids = Vec::with_capacity(valid_column_ids.len());
-    for i in 0..datum_num {
-        let this_id = encoded_bytes.get_i32_le();
-        if valid_column_ids.contains(&this_id) {
-            column_ids.push(this_id);
-            let this_offset_start_idx = i * offset_bytes;
-            let mut this_offset_slice =
-                &offsets[this_offset_start_idx..(this_offset_start_idx + offset_bytes)];
-            let this_offset = deserialize_width(offset_bytes, &mut this_offset_slice);
-            let data = if i + 1 < datum_num {
-                let mut next_offset_slice = &offsets[(this_offset_start_idx + offset_bytes)
-                    ..(this_offset_start_idx + 2 * offset_bytes)];
-                let next_offset = deserialize_width(offset_bytes, &mut next_offset_slice);
-                if this_offset == next_offset {
-                    None
-                } else {
-                    let data_slice = &data[this_offset..next_offset];
-                    Some(data_slice)
-                }
-            } else if this_offset == data.len() {
-                None
-            } else {
-                let data_slice = &data[this_offset..];
-                Some(data_slice)
-            };
-            datums.push(data);
+
+    for (id, data) in encoded_bytes {
+        if valid_column_ids.contains(&id) {
+            column_ids.push(id);
+            datums.push(if data.is_empty() { None } else { Some(data) });
         }
     }
+
     if column_ids.is_empty() {
         // According to `RowEncoding::encode`, at least one column is required.
         return None;
