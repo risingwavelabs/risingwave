@@ -23,10 +23,10 @@ use risingwave_sqlparser::ast::AsOf;
 
 use super::super::utils::TableCatalogBuilder;
 use super::GenericPlanNode;
+use crate::TableCatalog;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::FunctionalDependencySet;
-use crate::TableCatalog;
 
 /// In which scnario the source node is created
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

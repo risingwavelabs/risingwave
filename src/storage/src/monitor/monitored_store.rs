@@ -27,7 +27,7 @@ use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
 use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch, SyncResult};
 use thiserror_ext::AsReport;
 use tokio::time::Instant;
-use tracing::{error, Instrument};
+use tracing::{Instrument, error};
 
 #[cfg(all(not(madsim), feature = "hm-trace"))]
 use super::traced_store::TracedStateStore;

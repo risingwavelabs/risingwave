@@ -26,7 +26,7 @@ use risingwave_common::transaction::transaction_id::TxnId;
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_dml::dml_manager::DmlManagerRef;
-use risingwave_expr::expr::{build_from_prost, BoxedExpression};
+use risingwave_expr::expr::{BoxedExpression, build_from_prost};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::plan_common::IndexAndExpr;
 
@@ -269,7 +269,7 @@ mod tests {
     use futures::StreamExt;
     use risingwave_common::array::{Array, ArrayImpl, I32Array, StructArray};
     use risingwave_common::catalog::{
-        schema_test_utils, ColumnDesc, ColumnId, INITIAL_TABLE_VERSION_ID,
+        ColumnDesc, ColumnId, INITIAL_TABLE_VERSION_ID, schema_test_utils,
     };
     use risingwave_common::transaction::transaction_message::TxnMsg;
     use risingwave_common::types::StructType;

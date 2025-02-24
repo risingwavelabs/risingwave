@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::sync::Arc;
 
 use risingwave_common::system_param::reader::SystemParamsReader;
@@ -24,13 +24,13 @@ use risingwave_pb::meta::{
     MetaSnapshot, PbObject, PbObjectGroup, SubscribeResponse, SubscribeType,
 };
 use thiserror_ext::AsReport;
-use tokio::sync::mpsc::{self, UnboundedSender};
 use tokio::sync::Mutex;
+use tokio::sync::mpsc::{self, UnboundedSender};
 use tonic::Status;
 
 use crate::controller::SqlMetaStore;
-use crate::manager::notification_version::NotificationVersionGenerator;
 use crate::manager::WorkerKey;
+use crate::manager::notification_version::NotificationVersionGenerator;
 use crate::model::FragmentId;
 
 pub type MessageStatus = Status;

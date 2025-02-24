@@ -17,20 +17,20 @@ use std::ffi::OsString;
 use std::fmt::Write;
 use std::sync::Arc;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use cfg_or_panic::cfg_or_panic;
 use clap::Parser;
 use itertools::Itertools;
 use rand::seq::IteratorRandom;
-use rand::{thread_rng, Rng};
+use rand::{Rng, thread_rng};
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::WorkerSlotId;
 use risingwave_connector::source::{SplitImpl, SplitMetaData};
 use risingwave_hummock_sdk::{CompactionGroupId, HummockSstableId};
-use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
-use risingwave_pb::meta::table_fragments::PbFragment;
-use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 use risingwave_pb::meta::GetClusterInfoResponse;
+use risingwave_pb::meta::table_fragments::PbFragment;
+use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
+use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 use risingwave_pb::stream_plan::StreamNode;
 
 use self::predicate::BoxedPredicate;
@@ -38,8 +38,8 @@ use crate::cluster::Cluster;
 
 /// Predicates used for locating fragments.
 pub mod predicate {
-    use risingwave_pb::stream_plan::stream_node::NodeBody;
     use risingwave_pb::stream_plan::DispatcherType;
+    use risingwave_pb::stream_plan::stream_node::NodeBody;
 
     use super::*;
 

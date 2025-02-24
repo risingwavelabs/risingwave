@@ -16,8 +16,8 @@ use risingwave_pb::plan_common::JoinType;
 
 use super::{BoxedRule, Rule};
 use crate::expr::InputRef;
-use crate::optimizer::plan_node::{LogicalApply, LogicalFilter, LogicalOverWindow};
 use crate::optimizer::PlanRef;
+use crate::optimizer::plan_node::{LogicalApply, LogicalFilter, LogicalOverWindow};
 use crate::utils::Condition;
 
 /// Transpose `LogicalApply` and `LogicalOverWindow`.

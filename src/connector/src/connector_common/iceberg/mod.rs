@@ -21,7 +21,7 @@ use std::sync::Arc;
 use ::iceberg::io::{S3_ACCESS_KEY_ID, S3_ENDPOINT, S3_REGION, S3_SECRET_ACCESS_KEY};
 use ::iceberg::table::Table;
 use ::iceberg::{Catalog, TableIdent};
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use iceberg::io::{GCS_CREDENTIALS_JSON, GCS_DISABLE_CONFIG_LOAD, S3_DISABLE_CONFIG_LOAD};
 use iceberg_catalog_glue::{AWS_ACCESS_KEY_ID, AWS_REGION_NAME, AWS_SECRET_ACCESS_KEY};
 use risingwave_common::bail;

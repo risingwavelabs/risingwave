@@ -25,8 +25,8 @@ use risingwave_pb::common::worker_node::Property;
 use risingwave_pb::common::{
     PbColumnOrder, PbDirection, PbNullsAre, PbOrderType, WorkerNode, WorkerType,
 };
-use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
+use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::expr::agg_call::PbKind as PbAggKind;
 use risingwave_pb::expr::expr_node::RexNode;
@@ -36,18 +36,18 @@ use risingwave_pb::plan_common::{ColumnCatalog, ColumnDesc, ExprContext, Field};
 use risingwave_pb::stream_plan::stream_fragment_graph::{StreamFragment, StreamFragmentEdge};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    agg_call_state, AggCallState, DispatchStrategy, DispatcherType, ExchangeNode, FilterNode,
-    FragmentTypeFlag, MaterializeNode, ProjectNode, SimpleAggNode, SourceNode, StreamContext,
-    StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamSource,
+    AggCallState, DispatchStrategy, DispatcherType, ExchangeNode, FilterNode, FragmentTypeFlag,
+    MaterializeNode, ProjectNode, SimpleAggNode, SourceNode, StreamContext,
+    StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamSource, agg_call_state,
 };
 
+use crate::MetaResult;
 use crate::controller::cluster::StreamingClusterInfo;
 use crate::manager::{MetaSrvEnv, StreamingJob};
 use crate::model::StreamJobFragments;
 use crate::stream::{
     ActorGraphBuildResult, ActorGraphBuilder, CompleteStreamFragmentGraph, StreamFragmentGraph,
 };
-use crate::MetaResult;
 
 fn make_inputref(idx: u32) -> ExprNode {
     ExprNode {

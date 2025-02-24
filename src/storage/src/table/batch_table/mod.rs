@@ -36,25 +36,25 @@ use risingwave_common::util::row_serde::*;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
 use risingwave_common::util::value_encoding::{BasicSerde, EitherSerde};
-use risingwave_hummock_sdk::key::{
-    end_bound_of_prefix, next_key, prefixed_range_with_vnode, CopyFromSlice, TableKeyRange,
-};
 use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_hummock_sdk::key::{
+    CopyFromSlice, TableKeyRange, end_bound_of_prefix, next_key, prefixed_range_with_vnode,
+};
 use risingwave_pb::plan_common::StorageTableDesc;
 use tracing::trace;
 
+use crate::StateStore;
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::CachePolicy;
 use crate::row_serde::row_serde_util::{serialize_pk, serialize_pk_with_vnode};
 use crate::row_serde::value_serde::{ValueRowSerde, ValueRowSerdeNew};
-use crate::row_serde::{find_columns_by_ids, ColumnMapping};
+use crate::row_serde::{ColumnMapping, find_columns_by_ids};
 use crate::store::{
     NextEpochOptions, PrefetchOptions, ReadLogOptions, ReadOptions, StateStoreIter,
     StateStoreIterExt, TryWaitEpochOptions,
 };
 use crate::table::merge_sort::NodePeek;
 use crate::table::{ChangeLogRow, KeyedRow, TableDistribution, TableIter};
-use crate::StateStore;
 
 /// [`BatchTableInner`] is the interface accessing relational data in KV(`StateStore`) with
 /// row-based encoding format, and is used in batch mode.
@@ -502,8 +502,8 @@ mod merge_vnode_stream {
     use risingwave_hummock_sdk::key::TableKey;
 
     use crate::error::StorageResult;
-    use crate::table::merge_sort::{merge_sort, NodePeek};
     use crate::table::KeyedRow;
+    use crate::table::merge_sort::{NodePeek, merge_sort};
 
     pub(super) enum VnodeStreamType<RowSt, KeyedRowSt> {
         Single(RowSt),
@@ -773,22 +773,15 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
             Some(Bytes::from(encoded_prefix[..prefix_len].to_vec()))
         } else {
             trace!(
-                    "iter_with_pk_bounds dist_key_indices table_id {} not match prefix pk_prefix {:?}  pk_prefix_indices {:?}",
-                    self.table_id,
-                    pk_prefix,
-                    pk_prefix_indices
-                );
+                "iter_with_pk_bounds dist_key_indices table_id {} not match prefix pk_prefix {:?}  pk_prefix_indices {:?}",
+                self.table_id, pk_prefix, pk_prefix_indices
+            );
             None
         };
 
         trace!(
-            "iter_with_pk_bounds table_id {} prefix_hint {:?} start_key: {:?}, end_key: {:?} pk_prefix {:?}  pk_prefix_indices {:?}" ,
-            self.table_id,
-            prefix_hint,
-            start_key,
-            end_key,
-            pk_prefix,
-            pk_prefix_indices
+            "iter_with_pk_bounds table_id {} prefix_hint {:?} start_key: {:?}, end_key: {:?} pk_prefix {:?}  pk_prefix_indices {:?}",
+            self.table_id, prefix_hint, start_key, end_key, pk_prefix, pk_prefix_indices
         );
 
         self.iter_with_encoded_key_range(
@@ -809,7 +802,7 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
         schema: Schema,
         chunk_size: usize,
     ) {
-        use futures::{pin_mut, TryStreamExt};
+        use futures::{TryStreamExt, pin_mut};
         use risingwave_common::util::iter_util::ZipEqFast;
 
         pin_mut!(iter);

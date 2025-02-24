@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use prometheus::core::{AtomicU64, GenericGauge};
 use prometheus::IntGauge;
+use prometheus::core::{AtomicU64, GenericGauge};
 
 /// The integer version of [`prometheus::Gauge`]. Provides better performance if metric values are
 /// all unsigned integers.

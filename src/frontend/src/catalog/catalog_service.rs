@@ -27,9 +27,9 @@ use risingwave_pb::catalog::{
 };
 use risingwave_pb::ddl_service::replace_job_plan::{ReplaceJob, ReplaceSource, ReplaceTable};
 use risingwave_pb::ddl_service::{
+    PbReplaceJobPlan, PbTableJobType, ReplaceJobPlan, TableJobType, WaitVersion,
     alter_name_request, alter_owner_request, alter_set_schema_request, alter_swap_rename_request,
-    create_connection_request, PbReplaceJobPlan, PbTableJobType, ReplaceJobPlan, TableJobType,
-    WaitVersion,
+    create_connection_request,
 };
 use risingwave_pb::meta::PbTableParallelism;
 use risingwave_pb::stream_plan::StreamFragmentGraph;

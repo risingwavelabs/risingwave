@@ -19,14 +19,14 @@ use itertools::Itertools;
 use prost_reflect::{Cardinality, FieldDescriptor, Kind, MessageDescriptor, ReflectMessage, Value};
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::types::{
-    DataType, DatumCow, Decimal, JsonbVal, MapType, MapValue, ScalarImpl, StructType, ToOwnedDatum,
-    F32, F64,
+    DataType, DatumCow, Decimal, F32, F64, JsonbVal, MapType, MapValue, ScalarImpl, StructType,
+    ToOwnedDatum,
 };
 use risingwave_pb::plan_common::{AdditionalColumn, ColumnDesc, ColumnDescVersion};
 use thiserror::Error;
 use thiserror_ext::Macro;
 
-use crate::decoder::{uncategorized, AccessError, AccessResult};
+use crate::decoder::{AccessError, AccessResult, uncategorized};
 
 pub const PROTOBUF_MESSAGES_AS_JSONB: &str = "messages_as_jsonb";
 

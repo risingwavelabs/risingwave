@@ -13,17 +13,17 @@
 // limitations under the License.
 
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::LogRowSeqScanNode;
+use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::common::{BatchQueryCommittedEpoch, BatchQueryEpoch};
 
 use super::batch::prelude::*;
-use super::utils::{childless_record, Distill};
-use super::{generic, ExprRewritable, PlanBase, PlanRef, ToDistributedBatch, TryToBatchPb};
+use super::utils::{Distill, childless_record};
+use super::{ExprRewritable, PlanBase, PlanRef, ToDistributedBatch, TryToBatchPb, generic};
 use crate::catalog::ColumnId;
 use crate::error::Result;
-use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::ToLocalBatch;
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::property::{Distribution, DistributionDisplay, Order};
 use crate::scheduler::SchedulerResult;
 

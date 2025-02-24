@@ -17,8 +17,8 @@ use risingwave_common::config::MetaBackend;
 use risingwave_common::telemetry::pb_compatible::TelemetryToProtobuf;
 use risingwave_common::telemetry::report::{TelemetryInfoFetcher, TelemetryReportCreator};
 use risingwave_common::telemetry::{
-    current_timestamp, report_event_common, telemetry_cluster_type_from_env_var, SystemData,
-    TelemetryNodeType, TelemetryReportBase, TelemetryResult,
+    SystemData, TelemetryNodeType, TelemetryReportBase, TelemetryResult, current_timestamp,
+    report_event_common, telemetry_cluster_type_from_env_var,
 };
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_pb::common::WorkerType;
@@ -253,7 +253,7 @@ impl TelemetryReportCreator for MetaReportCreator {
 mod test {
     use risingwave_common::config::MetaBackend;
     use risingwave_common::telemetry::{
-        current_timestamp, SystemData, TelemetryNodeType, TelemetryReportBase,
+        SystemData, TelemetryNodeType, TelemetryReportBase, current_timestamp,
     };
     use risingwave_pb::telemetry::PbTelemetryClusterType;
 
@@ -263,7 +263,7 @@ mod test {
     #[tokio::test]
     async fn test_meta_telemetry_report() {
         use risingwave_common::telemetry::pb_compatible::TelemetryToProtobuf;
-        use risingwave_common::telemetry::{post_telemetry_report_pb, TELEMETRY_REPORT_URL};
+        use risingwave_common::telemetry::{TELEMETRY_REPORT_URL, post_telemetry_report_pb};
 
         use crate::telemetry::TELEMETRY_META_REPORT_TYPE;
 

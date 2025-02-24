@@ -208,8 +208,8 @@ mod tests {
     use risingwave_common::util::sort_util::OrderType;
 
     use super::*;
-    use crate::executor::test_utils::top_n_executor::create_in_memory_state_table;
     use crate::executor::test_utils::MockSource;
+    use crate::executor::test_utils::top_n_executor::create_in_memory_state_table;
     use crate::executor::{Barrier, Message};
 
     mod test1 {
@@ -629,8 +629,8 @@ mod tests {
         use risingwave_storage::memory::MemoryStateStore;
 
         use super::*;
-        use crate::executor::test_utils::top_n_executor::create_in_memory_state_table_from_state_store;
         use crate::executor::test_utils::StreamExecutorTestExt;
+        use crate::executor::test_utils::top_n_executor::create_in_memory_state_table_from_state_store;
         fn create_source_new() -> Executor {
             let mut chunks = vec![
                 StreamChunk::from_pretty(
@@ -913,8 +913,8 @@ mod tests {
         use risingwave_storage::memory::MemoryStateStore;
 
         use super::*;
-        use crate::executor::test_utils::top_n_executor::create_in_memory_state_table_from_state_store;
         use crate::executor::test_utils::StreamExecutorTestExt;
+        use crate::executor::test_utils::top_n_executor::create_in_memory_state_table_from_state_store;
 
         fn create_source() -> Executor {
             let mut chunks = vec![

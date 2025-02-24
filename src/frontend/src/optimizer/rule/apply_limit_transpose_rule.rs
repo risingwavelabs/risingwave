@@ -17,11 +17,11 @@ use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::plan_common::JoinType;
 
 use super::{BoxedRule, Rule};
+use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::{
     LogicalApply, LogicalFilter, LogicalLimit, LogicalTopN, PlanTreeNodeUnary,
 };
 use crate::optimizer::property::Order;
-use crate::optimizer::PlanRef;
 use crate::utils::Condition;
 
 /// Transpose `LogicalApply` and `LogicalLimit`.

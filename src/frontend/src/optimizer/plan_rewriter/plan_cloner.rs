@@ -16,10 +16,10 @@ use std::collections::HashMap;
 
 use itertools::Itertools;
 
+use crate::PlanRef;
+use crate::optimizer::PlanRewriter;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{LogicalShare, PlanNodeId, PlanTreeNode, StreamShare};
-use crate::optimizer::PlanRewriter;
-use crate::PlanRef;
 
 #[derive(Debug, Clone, Default)]
 pub struct PlanCloner {

@@ -23,20 +23,20 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use async_trait::async_trait;
 use futures::future::pending;
-use futures::stream::{empty, select_all, BoxStream};
-use futures::{stream, FutureExt, StreamExt};
+use futures::stream::{BoxStream, empty, select_all};
+use futures::{FutureExt, StreamExt, stream};
 use itertools::Itertools;
 use rand::prelude::SliceRandom;
-use rand::{thread_rng, Rng};
+use rand::{Rng, thread_rng};
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, ScalarImpl, Serial};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
-use risingwave_connector::sink::test_sink::{registry_build_sink, TestSinkRegistryGuard};
-use risingwave_connector::sink::writer::SinkWriter;
 use risingwave_connector::sink::SinkError;
+use risingwave_connector::sink::test_sink::{TestSinkRegistryGuard, registry_build_sink};
+use risingwave_connector::sink::writer::SinkWriter;
 use risingwave_connector::source::test_source::{
-    registry_test_source, BoxSource, TestSourceRegistryGuard, TestSourceSplit,
+    BoxSource, TestSourceRegistryGuard, TestSourceSplit, registry_test_source,
 };
 use risingwave_simulation::cluster::{Cluster, ConfigPath, Configuration};
 use tokio::task::yield_now;
@@ -272,15 +272,17 @@ pub fn build_stream_chunk(
     );
     for (id, name, split_id, offset) in row_iter {
         let row_id = ROW_ID_GEN.fetch_add(1, Relaxed);
-        std::assert!(builder
-            .append_one_row([
-                Some(ScalarImpl::Int32(id)),
-                Some(ScalarImpl::Utf8(name.into())),
-                Some(ScalarImpl::Serial(Serial::from(row_id))),
-                Some(ScalarImpl::Utf8(split_id.into())),
-                Some(ScalarImpl::Utf8(offset.into())),
-            ])
-            .is_none());
+        std::assert!(
+            builder
+                .append_one_row([
+                    Some(ScalarImpl::Int32(id)),
+                    Some(ScalarImpl::Utf8(name.into())),
+                    Some(ScalarImpl::Serial(Serial::from(row_id))),
+                    Some(ScalarImpl::Utf8(split_id.into())),
+                    Some(ScalarImpl::Utf8(offset.into())),
+                ])
+                .is_none()
+        );
     }
     let chunk = builder.consume_all().unwrap();
     let ops = (0..chunk.cardinality()).map(|_| Op::Insert).collect_vec();

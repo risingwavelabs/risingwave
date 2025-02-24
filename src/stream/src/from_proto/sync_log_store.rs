@@ -16,7 +16,7 @@ use risingwave_pb::stream_plan::SyncLogStoreNode;
 use risingwave_storage::StateStore;
 
 use crate::common::log_store_impl::kv_log_store::serde::LogStoreRowSerde;
-use crate::common::log_store_impl::kv_log_store::{KvLogStoreMetrics, KV_LOG_STORE_V2_INFO};
+use crate::common::log_store_impl::kv_log_store::{KV_LOG_STORE_V2_INFO, KvLogStoreMetrics};
 use crate::error::StreamResult;
 use crate::executor::{Executor, SyncedKvLogStoreExecutor};
 use crate::from_proto::ExecutorBuilder;

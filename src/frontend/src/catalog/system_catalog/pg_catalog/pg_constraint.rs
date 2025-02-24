@@ -15,10 +15,10 @@
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 
+use crate::TableCatalog;
 use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::system_catalog::{SysCatalogReaderImpl, SystemTableCatalog};
 use crate::error::Result;
-use crate::TableCatalog;
 
 /// The catalog `pg_constraint` records information about table and index inheritance hierarchies.
 /// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-constraint.html`]

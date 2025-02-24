@@ -16,7 +16,7 @@ use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
 use syn::parse::{Parse, ParseStream};
-use syn::{parse_macro_input, Ident, ItemFn, ItemStruct, LitStr, Result, Token};
+use syn::{Ident, ItemFn, ItemStruct, LitStr, Result, Token, parse_macro_input};
 
 #[proc_macro_attribute]
 pub fn system_catalog(attr: TokenStream, item: TokenStream) -> TokenStream {

@@ -23,7 +23,7 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_dml::dml_manager::DmlManagerRef;
-use risingwave_expr::expr::{build_from_prost, BoxedExpression};
+use risingwave_expr::expr::{BoxedExpression, build_from_prost};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::error::{BatchError, Result};
@@ -189,7 +189,9 @@ impl UpdateExecutor {
                 // If row_delete == row_insert, we don't need to do a actual update
                 if row_delete != row_insert {
                     let None = builder.append_one_row(row_delete) else {
-                        unreachable!("no chunk should be yielded when appending the deleted row as the chunk size is always even");
+                        unreachable!(
+                            "no chunk should be yielded when appending the deleted row as the chunk size is always even"
+                        );
                     };
                     if let Some(chunk) = builder.append_one_row(row_insert) {
                         write_txn_data(chunk).await?;
@@ -264,7 +266,7 @@ mod tests {
 
     use futures::StreamExt;
     use risingwave_common::catalog::{
-        schema_test_utils, ColumnDesc, ColumnId, INITIAL_TABLE_VERSION_ID,
+        ColumnDesc, ColumnId, INITIAL_TABLE_VERSION_ID, schema_test_utils,
     };
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_dml::dml_manager::DmlManager;

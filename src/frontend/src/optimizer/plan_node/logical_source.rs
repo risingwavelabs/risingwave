@@ -19,17 +19,17 @@ use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, Field};
 use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
 use risingwave_connector::source::{DataType, UPSTREAM_SOURCE_KEY};
-use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::GeneratedColumnDesc;
+use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_sqlparser::ast::AsOf;
 
 use super::generic::{GenericPlanRef, SourceNodeKind};
 use super::stream_watermark_filter::StreamWatermarkFilter;
-use super::utils::{childless_record, Distill};
+use super::utils::{Distill, childless_record};
 use super::{
-    generic, BatchProject, BatchSource, ColPrunable, ExprRewritable, Logical, LogicalFilter,
-    LogicalProject, PlanBase, PlanRef, PredicatePushdown, StreamProject, StreamRowIdGen,
-    StreamSource, StreamSourceScan, ToBatch, ToStream,
+    BatchProject, BatchSource, ColPrunable, ExprRewritable, Logical, LogicalFilter, LogicalProject,
+    PlanBase, PlanRef, PredicatePushdown, StreamProject, StreamRowIdGen, StreamSource,
+    StreamSourceScan, ToBatch, ToStream, generic,
 };
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::error::Result;

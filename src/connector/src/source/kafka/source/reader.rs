@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::mem::swap;
 use std::time::Duration;
 
@@ -32,11 +32,11 @@ use crate::error::ConnectorResult as Result;
 use crate::parser::ParserConfig;
 use crate::source::base::SourceMessage;
 use crate::source::kafka::{
-    KafkaContextCommon, KafkaProperties, KafkaSplit, RwConsumerContext, KAFKA_ISOLATION_LEVEL,
+    KAFKA_ISOLATION_LEVEL, KafkaContextCommon, KafkaProperties, KafkaSplit, RwConsumerContext,
 };
 use crate::source::{
-    into_chunk_stream, BackfillInfo, BoxSourceChunkStream, Column, SourceContextRef, SplitId,
-    SplitImpl, SplitMetaData, SplitReader,
+    BackfillInfo, BoxSourceChunkStream, Column, SourceContextRef, SplitId, SplitImpl,
+    SplitMetaData, SplitReader, into_chunk_stream,
 };
 
 pub struct KafkaSplitReader {

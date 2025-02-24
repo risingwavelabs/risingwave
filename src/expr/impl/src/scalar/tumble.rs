@@ -14,7 +14,7 @@
 
 use num_traits::Zero;
 use risingwave_common::types::{Date, Interval, Timestamp, Timestamptz};
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_expr::{ExprError, Result, function};
 
 #[inline(always)]
 fn interval_to_micro_second(t: Interval) -> Result<i64> {

@@ -16,12 +16,12 @@ use std::fmt::Debug;
 
 use jsonbb::Builder;
 use risingwave_common::types::{
-    DataType, Date, Decimal, Int256Ref, Interval, JsonbRef, JsonbVal, ListRef, MapRef,
-    ScalarRefImpl, Serial, StructRef, Time, Timestamp, Timestamptz, ToText, F32, F64,
+    DataType, Date, Decimal, F32, F64, Int256Ref, Interval, JsonbRef, JsonbVal, ListRef, MapRef,
+    ScalarRefImpl, Serial, StructRef, Time, Timestamp, Timestamptz, ToText,
 };
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::Context;
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_expr::{ExprError, Result, function};
 
 #[function("to_jsonb(*) -> jsonb")]
 fn to_jsonb(input: Option<impl ToJsonb>, ctx: &Context) -> Result<JsonbVal> {

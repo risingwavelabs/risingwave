@@ -16,8 +16,8 @@ use std::io::{Cursor, Read};
 
 use ethnum::I256;
 use risingwave_common_estimate_size::EstimateSize;
-use risingwave_pb::common::buffer::CompressionType;
 use risingwave_pb::common::Buffer;
+use risingwave_pb::common::buffer::CompressionType;
 use risingwave_pb::data::PbArray;
 
 use crate::array::{Array, ArrayBuilder, ArrayImpl, ArrayResult};

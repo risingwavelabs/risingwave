@@ -19,8 +19,8 @@ use risingwave_common::util::epoch::is_max_epoch;
 use risingwave_storage::hummock::CachePolicy;
 use risingwave_storage::store::{PrefetchOptions, ReadOptions, StateStoreIter, StateStoreRead};
 
-use crate::common::HummockServiceOpts;
 use crate::CtlContext;
+use crate::common::HummockServiceOpts;
 
 pub async fn list_kv(
     context: &CtlContext,

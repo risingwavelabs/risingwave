@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use futures::FutureExt;
 use risingwave_common::transaction::transaction_message::TxnMsg;
-use tokio::sync::{mpsc, oneshot, Semaphore};
+use tokio::sync::{Semaphore, mpsc, oneshot};
 
 pub struct PermitValue(u32);
 

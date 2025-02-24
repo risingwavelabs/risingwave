@@ -27,7 +27,7 @@ use tokio::sync::watch;
 
 use crate::common::log_store_impl::kv_log_store::buffer::LogStoreBufferSender;
 use crate::common::log_store_impl::kv_log_store::state::LogStoreWriteState;
-use crate::common::log_store_impl::kv_log_store::{KvLogStoreMetrics, SeqIdType, FIRST_SEQ_ID};
+use crate::common::log_store_impl::kv_log_store::{FIRST_SEQ_ID, KvLogStoreMetrics, SeqIdType};
 
 pub struct KvLogStoreWriter<LS: LocalStateStore> {
     seq_id: SeqIdType,

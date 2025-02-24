@@ -20,10 +20,10 @@ use std::cmp::Ordering;
 use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::fmt::{Debug, Display, Formatter};
-use std::future::{poll_fn, Future};
+use std::future::{Future, poll_fn};
 use std::mem::{replace, swap, take};
 use std::sync::Arc;
-use std::task::{ready, Context, Poll};
+use std::task::{Context, Poll, ready};
 
 use futures::FutureExt;
 use itertools::Itertools;
@@ -43,10 +43,10 @@ use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
 
-use crate::hummock::event_handler::hummock_event_handler::{send_sync_result, BufferTracker};
+use crate::hummock::event_handler::LocalInstanceId;
+use crate::hummock::event_handler::hummock_event_handler::{BufferTracker, send_sync_result};
 use crate::hummock::event_handler::uploader::spiller::Spiller;
 use crate::hummock::event_handler::uploader::uploader_imm::UploaderImm;
-use crate::hummock::event_handler::LocalInstanceId;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatchId;
 use crate::hummock::store::version::StagingSstableInfo;
@@ -431,9 +431,11 @@ impl UploaderData {
             }
         }
         if let Some(table_watermarks) = table_watermarks {
-            assert!(all_table_watermarks
-                .insert(table_id, table_watermarks)
-                .is_none());
+            assert!(
+                all_table_watermarks
+                    .insert(table_id, table_watermarks)
+                    .is_none()
+            );
         }
     }
 }
@@ -607,7 +609,9 @@ impl LocalInstanceUnsyncData {
                 assert!(latest_epoch_data.is_empty());
                 assert!(!latest_epoch_data.has_spilled);
                 if cfg!(debug_assertions) {
-                    panic!("sync epoch exceeds latest epoch, and the current instance should have been archived");
+                    panic!(
+                        "sync epoch exceeds latest epoch, and the current instance should have been archived"
+                    );
                 }
                 warn!(
                     instance_id = self.instance_id,
@@ -823,17 +827,20 @@ impl UnsyncData {
             .table_data
             .get_mut(&table_id)
             .unwrap_or_else(|| panic!("should exist. {table_id:?}"));
-        assert!(table_data
-            .instance_data
-            .insert(
-                instance_id,
-                LocalInstanceUnsyncData::new(table_id, instance_id, init_epoch)
-            )
-            .is_none());
-        assert!(self
-            .instance_table_id
-            .insert(instance_id, table_id)
-            .is_none());
+        assert!(
+            table_data
+                .instance_data
+                .insert(
+                    instance_id,
+                    LocalInstanceUnsyncData::new(table_id, instance_id, init_epoch)
+                )
+                .is_none()
+        );
+        assert!(
+            self.instance_table_id
+                .insert(instance_id, table_id)
+                .is_none()
+        );
         assert!(table_data.unsync_epochs.contains_key(&init_epoch));
     }
 
@@ -884,7 +891,12 @@ impl UnsyncData {
                     if cfg!(debug_assertions) {
                         panic!(
                             "table_id {} stop epoch {} different to prev stop epoch {}. unsync epochs: {:?}, syncing epochs {:?}, max_synced_epoch {:?}",
-                            table_id, next_epoch, stopped_next_epoch, unsync_epochs, table_data.syncing_epochs, table_data.max_synced_epoch
+                            table_id,
+                            next_epoch,
+                            stopped_next_epoch,
+                            unsync_epochs,
+                            table_data.syncing_epochs,
+                            table_data.max_synced_epoch
                         );
                     } else {
                         warn!(
@@ -957,10 +969,11 @@ impl UnsyncData {
                 }
             }
         }
-        debug_assert!(self
-            .spilled_data
-            .values()
-            .all(|(_, spill_table_ids)| spill_table_ids.is_disjoint(table_ids)));
+        debug_assert!(
+            self.spilled_data
+                .values()
+                .all(|(_, spill_table_ids)| spill_table_ids.is_disjoint(table_ids))
+        );
         self.unsync_epochs.retain(|_, unsync_epoch_table_ids| {
             if !unsync_epoch_table_ids.is_disjoint(table_ids) {
                 assert!(unsync_epoch_table_ids.is_subset(table_ids));
@@ -969,10 +982,11 @@ impl UnsyncData {
                 true
             }
         });
-        assert!(self
-            .instance_table_id
-            .values()
-            .all(|table_id| !table_ids.contains(table_id)));
+        assert!(
+            self.instance_table_id
+                .values()
+                .all(|table_id| !table_ids.contains(table_id))
+        );
     }
 }
 
@@ -1198,10 +1212,12 @@ impl UploaderData {
                 .iter()
                 .any(|(_, sync_table_ids)| !sync_table_ids.is_disjoint(&table_ids))
             {
-                assert!(syncing_data
-                    .sync_table_epochs
-                    .iter()
-                    .all(|(_, sync_table_ids)| sync_table_ids.is_subset(&table_ids)));
+                assert!(
+                    syncing_data
+                        .sync_table_epochs
+                        .iter()
+                        .all(|(_, sync_table_ids)| sync_table_ids.is_subset(&table_ids))
+                );
                 for task_id in &syncing_data.remaining_uploading_tasks {
                     match self
                         .task_manager
@@ -1349,11 +1365,12 @@ impl HummockUploader {
             table_data.new_epoch(epoch);
         }
         if let Some(unsync_epoch_id) = get_unsync_epoch_id(epoch, &table_ids) {
-            assert!(data
-                .unsync_data
-                .unsync_epochs
-                .insert(unsync_epoch_id, table_ids)
-                .is_none());
+            assert!(
+                data.unsync_data
+                    .unsync_epochs
+                    .insert(unsync_epoch_id, table_ids)
+                    .is_none()
+            );
         }
     }
 
@@ -1522,10 +1539,12 @@ impl UploaderData {
                     .iter()
                     .flat_map(|(_, tasks)| tasks.iter())
                 {
-                    assert!(spill_task_table_id_from_data
-                        .entry(*task_id)
-                        .or_default()
-                        .insert(table_data.table_id));
+                    assert!(
+                        spill_task_table_id_from_data
+                            .entry(*task_id)
+                            .or_default()
+                            .insert(table_data.table_id)
+                    );
                 }
             }
             let syncing_task_id_from_data: HashMap<_, HashSet<_>> = self
@@ -1548,15 +1567,19 @@ impl UploaderData {
             for (task_id, status) in self.task_manager.tasks() {
                 match status {
                     UploadingTaskStatus::Spilling(table_ids) => {
-                        assert!(spill_task_table_id_from_manager
-                            .insert(task_id, table_ids.clone())
-                            .is_none());
+                        assert!(
+                            spill_task_table_id_from_manager
+                                .insert(task_id, table_ids.clone())
+                                .is_none()
+                        );
                     }
                     UploadingTaskStatus::Sync(sync_id) => {
-                        assert!(syncing_task_from_manager
-                            .entry(*sync_id)
-                            .or_default()
-                            .insert(task_id));
+                        assert!(
+                            syncing_task_from_manager
+                                .entry(*sync_id)
+                                .or_default()
+                                .insert(task_id)
+                        );
                     }
                 }
             }
@@ -1638,12 +1661,12 @@ impl HummockUploader {
 #[cfg(test)]
 pub(crate) mod tests {
     use std::collections::{HashMap, HashSet};
-    use std::future::{poll_fn, Future};
+    use std::future::{Future, poll_fn};
     use std::ops::Deref;
     use std::pin::pin;
+    use std::sync::Arc;
     use std::sync::atomic::AtomicUsize;
     use std::sync::atomic::Ordering::SeqCst;
-    use std::sync::Arc;
     use std::task::Poll;
 
     use futures::FutureExt;
@@ -1653,10 +1676,10 @@ pub(crate) mod tests {
     use tokio::sync::oneshot;
 
     use super::test_utils::*;
-    use crate::hummock::event_handler::uploader::{
-        get_payload_imm_ids, HummockUploader, SyncedData, UploadingTask,
-    };
     use crate::hummock::event_handler::TEST_LOCAL_INSTANCE_ID;
+    use crate::hummock::event_handler::uploader::{
+        HummockUploader, SyncedData, UploadingTask, get_payload_imm_ids,
+    };
     use crate::hummock::{HummockError, HummockResult};
     use crate::opts::StorageOpts;
 
@@ -1863,11 +1886,13 @@ pub(crate) mod tests {
             }
             _ => unreachable!(),
         };
-        assert!(!uploader
-            .data()
-            .unsync_data
-            .table_data
-            .contains_key(&TEST_TABLE_ID));
+        assert!(
+            !uploader
+                .data()
+                .unsync_data
+                .table_data
+                .contains_key(&TEST_TABLE_ID)
+        );
     }
 
     #[tokio::test]

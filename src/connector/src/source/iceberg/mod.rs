@@ -20,17 +20,17 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use futures_async_stream::for_await;
+use iceberg::Catalog;
 use iceberg::expr::Predicate as IcebergPredicate;
 use iceberg::scan::FileScanTask;
 use iceberg::spec::{DataContentType, ManifestList};
 use iceberg::table::Table;
-use iceberg::Catalog;
 use itertools::Itertools;
 pub use parquet_file_handler::*;
 use risingwave_common::bail;
 use risingwave_common::catalog::{
-    Schema, ICEBERG_FILE_PATH_COLUMN_NAME, ICEBERG_FILE_POS_COLUMN_NAME,
-    ICEBERG_SEQUENCE_NUM_COLUMN_NAME,
+    ICEBERG_FILE_PATH_COLUMN_NAME, ICEBERG_FILE_POS_COLUMN_NAME, ICEBERG_SEQUENCE_NUM_COLUMN_NAME,
+    Schema,
 };
 use risingwave_common::types::JsonbVal;
 use risingwave_common::util::iter_util::ZipEqFast;

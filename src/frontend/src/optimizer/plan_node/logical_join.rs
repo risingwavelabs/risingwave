@@ -24,12 +24,12 @@ use risingwave_pb::stream_plan::StreamScanType;
 use risingwave_sqlparser::ast::AsOf;
 
 use super::generic::{
-    push_down_into_join, push_down_join_condition, GenericPlanNode, GenericPlanRef,
+    GenericPlanNode, GenericPlanRef, push_down_into_join, push_down_join_condition,
 };
-use super::utils::{childless_record, Distill};
+use super::utils::{Distill, childless_record};
 use super::{
-    generic, ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef, PlanTreeNodeBinary,
-    PredicatePushdown, StreamHashJoin, StreamProject, ToBatch, ToStream,
+    ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef, PlanTreeNodeBinary, PredicatePushdown,
+    StreamHashJoin, StreamProject, ToBatch, ToStream, generic,
 };
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{CollectInputRef, Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, InputRef};
@@ -1670,7 +1670,7 @@ mod tests {
     use risingwave_pb::expr::expr_node::Type;
 
     use super::*;
-    use crate::expr::{assert_eq_input_ref, FunctionCall, Literal};
+    use crate::expr::{FunctionCall, Literal, assert_eq_input_ref};
     use crate::optimizer::optimizer_context::OptimizerContext;
     use crate::optimizer::plan_node::LogicalValues;
     use crate::optimizer::property::FunctionalDependency;
@@ -1995,7 +1995,7 @@ mod tests {
     /// ```
     #[tokio::test]
     #[ignore] // ignore due to refactor logical scan, but the test seem to duplicate with the explain test
-              // framework, maybe we will remove it?
+    // framework, maybe we will remove it?
     async fn test_join_to_stream() {
         // let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
         // let fields: Vec<Field> = (1..7)

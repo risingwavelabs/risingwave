@@ -23,7 +23,7 @@ use risingwave_connector::match_sink_name_str;
 use risingwave_connector::sink::catalog::{SinkFormatDesc, SinkId, SinkType};
 use risingwave_connector::sink::file_sink::fs::FsSink;
 use risingwave_connector::sink::{
-    SinkError, SinkMetaClient, SinkParam, SinkWriterParam, CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION,
+    CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION, SinkError, SinkMetaClient, SinkParam, SinkWriterParam,
 };
 use risingwave_pb::catalog::Table;
 use risingwave_pb::plan_common::PbColumnCatalog;
@@ -33,7 +33,7 @@ use url::Url;
 use super::*;
 use crate::common::log_store_impl::in_mem::BoundedInMemLogStoreFactory;
 use crate::common::log_store_impl::kv_log_store::{
-    KvLogStoreFactory, KvLogStoreMetrics, KvLogStorePkInfo, KV_LOG_STORE_V2_INFO,
+    KV_LOG_STORE_V2_INFO, KvLogStoreFactory, KvLogStoreMetrics, KvLogStorePkInfo,
 };
 use crate::executor::{SinkExecutor, StreamExecutorError};
 
@@ -305,7 +305,9 @@ struct JdbcUrl {
 
 fn parse_jdbc_url(url: &str) -> anyhow::Result<JdbcUrl> {
     if !url.starts_with("jdbc:postgresql") {
-        bail!("invalid jdbc url, to switch to postgres rust connector, we need to use the url jdbc:postgresql://...")
+        bail!(
+            "invalid jdbc url, to switch to postgres rust connector, we need to use the url jdbc:postgresql://..."
+        )
     }
 
     // trim the "jdbc:" prefix to make it a valid url

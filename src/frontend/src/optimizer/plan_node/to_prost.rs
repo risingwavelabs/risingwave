@@ -72,7 +72,7 @@ impl<T: StreamNode> TryToStreamPb for T {
 
 pub trait StreamNode {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState)
-        -> pb_stream_node::NodeBody;
+    -> pb_stream_node::NodeBody;
 }
 
 /// impl `ToPb` nodes which have impl `ToBatchPb` and `ToStreamPb`.

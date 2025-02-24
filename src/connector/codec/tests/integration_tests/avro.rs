@@ -14,11 +14,11 @@
 
 use anyhow::Context;
 use apache_avro::from_avro_datum;
-use risingwave_connector_codec::decoder::avro::{
-    avro_schema_to_column_descs, AvroAccess, AvroParseOptions, MapHandling, ResolvedAvroSchema,
-};
-use risingwave_connector_codec::decoder::Access;
 use risingwave_connector_codec::AvroSchema;
+use risingwave_connector_codec::decoder::Access;
+use risingwave_connector_codec::decoder::avro::{
+    AvroAccess, AvroParseOptions, MapHandling, ResolvedAvroSchema, avro_schema_to_column_descs,
+};
 use thiserror_ext::AsReport;
 
 use crate::utils::*;
@@ -194,8 +194,8 @@ fn test_simple() {
         "#,
         &[
             // {"id":32,"sequence_id":64,"name":{"string":"str_value"},"score":32.0,"avg_score":64.0,"is_lasted":true,"entrance_date":0,"birthday":0,"anniversary":0,"passed":"\u0001\u0000\u0000\u0000\u0001\u0000\u0000\u0000\u00E8\u0003\u0000\u0000","bytes":"\u0001\u0002\u0003\u0004\u0005"}
-              "40800102127374725f76616c7565000000420000000000005040010000000100000001000000e80300000a0102030405"
-            ],
+            "40800102127374725f76616c7565000000420000000000005040010000000100000001000000e80300000a0102030405",
+        ],
         Config {
             map_handling: None,
             data_encoding: TestDataEncoding::HexBinary,
@@ -510,8 +510,8 @@ fn test_1() {
 "#,
         &[
             // {"op_type": {"string": "update"}, "ID": {"string": "id1"}, "CLASS_ID": {"string": "1"}, "ITEM_ID": {"string": "6768"}, "ATTR_ID": {"string": "6970"}, "ATTR_VALUE": {"string": "value9"}, "ORG_ID": {"string": "7172"}, "UNIT_INFO": {"string": "info9"}, "UPD_TIME": {"string": "2021-05-18T07:59:58.714Z"}, "DEC_VAL": {"bytes": "\u0002\u0054\u000b\u00e3\u00ff"}}
-            "020c7570646174650206696431020231020836373638020836393730020c76616c756539020837313732020a696e666f390230323032312d30352d31385430373a35393a35382e3731345a000a02540be3ff000000000000000000f87f"
-            ],
+            "020c7570646174650206696431020231020836373638020836393730020c76616c756539020837313732020a696e666f390230323032312d30352d31385430373a35393a35382e3731345a000a02540be3ff000000000000000000f87f",
+        ],
         Config {
             map_handling: None,
             data_encoding: TestDataEncoding::HexBinary,

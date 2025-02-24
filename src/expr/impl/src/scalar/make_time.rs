@@ -13,9 +13,9 @@
 // limitations under the License.
 
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
-use risingwave_common::types::{Date, FloatExt, Time, Timestamp, Timestamptz, F64};
+use risingwave_common::types::{Date, F64, FloatExt, Time, Timestamp, Timestamptz};
 use risingwave_expr::expr_context::TIME_ZONE;
-use risingwave_expr::{capture_context, function, ExprError, Result};
+use risingwave_expr::{ExprError, Result, capture_context, function};
 
 use crate::scalar::timestamptz::timestamp_at_time_zone;
 

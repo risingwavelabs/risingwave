@@ -22,29 +22,29 @@ use itertools::Itertools;
 use prometheus::Registry;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::util::epoch::{test_epoch, EpochExt};
+use risingwave_common::util::epoch::{EpochExt, test_epoch};
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compact_task::CompactTask;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::get_compaction_group_ssts;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-use risingwave_hummock_sdk::key::{gen_key_from_str, FullKey};
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::get_compaction_group_ssts;
+use risingwave_hummock_sdk::key::{FullKey, gen_key_from_str};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
-use risingwave_hummock_sdk::table_stats::{to_prost_table_stats_map, TableStats, TableStatsMap};
+use risingwave_hummock_sdk::table_stats::{TableStats, TableStatsMap, to_prost_table_stats_map};
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{
-    CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableObjectId, HummockVersionId,
-    LocalSstableInfo, SyncResult, FIRST_VERSION_ID,
+    CompactionGroupId, FIRST_VERSION_ID, HummockContextId, HummockEpoch, HummockSstableObjectId,
+    HummockVersionId, LocalSstableInfo, SyncResult,
 };
 use risingwave_pb::common::worker_node::Property;
 use risingwave_pb::common::{HostAddress, WorkerType};
-use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::HummockPinnedVersion;
+use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_rpc_client::HummockMetaClient;
 use thiserror_ext::AsReport;
 
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
-use crate::hummock::compaction::selector::{default_compaction_selector, ManualCompactionOption};
+use crate::hummock::compaction::selector::{ManualCompactionOption, default_compaction_selector};
 use crate::hummock::error::Error;
 use crate::hummock::test_utils::*;
 use crate::hummock::{HummockManagerRef, MockHummockMetaClient};
@@ -146,14 +146,16 @@ async fn test_hummock_compaction_task() {
     ));
 
     // No compaction task available.
-    assert!(hummock_manager
-        .get_compact_task(
-            StaticCompactionGroupId::StateDefault.into(),
-            &mut default_compaction_selector(),
-        )
-        .await
-        .unwrap()
-        .is_none());
+    assert!(
+        hummock_manager
+            .get_compact_task(
+                StaticCompactionGroupId::StateDefault.into(),
+                &mut default_compaction_selector(),
+            )
+            .await
+            .unwrap()
+            .is_none()
+    );
 
     // Add some sstables and commit.
     let epoch = test_epoch(1);
@@ -192,10 +194,12 @@ async fn test_hummock_compaction_task() {
     assert_eq!(compact_task.task_id, 2);
 
     // Cancel the task and succeed.
-    assert!(hummock_manager
-        .cancel_compact_task(compact_task.task_id, TaskStatus::ManualCanceled)
-        .await
-        .unwrap());
+    assert!(
+        hummock_manager
+            .cancel_compact_task(compact_task.task_id, TaskStatus::ManualCanceled)
+            .await
+            .unwrap()
+    );
 
     // Get a compaction task.
     let compact_task = hummock_manager
@@ -206,16 +210,18 @@ async fn test_hummock_compaction_task() {
     assert_eq!(compact_task.task_id, 3);
     // Finish the task and succeed.
 
-    assert!(hummock_manager
-        .report_compact_task(
-            compact_task.task_id,
-            TaskStatus::Success,
-            vec![],
-            None,
-            HashMap::default()
-        )
-        .await
-        .unwrap());
+    assert!(
+        hummock_manager
+            .report_compact_task(
+                compact_task.task_id,
+                TaskStatus::Success,
+                vec![],
+                None,
+                HashMap::default()
+            )
+            .await
+            .unwrap()
+    );
 }
 
 #[tokio::test]
@@ -812,10 +818,12 @@ async fn test_invalid_sst_id() {
         )
         .await
         .unwrap_err();
-    assert!(error
-        .as_report()
-        .to_string()
-        .contains("is rejected from being committed since it's below watermark"));
+    assert!(
+        error
+            .as_report()
+            .to_string()
+            .contains("is rejected from being committed since it's below watermark")
+    );
 
     hummock_meta_client
         .commit_epoch(
@@ -936,14 +944,16 @@ async fn test_hummock_compaction_task_heartbeat() {
         HummockManager::hummock_timer_task(hummock_manager.clone(), None);
 
     // No compaction task available.
-    assert!(hummock_manager
-        .get_compact_task(
-            StaticCompactionGroupId::StateDefault.into(),
-            &mut default_compaction_selector(),
-        )
-        .await
-        .unwrap()
-        .is_none());
+    assert!(
+        hummock_manager
+            .get_compact_task(
+                StaticCompactionGroupId::StateDefault.into(),
+                &mut default_compaction_selector(),
+            )
+            .await
+            .unwrap()
+            .is_none()
+    );
 
     // Add some sstables and commit.
     let epoch = test_epoch(1);
@@ -994,16 +1004,18 @@ async fn test_hummock_compaction_task_heartbeat() {
     }
 
     // Cancel the task immediately and succeed.
-    assert!(hummock_manager
-        .report_compact_task(
-            compact_task.task_id,
-            TaskStatus::ExecuteFailed,
-            vec![],
-            None,
-            HashMap::default(),
-        )
-        .await
-        .unwrap());
+    assert!(
+        hummock_manager
+            .report_compact_task(
+                compact_task.task_id,
+                TaskStatus::ExecuteFailed,
+                vec![],
+                None,
+                HashMap::default(),
+            )
+            .await
+            .unwrap()
+    );
 
     // Get a compaction task.
     let compact_task = hummock_manager
@@ -1023,16 +1035,18 @@ async fn test_hummock_compaction_task_heartbeat() {
     // default_interval = 30s
     tokio::time::sleep(std::time::Duration::from_secs(32)).await;
 
-    assert!(!hummock_manager
-        .report_compact_task(
-            compact_task.task_id,
-            TaskStatus::ExecuteFailed,
-            vec![],
-            None,
-            HashMap::default(),
-        )
-        .await
-        .unwrap());
+    assert!(
+        !hummock_manager
+            .report_compact_task(
+                compact_task.task_id,
+                TaskStatus::ExecuteFailed,
+                vec![],
+                None,
+                HashMap::default(),
+            )
+            .await
+            .unwrap()
+    );
     shutdown_tx.send(()).unwrap();
     join_handle.await.unwrap();
 }
@@ -1065,14 +1079,16 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
         HummockManager::hummock_timer_task(hummock_manager.clone(), None);
 
     // No compaction task available.
-    assert!(hummock_manager
-        .get_compact_task(
-            StaticCompactionGroupId::StateDefault.into(),
-            &mut default_compaction_selector(),
-        )
-        .await
-        .unwrap()
-        .is_none());
+    assert!(
+        hummock_manager
+            .get_compact_task(
+                StaticCompactionGroupId::StateDefault.into(),
+                &mut default_compaction_selector(),
+            )
+            .await
+            .unwrap()
+            .is_none()
+    );
 
     // Add some sstables and commit.
     let epoch = test_epoch(1);
@@ -1732,18 +1748,20 @@ async fn test_move_state_tables_to_dedicated_compaction_group_trivial_expired() 
         .report_compact_task(
             task2.task_id,
             TaskStatus::Success,
-            vec![SstableInfoInner {
-                object_id: 12,
-                sst_id: 12,
-                key_range: KeyRange::default(),
-                table_ids: vec![100],
-                min_epoch: 20,
-                max_epoch: 20,
-                file_size: 100,
-                sst_size: 100,
-                ..Default::default()
-            }
-            .into()],
+            vec![
+                SstableInfoInner {
+                    object_id: 12,
+                    sst_id: 12,
+                    key_range: KeyRange::default(),
+                    table_ids: vec![100],
+                    min_epoch: 20,
+                    max_epoch: 20,
+                    file_size: 100,
+                    sst_size: 100,
+                    ..Default::default()
+                }
+                .into(),
+            ],
             None,
             HashMap::default(),
         )
@@ -1969,16 +1987,18 @@ async fn test_compaction_task_expiration_due_to_split_group() {
         .unwrap();
 
     let version_1 = hummock_manager.get_current_version().await;
-    assert!(!hummock_manager
-        .report_compact_task(
-            compaction_task.task_id,
-            TaskStatus::Success,
-            vec![],
-            None,
-            HashMap::default()
-        )
-        .await
-        .unwrap());
+    assert!(
+        !hummock_manager
+            .report_compact_task(
+                compaction_task.task_id,
+                TaskStatus::Success,
+                vec![],
+                None,
+                HashMap::default()
+            )
+            .await
+            .unwrap()
+    );
     let version_2 = hummock_manager.get_current_version().await;
     assert_eq!(
         version_1, version_2,
@@ -2518,18 +2538,20 @@ async fn test_merge_compaction_group_task_expired() {
         .report_compact_task(
             task2.task_id,
             TaskStatus::Success,
-            vec![SstableInfoInner {
-                object_id: report_sst_id,
-                sst_id: report_sst_id,
-                key_range: KeyRange::default(),
-                table_ids: vec![100],
-                min_epoch: 20,
-                max_epoch: 20,
-                file_size: 100,
-                sst_size: 100,
-                ..Default::default()
-            }
-            .into()],
+            vec![
+                SstableInfoInner {
+                    object_id: report_sst_id,
+                    sst_id: report_sst_id,
+                    key_range: KeyRange::default(),
+                    table_ids: vec![100],
+                    min_epoch: 20,
+                    max_epoch: 20,
+                    file_size: 100,
+                    sst_size: 100,
+                    ..Default::default()
+                }
+                .into(),
+            ],
             None,
             HashMap::default(),
         )

@@ -16,8 +16,8 @@ use std::time::Duration;
 
 use risingwave_pb::meta::subscribe_response::Info;
 use risingwave_pb::meta::{SubscribeResponse, SubscribeType};
-use risingwave_rpc_client::error::RpcError;
 use risingwave_rpc_client::MetaClient;
+use risingwave_rpc_client::error::RpcError;
 use thiserror_ext::AsReport;
 use tokio::task::JoinHandle;
 use tonic::{Status, Streaming};

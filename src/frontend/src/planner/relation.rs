@@ -19,7 +19,7 @@ use std::rc::Rc;
 use either::Either;
 use itertools::Itertools;
 use risingwave_common::catalog::{
-    ColumnCatalog, Engine, Field, Schema, RISINGWAVE_ICEBERG_ROW_ID, ROW_ID_COLUMN_NAME,
+    ColumnCatalog, Engine, Field, RISINGWAVE_ICEBERG_ROW_ID, ROW_ID_COLUMN_NAME, Schema,
 };
 use risingwave_common::types::{DataType, Interval, ScalarImpl};
 use risingwave_common::{bail, bail_not_implemented};
@@ -407,7 +407,7 @@ impl Planner {
                 return Err(ErrorCode::BindError(format!(
                     "Invalid input relation to tumble: {r:?}"
                 ))
-                .into())
+                .into());
             }
         };
         Ok(col_data_types)

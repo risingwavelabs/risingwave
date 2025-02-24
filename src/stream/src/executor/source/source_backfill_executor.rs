@@ -19,11 +19,11 @@ use std::time::Instant;
 
 use anyhow::anyhow;
 use either::Either;
-use futures::stream::{select_with_strategy, PollNext};
+use futures::stream::{PollNext, select_with_strategy};
 use itertools::Itertools;
 use risingwave_common::bitmap::BitmapBuilder;
 use risingwave_common::catalog::{ColumnId, TableId};
-use risingwave_common::metrics::{LabelGuardedIntCounter, GLOBAL_ERROR_METRICS};
+use risingwave_common::metrics::{GLOBAL_ERROR_METRICS, LabelGuardedIntCounter};
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::types::JsonbVal;
@@ -42,9 +42,9 @@ use super::executor_core::StreamSourceCore;
 use super::source_backfill_state_table::BackfillStateTableHandler;
 use super::{apply_rate_limit, get_split_offset_col_idx};
 use crate::common::rate_limit::limited_chunk_size;
+use crate::executor::UpdateMutation;
 use crate::executor::prelude::*;
 use crate::executor::source::source_executor::WAIT_BARRIER_MULTIPLE_TIMES;
-use crate::executor::UpdateMutation;
 use crate::task::CreateMviewProgressReporter;
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]

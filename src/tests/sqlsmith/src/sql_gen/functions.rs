@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use rand::seq::SliceRandom;
 use rand::Rng;
+use rand::seq::SliceRandom;
 use risingwave_common::types::DataType;
 use risingwave_frontend::expr::ExprType;
 use risingwave_sqlparser::ast::{

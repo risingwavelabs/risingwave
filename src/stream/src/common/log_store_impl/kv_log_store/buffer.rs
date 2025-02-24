@@ -21,7 +21,7 @@ use parking_lot::{Mutex, MutexGuard};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_connector::sink::log_store::{ChunkId, LogStoreResult, TruncateOffset};
-use tokio::sync::{oneshot, Notify};
+use tokio::sync::{Notify, oneshot};
 
 use crate::common::log_store_impl::kv_log_store::{
     KvLogStoreMetrics, ReaderTruncationOffsetType, SeqIdType,

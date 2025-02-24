@@ -20,10 +20,10 @@ use risingwave_pb::user::grant_privilege;
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::{HandlerArgs, RwPgResponse};
+use crate::Binder;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::table_catalog::TableType;
 use crate::error::{ErrorCode, Result};
-use crate::Binder;
 
 pub async fn handle_rename_table(
     handler_args: HandlerArgs,

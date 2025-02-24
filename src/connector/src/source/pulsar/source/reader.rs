@@ -18,7 +18,7 @@ use anyhow::Context;
 use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use icelake::catalog::{load_catalog, CATALOG_NAME, CATALOG_TYPE};
+use icelake::catalog::{CATALOG_NAME, CATALOG_TYPE, load_catalog};
 use icelake::io::FileScanStream;
 use icelake::types::{Any, AnyValue, StructValueBuilder};
 use icelake::{Table, TableIdentifier};
@@ -26,9 +26,9 @@ use itertools::Itertools;
 use pulsar::consumer::InitialPosition;
 use pulsar::message::proto::MessageIdData;
 use pulsar::{Consumer, ConsumerBuilder, ConsumerOptions, Pulsar, SubType, TokioExecutor};
-use risingwave_common::array::arrow::arrow_array_iceberg::{Int32Array, Int64Array, RecordBatch};
-use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::StreamChunk;
+use risingwave_common::array::arrow::IcebergArrowConvert;
+use risingwave_common::array::arrow::arrow_array_iceberg::{Int32Array, Int64Array, RecordBatch};
 use risingwave_common::{bail, ensure};
 use thiserror_ext::AsReport;
 
@@ -37,8 +37,8 @@ use crate::parser::ParserConfig;
 use crate::source::pulsar::split::PulsarSplit;
 use crate::source::pulsar::{PulsarEnumeratorOffset, PulsarProperties};
 use crate::source::{
-    into_chunk_stream, BoxSourceChunkStream, Column, SourceContextRef, SourceMessage, SplitId,
-    SplitMetaData, SplitReader,
+    BoxSourceChunkStream, Column, SourceContextRef, SourceMessage, SplitId, SplitMetaData,
+    SplitReader, into_chunk_stream,
 };
 
 const PULSAR_DEFAULT_SUBSCRIPTION_PREFIX: &str = "rw-consumer";
@@ -186,7 +186,9 @@ impl SplitReader for PulsarBrokerReader {
         let builder = match split.start_offset.clone() {
             PulsarEnumeratorOffset::Earliest => {
                 if topic.starts_with("non-persistent://") {
-                    tracing::warn!("Earliest offset is not supported for non-persistent topic, use Latest instead");
+                    tracing::warn!(
+                        "Earliest offset is not supported for non-persistent topic, use Latest instead"
+                    );
                     builder.with_options(
                         ConsumerOptions::default().with_initial_position(InitialPosition::Latest),
                     )
@@ -205,7 +207,9 @@ impl SplitReader for PulsarBrokerReader {
             ),
             PulsarEnumeratorOffset::MessageId(m) => {
                 if topic.starts_with("non-persistent://") {
-                    tracing::warn!("MessageId offset is not supported for non-persistent topic, use Latest instead");
+                    tracing::warn!(
+                        "MessageId offset is not supported for non-persistent topic, use Latest instead"
+                    );
                     builder.with_options(
                         ConsumerOptions::default().with_initial_position(InitialPosition::Latest),
                     )
@@ -348,9 +352,8 @@ impl PulsarIcebergReader {
             .await
             .context("Unable to load iceberg catalog")?;
 
-        let table_id =
-            TableIdentifier::new(vec![self.split.topic.topic_str_without_partition()?])
-                .context("Unable to parse table name")?;
+        let table_id = TableIdentifier::new(vec![self.split.topic.topic_str_without_partition()?])
+            .context("Unable to parse table name")?;
 
         let table = catalog.load_table(&table_id).await?;
 

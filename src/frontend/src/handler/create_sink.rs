@@ -25,16 +25,16 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::DataType;
+use risingwave_connector::WithPropertiesExt;
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc};
-use risingwave_connector::sink::iceberg::{IcebergConfig, ICEBERG_SINK};
+use risingwave_connector::sink::iceberg::{ICEBERG_SINK, IcebergConfig};
 use risingwave_connector::sink::kafka::KAFKA_SINK;
 use risingwave_connector::sink::{
     CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION, SINK_USER_FORCE_APPEND_ONLY_OPTION, SINK_WITHOUT_BACKFILL,
 };
-use risingwave_connector::WithPropertiesExt;
 use risingwave_pb::catalog::connection_params::PbConnectionType;
 use risingwave_pb::catalog::{PbSink, PbSource, Table};
-use risingwave_pb::ddl_service::{replace_job_plan, ReplaceJobPlan, TableJobType};
+use risingwave_pb::ddl_service::{ReplaceJobPlan, TableJobType, replace_job_plan};
 use risingwave_pb::stream_plan::stream_node::{NodeBody, PbNodeBody};
 use risingwave_pb::stream_plan::{MergeNode, StreamFragmentGraph, StreamNode};
 use risingwave_pb::telemetry::TelemetryDatabaseObject;
@@ -43,20 +43,20 @@ use risingwave_sqlparser::ast::{
     Query, Statement,
 };
 
+use super::RwPgResponse;
 use super::create_mv::get_column_names;
 use super::create_source::{SqlColumnStrategy, UPSTREAM_SOURCE_KEY};
 use super::util::gen_query_from_table_name;
-use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::SinkId;
 use crate::error::{ErrorCode, Result, RwError};
-use crate::expr::{rewrite_now_to_proctime, ExprImpl, InputRef};
+use crate::expr::{ExprImpl, InputRef, rewrite_now_to_proctime};
+use crate::handler::HandlerArgs;
 use crate::handler::alter_table_column::fetch_table_catalog_for_alter;
 use crate::handler::create_mv::parse_column_names;
-use crate::handler::create_table::{generate_stream_graph_for_replace_table, ColumnIdGenerator};
+use crate::handler::create_table::{ColumnIdGenerator, generate_stream_graph_for_replace_table};
 use crate::handler::util::{check_connector_match_connection_type, ensure_connection_type_allowed};
-use crate::handler::HandlerArgs;
-use crate::optimizer::plan_node::{generic, LogicalSource, PartitionComputeInfo, StreamProject};
+use crate::optimizer::plan_node::{LogicalSource, PartitionComputeInfo, StreamProject, generic};
 use crate::optimizer::{OptimizerContext, PlanRef, RelationCollectorVisitor};
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
@@ -300,7 +300,9 @@ pub async fn gen_sink_plan(
     if let Some(table_catalog) = &target_table_catalog {
         for column in sink_catalog.full_columns() {
             if !column.can_dml() {
-                unreachable!("can not derive generated columns and system column `_rw_timestamp` in a sink's catalog, but meet one");
+                unreachable!(
+                    "can not derive generated columns and system column `_rw_timestamp` in a sink's catalog, but meet one"
+                );
             }
         }
 
@@ -670,7 +672,7 @@ fn bind_sink_format_desc(
                 return Err(ErrorCode::BindError(format!(
                     "sink key encode unsupported: {encode}, only TEXT and BYTES supported"
                 ))
-                .into())
+                .into());
             }
         }
     }
@@ -700,6 +702,7 @@ fn bind_sink_format_desc(
 
 static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, Vec<Encode>>>> =
     LazyLock::new(|| {
+        use risingwave_connector::sink::Sink as _;
         use risingwave_connector::sink::file_sink::azblob::AzblobSink;
         use risingwave_connector::sink::file_sink::fs::FsSink;
         use risingwave_connector::sink::file_sink::gcs::GcsSink;
@@ -712,7 +715,6 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
         use risingwave_connector::sink::mqtt::MqttSink;
         use risingwave_connector::sink::pulsar::PulsarSink;
         use risingwave_connector::sink::redis::RedisSink;
-        use risingwave_connector::sink::Sink as _;
 
         convert_args!(hashmap!(
                 GooglePubSubSink::SINK_NAME => hashmap!(
@@ -804,7 +806,7 @@ pub mod tests {
     use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
 
     use crate::catalog::root_catalog::SchemaPath;
-    use crate::test_utils::{create_proto_file, LocalFrontend, PROTO_FILE_DATA};
+    use crate::test_utils::{LocalFrontend, PROTO_FILE_DATA, create_proto_file};
 
     #[tokio::test]
     async fn test_create_sink_handler() {

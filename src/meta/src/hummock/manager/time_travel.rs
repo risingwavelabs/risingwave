@@ -21,7 +21,7 @@ use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::time_travel::{
-    refill_version, IncompleteHummockVersion, IncompleteHummockVersionDelta,
+    IncompleteHummockVersion, IncompleteHummockVersionDelta, refill_version,
 };
 use risingwave_hummock_sdk::version::{GroupDeltaCommon, HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{
@@ -39,8 +39,8 @@ use sea_orm::{
     QueryOrder, QuerySelect, TransactionTrait,
 };
 
-use crate::hummock::error::{Error, Result};
 use crate::hummock::HummockManager;
+use crate::hummock::error::{Error, Result};
 
 /// Time travel.
 impl HummockManager {

@@ -17,7 +17,7 @@
 
 use bytes::{Buf, BufMut};
 use chrono::{Datelike, Timelike};
-use either::{for_both, Either};
+use either::{Either, for_both};
 use enum_as_inner::EnumAsInner;
 use risingwave_pb::data::PbDatum;
 

@@ -27,8 +27,8 @@ use risingwave_hummock_sdk::change_log::build_table_change_log_delta;
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::catalog::{CreateType, Table};
 use risingwave_pb::common::PbWorkerNode;
-use risingwave_pb::meta::table_fragments::PbActorStatus;
 use risingwave_pb::meta::PausedReason;
+use risingwave_pb::meta::table_fragments::PbActorStatus;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use risingwave_pb::stream_plan::barrier::BarrierKind as PbBarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
@@ -43,9 +43,9 @@ use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::warn;
 
 use super::info::{CommandFragmentChanges, InflightDatabaseInfo, InflightStreamingJobInfo};
+use crate::barrier::InflightSubscriptionInfo;
 use crate::barrier::info::BarrierInfo;
 use crate::barrier::utils::collect_resp_info;
-use crate::barrier::InflightSubscriptionInfo;
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::hummock::{CommitEpochInfo, NewTableFragmentInfo};
 use crate::manager::{StreamingJob, StreamingJobType};
@@ -53,7 +53,7 @@ use crate::model::{
     ActorId, ActorUpstreams, DispatcherId, FragmentId, StreamJobActorsToCreate, StreamJobFragments,
 };
 use crate::stream::{
-    build_actor_connector_splits, JobReschedulePostUpdates, SplitAssignment, ThrottleConfig,
+    JobReschedulePostUpdates, SplitAssignment, ThrottleConfig, build_actor_connector_splits,
 };
 
 /// [`Reschedule`] is for the [`Command::RescheduleFragment`], which is used for rescheduling actors

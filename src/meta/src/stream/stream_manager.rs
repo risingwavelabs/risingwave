@@ -21,11 +21,11 @@ use risingwave_common::bail;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_meta_model::ObjectId;
 use risingwave_pb::catalog::{CreateType, Subscription, Table};
-use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use risingwave_pb::stream_plan::Dispatcher;
+use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::Sender;
-use tokio::sync::{oneshot, Mutex};
+use tokio::sync::{Mutex, oneshot};
 use tracing::Instrument;
 
 use super::{
@@ -631,7 +631,11 @@ impl GlobalStreamManager {
 
             for job in background_jobs {
                 if related_jobs.contains(&job) {
-                    bail!("Cannot alter the job {} because the related job {} is currently being created", table_id, job.table_id);
+                    bail!(
+                        "Cannot alter the job {} because the related job {} is currently being created",
+                        table_id,
+                        job.table_id
+                    );
                 }
             }
         }
@@ -672,9 +676,9 @@ impl GlobalStreamManager {
                 TableParallelism::Adaptive => {
                     if available_parallelism > max_parallelism {
                         tracing::warn!(
-                        "too many parallelism available, use max parallelism {} will be limited",
-                        max_parallelism
-                    );
+                            "too many parallelism available, use max parallelism {} will be limited",
+                            max_parallelism
+                        );
                     }
                 }
                 TableParallelism::Fixed(parallelism) => {
@@ -734,7 +738,11 @@ impl GlobalStreamManager {
                 .await?;
 
             if reschedule_plan.reschedules.is_empty() {
-                tracing::debug!("empty reschedule plan generated for job {}, set the parallelism directly to {:?}", table_id, reschedule_plan.post_updates);
+                tracing::debug!(
+                    "empty reschedule plan generated for job {}, set the parallelism directly to {:?}",
+                    table_id,
+                    reschedule_plan.post_updates
+                );
                 self.scale_controller
                     .post_apply_reschedule(&HashMap::new(), &reschedule_plan.post_updates)
                     .await?;

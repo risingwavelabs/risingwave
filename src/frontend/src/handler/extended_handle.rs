@@ -23,7 +23,7 @@ use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{CreateSink, Query, Statement};
 
 use super::query::BoundResult;
-use super::{fetch_cursor, handle, query, HandlerArgs, RwPgResponse};
+use super::{HandlerArgs, RwPgResponse, fetch_cursor, handle, query};
 use crate::error::Result;
 use crate::session::SessionImpl;
 

@@ -14,8 +14,8 @@
 
 use risingwave_pb::meta::PbThrottleTarget;
 
-use crate::common::CtlContext;
 use crate::ThrottleCommandArgs;
+use crate::common::CtlContext;
 
 pub async fn apply_throttle(
     context: &CtlContext,

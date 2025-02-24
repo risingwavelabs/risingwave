@@ -16,8 +16,8 @@ use std::sync::{Arc, LazyLock};
 
 use prometheus::core::{AtomicU64, GenericCounter};
 use prometheus::{
-    histogram_opts, register_histogram_with_registry, register_int_counter_with_registry,
-    Histogram, IntGauge, Registry,
+    Histogram, IntGauge, Registry, histogram_opts, register_histogram_with_registry,
+    register_int_counter_with_registry,
 };
 use risingwave_common::metrics::{LabelGuardedIntCounterVec, TrAdderGauge};
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;

@@ -19,7 +19,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use bytes::Bytes;
-use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
+use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header};
 use parking_lot::Mutex;
 use risingwave_common::types::DataType;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
@@ -351,8 +351,8 @@ mod tests {
     use std::time::Instant;
 
     use bytes::Bytes;
-    use futures::stream::BoxStream;
     use futures::StreamExt;
+    use futures::stream::BoxStream;
     use risingwave_common::types::DataType;
     use risingwave_common::util::tokio_util::sync::CancellationToken;
     use risingwave_sqlparser::ast::Statement;
@@ -363,8 +363,8 @@ mod tests {
     use crate::pg_message::TransactionStatus;
     use crate::pg_response::{PgResponse, RowSetResult, StatementType};
     use crate::pg_server::{
-        pg_serve, BoxedError, ExecContext, ExecContextGuard, Session, SessionId, SessionManager,
-        UserAuthenticator,
+        BoxedError, ExecContext, ExecContextGuard, Session, SessionId, SessionManager,
+        UserAuthenticator, pg_serve,
     };
     use crate::types;
     use crate::types::Row;

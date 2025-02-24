@@ -26,13 +26,13 @@ pub(crate) mod tests {
     use risingwave_common::catalog::TableId;
     use risingwave_common::constants::hummock::CompactionFilterFlag;
     use risingwave_common::hash::VirtualNode;
-    use risingwave_common::util::epoch::{test_epoch, Epoch, EpochExt};
+    use risingwave_common::util::epoch::{Epoch, EpochExt, test_epoch};
     use risingwave_common_service::NotificationClient;
     use risingwave_hummock_sdk::compact_task::CompactTask;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_hummock_sdk::key::{
-        next_key, prefix_slice_with_vnode, prefixed_range_with_vnode, FullKey, TableKey,
-        TABLE_PREFIX_LEN,
+        FullKey, TABLE_PREFIX_LEN, TableKey, next_key, prefix_slice_with_vnode,
+        prefixed_range_with_vnode,
     };
     use risingwave_hummock_sdk::key_range::KeyRange;
     use risingwave_hummock_sdk::level::InputLevel;
@@ -42,9 +42,9 @@ pub(crate) mod tests {
         ReadTableWatermark, TableWatermarks, VnodeWatermark, WatermarkDirection, WatermarkSerdeType,
     };
     use risingwave_hummock_sdk::version::HummockVersion;
-    use risingwave_hummock_sdk::{can_concat, CompactionGroupId};
+    use risingwave_hummock_sdk::{CompactionGroupId, can_concat};
     use risingwave_meta::hummock::compaction::selector::{
-        default_compaction_selector, ManualCompactionOption,
+        ManualCompactionOption, default_compaction_selector,
     };
     use risingwave_meta::hummock::test_utils::{
         get_compaction_group_id_by_table_id, register_table_ids_to_compaction_group,
@@ -58,7 +58,7 @@ pub(crate) mod tests {
         FixedLengthFilterKeyExtractor, MultiFilterKeyExtractor,
     };
     use risingwave_storage::hummock::compactor::compactor_runner::{
-        compact_with_agent, CompactorRunner,
+        CompactorRunner, compact_with_agent,
     };
     use risingwave_storage::hummock::compactor::fast_compactor_runner::CompactorRunner as FastCompactorRunner;
     use risingwave_storage::hummock::compactor::{
@@ -86,8 +86,8 @@ pub(crate) mod tests {
     use crate::get_notification_client_for_test;
     use crate::local_state_store_test_utils::LocalStateStoreTestExt;
     use crate::test_utils::{
-        register_tables_with_id_for_test, update_filter_key_extractor_for_table_ids,
-        TestIngestBatch,
+        TestIngestBatch, register_tables_with_id_for_test,
+        update_filter_key_extractor_for_table_ids,
     };
 
     pub(crate) async fn get_hummock_storage(
@@ -453,10 +453,12 @@ pub(crate) mod tests {
         assert!(compact_task.is_none());
 
         let current_version = hummock_manager_ref.get_current_version().await;
-        assert!(current_version
-            .get_sst_ids_by_group_id(compaction_group_id)
-            .collect_vec()
-            .is_empty());
+        assert!(
+            current_version
+                .get_sst_ids_by_group_id(compaction_group_id)
+                .collect_vec()
+                .is_empty()
+        );
     }
 
     #[tokio::test]

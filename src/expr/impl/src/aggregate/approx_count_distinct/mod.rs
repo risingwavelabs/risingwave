@@ -23,7 +23,7 @@ use risingwave_common::row::Row;
 use risingwave_common::types::*;
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_expr::aggregate::{AggCall, AggStateDyn, AggregateFunction, AggregateState};
-use risingwave_expr::{build_aggregate, ExprError, Result};
+use risingwave_expr::{ExprError, Result, build_aggregate};
 
 use self::append_only::AppendOnlyBucket;
 use self::updatable::UpdatableBucket;
@@ -332,7 +332,7 @@ fn pos_in_serialized(bucket_idx: usize) -> (usize, usize, u32) {
 mod tests {
     use futures_util::FutureExt;
     use risingwave_common::array::{Array, DataChunk, I32Array, StreamChunk};
-    use risingwave_expr::aggregate::{build_append_only, AggCall};
+    use risingwave_expr::aggregate::{AggCall, build_append_only};
 
     #[test]
     fn test() {

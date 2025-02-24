@@ -20,8 +20,8 @@ use axum::{Extension, Json};
 use prometheus_http_query::response::{InstantVector, RangeVector, Sample};
 use serde::Serialize;
 
-use super::handlers::{err, DashboardError};
 use super::Service;
+use super::handlers::{DashboardError, err};
 
 #[derive(Serialize, Debug)]
 pub struct PrometheusSample {
@@ -80,8 +80,10 @@ pub async fn list_prometheus_cluster(
     if let Some(ref client) = srv.prometheus_client {
         // assume job_name is one of compute, meta, frontend
         let now = SystemTime::now();
-        let cpu_query =
-            format!("sum(rate(process_cpu_seconds_total{{job=~\"standalone|compute|meta|frontend\", {}}}[60s]) or label_replace(rate(process_cpu_seconds_total{{component=~\"standalone|compute|meta|frontend\", {}}}[60s]), \"job\", \"$1\", \"component\", \"(.*)\")) by (job,instance)", srv.prometheus_selector, srv.prometheus_selector);
+        let cpu_query = format!(
+            "sum(rate(process_cpu_seconds_total{{job=~\"standalone|compute|meta|frontend\", {}}}[60s]) or label_replace(rate(process_cpu_seconds_total{{component=~\"standalone|compute|meta|frontend\", {}}}[60s]), \"job\", \"$1\", \"component\", \"(.*)\")) by (job,instance)",
+            srv.prometheus_selector, srv.prometheus_selector
+        );
         let result = client
             .query_range(
                 cpu_query,
@@ -104,8 +106,10 @@ pub async fn list_prometheus_cluster(
             .iter()
             .map(PrometheusVector::from)
             .collect();
-        let memory_query =
-            format!("avg(process_resident_memory_bytes{{job=~\"standalone|compute|meta|frontend\", {}}} or label_replace(process_resident_memory_bytes{{component=~\"standalone|compute|meta|frontend\", {}}}, \"job\", \"$1\", \"component\", \"(.*)\")) by (job,instance)", srv.prometheus_selector, srv.prometheus_selector);
+        let memory_query = format!(
+            "avg(process_resident_memory_bytes{{job=~\"standalone|compute|meta|frontend\", {}}} or label_replace(process_resident_memory_bytes{{component=~\"standalone|compute|meta|frontend\", {}}}, \"job\", \"$1\", \"component\", \"(.*)\")) by (job,instance)",
+            srv.prometheus_selector, srv.prometheus_selector
+        );
         let result = client
             .query_range(
                 memory_query,

@@ -31,7 +31,7 @@ use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::scan_range::ScanRange;
 use risingwave_common::util::tracing::TracingContext;
-use risingwave_expr::expr::{build_from_prost, BoxedExpression};
+use risingwave_expr::expr::{BoxedExpression, build_from_prost};
 use risingwave_pb::batch_plan::exchange_info::DistributionMode;
 use risingwave_pb::batch_plan::exchange_source::LocalExecutePlan::Plan;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -44,8 +44,8 @@ use risingwave_pb::plan_common::StorageTableDesc;
 
 use crate::error::Result;
 use crate::executor::{
-    unix_timestamp_sec_to_epoch, AsOf, BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder,
-    DummyExecutor, Executor, ExecutorBuilder, JoinType, LookupJoinBase,
+    AsOf, BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, DummyExecutor, Executor,
+    ExecutorBuilder, JoinType, LookupJoinBase, unix_timestamp_sec_to_epoch,
 };
 use crate::task::{BatchTaskContext, ShutdownToken, TaskId};
 
@@ -517,12 +517,12 @@ mod tests {
     use risingwave_common::types::DataType;
     use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
     use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-    use risingwave_expr::expr::{build_from_pretty, BoxedExpression};
+    use risingwave_expr::expr::{BoxedExpression, build_from_pretty};
 
     use super::LocalLookupJoinExecutorArgs;
     use crate::executor::join::JoinType;
     use crate::executor::test_utils::{
-        diff_executor_output, FakeInnerSideExecutorBuilder, MockExecutor,
+        FakeInnerSideExecutorBuilder, MockExecutor, diff_executor_output,
     };
     use crate::executor::{BoxedExecutor, SortExecutor};
     use crate::monitor::BatchSpillMetrics;

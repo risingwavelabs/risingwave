@@ -15,7 +15,7 @@
 use risingwave_common::catalog::{ColumnDesc, TableId};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::DataType;
-use risingwave_common::util::epoch::{test_epoch, EpochPair};
+use risingwave_common::util::epoch::{EpochPair, test_epoch};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::table::batch_table::BatchTable;

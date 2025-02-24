@@ -39,9 +39,9 @@ use thiserror_ext::AsReport;
 pub use self::mysql::{mysql_datum_to_rw_datum, mysql_row_to_owned_row};
 use self::plain_parser::PlainParser;
 pub use self::postgres::postgres_row_to_owned_row;
-pub use self::sql_server::{sql_server_row_to_owned_row, ScalarImplTiberiusWrapper};
-pub use self::unified::json::{JsonAccess, TimestamptzHandling};
+pub use self::sql_server::{ScalarImplTiberiusWrapper, sql_server_row_to_owned_row};
 pub use self::unified::Access;
+pub use self::unified::json::{JsonAccess, TimestamptzHandling};
 use self::upsert_parser::UpsertParser;
 use crate::error::ConnectorResult;
 use crate::parser::maxwell::MaxwellParser;
@@ -76,8 +76,8 @@ mod utils;
 
 use access_builder::{AccessBuilder, AccessBuilderImpl};
 pub use config::*;
-use debezium::schema_change::SchemaChangeEnvelope;
 pub use debezium::DEBEZIUM_IGNORE_KEY;
+use debezium::schema_change::SchemaChangeEnvelope;
 pub use unified::{AccessError, AccessResult};
 
 /// The meta data of the original message for a row writer.

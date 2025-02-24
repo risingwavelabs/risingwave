@@ -19,12 +19,12 @@ use std::time::Duration;
 
 use anyhow::anyhow;
 use either::Either;
-use futures::stream::BoxStream;
 use futures::TryStreamExt;
+use futures::stream::BoxStream;
 use itertools::Itertools;
 use risingwave_common::array::ArrayRef;
 use risingwave_common::catalog::{ColumnId, TableId};
-use risingwave_common::metrics::{LabelGuardedIntCounter, GLOBAL_ERROR_METRICS};
+use risingwave_common::metrics::{GLOBAL_ERROR_METRICS, LabelGuardedIntCounter};
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::epoch::{Epoch, EpochPair};
@@ -49,10 +49,10 @@ use super::{
     get_split_offset_mapping_from_chunk, prune_additional_cols,
 };
 use crate::common::rate_limit::limited_chunk_size;
+use crate::executor::UpdateMutation;
 use crate::executor::prelude::*;
 use crate::executor::source::get_infinite_backoff_strategy;
 use crate::executor::stream_reader::StreamReaderWithPause;
-use crate::executor::UpdateMutation;
 
 /// A constant to multiply when calculating the maximum time to wait for a barrier. This is due to
 /// some latencies in network and cost in meta.
@@ -1082,7 +1082,7 @@ mod tests {
     use risingwave_common::catalog::{ColumnId, Field, TableId};
     use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
     use risingwave_common::test_prelude::StreamChunkTestExt;
-    use risingwave_common::util::epoch::{test_epoch, EpochExt};
+    use risingwave_common::util::epoch::{EpochExt, test_epoch};
     use risingwave_connector::source::datagen::DatagenSplit;
     use risingwave_connector::source::reader::desc::test_utils::create_source_desc_builder;
     use risingwave_pb::catalog::StreamSourceInfo;
@@ -1092,8 +1092,8 @@ mod tests {
     use tracing_test::traced_test;
 
     use super::*;
-    use crate::executor::source::{default_source_internal_table, SourceStateTableHandler};
     use crate::executor::AddMutation;
+    use crate::executor::source::{SourceStateTableHandler, default_source_internal_table};
 
     const MOCK_SOURCE_NAME: &str = "mock_source";
 
@@ -1369,22 +1369,28 @@ mod tests {
             .new_committed_reader(new_epoch)
             .await
             .unwrap();
-        assert!(committed_reader
-            .try_recover_from_state_store(&prev_assignment[0])
-            .await
-            .unwrap()
-            .is_none());
+        assert!(
+            committed_reader
+                .try_recover_from_state_store(&prev_assignment[0])
+                .await
+                .unwrap()
+                .is_none()
+        );
 
-        assert!(committed_reader
-            .try_recover_from_state_store(&prev_assignment[1])
-            .await
-            .unwrap()
-            .is_none());
+        assert!(
+            committed_reader
+                .try_recover_from_state_store(&prev_assignment[1])
+                .await
+                .unwrap()
+                .is_none()
+        );
 
-        assert!(committed_reader
-            .try_recover_from_state_store(&prev_assignment[2])
-            .await
-            .unwrap()
-            .is_some());
+        assert!(
+            committed_reader
+                .try_recover_from_state_store(&prev_assignment[2])
+                .await
+                .unwrap()
+                .is_some()
+        );
     }
 }

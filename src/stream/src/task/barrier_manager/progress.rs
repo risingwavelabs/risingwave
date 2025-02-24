@@ -19,9 +19,9 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_pb::stream_service::barrier_complete_response::PbCreateMviewProgress;
 
 use super::LocalBarrierManager;
-use crate::task::barrier_manager::managed_state::DatabaseManagedBarrierState;
-use crate::task::barrier_manager::LocalBarrierEvent::ReportCreateProgress;
 use crate::task::ActorId;
+use crate::task::barrier_manager::LocalBarrierEvent::ReportCreateProgress;
+use crate::task::barrier_manager::managed_state::DatabaseManagedBarrierState;
 
 type ConsumedEpoch = u64;
 type ConsumedRows = u64;

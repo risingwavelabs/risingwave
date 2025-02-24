@@ -23,7 +23,7 @@ use anyhow::anyhow;
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use foyer::CacheHint;
-use futures::future::{try_join_all, BoxFuture};
+use futures::future::{BoxFuture, try_join_all};
 use futures::{FutureExt, TryFutureExt};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bitmap::Bitmap;
@@ -33,14 +33,14 @@ use risingwave_common::util::epoch::EpochExt;
 use risingwave_connector::sink::log_store::{
     ChunkId, LogReader, LogStoreReadItem, LogStoreResult, TruncateOffset,
 };
-use risingwave_hummock_sdk::key::{prefixed_range_with_vnode, FullKey, TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockEpoch;
+use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange, prefixed_range_with_vnode};
+use risingwave_storage::StateStoreIter;
 use risingwave_storage::error::StorageResult;
 use risingwave_storage::hummock::CachePolicy;
 use risingwave_storage::store::{
     PrefetchOptions, ReadOptions, StateStoreKeyedRowRef, StateStoreRead,
 };
-use risingwave_storage::StateStoreIter;
 use tokio::sync::watch;
 use tokio::time::sleep;
 use tokio_stream::StreamExt;
@@ -49,7 +49,7 @@ use crate::common::log_store_impl::kv_log_store::buffer::{
     LogStoreBufferItem, LogStoreBufferReceiver,
 };
 use crate::common::log_store_impl::kv_log_store::serde::{
-    merge_log_store_item_stream, KvLogStoreItem, LogStoreItemMergeStream,
+    KvLogStoreItem, LogStoreItemMergeStream, merge_log_store_item_stream,
 };
 use crate::common::log_store_impl::kv_log_store::state::LogStoreReadState;
 use crate::common::log_store_impl::kv_log_store::{
@@ -229,8 +229,8 @@ pub(crate) mod timeout_auto_rebuild {
     use std::sync::Arc;
     use std::time::{Duration, Instant};
 
-    use risingwave_hummock_sdk::key::TableKeyRange;
     use risingwave_hummock_sdk::HummockEpoch;
+    use risingwave_hummock_sdk::key::TableKeyRange;
     use risingwave_storage::error::StorageResult;
     use risingwave_storage::store::{ReadOptions, StateStoreRead};
 
@@ -471,10 +471,11 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
 
                 // Store the future in case that in the subsequent pending await point,
                 // the future is cancelled, and we lose an flushed item.
-                assert!(self
-                    .read_flushed_chunk_future
-                    .replace(read_flushed_chunk_future)
-                    .is_none());
+                assert!(
+                    self.read_flushed_chunk_future
+                        .replace(read_flushed_chunk_future)
+                        .is_none()
+                );
 
                 // for cancellation test
                 #[cfg(test)]
@@ -598,7 +599,9 @@ impl<S: StateStoreRead> LogStoreReadState<S> {
         let serde = self.serde.clone();
         let table_id = self.table_id;
         async move {
-            tracing::trace!("reading flushed chunk from buffer: start_seq_id: {start_seq_id}, end_seq_id: {end_seq_id}, chunk_id: {chunk_id}");
+            tracing::trace!(
+                "reading flushed chunk from buffer: start_seq_id: {start_seq_id}, end_seq_id: {end_seq_id}, chunk_id: {chunk_id}"
+            );
             let iters = try_join_all(vnode_bitmap.iter_vnodes().map(|vnode| {
                 let range_start =
                     serde.serialize_log_store_pk(vnode, item_epoch, Some(start_seq_id));
@@ -651,7 +654,7 @@ impl<S: StateStoreRead> LogStoreReadState<S> {
     ) -> impl Future<
         Output = LogStoreResult<Pin<Box<LogStoreItemMergeStream<TimeoutAutoRebuildIter<S>>>>>,
     > + Send
-           + 'static {
+    + 'static {
         let serde = self.serde.clone();
         let range_start = if let Some(last_persisted_epoch) = last_persisted_epoch {
             // start from the next epoch of last_persisted_epoch
@@ -709,8 +712,8 @@ mod tests {
     use bytes::Bytes;
     use itertools::Itertools;
     use risingwave_common::hash::VirtualNode;
-    use risingwave_common::util::epoch::{test_epoch, EpochExt};
-    use risingwave_hummock_sdk::key::{prefixed_range_with_vnode, KeyPayloadType, TableKey};
+    use risingwave_common::util::epoch::{EpochExt, test_epoch};
+    use risingwave_hummock_sdk::key::{KeyPayloadType, TableKey, prefixed_range_with_vnode};
     use risingwave_hummock_test::local_state_store_test_utils::LocalStateStoreTestExt;
     use risingwave_hummock_test::test_utils::prepare_hummock_test_env;
     use risingwave_storage::hummock::iterator::test_utils::{

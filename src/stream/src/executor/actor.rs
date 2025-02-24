@@ -18,18 +18,18 @@ use std::sync::{Arc, LazyLock};
 
 use anyhow::anyhow;
 use await_tree::InstrumentAwait;
-use futures::future::join_all;
 use futures::FutureExt;
+use futures::future::join_all;
 use hytra::TrAdder;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::log::LogSuppresser;
-use risingwave_common::metrics::{IntGaugeExt, GLOBAL_ERROR_METRICS};
+use risingwave_common::metrics::{GLOBAL_ERROR_METRICS, IntGaugeExt};
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_expr::expr_context::{expr_context_scope, FRAGMENT_ID, VNODE_COUNT};
 use risingwave_expr::ExprError;
+use risingwave_expr::expr_context::{FRAGMENT_ID, VNODE_COUNT, expr_context_scope};
 use risingwave_pb::plan_common::ExprContext;
 use risingwave_pb::stream_plan::PbStreamActor;
 use risingwave_pb::stream_service::inject_barrier_request::build_actor_info::UpstreamActors;
@@ -38,9 +38,9 @@ use thiserror_ext::AsReport;
 use tokio_stream::StreamExt;
 use tracing::Instrument;
 
+use super::StreamConsumer;
 use super::monitor::StreamingMetrics;
 use super::subtask::SubtaskHandle;
-use super::StreamConsumer;
 use crate::error::StreamResult;
 use crate::task::{ActorId, FragmentId, LocalBarrierManager};
 

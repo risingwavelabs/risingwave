@@ -50,14 +50,18 @@ async fn test_resource_group() -> Result<()> {
         .run("create materialized view m as select * from t")
         .await?;
 
-    assert!(session
-        .run("alter table t set resource_group to 'test'")
-        .await
-        .is_err());
-    assert!(session
-        .run("alter materialized view m set resource_group to 'test'")
-        .await
-        .is_err());
+    assert!(
+        session
+            .run("alter table t set resource_group to 'test'")
+            .await
+            .is_err()
+    );
+    assert!(
+        session
+            .run("alter materialized view m set resource_group to 'test'")
+            .await
+            .is_err()
+    );
 
     cluster.simple_restart_nodes(["compute-2"]).await;
 

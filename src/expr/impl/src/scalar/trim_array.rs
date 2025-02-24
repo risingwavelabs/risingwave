@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::array::{ListRef, ListValue};
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_expr::{ExprError, Result, function};
 
 /// Trims an array by removing the last n elements. If the array is multidimensional, only the first
 /// dimension is trimmed.

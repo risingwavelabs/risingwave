@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 
-use crate::expr::{default_visit_expr, ExprImpl, ExprType, ExprVisitor, FunctionCall};
+use crate::expr::{ExprImpl, ExprType, ExprVisitor, FunctionCall, default_visit_expr};
 
 /// `ExprCounter` is used by `CseRewriter`.
 #[derive(Default)]

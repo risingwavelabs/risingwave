@@ -13,15 +13,15 @@
 // limitations under the License.
 
 use std::net::SocketAddr;
-use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU32;
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
+use axum::Router;
 use axum::body::Bytes;
 use axum::extract::{Extension, Path};
 use axum::http::{HeaderMap, Method, StatusCode};
 use axum::routing::post;
-use axum::Router;
 use risingwave_common::array::{Array, ArrayBuilder, DataChunk};
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::{DataType, JsonbVal, Scalar};
@@ -33,7 +33,7 @@ use tower_http::add_extension::AddExtensionLayer;
 use tower_http::compression::CompressionLayer;
 use tower_http::cors::{self, CorsLayer};
 
-use crate::webhook::utils::{err, Result};
+use crate::webhook::utils::{Result, err};
 mod utils;
 use risingwave_rpc_client::ComputeClient;
 

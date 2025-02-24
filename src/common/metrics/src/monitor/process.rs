@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use prometheus::core::{Collector, Desc};
-use prometheus::{proto, IntCounter, IntGauge, Opts, Registry};
+use prometheus::{IntCounter, IntGauge, Opts, Registry, proto};
 
 #[cfg(target_os = "linux")]
 use super::{CLOCK_TICK, PAGESIZE};
