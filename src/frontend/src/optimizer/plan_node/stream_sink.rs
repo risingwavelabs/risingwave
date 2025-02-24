@@ -484,14 +484,22 @@ impl StreamSink {
             ),
         };
 
-        if user_force_append_only && frontend_derived_append_only {
+        if user_force_append_only
+            && user_defined_sink_type.is_some()
+            && user_defined_sink_type != Some(SinkType::AppendOnly)
+        {
             return Err(ErrorCode::SinkError(Box::new(Error::new(
                 ErrorKind::InvalidInput,
-                "The sink has been append only, please remove the force_append_only option"
-                    .to_string(),
+                "The force_append_only can be only used for type = \'append-only\'".to_owned(),
             )))
             .into());
         }
+
+        let user_force_append_only = if user_force_append_only && frontend_derived_append_only {
+            false
+        } else {
+            user_force_append_only
+        };
 
         if user_force_append_only && user_defined_sink_type != Some(SinkType::AppendOnly) {
             return Err(ErrorCode::SinkError(Box::new(Error::new(
