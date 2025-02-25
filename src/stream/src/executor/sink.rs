@@ -32,7 +32,7 @@ use risingwave_connector::sink::log_store::{
     LogWriterMetrics,
 };
 use risingwave_connector::sink::{
-    GLOBAL_SINK_METRICS, LogSinker, Sink, SinkImpl, SinkParam, SinkWriterParam, build_sink,
+    GLOBAL_SINK_METRICS, LogSinker, Sink, SinkImpl, SinkParam, SinkWriterParam,
 };
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
@@ -90,6 +90,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         info: ExecutorInfo,
         input: Executor,
         sink_writer_param: SinkWriterParam,
+        sink: SinkImpl,
         sink_param: SinkParam,
         columns: Vec<ColumnCatalog>,
         log_store_factory: F,
@@ -97,8 +98,6 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         input_data_types: Vec<DataType>,
         rate_limit: Option<u32>,
     ) -> StreamExecutorResult<Self> {
-        let sink = build_sink(sink_param.clone())
-            .map_err(|e| StreamExecutorError::from((e, sink_param.sink_id.sink_id)))?;
         let sink_input_schema: Schema = columns
             .iter()
             .map(|column| Field::from(&column.column_desc))
@@ -601,6 +600,7 @@ impl<F: LogStoreFactory> Execute for SinkExecutor<F> {
 mod test {
     use risingwave_common::catalog::{ColumnDesc, ColumnId};
     use risingwave_common::util::epoch::test_epoch;
+    use risingwave_connector::sink::build_sink;
 
     use super::*;
     use crate::common::log_store_impl::in_mem::BoundedInMemLogStoreFactory;
@@ -685,11 +685,14 @@ mod test {
             identity: "SinkExecutor".to_owned(),
         };
 
+        let sink = build_sink(sink_param.clone()).unwrap();
+
         let sink_executor = SinkExecutor::new(
             ActorContext::for_test(0),
             info,
             source,
             SinkWriterParam::for_test(),
+            sink,
             sink_param,
             columns.clone(),
             BoundedInMemLogStoreFactory::new(1),
@@ -815,11 +818,14 @@ mod test {
             identity: "SinkExecutor".to_owned(),
         };
 
+        let sink = build_sink(sink_param.clone()).unwrap();
+
         let sink_executor = SinkExecutor::new(
             ActorContext::for_test(0),
             info,
             source,
             SinkWriterParam::for_test(),
+            sink,
             sink_param,
             columns.clone(),
             BoundedInMemLogStoreFactory::new(1),
@@ -918,11 +924,14 @@ mod test {
             identity: "SinkExecutor".to_owned(),
         };
 
+        let sink = build_sink(sink_param.clone()).unwrap();
+
         let sink_executor = SinkExecutor::new(
             ActorContext::for_test(0),
             info,
             source,
             SinkWriterParam::for_test(),
+            sink,
             sink_param,
             columns,
             BoundedInMemLogStoreFactory::new(1),
