@@ -23,10 +23,10 @@ risingwave_expr_impl::enable!();
 
 use std::collections::{HashMap, HashSet};
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use itertools::Itertools;
-use rand::prelude::SliceRandom;
 use rand::Rng;
+use rand::prelude::SliceRandom;
 use risingwave_sqlparser::ast::{
     BinaryOperator, ColumnOption, Expr, Join, JoinConstraint, JoinOperator, Statement,
     TableConstraint,
@@ -42,7 +42,7 @@ mod utils;
 pub mod validation;
 pub use validation::is_permissible_error;
 
-pub use crate::sql_gen::{print_function_table, Table};
+pub use crate::sql_gen::{Table, print_function_table};
 
 /// Generate a random SQL string.
 pub fn sql_gen(rng: &mut impl Rng, tables: Vec<Table>) -> String {
@@ -180,7 +180,7 @@ pub fn parse_create_table_statements(sql: impl AsRef<str>) -> (Vec<Table>, Vec<S
 mod tests {
     use std::fmt::Debug;
 
-    use expect_test::{expect, Expect};
+    use expect_test::{Expect, expect};
 
     use super::*;
 

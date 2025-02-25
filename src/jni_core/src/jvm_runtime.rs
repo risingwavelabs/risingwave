@@ -16,7 +16,7 @@ use std::ffi::c_void;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use fs_err as fs;
 use fs_err::PathExt;
 use jni::objects::{JObject, JString};
@@ -59,7 +59,9 @@ impl JavaVmWrapper {
         let libs_path = if let Ok(libs_path) = std::env::var("CONNECTOR_LIBS_PATH") {
             PathBuf::from(libs_path)
         } else {
-            tracing::info!("environment variable CONNECTOR_LIBS_PATH is not specified, use default path `./libs` instead");
+            tracing::info!(
+                "environment variable CONNECTOR_LIBS_PATH is not specified, use default path `./libs` instead"
+            );
             std::env::current_exe()
                 .and_then(|p| p.fs_err_canonicalize()) // resolve symlink of the current executable
                 .context("unable to get path of the executable")?

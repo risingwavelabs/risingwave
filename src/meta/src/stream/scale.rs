@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::{min, Ordering};
+use std::cmp::{Ordering, min};
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use futures::future::try_join_all;
 use itertools::Itertools;
 use num_integer::Integer;
@@ -29,22 +29,22 @@ use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::hash::ActorMapping;
 use risingwave_common::util::iter_util::ZipEqDebug;
-use risingwave_meta_model::{actor, fragment, ObjectId, WorkerId};
+use risingwave_meta_model::{ObjectId, WorkerId, actor, fragment};
 use risingwave_pb::common::{PbActorLocation, WorkerNode, WorkerType};
+use risingwave_pb::meta::FragmentWorkerSlotMappings;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::fragment::{
     FragmentDistributionType, PbFragmentDistributionType,
 };
 use risingwave_pb::meta::table_fragments::{self, ActorStatus, PbFragment, State};
-use risingwave_pb::meta::FragmentWorkerSlotMappings;
 use risingwave_pb::stream_plan::{
     Dispatcher, DispatcherType, FragmentTypeFlag, PbDispatcher, PbStreamActor, StreamActor,
     StreamNode,
 };
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Receiver;
-use tokio::sync::{oneshot, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard, oneshot};
 use tokio::task::JoinHandle;
 use tokio::time::{Instant, MissedTickBehavior};
 
@@ -53,7 +53,7 @@ use crate::controller::scale::RescheduleWorkingSet;
 use crate::manager::{LocalNotification, MetaSrvEnv, MetadataManager};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableParallelism};
 use crate::serving::{
-    to_deleted_fragment_worker_slot_mapping, to_fragment_worker_slot_mapping, ServingVnodeMapping,
+    ServingVnodeMapping, to_deleted_fragment_worker_slot_mapping, to_fragment_worker_slot_mapping,
 };
 use crate::stream::{GlobalStreamManager, SourceManagerRef};
 use crate::{MetaError, MetaResult};
@@ -739,7 +739,9 @@ impl ScaleController {
             }
 
             if no_shuffle_target_fragment_ids.contains(fragment_id) {
-                bail!("rescheduling NoShuffle downstream fragment (maybe Chain fragment) is forbidden, please use NoShuffle upstream fragment (like Materialized fragment) to scale");
+                bail!(
+                    "rescheduling NoShuffle downstream fragment (maybe Chain fragment) is forbidden, please use NoShuffle upstream fragment (like Materialized fragment) to scale"
+                );
             }
 
             // For the relation of NoShuffle (e.g. Materialize and Chain), we need a special
@@ -1510,7 +1512,13 @@ impl ScaleController {
             for (worker_id, n) in decreased_actor_count {
                 if let Some(actor_ids) = worker_to_actors.get(worker_id) {
                     if actor_ids.len() < n {
-                        bail!("plan illegal, for fragment {}, worker {} only has {} actors, but needs to reduce {}",fragment_id, worker_id, actor_ids.len(), n);
+                        bail!(
+                            "plan illegal, for fragment {}, worker {} only has {} actors, but needs to reduce {}",
+                            fragment_id,
+                            worker_id,
+                            actor_ids.len(),
+                            n
+                        );
                     }
 
                     let removed_actors: Vec<_> = actor_ids
@@ -1986,7 +1994,9 @@ impl ScaleController {
                         assert_eq!(*should_be_one, 1);
 
                         if *chosen_target_worker_id == *single_worker_id {
-                            tracing::debug!("single fragment {fragment_id} already on target worker {chosen_target_worker_id}");
+                            tracing::debug!(
+                                "single fragment {fragment_id} already on target worker {chosen_target_worker_id}"
+                            );
                             continue;
                         }
 
@@ -2003,7 +2013,9 @@ impl ScaleController {
                     FragmentDistributionType::Hash => match parallelism {
                         TableParallelism::Adaptive => {
                             if available_slot_count > max_parallelism {
-                                tracing::warn!("available parallelism for table {table_id} is larger than max parallelism, force limit to {max_parallelism}");
+                                tracing::warn!(
+                                    "available parallelism for table {table_id} is larger than max parallelism, force limit to {max_parallelism}"
+                                );
                                 // force limit to `max_parallelism`
                                 let target_worker_slots = schedule_units_for_slots(
                                     &available_worker_slots,
@@ -2030,7 +2042,9 @@ impl ScaleController {
                         }
                         TableParallelism::Fixed(mut n) => {
                             if n > max_parallelism {
-                                tracing::warn!("specified parallelism {n} for table {table_id} is larger than max parallelism, force limit to {max_parallelism}");
+                                tracing::warn!(
+                                    "specified parallelism {n} for table {table_id} is larger than max parallelism, force limit to {max_parallelism}"
+                                );
                                 n = max_parallelism
                             }
 
@@ -2250,7 +2264,11 @@ impl ScaleController {
 
                 if let Some(upstream_reschedule_plan) = reschedule.get(upstream_fragment_id) {
                     if upstream_reschedule_plan != reschedule_plan {
-                        bail!("Inconsistent NO_SHUFFLE plan, check target worker ids of fragment {} and {}", fragment_id, upstream_fragment_id);
+                        bail!(
+                            "Inconsistent NO_SHUFFLE plan, check target worker ids of fragment {} and {}",
+                            fragment_id,
+                            upstream_fragment_id
+                        );
                     }
 
                     continue;

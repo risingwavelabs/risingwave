@@ -15,8 +15,8 @@
 use core::time::Duration;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
-use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
 use std::time::Instant;
 
 use async_recursion::async_recursion;
@@ -41,9 +41,9 @@ use risingwave_pb::stream_service::{
 };
 use risingwave_storage::monitor::HummockTraceFutureExt;
 use risingwave_storage::table::batch_table::BatchTable;
-use risingwave_storage::{dispatch_state_store, StateStore};
+use risingwave_storage::{StateStore, dispatch_state_store};
 use thiserror_ext::AsReport;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
+use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use tokio::task::JoinHandle;
 use tonic::Status;
 
@@ -58,7 +58,7 @@ use crate::executor::{
     ExecutorInfo, MergeExecutorInput, SnapshotBackfillExecutor, TroublemakerExecutor,
     WrapperExecutor,
 };
-use crate::from_proto::{create_executor, MergeExecutorBuilder};
+use crate::from_proto::{MergeExecutorBuilder, create_executor};
 use crate::task::barrier_manager::{
     ControlStreamHandle, EventSender, LocalActorOperation, LocalBarrierWorker,
 };

@@ -67,7 +67,7 @@ impl ColumnMapping {
 mod test {
     use std::fmt::Debug;
 
-    use expect_test::{expect, Expect};
+    use expect_test::{Expect, expect};
     use risingwave_common::types::DataType;
 
     use super::*;

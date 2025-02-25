@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use super::{BoxedRule, Rule};
-use crate::optimizer::plan_node::{LogicalShare, PlanTreeNodeUnary};
 use crate::optimizer::PlanRef;
+use crate::optimizer::plan_node::{LogicalShare, PlanTreeNodeUnary};
 
 pub struct DagToTreeRule {}
 impl Rule for DagToTreeRule {

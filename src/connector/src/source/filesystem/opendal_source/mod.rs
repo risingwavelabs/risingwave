@@ -22,15 +22,15 @@ pub mod posix_fs_source;
 pub mod s3_source;
 
 use serde::Deserialize;
-use serde_with::{serde_as, DisplayFromStr};
+use serde_with::{DisplayFromStr, serde_as};
 use with_options::WithOptions;
 pub mod opendal_enumerator;
 pub mod opendal_reader;
 
 use self::opendal_reader::OpendalReader;
+use super::OpendalFsSplit;
 use super::file_common::CompressionFormat;
 pub use super::s3::S3PropertiesCommon;
-use super::OpendalFsSplit;
 use crate::error::ConnectorResult;
 use crate::source::{SourceProperties, UnknownFields};
 

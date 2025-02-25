@@ -21,13 +21,13 @@ use risingwave_pb::catalog::{PbSchemaRegistryNameStrategy, StreamSourceInfo};
 
 use super::utils::get_kafka_topic;
 use super::{DebeziumProps, TimestamptzHandling};
+use crate::WithOptionsSecResolved;
 use crate::connector_common::AwsAuthProps;
 use crate::error::ConnectorResult;
 use crate::parser::PROTOBUF_MESSAGES_AS_JSONB;
-use crate::schema::schema_registry::SchemaRegistryAuth;
 use crate::schema::AWS_GLUE_SCHEMA_ARN_KEY;
-use crate::source::{extract_source_struct, SourceColumnDesc, SourceEncode, SourceFormat};
-use crate::WithOptionsSecResolved;
+use crate::schema::schema_registry::SchemaRegistryAuth;
+use crate::source::{SourceColumnDesc, SourceEncode, SourceFormat, extract_source_struct};
 
 /// Note: this is created in `SourceReader::build_stream`
 #[derive(Debug, Clone, Default)]

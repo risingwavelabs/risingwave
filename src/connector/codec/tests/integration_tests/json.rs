@@ -214,14 +214,14 @@ async fn test_json_schema_parse() {
 
     expect![[r#"
         [
-            cats(#1): Jsonb,
-            id(#2): Varchar,
-            meta(#3): Struct {
+            cats(#2147483646): Jsonb,
+            id(#2147483646): Varchar,
+            meta(#2147483646): Struct {
                 active: Jsonb,
                 tags: Jsonb,
             },
-            name(#4): Jsonb,
-            recurrent(#5): Struct {
+            name(#2147483646): Jsonb,
+            recurrent(#2147483646): Struct {
                 id: Varchar,
                 next: Struct {
                     id: Varchar,

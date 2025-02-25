@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use prometheus::Registry;
-use rdkafka::statistics::{Broker, ConsumerGroup, Partition, Topic, Window};
 use rdkafka::Statistics;
+use rdkafka::statistics::{Broker, ConsumerGroup, Partition, Topic, Window};
 use risingwave_common::metrics::{LabelGuardedIntGaugeVec, LabelGuardedUintGaugeVec};
 use risingwave_common::{
     register_guarded_int_gauge_vec_with_registry, register_guarded_uint_gauge_vec_with_registry,

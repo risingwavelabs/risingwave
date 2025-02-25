@@ -40,8 +40,8 @@ use std::iter::{self, TrustedLen};
 use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, Not, Range, RangeInclusive};
 
 use risingwave_common_estimate_size::EstimateSize;
-use risingwave_pb::common::buffer::CompressionType;
 use risingwave_pb::common::PbBuffer;
+use risingwave_pb::common::buffer::CompressionType;
 use rw_iter_util::ZipEqFast;
 
 #[derive(Default, Debug, Clone, EstimateSize)]
@@ -476,7 +476,7 @@ impl<'b> BitAnd<&'b Bitmap> for &Bitmap {
         assert_eq!(self.num_bits, rhs.num_bits);
         let (lbits, rbits) = match (&self.bits, &rhs.bits) {
             _ if self.count_ones == 0 || rhs.count_ones == 0 => {
-                return Bitmap::zeros(self.num_bits)
+                return Bitmap::zeros(self.num_bits);
             }
             (_, None) => return self.clone(),
             (None, _) => return rhs.clone(),

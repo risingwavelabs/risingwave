@@ -15,7 +15,7 @@
 use std::fmt::Debug;
 
 use risingwave_common::catalog::{
-    ColumnDesc, ColumnId, CDC_OFFSET_COLUMN_NAME, CDC_TABLE_NAME_COLUMN_NAME,
+    CDC_OFFSET_COLUMN_NAME, CDC_TABLE_NAME_COLUMN_NAME, ColumnDesc, ColumnId,
     KAFKA_TIMESTAMP_COLUMN_NAME, ROW_ID_COLUMN_ID, ROW_ID_COLUMN_NAME,
 };
 use risingwave_common::types::DataType;

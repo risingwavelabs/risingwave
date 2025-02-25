@@ -16,7 +16,7 @@ mod trad_source;
 
 use std::collections::BTreeMap;
 
-pub use trad_source::{create_source_desc_builder, SourceExecutorBuilder};
+pub use trad_source::{SourceExecutorBuilder, create_source_desc_builder};
 mod fs_fetch;
 pub use fs_fetch::FsFetchExecutorBuilder;
 use risingwave_common::catalog::TableId;

@@ -15,11 +15,11 @@
 use std::cmp;
 
 use itertools::Itertools;
+use risingwave_backup::MetaSnapshotId;
 use risingwave_backup::error::{BackupError, BackupResult};
 use risingwave_backup::meta_snapshot::MetaSnapshot;
 use risingwave_backup::meta_snapshot_v2::{MetaSnapshotV2, MetadataV2};
 use risingwave_backup::storage::{MetaSnapshotStorage, MetaSnapshotStorageRef};
-use risingwave_backup::MetaSnapshotId;
 use sea_orm::DbErr;
 
 use crate::backup_restore::restore_impl::{Loader, Writer};

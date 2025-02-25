@@ -17,9 +17,9 @@
 // COPYING file in the root directory) and Apache 2.0 License
 // (found in the LICENSE.Apache file in the root directory).
 
+use crate::PlanRef;
 use crate::optimizer::plan_node::{BatchIcebergScan, PlanAggCall};
 use crate::optimizer::rule::{BoxedRule, Rule};
-use crate::PlanRef;
 
 pub struct BatchIcebergCountStar {}
 

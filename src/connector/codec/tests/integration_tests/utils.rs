@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub use expect_test::{expect, Expect};
+pub use expect_test::{Expect, expect};
 pub use itertools::Itertools;
 pub use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::types::{

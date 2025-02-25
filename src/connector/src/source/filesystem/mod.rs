@@ -14,7 +14,7 @@
 
 pub use opendal_source::GcsProperties;
 pub use s3::{
-    LegacyS3FileReader, LegacyS3Properties, LegacyS3SplitEnumerator, LEGACY_S3_CONNECTOR,
+    LEGACY_S3_CONNECTOR, LegacyS3FileReader, LegacyS3Properties, LegacyS3SplitEnumerator,
 };
 pub mod file_common;
 pub mod nd_streaming;

@@ -15,7 +15,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::str::FromStr;
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use itertools::Itertools;
 use rdkafka::client::BrokerAddr;
 use risingwave_common::bail;

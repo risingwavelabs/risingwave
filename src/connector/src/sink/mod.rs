@@ -56,8 +56,8 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use clickhouse::CLICKHOUSE_SINK;
 use decouple_checkpoint_log_sink::{
-    COMMIT_CHECKPOINT_INTERVAL, DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITHOUT_SINK_DECOUPLE,
-    DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE,
+    COMMIT_CHECKPOINT_INTERVAL, DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE,
+    DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITHOUT_SINK_DECOUPLE,
 };
 use deltalake::DELTALAKE_SINK;
 use iceberg::ICEBERG_SINK;
@@ -80,8 +80,8 @@ use risingwave_common::{
 };
 use risingwave_pb::catalog::PbSinkType;
 use risingwave_pb::connector_service::{PbSinkParam, SinkMetadata, TableSchema};
-use risingwave_rpc_client::error::RpcError;
 use risingwave_rpc_client::MetaClient;
+use risingwave_rpc_client::error::RpcError;
 use starrocks::STARROCKS_SINK;
 use thiserror::Error;
 use thiserror_ext::AsReport;
@@ -611,7 +611,9 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
                     if matches!(user_specified, SinkDecouple::Disable)
                         && commit_checkpoint_interval > 1
                     {
-                        return Err(SinkError::Config(anyhow!("config conflict: `commit_checkpoint_interval` larger than 1 means that sink decouple must be enabled, but session config sink_decouple is disabled")));
+                        return Err(SinkError::Config(anyhow!(
+                            "config conflict: `commit_checkpoint_interval` larger than 1 means that sink decouple must be enabled, but session config sink_decouple is disabled"
+                        )));
                     }
                 }
                 None => match user_specified {
@@ -785,6 +787,8 @@ pub enum SinkError {
     ),
     #[error("Encode error: {0}")]
     Encode(String),
+    #[error("Avro error: {0}")]
+    Avro(#[from] apache_avro::Error),
     #[error("Iceberg error: {0}")]
     Iceberg(
         #[source]

@@ -16,7 +16,7 @@ use chrono_tz::Tz;
 use num_traits::One;
 use risingwave_common::types::{CheckedAdd, Decimal, Interval, IsNegative, Timestamptz};
 use risingwave_expr::expr_context::TIME_ZONE;
-use risingwave_expr::{capture_context, function, ExprError, Result};
+use risingwave_expr::{ExprError, Result, capture_context, function};
 
 #[function("generate_series(int4, int4) -> setof int4")]
 #[function("generate_series(int8, int8) -> setof int8")]

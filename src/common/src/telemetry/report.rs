@@ -16,16 +16,16 @@ use std::sync::Arc;
 
 use risingwave_pb::telemetry::PbEventMessage;
 pub use risingwave_telemetry_event::{
-    current_timestamp, do_telemetry_event_report, post_telemetry_report_pb,
     TELEMETRY_EVENT_REPORT_INTERVAL, TELEMETRY_REPORT_URL, TELEMETRY_TRACKING_ID,
+    current_timestamp, do_telemetry_event_report, post_telemetry_report_pb,
 };
 use risingwave_telemetry_event::{
-    get_telemetry_risingwave_cloud_uuid, TELEMETRY_EVENT_REPORT_STASH_SIZE,
-    TELEMETRY_EVENT_REPORT_TX,
+    TELEMETRY_EVENT_REPORT_STASH_SIZE, TELEMETRY_EVENT_REPORT_TX,
+    get_telemetry_risingwave_cloud_uuid,
 };
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
-use tokio::time::{interval as tokio_interval_fn, Duration};
+use tokio::time::{Duration, interval as tokio_interval_fn};
 use uuid::Uuid;
 
 use super::{Result, TELEMETRY_REPORT_INTERVAL};

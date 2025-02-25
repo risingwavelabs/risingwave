@@ -19,11 +19,11 @@ use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::metrics::{
     LabelGuardedHistogram, LabelGuardedIntCounter, LabelGuardedIntGauge,
 };
-use risingwave_connector::sink::log_store::LogStoreFactory;
 use risingwave_connector::sink::SinkParam;
+use risingwave_connector::sink::log_store::LogStoreFactory;
 use risingwave_pb::catalog::Table;
-use risingwave_storage::store::{LocalStateStore, NewLocalOptions, OpConsistencyLevel};
 use risingwave_storage::StateStore;
+use risingwave_storage::store::{LocalStateStore, NewLocalOptions, OpConsistencyLevel};
 use tokio::sync::watch;
 
 use crate::common::log_store_impl::kv_log_store::buffer::new_log_store_buffer;
@@ -444,7 +444,7 @@ impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
-    use std::future::{poll_fn, Future};
+    use std::future::{Future, poll_fn};
     use std::iter::empty;
     use std::pin::pin;
     use std::sync::Arc;
@@ -461,16 +461,16 @@ mod tests {
     };
     use risingwave_hummock_sdk::HummockReadEpoch;
     use risingwave_hummock_test::test_utils::prepare_hummock_test_env;
-    use risingwave_storage::store::TryWaitEpochOptions;
     use risingwave_storage::StateStore;
+    use risingwave_storage::store::TryWaitEpochOptions;
 
     use crate::common::log_store_impl::kv_log_store::test_utils::{
-        calculate_vnode_bitmap, check_rows_eq, check_stream_chunk_eq,
-        gen_multi_vnode_stream_chunks, gen_stream_chunk_with_info, gen_test_log_store_table,
-        LogWriterTestExt, TEST_DATA_SIZE,
+        LogWriterTestExt, TEST_DATA_SIZE, calculate_vnode_bitmap, check_rows_eq,
+        check_stream_chunk_eq, gen_multi_vnode_stream_chunks, gen_stream_chunk_with_info,
+        gen_test_log_store_table,
     };
     use crate::common::log_store_impl::kv_log_store::{
-        KvLogStoreFactory, KvLogStoreMetrics, KvLogStorePkInfo, KV_LOG_STORE_V2_INFO,
+        KV_LOG_STORE_V2_INFO, KvLogStoreFactory, KvLogStoreMetrics, KvLogStorePkInfo,
     };
 
     #[tokio::test]
@@ -1287,9 +1287,11 @@ mod tests {
 
         {
             let mut future = pin!(reader.next_item());
-            assert!(poll_fn(|cx| Poll::Ready(future.as_mut().poll(cx)))
-                .await
-                .is_pending());
+            assert!(
+                poll_fn(|cx| Poll::Ready(future.as_mut().poll(cx)))
+                    .await
+                    .is_pending()
+            );
         }
 
         match reader.next_item().await.unwrap() {
@@ -1389,9 +1391,11 @@ mod tests {
                 }
             }
             let mut future = pin!(reader.next_item());
-            assert!(poll_fn(|cx| Poll::Ready(future.as_mut().poll(cx)))
-                .await
-                .is_pending());
+            assert!(
+                poll_fn(|cx| Poll::Ready(future.as_mut().poll(cx)))
+                    .await
+                    .is_pending()
+            );
             chunk_ids
         }
 

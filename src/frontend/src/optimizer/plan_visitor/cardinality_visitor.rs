@@ -153,11 +153,7 @@ impl PlanVisitor for CardinalityVisitor {
             .map(|input| self.visit(input))
             .fold(Cardinality::unknown(), std::ops::Add::add);
 
-        if plan.all() {
-            all
-        } else {
-            all.min(1..)
-        }
+        if plan.all() { all } else { all.min(1..) }
     }
 
     fn visit_logical_join(&mut self, plan: &plan_node::LogicalJoin) -> Cardinality {

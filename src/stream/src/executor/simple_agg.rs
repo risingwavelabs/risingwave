@@ -17,12 +17,12 @@ use std::collections::HashMap;
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::aggregate::{build_retractable, AggCall, BoxedAggregateFunction};
+use risingwave_expr::aggregate::{AggCall, BoxedAggregateFunction, build_retractable};
 use risingwave_pb::stream_plan::PbAggNodeVersion;
 
 use super::agg_common::{AggExecutorArgs, SimpleAggExecutorExtraArgs};
 use super::aggregation::{
-    agg_call_filter_res, iter_table_storage, AggStateStorage, AlwaysOutput, DistinctDeduplicater,
+    AggStateStorage, AlwaysOutput, DistinctDeduplicater, agg_call_filter_res, iter_table_storage,
 };
 use crate::executor::aggregation::AggGroup;
 use crate::executor::prelude::*;

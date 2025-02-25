@@ -25,15 +25,16 @@ use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::{report_scarf_enabled, report_to_scarf, telemetry_env_enabled};
 use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_common_service::{MetricsManager, TracingExtractLayer};
+use risingwave_meta::MetaStoreBackend;
 use risingwave_meta::barrier::GlobalBarrierManager;
 use risingwave_meta::controller::catalog::CatalogController;
 use risingwave_meta::controller::cluster::ClusterController;
-use risingwave_meta::manager::{MetadataManager, META_NODE_ID};
+use risingwave_meta::manager::{META_NODE_ID, MetadataManager};
+use risingwave_meta::rpc::ElectionClientRef;
 use risingwave_meta::rpc::election::dummy::DummyElectionClient;
 use risingwave_meta::rpc::intercept::MetricsMiddlewareLayer;
-use risingwave_meta::rpc::ElectionClientRef;
 use risingwave_meta::stream::ScaleController;
-use risingwave_meta::MetaStoreBackend;
+use risingwave_meta_service::AddressInfo;
 use risingwave_meta_service::backup_service::BackupServiceImpl;
 use risingwave_meta_service::cloud_service::CloudServiceImpl;
 use risingwave_meta_service::cluster_limit_service::ClusterLimitServiceImpl;
@@ -53,13 +54,13 @@ use risingwave_meta_service::stream_service::StreamServiceImpl;
 use risingwave_meta_service::system_params_service::SystemParamsServiceImpl;
 use risingwave_meta_service::telemetry_service::TelemetryInfoServiceImpl;
 use risingwave_meta_service::user_service::UserServiceImpl;
-use risingwave_meta_service::AddressInfo;
 use risingwave_pb::backup_service::backup_service_server::BackupServiceServer;
 use risingwave_pb::cloud_service::cloud_service_server::CloudServiceServer;
 use risingwave_pb::connector_service::sink_coordination_service_server::SinkCoordinationServiceServer;
 use risingwave_pb::ddl_service::ddl_service_server::DdlServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerServiceServer;
+use risingwave_pb::meta::SystemParams;
 use risingwave_pb::meta::cluster_limit_service_server::ClusterLimitServiceServer;
 use risingwave_pb::meta::cluster_service_server::ClusterServiceServer;
 use risingwave_pb::meta::event_log_service_server::EventLogServiceServer;
@@ -72,7 +73,6 @@ use risingwave_pb::meta::session_param_service_server::SessionParamServiceServer
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerServiceServer;
 use risingwave_pb::meta::system_params_service_server::SystemParamsServiceServer;
 use risingwave_pb::meta::telemetry_info_service_server::TelemetryInfoServiceServer;
-use risingwave_pb::meta::SystemParams;
 use risingwave_pb::user::user_service_server::UserServiceServer;
 use risingwave_rpc_client::ComputeClientPool;
 use sea_orm::{ConnectionTrait, DbBackend};
@@ -81,19 +81,19 @@ use tokio::sync::watch;
 
 use crate::backup_restore::BackupManager;
 use crate::barrier::BarrierScheduler;
-use crate::controller::system_param::SystemParamsController;
 use crate::controller::SqlMetaStore;
+use crate::controller::system_param::SystemParamsController;
 use crate::hummock::HummockManager;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{IdleManager, MetaOpts, MetaSrvEnv};
 use crate::rpc::election::sql::{MySqlDriver, PostgresDriver, SqlBackendElectionClient};
 use crate::rpc::metrics::{
-    start_fragment_info_monitor, start_worker_info_monitor, GLOBAL_META_METRICS,
+    GLOBAL_META_METRICS, start_fragment_info_monitor, start_worker_info_monitor,
 };
 use crate::serving::ServingVnodeMapping;
 use crate::stream::{GlobalStreamManager, SourceManager};
 use crate::telemetry::{MetaReportCreator, MetaTelemetryInfoFetcher};
-use crate::{hummock, serving, MetaError, MetaResult};
+use crate::{MetaError, MetaResult, hummock, serving};
 
 /// Used for standalone mode checking the status of the meta service.
 /// This can be easier and more accurate than checking the TCP connection.

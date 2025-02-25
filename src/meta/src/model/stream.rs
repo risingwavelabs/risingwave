@@ -36,7 +36,7 @@ use risingwave_pb::stream_plan::{FragmentTypeFlag, PbStreamContext, StreamActor,
 
 use super::{ActorId, FragmentId};
 use crate::model::MetadataModelResult;
-use crate::stream::{build_actor_connector_splits, SplitAssignment};
+use crate::stream::{SplitAssignment, build_actor_connector_splits};
 
 /// The parallelism for a `TableFragments`.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]

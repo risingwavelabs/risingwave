@@ -13,20 +13,20 @@
 // limitations under the License.
 
 use pretty_xmlish::XmlNode;
-use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::SyncLogStoreNode;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 
+use crate::PlanRef;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::PhysicalPlanRef;
 use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::plan_node::utils::{
-    childless_record, infer_synced_kv_log_store_table_catalog_inner, Distill,
+    Distill, childless_record, infer_synced_kv_log_store_table_catalog_inner,
 };
 use crate::optimizer::plan_node::{
     ExprRewritable, PlanBase, PlanTreeNodeUnary, Stream, StreamNode,
 };
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::PlanRef;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamSyncLogStore {

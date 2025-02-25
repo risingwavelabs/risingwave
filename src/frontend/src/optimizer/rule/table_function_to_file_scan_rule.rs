@@ -15,13 +15,13 @@
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::{DataType, ScalarImpl};
-use risingwave_connector::source::iceberg::{extract_bucket_and_file_name, FileScanBackend};
+use risingwave_connector::source::iceberg::{FileScanBackend, extract_bucket_and_file_name};
 
 use super::{BoxedRule, Rule};
 use crate::expr::{Expr, TableFunctionType};
+use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{LogicalFileScan, LogicalTableFunction};
-use crate::optimizer::PlanRef;
 
 /// Transform a special `TableFunction` (with `FILE_SCAN` table function type) into a `LogicalFileScan`
 pub struct TableFunctionToFileScanRule {}

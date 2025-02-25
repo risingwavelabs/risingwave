@@ -15,14 +15,14 @@
 use std::fmt::Debug;
 
 use anyhow::Context;
-use simd_json::prelude::MutableObject;
 use simd_json::BorrowedValue;
+use simd_json::prelude::MutableObject;
 
 use crate::error::ConnectorResult;
+use crate::parser::AccessBuilder;
+use crate::parser::unified::AccessImpl;
 use crate::parser::unified::debezium::MongoJsonAccess;
 use crate::parser::unified::json::{JsonAccess, JsonParseOptions, TimestamptzHandling};
-use crate::parser::unified::AccessImpl;
-use crate::parser::AccessBuilder;
 
 #[derive(Debug)]
 pub struct DebeziumJsonAccessBuilder {

@@ -24,7 +24,7 @@ use std::fmt::{Display, Write as _};
 use std::fs::File;
 use std::io::Write;
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use console::style;
 use libtest_mimic::{Arguments, Failed, Trial};
 use risingwave_sqlparser::ast::Statement;

@@ -21,10 +21,11 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
+use StageEvent::Failed;
 use anyhow::anyhow;
 use arc_swap::ArcSwap;
 use futures::stream::Fuse;
-use futures::{stream, StreamExt, TryStreamExt};
+use futures::{StreamExt, TryStreamExt, stream};
 use futures_async_stream::for_await;
 use itertools::Itertools;
 use risingwave_batch::error::BatchError;
@@ -45,26 +46,25 @@ use risingwave_pb::batch_plan::{
 use risingwave_pb::common::{BatchQueryEpoch, HostAddress, WorkerNode};
 use risingwave_pb::plan_common::ExprContext;
 use risingwave_pb::task_service::{CancelTaskRequest, TaskInfoResponse};
-use risingwave_rpc_client::error::RpcError;
 use risingwave_rpc_client::ComputeClientPoolRef;
+use risingwave_rpc_client::error::RpcError;
 use rw_futures_util::select_all;
 use thiserror_ext::AsReport;
 use tokio::spawn;
-use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::RwLock;
+use tokio::sync::mpsc::{Receiver, Sender};
 use tonic::Streaming;
-use tracing::{debug, error, warn, Instrument};
-use StageEvent::Failed;
+use tracing::{Instrument, debug, error, warn};
 
 use crate::catalog::catalog_service::CatalogReader;
 use crate::catalog::{FragmentId, TableId};
 use crate::optimizer::plan_node::PlanNodeType;
-use crate::scheduler::distributed::stage::StageState::Pending;
-use crate::scheduler::distributed::QueryMessage;
-use crate::scheduler::plan_fragmenter::{
-    ExecutionPlanNode, PartitionInfo, QueryStageRef, StageId, TaskId, ROOT_TASK_ID,
-};
 use crate::scheduler::SchedulerError::{TaskExecutionError, TaskRunningOutOfMemory};
+use crate::scheduler::distributed::QueryMessage;
+use crate::scheduler::distributed::stage::StageState::Pending;
+use crate::scheduler::plan_fragmenter::{
+    ExecutionPlanNode, PartitionInfo, QueryStageRef, ROOT_TASK_ID, StageId, TaskId,
+};
 use crate::scheduler::{ExecutionContextRef, SchedulerError, SchedulerResult};
 
 const TASK_SCHEDULING_PARALLELISM: usize = 10;

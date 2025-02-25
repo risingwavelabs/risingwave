@@ -23,7 +23,7 @@ pub mod enumerator;
 pub mod source;
 pub mod split;
 pub use enumerator::*;
-use serde_with::{serde_as, DisplayFromStr};
+use serde_with::{DisplayFromStr, serde_as};
 pub use source::*;
 pub use split::*;
 use with_options::WithOptions;

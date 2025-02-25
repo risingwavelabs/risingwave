@@ -15,13 +15,13 @@
 use std::collections::HashSet;
 use std::ops::Bound::{self, *};
 
-use futures::{pin_mut, StreamExt};
+use futures::{StreamExt, pin_mut};
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::row::{self, OwnedRow};
 use risingwave_common::types::{DataType, Scalar, ScalarImpl, Timestamptz};
-use risingwave_common::util::epoch::{test_epoch, EpochPair};
+use risingwave_common::util::epoch::{EpochPair, test_epoch};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::BasicSerde;
 use risingwave_hummock_test::test_utils::prepare_hummock_test_env;

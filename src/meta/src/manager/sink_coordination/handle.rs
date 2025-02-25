@@ -23,7 +23,7 @@ use risingwave_pb::connector_service::coordinate_response::{
     CommitResponse, StartCoordinationResponse,
 };
 use risingwave_pb::connector_service::{
-    coordinate_request, coordinate_response, CoordinateResponse, SinkMetadata,
+    CoordinateResponse, SinkMetadata, coordinate_request, coordinate_response,
 };
 use tonic::Status;
 

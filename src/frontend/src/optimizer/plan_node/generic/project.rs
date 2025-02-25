@@ -22,8 +22,8 @@ use risingwave_common::util::iter_util::ZipEqFast;
 
 use super::{GenericPlanNode, GenericPlanRef};
 use crate::expr::{
-    assert_input_ref, Expr, ExprDisplay, ExprImpl, ExprRewriter, ExprType, ExprVisitor,
-    FunctionCall, InputRef,
+    Expr, ExprDisplay, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef,
+    assert_input_ref,
 };
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::FunctionalDependencySet;

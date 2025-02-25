@@ -75,8 +75,8 @@ impl ExchangeSource for LocalExchangeSource {
 #[cfg(test)]
 mod tests {
     use std::net::SocketAddr;
-    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::Duration;
 
     use risingwave_pb::batch_plan::{TaskId, TaskOutputId};

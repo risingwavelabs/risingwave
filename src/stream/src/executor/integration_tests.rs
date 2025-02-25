@@ -14,15 +14,15 @@
 
 use std::sync::Mutex;
 
-use futures::future::BoxFuture;
 use futures::FutureExt;
+use futures::future::BoxFuture;
 use futures_async_stream::try_stream;
 use multimap::MultiMap;
 use risingwave_common::array::*;
 use risingwave_common::catalog::Field;
 use risingwave_common::config;
 use risingwave_common::types::*;
-use risingwave_common::util::epoch::{test_epoch, EpochExt};
+use risingwave_common::util::epoch::{EpochExt, test_epoch};
 use risingwave_expr::aggregate::AggCall;
 use risingwave_expr::expr::*;
 use risingwave_pb::plan_common::ExprContext;

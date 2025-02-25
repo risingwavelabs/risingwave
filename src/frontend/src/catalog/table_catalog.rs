@@ -29,8 +29,8 @@ use risingwave_pb::catalog::table::{
     OptionalAssociatedSourceId, PbEngine, PbTableType, PbTableVersion,
 };
 use risingwave_pb::catalog::{PbCreateType, PbStreamJobStatus, PbTable, PbWebhookSourceInfo};
-use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::DefaultColumnDesc;
+use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_sqlparser::ast;
 use risingwave_sqlparser::parser::Parser;
 use thiserror_ext::AsReport as _;

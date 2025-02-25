@@ -19,15 +19,15 @@ use iceberg::expr::Predicate as IcebergPredicate;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId};
 use risingwave_common::types::DataType;
+use risingwave_pb::batch_plan::IcebergScanNode;
 use risingwave_pb::batch_plan::iceberg_scan_node::IcebergScanType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::batch_plan::IcebergScanNode;
 use risingwave_sqlparser::ast::AsOf;
 
 use super::batch::prelude::*;
-use super::utils::{childless_record, column_names_pretty, Distill};
+use super::utils::{Distill, childless_record, column_names_pretty};
 use super::{
-    generic, ExprRewritable, PlanBase, PlanRef, ToBatchPb, ToDistributedBatch, ToLocalBatch,
+    ExprRewritable, PlanBase, PlanRef, ToBatchPb, ToDistributedBatch, ToLocalBatch, generic,
 };
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::error::Result;

@@ -15,7 +15,7 @@
 use std::collections::{HashMap, HashSet};
 use std::process::exit;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use inquire::Confirm;
 use itertools::Itertools;
 use regex::Regex;

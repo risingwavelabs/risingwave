@@ -35,7 +35,7 @@ use thiserror_ext::AsReport;
 
 use super::{Access, AccessError, AccessResult};
 use crate::parser::DatumCow;
-use crate::schema::{bail_invalid_option_error, InvalidOptionError};
+use crate::schema::{InvalidOptionError, bail_invalid_option_error};
 
 #[derive(Clone, Debug)]
 pub enum ByteaHandling {
@@ -428,7 +428,7 @@ impl JsonParseOptions {
                 .into(),
             // ---- Varchar -----
             (DataType::Varchar, ValueType::String) => {
-                return Ok(DatumCow::Borrowed(Some(value.as_str().unwrap().into())))
+                return Ok(DatumCow::Borrowed(Some(value.as_str().unwrap().into())));
             }
             (
                 DataType::Varchar,

@@ -35,7 +35,7 @@ use std::iter::repeat;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use async_trait::async_trait;
 use futures::future::try_join_all;
 use futures::stream::{BoxStream, Peekable};
@@ -45,7 +45,7 @@ use rand::prelude::SliceRandom;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::{WorkerNode, WorkerType};
 use tokio::sync::mpsc::{
-    channel, unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender,
+    Receiver, Sender, UnboundedReceiver, UnboundedSender, channel, unbounded_channel,
 };
 
 pub mod error;

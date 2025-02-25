@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use itertools::Itertools;
 use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
-use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher};
+use risingwave_common::hash::{HashKey, HashKeyDispatcher, calc_hash_key_kind};
 use risingwave_common::test_utils::rand_chunk;
 use risingwave_common::types::DataType;
 

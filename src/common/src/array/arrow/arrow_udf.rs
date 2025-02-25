@@ -21,7 +21,7 @@
 use std::sync::Arc;
 
 pub use super::arrow_53::{
-    arrow_array, arrow_buffer, arrow_cast, arrow_schema, FromArrow, ToArrow,
+    FromArrow, ToArrow, arrow_array, arrow_buffer, arrow_cast, arrow_schema,
 };
 use crate::array::{ArrayError, ArrayImpl, DataType, DecimalArray, JsonbArray};
 

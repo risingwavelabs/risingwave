@@ -208,8 +208,8 @@ mod tests {
     use risingwave_common::util::sort_util::OrderType;
 
     use super::*;
-    use crate::executor::test_utils::top_n_executor::create_in_memory_state_table;
     use crate::executor::test_utils::MockSource;
+    use crate::executor::test_utils::top_n_executor::create_in_memory_state_table;
     use crate::executor::{Barrier, Message};
 
     mod test1 {
@@ -629,8 +629,8 @@ mod tests {
         use risingwave_storage::memory::MemoryStateStore;
 
         use super::*;
-        use crate::executor::test_utils::top_n_executor::create_in_memory_state_table_from_state_store;
         use crate::executor::test_utils::StreamExecutorTestExt;
+        use crate::executor::test_utils::top_n_executor::create_in_memory_state_table_from_state_store;
         fn create_source_new() -> Executor {
             let mut chunks = vec![
                 StreamChunk::from_pretty(
@@ -721,10 +721,10 @@ mod tests {
                 ],
             };
             MockSource::with_messages(vec![
-                Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
                 Message::Chunk(std::mem::take(&mut chunks[0])),
                 Message::Chunk(std::mem::take(&mut chunks[1])),
-                Message::Barrier(Barrier::new_test_barrier(test_epoch(4))),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
             ])
             .into_executor(schema, pk_indices())
         }
@@ -913,8 +913,8 @@ mod tests {
         use risingwave_storage::memory::MemoryStateStore;
 
         use super::*;
-        use crate::executor::test_utils::top_n_executor::create_in_memory_state_table_from_state_store;
         use crate::executor::test_utils::StreamExecutorTestExt;
+        use crate::executor::test_utils::top_n_executor::create_in_memory_state_table_from_state_store;
 
         fn create_source() -> Executor {
             let mut chunks = vec![
@@ -1101,10 +1101,10 @@ mod tests {
                 ],
             };
             MockSource::with_messages(vec![
-                Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
                 Message::Chunk(std::mem::take(&mut chunks[0])),
                 Message::Chunk(std::mem::take(&mut chunks[1])),
-                Message::Barrier(Barrier::new_test_barrier(test_epoch(4))),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
             ])
             .into_executor(schema, pk_indices())
         }

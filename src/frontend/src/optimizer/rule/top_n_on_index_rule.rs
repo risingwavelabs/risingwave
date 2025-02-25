@@ -22,9 +22,9 @@ use std::collections::BTreeMap;
 use risingwave_common::util::sort_util::ColumnOrder;
 
 use super::{BoxedRule, Rule};
+use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::{LogicalScan, LogicalTopN, PlanTreeNodeUnary};
 use crate::optimizer::property::Order;
-use crate::optimizer::PlanRef;
 
 pub struct TopNOnIndexRule {}
 

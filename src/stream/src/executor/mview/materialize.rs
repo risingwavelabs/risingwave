@@ -208,7 +208,9 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                             if self.state_table.value_indices().is_some() {
                                 // TODO(st1page): when materialize partial columns(), we should
                                 // construct some columns in the pk
-                                panic!("materialize executor with data check can not handle only materialize partial columns")
+                                panic!(
+                                    "materialize executor with data check can not handle only materialize partial columns"
+                                )
                             };
                             let values = data_chunk.serialize();
 

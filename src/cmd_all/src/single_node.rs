@@ -17,8 +17,8 @@ use home::home_dir;
 use risingwave_common::config::MetaBackend;
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
 use risingwave_compactor::CompactorOpts;
-use risingwave_compute::memory::config::gradient_reserve_memory_bytes;
 use risingwave_compute::ComputeNodeOpts;
+use risingwave_compute::memory::config::gradient_reserve_memory_bytes;
 use risingwave_frontend::FrontendOpts;
 use risingwave_meta_node::MetaNodeOpts;
 

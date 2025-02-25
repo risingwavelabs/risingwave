@@ -23,8 +23,8 @@ use super::stream::prelude::*;
 use super::{PlanBase, PlanRef, PlanTreeNodeUnary};
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::plan_node::utils::{childless_record, Distill};
-use crate::optimizer::plan_node::{generic, ExprRewritable, StreamNode};
+use crate::optimizer::plan_node::utils::{Distill, childless_record};
+use crate::optimizer::plan_node::{ExprRewritable, StreamNode, generic};
 use crate::optimizer::property::{Distribution, MonotonicityMap, WatermarkColumns};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 

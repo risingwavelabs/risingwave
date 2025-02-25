@@ -30,10 +30,10 @@ use risingwave_pb::plan_common::ColumnDesc;
 use super::utils::{bytes_from_url, get_kafka_topic};
 use super::{JsonProperties, SchemaRegistryAuth};
 use crate::error::ConnectorResult;
-use crate::parser::unified::json::{JsonAccess, JsonParseOptions};
-use crate::parser::unified::AccessImpl;
 use crate::parser::AccessBuilder;
-use crate::schema::schema_registry::{handle_sr_list, Client};
+use crate::parser::unified::AccessImpl;
+use crate::parser::unified::json::{JsonAccess, JsonParseOptions};
+use crate::schema::schema_registry::{Client, handle_sr_list};
 
 #[derive(Debug)]
 pub struct JsonAccessBuilder {

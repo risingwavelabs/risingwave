@@ -33,8 +33,9 @@ use risingwave_pb::stream_plan::{
     StreamScanType,
 };
 
-use super::id::GlobalFragmentIdsExt;
 use super::Locations;
+use super::id::GlobalFragmentIdsExt;
+use crate::MetaResult;
 use crate::controller::cluster::StreamingClusterInfo;
 use crate::manager::{MetaSrvEnv, StreamingJob};
 use crate::model::{DispatcherId, FragmentActorUpstreams, FragmentId};
@@ -45,7 +46,6 @@ use crate::stream::stream_graph::fragment::{
 use crate::stream::stream_graph::id::{GlobalActorId, GlobalActorIdGen, GlobalFragmentId};
 use crate::stream::stream_graph::schedule;
 use crate::stream::stream_graph::schedule::Distribution;
-use crate::MetaResult;
 
 /// The upstream information of an actor during the building process. This will eventually be used
 /// to create the `MergeNode`s as the leaf executor of each actor.

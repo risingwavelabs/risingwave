@@ -16,15 +16,15 @@ use std::collections::BTreeMap;
 use std::io::Read;
 use std::path::Path;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use clap::Parser;
 use console::style;
 use fs_err::File;
 use itertools::Itertools;
 use risedev::{
-    compose_deploy, generate_risedev_env, Compose, ComposeConfig, ComposeDeployConfig, ComposeFile,
-    ComposeService, ComposeVolume, ConfigExpander, DockerImageConfig, ServiceConfig,
-    RISEDEV_CONFIG_FILE,
+    Compose, ComposeConfig, ComposeDeployConfig, ComposeFile, ComposeService, ComposeVolume,
+    ConfigExpander, DockerImageConfig, RISEDEV_CONFIG_FILE, ServiceConfig, compose_deploy,
+    generate_risedev_env,
 };
 use serde::Deserialize;
 
@@ -192,10 +192,10 @@ fn main() -> Result<()> {
             }
             ServiceConfig::Tempo(c) => (c.address.clone(), c.compose(&compose_config)?),
             ServiceConfig::Kafka(_) => {
-                return Err(anyhow!("not supported, please use redpanda instead"))
+                return Err(anyhow!("not supported, please use redpanda instead"));
             }
             ServiceConfig::Pubsub(_) => {
-                return Err(anyhow!("not supported, please use redpanda instead"))
+                return Err(anyhow!("not supported, please use redpanda instead"));
             }
             ServiceConfig::Opendal(_) => continue,
             ServiceConfig::AwsS3(_) => continue,

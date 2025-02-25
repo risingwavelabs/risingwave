@@ -14,12 +14,12 @@
 
 use std::collections::HashSet;
 use std::env;
-use std::fs::{create_dir_all, OpenOptions};
+use std::fs::{OpenOptions, create_dir_all};
 use std::io::BufWriter;
 use std::ops::Bound;
 use std::path::Path;
-use std::sync::atomic::AtomicU64;
 use std::sync::LazyLock;
+use std::sync::atomic::AtomicU64;
 
 use bincode::{Decode, Encode};
 use bytes::Bytes;
@@ -29,7 +29,7 @@ use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
 use risingwave_pb::meta::SubscribeResponse;
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc::{
-    unbounded_channel as channel, UnboundedReceiver as Receiver, UnboundedSender as Sender,
+    UnboundedReceiver as Receiver, UnboundedSender as Sender, unbounded_channel as channel,
 };
 use tokio::task_local;
 

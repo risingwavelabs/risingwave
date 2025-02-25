@@ -15,8 +15,8 @@
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnCatalog, Field};
 
-use crate::error::Result;
 use crate::Binder;
+use crate::error::Result;
 
 impl Binder {
     pub fn bind_columns_to_context(

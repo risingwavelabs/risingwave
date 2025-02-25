@@ -20,6 +20,7 @@ use futures::FutureExt;
 use risingwave_hummock_sdk::key::FullKey;
 
 use super::Forward;
+use crate::hummock::HummockResult;
 use crate::hummock::iterator::{
     DirectionEnum, HummockIterator, HummockIteratorDirection, ValueMeta,
 };
@@ -27,7 +28,6 @@ use crate::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatchIterator, SharedBufferVersionedEntryRef,
 };
 use crate::hummock::value::HummockValue;
-use crate::hummock::HummockResult;
 use crate::monitor::StoreLocalStatistic;
 
 pub struct Node<I: HummockIterator> {

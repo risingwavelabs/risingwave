@@ -30,9 +30,9 @@ use risingwave_pb::meta::list_table_fragments_response::{
     ActorInfo, FragmentInfo, TableFragmentInfo,
 };
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerService;
+use risingwave_pb::meta::table_fragments::PbState;
 use risingwave_pb::meta::table_fragments::actor_status::PbActorState;
 use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
-use risingwave_pb::meta::table_fragments::PbState;
 use risingwave_pb::meta::*;
 use tonic::{Request, Response, Status};
 
@@ -137,7 +137,7 @@ impl StreamManagerService for StreamServiceImpl {
                     .await?
             }
             ThrottleTarget::Unspecified => {
-                return Err(Status::invalid_argument("unspecified throttle target"))
+                return Err(Status::invalid_argument("unspecified throttle target"));
             }
         };
 

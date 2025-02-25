@@ -16,8 +16,8 @@ use risingwave_common::catalog::{Field, SYS_CATALOG_START_ID};
 use risingwave_pb::catalog::PbView;
 
 use super::{OwnedByUserCatalog, ViewId};
-use crate::user::UserId;
 use crate::WithOptions;
+use crate::user::UserId;
 
 #[derive(Clone, Debug)]
 pub struct ViewCatalog {

@@ -14,8 +14,8 @@
 
 use risingwave_sqlparser::ast::{EmitMode, Ident, ObjectName, SqlOption};
 
-use crate::binder::statement::RewriteExprsRecursive;
 use crate::binder::BoundQuery;
+use crate::binder::statement::RewriteExprsRecursive;
 use crate::expr::ExprRewriter;
 
 /// Represents a bounded `CREATE MATERIALIZED VIEW` statement.

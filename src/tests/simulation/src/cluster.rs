@@ -22,7 +22,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 use cfg_or_panic::cfg_or_panic;
 use clap::Parser;
 use futures::channel::{mpsc, oneshot};
@@ -31,8 +31,8 @@ use futures::{SinkExt, StreamExt};
 use itertools::Itertools;
 #[cfg(madsim)]
 use madsim::runtime::{Handle, NodeHandle};
-use rand::seq::IteratorRandom;
 use rand::Rng;
+use rand::seq::IteratorRandom;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 #[cfg(madsim)]

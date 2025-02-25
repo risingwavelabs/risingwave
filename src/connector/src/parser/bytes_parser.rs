@@ -14,8 +14,8 @@
 
 use risingwave_common::try_match_expand;
 
-use super::unified::bytes::BytesAccess;
 use super::unified::AccessImpl;
+use super::unified::bytes::BytesAccess;
 use super::{AccessBuilder, EncodingProperties};
 use crate::error::ConnectorResult;
 

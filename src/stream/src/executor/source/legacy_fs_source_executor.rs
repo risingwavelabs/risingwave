@@ -39,9 +39,9 @@ use super::{
     get_split_offset_mapping_from_chunk, prune_additional_cols,
 };
 use crate::common::rate_limit::limited_chunk_size;
+use crate::executor::UpdateMutation;
 use crate::executor::prelude::*;
 use crate::executor::stream_reader::StreamReaderWithPause;
-use crate::executor::UpdateMutation;
 
 /// A constant to multiply when calculating the maximum time to wait for a barrier. This is due to
 /// some latencies in network and cost in meta.

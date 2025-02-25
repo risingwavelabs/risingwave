@@ -23,12 +23,12 @@ use risingwave_pb::hummock::{
     PbValidationTask,
 };
 
+use crate::HummockSstableObjectId;
 use crate::compaction_group::StateTableId;
 use crate::key_range::KeyRange;
 use crate::level::InputLevel;
 use crate::sstable_info::SstableInfo;
 use crate::table_watermark::{TableWatermarks, WatermarkSerdeType};
-use crate::HummockSstableObjectId;
 
 #[derive(Clone, PartialEq, Default, Debug)]
 pub struct CompactTask {

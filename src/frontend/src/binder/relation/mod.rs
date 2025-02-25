@@ -28,8 +28,8 @@ use thiserror_ext::AsReport;
 
 use super::bind_context::ColumnBinding;
 use super::statement::RewriteExprsRecursive;
-use crate::binder::bind_context::{BindingCte, BindingCteState};
 use crate::binder::Binder;
+use crate::binder::bind_context::{BindingCte, BindingCteState};
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{ExprImpl, InputRef};
 

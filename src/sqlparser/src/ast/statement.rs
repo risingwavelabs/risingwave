@@ -22,10 +22,10 @@ use serde::{Deserialize, Serialize};
 use winnow::PResult;
 
 use super::ddl::SourceWatermark;
-use super::legacy_source::{parse_format_encode, CompatibleFormatEncode};
+use super::legacy_source::{CompatibleFormatEncode, parse_format_encode};
 use super::{EmitMode, Ident, ObjectType, Query, Value};
 use crate::ast::{
-    display_comma_separated, display_separated, ColumnDef, ObjectName, SqlOption, TableConstraint,
+    ColumnDef, ObjectName, SqlOption, TableConstraint, display_comma_separated, display_separated,
 };
 use crate::keywords::Keyword;
 use crate::parser::{IncludeOption, IsOptional, Parser};

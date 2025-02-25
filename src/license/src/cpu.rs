@@ -44,24 +44,33 @@ mod tests {
         do_test(
             KEY,
             0,
-            expect!["feature TestPaid is not available due to license error: invalid license key: InvalidToken"],
+            expect![
+                "feature TestPaid is not available due to license error: invalid license key: InvalidToken"
+            ],
         );
         do_test(
             KEY,
             114514,
-            expect!["feature TestPaid is not available due to license error: invalid license key: InvalidToken"],
+            expect![
+                "feature TestPaid is not available due to license error: invalid license key: InvalidToken"
+            ],
         );
     }
 
     #[test]
     fn test_limit() {
-        const KEY: &str =
-         "eyJhbGciOiJSUzUxMiIsInR5cCI6IkpXVCJ9.\
+        const KEY: &str = "eyJhbGciOiJSUzUxMiIsInR5cCI6IkpXVCJ9.\
           eyJzdWIiOiJwYWlkLXRlc3QtMzIiLCJpc3MiOiJ0ZXN0LnJpc2luZ3dhdmUuY29tIiwidGllciI6InBhaWQiLCJleHAiOjIxNTA0OTU5OTksImlhdCI6MTczNzYxMjQ5NSwiY3B1X2NvcmVfbGltaXQiOjMyfQ.\
           SQpX2Dmon5Mb04VUbHyxsU7owJhcdLZHqUefxAXBwG5AqgKdpfS0XUePW5E4D-EfxtH_cWJiD4QDFsfdRUz88g_n_KvfNUObMW7NV5TUoRs_ImtS4ySugExNX3JzJi71QqgI8kugStQ7uOR9kZ_C-cCc_IG2CwwEmhhW1Ij0vX7qjhG5JNMit_bhxPY7Rh27ppgPTqWxJFTTsw-9B7O5WR_yIlaDjxVzk0ALm_j6DPB249gG3dkeK0rP0AK_ip2cK6iQdy8Cge7ATD6yUh4c_aR6GILDF6-vyB7QdWU6DdQS4KhdkPNWoe_Z9psotcXQJ7NhQ39hk8tdLzmTfGDDBA";
 
         do_test(KEY, 31, expect!["ok"]);
         do_test(KEY, 32, expect!["ok"]);
-        do_test(KEY, 33, expect!["feature TestPaid is not available due to license error: the license key is currently not effective because the CPU core in the cluster (33) exceeds the maximum allowed by the license key (32); consider removing some nodes or acquiring a new license key with a higher limit"]);
+        do_test(
+            KEY,
+            33,
+            expect![
+                "feature TestPaid is not available due to license error: the license key is currently not effective because the CPU core in the cluster (33) exceeds the maximum allowed by the license key (32); consider removing some nodes or acquiring a new license key with a higher limit"
+            ],
+        );
     }
 }

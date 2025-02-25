@@ -115,9 +115,9 @@ mod tests {
             ("", None),
             (
                 "http://abc",
-                Some(MetaAddressStrategy::List(vec!["http://abc"
-                    .parse()
-                    .unwrap()])),
+                Some(MetaAddressStrategy::List(vec![
+                    "http://abc".parse().unwrap(),
+                ])),
             ),
             (
                 "http://abc,http://def",

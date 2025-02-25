@@ -20,7 +20,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use console::style;
 use dialoguer::MultiSelect;
-use enum_iterator::{all, Sequence};
+use enum_iterator::{Sequence, all};
 use fs_err::OpenOptions;
 use itertools::Itertools;
 

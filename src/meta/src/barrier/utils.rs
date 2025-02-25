@@ -19,7 +19,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::from_prost_table_stats_map;
 use risingwave_hummock_sdk::table_watermark::{
-    merge_multiple_new_table_watermarks, TableWatermarks,
+    TableWatermarks, merge_multiple_new_table_watermarks,
 };
 use risingwave_hummock_sdk::{HummockSstableObjectId, LocalSstableInfo};
 use risingwave_pb::stream_service::BarrierCompleteResponse;

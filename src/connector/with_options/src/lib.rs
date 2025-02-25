@@ -14,7 +14,7 @@
 
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, DeriveInput};
+use syn::{DeriveInput, parse_macro_input};
 
 /// Annotates that the struct represents the `WITH` properties for a connector.
 /// This implements a marker trait `WithOptions`.

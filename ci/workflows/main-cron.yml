@@ -100,7 +100,6 @@ steps:
       depends_on:
         - "build"
         - "build-other"
-        - "docslt"
       plugins:
         - docker-compose#v5.5.0: *docker-compose-standard
         - ./ci/plugins/upload-failure-logs
@@ -121,7 +120,7 @@ steps:
       plugins:
         - docker-compose#v5.5.0: *docker-compose-standard
         - ./ci/plugins/upload-failure-logs
-      timeout_in_minutes: 8
+      timeout_in_minutes: 9
       retry: *auto-retry
 
     - label: "end-to-end test (parallel, {{matrix.backend}} backend)"
@@ -134,6 +133,7 @@ steps:
         || build.env("CI_STEPS") =~ /(^|,)e2e-parallel-tests?(,|$$)/
       depends_on:
         - "build"
+        - "build-other"
         - "docslt"
       plugins:
         - seek-oss/aws-sm#v2.3.2:
@@ -156,7 +156,6 @@ steps:
       || build.env("CI_STEPS") =~ /(^|,)e2e-parallel-in-memory-tests?(,|$$)/
     depends_on:
       - "build"
-      - "docslt"
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
@@ -416,7 +415,7 @@ steps:
     command: "ci/scripts/e2e-iceberg-sink-test.sh -p ci-release"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-e2e-iceberg-sink-tests"
+      || build.pull_request.labels includes "ci/run-e2e-iceberg-tests"
       || build.env("CI_STEPS") =~ /(^|,)e2e-iceberg-sink-tests?(,|$$)/
     depends_on:
       - "build"
@@ -432,7 +431,7 @@ steps:
     command: "ci/scripts/e2e-iceberg-sink-v2-test.sh -p ci-release"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-e2e-iceberg-sink-v2-tests"
+      || build.pull_request.labels includes "ci/run-e2e-iceberg-tests"
       || build.env("CI_STEPS") =~ /(^|,)e2e-iceberg-sink-v2-tests?(,|$$)/
     depends_on:
       - "build"

@@ -859,11 +859,14 @@ impl Mutation {
                     .collect(),
             },
             PbMutation::Combined(CombinedMutation { mutations }) => match &mutations[..] {
-                [BarrierMutation {
-                    mutation: Some(add),
-                }, BarrierMutation {
-                    mutation: Some(update),
-                }] => {
+                [
+                    BarrierMutation {
+                        mutation: Some(add),
+                    },
+                    BarrierMutation {
+                        mutation: Some(update),
+                    },
+                ] => {
                     let Mutation::Add(add_mutation) = Mutation::from_protobuf(add)? else {
                         unreachable!();
                     };

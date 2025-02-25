@@ -131,11 +131,7 @@ pub type CastResult<T = ()> = Result<T, CastError>;
 /// Returns `Ok` if `ok` is true, otherwise returns a placeholder [`CastError`] to be further
 /// wrapped with a more informative context in [`cast`].
 fn canbo(ok: bool) -> CastResult {
-    if ok {
-        Ok(())
-    } else {
-        bail_cast_error!()
-    }
+    if ok { Ok(()) } else { bail_cast_error!() }
 }
 /// Equivalent to `canbo(false)`.
 fn cannot() -> CastResult {
@@ -344,8 +340,8 @@ mod tests {
     use super::*;
 
     fn gen_cast_table(allows: CastContext) -> Vec<String> {
-        use itertools::Itertools as _;
         use DataType as T;
+        use itertools::Itertools as _;
         let all_types = &[
             T::Boolean,
             T::Int16,

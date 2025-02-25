@@ -16,8 +16,8 @@ use std::borrow::Cow;
 
 use itertools::Itertools;
 use risingwave_common::types::Datum;
-use risingwave_pb::expr::expr_node::{RexNode, Type as ExprType};
 use risingwave_pb::expr::ExprNode;
+use risingwave_pb::expr::expr_node::{RexNode, Type as ExprType};
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::{
     AdditionalColumn, ColumnDescVersion, DefaultColumnDesc, PbColumnCatalog, PbColumnDesc,
@@ -399,12 +399,6 @@ impl ColumnCatalog {
                 DataType::Int64,
             )),
         ]
-    }
-
-    pub fn is_iceberg_hidden_col(&self) -> bool {
-        self.column_desc.name == ICEBERG_SEQUENCE_NUM_COLUMN_NAME
-            || self.column_desc.name == ICEBERG_FILE_PATH_COLUMN_NAME
-            || self.column_desc.name == ICEBERG_FILE_POS_COLUMN_NAME
     }
 
     /// Note: these columns are added in `SourceStreamChunkRowWriter::do_action`.

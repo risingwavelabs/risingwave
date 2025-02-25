@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::{zip_eq, Itertools};
+use itertools::{Itertools, zip_eq};
 use rand::RngCore;
 use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::bitmap::{Bitmap, BitmapBuilder};

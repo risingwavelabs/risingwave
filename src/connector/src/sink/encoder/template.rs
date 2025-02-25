@@ -21,8 +21,8 @@ use risingwave_common::types::{DataType, ScalarRefImpl, ToText};
 use thiserror_ext::AsReport;
 
 use super::{Result, RowEncoder};
-use crate::sink::encoder::SerTo;
 use crate::sink::SinkError;
+use crate::sink::encoder::SerTo;
 
 pub enum TemplateEncoder {
     String(TemplateStringEncoder),

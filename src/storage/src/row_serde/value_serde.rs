@@ -31,8 +31,8 @@ use risingwave_common::util::value_encoding::{
     ValueRowSerdeKind, ValueRowSerializer,
 };
 use risingwave_expr::expr::build_from_prost;
-use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::DefaultColumnDesc;
+use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 
 pub type Result<T> = std::result::Result<T, ValueEncodingError>;
 

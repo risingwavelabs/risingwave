@@ -128,8 +128,8 @@ mod tests {
     use risingwave_common::types::DataType;
 
     use super::ExpandExecutor;
-    use crate::executor::test_utils::MockExecutor;
     use crate::executor::Executor;
+    use crate::executor::test_utils::MockExecutor;
 
     const CHUNK_SIZE: usize = 1024;
 

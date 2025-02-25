@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
 
 use assert_matches::assert_matches;
 use futures::StreamExt;
 use itertools::Itertools;
-use risingwave_common::array::stream_chunk::StreamChunkTestExt;
 use risingwave_common::array::StreamChunk;
+use risingwave_common::array::stream_chunk::StreamChunkTestExt;
 use risingwave_common::catalog::{ColumnDesc, ConflictBehavior, Field, Schema, TableId};
 use risingwave_common::types::DataType;
 use risingwave_common::util::epoch::test_epoch;
@@ -27,8 +27,8 @@ use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::table::batch_table::BatchTable;
 
-use crate::executor::lookup::impl_::LookupExecutorParams;
 use crate::executor::lookup::LookupExecutor;
+use crate::executor::lookup::impl_::LookupExecutorParams;
 use crate::executor::test_utils::*;
 use crate::executor::{
     ActorContext, Barrier, BoxedMessageStream, Execute, Executor, ExecutorInfo,

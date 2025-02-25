@@ -16,7 +16,7 @@ use risingwave_common::types::{Fields, Timestamptz};
 use risingwave_frontend_macro::system_catalog;
 use risingwave_pb::user::grant_privilege::Object as GrantObject;
 
-use crate::catalog::system_catalog::{get_acl_items, SysCatalogReaderImpl};
+use crate::catalog::system_catalog::{SysCatalogReaderImpl, get_acl_items};
 use crate::error::Result;
 
 #[derive(Fields)]

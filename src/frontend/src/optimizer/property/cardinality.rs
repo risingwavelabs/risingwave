@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::{max, min, Ordering};
+use std::cmp::{Ordering, max, min};
 use std::ops::{Add, Mul, RangeFrom, RangeInclusive, Sub};
 
 use risingwave_pb::plan_common::PbCardinality;

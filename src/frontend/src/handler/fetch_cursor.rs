@@ -20,10 +20,10 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{FetchCursorStatement, Statement};
 
+use super::RwPgResponse;
 use super::extended_handle::{PortalResult, PrepareStatement, PreparedResult};
 use super::query::BoundResult;
 use super::util::convert_interval_to_u64_seconds;
-use super::RwPgResponse;
 use crate::binder::BoundStatement;
 use crate::error::Result;
 use crate::handler::HandlerArgs;

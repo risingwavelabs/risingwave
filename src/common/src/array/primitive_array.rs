@@ -19,8 +19,8 @@ use std::mem::size_of;
 use anyhow::Context;
 use byteorder::{BigEndian, ReadBytesExt};
 use risingwave_common_estimate_size::{EstimateSize, ZeroHeapSize};
-use risingwave_pb::common::buffer::CompressionType;
 use risingwave_pb::common::Buffer;
+use risingwave_pb::common::buffer::CompressionType;
 use risingwave_pb::data::{ArrayType, PbArray};
 
 use super::{Array, ArrayBuilder, ArrayImpl, ArrayResult};

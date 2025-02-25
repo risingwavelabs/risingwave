@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use risingwave_expr::aggregate::{AggType, PbAggKind};
-use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::SortAggNode;
+use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use super::batch::prelude::*;
 use super::generic::{self, PlanAggCall};

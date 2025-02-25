@@ -25,8 +25,8 @@ use parking_lot::RwLock;
 use risingwave_common::acl::AclMode;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{
-    ColumnCatalog, ColumnDesc, Field, SysCatalogReader, TableDesc, TableId, DEFAULT_SUPER_USER_ID,
-    MAX_SYS_CATALOG_NUM, SYS_CATALOG_START_ID,
+    ColumnCatalog, ColumnDesc, DEFAULT_SUPER_USER_ID, Field, MAX_SYS_CATALOG_NUM,
+    SYS_CATALOG_START_ID, SysCatalogReader, TableDesc, TableId,
 };
 use risingwave_common::error::BoxedError;
 use risingwave_common::session_config::SessionConfig;
@@ -40,10 +40,10 @@ use crate::catalog::catalog_service::CatalogReader;
 use crate::catalog::view_catalog::ViewCatalog;
 use crate::meta_client::FrontendMetaClient;
 use crate::session::AuthContext;
+use crate::user::UserId;
 use crate::user::user_catalog::UserCatalog;
 use crate::user::user_privilege::available_prost_privilege;
 use crate::user::user_service::UserInfoReader;
-use crate::user::UserId;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct SystemTableCatalog {

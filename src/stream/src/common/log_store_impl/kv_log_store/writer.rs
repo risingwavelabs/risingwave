@@ -27,7 +27,7 @@ use tokio::sync::watch;
 
 use crate::common::log_store_impl::kv_log_store::buffer::LogStoreBufferSender;
 use crate::common::log_store_impl::kv_log_store::state::LogStoreWriteState;
-use crate::common::log_store_impl::kv_log_store::{KvLogStoreMetrics, SeqIdType, FIRST_SEQ_ID};
+use crate::common::log_store_impl::kv_log_store::{FIRST_SEQ_ID, KvLogStoreMetrics, SeqIdType};
 
 pub struct KvLogStoreWriter<LS: LocalStateStore> {
     seq_id: SeqIdType,
@@ -152,7 +152,9 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
         Ok(LogWriterPostFlushCurrentEpoch::new(
             move |new_vnodes: Option<Arc<Bitmap>>| {
                 async move {
-                    post_seal_epoch.post_yield_barrier(new_vnodes.clone());
+                    post_seal_epoch
+                        .post_yield_barrier(new_vnodes.clone())
+                        .await?;
                     if let Some(new_vnodes) = new_vnodes {
                         tx.update_vnode(next_epoch, new_vnodes);
                     }

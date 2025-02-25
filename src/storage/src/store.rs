@@ -28,11 +28,11 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::{Epoch, EpochPair};
+use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange};
 use risingwave_hummock_sdk::table_watermark::{
     VnodeWatermark, WatermarkDirection, WatermarkSerdeType,
 };
-use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_hummock_trace::{
     TracedInitOptions, TracedNewLocalOptions, TracedOpConsistencyLevel, TracedPrefetchOptions,
     TracedReadOptions, TracedSealCurrentEpochOptions, TracedTryWaitEpochOptions,
@@ -462,7 +462,7 @@ pub trait LocalStateStore: StaticSendSync {
 
     // Updates the vnode bitmap corresponding to the local state store
     // Returns the previous vnode bitmap
-    fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap>;
+    fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> impl StorageFuture<'_, Arc<Bitmap>>;
 }
 
 /// If `prefetch` is true, prefetch will be enabled. Prefetching may increase the memory

@@ -18,7 +18,7 @@ use jni::objects::JString;
 use jni::sys::{jboolean, jint};
 use tracing::Level;
 
-use crate::{execute_and_catch, EnvParam};
+use crate::{EnvParam, execute_and_catch};
 
 const TARGET: &str = "risingwave_connector_node";
 
