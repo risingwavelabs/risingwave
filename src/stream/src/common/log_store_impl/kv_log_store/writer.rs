@@ -43,6 +43,8 @@ pub struct KvLogStoreWriter<LS: LocalStateStore> {
     is_paused: bool,
 
     identity: String,
+
+    align_epoch_on_init: bool,
 }
 
 impl<LS: LocalStateStore> KvLogStoreWriter<LS> {
@@ -52,6 +54,7 @@ impl<LS: LocalStateStore> KvLogStoreWriter<LS> {
         metrics: KvLogStoreMetrics,
         paused_notifier: watch::Sender<bool>,
         identity: String,
+        align_epoch_on_init: bool,
     ) -> Self {
         Self {
             seq_id: FIRST_SEQ_ID,
@@ -61,6 +64,7 @@ impl<LS: LocalStateStore> KvLogStoreWriter<LS> {
             paused_notifier,
             identity,
             is_paused: false,
+            align_epoch_on_init,
         }
     }
 }
@@ -77,7 +81,12 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
             info!("KvLogStore of {} paused on bootstrap", self.identity);
         }
         self.seq_id = FIRST_SEQ_ID;
-        self.tx.init(epoch.curr);
+        let init_offset_range_start = if self.align_epoch_on_init {
+            Some(self.state.aligned_init_range_start())
+        } else {
+            None
+        };
+        self.tx.init(epoch, init_offset_range_start);
         Ok(())
     }
 

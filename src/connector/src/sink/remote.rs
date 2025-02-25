@@ -551,6 +551,10 @@ impl<R: RemoteSinkTrait> Sink for CoordinatedRemoteSink<R> {
         .into_log_sinker(metrics))
     }
 
+    fn is_coordinated_sink(&self) -> bool {
+        true
+    }
+
     async fn new_coordinator(&self) -> Result<Self::Coordinator> {
         RemoteCoordinator::new::<R>(self.param.clone()).await
     }

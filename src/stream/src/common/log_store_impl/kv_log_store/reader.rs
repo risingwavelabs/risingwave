@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::future::Future;
+use std::mem::replace;
 use std::ops::Bound;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::pin::Pin;
@@ -77,6 +78,7 @@ mod rewind_backoff_policy {
 }
 
 use rewind_backoff_policy::*;
+use risingwave_common::must_match;
 
 struct RewindDelay {
     last_rewind_truncate_offset: Option<TruncateOffset>,
@@ -120,6 +122,50 @@ impl RewindDelay {
     }
 }
 
+enum KvLogStoreReaderFutureState<S: StateStoreRead> {
+    /// `Some` means consuming historical log data
+    ReadStateStoreStream(Pin<Box<LogStoreItemMergeStream<TimeoutAutoRebuildIter<S>>>>),
+    ReadFlushedChunk(BoxFuture<'static, LogStoreResult<(ChunkId, StreamChunk, u64)>>),
+    Empty,
+}
+
+impl<S: StateStoreRead> KvLogStoreReaderFutureState<S> {
+    async fn set_and_drive_future<F: Future + Unpin>(
+        &mut self,
+        future_state: Self,
+        get_future: impl FnOnce(&mut Self) -> &mut F,
+    ) -> F::Output {
+        // Store the future in case that in the subsequent pending await point,
+        // the future is cancelled, and we lose an item.
+        must_match!(replace(self, future_state),
+                    KvLogStoreReaderFutureState::Empty => {});
+
+        // for cancellation test
+        #[cfg(test)]
+        {
+            sleep(Duration::from_secs(1)).await;
+        }
+
+        let output = get_future(self).await;
+        *self = KvLogStoreReaderFutureState::Empty;
+        output
+    }
+}
+
+macro_rules! set_and_drive_future {
+    ($future_state:expr, $item_name:ident, $future:expr) => {
+        $future_state.set_and_drive_future(
+            KvLogStoreReaderFutureState::$item_name($future),
+            |future_state| match future_state {
+                KvLogStoreReaderFutureState::$item_name(future) => future,
+                _ => {
+                    unreachable!()
+                }
+            },
+        )
+    };
+}
+
 pub struct KvLogStoreReader<S: StateStoreRead> {
     state: LogStoreReadState<S>,
 
@@ -128,16 +174,7 @@ pub struct KvLogStoreReader<S: StateStoreRead> {
     /// The first epoch that newly written by the log writer
     first_write_epoch: Option<u64>,
 
-    /// `Some` means consuming historical log data
-    state_store_stream: Option<Pin<Box<LogStoreItemMergeStream<TimeoutAutoRebuildIter<S>>>>>,
-
-    /// Store the future that attempts to read a flushed stream chunk.
-    /// This is for cancellation safety. Since it is possible that the future of `next_item`
-    /// gets dropped after it takes an flushed item out from the buffer, but before it successfully
-    /// read the stream chunk out from the storage. Therefore we store the future so that it can continue
-    /// reading the stream chunk after the next `next_item` is called.
-    read_flushed_chunk_future:
-        Option<BoxFuture<'static, LogStoreResult<(ChunkId, StreamChunk, u64)>>>,
+    future_state: KvLogStoreReaderFutureState<S>,
 
     latest_offset: Option<TruncateOffset>,
 
@@ -150,6 +187,8 @@ pub struct KvLogStoreReader<S: StateStoreRead> {
     identity: String,
 
     rewind_delay: RewindDelay,
+
+    align_epoch_on_init: bool,
 }
 
 impl<S: StateStoreRead> KvLogStoreReader<S> {
@@ -159,35 +198,21 @@ impl<S: StateStoreRead> KvLogStoreReader<S> {
         metrics: KvLogStoreMetrics,
         is_paused: watch::Receiver<bool>,
         identity: String,
+        align_epoch_on_init: bool,
     ) -> Self {
         let rewind_delay = RewindDelay::new(&metrics);
         Self {
             state,
             rx,
-            read_flushed_chunk_future: None,
             first_write_epoch: None,
-            state_store_stream: None,
+            future_state: KvLogStoreReaderFutureState::Empty,
             latest_offset: None,
             truncate_offset: None,
             metrics,
             is_paused,
             identity,
             rewind_delay,
-        }
-    }
-
-    async fn may_continue_read_flushed_chunk(
-        &mut self,
-    ) -> LogStoreResult<Option<(ChunkId, StreamChunk, u64)>> {
-        if let Some(future) = self.read_flushed_chunk_future.as_mut() {
-            let result = future.instrument_await("Read Flushed Chunk").await;
-            let _fut = self
-                .read_flushed_chunk_future
-                .take()
-                .expect("future not None");
-            Ok(Some(result?))
-        } else {
-            Ok(None)
+            align_epoch_on_init,
         }
     }
 }
@@ -337,28 +362,39 @@ impl<S: StateStoreRead, F: FnMut() -> bool + Send> StateStoreIter
 impl<S: StateStoreRead> KvLogStoreReader<S> {
     fn read_persisted_log_store(
         &self,
-        last_persisted_epoch: Option<u64>,
+        range_start: LogStoreReadStateStreamRangeStart,
     ) -> impl Future<
         Output = LogStoreResult<Pin<Box<LogStoreItemMergeStream<TimeoutAutoRebuildIter<S>>>>>,
     > + Send {
         self.state.read_persisted_log_store(
             &self.metrics,
             self.first_write_epoch.expect("should have init"),
-            last_persisted_epoch,
+            range_start,
         )
     }
 }
 
 impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
     async fn init(&mut self) -> LogStoreResult<()> {
-        let first_write_epoch = self.rx.init().await;
+        let (init_epoch, aligned_range_start) = self.rx.init().await;
+        let first_write_epoch = init_epoch.curr;
 
         assert!(
             self.first_write_epoch.replace(first_write_epoch).is_none(),
             "should not init twice"
         );
 
-        self.state_store_stream = Some(self.read_persisted_log_store(None).await?);
+        let range_start = if self.align_epoch_on_init
+            && let Some(range_start) = aligned_range_start.expect("should have aligned range start")
+        {
+            LogStoreReadStateStreamRangeStart::SerializedInclusive(range_start)
+        } else {
+            LogStoreReadStateStreamRangeStart::Unbounded
+        };
+
+        self.future_state = KvLogStoreReaderFutureState::ReadStateStoreStream(
+            self.read_persisted_log_store(range_start).await?,
+        );
 
         Ok(())
     }
@@ -372,55 +408,57 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
                 .await
                 .map_err(|_| anyhow!("unable to subscribe resume"))?;
         }
-        if let Some(state_store_stream) = &mut self.state_store_stream {
-            match state_store_stream
-                .try_next()
-                .instrument_await("Try Next for Historical Stream")
-                .await?
-            {
-                Some((epoch, item)) => {
-                    if let Some(latest_offset) = &self.latest_offset {
-                        latest_offset.check_next_item_epoch(epoch)?;
+        match &mut self.future_state {
+            KvLogStoreReaderFutureState::ReadStateStoreStream(state_store_stream) => {
+                match state_store_stream
+                    .try_next()
+                    .instrument_await("Try Next for Historical Stream")
+                    .await?
+                {
+                    Some((epoch, item)) => {
+                        if let Some(latest_offset) = &self.latest_offset {
+                            latest_offset.check_next_item_epoch(epoch)?;
+                        }
+                        let item = match item {
+                            KvLogStoreItem::StreamChunk(chunk) => {
+                                let chunk_id = if let Some(latest_offset) = self.latest_offset {
+                                    latest_offset.next_chunk_id()
+                                } else {
+                                    0
+                                };
+                                self.latest_offset =
+                                    Some(TruncateOffset::Chunk { epoch, chunk_id });
+                                LogStoreReadItem::StreamChunk { chunk, chunk_id }
+                            }
+                            KvLogStoreItem::Barrier { is_checkpoint } => {
+                                self.latest_offset = Some(TruncateOffset::Barrier { epoch });
+                                LogStoreReadItem::Barrier { is_checkpoint }
+                            }
+                        };
+                        return Ok((epoch, item));
                     }
-                    let item = match item {
-                        KvLogStoreItem::StreamChunk(chunk) => {
-                            let chunk_id = if let Some(latest_offset) = self.latest_offset {
-                                latest_offset.next_chunk_id()
-                            } else {
-                                0
-                            };
-                            self.latest_offset = Some(TruncateOffset::Chunk { epoch, chunk_id });
-                            LogStoreReadItem::StreamChunk { chunk, chunk_id }
-                        }
-                        KvLogStoreItem::Barrier { is_checkpoint } => {
-                            self.latest_offset = Some(TruncateOffset::Barrier { epoch });
-                            LogStoreReadItem::Barrier { is_checkpoint }
-                        }
-                    };
-                    return Ok((epoch, item));
-                }
-                None => {
-                    self.state_store_stream = None;
+                    None => {
+                        self.future_state = KvLogStoreReaderFutureState::Empty;
+                    }
                 }
             }
-        }
-
-        // It is possible that the future gets dropped after it pops a flushed
-        // item but before it reads a stream chunk. Therefore, we may continue
-        // driving the future to continue reading the stream chunk.
-        if let Some((chunk_id, chunk, item_epoch)) = self.may_continue_read_flushed_chunk().await? {
-            let offset = TruncateOffset::Chunk {
-                epoch: item_epoch,
-                chunk_id,
-            };
-            if let Some(latest_offset) = &self.latest_offset {
-                assert!(offset > *latest_offset);
+            KvLogStoreReaderFutureState::ReadFlushedChunk(future) => {
+                let (chunk_id, chunk, item_epoch) = future.await?;
+                self.future_state = KvLogStoreReaderFutureState::Empty;
+                let offset = TruncateOffset::Chunk {
+                    epoch: item_epoch,
+                    chunk_id,
+                };
+                if let Some(latest_offset) = &self.latest_offset {
+                    assert!(offset > *latest_offset);
+                }
+                self.latest_offset = Some(offset);
+                return Ok((
+                    item_epoch,
+                    LogStoreReadItem::StreamChunk { chunk, chunk_id },
+                ));
             }
-            self.latest_offset = Some(offset);
-            return Ok((
-                item_epoch,
-                LogStoreReadItem::StreamChunk { chunk, chunk_id },
-            ));
+            KvLogStoreReaderFutureState::Empty => {}
         }
 
         // Now the historical state store has been consumed.
@@ -469,24 +507,12 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
                         .boxed()
                 };
 
-                // Store the future in case that in the subsequent pending await point,
-                // the future is cancelled, and we lose an flushed item.
-                assert!(
-                    self.read_flushed_chunk_future
-                        .replace(read_flushed_chunk_future)
-                        .is_none()
-                );
-
-                // for cancellation test
-                #[cfg(test)]
-                {
-                    sleep(Duration::from_secs(1)).await;
-                }
-
-                let (_, chunk, _) = self
-                    .may_continue_read_flushed_chunk()
-                    .await?
-                    .expect("future just insert. unlikely to be none");
+                let (_, chunk, _) = set_and_drive_future!(
+                    &mut self.future_state,
+                    ReadFlushedChunk,
+                    read_flushed_chunk_future
+                )
+                .await?;
 
                 let offset = TruncateOffset::Chunk {
                     epoch: item_epoch,
@@ -563,7 +589,6 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
     async fn rewind(&mut self) -> LogStoreResult<(bool, Option<Bitmap>)> {
         self.rewind_delay.rewind_delay(self.truncate_offset).await;
         self.latest_offset = None;
-        self.read_flushed_chunk_future = None;
         if self.truncate_offset.is_none()
             || self.truncate_offset.expect("not none").epoch()
                 < self.first_write_epoch.expect("should have init")
@@ -575,9 +600,15 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
                         TruncateOffset::Chunk { epoch, .. } => epoch.prev_epoch(),
                         TruncateOffset::Barrier { epoch } => epoch,
                     });
-            self.state_store_stream = Some(self.read_persisted_log_store(persisted_epoch).await?);
+            let range_start = match persisted_epoch {
+                None => LogStoreReadStateStreamRangeStart::Unbounded,
+                Some(epoch) => LogStoreReadStateStreamRangeStart::LastPersistedEpoch(epoch),
+            };
+            self.future_state = KvLogStoreReaderFutureState::ReadStateStoreStream(
+                self.read_persisted_log_store(range_start).await?,
+            );
         } else {
-            assert!(self.state_store_stream.is_none());
+            self.future_state = KvLogStoreReaderFutureState::Empty;
         }
         self.rx.rewind();
 
@@ -618,7 +649,7 @@ impl<S: StateStoreRead> LogStoreReadState<S> {
                                 HummockEpoch::MAX,
                                 ReadOptions {
                                     prefetch_options:
-                                        PrefetchOptions::prefetch_for_large_range_scan(),
+                                    PrefetchOptions::prefetch_for_large_range_scan(),
                                     cache_policy: CachePolicy::Fill(CacheHint::Low),
                                     table_id,
                                     ..Default::default()
@@ -628,8 +659,8 @@ impl<S: StateStoreRead> LogStoreReadState<S> {
                     )
                 }
             }))
-            .instrument_await("Wait Create Iter Stream")
-            .await?;
+                .instrument_await("Wait Create Iter Stream")
+                .await?;
 
             let chunk = serde
                 .deserialize_stream_chunk(
@@ -643,24 +674,36 @@ impl<S: StateStoreRead> LogStoreReadState<S> {
                 .await?;
 
             Ok((chunk_id, chunk, item_epoch))
-        }
+        }.instrument_await("Read Flushed Chunk")
     }
+}
 
+pub(crate) enum LogStoreReadStateStreamRangeStart {
+    Unbounded,
+    LastPersistedEpoch(u64),
+    SerializedInclusive(Bytes),
+}
+
+impl<S: StateStoreRead> LogStoreReadState<S> {
     pub(crate) fn read_persisted_log_store(
         &self,
         metrics: &KvLogStoreMetrics,
         first_write_epoch: u64,
-        last_persisted_epoch: Option<u64>,
+        range_start: LogStoreReadStateStreamRangeStart,
     ) -> impl Future<
         Output = LogStoreResult<Pin<Box<LogStoreItemMergeStream<TimeoutAutoRebuildIter<S>>>>>,
     > + Send
     + 'static {
         let serde = self.serde.clone();
-        let range_start = if let Some(last_persisted_epoch) = last_persisted_epoch {
-            // start from the next epoch of last_persisted_epoch
-            Included(serde.serialize_pk_epoch_prefix(last_persisted_epoch.next_epoch()))
-        } else {
-            Unbounded
+        let range_start = match range_start {
+            LogStoreReadStateStreamRangeStart::Unbounded => Unbounded,
+            LogStoreReadStateStreamRangeStart::LastPersistedEpoch(last_persisted_epoch) => {
+                // start from the next epoch of last_persisted_epoch
+                Included(serde.serialize_pk_epoch_prefix(last_persisted_epoch + 1))
+            }
+            LogStoreReadStateStreamRangeStart::SerializedInclusive(range_start) => {
+                Included(range_start)
+            }
         };
         let range_end = serde.serialize_pk_epoch_prefix(first_write_epoch);
 

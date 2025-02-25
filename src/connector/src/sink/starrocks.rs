@@ -339,6 +339,10 @@ impl Sink for StarrocksSink {
         ))
     }
 
+    fn is_coordinated_sink(&self) -> bool {
+        true
+    }
+
     async fn new_coordinator(&self) -> Result<Self::Coordinator> {
         let header = HeaderBuilder::new()
             .add_common_header()

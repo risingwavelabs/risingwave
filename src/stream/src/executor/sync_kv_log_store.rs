@@ -81,6 +81,7 @@ use risingwave_storage::store::{
 use rw_futures_util::drop_either_future;
 
 use crate::common::log_store_impl::kv_log_store::buffer::LogStoreBufferItem;
+use crate::common::log_store_impl::kv_log_store::reader::LogStoreReadStateStreamRangeStart;
 use crate::common::log_store_impl::kv_log_store::reader::timeout_auto_rebuild::TimeoutAutoRebuildIter;
 use crate::common::log_store_impl::kv_log_store::serde::{
     KvLogStoreItem, LogStoreItemMergeStream, LogStoreRowSerde,
@@ -276,7 +277,11 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
             };
             let mut read_future = ReadFuture::ReadingPersistedStream(
                 read_state
-                    .read_persisted_log_store(&self.metrics, initial_write_epoch.prev, None)
+                    .read_persisted_log_store(
+                        &self.metrics,
+                        initial_write_epoch.prev,
+                        LogStoreReadStateStreamRangeStart::Unbounded,
+                    )
                     .await?,
             );
 
