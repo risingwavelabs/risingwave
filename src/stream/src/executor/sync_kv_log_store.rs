@@ -79,7 +79,7 @@ use risingwave_storage::store::{
     LocalStateStore, NewLocalOptions, OpConsistencyLevel, StateStoreRead,
 };
 use rw_futures_util::drop_either_future;
-use tokio::time::{Duration, sleep};
+use tokio::time::{Duration, Sleep, sleep};
 
 use crate::common::log_store_impl::kv_log_store::buffer::LogStoreBufferItem;
 use crate::common::log_store_impl::kv_log_store::reader::timeout_auto_rebuild::TimeoutAutoRebuildIter;
@@ -151,7 +151,7 @@ struct FlushedChunkInfo {
 
 enum WriteFuture<S: LocalStateStore> {
     Paused {
-        duration: Duration,
+        sleep_future: Pin<Box<Sleep>>,
         future: StreamFuture<BoxedMessageStream>,
         write_state: LogStoreWriteState<S>, // Just used to hold the state
     },
@@ -213,7 +213,7 @@ impl<S: LocalStateStore> WriteFuture<S> {
         write_state: LogStoreWriteState<S>,
     ) -> Self {
         Self::Paused {
-            duration,
+            sleep_future: Box::pin(sleep(duration)),
             future: stream.into_future(),
             write_state,
         }
@@ -224,9 +224,11 @@ impl<S: LocalStateStore> WriteFuture<S> {
     ) -> StreamExecutorResult<(BoxedMessageStream, LogStoreWriteState<S>, WriteFutureEvent)> {
         match self {
             WriteFuture::Paused {
-                duration, future, ..
+                sleep_future,
+                future,
+                ..
             } => {
-                sleep(*duration).await;
+                sleep_future.await;
                 let (opt, stream) = future.await;
                 must_match!(replace(self, WriteFuture::Empty), WriteFuture::Paused { write_state, .. } => {
                     opt
