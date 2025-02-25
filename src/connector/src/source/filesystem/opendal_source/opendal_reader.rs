@@ -81,7 +81,15 @@ impl<Src: OpendalSource> OpendalReader<Src> {
             let source_ctx = self.source_ctx.clone();
 
             let object_name = split.name.clone();
-
+            let actor_id = source_ctx.actor_id.to_string();
+            let fragment_id = source_ctx.fragment_id.to_string();
+            let source_id = source_ctx.source_id.to_string();
+            let source_name = source_ctx.source_name.clone();
+            let file_source_input_row_count = self
+                .source_ctx
+                .metrics
+                .file_source_input_row_count
+                .with_guarded_label_values(&[&source_id, &source_name, &actor_id, &fragment_id]);
             let chunk_stream;
             if let EncodingProperties::Parquet = &self.parser_config.specific.encoding_config {
                 chunk_stream = read_parquet_file(
@@ -91,6 +99,7 @@ impl<Src: OpendalSource> OpendalReader<Src> {
                     Some(self.parser_config.common.rw_columns.clone()),
                     self.source_ctx.source_ctrl_opts.chunk_size,
                     split.offset,
+                    Some(file_source_input_row_count.clone()),
                 )
                 .await?;
             } else {
@@ -104,6 +113,7 @@ impl<Src: OpendalSource> OpendalReader<Src> {
                     split,
                     self.source_ctx.clone(),
                     self.connector.compression_format.clone(),
+                    file_source_input_row_count.clone(),
                 );
 
                 let parser =
@@ -125,6 +135,12 @@ impl<Src: OpendalSource> OpendalReader<Src> {
         split: OpendalFsSplit<Src>,
         source_ctx: SourceContextRef,
         compression_format: CompressionFormat,
+        file_source_input_row_count_metrics: 
+        risingwave_common::metrics::LabelGuardedMetric<
+            prometheus::core::GenericCounter<prometheus::core::AtomicU64>,
+            4,
+        >,
+    
     ) {
         let actor_id = source_ctx.actor_id.to_string();
         let fragment_id = source_ctx.fragment_id.to_string();
@@ -190,18 +206,13 @@ impl<Src: OpendalSource> OpendalReader<Src> {
                 // EOF
                 break;
             }
-            let remaining = buf_reader.fill_buf().await?;
-            let msg_offset = if remaining.is_empty() {
-                usize::MAX.to_string()
-            } else {
-                (offset + n_read).to_string()
-            };
+            // let remaining = buf_reader.fill_buf().await?;
+            let msg_offset = (offset + n_read).to_string();
             // note that the buffer contains the newline character
             debug_assert_eq!(n_read, line_buf.len());
             if (object_name.ends_with(".gz") || object_name.ends_with(".gzip"))
                 && offset + n_read <= start_offset
             {
-
                 // For gzip compressed files, the reader needs to read from the beginning each time,
                 // but it needs to skip the previously read part and start yielding chunks from a position greater than or equal to start_offset.
             } else {
@@ -218,12 +229,14 @@ impl<Src: OpendalSource> OpendalReader<Src> {
             partition_input_bytes_metrics.inc_by(n_read as _);
 
             if batch.len() >= max_chunk_size {
+                file_source_input_row_count_metrics.inc_by(max_chunk_size as _);
                 yield std::mem::replace(&mut batch, Vec::with_capacity(max_chunk_size));
             }
         }
 
         if !batch.is_empty() {
             batch.shrink_to_fit();
+            file_source_input_row_count_metrics.inc_by(batch.len() as _);
             yield batch;
         }
     }
