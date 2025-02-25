@@ -253,10 +253,6 @@ impl<'a> EncodedBytes<'a> {
             data: &encoded_bytes[data_start_idx..],
         })
     }
-
-    fn offset_width(&self) -> usize {
-        self.header.offset().width()
-    }
 }
 
 impl<'a> Iterator for EncodedBytes<'a> {
@@ -270,7 +266,7 @@ impl<'a> Iterator for EncodedBytes<'a> {
 
         let id = self.column_ids.get_i32_le();
 
-        let offset_width = self.offset_width();
+        let offset_width = self.header.offset().width();
         let get_offset = |offsets: &mut &[u8]| offsets.get_uint_le(offset_width) as usize;
 
         let this_offset = get_offset(&mut self.offsets);
