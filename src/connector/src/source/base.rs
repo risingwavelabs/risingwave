@@ -357,6 +357,11 @@ impl<T> ChunkSourceStream for T where
 }
 
 pub type BoxChunkSourceStream = BoxStream<'static, crate::error::ConnectorResult<StreamChunk>>;
+
+/// Stream of [`Option<StreamChunk>`]s parsed from the messages from the external source.
+pub type BoxStreamingFileSourceChunkStream =
+    BoxStream<'static, crate::error::ConnectorResult<Option<StreamChunk>>>;
+
 pub type BoxTryStream<M> = BoxStream<'static, crate::error::ConnectorResult<M>>;
 
 /// [`SplitReader`] is a new abstraction of the external connector read interface which is

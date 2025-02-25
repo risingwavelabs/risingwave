@@ -69,6 +69,8 @@ pub struct SourceMetrics {
     pub rdkafka_native_metric: Arc<RdKafkaStats>,
 
     pub direct_cdc_event_lag_latency: LabelGuardedHistogramVec<1>,
+
+    pub file_source_input_row_count: LabelGuardedIntCounterVec<4>,
 }
 
 pub static GLOBAL_SOURCE_METRICS: LazyLock<SourceMetrics> =
@@ -118,6 +120,14 @@ impl SourceMetrics {
         let direct_cdc_event_lag_latency =
             register_guarded_histogram_vec_with_registry!(opts, &["table_name"], registry).unwrap();
 
+        let file_source_input_row_count = register_guarded_int_counter_vec_with_registry!(
+            "file_source_input_row_count",
+            "Total number of rows that have been read in file source",
+            &["source_id", "source_name", "actor_id", "fragment_id"],
+            registry
+        )
+        .unwrap();
+
         let rdkafka_native_metric = Arc::new(RdKafkaStats::new(registry.clone()));
         SourceMetrics {
             partition_input_count,
@@ -125,6 +135,7 @@ impl SourceMetrics {
             latest_message_id,
             rdkafka_native_metric,
             direct_cdc_event_lag_latency,
+            file_source_input_row_count,
         }
     }
 }
