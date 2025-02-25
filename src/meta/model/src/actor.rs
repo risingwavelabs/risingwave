@@ -65,8 +65,6 @@ pub struct Model {
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
-    #[sea_orm(has_many = "super::actor_dispatcher::Entity")]
-    ActorDispatcher,
     #[sea_orm(
         belongs_to = "super::fragment::Entity",
         from = "Column::FragmentId",
@@ -75,12 +73,6 @@ pub enum Relation {
         on_delete = "Cascade"
     )]
     Fragment,
-}
-
-impl Related<super::actor_dispatcher::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::ActorDispatcher.def()
-    }
 }
 
 impl Related<super::fragment::Entity> for Entity {
