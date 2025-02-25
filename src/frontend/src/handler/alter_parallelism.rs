@@ -44,7 +44,7 @@ pub async fn handle_alter_parallelism(
     let user_name = &session.user_name();
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
-    let table_id = {
+    let job_id = {
         let reader = session.env().catalog_reader().read_guard();
 
         match stmt_type {
@@ -76,6 +76,13 @@ pub async fn handle_alter_parallelism(
                 session.check_privilege_for_drop_alter(schema_name, &**table)?;
                 table.id.table_id()
             }
+            StatementType::ALTER_SOURCE => {
+                let (source, schema_name) =
+                    reader.get_source_by_name(db_name, schema_path, &real_table_name)?;
+
+                session.check_privilege_for_drop_alter(schema_name, &**source)?;
+                source.id
+            }
             StatementType::ALTER_SINK => {
                 let (sink, schema_name) =
                     reader.get_sink_by_name(db_name, schema_path, &real_table_name)?;
@@ -97,7 +104,7 @@ pub async fn handle_alter_parallelism(
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .alter_parallelism(table_id, target_parallelism, deferred)
+        .alter_parallelism(job_id, target_parallelism, deferred)
         .await?;
 
     if deferred {

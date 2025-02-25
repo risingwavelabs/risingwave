@@ -1035,6 +1035,19 @@ pub async fn handle(
                 )
                 .await
             }
+            AlterSourceOperation::SetParallelism {
+                parallelism,
+                deferred,
+            } => {
+                alter_parallelism::handle_alter_parallelism(
+                    handler_args,
+                    name,
+                    parallelism,
+                    StatementType::ALTER_SOURCE,
+                    deferred,
+                )
+                .await
+            }
         },
         Statement::AlterFunction {
             name,

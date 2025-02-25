@@ -613,7 +613,7 @@ impl GlobalStreamManager {
 
     pub(crate) async fn reschedule_streaming_job(
         &self,
-        table_id: u32,
+        job_id: u32,
         target: JobRescheduleTarget,
         deferred: bool,
     ) -> MetaResult<()> {
@@ -633,7 +633,7 @@ impl GlobalStreamManager {
                 if related_jobs.contains(&job) {
                     bail!(
                         "Cannot alter the job {} because the related job {} is currently being created",
-                        table_id,
+                        job_id,
                         job.table_id
                     );
                 }
@@ -648,10 +648,10 @@ impl GlobalStreamManager {
         let database_id = DatabaseId::new(
             self.metadata_manager
                 .catalog_controller
-                .get_object_database_id(table_id as ObjectId)
+                .get_object_database_id(job_id as ObjectId)
                 .await? as _,
         );
-        let table_id = TableId::new(table_id);
+        let job_id = TableId::new(job_id);
 
         let worker_nodes = self
             .metadata_manager
@@ -668,7 +668,7 @@ impl GlobalStreamManager {
             .sum::<usize>();
         let max_parallelism = self
             .metadata_manager
-            .get_job_max_parallelism(table_id)
+            .get_job_max_parallelism(job_id)
             .await?;
 
         if let JobParallelismTarget::Update(parallelism) = parallelism_change {
@@ -697,12 +697,12 @@ impl GlobalStreamManager {
         }
 
         let table_parallelism_assignment = match &parallelism_change {
-            JobParallelismTarget::Update(parallelism) => HashMap::from([(table_id, *parallelism)]),
+            JobParallelismTarget::Update(parallelism) => HashMap::from([(job_id, *parallelism)]),
             JobParallelismTarget::Refresh => HashMap::new(),
         };
         let resource_group_assignment = match &resource_group_change {
             JobResourceGroupTarget::Update(target) => {
-                HashMap::from([(table_id.table_id() as ObjectId, target.clone())])
+                HashMap::from([(job_id.table_id() as ObjectId, target.clone())])
             }
             JobResourceGroupTarget::Keep => HashMap::new(),
         };
@@ -710,7 +710,7 @@ impl GlobalStreamManager {
         if deferred {
             tracing::debug!(
                 "deferred mode enabled for job {}, set the parallelism directly to parallelism {:?}, resource group {:?}",
-                table_id,
+                job_id,
                 parallelism_change,
                 resource_group_change,
             );
@@ -728,7 +728,7 @@ impl GlobalStreamManager {
                 .scale_controller
                 .generate_job_reschedule_plan(JobReschedulePolicy {
                     targets: HashMap::from([(
-                        table_id.table_id,
+                        job_id.table_id,
                         JobRescheduleTarget {
                             parallelism: parallelism_change,
                             resource_group: resource_group_change,
@@ -740,7 +740,7 @@ impl GlobalStreamManager {
             if reschedule_plan.reschedules.is_empty() {
                 tracing::debug!(
                     "empty reschedule plan generated for job {}, set the parallelism directly to {:?}",
-                    table_id,
+                    job_id,
                     reschedule_plan.post_updates
                 );
                 self.scale_controller
