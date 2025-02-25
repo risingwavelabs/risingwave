@@ -56,7 +56,7 @@ impl TopNOnIndexRule {
         required_order: &Order,
     ) -> Option<PlanRef> {
         let scan_predicates = logical_scan.predicate();
-        let input_refs = scan_predicates.get_eq_literal_cond_input_refs();
+        let input_refs = scan_predicates.get_eq_const_input_refs();
         let prefix = input_refs
             .into_iter()
             .map(|input_ref| ColumnOrder {

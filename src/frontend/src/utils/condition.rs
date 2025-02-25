@@ -633,10 +633,10 @@ impl Condition {
     }
 
     /// x = 1 AND y = 2 AND z = 3 => [x, y, z]
-    pub fn get_eq_literal_cond_input_refs(&self) -> Vec<InputRef> {
+    pub fn get_eq_const_input_refs(&self) -> Vec<InputRef> {
         self.conjunctions
             .iter()
-            .filter_map(|expr| expr.as_eq_literal_cond().map(|(input_ref, _)| input_ref))
+            .filter_map(|expr| expr.as_eq_const().map(|(input_ref, _)| input_ref))
             .collect()
     }
 
