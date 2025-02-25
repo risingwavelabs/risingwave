@@ -10621,7 +10621,6 @@ dependencies = [
  "itoa",
  "jiff",
  "jsonbb",
- "lazy_static",
  "libc",
  "lru 0.7.6",
  "mach2",

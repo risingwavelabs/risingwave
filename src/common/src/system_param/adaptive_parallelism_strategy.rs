@@ -16,24 +16,20 @@ use std::cmp::{max, min};
 use std::fmt::{Display, Formatter};
 use std::num::NonZeroUsize;
 use std::str::FromStr;
+use std::sync::LazyLock;
 
 use regex::Regex;
 use risingwave_common::system_param::ParamValue;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-#[derive(PartialEq, Copy, Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Copy, Clone, Debug, Serialize, Deserialize, Default)]
 pub enum AdaptiveParallelismStrategy {
+    #[default]
     Auto,
     Full,
     Bounded(NonZeroUsize),
     Ratio(f32),
-}
-
-impl Default for AdaptiveParallelismStrategy {
-    fn default() -> Self {
-        AdaptiveParallelismStrategy::Auto
-    }
 }
 
 impl Display for AdaptiveParallelismStrategy {
@@ -47,9 +43,9 @@ impl Display for AdaptiveParallelismStrategy {
     }
 }
 
-impl Into<String> for AdaptiveParallelismStrategy {
-    fn into(self) -> String {
-        self.to_string()
+impl From<AdaptiveParallelismStrategy> for String {
+    fn from(val: AdaptiveParallelismStrategy) -> Self {
+        val.to_string()
     }
 }
 
@@ -88,22 +84,25 @@ impl AdaptiveParallelismStrategy {
 pub fn parse_strategy(
     input: &str,
 ) -> Result<AdaptiveParallelismStrategy, ParallelismStrategyParseError> {
-    lazy_static::lazy_static! {
-        static ref RE: Regex = Regex::new(r"(?xi)
-            ^
-            (?P<auto>auto)                       # Auto strategy
-            | (?P<full>full)                     # Full strategy
-            | bounded\((?P<bounded_value>\d+)\)  # Bounded with value
-            | ratio\((?P<ratio_value>[0-9.]+)\)  # Ratio with value
-            $
-        ").unwrap();
-    }
+    static RE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(
+            r"(?xi)
+        ^
+        (?P<auto>auto)                       # Auto strategy
+        | (?P<full>full)                     # Full strategy
+        | bounded\((?P<bounded_value>\d+)\)  # Bounded with value
+        | ratio\((?P<ratio_value>[0-9.]+)\)  # Ratio with value
+        $
+    ",
+        )
+        .unwrap()
+    });
 
     let input = input.trim();
 
     let caps = RE
         .captures(input)
-        .ok_or_else(|| ParallelismStrategyParseError::UnsupportedStrategy(input.to_string()))?;
+        .ok_or_else(|| ParallelismStrategyParseError::UnsupportedStrategy(input.to_owned()))?;
 
     if caps.name("auto").is_some() {
         Ok(AdaptiveParallelismStrategy::Auto)
@@ -122,7 +121,7 @@ pub fn parse_strategy(
         Ok(AdaptiveParallelismStrategy::Ratio(value))
     } else {
         Err(ParallelismStrategyParseError::UnsupportedStrategy(
-            input.to_string(),
+            input.to_owned(),
         ))
     }
 }
