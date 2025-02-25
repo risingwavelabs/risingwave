@@ -530,10 +530,10 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
         // to reduce memory consumption of logstore.
 
         let epoch = barrier.epoch.prev;
-        if barrier.is_checkpoint() {
-            let mut writer = write_state.start_writer(false);
-            writer.write_barrier(epoch, barrier.is_checkpoint())?;
+        let mut writer = write_state.start_writer(false);
+        writer.write_barrier(epoch, barrier.is_checkpoint())?;
 
+        if barrier.is_checkpoint() {
             for (epoch, item) in &mut buffer.buffer {
                 match item {
                     LogStoreBufferItem::StreamChunk {
@@ -550,10 +550,9 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                             break;
                         }
                     }
-                    LogStoreBufferItem::Flushed { .. } => {
-                        break;
-                    }
-                    LogStoreBufferItem::Barrier { .. } | LogStoreBufferItem::UpdateVnodes(_) => {}
+                    LogStoreBufferItem::Flushed { .. }
+                    | LogStoreBufferItem::Barrier { .. }
+                    | LogStoreBufferItem::UpdateVnodes(_) => {}
                 }
             }
 
