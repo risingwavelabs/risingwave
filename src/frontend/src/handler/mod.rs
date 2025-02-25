@@ -693,7 +693,8 @@ pub async fn handle(
             name,
             operation:
                 operation @ (AlterTableOperation::AddColumn { .. }
-                | AlterTableOperation::DropColumn { .. }),
+                | AlterTableOperation::DropColumn { .. }
+                | AlterTableOperation::AlterColumn { .. }),
         } => alter_table_column::handle_alter_table_column(handler_args, name, operation).await,
         Statement::AlterTable {
             name,
