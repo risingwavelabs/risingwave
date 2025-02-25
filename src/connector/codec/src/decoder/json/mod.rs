@@ -38,7 +38,7 @@ use std::collections::HashMap;
 use std::fs;
 
 use anyhow::Context;
-use risingwave_pb::plan_common::ColumnDesc;
+use risingwave_common::catalog::Field;
 use serde_json::Value;
 use thiserror::Error;
 use url::Url;
@@ -201,7 +201,7 @@ impl crate::JsonSchema {
     pub async fn json_schema_to_columns(
         &mut self,
         retrieval_url: Url,
-    ) -> anyhow::Result<Vec<ColumnDesc>> {
+    ) -> anyhow::Result<Vec<Field>> {
         JsonRef::new()
             .deref_value(&mut self.0, &retrieval_url)
             .await?;
