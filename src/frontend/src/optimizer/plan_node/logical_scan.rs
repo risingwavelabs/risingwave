@@ -147,37 +147,9 @@ impl LogicalScan {
 
     /// Return indexes can satisfy the required order.
     pub fn indexes_satisfy_order(&self, required_order: &Order) -> Vec<&Rc<IndexCatalog>> {
-        let output_col_map = self
-            .output_col_idx()
-            .iter()
-            .cloned()
-            .enumerate()
-            .map(|(id, col)| (col, id))
-            .collect::<BTreeMap<_, _>>();
-        let unmatched_idx = output_col_map.len();
-        self.indexes()
-            .iter()
-            .filter(|idx| {
-                let s2p_mapping = idx.secondary_to_primary_mapping();
-                Order {
-                    column_orders: idx
-                        .index_table
-                        .pk()
-                        .iter()
-                        .map(|idx_item| {
-                            let idx = match s2p_mapping.get(&idx_item.column_index) {
-                                Some(col_idx) => {
-                                    *output_col_map.get(col_idx).unwrap_or(&unmatched_idx)
-                                }
-                                // After we support index on expressions, we need to handle the case where the column is not in the `s2p_mapping`.
-                                None => unmatched_idx,
-                            };
-                            ColumnOrder::new(idx, idx_item.order_type)
-                        })
-                        .collect(),
-                }
-                .satisfies(required_order)
-            })
+        self.indexes_satisfy_order_with_prefix(required_order, &HashSet::new())
+            .into_iter()
+            .map(|(index, _)| index)
             .collect()
     }
 
