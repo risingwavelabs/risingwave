@@ -218,8 +218,7 @@ where
         self.inner()
             .adaptive_parallelism_strategy
             .as_deref()
-            .map(|s| AdaptiveParallelismStrategy::from_str(s).ok()) // fallback to Auto
-            .flatten()
+            .and_then(|s| AdaptiveParallelismStrategy::from_str(s).ok())
             .unwrap_or(AdaptiveParallelismStrategy::Auto)
     }
 }
