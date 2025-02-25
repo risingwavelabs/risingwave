@@ -198,11 +198,10 @@ mod tests {
     use itertools::Itertools;
     use maplit::{btreemap, convert_args};
     use risingwave_common::array::Op;
-    use risingwave_common::catalog::{ColumnDesc as CatColumnDesc, ColumnId};
+    use risingwave_common::catalog::ColumnDesc as CatColumnDesc;
     use risingwave_common::row::{OwnedRow, Row};
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_pb::catalog::StreamSourceInfo;
-    use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::plan_common::{PbEncodeType, PbFormatType};
 
     use super::*;
@@ -352,10 +351,9 @@ mod tests {
         let schema = Schema::parse_str(test_schema_str).unwrap();
         let columns = avro_schema_to_column_descs(&schema, None).unwrap();
         for col in &columns {
-            let dtype = col.data_type.to_protobuf();
-            println!("name = {}, type = {:?}", col.name, dtype.type_name);
+            println!("name = {}, type = {}", col.name, col.data_type);
             if col.name.contains("unconstrained") {
-                assert_eq!(dtype.type_name, TypeName::Decimal as i32);
+                assert_eq!(col.data_type, DataType::Decimal);
             }
         }
     }
@@ -367,31 +365,16 @@ mod tests {
             extract_debezium_table_schema(&outer_schema).unwrap(),
             None,
         )
-        .unwrap()
-        .iter()
-        .map(CatColumnDesc::from_field_without_column_id)
-        .collect_vec();
+        .unwrap();
 
         assert_eq!(columns.len(), 4);
-        assert_eq!(
-            CatColumnDesc::named("id", ColumnId::placeholder(), DataType::Int32),
-            columns[0]
-        );
+        assert_eq!(Field::new("id", DataType::Int32), columns[0]);
 
-        assert_eq!(
-            CatColumnDesc::named("first_name", ColumnId::placeholder(), DataType::Varchar),
-            columns[1]
-        );
+        assert_eq!(Field::new("first_name", DataType::Varchar), columns[1]);
 
-        assert_eq!(
-            CatColumnDesc::named("last_name", ColumnId::placeholder(), DataType::Varchar),
-            columns[2]
-        );
+        assert_eq!(Field::new("last_name", DataType::Varchar), columns[2]);
 
-        assert_eq!(
-            CatColumnDesc::named("email", ColumnId::placeholder(), DataType::Varchar),
-            columns[3]
-        );
+        assert_eq!(Field::new("email", DataType::Varchar), columns[3]);
     }
 
     #[ignore]
