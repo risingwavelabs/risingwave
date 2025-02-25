@@ -79,7 +79,7 @@ use risingwave_storage::store::{
     LocalStateStore, NewLocalOptions, OpConsistencyLevel, StateStoreRead,
 };
 use rw_futures_util::drop_either_future;
-use tokio::time::{sleep, Duration};
+use tokio::time::{Duration, sleep};
 
 use crate::common::log_store_impl::kv_log_store::buffer::LogStoreBufferItem;
 use crate::common::log_store_impl::kv_log_store::reader::timeout_auto_rebuild::TimeoutAutoRebuildIter;
