@@ -41,7 +41,7 @@ use risingwave_meta::hummock::{CommitEpochInfo, NewTableFragmentInfo};
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::local_version::pinned_version::PinnedVersion;
 use risingwave_storage::hummock::store::version::read_filter_for_version;
-use risingwave_storage::hummock::test_utils::*;
+use risingwave_storage::hummock::test_utils::{ReadOptions, *};
 use risingwave_storage::hummock::{CachePolicy, HummockStorage, LocalHummockStorage};
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::*;
@@ -1394,6 +1394,7 @@ async fn test_iter_with_min_epoch() {
 
 #[tokio::test]
 async fn test_hummock_version_reader() {
+    use risingwave_storage::store::ReadOptions;
     const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
     let table_id_set = HashSet::from_iter([TEST_TABLE_ID]);
     let test_env = prepare_hummock_test_env().await;
@@ -1510,8 +1511,8 @@ async fn test_hummock_version_reader() {
                             VirtualNode::ZERO,
                         ),
                         epoch1,
+                        TEST_TABLE_ID,
                         ReadOptions {
-                            table_id: TEST_TABLE_ID,
                             prefetch_options: PrefetchOptions::default(),
                             cache_policy: CachePolicy::Fill(CacheHint::Normal),
                             ..Default::default()
@@ -1545,8 +1546,8 @@ async fn test_hummock_version_reader() {
                             VirtualNode::ZERO,
                         ),
                         epoch2,
+                        TEST_TABLE_ID,
                         ReadOptions {
-                            table_id: TEST_TABLE_ID,
                             prefetch_options: PrefetchOptions::default(),
                             cache_policy: CachePolicy::Fill(CacheHint::Normal),
                             ..Default::default()
@@ -1580,8 +1581,8 @@ async fn test_hummock_version_reader() {
                             VirtualNode::ZERO,
                         ),
                         epoch2,
+                        TEST_TABLE_ID,
                         ReadOptions {
-                            table_id: TEST_TABLE_ID,
                             retention_seconds: Some(0),
                             prefetch_options: PrefetchOptions::default(),
                             cache_policy: CachePolicy::Fill(CacheHint::Normal),
@@ -1653,8 +1654,8 @@ async fn test_hummock_version_reader() {
                             VirtualNode::ZERO,
                         ),
                         epoch1,
+                        TEST_TABLE_ID,
                         ReadOptions {
-                            table_id: TEST_TABLE_ID,
                             prefetch_options: PrefetchOptions::default(),
                             cache_policy: CachePolicy::Fill(CacheHint::Normal),
                             ..Default::default()
@@ -1701,8 +1702,8 @@ async fn test_hummock_version_reader() {
                             VirtualNode::ZERO,
                         ),
                         epoch2,
+                        TEST_TABLE_ID,
                         ReadOptions {
-                            table_id: TEST_TABLE_ID,
                             prefetch_options: PrefetchOptions::default(),
                             cache_policy: CachePolicy::Fill(CacheHint::Normal),
                             ..Default::default()
@@ -1736,8 +1737,8 @@ async fn test_hummock_version_reader() {
                             VirtualNode::ZERO,
                         ),
                         epoch2,
+                        TEST_TABLE_ID,
                         ReadOptions {
-                            table_id: TEST_TABLE_ID,
                             retention_seconds: Some(0),
                             prefetch_options: PrefetchOptions::default(),
                             cache_policy: CachePolicy::Fill(CacheHint::Normal),
@@ -1772,8 +1773,8 @@ async fn test_hummock_version_reader() {
                             VirtualNode::ZERO,
                         ),
                         epoch3,
+                        TEST_TABLE_ID,
                         ReadOptions {
-                            table_id: TEST_TABLE_ID,
                             prefetch_options: PrefetchOptions::default(),
                             cache_policy: CachePolicy::Fill(CacheHint::Normal),
                             ..Default::default()
@@ -1810,8 +1811,8 @@ async fn test_hummock_version_reader() {
                         .iter(
                             key_range.clone(),
                             epoch2,
+                            TEST_TABLE_ID,
                             ReadOptions {
-                                table_id: TEST_TABLE_ID,
                                 prefetch_options: PrefetchOptions::default(),
                                 cache_policy: CachePolicy::Fill(CacheHint::Normal),
                                 ..Default::default()
@@ -1842,8 +1843,8 @@ async fn test_hummock_version_reader() {
                         .iter(
                             key_range.clone(),
                             epoch3,
+                            TEST_TABLE_ID,
                             ReadOptions {
-                                table_id: TEST_TABLE_ID,
                                 prefetch_options: PrefetchOptions::default(),
                                 cache_policy: CachePolicy::Fill(CacheHint::Normal),
                                 ..Default::default()
@@ -2224,13 +2225,7 @@ async fn test_table_watermark() {
         for (local, vnode) in [(&local1, vnode1), (&local2, vnode2)] {
             for index in epoch1_indexes() {
                 let value = local
-                    .get(
-                        gen_key(vnode, index),
-                        ReadOptions {
-                            table_id: TEST_TABLE_ID,
-                            ..Default::default()
-                        },
-                    )
+                    .get(gen_key(vnode, index), Default::default())
                     .await
                     .unwrap();
                 assert_eq!(value.unwrap(), gen_val(index));
@@ -2238,10 +2233,7 @@ async fn test_table_watermark() {
             let result = local
                 .iter(
                     RangeBoundsExt::map(&gen_range(), |index| gen_key(vnode, *index)),
-                    ReadOptions {
-                        table_id: TEST_TABLE_ID,
-                        ..Default::default()
-                    },
+                    Default::default(),
                 )
                 .await
                 .unwrap()
@@ -2291,13 +2283,7 @@ async fn test_table_watermark() {
         for (local, vnode) in [(&local1, vnode1), (&local2, vnode2)] {
             for index in epoch1_indexes() {
                 let value = local
-                    .get(
-                        gen_key(vnode, index),
-                        ReadOptions {
-                            table_id: TEST_TABLE_ID,
-                            ..Default::default()
-                        },
-                    )
+                    .get(gen_key(vnode, index), Default::default())
                     .await
                     .unwrap();
                 if index < watermark1 {
@@ -2312,10 +2298,7 @@ async fn test_table_watermark() {
                 let result = risingwave_storage::store::LocalStateStore::iter(
                     local,
                     RangeBoundsExt::map(&gen_range(), |index| gen_key(vnode, *index)),
-                    ReadOptions {
-                        table_id: TEST_TABLE_ID,
-                        ..Default::default()
-                    },
+                    Default::default(),
                 )
                 .await
                 .unwrap()
@@ -2344,10 +2327,7 @@ async fn test_table_watermark() {
                         Included(gen_key(vnode, 0)),
                         Included(gen_key(vnode, watermark1 - 1)),
                     ),
-                    ReadOptions {
-                        table_id: TEST_TABLE_ID,
-                        ..Default::default()
-                    },
+                    Default::default(),
                 )
                 .await
                 .unwrap()
@@ -2395,13 +2375,7 @@ async fn test_table_watermark() {
         for (local, vnode) in [(&local1, vnode1), (&local2, vnode2)] {
             for index in indexes_after_epoch2() {
                 let value = local
-                    .get(
-                        gen_key(vnode, index),
-                        ReadOptions {
-                            table_id: TEST_TABLE_ID,
-                            ..Default::default()
-                        },
-                    )
+                    .get(gen_key(vnode, index), Default::default())
                     .await
                     .unwrap();
                 if index < watermark1 {
@@ -2416,10 +2390,7 @@ async fn test_table_watermark() {
                 let result = risingwave_storage::store::LocalStateStore::iter(
                     local,
                     RangeBoundsExt::map(&gen_range(), |index| gen_key(vnode, *index)),
-                    ReadOptions {
-                        table_id: TEST_TABLE_ID,
-                        ..Default::default()
-                    },
+                    Default::default(),
                 )
                 .await
                 .unwrap()
@@ -2448,10 +2419,7 @@ async fn test_table_watermark() {
                         Included(gen_key(vnode, 0)),
                         Included(gen_key(vnode, watermark1 - 1)),
                     ),
-                    ReadOptions {
-                        table_id: TEST_TABLE_ID,
-                        ..Default::default()
-                    },
+                    Default::default(),
                 )
                 .await
                 .unwrap()
@@ -2506,7 +2474,7 @@ async fn test_table_watermark() {
                     .get(
                         gen_key(vnode, index),
                         epoch,
-                        ReadOptions {
+                        StateStoreTestReadOptions {
                             table_id: TEST_TABLE_ID,
                             ..Default::default()
                         },
@@ -2527,7 +2495,7 @@ async fn test_table_watermark() {
                     .iter(
                         RangeBoundsExt::map(&gen_range(), |index| gen_key(vnode, *index)),
                         epoch,
-                        ReadOptions {
+                        StateStoreTestReadOptions {
                             table_id: TEST_TABLE_ID,
                             ..Default::default()
                         },
@@ -2560,7 +2528,7 @@ async fn test_table_watermark() {
                             Included(gen_key(vnode, watermark1 - 1)),
                         ),
                         epoch,
-                        ReadOptions {
+                        StateStoreTestReadOptions {
                             table_id: TEST_TABLE_ID,
                             ..Default::default()
                         },
