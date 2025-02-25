@@ -25,7 +25,7 @@ use futures::{FutureExt, StreamExt, TryStreamExt};
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, StructType};
 use risingwave_connector::parser::{
     ByteStreamSourceParserImpl, CommonParserConfig, ParserConfig, SpecificParserConfig,
 };
@@ -94,12 +94,8 @@ fn make_parser(use_struct: bool) -> ByteStreamSourceParserImpl {
     ];
 
     let rw_columns = if use_struct {
-        let fields = fields
-            .into_iter()
-            .enumerate()
-            .map(|(i, (n, t))| ColumnDesc::named(n, ColumnId::new(i as _), t))
-            .collect();
-        let struct_col = ColumnDesc::new_struct("bid", 114514, "bid", fields);
+        let struct_type = StructType::new(fields).into();
+        let struct_col = ColumnDesc::named("bid", 114514.into(), struct_type);
         vec![(&struct_col).into()]
     } else {
         fields

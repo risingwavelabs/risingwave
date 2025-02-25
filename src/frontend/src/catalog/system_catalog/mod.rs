@@ -170,7 +170,7 @@ impl From<&BuiltinTable> for SystemTableCatalog {
                 .iter()
                 .enumerate()
                 .map(|(idx, (name, ty))| ColumnCatalog {
-                    column_desc: ColumnDesc::new_atomic(ty.clone(), name, idx as i32),
+                    column_desc: ColumnDesc::named(*name, (idx as i32).into(), ty.clone()),
                     is_hidden: false,
                 })
                 .collect(),

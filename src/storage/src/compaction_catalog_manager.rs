@@ -604,25 +604,25 @@ mod tests {
             columns: vec![
                 PbColumnCatalog {
                     column_desc: Some(
-                        (&ColumnDesc::new_atomic(DataType::Int64, "_row_id", 0)).into(),
+                        (&ColumnDesc::named("_row_id", 0.into(), DataType::Int64)).into(),
                     ),
                     is_hidden: true,
                 },
                 PbColumnCatalog {
                     column_desc: Some(
-                        (&ColumnDesc::new_atomic(DataType::Int64, "col_1", 0)).into(),
+                        (&ColumnDesc::named("col_1", 0.into(), DataType::Int64)).into(),
                     ),
                     is_hidden: false,
                 },
                 PbColumnCatalog {
                     column_desc: Some(
-                        (&ColumnDesc::new_atomic(DataType::Float64, "col_2", 0)).into(),
+                        (&ColumnDesc::named("col_2", 0.into(), DataType::Float64)).into(),
                     ),
                     is_hidden: false,
                 },
                 PbColumnCatalog {
                     column_desc: Some(
-                        (&ColumnDesc::new_atomic(DataType::Varchar, "col_3", 0)).into(),
+                        (&ColumnDesc::named("col_3", 0.into(), DataType::Varchar)).into(),
                     ),
                     is_hidden: false,
                 },

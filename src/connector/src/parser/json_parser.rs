@@ -111,7 +111,7 @@ mod tests {
     use risingwave_common::catalog::ColumnDesc;
     use risingwave_common::row::Row;
     use risingwave_common::test_prelude::StreamChunkTestExt;
-    use risingwave_common::types::{DataType, ScalarImpl, ToOwnedDatum};
+    use risingwave_common::types::{DataType, ScalarImpl, StructType, ToOwnedDatum};
     use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
     use risingwave_pb::plan_common::{AdditionalColumn, AdditionalColumnKey};
 
@@ -290,30 +290,28 @@ mod tests {
     #[tokio::test]
     async fn test_json_parse_struct() {
         let descs = vec![
-            ColumnDesc::new_struct(
+            ColumnDesc::named(
                 "data",
-                0,
-                "",
-                vec![
-                    ColumnDesc::new_atomic(DataType::Timestamp, "created_at", 1),
-                    ColumnDesc::new_atomic(DataType::Varchar, "id", 2),
-                    ColumnDesc::new_atomic(DataType::Varchar, "text", 3),
-                    ColumnDesc::new_atomic(DataType::Varchar, "lang", 4),
-                ],
+                0.into(),
+                DataType::from(StructType::new([
+                    ("created_at", DataType::Timestamp),
+                    ("id", DataType::Varchar),
+                    ("text", DataType::Varchar),
+                    ("lang", DataType::Varchar),
+                ])),
             ),
-            ColumnDesc::new_struct(
+            ColumnDesc::named(
                 "author",
-                5,
-                "",
-                vec![
-                    ColumnDesc::new_atomic(DataType::Timestamp, "created_at", 6),
-                    ColumnDesc::new_atomic(DataType::Varchar, "id", 7),
-                    ColumnDesc::new_atomic(DataType::Varchar, "name", 8),
-                    ColumnDesc::new_atomic(DataType::Varchar, "username", 9),
-                ],
+                5.into(),
+                DataType::from(StructType::new([
+                    ("created_at", DataType::Timestamp),
+                    ("id", DataType::Varchar),
+                    ("name", DataType::Varchar),
+                    ("username", DataType::Varchar),
+                ])),
             ),
-            ColumnDesc::new_atomic(DataType::Varchar, "I64CastToVarchar", 10),
-            ColumnDesc::new_atomic(DataType::Int64, "VarcharCastToI64", 11),
+            ColumnDesc::named("I64CastToVarchar", 10.into(), DataType::Varchar),
+            ColumnDesc::named("VarcharCastToI64", 11.into(), DataType::Int64),
         ]
         .iter()
         .map(SourceColumnDesc::from)
@@ -369,14 +367,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_json_parse_struct_from_string() {
-        let descs = vec![ColumnDesc::new_struct(
+        let descs = vec![ColumnDesc::named(
             "struct",
-            0,
-            "",
-            vec![
-                ColumnDesc::new_atomic(DataType::Varchar, "varchar", 1),
-                ColumnDesc::new_atomic(DataType::Boolean, "boolean", 2),
-            ],
+            0.into(),
+            DataType::from(StructType::new([
+                ("varchar", DataType::Varchar),
+                ("boolean", DataType::Boolean),
+            ])),
         )]
         .iter()
         .map(SourceColumnDesc::from)
@@ -406,14 +403,13 @@ mod tests {
     #[tokio::test]
     #[tracing_test::traced_test]
     async fn test_json_parse_struct_missing_field_warning() {
-        let descs = vec![ColumnDesc::new_struct(
+        let descs = vec![ColumnDesc::named(
             "struct",
-            0,
-            "",
-            vec![
-                ColumnDesc::new_atomic(DataType::Varchar, "varchar", 1),
-                ColumnDesc::new_atomic(DataType::Boolean, "boolean", 2),
-            ],
+            0.into(),
+            DataType::from(StructType::new([
+                ("varchar", DataType::Varchar),
+                ("boolean", DataType::Boolean),
+            ])),
         )]
         .iter()
         .map(SourceColumnDesc::from)

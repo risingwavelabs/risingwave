@@ -555,15 +555,15 @@ pub(crate) mod tests {
             dependent_relations: vec![],
             columns: vec![
                 ColumnCatalog {
-                    column_desc: ColumnDesc::new_atomic(DataType::Int32, "a", 0),
+                    column_desc: ColumnDesc::named("a", 0.into(), DataType::Int32),
                     is_hidden: false,
                 },
                 ColumnCatalog {
-                    column_desc: ColumnDesc::new_atomic(DataType::Float64, "b", 1),
+                    column_desc: ColumnDesc::named("b", 1.into(), DataType::Float64),
                     is_hidden: false,
                 },
                 ColumnCatalog {
-                    column_desc: ColumnDesc::new_atomic(DataType::Int64, "c", 2),
+                    column_desc: ColumnDesc::named("c", 2.into(), DataType::Int64),
                     is_hidden: false,
                 },
             ],
