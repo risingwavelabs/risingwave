@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::{Ordering, max, min};
+use std::cmp::{Ordering, min};
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::hash::{Hash, Hasher};
@@ -2020,18 +2020,10 @@ impl ScaleController {
                     }
                     FragmentDistributionType::Hash => match parallelism {
                         TableParallelism::Adaptive => {
-                            let available_slot_count = match adaptive_parallelism_strategy {
-                                AdaptiveParallelismStrategy::Auto
-                                | AdaptiveParallelismStrategy::Full => available_slot_count,
-                                AdaptiveParallelismStrategy::Bounded(n) => {
-                                    min(n.get(), available_slot_count)
-                                }
-                                AdaptiveParallelismStrategy::Ratio(r) => {
-                                    max(1, (r as f64 * available_slot_count as f64) as usize)
-                                }
-                            };
+                            let target_slot_count = adaptive_parallelism_strategy
+                                .compute_target_parallelism(available_slot_count);
 
-                            if available_slot_count > max_parallelism {
+                            if target_slot_count > max_parallelism {
                                 tracing::warn!(
                                     "available parallelism for table {table_id} is larger than max parallelism, force limit to {max_parallelism}"
                                 );
@@ -2039,6 +2031,23 @@ impl ScaleController {
                                 let target_worker_slots = schedule_units_for_slots(
                                     &available_worker_slots,
                                     max_parallelism,
+                                    table_id,
+                                )?;
+
+                                target_plan.insert(
+                                    fragment_id,
+                                    Self::diff_worker_slot_changes(
+                                        &fragment_slots,
+                                        &target_worker_slots,
+                                    ),
+                                );
+                            } else if available_slot_count != target_slot_count {
+                                tracing::info!(
+                                    "available parallelism for table {table_id} is limit by adaptive strategy {adaptive_parallelism_strategy}, resetting to {target_slot_count}"
+                                );
+                                let target_worker_slots = schedule_units_for_slots(
+                                    &available_worker_slots,
+                                    target_slot_count,
                                     table_id,
                                 )?;
 
