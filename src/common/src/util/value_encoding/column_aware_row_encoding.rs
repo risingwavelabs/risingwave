@@ -273,7 +273,7 @@ impl<'a> Iterator for EncodedBytes<'a> {
         let next_offset = if self.offsets.is_empty() {
             self.data.len()
         } else {
-            let mut peek_offsets = self.offsets;
+            let mut peek_offsets = self.offsets; // copy the reference to the slice to avoid mutating the buf position
             get_offset(&mut peek_offsets)
         };
 
