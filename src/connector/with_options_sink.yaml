@@ -107,6 +107,10 @@ BigQueryConfig:
     required: false
     alias:
     - profile
+  - name: aws.msk.signer_timeout_sec
+    field_type: u64
+    required: false
+    default: default::default_msk_signer_timeout_sec
   - name: r#type
     field_type: String
     required: true
@@ -190,6 +194,10 @@ DeltaLakeConfig:
     required: false
     alias:
     - profile
+  - name: aws.msk.signer_timeout_sec
+    field_type: u64
+    required: false
+    default: default::default_msk_signer_timeout_sec
   - name: gcs.service.account
     field_type: String
     required: false
@@ -282,6 +290,10 @@ DynamoDbConfig:
     required: false
     alias:
     - profile
+  - name: aws.msk.signer_timeout_sec
+    field_type: u64
+    required: false
+    default: default::default_msk_signer_timeout_sec
   - name: dynamodb.max_batch_item_nums
     field_type: usize
     required: false
@@ -778,6 +790,10 @@ KafkaConfig:
     required: false
     alias:
     - profile
+  - name: aws.msk.signer_timeout_sec
+    field_type: u64
+    required: false
+    default: default::default_msk_signer_timeout_sec
 KinesisSinkConfig:
   fields:
   - name: stream
@@ -1059,6 +1075,10 @@ PulsarConfig:
     required: false
     alias:
     - profile
+  - name: aws.msk.signer_timeout_sec
+    field_type: u64
+    required: false
+    default: default::default_msk_signer_timeout_sec
   - name: properties.batch.size
     field_type: u32
     required: false
