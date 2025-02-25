@@ -218,7 +218,7 @@ where
         self.inner()
             .adaptive_parallelism_strategy
             .as_deref()
-            .map(|s| AdaptiveParallelismStrategy::from_str(s).ok())// fallback to Auto
+            .map(|s| AdaptiveParallelismStrategy::from_str(s).ok()) // fallback to Auto
             .flatten()
             .unwrap_or(AdaptiveParallelismStrategy::Auto)
     }

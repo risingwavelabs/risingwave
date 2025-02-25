@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::{max, min};
 use std::fmt::{Display, Formatter};
 use std::num::NonZeroUsize;
 use std::str::FromStr;
@@ -68,6 +69,20 @@ pub enum ParallelismStrategyParseError {
 
     #[error("Invalid value for Ratio strategy: must be between 0.0 and 1.0")]
     InvalidRatioValue,
+}
+
+impl AdaptiveParallelismStrategy {
+    pub fn compute_target_parallelism(&self, current_parallelism: usize) -> usize {
+        match self {
+            AdaptiveParallelismStrategy::Auto | AdaptiveParallelismStrategy::Full => {
+                current_parallelism
+            }
+            AdaptiveParallelismStrategy::Bounded(n) => min(n.get(), current_parallelism),
+            AdaptiveParallelismStrategy::Ratio(r) => {
+                max((current_parallelism as f32 * r).floor() as usize, 1)
+            }
+        }
+    }
 }
 
 pub fn parse_strategy(
