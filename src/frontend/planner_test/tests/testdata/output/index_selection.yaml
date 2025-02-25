@@ -841,9 +841,8 @@
     create index idx4 on t1(b, a desc);
     select * from t1 where c = 1 and a = 2 and d = 3 order by b desc limit 10
   batch_plan: |-
-    BatchSort { order: [idx2.b DESC] }
-    └─BatchTopN { order: [idx2.a ASC, idx2.c ASC, idx2.b DESC], limit: 10, offset: 0 }
+    BatchSort { order: [idx3.b DESC] }
+    └─BatchTopN { order: [idx3.a ASC, idx3.c ASC, idx3.d ASC, idx3.b DESC], limit: 10, offset: 0 }
       └─BatchExchange { order: [], dist: Single }
         └─BatchLimit { limit: 10, offset: 0 }
-          └─BatchFilter { predicate: (idx2.d = 3:Int32) }
-            └─BatchScan { table: idx2, columns: [idx2.a, idx2.b, idx2.c, idx2.d], scan_ranges: [idx2.a = Int32(2) AND idx2.c = Int32(1)], distribution: UpstreamHashShard(idx2.a) }
+          └─BatchScan { table: idx3, columns: [idx3.a, idx3.b, idx3.c, idx3.d], scan_ranges: [idx3.a = Int32(2) AND idx3.c = Int32(1) AND idx3.d = Int32(3)], limit: 10, distribution: UpstreamHashShard(idx3.a) }

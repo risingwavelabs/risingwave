@@ -66,17 +66,21 @@ impl TopNOnIndexRule {
             .collect();
         let order_satisfied_index =
             logical_scan.indexes_satisfy_order_with_prefix(required_order, &prefix);
+        let mut longest_prefix: Option<Order> = None;
+        let mut selected_index = None;
         for (index, prefix) in order_satisfied_index {
-            if let Some(index_scan) = logical_scan.to_index_scan_if_index_covered(index) {
-                return Some(
-                    logical_top_n
-                        .clone_with_input_and_prefix(index_scan.into(), prefix)
-                        .into(),
-                );
+            if prefix.len() >= longest_prefix.as_ref().map_or(0, |p| p.len()) {
+                longest_prefix = Some(prefix.clone());
+                if let Some(index_scan) = logical_scan.to_index_scan_if_index_covered(index) {
+                    selected_index = Some(
+                        logical_top_n
+                            .clone_with_input_and_prefix(index_scan.into(), prefix)
+                            .into(),
+                    );
+                }
             }
         }
-
-        None
+        selected_index
     }
 
     fn try_on_pk(
