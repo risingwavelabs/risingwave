@@ -275,22 +275,25 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                 next_chunk_id: 0,
                 metrics: self.metrics.clone(),
             };
-            let mut read_future = if pause_stream {
-                ReadFuture::Paused
-            } else {
-                ReadFuture::ReadingPersistedStream(
-                    read_state
-                        .read_persisted_log_store(&self.metrics, initial_write_epoch.prev, None)
-                        .await?,
-                )
-            };
+            let mut read_future = ReadFuture::ReadingPersistedStream(
+                read_state
+                    .read_persisted_log_store(&self.metrics, initial_write_epoch.prev, None)
+                    .await?,
+            );
 
             let mut write_future = WriteFuture::receive_from_upstream(input, initial_write_state);
 
             loop {
                 let select_result = {
-                    let read_future =
-                        read_future.next_chunk(&read_state, &mut buffer, &self.metrics);
+                    let read_future = async {
+                        if pause_stream {
+                            pending().await
+                        } else {
+                            read_future
+                                .next_chunk(&read_state, &mut buffer, &self.metrics)
+                                .await
+                        }
+                    };
                     pin_mut!(read_future);
                     let write_future = write_future.next_event();
                     pin_mut!(write_future);
@@ -421,7 +424,6 @@ enum ReadFuture<S: StateStoreRead> {
         truncate_offset: ReaderTruncationOffsetType,
     },
     Idle,
-    Paused,
 }
 
 // Read methods
@@ -449,7 +451,6 @@ impl<S: StateStoreRead> ReadFuture<S> {
                 *self = ReadFuture::Idle;
             }
             ReadFuture::ReadingFlushedChunk { .. } | ReadFuture::Idle => {}
-            ReadFuture::Paused => return pending().await,
         }
         match self {
             ReadFuture::ReadingPersistedStream(_) => {
@@ -498,9 +499,6 @@ impl<S: StateStoreRead> ReadFuture<S> {
                     }
                 }
             },
-            ReadFuture::Paused => {
-                unreachable!("should not be polled after paused")
-            }
         }
 
         let (future, truncate_offset) = match self {
@@ -511,9 +509,6 @@ impl<S: StateStoreRead> ReadFuture<S> {
                 future,
                 truncate_offset,
             } => (future, *truncate_offset),
-            ReadFuture::Paused => {
-                unreachable!("should not be polled after paused")
-            }
         };
 
         let (_, chunk, _) = future.await?;
