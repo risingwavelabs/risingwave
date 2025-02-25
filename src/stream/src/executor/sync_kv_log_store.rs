@@ -111,7 +111,7 @@ pub struct SyncedKvLogStoreExecutor<S: StateStore> {
 
     // Log store state
     state_store: S,
-    buffer_size: usize,
+    max_buffer_size: usize,
 
     pause_duration_ms: Duration,
 }
@@ -135,7 +135,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
             serde,
             state_store,
             upstream,
-            buffer_size,
+            max_buffer_size: buffer_size,
             pause_duration_ms,
         }
     }
@@ -309,9 +309,10 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
             let mut buffer = SyncedLogStoreBuffer {
                 buffer: VecDeque::new(),
                 current_size: 0,
-                max_size: self.buffer_size,
+                max_size: self.max_buffer_size,
                 next_chunk_id: 0,
                 metrics: self.metrics.clone(),
+                flushed: false,
             };
             let mut read_future = ReadFuture::ReadingPersistedStream(
                 read_state
@@ -390,9 +391,11 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                                                 end_seq_id,
                                             );
                                         } else {
-                                            // If buffer 90% full, pause the stream for a while, let downstream do some processing
+                                            // If buffer full, pause the stream for a while, let downstream do some processing
                                             // to avoid flushing.
-                                            if buffer.buffer.len() >= self.buffer_size * 9 / 10 {
+                                            if !buffer.flushed()
+                                                && buffer.size() >= self.max_buffer_size
+                                            {
                                                 write_future = WriteFuture::paused(
                                                     self.pause_duration_ms,
                                                     stream,
@@ -612,9 +615,19 @@ struct SyncedLogStoreBuffer {
     max_size: usize,
     next_chunk_id: ChunkId,
     metrics: KvLogStoreMetrics,
+    flushed: bool,
 }
 
 impl SyncedLogStoreBuffer {
+    fn size(&self) -> usize {
+        self.current_size
+    }
+
+    /// Returns true if there are flushed items in the buffer.
+    fn flushed(&self) -> bool {
+        self.flushed
+    }
+
     fn add_or_flush_chunk(
         &mut self,
         start_seq_id: SeqIdType,
@@ -681,6 +694,7 @@ impl SyncedLogStoreBuffer {
             );
         }
         // FIXME(kwannoel): Seems these metrics are updated _after_ the flush info is reported.
+        self.flushed = true;
         self.update_unconsumed_buffer_metrics();
     }
 
@@ -693,6 +707,7 @@ impl SyncedLogStoreBuffer {
     ) {
         let chunk_id = self.next_chunk_id;
         self.next_chunk_id += 1;
+        self.current_size += chunk.cardinality();
         self.buffer.push_back((
             epoch,
             LogStoreBufferItem::StreamChunk {
