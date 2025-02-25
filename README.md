@@ -75,7 +75,7 @@ RisingWave is designed to be easier to use and more cost-efficient:
 
 ### PostgreSQL compatibility
 
-* **Seamless integration:** Connects via the PostgreSQL wire protocol, working with psql, JDBC, and any Postgres tool.  
+* **Seamless integration:** Connects via the PostgreSQL wire protocol, working with psql, JDBC, and any Postgres tool.
 * **Expressive SQL:** Supports structured, semi-structured, and unstructured data with a familiar SQL dialect.
 * **No manual state tuning:** Eliminates complex state management configurations.
 
