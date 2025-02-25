@@ -42,7 +42,7 @@ FORMAT UPSERT ENCODE JSON
 db error: ERROR: Failed to run the query
 
 Caused by:
-  Bind error: can't CREATE SOURCE with FORMAT UPSERT
+  Bind error: can't CREATE SOURCE with FORMAT UPSERT.
 
 Hint: use CREATE TABLE instead
 
@@ -51,7 +51,7 @@ example:
     CREATE TABLE <table_name> ( PRIMARY KEY ([rw_key | <key_name>]) )
     INCLUDE KEY [AS <key_name>]
     WITH (...)
-    FORMAT UPSERT ENCODE JSON (...)
+    FORMAT UPSERT ENCODE JSON
 
 
 # upsert format must have a pk
@@ -73,16 +73,14 @@ FORMAT UPSERT ENCODE JSON
 db error: ERROR: Failed to run the query
 
 Caused by:
-  Bind error: can't CREATE SOURCE with FORMAT UPSERT.
-
-Hint: use CREATE TABLE instead
+  Protocol error: Primary key must be specified to rw_key
 
 Hint: For FORMAT UPSERT ENCODE JSON, INCLUDE KEY must be specified and the key column must be used as primary key.
 example:
-  CREATE TABLE <table_name> ( PRIMARY KEY ([rw_key | <key_name>]) )
-  INCLUDE KEY [AS <key_name>]
-  WITH (...)
-  FORMAT UPSERT ENCODE JSON
+    CREATE TABLE <table_name> ( PRIMARY KEY ([rw_key | <key_name>]) )
+    INCLUDE KEY [AS <key_name>]
+    WITH (...)
+    FORMAT UPSERT ENCODE JSON
 
 
 # upsert format pk must be the key column
@@ -111,7 +109,7 @@ example:
     CREATE TABLE <table_name> ( PRIMARY KEY ([rw_key | <key_name>]) )
     INCLUDE KEY [AS <key_name>]
     WITH (...)
-    FORMAT UPSERT ENCODE JSON (...)
+    FORMAT UPSERT ENCODE JSON
 
 
 statement error
@@ -133,7 +131,7 @@ FORMAT UPSERT ENCODE JSON
 db error: ERROR: Failed to run the query
 
 Caused by:
-  Bind error: can't CREATE SOURCE with FORMAT UPSERT
+  Bind error: can't CREATE SOURCE with FORMAT UPSERT.
 
 Hint: use CREATE TABLE instead
 
@@ -142,7 +140,7 @@ example:
     CREATE TABLE <table_name> ( PRIMARY KEY ([rw_key | <key_name>]) )
     INCLUDE KEY [AS <key_name>]
     WITH (...)
-    FORMAT UPSERT ENCODE JSON (...)
+    FORMAT UPSERT ENCODE JSON
 
 
 statement ok
