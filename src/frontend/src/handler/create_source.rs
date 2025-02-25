@@ -19,7 +19,6 @@ use std::sync::LazyLock;
 use anyhow::{Context, anyhow};
 use either::Either;
 use external_schema::debezium::extract_debezium_avro_table_pk_columns;
-use external_schema::iceberg::check_iceberg_source;
 use external_schema::nexmark::check_nexmark_schema;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap, hashset};
@@ -29,7 +28,7 @@ use risingwave_common::array::arrow::{IcebergArrowConvert, arrow_schema_iceberg}
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{
     ColumnCatalog, ColumnDesc, ColumnId, INITIAL_SOURCE_VERSION_ID, KAFKA_TIMESTAMP_COLUMN_NAME,
-    ROW_ID_COLUMN_NAME, Schema, TableId, debug_assert_column_ids_distinct,
+    ROW_ID_COLUMN_NAME, TableId, debug_assert_column_ids_distinct,
 };
 use risingwave_common::license::Feature;
 use risingwave_common::secret::LocalSecretManager;
@@ -400,15 +399,22 @@ pub(crate) fn bind_all_columns(
 }
 
 /// TODO: perhaps put the hint in notice is better. The error message format might be not that reliable.
-fn hint_upsert(encode: &Encode) -> String {
+fn hint_format_encode(format_encode: &FormatEncodeOptions) -> String {
     format!(
-        r#"Hint: For FORMAT UPSERT ENCODE {encode:}, INCLUDE KEY must be specified and the key column must be used as primary key.
+        r#"Hint: For FORMAT {0} ENCODE {1}, INCLUDE KEY must be specified and the key column must be used as primary key.
 example:
     CREATE TABLE <table_name> ( PRIMARY KEY ([rw_key | <key_name>]) )
     INCLUDE KEY [AS <key_name>]
     WITH (...)
-    FORMAT UPSERT ENCODE {encode:} (...)
-"#
+    FORMAT {0} ENCODE {1}{2}
+"#,
+        format_encode.format,
+        format_encode.row_encode,
+        if format_encode.row_encode == Encode::Json || format_encode.row_encode == Encode::Bytes {
+            "".to_owned()
+        } else {
+            " (...)".to_owned()
+        }
     )
 }
 
@@ -454,10 +460,7 @@ pub(crate) async fn bind_source_pk(
 
         // For all Upsert formats, we only accept one and only key column as primary key.
         // Additional KEY columns must be set in this case and must be primary key.
-        (
-            Format::Upsert,
-            encode @ Encode::Json | encode @ Encode::Avro | encode @ Encode::Protobuf,
-        ) => {
+        (Format::Upsert, Encode::Json | Encode::Avro | Encode::Protobuf) => {
             if let Some(ref key_column_name) = include_key_column_name
                 && sql_defined_pk
             {
@@ -471,7 +474,7 @@ pub(crate) async fn bind_source_pk(
                     return Err(RwError::from(ProtocolError(format!(
                         "Only \"{}\" can be used as primary key\n\n{}",
                         key_column_name,
-                        hint_upsert(encode)
+                        hint_format_encode(format_encode)
                     ))));
                 }
                 sql_defined_pk_names
@@ -481,12 +484,12 @@ pub(crate) async fn bind_source_pk(
                     Err(RwError::from(ProtocolError(format!(
                         "Primary key must be specified to {}\n\n{}",
                         include_key_column_name,
-                        hint_upsert(encode)
+                        hint_format_encode(format_encode)
                     ))))
                 } else {
                     Err(RwError::from(ProtocolError(format!(
                         "INCLUDE KEY clause not set\n\n{}",
-                        hint_upsert(encode)
+                        hint_format_encode(format_encode)
                     ))))
                 };
             }
@@ -620,7 +623,7 @@ pub(super) fn bind_source_watermark(
 ///
 /// One should only call this function after all properties of all columns are resolved, like
 /// generated column descriptors.
-pub(super) async fn check_format_encode(
+pub(super) fn check_format_encode(
     props: &WithOptionsSecResolved,
     row_id_index: Option<usize>,
     columns: &[ColumnCatalog],
@@ -631,10 +634,6 @@ pub(super) async fn check_format_encode(
 
     if connector == NEXMARK_CONNECTOR {
         check_nexmark_schema(props, row_id_index, columns)
-    } else if connector == ICEBERG_CONNECTOR {
-        Ok(check_iceberg_source(props, columns)
-            .await
-            .map_err(|err| ProtocolError(err.to_report_string()))?)
     } else {
         Ok(())
     }
@@ -752,10 +751,15 @@ pub async fn bind_create_source_or_table_with_connector(
     }
     if is_create_source {
         match format_encode.format {
-            Format::Upsert => {
+            Format::Upsert
+            | Format::Debezium
+            | Format::DebeziumMongo
+            | Format::Maxwell
+            | Format::Canal => {
                 return Err(ErrorCode::BindError(format!(
-                    "can't CREATE SOURCE with FORMAT UPSERT\n\nHint: use CREATE TABLE instead\n\n{}",
-                    hint_upsert(&format_encode.row_encode)
+                    "can't CREATE SOURCE with FORMAT {}.\n\nHint: use CREATE TABLE instead\n\n{}",
+                    format_encode.format,
+                    hint_format_encode(&format_encode)
                 ))
                 .into());
             }
@@ -892,7 +896,7 @@ pub async fn bind_create_source_or_table_with_connector(
         sql_columns_defs.to_vec(),
         &pk_col_ids,
     )?;
-    check_format_encode(&with_properties, row_id_index, &columns).await?;
+    check_format_encode(&with_properties, row_id_index, &columns)?;
 
     let definition = handler_args.normalized_sql.clone();
 

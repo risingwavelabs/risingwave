@@ -155,7 +155,7 @@ class Panels:
         )
 
     def timeseries(self, title, description, targets):
-        gridPos = self.layout.next_half_width_graph()
+        gridPos = self.layout.next_one_third_width_graph()
         return TimeSeries(
             title=title,
             dataSource=self.datasource,
@@ -166,7 +166,7 @@ class Panels:
         )
 
     def timeseries_count(self, title, description, targets, legendCols=["mean"]):
-        gridPos = self.layout.next_half_width_graph()
+        gridPos = self.layout.next_one_third_width_graph()
         return TimeSeries(
             title=title,
             dataSource=self.datasource,
@@ -179,7 +179,7 @@ class Panels:
 
     def timeseries_percentage(self, title, description, targets, legendCols=["mean"]):
         # Percentage should fall into 0.0-1.0
-        gridPos = self.layout.next_half_width_graph()
+        gridPos = self.layout.next_one_third_width_graph()
         return TimeSeries(
             title=title,
             dataSource=self.datasource,
@@ -192,7 +192,7 @@ class Panels:
         )
 
     def timeseries_latency(self, title, description, targets, legendCols=["mean"]):
-        gridPos = self.layout.next_half_width_graph()
+        gridPos = self.layout.next_one_third_width_graph()
         return TimeSeries(
             title=title,
             dataSource=self.datasource,
@@ -205,7 +205,7 @@ class Panels:
         )
 
     def timeseries_latency_ms(self, title, description, targets, legendCols=["mean"]):
-        gridPos = self.layout.next_half_width_graph()
+        gridPos = self.layout.next_one_third_width_graph()
         return TimeSeries(
             title=title,
             dataSource=self.datasource,
@@ -220,7 +220,7 @@ class Panels:
     def timeseries_actor_latency(
         self, title, description, targets, legendCols=["mean"]
     ):
-        gridPos = self.layout.next_half_width_graph()
+        gridPos = self.layout.next_one_third_width_graph()
         return TimeSeries(
             title=title,
             dataSource=self.datasource,
@@ -250,7 +250,7 @@ class Panels:
     def timeseries_query_per_sec(
         self, title, description, targets, legendCols=["mean"]
     ):
-        gridPos = self.layout.next_half_width_graph()
+        gridPos = self.layout.next_one_third_width_graph()
         return TimeSeries(
             title=title,
             dataSource=self.datasource,
@@ -265,7 +265,7 @@ class Panels:
     def timeseries_bytes_per_sec(
         self, title, description, targets, legendCols=["mean"]
     ):
-        gridPos = self.layout.next_half_width_graph()
+        gridPos = self.layout.next_one_third_width_graph()
         return TimeSeries(
             title=title,
             dataSource=self.datasource,
@@ -278,7 +278,7 @@ class Panels:
         )
 
     def timeseries_bytes(self, title, description, targets, legendCols=["mean"]):
-        gridPos = self.layout.next_half_width_graph()
+        gridPos = self.layout.next_one_third_width_graph()
         return TimeSeries(
             title=title,
             dataSource=self.datasource,
@@ -291,7 +291,7 @@ class Panels:
         )
 
     def timeseries_row(self, title, description, targets, legendCols=["mean"]):
-        gridPos = self.layout.next_half_width_graph()
+        gridPos = self.layout.next_one_third_width_graph()
         return TimeSeries(
             title=title,
             dataSource=self.datasource,
@@ -304,7 +304,7 @@ class Panels:
         )
 
     def timeseries_ms(self, title, description, targets, legendCols=["mean"]):
-        gridPos = self.layout.next_half_width_graph()
+        gridPos = self.layout.next_one_third_width_graph()
         return TimeSeries(
             title=title,
             dataSource=self.datasource,
@@ -316,7 +316,7 @@ class Panels:
         )
 
     def timeseries_kilobytes(self, title, description, targets, legendCols=["mean"]):
-        gridPos = self.layout.next_half_width_graph()
+        gridPos = self.layout.next_one_third_width_graph()
         return TimeSeries(
             title=title,
             dataSource=self.datasource,
@@ -329,7 +329,7 @@ class Panels:
         )
 
     def timeseries_dollar(self, title, description, targets, legendCols=["mean"]):
-        gridPos = self.layout.next_half_width_graph()
+        gridPos = self.layout.next_one_third_width_graph()
         return TimeSeries(
             title=title,
             dataSource=self.datasource,
@@ -342,7 +342,7 @@ class Panels:
         )
 
     def timeseries_ops(self, title, description, targets, legendCols=["mean"]):
-        gridPos = self.layout.next_half_width_graph()
+        gridPos = self.layout.next_one_third_width_graph()
         return TimeSeries(
             title=title,
             dataSource=self.datasource,
@@ -355,7 +355,7 @@ class Panels:
         )
 
     def timeseries_actor_ops(self, title, description, targets, legendCols=["mean"]):
-        gridPos = self.layout.next_half_width_graph()
+        gridPos = self.layout.next_one_third_width_graph()
         return TimeSeries(
             title=title,
             dataSource=self.datasource,
@@ -383,7 +383,7 @@ class Panels:
         )
 
     def timeseries_rowsps(self, title, description, targets, legendCols=["mean"]):
-        gridPos = self.layout.next_half_width_graph()
+        gridPos = self.layout.next_one_third_width_graph()
         return TimeSeries(
             title=title,
             dataSource=self.datasource,
@@ -396,7 +396,7 @@ class Panels:
         )
 
     def timeseries_bytesps(self, title, description, targets, legendCols=["mean"]):
-        gridPos = self.layout.next_half_width_graph()
+        gridPos = self.layout.next_one_third_width_graph()
         return TimeSeries(
             title=title,
             dataSource=self.datasource,
@@ -409,7 +409,7 @@ class Panels:
         )
 
     def timeseries_actor_rowsps(self, title, description, targets):
-        gridPos = self.layout.next_half_width_graph()
+        gridPos = self.layout.next_one_third_width_graph()
         return TimeSeries(
             title=title,
             dataSource=self.datasource,
@@ -421,7 +421,7 @@ class Panels:
         )
 
     def timeseries_memory(self, title, description, targets):
-        gridPos = self.layout.next_half_width_graph()
+        gridPos = self.layout.next_one_third_width_graph()
         return TimeSeries(
             title=title,
             dataSource=self.datasource,
@@ -433,7 +433,7 @@ class Panels:
         )
 
     def timeseries_cpu(self, title, description, targets):
-        gridPos = self.layout.next_half_width_graph()
+        gridPos = self.layout.next_one_third_width_graph()
         return TimeSeries(
             title=title,
             dataSource=self.datasource,
@@ -457,7 +457,7 @@ class Panels:
         )
 
     def timeseries_epoch(self, title, description, targets):
-        gridPos = self.layout.next_half_width_graph()
+        gridPos = self.layout.next_one_third_width_graph()
         return TimeSeries(
             title=title,
             dataSource=self.datasource,
@@ -468,7 +468,7 @@ class Panels:
         )
 
     def table_info(self, title, description, targets, columns, excludeByName=dict.fromkeys(["Time", "Value"], True)):
-        gridPos = self.layout.next_half_width_graph()
+        gridPos = self.layout.next_one_third_width_graph()
         column_indices = {column: index for index, column in enumerate(columns)}
         transformations = [
             {"id": "organize", "options": {"indexByName": column_indices, "excludeByName": excludeByName}}
@@ -483,7 +483,6 @@ class Panels:
             filterable=True,
             transformations=transformations,
         )
-
 
     def sub_panel(self):
         return Panels(self.datasource)

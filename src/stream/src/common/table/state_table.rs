@@ -56,11 +56,7 @@ use risingwave_storage::row_serde::row_serde_util::{
     deserialize_pk_with_vnode, serialize_pk, serialize_pk_with_vnode,
 };
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
-use risingwave_storage::store::{
-    InitOptions, LocalStateStore, NewLocalOptions, OpConsistencyLevel, PrefetchOptions,
-    ReadLogOptions, ReadOptions, SealCurrentEpochOptions, StateStoreIter, StateStoreIterExt,
-    TryWaitEpochOptions,
-};
+use risingwave_storage::store::*;
 use risingwave_storage::table::merge_sort::merge_sort;
 use risingwave_storage::table::{
     ChangeLogRow, KeyedRow, TableDistribution, deserialize_log_stream,
@@ -717,7 +713,6 @@ pub struct StateTablePostCommit<
     SD: ValueRowSerde,
 {
     inner: &'a mut StateTableInner<S, SD, IS_REPLICATED, USE_WATERMARK_CACHE>,
-    barrier_epoch: EpochPair,
 }
 
 impl<'a, S, SD, const IS_REPLICATED: bool, const USE_WATERMARK_CACHE: bool>
@@ -741,10 +736,8 @@ where
     > {
         self.inner.on_post_commit = false;
         Ok(if let Some(new_vnodes) = new_vnodes {
-            self.inner
-                .try_wait_committed_epoch(self.barrier_epoch.prev)
-                .await?;
-            let (old_vnodes, cache_may_stale) = self.update_vnode_bitmap(new_vnodes.clone());
+            let (old_vnodes, cache_may_stale) =
+                self.update_vnode_bitmap(new_vnodes.clone()).await?;
             Some(((new_vnodes, old_vnodes, self.inner), cache_may_stale))
         } else {
             None
@@ -756,7 +749,10 @@ where
     }
 
     /// Update the vnode bitmap of the state table, returns the previous vnode bitmap.
-    fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) -> (Arc<Bitmap>, bool) {
+    async fn update_vnode_bitmap(
+        &mut self,
+        new_vnodes: Arc<Bitmap>,
+    ) -> StreamExecutorResult<(Arc<Bitmap>, bool)> {
         assert!(
             !self.inner.is_dirty(),
             "vnode bitmap should only be updated when state table is clean"
@@ -764,7 +760,8 @@ where
         let prev_vnodes = self
             .inner
             .local_store
-            .update_vnode_bitmap(new_vnodes.clone());
+            .update_vnode_bitmap(new_vnodes.clone())
+            .await?;
         assert_eq!(
             &prev_vnodes,
             self.inner.vnodes(),
@@ -789,10 +786,10 @@ where
             }
         }
 
-        (
+        Ok((
             self.inner.distribution.update_vnode_bitmap(new_vnodes),
             cache_may_stale,
-        )
+        ))
     }
 }
 
@@ -1149,10 +1146,7 @@ where
         }
 
         self.on_post_commit = true;
-        Ok(StateTablePostCommit {
-            inner: self,
-            barrier_epoch: new_epoch,
-        })
+        Ok(StateTablePostCommit { inner: self })
     }
 
     /// Commit pending watermark and return vnode bitmap-watermark pairs to seal.
