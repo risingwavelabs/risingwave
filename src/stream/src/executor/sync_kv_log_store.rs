@@ -308,6 +308,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
             let mut truncation_offset = None;
             let mut buffer = SyncedLogStoreBuffer {
                 buffer: VecDeque::new(),
+                current_size: 0,
                 max_size: self.buffer_size,
                 next_chunk_id: 0,
                 metrics: self.metrics.clone(),
@@ -607,6 +608,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
 
 struct SyncedLogStoreBuffer {
     buffer: VecDeque<(u64, LogStoreBufferItem)>,
+    current_size: usize,
     max_size: usize,
     next_chunk_id: ChunkId,
     metrics: KvLogStoreMetrics,
@@ -620,7 +622,7 @@ impl SyncedLogStoreBuffer {
         chunk: StreamChunk,
         epoch: u64,
     ) -> Option<StreamChunk> {
-        let current_size = self.buffer.len();
+        let current_size = self.current_size;
         let chunk_size = chunk.cardinality();
 
         let should_flush_chunk = current_size + chunk_size >= self.max_size;
