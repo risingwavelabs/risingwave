@@ -96,12 +96,6 @@ pub mod predicate {
         Box::new(p)
     }
 
-    /// There're `n` upstream fragments of the fragment.
-    pub fn upstream_fragment_count(n: usize) -> BoxedPredicate {
-        let p = move |f: &PbFragment| f.upstream_fragment_ids.len() == n;
-        Box::new(p)
-    }
-
     /// The fragment is able to be rescheduled. Used for locating random fragment.
     pub fn can_reschedule() -> BoxedPredicate {
         let p = |f: &PbFragment| {

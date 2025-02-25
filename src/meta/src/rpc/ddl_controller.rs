@@ -947,10 +947,6 @@ impl DdlController {
                 });
             }
         }
-
-        union_fragment
-            .upstream_fragment_ids
-            .push(upstream_fragment_id);
     }
 
     /// For [`CreateType::Foreground`], the function will only return after backfilling finishes
