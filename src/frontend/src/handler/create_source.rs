@@ -762,7 +762,7 @@ pub async fn bind_create_source_or_table_with_connector(
             | Format::Maxwell
             | Format::Canal => {
                 return Err(ErrorCode::BindError(format!(
-                    "can't CREATE SOURCE with {}\n\nHint: use CREATE TABLE instead\n\n{}",
+                    "can't CREATE SOURCE with FORMAT {}.\n\nHint: use CREATE TABLE instead\n\n{}",
                     format_encode.format,
                     hint_format_encode(&format_encode)
                 ))
