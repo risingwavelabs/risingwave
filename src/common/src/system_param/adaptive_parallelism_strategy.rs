@@ -16,7 +16,6 @@ use std::cmp::{max, min};
 use std::fmt::{Display, Formatter};
 use std::num::NonZeroUsize;
 use std::str::FromStr;
-use std::sync::LazyLock;
 
 use regex::Regex;
 use risingwave_common::system_param::ParamValue;
@@ -84,46 +83,53 @@ impl AdaptiveParallelismStrategy {
 pub fn parse_strategy(
     input: &str,
 ) -> Result<AdaptiveParallelismStrategy, ParallelismStrategyParseError> {
-    static RE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(
-            r"(?xi)
-        ^
-        (?P<auto>auto)                       # Auto strategy
-        | (?P<full>full)                     # Full strategy
-        | bounded\((?P<bounded_value>\d+)\)  # Bounded with value
-        | ratio\((?P<ratio_value>[0-9.]+)\)  # Ratio with value
-        $
-    ",
-        )
-        .unwrap()
-    });
+    let lower_input = input.to_lowercase();
 
-    let input = input.trim();
+    // Handle Auto/Full case-insensitively without regex
+    match lower_input.as_str() {
+        "auto" => return Ok(AdaptiveParallelismStrategy::Auto),
+        "full" => return Ok(AdaptiveParallelismStrategy::Full),
+        _ => (),
+    }
 
-    let caps = RE
-        .captures(input)
-        .ok_or_else(|| ParallelismStrategyParseError::UnsupportedStrategy(input.to_owned()))?;
+    // Compile regex patterns once using OnceLock
+    fn bounded_re() -> &'static Regex {
+        static RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+        RE.get_or_init(|| Regex::new(r"(?i)^bounded\((?<value>\d+)\)$").unwrap())
+    }
 
-    if caps.name("auto").is_some() {
-        Ok(AdaptiveParallelismStrategy::Auto)
-    } else if caps.name("full").is_some() {
-        Ok(AdaptiveParallelismStrategy::Full)
-    } else if let Some(m) = caps.name("bounded_value") {
-        let value = m.as_str().parse::<u64>()?;
-        let non_zero = NonZeroUsize::new(value as usize)
-            .ok_or(ParallelismStrategyParseError::InvalidBoundedValue)?;
-        Ok(AdaptiveParallelismStrategy::Bounded(non_zero))
-    } else if let Some(m) = caps.name("ratio_value") {
-        let value = m.as_str().parse::<f32>()?;
+    fn ratio_re() -> &'static Regex {
+        static RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+        RE.get_or_init(|| Regex::new(r"(?i)^ratio\((?<value>[+-]?\d+(?:\.\d+)?)\)$").unwrap())
+    }
+
+    // Try to match Bounded pattern
+    if let Some(caps) = bounded_re().captures(&lower_input) {
+        let value_str = caps.name("value").unwrap().as_str();
+        let value: usize = value_str.parse()?;
+
+        let value =
+            NonZeroUsize::new(value).ok_or(ParallelismStrategyParseError::InvalidBoundedValue)?;
+
+        return Ok(AdaptiveParallelismStrategy::Bounded(value));
+    }
+
+    // Try to match Ratio pattern
+    if let Some(caps) = ratio_re().captures(&lower_input) {
+        let value_str = caps.name("value").unwrap().as_str();
+        let value: f32 = value_str.parse()?;
+
         if !(0.0..=1.0).contains(&value) {
             return Err(ParallelismStrategyParseError::InvalidRatioValue);
         }
-        Ok(AdaptiveParallelismStrategy::Ratio(value))
-    } else {
-        Err(ParallelismStrategyParseError::UnsupportedStrategy(
-            input.to_owned(),
-        ))
+
+        return Ok(AdaptiveParallelismStrategy::Ratio(value));
     }
+
+    // If no patterns matched
+    Err(ParallelismStrategyParseError::UnsupportedStrategy(
+        input.to_owned(),
+    ))
 }
 
 impl FromStr for AdaptiveParallelismStrategy {
@@ -174,7 +180,7 @@ mod tests {
 
         assert!(matches!(
             parse_strategy("Ratio(-0.5)"),
-            Err(ParallelismStrategyParseError::ParseFloatError(_))
+            Err(ParallelismStrategyParseError::InvalidRatioValue)
         ));
     }
 
@@ -189,5 +195,69 @@ mod tests {
             parse_strategy("Auto(5)"),
             Err(ParallelismStrategyParseError::UnsupportedStrategy(_))
         ));
+    }
+
+    #[test]
+    fn test_auto_full_strategies() {
+        let auto = AdaptiveParallelismStrategy::Auto;
+        let full = AdaptiveParallelismStrategy::Full;
+
+        // Basic cases
+        assert_eq!(auto.compute_target_parallelism(1), 1);
+        assert_eq!(auto.compute_target_parallelism(10), 10);
+        assert_eq!(full.compute_target_parallelism(5), 5);
+        assert_eq!(full.compute_target_parallelism(8), 8);
+
+        // Edge cases
+        assert_eq!(auto.compute_target_parallelism(usize::MAX), usize::MAX);
+    }
+
+    #[test]
+    fn test_bounded_strategy() {
+        let bounded_8 = AdaptiveParallelismStrategy::Bounded(NonZeroUsize::new(8).unwrap());
+        let bounded_1 = AdaptiveParallelismStrategy::Bounded(NonZeroUsize::new(1).unwrap());
+
+        // Below bound
+        assert_eq!(bounded_8.compute_target_parallelism(5), 5);
+        // Exactly at bound
+        assert_eq!(bounded_8.compute_target_parallelism(8), 8);
+        // Above bound
+        assert_eq!(bounded_8.compute_target_parallelism(10), 8);
+        // Minimum bound
+        assert_eq!(bounded_1.compute_target_parallelism(1), 1);
+        assert_eq!(bounded_1.compute_target_parallelism(2), 1);
+    }
+
+    #[test]
+    fn test_ratio_strategy() {
+        let ratio_half = AdaptiveParallelismStrategy::Ratio(0.5);
+        let ratio_30pct = AdaptiveParallelismStrategy::Ratio(0.3);
+        let ratio_full = AdaptiveParallelismStrategy::Ratio(1.0);
+
+        // Normal calculations
+        assert_eq!(ratio_half.compute_target_parallelism(4), 2);
+        assert_eq!(ratio_half.compute_target_parallelism(5), 2);
+
+        // Flooring behavior
+        assert_eq!(ratio_30pct.compute_target_parallelism(3), 1);
+        assert_eq!(ratio_30pct.compute_target_parallelism(4), 1);
+        assert_eq!(ratio_30pct.compute_target_parallelism(5), 1);
+        assert_eq!(ratio_30pct.compute_target_parallelism(7), 2);
+
+        // Full ratio
+        assert_eq!(ratio_full.compute_target_parallelism(5), 5);
+    }
+
+    #[test]
+    fn test_edge_cases() {
+        let ratio_overflow = AdaptiveParallelismStrategy::Ratio(2.5);
+        assert_eq!(ratio_overflow.compute_target_parallelism(4), 10);
+
+        let max_parallelism =
+            AdaptiveParallelismStrategy::Bounded(NonZeroUsize::new(usize::MAX).unwrap());
+        assert_eq!(
+            max_parallelism.compute_target_parallelism(usize::MAX),
+            usize::MAX
+        );
     }
 }
