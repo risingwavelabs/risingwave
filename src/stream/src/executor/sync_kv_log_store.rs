@@ -260,7 +260,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
             new_log_store_state(self.table_id, local_state_store, self.serde);
         initial_write_state.init(first_write_epoch).await?;
 
-        let mut pause_stream = false;
+        let mut pause_stream = first_barrier.is_pause_on_startup();
         let mut initial_write_epoch = first_write_epoch;
 
         // We only recreate the consume stream when:
@@ -433,9 +433,6 @@ impl<S: StateStoreRead> ReadFuture<S> {
         buffer: &mut SyncedLogStoreBuffer,
         metrics: &KvLogStoreMetrics,
     ) -> StreamExecutorResult<(StreamChunk, Option<ReaderTruncationOffsetType>)> {
-        if let ReadFuture::Paused = self {
-            return pending().await;
-        }
         match self {
             ReadFuture::ReadingPersistedStream(stream) => {
                 while let Some((_, item)) = stream.try_next().await? {
@@ -452,9 +449,7 @@ impl<S: StateStoreRead> ReadFuture<S> {
                 *self = ReadFuture::Idle;
             }
             ReadFuture::ReadingFlushedChunk { .. } | ReadFuture::Idle => {}
-            ReadFuture::Paused => {
-                unreachable!("should not be polled after paused")
-            }
+            ReadFuture::Paused => return pending().await,
         }
         match self {
             ReadFuture::ReadingPersistedStream(_) => {
