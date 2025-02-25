@@ -903,12 +903,12 @@ impl DdlService for DdlServiceImpl {
     ) -> Result<Response<AlterParallelismResponse>, Status> {
         let req = request.into_inner();
 
-        let table_id = req.get_table_id();
+        let job_id = req.get_table_id();
         let parallelism = *req.get_parallelism()?;
         let deferred = req.get_deferred();
         self.ddl_controller
             .reschedule_streaming_job(
-                table_id,
+                job_id,
                 JobRescheduleTarget {
                     parallelism: JobParallelismTarget::Update(TableParallelism::from(parallelism)),
                     resource_group: JobResourceGroupTarget::Keep,

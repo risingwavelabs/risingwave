@@ -14,7 +14,6 @@
 
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
-use std::sync::Once;
 use std::time::Instant;
 
 use anyhow::anyhow;
@@ -442,23 +441,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             .state_store()
             .clone();
         let table_id = self.backfill_state_store.state_store().table_id().into();
-        static STATE_TABLE_INITIALIZED: Once = Once::new();
-        tokio::spawn(async move {
-            // This is for self.backfill_finished() to be safe.
-            // We wait for 1st epoch's curr, i.e., the 2nd epoch's prev.
-            let epoch = first_epoch.curr;
-            tracing::info!("waiting for epoch: {}", epoch);
-            state_store
-                .try_wait_epoch(
-                    HummockReadEpoch::Committed(epoch),
-                    TryWaitEpochOptions { table_id },
-                )
-                .await
-                .expect("failed to wait epoch");
-            STATE_TABLE_INITIALIZED.call_once(|| ());
-            tracing::info!("finished waiting for epoch: {}", epoch);
-        });
-
+        let mut state_table_initialized = false;
         {
             let source_backfill_row_count = self
                 .metrics
@@ -665,11 +648,25 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                         .await?;
                                     }
 
+                                    if !state_table_initialized {
+                                        // This is for self.backfill_finished() to be safe: wait until this actor can read all actors' written data.
+                                        // We wait for 2nd epoch
+                                        let epoch = barrier_epoch.prev;
+                                        tracing::info!("waiting for epoch: {}", epoch);
+                                        state_store
+                                            .try_wait_epoch(
+                                                HummockReadEpoch::Committed(epoch),
+                                                TryWaitEpochOptions { table_id },
+                                            )
+                                            .await
+                                            .expect("failed to wait epoch");
+                                        tracing::info!("finished waiting for epoch: {}", epoch);
+                                        state_table_initialized = true;
+                                    }
                                     // After we reported finished, we still don't exit the loop.
                                     // Because we need to handle split migration.
-                                    if STATE_TABLE_INITIALIZED.is_completed()
-                                        && self.backfill_finished(&backfill_stage.states).await?
-                                    {
+                                    if self.backfill_finished(&backfill_stage.states).await? {
+                                        tracing::info!("source backfill finished");
                                         break 'backfill_loop;
                                     }
                                 } else {
@@ -869,7 +866,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
     ///
     /// Note: at the beginning, the actor will only read the state written by itself.
     /// It needs to _wait until it can read all actors' written data_.
-    /// i.e., wait for the first checkpoint has been available.
+    /// i.e., wait for the second checkpoint has been available.
     ///
     /// See <https://github.com/risingwavelabs/risingwave/issues/18300> for more details.
     async fn backfill_finished(&self, states: &BackfillStates) -> StreamExecutorResult<bool> {

@@ -394,7 +394,7 @@ impl DdlController {
     #[tracing::instrument(skip(self), level = "debug")]
     pub async fn reschedule_streaming_job(
         &self,
-        table_id: u32,
+        job_id: u32,
         target: JobRescheduleTarget,
         mut deferred: bool,
     ) -> MetaResult<()> {
@@ -407,7 +407,7 @@ impl DdlController {
         }
 
         self.stream_manager
-            .reschedule_streaming_job(table_id, target, deferred)
+            .reschedule_streaming_job(job_id, target, deferred)
             .await
     }
 
