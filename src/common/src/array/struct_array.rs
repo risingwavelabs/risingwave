@@ -27,6 +27,7 @@ use super::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayResult, DataC
 use crate::array::ArrayRef;
 use crate::bitmap::{Bitmap, BitmapBuilder};
 use crate::error::BoxedError;
+use crate::row::Row;
 use crate::types::{
     DataType, Datum, DatumRef, DefaultOrd, Scalar, ScalarImpl, StructType, ToDatumRef, ToText,
     hash_datum,
@@ -497,6 +498,25 @@ impl ToText for StructRef<'_> {
             DataType::Struct(_) => self.write(f),
             _ => unreachable!(),
         }
+    }
+}
+
+impl Row for StructRef<'_> {
+    fn datum_at(&self, index: usize) -> DatumRef<'_> {
+        self.field_at(index)
+    }
+
+    unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
+        // TODO: unchecked
+        self.field_at(index)
+    }
+
+    fn len(&self) -> usize {
+        self.iter_fields_ref().len()
+    }
+
+    fn iter(&self) -> impl Iterator<Item = DatumRef<'_>> {
+        self.iter_fields_ref()
     }
 }
 
