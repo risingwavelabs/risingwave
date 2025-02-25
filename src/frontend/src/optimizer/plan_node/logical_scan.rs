@@ -187,16 +187,18 @@ impl LogicalScan {
                 })
                 .collect();
 
-            let mut index_orders_iter = index_orders.into_iter();
+            let mut index_orders_iter = index_orders.into_iter().peekable();
 
             // First check the prefix
             let fixed_prefix = {
                 let mut fixed_prefix = vec![];
-                for index_col_order in &mut index_orders_iter {
-                    if prefix.contains(&index_col_order) {
-                        fixed_prefix.push(index_col_order);
-                    } else {
-                        break;
+                loop {
+                    match index_orders_iter.peek() {
+                        Some(index_col_order) if prefix.contains(index_col_order) => {
+                            let index_col_order = index_orders_iter.next().unwrap();
+                            fixed_prefix.push(index_col_order);
+                        }
+                        _ => break,
                     }
                 }
                 Order {

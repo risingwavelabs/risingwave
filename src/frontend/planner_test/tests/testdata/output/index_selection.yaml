@@ -788,16 +788,16 @@
     └─BatchExchange { order: [], dist: Single }
       └─BatchLimit { limit: 10, offset: 0 }
         └─BatchScan { table: idx1, columns: [idx1.a, idx1.b], limit: 10, distribution: UpstreamHashShard(idx1.a) }
-- name: topn index selection + limit pushdown fails
+- name: topn index selection + limit pushdown fails due to b desc != b asc
   sql: |
     create table t1 (a int, b int);
     create index idx1 on t1(a, b desc);
     select * from t1 order by a, b limit 10
   batch_plan: |-
-    BatchTopN { order: [idx1.a ASC, idx1.b ASC], limit: 10, offset: 0 }
+    BatchTopN { order: [t1.a ASC, t1.b ASC], limit: 10, offset: 0 }
     └─BatchExchange { order: [], dist: Single }
-      └─BatchTopN { order: [idx1.a ASC, idx1.b ASC], limit: 10, offset: 0 }
-        └─BatchScan { table: idx1, columns: [idx1.a, idx1.b], distribution: UpstreamHashShard(idx1.a) }
+      └─BatchTopN { order: [t1.a ASC, t1.b ASC], limit: 10, offset: 0 }
+        └─BatchScan { table: t1, columns: [t1.a, t1.b], distribution: SomeShard }
 - name: topn index selection + limit pushdown with point get
   sql: |
     create table t1 (a int, b int);
@@ -832,3 +832,18 @@
         └─BatchLimit { limit: 10, offset: 0 }
           └─BatchFilter { predicate: (idx1.d = 3:Int32) }
             └─BatchScan { table: idx1, columns: [idx1.a, idx1.b, idx1.c, idx1.d], scan_ranges: [idx1.a = Int32(2) AND idx1.c = Int32(1)], distribution: UpstreamHashShard(idx1.a) }
+- name: topn index selection + limit pushdown with multi index
+  sql: |
+    create table t1 (a int, b int, c int, d int);
+    create index idx1 on t1(a, b);
+    create index idx2 on t1(a, c, b desc);
+    create index idx3 on t1(a, c, d, b desc);
+    create index idx4 on t1(b, a desc);
+    select * from t1 where c = 1 and a = 2 and d = 3 order by b desc limit 10
+  batch_plan: |-
+    BatchSort { order: [idx2.b DESC] }
+    └─BatchTopN { order: [idx2.a ASC, idx2.c ASC, idx2.b DESC], limit: 10, offset: 0 }
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchLimit { limit: 10, offset: 0 }
+          └─BatchFilter { predicate: (idx2.d = 3:Int32) }
+            └─BatchScan { table: idx2, columns: [idx2.a, idx2.b, idx2.c, idx2.d], scan_ranges: [idx2.a = Int32(2) AND idx2.c = Int32(1)], distribution: UpstreamHashShard(idx2.a) }
