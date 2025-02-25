@@ -178,6 +178,7 @@ public class JDBCSink implements SinkWriter {
                         LOG.info("Recreate the JDBC connection due to connection broken");
                         // close the statements and connection first
                         jdbcStatements.close();
+                        conn.rollback();
                         conn.close();
 
                         // create a new connection if the current connection is invalid
@@ -394,6 +395,7 @@ public class JDBCSink implements SinkWriter {
 
         try {
             if (conn != null) {
+                conn.rollback();
                 conn.close();
             }
         } catch (SQLException e) {
