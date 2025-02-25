@@ -14,6 +14,7 @@
 
 use risingwave_pb::stream_plan::SyncLogStoreNode;
 use risingwave_storage::StateStore;
+use tokio::time::Duration;
 
 use crate::common::log_store_impl::kv_log_store::serde::LogStoreRowSerde;
 use crate::common::log_store_impl::kv_log_store::{KV_LOG_STORE_V2_INFO, KvLogStoreMetrics};
@@ -56,9 +57,10 @@ impl ExecutorBuilder for SyncLogStoreExecutorBuilder {
             params.vnode_bitmap.map(|b| b.into()),
             &KV_LOG_STORE_V2_INFO,
         );
-        // FIXME(kwannoel): Make configurable
-        let buffer_max_size = 1000;
         let [upstream] = params.input.try_into().unwrap();
+
+        let pause_duration_ms = node.pause_duration_ms as _;
+        let buffer_max_size = node.buffer_size as usize;
 
         let executor = SyncedKvLogStoreExecutor::new(
             actor_context,
@@ -68,6 +70,7 @@ impl ExecutorBuilder for SyncLogStoreExecutorBuilder {
             store,
             buffer_max_size,
             upstream,
+            Duration::from_millis(pause_duration_ms),
         );
         Ok((params.info, executor).into())
     }
