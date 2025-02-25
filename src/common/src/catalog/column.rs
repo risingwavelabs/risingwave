@@ -202,11 +202,6 @@ impl ColumnDesc {
         }
     }
 
-    // TODO(struct): deprecate and use `named` instead
-    pub fn new_atomic(data_type: DataType, name: &str, column_id: i32) -> Self {
-        Self::named(name, ColumnId::new(column_id), data_type)
-    }
-
     pub fn from_field_with_column_id(field: &Field, id: i32) -> Self {
         Self::named(&field.name, ColumnId::new(id), field.data_type.clone())
     }
