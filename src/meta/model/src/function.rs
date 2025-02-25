@@ -14,7 +14,6 @@
 
 use std::collections::BTreeMap;
 
-use risingwave_pb::catalog::function::Kind;
 use risingwave_pb::catalog::PbFunction;
 use risingwave_pb::catalog::function::Kind;
 use sea_orm::ActiveValue::Set;
