@@ -179,8 +179,8 @@ impl StreamReaderBuilder {
                 if is_initial_build {
                     return Err(StreamExecutorError::connector_error(e));
                 } else {
-                    tracing::warn!(error = ?e.as_report(), "build stream source reader error, retry in 5s");
-                    tokio::time::sleep(Duration::from_secs(5)).await;
+                    tracing::warn!(error = ?e.as_report(), "build stream source reader error, retry in 1s");
+                    tokio::time::sleep(Duration::from_secs(1)).await;
                     continue 'build_consume_loop;
                 }
             }
@@ -206,8 +206,8 @@ impl StreamReaderBuilder {
                     }
                 }
             }
-            tracing::info!("stream source reader error, retry in 5s");
-            tokio::time::sleep(Duration::from_secs(5)).await;
+            tracing::info!("stream source reader error, retry in 1s");
+            tokio::time::sleep(Duration::from_secs(1)).await;
         }
     }
 }

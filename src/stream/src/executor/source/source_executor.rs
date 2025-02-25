@@ -28,8 +28,8 @@ use risingwave_connector::parser::schema_change::SchemaChangeEnvelope;
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use risingwave_connector::source::reader::reader::SourceReader;
 use risingwave_connector::source::{
-    BoxSourceChunkStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitId, SplitImpl,
-    SplitMetaData, StreamChunkWithState, WaitCheckpointTask,
+    ConnectorState, SourceContext, SourceCtrlOpts, SplitId, SplitImpl, SplitMetaData,
+    StreamChunkWithState, WaitCheckpointTask,
 };
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::TryWaitEpochOptions;
@@ -39,9 +39,7 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::time::Instant;
 
 use super::executor_core::StreamSourceCore;
-use super::{
-    apply_rate_limit, barrier_to_message_stream, get_split_offset_col_idx, prune_additional_cols,
-};
+use super::{barrier_to_message_stream, get_split_offset_col_idx, prune_additional_cols};
 use crate::common::rate_limit::limited_chunk_size;
 use crate::executor::UpdateMutation;
 use crate::executor::prelude::*;
@@ -130,26 +128,6 @@ impl<S: StateStore> SourceExecutor<S> {
             source_reader,
             building_task: initial_task,
         }))
-    }
-
-    /// If `seek_to_latest` is true, will also return the latest splits after seek.
-    pub async fn build_stream_source_reader(
-        &self,
-        source_desc: &SourceDesc,
-        state: ConnectorState,
-        seek_to_latest: bool,
-    ) -> StreamExecutorResult<(BoxSourceChunkStream, Option<Vec<SplitImpl>>)> {
-        let (column_ids, source_ctx) = self.prepare_source_stream_build(source_desc);
-        let (stream, res) = source_desc
-            .source
-            .build_stream(state, column_ids, Arc::new(source_ctx), seek_to_latest)
-            .await
-            .map_err(StreamExecutorError::connector_error)?;
-
-        Ok((
-            apply_rate_limit(stream, self.rate_limit_rps).boxed(),
-            res.latest_splits,
-        ))
     }
 
     /// build the source column ids and the source context which will be used to build the source stream
