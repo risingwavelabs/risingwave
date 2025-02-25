@@ -194,7 +194,7 @@ where
     Ok(result)
 }
 
-async fn resolve_streaming_job_definition<C>(
+pub(crate) async fn resolve_streaming_job_definition<C>(
     txn: &C,
     job_ids: &HashSet<ObjectId>,
 ) -> MetaResult<HashMap<ObjectId, String>>
