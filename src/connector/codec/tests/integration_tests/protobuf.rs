@@ -157,12 +157,12 @@ fn test_simple_schema() -> anyhow::Result<()> {
         &[PRE_GEN_PROTO_DATA],
         expect![[r#"
             [
-                id(#1): Int32,
-                address(#2): Varchar,
-                city(#3): Varchar,
-                zipcode(#4): Int64,
-                rate(#5): Float32,
-                date(#6): Varchar,
+                id(#2147483646): Int32,
+                address(#2147483646): Varchar,
+                city(#2147483646): Varchar,
+                zipcode(#2147483646): Int64,
+                rate(#2147483646): Float32,
+                date(#2147483646): Varchar,
             ]"#]],
         expect![[r#"
             Owned(Int32(123))
@@ -185,21 +185,21 @@ fn test_complex_schema() -> anyhow::Result<()> {
         &[],
         expect![[r#"
             [
-                id(#1): Int32,
-                code(#2): Varchar,
-                timestamp(#3): Int64,
-                xfas(#4): List(
+                id(#2147483646): Int32,
+                code(#2147483646): Varchar,
+                timestamp(#2147483646): Int64,
+                xfas(#2147483646): List(
                     Struct {
                         device_model_id: Int32,
                         device_make_id: Int32,
                         ip: Varchar,
                     },
                 ),
-                contacts(#7): Struct {
+                contacts(#2147483646): Struct {
                     emails: List(Varchar),
                     phones: List(Varchar),
                 },
-                sex(#8): Varchar,
+                sex(#2147483646): Varchar,
             ]"#]],
         expect![""],
     );
@@ -455,8 +455,8 @@ fn test_any_schema() -> anyhow::Result<()> {
         &[ANY_DATA_1, ANY_DATA_2, ANY_DATA_3, ANY_DATA_INVALID],
         expect![[r#"
             [
-                id(#1): Int32,
-                any_value(#2): Jsonb,
+                id(#2147483646): Int32,
+                any_value(#2147483646): Jsonb,
             ]"#]],
         expect![[r#"
             Owned(Int32(12345))
@@ -574,44 +574,44 @@ fn test_all_types() -> anyhow::Result<()> {
         &[&data_bytes],
         expect![[r#"
             [
-                double_field(#1): Float64,
-                float_field(#2): Float32,
-                int32_field(#3): Int32,
-                int64_field(#4): Int64,
-                uint32_field(#5): Int64,
-                uint64_field(#6): Decimal,
-                sint32_field(#7): Int32,
-                sint64_field(#8): Int64,
-                fixed32_field(#9): Int64,
-                fixed64_field(#10): Decimal,
-                sfixed32_field(#11): Int32,
-                sfixed64_field(#12): Int64,
-                bool_field(#13): Boolean,
-                string_field(#14): Varchar,
-                bytes_field(#15): Bytea,
-                enum_field(#16): Varchar,
-                nested_message_field(#19): Struct {
+                double_field(#2147483646): Float64,
+                float_field(#2147483646): Float32,
+                int32_field(#2147483646): Int32,
+                int64_field(#2147483646): Int64,
+                uint32_field(#2147483646): Int64,
+                uint64_field(#2147483646): Decimal,
+                sint32_field(#2147483646): Int32,
+                sint64_field(#2147483646): Int64,
+                fixed32_field(#2147483646): Int64,
+                fixed64_field(#2147483646): Decimal,
+                sfixed32_field(#2147483646): Int32,
+                sfixed64_field(#2147483646): Int64,
+                bool_field(#2147483646): Boolean,
+                string_field(#2147483646): Varchar,
+                bytes_field(#2147483646): Bytea,
+                enum_field(#2147483646): Varchar,
+                nested_message_field(#2147483646): Struct {
                     id: Int32,
                     name: Varchar,
                 },
-                repeated_int_field(#20): List(Int32),
-                oneof_string(#21): Varchar,
-                oneof_int32(#22): Int32,
-                oneof_enum(#23): Varchar,
-                map_field(#26): Map(Varchar,Int32),
-                timestamp_field(#29): Struct {
+                repeated_int_field(#2147483646): List(Int32),
+                oneof_string(#2147483646): Varchar,
+                oneof_int32(#2147483646): Int32,
+                oneof_enum(#2147483646): Varchar,
+                map_field(#2147483646): Map(Varchar,Int32),
+                timestamp_field(#2147483646): Struct {
                     seconds: Int64,
                     nanos: Int32,
                 },
-                duration_field(#32): Struct {
+                duration_field(#2147483646): Struct {
                     seconds: Int64,
                     nanos: Int32,
                 },
-                any_field(#33): Jsonb,
-                int32_value_field(#35): Struct { value: Int32 },
-                string_value_field(#37): Struct { value: Varchar },
-                map_struct_field(#42): Map(Varchar,Struct { id: Int32, name: Varchar }),
-                map_enum_field(#45): Map(Int32,Varchar),
+                any_field(#2147483646): Jsonb,
+                int32_value_field(#2147483646): Struct { value: Int32 },
+                string_value_field(#2147483646): Struct { value: Varchar },
+                map_struct_field(#2147483646): Map(Varchar,Struct { id: Int32, name: Varchar }),
+                map_enum_field(#2147483646): Map(Int32,Varchar),
             ]"#]],
         expect![[r#"
             Owned(Float64(OrderedFloat(1.2345)))
