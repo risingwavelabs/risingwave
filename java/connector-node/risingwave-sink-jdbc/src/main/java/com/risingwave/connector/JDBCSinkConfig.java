@@ -39,6 +39,9 @@ public class JDBCSinkConfig extends CommonSinkConfig {
     @JsonProperty(value = "jdbc.query.timeout")
     private int queryTimeoutSeconds = 600;
 
+    @JsonProperty(value = "jdbc.auto.commit")
+    private boolean autoCommit = false;
+
     @JsonCreator
     public JDBCSinkConfig(
             @JsonProperty(value = "jdbc.url") String jdbcUrl,
@@ -80,5 +83,9 @@ public class JDBCSinkConfig extends CommonSinkConfig {
 
     public int getQueryTimeout() {
         return queryTimeoutSeconds;
+    }
+
+    public boolean isAutoCommit() {
+        return autoCommit;
     }
 }

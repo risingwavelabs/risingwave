@@ -39,8 +39,8 @@ public abstract class JdbcUtils {
     }
 
     /** The connection returned by this method is *not* autoCommit */
-    public static Connection getConnection(String jdbcUrl, String user, String password)
-            throws SQLException {
+    public static Connection getConnection(
+            String jdbcUrl, String user, String password, boolean autoCommit) throws SQLException {
         var props = new Properties();
         // enable TCP keep alive to avoid connection closed by server
         // both MySQL and PG support this property
@@ -65,7 +65,7 @@ public abstract class JdbcUtils {
 
         var conn = DriverManager.getConnection(jdbcUrl, props);
         // disable auto commit can improve performance
-        conn.setAutoCommit(false);
+        conn.setAutoCommit(autoCommit);
         // explicitly set isolation level to RC
         conn.setTransactionIsolation(Connection.TRANSACTION_READ_COMMITTED);
         return conn;
