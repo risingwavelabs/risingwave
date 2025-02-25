@@ -762,8 +762,8 @@ dependencies = [
 
 [[package]]
 name = "arrow-udf-js"
-version = "0.5.0"
-source = "git+https://github.com/arrow-udf/arrow-udf.git?rev=05e6dc9b5d0403fe7b88643925992da00cda22e3#05e6dc9b5d0403fe7b88643925992da00cda22e3"
+version = "0.6.0"
+source = "git+https://github.com/arrow-udf/arrow-udf.git?rev=5a11548395da70596d84e2ad4cffd567ff83c0f0#5a11548395da70596d84e2ad4cffd567ff83c0f0"
 dependencies = [
  "anyhow",
  "arrow-array 53.2.0",
