@@ -215,14 +215,14 @@ impl LogicalScan {
                 })
                 .collect();
 
-            let mut index_orders_iter = index_orders.iter();
+            let mut index_orders_iter = index_orders.into_iter();
 
             // First check the prefix
             let fixed_prefix = {
                 let mut fixed_prefix = vec![];
                 for index_col_order in &mut index_orders_iter {
-                    if prefix.contains(index_col_order) {
-                        fixed_prefix.push(index_col_order.clone());
+                    if prefix.contains(&index_col_order) {
+                        fixed_prefix.push(index_col_order);
                     } else {
                         break;
                     }
@@ -232,20 +232,12 @@ impl LogicalScan {
                 }
             };
 
-            // Next check required order
-            let remaining_len = index_orders_iter.len();
-            if remaining_len < required_order.column_orders.len() {
-                continue;
+            let remaining_orders = Order {
+                column_orders: index_orders_iter.collect(),
+            };
+            if remaining_orders.satisfies(required_order) {
+                index_catalog_and_orders.push((index, fixed_prefix));
             }
-
-            #[expect(clippy::disallowed_methods)]
-            for (order, other_order) in index_orders_iter.zip(required_order.column_orders.iter()) {
-                if order != other_order {
-                    continue;
-                }
-            }
-
-            index_catalog_and_orders.push((index, fixed_prefix));
         }
         index_catalog_and_orders
     }
