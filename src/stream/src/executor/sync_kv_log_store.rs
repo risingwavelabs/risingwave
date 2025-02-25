@@ -534,7 +534,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
         writer.write_barrier(epoch, barrier.is_checkpoint())?;
 
         if barrier.is_checkpoint() {
-            for (epoch, item) in &mut buffer.buffer {
+            for (epoch, item) in buffer.buffer.iter_mut().rev() {
                 match item {
                     LogStoreBufferItem::StreamChunk {
                         chunk,
