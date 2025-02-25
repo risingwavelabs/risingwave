@@ -64,6 +64,14 @@ impl OffsetWidth {
     }
 }
 
+/// Header (metadata) of the encoded row.
+///
+/// Layout (most to least significant bits):
+///
+/// ```text
+/// | magic | reserved | offset |
+/// |   1   |    5     |   2    |
+/// ```
 #[bitfield(u8, order = Msb)]
 #[derive(PartialEq, Eq)]
 struct Header {
@@ -88,6 +96,7 @@ struct RowEncoding {
     buf: Vec<u8>,
 }
 
+/// A trait unifying [`ToDatumRef`] and already encoded bytes.
 trait Encode {
     fn encode_to(self, data: &mut Vec<u8>);
 }
@@ -129,26 +138,19 @@ impl RowEncoding {
         // Use 0 if there's no data.
         let max_offset = usize_offsets.last().copied().unwrap_or(0);
 
-        match max_offset {
-            _n @ ..=const { u8::MAX as usize } => {
-                self.header.set_offset(OffsetWidth::Offset8);
-                usize_offsets
-                    .iter()
-                    .for_each(|m| self.offsets.put_u8(*m as u8));
-            }
-            _n @ ..=const { u16::MAX as usize } => {
-                self.header.set_offset(OffsetWidth::Offset16);
-                usize_offsets
-                    .iter()
-                    .for_each(|m| self.offsets.put_u16_le(*m as u16));
-            }
-            _n @ ..=const { u32::MAX as usize } => {
-                self.header.set_offset(OffsetWidth::Offset32);
-                usize_offsets
-                    .iter()
-                    .for_each(|m| self.offsets.put_u32_le(*m as u32));
-            }
+        let offset_width = match max_offset {
+            _n @ ..=const { u8::MAX as usize } => OffsetWidth::Offset8,
+            _n @ ..=const { u16::MAX as usize } => OffsetWidth::Offset16,
+            _n @ ..=const { u32::MAX as usize } => OffsetWidth::Offset32,
             _ => panic!("encoding length {} exceeds u32", max_offset),
+        };
+        self.header.set_offset(offset_width);
+
+        self.offsets
+            .reserve_exact(usize_offsets.len() * offset_width.width());
+        for &offset in usize_offsets {
+            self.offsets
+                .put_uint_le(offset as u64, offset_width.width());
         }
     }
 
@@ -157,7 +159,8 @@ impl RowEncoding {
             self.buf.is_empty(),
             "should not encode one RowEncoding object multiple times."
         );
-        let mut offset_usize = vec![];
+        let datums = datums.into_iter();
+        let mut offset_usize = Vec::with_capacity(datums.size_hint().0);
         for datum in datums {
             offset_usize.push(self.buf.len());
             datum.encode_to(&mut self.buf);
@@ -217,43 +220,15 @@ impl ValueRowSerializer for Serializer {
     }
 }
 
-/// Column-Aware `Deserializer` holds needed `ColumnIds` and their corresponding schema
-/// Should non-null default values be specified, a new field could be added to Deserializer
-#[derive(Clone)]
-pub struct Deserializer {
-    required_column_ids: HashMap<i32, usize>,
-    schema: Arc<[DataType]>,
-
-    /// A row with default values for each column or `None` if no default value is specified
-    default_row: Vec<Datum>,
-}
-
-impl Deserializer {
-    pub fn new(
-        column_ids: &[ColumnId],
-        schema: Arc<[DataType]>,
-        column_with_default: impl Iterator<Item = (usize, Datum)>,
-    ) -> Self {
-        assert_eq!(column_ids.len(), schema.len());
-        let mut default_row: Vec<Datum> = vec![None; schema.len()];
-        for (i, datum) in column_with_default {
-            default_row[i] = datum;
-        }
-        Self {
-            required_column_ids: column_ids
-                .iter()
-                .enumerate()
-                .map(|(i, c)| (c.get_id(), i))
-                .collect::<HashMap<_, _>>(),
-            schema,
-            default_row,
-        }
-    }
-}
-
+/// A view of the encoded bytes, which can be iterated over to get the column id and data.
+/// Used for deserialization.
+// TODO: can we unify this with `RowEncoding`, which is for serialization?
 #[derive(Clone)]
 struct EncodedBytes<'a> {
     header: Header,
+
+    // When iterating, we will consume `column_ids` and `offsets` while keep `data` unchanged.
+    // This is because we record absolute values in `offsets` to index into `data`.
     column_ids: &'a [u8],
     offsets: &'a [u8],
     data: &'a [u8],
@@ -295,17 +270,54 @@ impl<'a> Iterator for EncodedBytes<'a> {
 
         let id = self.column_ids.get_i32_le();
 
-        let this_offset = self.offsets.get_uint_le(self.offset_width()) as usize;
+        let offset_width = self.offset_width();
+        let get_offset = |offsets: &mut &[u8]| offsets.get_uint_le(offset_width) as usize;
+
+        let this_offset = get_offset(&mut self.offsets);
         let next_offset = if self.offsets.is_empty() {
             self.data.len()
         } else {
             let mut peek_offsets = self.offsets;
-            peek_offsets.get_uint_le(self.offset_width()) as usize
+            get_offset(&mut peek_offsets)
         };
 
         let data = &self.data[this_offset..next_offset];
 
         Some((id, data))
+    }
+}
+
+/// Column-Aware `Deserializer` holds needed `ColumnIds` and their corresponding schema
+/// Should non-null default values be specified, a new field could be added to Deserializer
+#[derive(Clone)]
+pub struct Deserializer {
+    required_column_ids: HashMap<i32, usize>,
+    schema: Arc<[DataType]>,
+
+    /// A row with default values for each column or `None` if no default value is specified
+    default_row: Vec<Datum>,
+}
+
+impl Deserializer {
+    pub fn new(
+        column_ids: &[ColumnId],
+        schema: Arc<[DataType]>,
+        column_with_default: impl Iterator<Item = (usize, Datum)>,
+    ) -> Self {
+        assert_eq!(column_ids.len(), schema.len());
+        let mut default_row: Vec<Datum> = vec![None; schema.len()];
+        for (i, datum) in column_with_default {
+            default_row[i] = datum;
+        }
+        Self {
+            required_column_ids: column_ids
+                .iter()
+                .enumerate()
+                .map(|(i, c)| (c.get_id(), i))
+                .collect::<HashMap<_, _>>(),
+            schema,
+            default_row,
+        }
     }
 }
 
@@ -355,7 +367,6 @@ impl ValueRowDeserializer for ColumnAwareSerde {
 
 /// Deserializes row `encoded_bytes`, drops columns not in `valid_column_ids`, serializes and returns.
 /// If no column is dropped, returns None.
-// TODO: Avoid duplicated code. The current code combines`Serializer` and `Deserializer` with unavailable parameter removed, e.g. `Deserializer::schema`.
 pub fn try_drop_invalid_columns(
     encoded_bytes: &[u8],
     valid_column_ids: &HashSet<i32>,
@@ -369,7 +380,7 @@ pub fn try_drop_invalid_columns(
 
     // Slow path that drops columns. Should be rare.
 
-    let mut datums: Vec<Option<&[u8]>> = Vec::with_capacity(valid_column_ids.len());
+    let mut datums = Vec::with_capacity(valid_column_ids.len());
     let mut column_ids = Vec::with_capacity(valid_column_ids.len());
 
     for (id, data) in encoded_bytes {
@@ -377,11 +388,6 @@ pub fn try_drop_invalid_columns(
             column_ids.push(ColumnId::new(id));
             datums.push(if data.is_empty() { None } else { Some(data) });
         }
-    }
-
-    if column_ids.is_empty() {
-        // According to `RowEncoding::encode`, at least one column is required.
-        return None;
     }
 
     let row_bytes = Serializer::new(&column_ids).serialize_raw(datums);
