@@ -30,10 +30,10 @@ use risingwave_pb::plan_common::ColumnDesc;
 use super::utils::{bytes_from_url, get_kafka_topic};
 use super::{JsonProperties, SchemaRegistryAuth};
 use crate::error::ConnectorResult;
-use crate::parser::unified::json::{JsonAccess, JsonParseOptions};
-use crate::parser::unified::AccessImpl;
 use crate::parser::AccessBuilder;
-use crate::schema::schema_registry::{handle_sr_list, Client};
+use crate::parser::unified::AccessImpl;
+use crate::parser::unified::json::{JsonAccess, JsonParseOptions};
+use crate::schema::schema_registry::{Client, handle_sr_list};
 
 #[derive(Debug)]
 pub struct JsonAccessBuilder {
@@ -84,8 +84,8 @@ pub async fn fetch_json_schema_and_map_to_columns(
     props: &BTreeMap<String, String>,
 ) -> ConnectorResult<Vec<ColumnDesc>> {
     let url = handle_sr_list(schema_location)?;
-    let json_schema = if let Some(schema_registry_auth) = schema_registry_auth {
-        let client = Client::new(url, &schema_registry_auth)?;
+    let mut json_schema = if let Some(schema_registry_auth) = schema_registry_auth {
+        let client = Client::new(url.clone(), &schema_registry_auth)?;
         let topic = get_kafka_topic(props)?;
         let schema = client
             .get_schema_by_subject(&format!("{}-value", topic))
@@ -96,7 +96,10 @@ pub async fn fetch_json_schema_and_map_to_columns(
         let bytes = bytes_from_url(url, None).await?;
         JsonSchema::parse_bytes(&bytes)?
     };
-    json_schema.json_schema_to_columns().map_err(Into::into)
+    json_schema
+        .json_schema_to_columns(url.first().unwrap().clone())
+        .await
+        .map_err(Into::into)
 }
 
 #[cfg(test)]
@@ -456,7 +459,6 @@ mod tests {
             name: "rw_key".into(),
             data_type: DataType::Bytea,
             column_id: 2.into(),
-            fields: vec![],
             column_type: SourceColumnType::Normal,
             is_pk: true,
             is_hidden_addition_col: false,

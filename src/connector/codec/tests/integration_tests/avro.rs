@@ -14,11 +14,11 @@
 
 use anyhow::Context;
 use apache_avro::from_avro_datum;
-use risingwave_connector_codec::decoder::avro::{
-    avro_schema_to_column_descs, AvroAccess, AvroParseOptions, MapHandling, ResolvedAvroSchema,
-};
-use risingwave_connector_codec::decoder::Access;
 use risingwave_connector_codec::AvroSchema;
+use risingwave_connector_codec::decoder::Access;
+use risingwave_connector_codec::decoder::avro::{
+    AvroAccess, AvroParseOptions, MapHandling, ResolvedAvroSchema, avro_schema_to_column_descs,
+};
 use thiserror_ext::AsReport;
 
 use crate::utils::*;
@@ -194,25 +194,25 @@ fn test_simple() {
         "#,
         &[
             // {"id":32,"sequence_id":64,"name":{"string":"str_value"},"score":32.0,"avg_score":64.0,"is_lasted":true,"entrance_date":0,"birthday":0,"anniversary":0,"passed":"\u0001\u0000\u0000\u0000\u0001\u0000\u0000\u0000\u00E8\u0003\u0000\u0000","bytes":"\u0001\u0002\u0003\u0004\u0005"}
-              "40800102127374725f76616c7565000000420000000000005040010000000100000001000000e80300000a0102030405"
-            ],
+            "40800102127374725f76616c7565000000420000000000005040010000000100000001000000e80300000a0102030405",
+        ],
         Config {
             map_handling: None,
             data_encoding: TestDataEncoding::HexBinary,
         },
         expect![[r#"
             [
-                id(#1): Int32,
-                sequence_id(#2): Int64,
-                name(#3): Varchar,
-                score(#4): Float32,
-                avg_score(#5): Float64,
-                is_lasted(#6): Boolean,
-                entrance_date(#7): Date,
-                birthday(#8): Timestamptz,
-                anniversary(#9): Timestamptz,
-                passed(#10): Interval,
-                bytes(#11): Bytea,
+                id(#2147483646): Int32,
+                sequence_id(#2147483646): Int64,
+                name(#2147483646): Varchar,
+                score(#2147483646): Float32,
+                avg_score(#2147483646): Float64,
+                is_lasted(#2147483646): Boolean,
+                entrance_date(#2147483646): Date,
+                birthday(#2147483646): Timestamptz,
+                anniversary(#2147483646): Timestamptz,
+                passed(#2147483646): Interval,
+                bytes(#2147483646): Bytea,
             ]"#]],
         expect![[r#"
             Owned(Int32(32))
@@ -343,16 +343,16 @@ fn test_nullable_union() {
         },
         expect![[r#"
             [
-                id(#1): Int32,
-                age(#2): Int32,
-                sequence_id(#3): Int64,
-                name(#4): Varchar,
-                score(#5): Float32,
-                avg_score(#6): Float64,
-                is_lasted(#7): Boolean,
-                entrance_date(#8): Date,
-                birthday(#9): Timestamptz,
-                anniversary(#10): Timestamptz,
+                id(#2147483646): Int32,
+                age(#2147483646): Int32,
+                sequence_id(#2147483646): Int64,
+                name(#2147483646): Varchar,
+                score(#2147483646): Float32,
+                avg_score(#2147483646): Float64,
+                is_lasted(#2147483646): Boolean,
+                entrance_date(#2147483646): Date,
+                birthday(#2147483646): Timestamptz,
+                anniversary(#2147483646): Timestamptz,
             ]"#]],
         expect![[r#"
             Owned(Int32(5))
@@ -510,28 +510,28 @@ fn test_1() {
 "#,
         &[
             // {"op_type": {"string": "update"}, "ID": {"string": "id1"}, "CLASS_ID": {"string": "1"}, "ITEM_ID": {"string": "6768"}, "ATTR_ID": {"string": "6970"}, "ATTR_VALUE": {"string": "value9"}, "ORG_ID": {"string": "7172"}, "UNIT_INFO": {"string": "info9"}, "UPD_TIME": {"string": "2021-05-18T07:59:58.714Z"}, "DEC_VAL": {"bytes": "\u0002\u0054\u000b\u00e3\u00ff"}}
-            "020c7570646174650206696431020231020836373638020836393730020c76616c756539020837313732020a696e666f390230323032312d30352d31385430373a35393a35382e3731345a000a02540be3ff000000000000000000f87f"
-            ],
+            "020c7570646174650206696431020231020836373638020836393730020c76616c756539020837313732020a696e666f390230323032312d30352d31385430373a35393a35382e3731345a000a02540be3ff000000000000000000f87f",
+        ],
         Config {
             map_handling: None,
             data_encoding: TestDataEncoding::HexBinary,
         },
         expect![[r#"
             [
-                op_type(#1): Varchar,
-                ID(#2): Varchar,
-                CLASS_ID(#3): Varchar,
-                ITEM_ID(#4): Varchar,
-                ATTR_ID(#5): Varchar,
-                ATTR_VALUE(#6): Varchar,
-                ORG_ID(#7): Varchar,
-                UNIT_INFO(#8): Varchar,
-                UPD_TIME(#9): Varchar,
-                DEC_VAL(#10): Decimal,
-                REFERRED(#11): Struct { a: Varchar },
-                REF(#12): Struct { a: Varchar },
-                uuid(#13): Varchar,
-                rate(#14): Float64,
+                op_type(#2147483646): Varchar,
+                ID(#2147483646): Varchar,
+                CLASS_ID(#2147483646): Varchar,
+                ITEM_ID(#2147483646): Varchar,
+                ATTR_ID(#2147483646): Varchar,
+                ATTR_VALUE(#2147483646): Varchar,
+                ORG_ID(#2147483646): Varchar,
+                UNIT_INFO(#2147483646): Varchar,
+                UPD_TIME(#2147483646): Varchar,
+                DEC_VAL(#2147483646): Decimal,
+                REFERRED(#2147483646): Struct { a: Varchar },
+                REF(#2147483646): Struct { a: Varchar },
+                uuid(#2147483646): Varchar,
+                rate(#2147483646): Float64,
             ]"#]],
         expect![[r#"
             Borrowed(Utf8("update"))
@@ -809,7 +809,7 @@ fn test_union() {
         },
         expect![[r#"
             [
-                metrics(#1): List(
+                metrics(#2147483646): List(
                     Struct {
                         id: Varchar,
                         name: Varchar,
@@ -910,8 +910,8 @@ fn test_map() {
         },
         expect![[r#"
             [
-                map_str(#1): Map(Varchar,Varchar),
-                map_map_int(#2): Map(Varchar,Map(Varchar,Int32)),
+                map_str(#2147483646): Map(Varchar,Varchar),
+                map_map_int(#2147483646): Map(Varchar,Map(Varchar,Int32)),
             ]"#]],
         expect![[r#"
             Owned([
@@ -966,8 +966,8 @@ fn test_map() {
         },
         expect![[r#"
             [
-                map_str(#1): Jsonb,
-                map_map_int(#2): Jsonb,
+                map_str(#2147483646): Jsonb,
+                map_map_int(#2147483646): Jsonb,
             ]"#]],
         expect![[r#"
             Owned(Jsonb({"a": "x", "b": "y"}))

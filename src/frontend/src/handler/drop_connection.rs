@@ -50,7 +50,7 @@ pub async fn handle_drop_connection(
                             .into())
                     } else {
                         Err(e.into())
-                    }
+                    };
                 }
             };
         session.check_privilege_for_drop_alter(schema_name, &**connection)?;

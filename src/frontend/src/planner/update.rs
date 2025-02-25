@@ -21,7 +21,7 @@ use crate::binder::{BoundUpdate, UpdateProject};
 use crate::error::Result;
 use crate::expr::{ExprImpl, FunctionCall, InputRef, Literal};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
-use crate::optimizer::plan_node::{generic, LogicalProject, LogicalUpdate};
+use crate::optimizer::plan_node::{LogicalProject, LogicalUpdate, generic};
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{PlanRef, PlanRoot};
 

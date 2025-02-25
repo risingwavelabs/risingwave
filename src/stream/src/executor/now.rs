@@ -21,8 +21,8 @@ use risingwave_common::row;
 use risingwave_common::types::{DefaultOrdered, Interval, Timestamptz, ToDatumRef};
 use risingwave_expr::capture_context;
 use risingwave_expr::expr::{
-    build_func_non_strict, EvalErrorReport, ExpressionBoxExt, InputRefExpression,
-    LiteralExpression, NonStrictExpression,
+    EvalErrorReport, ExpressionBoxExt, InputRefExpression, LiteralExpression, NonStrictExpression,
+    build_func_non_strict,
 };
 use risingwave_expr::expr_context::TIME_ZONE;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -161,7 +161,9 @@ impl<S: StateStore> NowExecutor<S> {
                     paused = is_pause_on_startup;
                     initialized = true;
                 } else {
-                    state_table.commit(barrier.epoch).await?;
+                    state_table
+                        .commit_assert_no_update_vnode_bitmap(barrier.epoch)
+                        .await?;
                     yield Message::Barrier(barrier);
                 }
 
@@ -307,7 +309,7 @@ mod tests {
     use risingwave_common::types::test_utils::IntervalTestExt;
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_storage::memory::MemoryStateStore;
-    use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
+    use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 
     use super::*;
     use crate::common::table::test_utils::gen_pbtable;

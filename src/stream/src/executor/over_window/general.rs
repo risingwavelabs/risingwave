@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{btree_map, BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashSet, btree_map};
 use std::marker::PhantomData;
 use std::ops::RangeInclusive;
 
 use delta_btree_map::Change;
 use itertools::Itertools;
-use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::Op;
+use risingwave_common::array::stream_record::Record;
 use risingwave_common::row::RowExt;
 use risingwave_common::session_config::OverWindowCachePolicy as CachePolicy;
 use risingwave_common::types::DefaultOrdered;
@@ -31,8 +31,8 @@ use risingwave_expr::window_function::{
 
 use super::frame_finder::merge_rows_frames;
 use super::over_partition::{
-    new_empty_partition_cache, shrink_partition_cache, CacheKey, OverPartition, PartitionCache,
-    PartitionDelta,
+    CacheKey, OverPartition, PartitionCache, PartitionDelta, new_empty_partition_cache,
+    shrink_partition_cache,
 };
 use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
@@ -655,7 +655,11 @@ impl<S: StateStore> OverWindowExecutor<S> {
                     this.state_table.try_flush().await?;
                 }
                 Message::Barrier(barrier) => {
-                    this.state_table.commit(barrier.epoch).await?;
+                    let post_commit = this.state_table.commit(barrier.epoch).await?;
+
+                    let update_vnode_bitmap = barrier.as_update_vnode_bitmap(this.actor_ctx.id);
+                    yield Message::Barrier(barrier);
+
                     vars.cached_partitions.evict();
 
                     metrics
@@ -668,9 +672,9 @@ impl<S: StateStore> OverWindowExecutor<S> {
                         .over_window_cache_miss_count
                         .inc_by(std::mem::take(&mut vars.stats.cache_miss));
 
-                    if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(this.actor_ctx.id) {
-                        let (_, cache_may_stale) =
-                            this.state_table.update_vnode_bitmap(vnode_bitmap);
+                    if let Some((_, cache_may_stale)) =
+                        post_commit.post_yield_barrier(update_vnode_bitmap).await?
+                    {
                         if cache_may_stale {
                             vars.cached_partitions.clear();
                             vars.recently_accessed_ranges.clear();
@@ -693,8 +697,6 @@ impl<S: StateStore> OverWindowExecutor<S> {
                             }
                         }
                     }
-
-                    yield Message::Barrier(barrier);
                 }
             }
         }

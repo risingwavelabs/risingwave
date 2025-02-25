@@ -16,8 +16,8 @@ use std::collections::{HashMap, HashSet};
 use std::process::exit;
 
 use itertools::Itertools;
-use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 use risingwave_pb::meta::GetClusterInfoResponse;
+use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 use thiserror_ext::AsReport;
 
 use crate::common::CtlContext;

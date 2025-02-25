@@ -15,8 +15,6 @@
 use std::collections::BTreeMap;
 
 use risingwave_common::bail;
-use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId};
-use risingwave_common::types::DataType;
 
 use super::simd_json_parser::DebeziumJsonAccessBuilder;
 use super::{DebeziumAvroAccessBuilder, DebeziumAvroParserConfig};
@@ -29,20 +27,6 @@ use crate::parser::{
     ParserFormat, ProtocolProperties, SourceStreamChunkRowWriter, SpecificParserConfig,
 };
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
-
-/// Note: these columns are added in `SourceStreamChunkRowWriter::do_action`.
-/// May also look for the usage of `SourceColumnType`.
-pub fn debezium_cdc_source_schema() -> Vec<ColumnCatalog> {
-    let columns = vec![
-        ColumnCatalog {
-            column_desc: ColumnDesc::named("payload", ColumnId::placeholder(), DataType::Jsonb),
-            is_hidden: false,
-        },
-        ColumnCatalog::offset_column(),
-        ColumnCatalog::cdc_table_name_column(),
-    ];
-    columns
-}
 
 #[derive(Debug)]
 pub struct DebeziumParser {
@@ -208,11 +192,11 @@ mod tests {
     use std::ops::Deref;
     use std::sync::Arc;
 
-    use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId, CDC_SOURCE_COLUMN_NUM};
+    use risingwave_common::catalog::{CDC_SOURCE_COLUMN_NUM, ColumnCatalog, ColumnDesc, ColumnId};
     use risingwave_common::row::Row;
     use risingwave_common::types::Timestamptz;
     use risingwave_pb::plan_common::{
-        additional_column, AdditionalColumn, AdditionalColumnTimestamp,
+        AdditionalColumn, AdditionalColumnTimestamp, additional_column,
     };
 
     use super::*;
@@ -221,14 +205,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_parse_transaction_metadata() {
-        let schema = vec![
-            ColumnCatalog {
-                column_desc: ColumnDesc::named("payload", ColumnId::placeholder(), DataType::Jsonb),
-                is_hidden: false,
-            },
-            ColumnCatalog::offset_column(),
-            ColumnCatalog::cdc_table_name_column(),
-        ];
+        let schema = ColumnCatalog::debezium_cdc_source_cols();
 
         let columns = schema
             .iter()
@@ -347,7 +324,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cdc_source_job_schema() {
-        let columns = debezium_cdc_source_schema();
+        let columns = ColumnCatalog::debezium_cdc_source_cols();
         // make sure it doesn't broken by future PRs
         assert_eq!(CDC_SOURCE_COLUMN_NUM, columns.len() as u32);
     }

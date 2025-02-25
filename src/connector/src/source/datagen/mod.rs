@@ -20,7 +20,7 @@ use std::collections::HashMap;
 
 pub use enumerator::*;
 use serde::Deserialize;
-use serde_with::{serde_as, DisplayFromStr};
+use serde_with::{DisplayFromStr, serde_as};
 pub use source::*;
 pub use split::*;
 

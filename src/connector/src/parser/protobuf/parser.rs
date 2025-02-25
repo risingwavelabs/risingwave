@@ -17,15 +17,15 @@ use std::collections::HashSet;
 use anyhow::Context;
 use prost_reflect::{DescriptorPool, DynamicMessage, FileDescriptor, MessageDescriptor};
 use risingwave_common::{bail, try_match_expand};
-pub use risingwave_connector_codec::decoder::protobuf::parser::{PROTOBUF_MESSAGES_AS_JSONB, *};
 use risingwave_connector_codec::decoder::protobuf::ProtobufAccess;
+pub use risingwave_connector_codec::decoder::protobuf::parser::{PROTOBUF_MESSAGES_AS_JSONB, *};
 use risingwave_pb::plan_common::ColumnDesc;
 
 use crate::error::ConnectorResult;
 use crate::parser::unified::AccessImpl;
 use crate::parser::utils::bytes_from_url;
 use crate::parser::{AccessBuilder, EncodingProperties};
-use crate::schema::schema_registry::{extract_schema_id, handle_sr_list, Client, WireFormatError};
+use crate::schema::schema_registry::{Client, WireFormatError, extract_schema_id, handle_sr_list};
 use crate::schema::{ConfluentSchemaLoader, SchemaLoader};
 
 #[derive(Debug)]

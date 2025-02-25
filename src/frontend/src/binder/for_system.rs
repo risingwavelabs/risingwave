@@ -17,11 +17,11 @@ use std::sync::Arc;
 use risingwave_connector::sink::catalog::SinkCatalog;
 use risingwave_sqlparser::ast::ObjectName;
 
+use crate::Binder;
 use crate::binder::BindFor;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::view_catalog::ViewCatalog;
 use crate::error::Result;
-use crate::Binder;
 
 pub struct BoundSink {
     pub sink_catalog: Arc<SinkCatalog>,

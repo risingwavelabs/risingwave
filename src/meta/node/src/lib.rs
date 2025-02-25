@@ -212,7 +212,7 @@ impl risingwave_common::opts::Opts for MetaNodeOpts {
 use std::future::Future;
 use std::pin::Pin;
 
-use risingwave_common::config::{load_config, MetaBackend, RwConfig};
+use risingwave_common::config::{MetaBackend, RwConfig, load_config};
 use tracing::info;
 
 /// Start meta node

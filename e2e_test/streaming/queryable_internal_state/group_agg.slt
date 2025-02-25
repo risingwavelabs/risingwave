@@ -1,0 +1,61 @@
+# See https://github.com/risingwavelabs/risingwave/pull/20435 for the bug.
+
+control substitution on
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t (foo int, bar int);
+
+statement ok
+insert into t values (1, 2), (1, 5);
+
+statement ok
+create materialized view mv as select foo, sum(bar) as sum from t group by foo;
+
+query ok
+select * from mv;
+----
+1 7
+
+skipif madsim
+system ok
+internal_table.mjs --db $__DATABASE__ --name mv --type hashaggstate --count
+----
+count: 1
+
+
+statement ok
+insert into t values (2, 3), (2, 4);
+
+query ok
+select * from mv order by foo;
+----
+1 7
+2 7
+
+skipif madsim
+system ok
+internal_table.mjs --db $__DATABASE__ --name mv --type hashaggstate --count
+----
+count: 2
+
+
+statement ok
+delete from t where foo = 1;
+
+query ok
+select * from mv;
+----
+2 7
+
+skipif madsim
+system ok
+internal_table.mjs --db $__DATABASE__ --name mv --type hashaggstate --count
+----
+count: 1
+
+
+statement ok
+drop table t cascade;

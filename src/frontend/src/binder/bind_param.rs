@@ -18,10 +18,10 @@ use risingwave_common::bail;
 use risingwave_common::error::BoxedError;
 use risingwave_common::types::{Datum, ScalarImpl};
 
-use super::statement::RewriteExprsRecursive;
 use super::BoundStatement;
+use super::statement::RewriteExprsRecursive;
 use crate::error::{ErrorCode, Result};
-use crate::expr::{default_rewrite_expr, Expr, ExprImpl, ExprRewriter, Literal};
+use crate::expr::{Expr, ExprImpl, ExprRewriter, Literal, default_rewrite_expr};
 
 /// Rewrites parameter expressions to literals.
 pub(crate) struct ParamRewriter {
@@ -124,8 +124,8 @@ mod test {
     use risingwave_common::types::DataType;
     use risingwave_sqlparser::test_utils::parse_sql_statements;
 
-    use crate::binder::test_utils::{mock_binder, mock_binder_with_param_types};
     use crate::binder::BoundStatement;
+    use crate::binder::test_utils::{mock_binder, mock_binder_with_param_types};
 
     fn create_expect_bound(sql: &str) -> BoundStatement {
         let mut binder = mock_binder();

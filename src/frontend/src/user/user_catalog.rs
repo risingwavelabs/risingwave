@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 
 use risingwave_common::acl::{AclMode, AclModeSet};
 use risingwave_pb::user::grant_privilege::{Action, Object as GrantObject, Object};
@@ -196,5 +196,17 @@ impl UserCatalog {
             }
         }
         action_map.values().all(|&found| found)
+    }
+
+    pub fn check_object_visibility(&self, obj_id: u32) -> bool {
+        if self.is_super {
+            return true;
+        }
+
+        // `Select` and `Execute` are the minimum required privileges for object visibility.
+        // `Execute` is required for functions.
+        self.object_acls.get(&obj_id).map_or(false, |acl_set| {
+            acl_set.has_mode(AclMode::Select) || acl_set.has_mode(AclMode::Execute)
+        })
     }
 }

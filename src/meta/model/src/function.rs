@@ -16,8 +16,9 @@ use std::collections::BTreeMap;
 
 use risingwave_pb::catalog::function::Kind;
 use risingwave_pb::catalog::PbFunction;
-use sea_orm::entity::prelude::*;
+use risingwave_pb::catalog::function::Kind;
 use sea_orm::ActiveValue::Set;
+use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::{DataType, DataTypeArray, FunctionId, Property};

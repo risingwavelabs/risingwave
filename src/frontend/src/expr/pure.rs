@@ -321,7 +321,7 @@ mod tests {
     use risingwave_common::types::DataType;
     use risingwave_pb::expr::expr_node::Type;
 
-    use crate::expr::{is_impure, is_pure, ExprImpl, FunctionCall, InputRef};
+    use crate::expr::{ExprImpl, FunctionCall, InputRef, is_impure, is_pure};
 
     fn expect_pure(expr: &ExprImpl) {
         assert!(is_pure(expr));

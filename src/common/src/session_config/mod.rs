@@ -26,7 +26,7 @@ pub use query_mode::QueryMode;
 use risingwave_common_proc_macro::{ConfigDoc, SessionConfig};
 pub use search_path::{SearchPath, USER_NAME_WILD_CARD};
 use serde::{Deserialize, Serialize};
-use serde_with::{serde_as, DisplayFromStr};
+use serde_with::{DisplayFromStr, serde_as};
 use thiserror::Error;
 
 use self::non_zero64::ConfigNonZeroU64;
@@ -342,6 +342,10 @@ pub struct SessionConfig {
     /// Format: iceberg_engine_connection = schema_name.connection_name.
     #[parameter(default = "", check_hook = check_iceberg_engine_connection)]
     iceberg_engine_connection: String,
+
+    /// Whether the streaming join should be unaligned or not.
+    #[parameter(default = false)]
+    streaming_enable_unaligned_join: bool,
 }
 
 fn check_iceberg_engine_connection(val: &str) -> Result<(), String> {

@@ -22,17 +22,17 @@ use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use console::style;
 use fs_err::OpenOptions;
 use indicatif::{MultiProgress, ProgressBar};
 use risedev::util::{begin_spin, complete_spin, fail_spin};
 use risedev::{
-    generate_risedev_env, preflight_check, CompactorService, ComputeNodeService, ConfigExpander,
-    ConfigureTmuxTask, DummyService, EnsureStopService, ExecuteContext, FrontendService,
-    GrafanaService, KafkaService, MetaNodeService, MinioService, MySqlService, PostgresService,
-    PrometheusService, PubsubService, RedisService, SchemaRegistryService, ServiceConfig,
-    SqlServerService, SqliteConfig, Task, TaskGroup, TempoService, RISEDEV_NAME,
+    CompactorService, ComputeNodeService, ConfigExpander, ConfigureTmuxTask, DummyService,
+    EnsureStopService, ExecuteContext, FrontendService, GrafanaService, KafkaService,
+    MetaNodeService, MinioService, MySqlService, PostgresService, PrometheusService, PubsubService,
+    RISEDEV_NAME, RedisService, SchemaRegistryService, ServiceConfig, SqlServerService,
+    SqliteConfig, Task, TaskGroup, TempoService, generate_risedev_env, preflight_check,
 };
 use sqlx::mysql::MySqlConnectOptions;
 use sqlx::postgres::PgConnectOptions;

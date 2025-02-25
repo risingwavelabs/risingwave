@@ -14,7 +14,7 @@
 
 use std::fmt::Write;
 
-use risingwave_expr::{capture_context, function, ExprError, Result};
+use risingwave_expr::{ExprError, Result, capture_context, function};
 use thiserror_ext::AsReport;
 
 use super::context::{CATALOG_READER, DB_NAME};

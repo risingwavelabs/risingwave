@@ -19,15 +19,15 @@ use either::Either;
 use futures::stream::BoxStream;
 use futures::{Stream, StreamExt, TryStreamExt};
 
-use crate::executor::error::StreamExecutorResult;
 use crate::executor::Message;
+use crate::executor::error::StreamExecutorResult;
 
 type ExecutorMessageStream = BoxStream<'static, StreamExecutorResult<Message>>;
 type StreamReaderData<M> = StreamExecutorResult<Either<Message, M>>;
 type ReaderArm<M> = BoxStream<'static, StreamReaderData<M>>;
 
 mod stream_reader_with_pause {
-    use futures::stream::{select_with_strategy, PollNext, SelectWithStrategy};
+    use futures::stream::{PollNext, SelectWithStrategy, select_with_strategy};
 
     use crate::executor::stream_reader::ReaderArm;
 
@@ -148,7 +148,7 @@ impl<const BIASED: bool, M> Stream for StreamReaderWithPause<BIASED, M> {
 #[cfg(test)]
 mod tests {
     use assert_matches::assert_matches;
-    use futures::{pin_mut, FutureExt};
+    use futures::{FutureExt, pin_mut};
     use risingwave_common::array::StreamChunk;
     use risingwave_common::transaction::transaction_id::TxnId;
     use risingwave_common::util::epoch::test_epoch;

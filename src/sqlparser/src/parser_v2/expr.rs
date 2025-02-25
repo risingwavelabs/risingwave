@@ -13,7 +13,7 @@ use winnow::combinator::{alt, cut_err, opt, preceded, repeat, seq, trace};
 use winnow::error::ContextError;
 use winnow::{PResult, Parser};
 
-use super::{data_type, token, ParserExt, TokenStream};
+use super::{ParserExt, TokenStream, data_type, token};
 use crate::ast::Expr;
 use crate::keywords::Keyword;
 use crate::parser::Precedence;

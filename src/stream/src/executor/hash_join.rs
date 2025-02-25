@@ -24,8 +24,8 @@ use risingwave_common::row::RowExt;
 use risingwave_common::types::{DefaultOrd, ToOwnedDatum};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqDebug;
-use risingwave_expr::expr::NonStrictExpression;
 use risingwave_expr::ExprError;
+use risingwave_expr::expr::NonStrictExpression;
 use tokio::time::Instant;
 
 use self::builder::JoinChunkBuilder;
@@ -529,6 +529,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         );
         pin_mut!(aligned_stream);
 
+        let actor_id = self.ctx.id;
+
         let barrier = expect_first_barrier_from_aligned_stream(&mut aligned_stream).await?;
         let first_epoch = barrier.epoch;
         // The first barrier message should be propagated.
@@ -645,17 +647,25 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 }
                 AlignedMessage::Barrier(barrier) => {
                     let barrier_start_time = Instant::now();
-                    self.flush_data(barrier.epoch).await?;
+                    let (left_post_commit, right_post_commit) =
+                        self.flush_data(barrier.epoch).await?;
+
+                    let update_vnode_bitmap = barrier.as_update_vnode_bitmap(actor_id);
+                    yield Message::Barrier(barrier);
 
                     // Update the vnode bitmap for state tables of both sides if asked.
-                    if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.ctx.id) {
-                        if self.side_l.ht.update_vnode_bitmap(vnode_bitmap.clone()) {
-                            self.watermark_buffers
-                                .values_mut()
-                                .for_each(|buffers| buffers.clear());
-                            self.inequality_watermarks.fill(None);
-                        }
-                        self.side_r.ht.update_vnode_bitmap(vnode_bitmap);
+                    right_post_commit
+                        .post_yield_barrier(update_vnode_bitmap.clone())
+                        .await?;
+                    if left_post_commit
+                        .post_yield_barrier(update_vnode_bitmap)
+                        .await?
+                        .unwrap_or(false)
+                    {
+                        self.watermark_buffers
+                            .values_mut()
+                            .for_each(|buffers| buffers.clear());
+                        self.inequality_watermarks.fill(None);
                     }
 
                     // Report metrics of cached join rows/entries
@@ -668,19 +678,24 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
 
                     barrier_join_match_duration_ns
                         .inc_by(barrier_start_time.elapsed().as_nanos() as u64);
-                    yield Message::Barrier(barrier);
                 }
             }
             start_time = Instant::now();
         }
     }
 
-    async fn flush_data(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
+    async fn flush_data(
+        &mut self,
+        epoch: EpochPair,
+    ) -> StreamExecutorResult<(
+        JoinHashMapPostCommit<'_, K, S>,
+        JoinHashMapPostCommit<'_, K, S>,
+    )> {
         // All changes to the state has been buffered in the mem-table of the state table. Just
         // `commit` them here.
-        self.side_l.ht.flush(epoch).await?;
-        self.side_r.ht.flush(epoch).await?;
-        Ok(())
+        let left = self.side_l.ht.flush(epoch).await?;
+        let right = self.side_r.ht.flush(epoch).await?;
+        Ok((left, right))
     }
 
     async fn try_flush_data(&mut self) -> StreamExecutorResult<()> {
@@ -1282,7 +1297,7 @@ mod tests {
     use pretty_assertions::assert_eq;
     use risingwave_common::array::*;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, TableId};
-    use risingwave_common::hash::{Key128, Key64};
+    use risingwave_common::hash::{Key64, Key128};
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;

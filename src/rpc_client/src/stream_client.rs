@@ -30,7 +30,7 @@ use tonic::transport::Endpoint;
 
 use crate::channel::{Channel, WrappedChannelExt};
 use crate::error::{Result, RpcError};
-use crate::{stream_rpc_client_method_impl, RpcClient, RpcClientPool, UnboundedBidiStreamHandle};
+use crate::{RpcClient, RpcClientPool, UnboundedBidiStreamHandle, stream_rpc_client_method_impl};
 
 #[derive(Clone)]
 pub struct StreamClient(StreamServiceClient<Channel>);

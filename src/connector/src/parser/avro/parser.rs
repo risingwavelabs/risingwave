@@ -17,10 +17,10 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use apache_avro::types::Value;
-use apache_avro::{from_avro_datum, Reader, Schema};
+use apache_avro::{Reader, Schema, from_avro_datum};
 use risingwave_common::{bail, try_match_expand};
 use risingwave_connector_codec::decoder::avro::{
-    avro_schema_to_column_descs, AvroAccess, AvroParseOptions, ResolvedAvroSchema,
+    AvroAccess, AvroParseOptions, ResolvedAvroSchema, avro_schema_to_column_descs,
 };
 use risingwave_pb::plan_common::ColumnDesc;
 
@@ -32,7 +32,7 @@ use crate::parser::{
     AccessBuilder, AvroProperties, EncodingProperties, MapHandling, SchemaLocation,
 };
 use crate::schema::schema_registry::{
-    extract_schema_id, get_subject_by_strategy, handle_sr_list, Client,
+    Client, extract_schema_id, get_subject_by_strategy, handle_sr_list,
 };
 
 // Default avro access builder

@@ -18,12 +18,12 @@ use std::net::SocketAddr;
 use std::path::Path as FilePath;
 use std::sync::Arc;
 
-use anyhow::{anyhow, Context as _, Result};
+use anyhow::{Context as _, Result, anyhow};
+use axum::Router;
 use axum::extract::{Extension, Path};
 use axum::http::{Method, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
-use axum::Router;
 use risingwave_common::util::StackTraceResponseExt;
 use risingwave_rpc_client::ComputeClientPool;
 use tokio::net::TcpListener;
@@ -32,8 +32,8 @@ use tower_http::add_extension::AddExtensionLayer;
 use tower_http::compression::CompressionLayer;
 use tower_http::cors::{self, CorsLayer};
 
-use crate::manager::diagnose::DiagnoseCommandRef;
 use crate::manager::MetadataManager;
+use crate::manager::diagnose::DiagnoseCommandRef;
 
 #[derive(Clone)]
 pub struct DashboardService {

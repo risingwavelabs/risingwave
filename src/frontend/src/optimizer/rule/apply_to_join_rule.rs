@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use super::{BoxedRule, Rule};
-use crate::optimizer::plan_node::{LogicalApply, LogicalJoin};
 use crate::optimizer::PlanRef;
+use crate::optimizer::plan_node::{LogicalApply, LogicalJoin};
 
 /// Convert `LogicalApply` to `LogicalJoin` if it is uncorrelated and doesn't require max one row
 /// restriction.

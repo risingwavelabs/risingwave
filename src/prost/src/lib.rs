@@ -494,8 +494,6 @@ impl std::fmt::Debug for plan_common::ColumnDesc {
             column_type,
             column_id,
             name,
-            field_descs,
-            type_name,
             description,
             additional_column_type,
             additional_column,
@@ -510,12 +508,6 @@ impl std::fmt::Debug for plan_common::ColumnDesc {
             s.field("column_type", &"Unknown");
         }
         s.field("column_id", column_id).field("name", name);
-        if !self.field_descs.is_empty() {
-            s.field("field_descs", field_descs);
-        }
-        if !self.type_name.is_empty() {
-            s.field("type_name", type_name);
-        }
         if let Some(description) = description {
             s.field("description", description);
         }
@@ -539,7 +531,7 @@ impl std::fmt::Debug for plan_common::ColumnDesc {
 
 #[cfg(test)]
 mod tests {
-    use crate::data::{data_type, DataType};
+    use crate::data::{DataType, data_type};
     use crate::plan_common::Field;
     use crate::stream_plan::stream_node::NodeBody;
 

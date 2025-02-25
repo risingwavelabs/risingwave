@@ -21,8 +21,8 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::{Ident, ObjectName, Query, SelectItem};
 
-use super::statement::RewriteExprsRecursive;
 use super::BoundQuery;
+use super::statement::RewriteExprsRecursive;
 use crate::binder::{Binder, Clause};
 use crate::catalog::TableId;
 use crate::error::{ErrorCode, Result, RwError};
@@ -368,7 +368,7 @@ fn get_col_indices_to_insert(
                 }
                 col_indices_to_insert.push(*value_ref);
                 *value_ref = usize::MAX; // mark this column name, for duplicate
-                                         // detection
+                // detection
             }
             None => {
                 // Invalid column name found

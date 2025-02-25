@@ -41,7 +41,9 @@ fn preflight_check_proxy() -> Result<()> {
                 "[{}] {} - `no_proxy` is not set correctly, which might cause failure in RiseDev and RisingWave. Consider {}.",
                 style("risedev-preflight-check").bold(),
                 style("WARN").yellow().bold(),
-                style("`export no_proxy=localhost,127.0.0.1,::1`").blue().bold()
+                style("`export no_proxy=localhost,127.0.0.1,::1`")
+                    .blue()
+                    .bold()
             );
         }
     }

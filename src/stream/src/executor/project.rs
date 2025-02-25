@@ -211,8 +211,8 @@ impl Inner {
 mod tests {
     use std::sync::atomic::{self, AtomicI64};
 
-    use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::DataChunk;
+    use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::catalog::Field;
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_expr::expr::{self, ValueImpl};
@@ -220,8 +220,8 @@ mod tests {
     use super::super::test_utils::MockSource;
     use super::super::*;
     use super::*;
-    use crate::executor::test_utils::expr::build_from_pretty;
     use crate::executor::test_utils::StreamExecutorTestExt;
+    use crate::executor::test_utils::expr::build_from_pretty;
 
     #[tokio::test]
     async fn test_projection() {

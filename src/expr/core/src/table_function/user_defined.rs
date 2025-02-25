@@ -15,9 +15,9 @@
 use std::sync::Arc;
 
 use anyhow::Context;
+use risingwave_common::array::I32Array;
 use risingwave_common::array::arrow::arrow_schema_udf::{Fields, Schema, SchemaRef};
 use risingwave_common::array::arrow::{UdfArrowConvert, UdfFromArrow, UdfToArrow};
-use risingwave_common::array::I32Array;
 use risingwave_common::bail;
 
 use super::*;

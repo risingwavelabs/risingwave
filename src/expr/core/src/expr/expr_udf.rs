@@ -17,7 +17,7 @@ use std::sync::{Arc, LazyLock};
 
 use anyhow::Context;
 use await_tree::InstrumentAwait;
-use prometheus::{exponential_buckets, Registry};
+use prometheus::{Registry, exponential_buckets};
 use risingwave_common::array::arrow::arrow_schema_udf::{Fields, Schema, SchemaRef};
 use risingwave_common::array::arrow::{UdfArrowConvert, UdfFromArrow, UdfToArrow};
 use risingwave_common::array::{Array, ArrayRef, DataChunk};
@@ -31,7 +31,7 @@ use risingwave_pb::expr::ExprNode;
 use super::{BoxedExpression, Build};
 use crate::expr::Expression;
 use crate::sig::{UdfImpl, UdfKind, UdfOptions};
-use crate::{bail, ExprError, Result};
+use crate::{ExprError, Result, bail};
 
 #[derive(Debug)]
 pub struct UserDefinedFunction {

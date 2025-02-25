@@ -15,16 +15,19 @@
 use std::sync::Arc;
 
 use anyhow::anyhow;
+use futures::FutureExt;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_connector::sink::log_store::{LogStoreResult, LogWriter};
+use risingwave_connector::sink::log_store::{
+    LogStoreResult, LogWriter, LogWriterPostFlushCurrentEpoch,
+};
 use risingwave_storage::store::LocalStateStore;
 use tokio::sync::watch;
 
 use crate::common::log_store_impl::kv_log_store::buffer::LogStoreBufferSender;
 use crate::common::log_store_impl::kv_log_store::state::LogStoreWriteState;
-use crate::common::log_store_impl::kv_log_store::{KvLogStoreMetrics, SeqIdType, FIRST_SEQ_ID};
+use crate::common::log_store_impl::kv_log_store::{FIRST_SEQ_ID, KvLogStoreMetrics, SeqIdType};
 
 pub struct KvLogStoreWriter<LS: LocalStateStore> {
     seq_id: SeqIdType,
@@ -115,7 +118,7 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
         &mut self,
         next_epoch: u64,
         is_checkpoint: bool,
-    ) -> LogStoreResult<()> {
+    ) -> LogStoreResult<LogWriterPostFlushCurrentEpoch<'_>> {
         let epoch = self.state.epoch().curr;
         let mut writer = self.state.start_writer(false);
 
@@ -142,16 +145,22 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
         flush_info.report(&self.metrics);
 
         let truncate_offset = self.tx.pop_truncation(epoch);
-        self.state.seal_current_epoch(next_epoch, truncate_offset);
+        let post_seal_epoch = self.state.seal_current_epoch(next_epoch, truncate_offset);
         self.tx.barrier(epoch, is_checkpoint, next_epoch);
+        let tx = &mut self.tx;
         self.seq_id = FIRST_SEQ_ID;
-        Ok(())
-    }
-
-    async fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) -> LogStoreResult<()> {
-        self.state.update_vnode_bitmap(&new_vnodes);
-        self.tx.update_vnode(self.state.epoch().curr, new_vnodes);
-        Ok(())
+        Ok(LogWriterPostFlushCurrentEpoch::new(
+            move |new_vnodes: Option<Arc<Bitmap>>| {
+                async move {
+                    post_seal_epoch.post_yield_barrier(new_vnodes.clone());
+                    if let Some(new_vnodes) = new_vnodes {
+                        tx.update_vnode(next_epoch, new_vnodes);
+                    }
+                    Ok(())
+                }
+                .boxed()
+            },
+        ))
     }
 
     fn pause(&mut self) -> LogStoreResult<()> {

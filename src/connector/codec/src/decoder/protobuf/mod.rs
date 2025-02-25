@@ -23,7 +23,7 @@ use risingwave_common::log::LogSuppresser;
 use risingwave_common::types::{DataType, DatumCow, ToOwnedDatum};
 use thiserror_ext::AsReport;
 
-use super::{uncategorized, Access, AccessResult};
+use super::{Access, AccessResult, uncategorized};
 
 pub struct ProtobufAccess<'a> {
     message: DynamicMessage,

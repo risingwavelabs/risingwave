@@ -142,8 +142,8 @@ mod tests {
     use risingwave_common::types::{ScalarImpl, ToOwnedDatum};
 
     use super::*;
-    use crate::parser::unified::debezium::extract_bson_id;
     use crate::parser::SourceStreamChunkBuilder;
+    use crate::parser::unified::debezium::extract_bson_id;
     use crate::source::SourceCtrlOpts;
     #[test]
     fn test_parse_bson_value_id_int() {

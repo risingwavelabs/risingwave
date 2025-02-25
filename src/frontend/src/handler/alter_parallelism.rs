@@ -23,11 +23,11 @@ use risingwave_sqlparser::keywords::Keyword;
 use thiserror_ext::AsReport;
 
 use super::{HandlerArgs, RwPgResponse};
+use crate::Binder;
+use crate::catalog::CatalogError;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::table_catalog::TableType;
-use crate::catalog::CatalogError;
 use crate::error::{ErrorCode, Result};
-use crate::Binder;
 
 pub async fn handle_alter_parallelism(
     handler_args: HandlerArgs,

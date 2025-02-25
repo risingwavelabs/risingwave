@@ -14,7 +14,7 @@
 
 use num_traits::One;
 use risingwave_common::types::{CheckedAdd, Decimal, IsNegative};
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_expr::{ExprError, Result, function};
 
 #[function("generate_series(int4, int4) -> setof int4")]
 #[function("generate_series(int8, int8) -> setof int8")]

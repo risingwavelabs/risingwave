@@ -26,8 +26,8 @@ use winnow::error::{ContextError, ErrMode, ErrorKind, FromExternalError, StrCont
 use winnow::{PResult, Parser, Stateful};
 
 use super::{
-    identifier_non_reserved, keyword, literal_uint, object_name, precision_in_range, with_state,
-    TokenStream,
+    TokenStream, identifier_non_reserved, keyword, literal_uint, object_name, precision_in_range,
+    with_state,
 };
 use crate::ast::{DataType, StructField};
 use crate::keywords::Keyword;

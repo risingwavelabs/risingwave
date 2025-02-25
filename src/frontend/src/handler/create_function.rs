@@ -17,11 +17,11 @@ use either::Either;
 use risingwave_common::catalog::FunctionId;
 use risingwave_common::types::StructType;
 use risingwave_expr::sig::{CreateFunctionOptions, UdfKind};
-use risingwave_pb::catalog::function::{Kind, ScalarFunction, TableFunction};
 use risingwave_pb::catalog::Function;
+use risingwave_pb::catalog::function::{Kind, ScalarFunction, TableFunction};
 
 use super::*;
-use crate::{bind_data_type, Binder};
+use crate::{Binder, bind_data_type};
 
 pub async fn handle_create_function(
     handler_args: HandlerArgs,
@@ -51,7 +51,7 @@ pub async fn handle_create_function(
                         "language {} is not supported",
                         lang
                     ))
-                    .into())
+                    .into());
                 }
             }
         }
@@ -94,7 +94,7 @@ pub async fn handle_create_function(
             return Err(ErrorCode::InvalidParameterValue(
                 "return type must be specified".to_owned(),
             )
-            .into())
+            .into());
         }
     };
 
@@ -128,7 +128,7 @@ pub async fn handle_create_function(
     };
     let base64_decoded = match &params.using {
         Some(CreateFunctionUsing::Base64(encoded)) => {
-            use base64::prelude::{Engine, BASE64_STANDARD};
+            use base64::prelude::{BASE64_STANDARD, Engine};
             let bytes = BASE64_STANDARD
                 .decode(encoded)
                 .context("invalid base64 encoding")?;

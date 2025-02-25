@@ -644,17 +644,22 @@ mod tests {
         // Not(A And Not(B)) <=> Not(A) Or B
         let expr: ExprImpl = FunctionCall::new(
             Type::Not,
-            vec![FunctionCall::new(
-                Type::And,
-                vec![
-                    InputRef::new(0, DataType::Boolean).into(),
-                    FunctionCall::new(Type::Not, vec![InputRef::new(1, DataType::Boolean).into()])
+            vec![
+                FunctionCall::new(
+                    Type::And,
+                    vec![
+                        InputRef::new(0, DataType::Boolean).into(),
+                        FunctionCall::new(
+                            Type::Not,
+                            vec![InputRef::new(1, DataType::Boolean).into()],
+                        )
                         .unwrap()
                         .into(),
-                ],
-            )
-            .unwrap()
-            .into()],
+                    ],
+                )
+                .unwrap()
+                .into(),
+            ],
         )
         .unwrap()
         .into();
@@ -672,15 +677,17 @@ mod tests {
         // Not(A Or B) <=> Not(A) And Not(B)
         let expr: ExprImpl = FunctionCall::new(
             Type::Not,
-            vec![FunctionCall::new(
-                Type::Or,
-                vec![
-                    InputRef::new(0, DataType::Boolean).into(),
-                    InputRef::new(1, DataType::Boolean).into(),
-                ],
-            )
-            .unwrap()
-            .into()],
+            vec![
+                FunctionCall::new(
+                    Type::Or,
+                    vec![
+                        InputRef::new(0, DataType::Boolean).into(),
+                        InputRef::new(1, DataType::Boolean).into(),
+                    ],
+                )
+                .unwrap()
+                .into(),
+            ],
         )
         .unwrap()
         .into();

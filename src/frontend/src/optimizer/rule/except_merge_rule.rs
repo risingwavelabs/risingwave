@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use super::{BoxedRule, Rule};
-use crate::optimizer::plan_node::{LogicalExcept, PlanTreeNode};
 use crate::optimizer::PlanRef;
+use crate::optimizer::plan_node::{LogicalExcept, PlanTreeNode};
 
 /// Different from `UnionMergeRule` and `IntersectMergeRule`, `ExceptMergeRule` can only merge its
 /// left most one input.

@@ -88,12 +88,14 @@ pub async fn validate_ssts(task: ValidationTask, sstable_store: SstableStoreRef)
             if let Some((duplicate_sst_object_id, duplicate_worker_id)) =
                 visited_keys.get(&current_key).cloned()
             {
-                panic!("SST sanity check failed: Duplicate key {:x?} in SST object {} from worker {} and SST object {} from worker {}",
-                       current_key,
-                       sstable_info.object_id,
-                       worker_id,
-                       duplicate_sst_object_id,
-                       duplicate_worker_id)
+                panic!(
+                    "SST sanity check failed: Duplicate key {:x?} in SST object {} from worker {} and SST object {} from worker {}",
+                    current_key,
+                    sstable_info.object_id,
+                    worker_id,
+                    duplicate_sst_object_id,
+                    duplicate_worker_id
+                )
             }
             visited_keys.insert(current_key.to_owned(), (sstable_info.object_id, worker_id));
             // Ordered and Locally unique

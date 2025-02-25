@@ -1023,7 +1023,9 @@ pub enum IntervalParseError {
     #[error("Invalid interval: {0}")]
     Invalid(String),
 
-    #[error("Invalid interval: {0}, expected format P<years>Y<months>M<days>DT<hours>H<minutes>M<seconds>S")]
+    #[error(
+        "Invalid interval: {0}, expected format P<years>Y<months>M<days>DT<hours>H<minutes>M<seconds>S"
+    )]
     InvalidIso8601(String),
 
     #[error("Invalid unit: {0}")]
@@ -1264,7 +1266,7 @@ fn parse_interval(s: &str) -> ParseResult<Vec<TimeStrToken>> {
             _ => {
                 return Err(IntervalParseError::uncategorized(format!(
                     "Invalid character at offset {} in {}: {:?}. Only support digit or alphabetic now",
-                    i,s, c
+                    i, s, c
                 )));
             }
         };

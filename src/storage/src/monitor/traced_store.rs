@@ -24,8 +24,8 @@ use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
 use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch, SyncResult};
 use risingwave_hummock_trace::{
-    init_collector, should_use_trace, ConcurrentId, MayTraceSpan, OperationResult, StorageType,
-    TraceResult, TraceSpan, TracedBytes, TracedSealCurrentEpochOptions, LOCAL_ID,
+    ConcurrentId, LOCAL_ID, MayTraceSpan, OperationResult, StorageType, TraceResult, TraceSpan,
+    TracedBytes, TracedSealCurrentEpochOptions, init_collector, should_use_trace,
 };
 use thiserror_ext::AsReport;
 

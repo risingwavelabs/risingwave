@@ -15,7 +15,7 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::time::Duration;
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use futures::future::try_join_all;
 use itertools::Itertools;
 use risingwave_common::bail;
@@ -23,6 +23,7 @@ use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::WorkerSlotId;
 use risingwave_meta_model::StreamingParallelism;
+use risingwave_pb::stream_plan::StreamActor;
 use thiserror_ext::AsReport;
 use tokio::time::Instant;
 use tracing::{debug, info, warn};
@@ -33,12 +34,12 @@ use crate::barrier::info::InflightDatabaseInfo;
 use crate::barrier::{DatabaseRuntimeInfoSnapshot, InflightSubscriptionInfo};
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::manager::ActiveStreamingWorkerNodes;
-use crate::model::{ActorId, StreamActorWithUpstreams, StreamJobFragments, TableParallelism};
+use crate::model::{ActorId, StreamJobFragments, TableParallelism};
 use crate::stream::{
     JobParallelismTarget, JobReschedulePolicy, JobRescheduleTarget, JobResourceGroupTarget,
     RescheduleOptions, SourceChange,
 };
-use crate::{model, MetaResult};
+use crate::{MetaResult, model};
 
 impl GlobalBarrierWorkerContextImpl {
     /// Clean catalogs for creating streaming jobs that are in foreground mode or table fragments not persisted.
@@ -770,7 +771,7 @@ impl GlobalBarrierWorkerContextImpl {
     }
 
     /// Update all actors in compute nodes.
-    async fn load_all_actors(&self) -> MetaResult<HashMap<ActorId, StreamActorWithUpstreams>> {
+    async fn load_all_actors(&self) -> MetaResult<HashMap<ActorId, StreamActor>> {
         self.metadata_manager.all_active_actors().await
     }
 }

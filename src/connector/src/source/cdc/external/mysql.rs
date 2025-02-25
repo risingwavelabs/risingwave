@@ -14,33 +14,33 @@
 
 use std::collections::HashMap;
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use chrono::{DateTime, NaiveDateTime};
 use futures::stream::BoxStream;
-use futures::{pin_mut, StreamExt};
+use futures::{StreamExt, pin_mut};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use mysql_async::prelude::*;
 use mysql_common::params::Params;
 use mysql_common::value::Value;
 use risingwave_common::bail;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, OFFSET_COLUMN_NAME};
+use risingwave_common::catalog::{CDC_OFFSET_COLUMN_NAME, ColumnDesc, ColumnId, Schema};
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, Decimal, ScalarImpl, F32};
+use risingwave_common::types::{DataType, Decimal, F32, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
 use sea_schema::mysql::def::{ColumnDefault, ColumnKey, ColumnType};
 use sea_schema::mysql::discovery::SchemaDiscovery;
 use sea_schema::mysql::query::SchemaQueryBuilder;
 use sea_schema::sea_query::{Alias, IntoIden};
 use serde_derive::{Deserialize, Serialize};
-use sqlx::mysql::MySqlConnectOptions;
 use sqlx::MySqlPool;
+use sqlx::mysql::MySqlConnectOptions;
 use thiserror_ext::AsReport;
 
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::source::cdc::external::{
-    mysql_row_to_owned_row, CdcOffset, CdcOffsetParseFunc, DebeziumOffset, ExternalTableConfig,
-    ExternalTableReader, SchemaTableName, SslMode,
+    CdcOffset, CdcOffsetParseFunc, DebeziumOffset, ExternalTableConfig, ExternalTableReader,
+    SchemaTableName, SslMode, mysql_row_to_owned_row,
 };
 
 #[derive(Debug, Clone, Default, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -168,7 +168,9 @@ impl MySqlExternalTable {
                         }
                     }
                     ColumnDefault::CurrentTimestamp | ColumnDefault::CustomExpr(_) => {
-                        tracing::warn!("MySQL CURRENT_TIMESTAMP and custom expression default value not supported");
+                        tracing::warn!(
+                            "MySQL CURRENT_TIMESTAMP and custom expression default value not supported"
+                        );
                         None
                     }
                 };
@@ -410,7 +412,7 @@ impl MySqlExternalTableReader {
         let field_names = rw_schema
             .fields
             .iter()
-            .filter(|f| f.name != OFFSET_COLUMN_NAME)
+            .filter(|f| f.name != CDC_OFFSET_COLUMN_NAME)
             .map(|f| Self::quote_column(f.name.as_str()))
             .join(",");
 

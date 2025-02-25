@@ -262,12 +262,12 @@ impl SourceManager {
                     {
                         let err = || {
                             anyhow::anyhow!(
-                            "source backfill fragment's upstream fragment should have one dispatcher, fragment_id: {fragment_id}, upstream_fragment_id: {upstream_source_fragment_id}, upstream_actor: {upstream_actor}, dispatchers: {dispatchers:?}",
-                            fragment_id = fragment_id,
-                            upstream_source_fragment_id = upstream_source_fragment_id,
-                            upstream_actor = upstream_actor,
-                            dispatchers = dispatchers
-                        )
+                                "source backfill fragment's upstream fragment should have one dispatcher, fragment_id: {fragment_id}, upstream_fragment_id: {upstream_source_fragment_id}, upstream_actor: {upstream_actor}, dispatchers: {dispatchers:?}",
+                                fragment_id = fragment_id,
+                                upstream_source_fragment_id = upstream_source_fragment_id,
+                                upstream_actor = upstream_actor,
+                                dispatchers = dispatchers
+                            )
                         };
                         if dispatchers.len() != 1 || dispatchers[0].downstream_actor_id.len() != 1 {
                             return Err(err().into());
@@ -372,7 +372,7 @@ impl SourceManagerCore {
                     };
                     let actors = match self
                         .metadata_manager
-                        .get_running_actors_for_source_backfill(*fragment_id)
+                        .get_running_actors_for_source_backfill(*fragment_id, *upstream_fragment_id)
                         .await
                     {
                         Ok(actors) => {
@@ -740,13 +740,15 @@ mod tests {
     fn test_reassign_splits() {
         let actor_splits = HashMap::new();
         let discovered_splits: BTreeMap<SplitId, TestSplit> = BTreeMap::new();
-        assert!(reassign_splits(
-            FragmentId::default(),
-            actor_splits,
-            &discovered_splits,
-            Default::default()
-        )
-        .is_none());
+        assert!(
+            reassign_splits(
+                FragmentId::default(),
+                actor_splits,
+                &discovered_splits,
+                Default::default()
+            )
+            .is_none()
+        );
 
         let actor_splits = (0..3).map(|i| (i, vec![])).collect();
         let discovered_splits: BTreeMap<SplitId, TestSplit> = BTreeMap::new();

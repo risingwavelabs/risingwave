@@ -18,14 +18,14 @@ use either::Either;
 use fancy_regex::Regex;
 use risingwave_common::catalog::FunctionId;
 use risingwave_common::types::{DataType, StructType};
-use risingwave_pb::catalog::function::{Kind, ScalarFunction, TableFunction};
 use risingwave_pb::catalog::Function;
+use risingwave_pb::catalog::function::{Kind, ScalarFunction, TableFunction};
 use risingwave_sqlparser::parser::{Parser, ParserError};
 
 use super::*;
 use crate::binder::UdfContext;
 use crate::expr::{Expr, ExprImpl, Literal};
-use crate::{bind_data_type, Binder};
+use crate::{Binder, bind_data_type};
 
 /// The error type for hint display
 /// Currently we will try invalid parameter first
@@ -152,7 +152,7 @@ pub async fn handle_create_sql_function(
         Some(FunctionDefinition::SingleQuotedDef(s)) => s.clone(),
         Some(FunctionDefinition::DoubleDollarDef(s)) => s.clone(),
         Some(FunctionDefinition::Identifier(_)) => {
-            return Err(ErrorCode::InvalidParameterValue("expect quoted string".to_owned()).into())
+            return Err(ErrorCode::InvalidParameterValue("expect quoted string".to_owned()).into());
         }
         None => {
             if params.return_.is_none() {
@@ -201,7 +201,7 @@ pub async fn handle_create_sql_function(
             return Err(ErrorCode::InvalidParameterValue(
                 "return type must be specified".to_owned(),
             )
-            .into())
+            .into());
         }
     };
 

@@ -23,10 +23,10 @@ use risingwave_common::hash::{VirtualNode, VnodeCountCompat};
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
-use risingwave_hummock_sdk::key::{get_table_id, TABLE_PREFIX_LEN};
+use risingwave_hummock_sdk::key::{TABLE_PREFIX_LEN, get_table_id};
 use risingwave_pb::catalog::Table;
-use risingwave_rpc_client::error::{Result as RpcResult, RpcError};
 use risingwave_rpc_client::MetaClient;
+use risingwave_rpc_client::error::{Result as RpcResult, RpcError};
 use thiserror_ext::AsReport;
 
 use crate::hummock::{HummockError, HummockResult};

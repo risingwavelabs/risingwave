@@ -18,12 +18,12 @@ use anyhow::anyhow;
 use futures::stream::select;
 use futures::{FutureExt, TryFutureExt, TryStreamExt};
 use itertools::Itertools;
-use risingwave_common::array::stream_chunk::StreamChunkMut;
 use risingwave_common::array::Op;
+use risingwave_common::array::stream_chunk::StreamChunkMut;
 use risingwave_common::catalog::{ColumnCatalog, Field};
-use risingwave_common::metrics::{LabelGuardedIntGauge, GLOBAL_ERROR_METRICS};
-use risingwave_common_estimate_size::collections::EstimatedVec;
+use risingwave_common::metrics::{GLOBAL_ERROR_METRICS, LabelGuardedIntGauge};
 use risingwave_common_estimate_size::EstimateSize;
+use risingwave_common_estimate_size::collections::EstimatedVec;
 use risingwave_common_rate_limit::RateLimit;
 use risingwave_connector::dispatch_sink;
 use risingwave_connector::sink::catalog::SinkType;
@@ -32,12 +32,12 @@ use risingwave_connector::sink::log_store::{
     LogWriterMetrics,
 };
 use risingwave_connector::sink::{
-    build_sink, LogSinker, Sink, SinkImpl, SinkParam, SinkWriterParam, GLOBAL_SINK_METRICS,
+    GLOBAL_SINK_METRICS, LogSinker, Sink, SinkImpl, SinkParam, SinkWriterParam, build_sink,
 };
 use thiserror_ext::AsReport;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
-use crate::common::compact_chunk::{merge_chunk_row, StreamChunkCompactor};
+use crate::common::compact_chunk::{StreamChunkCompactor, merge_chunk_row};
 use crate::executor::prelude::*;
 pub struct SinkExecutor<F: LogStoreFactory> {
     actor_context: ActorContextRef,
@@ -313,11 +313,16 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                     yield Message::Chunk(chunk);
                 }
                 Message::Barrier(barrier) => {
-                    log_writer
+                    let post_flush = log_writer
                         .flush_current_epoch(barrier.epoch.curr, barrier.kind.is_checkpoint())
                         .await?;
 
-                    if let Some(mutation) = barrier.mutation.as_deref() {
+                    let update_vnode_bitmap = barrier.as_update_vnode_bitmap(actor_id);
+                    let mutation = barrier.mutation.clone();
+                    yield Message::Barrier(barrier);
+                    post_flush.post_yield_barrier(update_vnode_bitmap).await?;
+
+                    if let Some(mutation) = mutation.as_deref() {
                         match mutation {
                             Mutation::Pause => {
                                 log_writer.pause()?;
@@ -347,11 +352,6 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                             _ => (),
                         }
                     }
-
-                    if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(actor_id) {
-                        log_writer.update_vnode_bitmap(vnode_bitmap).await?;
-                    }
-                    yield Message::Barrier(barrier);
                 }
             }
         }
@@ -608,8 +608,8 @@ mod test {
 
     #[tokio::test]
     async fn test_force_append_only_sink() {
-        use risingwave_common::array::stream_chunk::StreamChunk;
         use risingwave_common::array::StreamChunkTestExt;
+        use risingwave_common::array::stream_chunk::StreamChunk;
         use risingwave_common::types::DataType;
 
         use crate::executor::Barrier;
@@ -736,8 +736,8 @@ mod test {
 
     #[tokio::test]
     async fn stream_key_sink_pk_mismatch() {
-        use risingwave_common::array::stream_chunk::StreamChunk;
         use risingwave_common::array::StreamChunkTestExt;
+        use risingwave_common::array::stream_chunk::StreamChunk;
         use risingwave_common::types::DataType;
 
         use crate::executor::Barrier;

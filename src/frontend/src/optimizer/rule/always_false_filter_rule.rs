@@ -15,9 +15,9 @@
 use risingwave_common::types::ScalarImpl;
 
 use super::{BoxedRule, Rule};
+use crate::PlanRef;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{LogicalFilter, LogicalValues};
-use crate::PlanRef;
 
 pub struct AlwaysFalseFilterRule;
 

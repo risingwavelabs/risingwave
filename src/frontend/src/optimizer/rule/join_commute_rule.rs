@@ -17,8 +17,8 @@ use risingwave_pb::plan_common::JoinType;
 
 use super::{BoxedRule, Rule};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, InputRef};
-use crate::optimizer::plan_node::LogicalJoin;
 use crate::optimizer::PlanRef;
+use crate::optimizer::plan_node::LogicalJoin;
 
 /// Convert right join type to left join type:
 ///

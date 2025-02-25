@@ -20,17 +20,20 @@ use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnDesc, TableDesc};
 use risingwave_common::util::sort_util::ColumnOrder;
+use risingwave_pb::stream_plan::StreamScanType;
 use risingwave_sqlparser::ast::AsOf;
 
 use super::generic::{GenericPlanNode, GenericPlanRef};
-use super::utils::{childless_record, Distill};
+use super::utils::{Distill, childless_record};
 use super::{
-    generic, BatchFilter, BatchProject, ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef,
-    PredicatePushdown, StreamTableScan, ToBatch, ToStream,
+    BatchFilter, BatchProject, ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef,
+    PredicatePushdown, StreamTableScan, ToBatch, ToStream, generic,
 };
+use crate::TableCatalog;
 use crate::catalog::{ColumnId, IndexCatalog};
 use crate::error::Result;
 use crate::expr::{CorrelatedInputRef, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
+use crate::optimizer::ApplyResult;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
@@ -39,9 +42,7 @@ use crate::optimizer::plan_node::{
 };
 use crate::optimizer::property::{Cardinality, Order, WatermarkColumns};
 use crate::optimizer::rule::IndexSelectionRule;
-use crate::optimizer::ApplyResult;
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
-use crate::TableCatalog;
 
 /// `LogicalScan` returns contents of a table or other equivalent object
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -353,9 +354,11 @@ impl ColPrunable for LogicalScan {
             .iter()
             .map(|i| self.required_col_idx()[*i])
             .collect();
-        assert!(output_col_idx
-            .iter()
-            .all(|i| self.output_col_idx().contains(i)));
+        assert!(
+            output_col_idx
+                .iter()
+                .all(|i| self.output_col_idx().contains(i))
+        );
 
         self.clone_with_output_indices(output_col_idx).into()
     }
@@ -519,11 +522,20 @@ impl ToBatch for LogicalScan {
 impl ToStream for LogicalScan {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
         if self.predicate().always_true() {
-            Ok(StreamTableScan::new_with_stream_scan_type(
-                self.core.clone(),
-                ctx.stream_scan_type(),
-            )
-            .into())
+            // Force rewrite scan type to cross-db scan
+            if self.core.table_catalog.database_id != self.base.ctx().session_ctx().database_id() {
+                Ok(StreamTableScan::new_with_stream_scan_type(
+                    self.core.clone(),
+                    StreamScanType::CrossDbSnapshotBackfill,
+                )
+                .into())
+            } else {
+                Ok(StreamTableScan::new_with_stream_scan_type(
+                    self.core.clone(),
+                    ctx.stream_scan_type(),
+                )
+                .into())
+            }
         } else {
             let (scan, predicate, project_expr) = self.predicate_pull_up();
             let mut plan = LogicalFilter::create(scan.into(), predicate);
