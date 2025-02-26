@@ -135,12 +135,10 @@ impl<Src: OpendalSource> OpendalReader<Src> {
         split: OpendalFsSplit<Src>,
         source_ctx: SourceContextRef,
         compression_format: CompressionFormat,
-        file_source_input_row_count_metrics: 
-        risingwave_common::metrics::LabelGuardedMetric<
+        file_source_input_row_count_metrics: risingwave_common::metrics::LabelGuardedMetric<
             prometheus::core::GenericCounter<prometheus::core::AtomicU64>,
             4,
         >,
-    
     ) {
         let actor_id = source_ctx.actor_id.to_string();
         let fragment_id = source_ctx.fragment_id.to_string();

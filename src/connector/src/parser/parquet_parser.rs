@@ -109,67 +109,52 @@ impl ParquetParser {
         for source_column in self.rw_columns.clone() {
             match source_column.column_type {
                 crate::source::SourceColumnType::Normal => {
-                    match source_column.is_hidden_addition_col {
-                        false => {
-                            let rw_data_type: &risingwave_common::types::DataType =
-                                &source_column.data_type;
-                            let rw_column_name = &source_column.name;
+                    let rw_data_type: &risingwave_common::types::DataType =
+                        &source_column.data_type;
+                    let rw_column_name = &source_column.name;
 
-                            if let Some(parquet_column) =
-                                record_batch.column_by_name(rw_column_name)
-                                && is_parquet_schema_match_source_schema(
-                                    parquet_column.data_type(),
-                                    rw_data_type,
-                                )
-                            {
-                                let arrow_field = IcebergArrowConvert
-                                    .to_arrow_field(rw_column_name, rw_data_type)?;
-                                let array_impl = IcebergArrowConvert
-                                    .array_from_arrow_array(&arrow_field, parquet_column)?;
-                                let column = Arc::new(array_impl);
-                                chunk_columns.push(column);
-                            } else {
-                                // For columns defined in the source schema but not present in the Parquet file, null values are filled in.
-                                let mut array_builder =
-                                    ArrayBuilderImpl::with_type(column_size, rw_data_type.clone());
-
-                                array_builder.append_n_null(record_batch.num_rows());
-                                let res = array_builder.finish();
-                                let column = Arc::new(res);
-                                chunk_columns.push(column);
-                            }
-                        }
-                        // handle hidden columns, for file source, the hidden columns are only `Offset` and `Filename`
-                        true => {
-                            if let Some(additional_column_type) =
-                                &source_column.additional_column.column_type
-                            {
-                                match additional_column_type{
-                                risingwave_pb::plan_common::additional_column::ColumnType::Offset(_) =>{
-                                    let mut array_builder =
-                                    ArrayBuilderImpl::with_type(column_size, source_column.data_type.clone());
-                                    for _ in 0..record_batch.num_rows(){
+                    if let Some(parquet_column) = record_batch.column_by_name(rw_column_name)
+                        && is_parquet_schema_match_source_schema(
+                            parquet_column.data_type(),
+                            rw_data_type,
+                        )
+                    {
+                        let arrow_field =
+                            IcebergArrowConvert.to_arrow_field(rw_column_name, rw_data_type)?;
+                        let array_impl = IcebergArrowConvert
+                            .array_from_arrow_array(&arrow_field, parquet_column)?;
+                        chunk_columns.push(Arc::new(array_impl));
+                    } else {
+                        // Handle additional columns, for file source, the additional columns are offset and file name;
+                        // for columns defined in the user schema but not present in the parquet file, fill with null.
+                        let column = if let Some(additional_column_type) =
+                            &source_column.additional_column.column_type
+                        {
+                            match additional_column_type {
+                                risingwave_pb::plan_common::additional_column::ColumnType::Offset(_) => {
+                                    let mut array_builder = ArrayBuilderImpl::with_type(column_size, source_column.data_type.clone());
+                                    for _ in 0..record_batch.num_rows() {
                                         let datum: Datum = Some(ScalarImpl::Utf8((self.offset).to_string().into()));
                                         self.inc_offset();
                                         array_builder.append(datum);
                                     }
-                                    let res = array_builder.finish();
-                                    let column = Arc::new(res);
-                                    chunk_columns.push(column);
-                                },
+                                    Arc::new(array_builder.finish())
+                                }
                                 risingwave_pb::plan_common::additional_column::ColumnType::Filename(_) => {
-                                    let mut array_builder =
-                                    ArrayBuilderImpl::with_type(column_size, source_column.data_type.clone());
-                                    let datum: Datum =  Some(ScalarImpl::Utf8(self.file_name.clone().into()));
+                                    let mut array_builder = ArrayBuilderImpl::with_type(column_size, source_column.data_type.clone());
+                                    let datum: Datum = Some(ScalarImpl::Utf8(self.file_name.clone().into()));
                                     array_builder.append_n(record_batch.num_rows(), datum);
-                                    let res = array_builder.finish();
-                                    let column = Arc::new(res);
-                                    chunk_columns.push(column);
-                                },
-                                _ => unreachable!()
+                                    Arc::new(array_builder.finish())
+                                }
+                                _ => unreachable!(),
                             }
-                            }
-                        }
+                        } else {
+                            let mut array_builder =
+                                ArrayBuilderImpl::with_type(column_size, rw_data_type.clone());
+                            array_builder.append_n_null(record_batch.num_rows());
+                            Arc::new(array_builder.finish())
+                        };
+                        chunk_columns.push(column);
                     }
                 }
                 crate::source::SourceColumnType::RowId => {
@@ -181,7 +166,7 @@ impl ParquetParser {
                     let column = Arc::new(res);
                     chunk_columns.push(column);
                 }
-                // The following fields is only used in CDC source
+                // The following fields are only used in CDC source
                 crate::source::SourceColumnType::Offset | crate::source::SourceColumnType::Meta => {
                     unreachable!()
                 }

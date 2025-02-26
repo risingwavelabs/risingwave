@@ -348,12 +348,14 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                         // StreamChunk from FsSourceReader, and the reader reads only one file.
                         Either::Right(chunk_option) => match chunk_option {
                             Some(chunk) => {
+                                println!("right chunk 来了");
                                 let mapping = get_split_offset_mapping_from_chunk(
                                     &chunk, split_idx, offset_idx,
                                 )
                                 .unwrap();
                                 debug_assert_eq!(mapping.len(), 1);
                                 if let Some((split_id, _offset)) = mapping.into_iter().next() {
+                                    println!("mapping里面");
                                     delete_file = split_id.clone();
 
                                     let row = state_store_handler.get(split_id.clone()).await?
@@ -372,16 +374,18 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                     state_store_handler
                                         .set(split_id, fs_split.encode_to_json())
                                         .await?;
-                                    let chunk = prune_additional_cols(
-                                        &chunk,
-                                        split_idx,
-                                        offset_idx,
-                                        &source_desc.columns,
-                                    );
-                                    yield Message::Chunk(chunk);
+                                    
                                 }
+                                let chunk = prune_additional_cols(
+                                    &chunk,
+                                    split_idx,
+                                    offset_idx,
+                                    &source_desc.columns,
+                                );
+                                yield Message::Chunk(chunk);
                             }
                             None => {
+                                println!("right None 来了, 删除{delete_file}");
                                 splits_on_fetch -= 1;
                                 state_store_handler.delete(delete_file.clone()).await?;
                             }
