@@ -465,6 +465,7 @@ mod tests {
             (USE_NEW_OBJECT_PREFIX_STRATEGY_KEY, "false"),
             (LICENSE_KEY_KEY, "foo"),
             (TIME_TRAVEL_RETENTION_MS_KEY, "0"),
+            (ADAPTIVE_PARALLELISM_STRATEGY_KEY, "Auto"),
             ("a_deprecated_param", "foo"),
         ];
 
