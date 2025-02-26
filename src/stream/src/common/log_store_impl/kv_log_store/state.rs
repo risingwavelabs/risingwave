@@ -160,7 +160,7 @@ impl<'a, S: LocalStateStore> LogStorePostSealCurrentEpoch<'a, S> {
     pub(crate) async fn post_yield_barrier(
         self,
         new_vnodes: Option<Arc<Bitmap>>,
-    ) -> LogStoreResult<()> {
+    ) -> LogStoreResult<&'a mut LogStoreWriteState<S>> {
         if let Some(new_vnodes) = new_vnodes {
             self.inner.serde.update_vnode_bitmap(new_vnodes.clone());
             self.inner
@@ -169,7 +169,7 @@ impl<'a, S: LocalStateStore> LogStorePostSealCurrentEpoch<'a, S> {
                 .await?;
         }
         self.inner.on_post_seal = false;
-        Ok(())
+        Ok(self.inner)
     }
 }
 
