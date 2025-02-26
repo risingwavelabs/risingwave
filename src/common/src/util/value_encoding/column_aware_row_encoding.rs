@@ -104,7 +104,7 @@ mod new_serde {
 
     // --- deserialize ---
 
-    fn new_inner_deserialize_datum(data: &mut impl Buf, ty: &DataType) -> Result<Datum> {
+    fn new_inner_deserialize_datum(data: &mut &[u8], ty: &DataType) -> Result<Datum> {
         let null_tag = data.get_u8();
         match null_tag {
             0 => Ok(None),
@@ -113,20 +113,22 @@ mod new_serde {
         }
     }
 
-    fn new_deserialize_struct(struct_def: &StructType, data: &mut impl Buf) -> Result<ScalarImpl> {
+    fn new_deserialize_struct(struct_def: &StructType, data: &mut &[u8]) -> Result<ScalarImpl> {
         let deserializer = super::Deserializer::new(
             &[],                                              // TODO: column ids
             struct_def.types().cloned().collect_vec().into(), // TODO: avoid this clone
             std::iter::empty(),
         );
         let encoded_len = data.get_u32_le() as usize;
-        let data = data.copy_to_bytes(encoded_len); // TODO: avoid copy
-        let fields = deserializer.deserialize(&data)?;
+
+        let (struct_data, remaining) = data.split_at(encoded_len);
+        *data = remaining;
+        let fields = deserializer.deserialize(&struct_data)?;
 
         Ok(ScalarImpl::Struct(StructValue::new(fields)))
     }
 
-    fn new_deserialize_list(item_type: &DataType, data: &mut impl Buf) -> Result<ScalarImpl> {
+    fn new_deserialize_list(item_type: &DataType, data: &mut &[u8]) -> Result<ScalarImpl> {
         let len = data.get_u32_le();
         let mut builder = item_type.create_array_builder(len as usize);
         for _ in 0..len {
@@ -135,7 +137,7 @@ mod new_serde {
         Ok(ScalarImpl::List(ListValue::new(builder.finish())))
     }
 
-    fn new_deserialize_map(map_type: &MapType, data: &mut impl Buf) -> Result<ScalarImpl> {
+    fn new_deserialize_map(map_type: &MapType, data: &mut &[u8]) -> Result<ScalarImpl> {
         let len = data.get_u32_le();
         let mut builder = map_type
             .clone() // FIXME: clone type everytime here is inefficient
@@ -152,7 +154,7 @@ mod new_serde {
         ))))
     }
 
-    pub fn new_deserialize_scalar(ty: &DataType, data: &mut impl Buf) -> Result<ScalarImpl> {
+    pub fn new_deserialize_scalar(ty: &DataType, data: &mut &[u8]) -> Result<ScalarImpl> {
         Ok(match ty {
             DataType::Struct(struct_def) => new_deserialize_struct(struct_def, data)?,
             DataType::List(item_type) => new_deserialize_list(item_type, data)?,
