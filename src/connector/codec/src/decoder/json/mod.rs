@@ -43,7 +43,7 @@ use serde_json::Value;
 use thiserror::Error;
 use url::Url;
 
-use super::avro::{MapHandling, avro_schema_to_column_descs};
+use super::avro::{MapHandling, avro_schema_to_fields};
 
 #[derive(Debug, Error, thiserror_ext::ContextInto)]
 pub enum Error {
@@ -208,6 +208,6 @@ impl crate::JsonSchema {
         let avro_schema = jst::convert_avro(&self.0, jst::Context::default()).to_string();
         let schema =
             apache_avro::Schema::parse_str(&avro_schema).context("failed to parse avro schema")?;
-        avro_schema_to_column_descs(&schema, Some(MapHandling::Jsonb)).map_err(Into::into)
+        avro_schema_to_fields(&schema, Some(MapHandling::Jsonb)).map_err(Into::into)
     }
 }

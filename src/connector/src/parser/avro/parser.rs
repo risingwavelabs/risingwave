@@ -21,7 +21,7 @@ use apache_avro::{Reader, Schema, from_avro_datum};
 use risingwave_common::catalog::Field;
 use risingwave_common::{bail, try_match_expand};
 use risingwave_connector_codec::decoder::avro::{
-    AvroAccess, AvroParseOptions, ResolvedAvroSchema, avro_schema_to_column_descs,
+    AvroAccess, AvroParseOptions, ResolvedAvroSchema, avro_schema_to_fields,
 };
 
 use super::{ConfluentSchemaCache, GlueSchemaCache as _, GlueSchemaCacheImpl};
@@ -229,8 +229,7 @@ impl AvroParserConfig {
     }
 
     pub fn map_to_columns(&self) -> ConnectorResult<Vec<Field>> {
-        avro_schema_to_column_descs(&self.schema.original_schema, self.map_handling)
-            .map_err(Into::into)
+        avro_schema_to_fields(&self.schema.original_schema, self.map_handling).map_err(Into::into)
     }
 }
 

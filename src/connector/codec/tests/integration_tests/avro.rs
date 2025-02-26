@@ -17,7 +17,7 @@ use apache_avro::from_avro_datum;
 use risingwave_connector_codec::AvroSchema;
 use risingwave_connector_codec::decoder::Access;
 use risingwave_connector_codec::decoder::avro::{
-    AvroAccess, AvroParseOptions, MapHandling, ResolvedAvroSchema, avro_schema_to_column_descs,
+    AvroAccess, AvroParseOptions, MapHandling, ResolvedAvroSchema, avro_schema_to_fields,
 };
 use thiserror_ext::AsReport;
 
@@ -55,9 +55,8 @@ fn avro_schema_str_to_risingwave_schema(
     let resolved_schema =
         ResolvedAvroSchema::create(avro_schema.into()).context("failed to resolve Avro schema")?;
 
-    let rw_schema =
-        avro_schema_to_column_descs(&resolved_schema.original_schema, config.map_handling)
-            .context("failed to convert Avro schema to RisingWave schema")?;
+    let rw_schema = avro_schema_to_fields(&resolved_schema.original_schema, config.map_handling)
+        .context("failed to convert Avro schema to RisingWave schema")?;
     Ok((resolved_schema, rw_schema))
 }
 

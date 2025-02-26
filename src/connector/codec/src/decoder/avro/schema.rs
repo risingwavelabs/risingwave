@@ -72,7 +72,7 @@ impl MapHandling {
 
 /// This function expects original schema (with `Ref`).
 /// TODO: change `map_handling` to some `Config`, and also unify debezium.
-pub fn avro_schema_to_column_descs(
+pub fn avro_schema_to_fields(
     schema: &Schema,
     map_handling: Option<MapHandling>,
 ) -> anyhow::Result<Vec<Field>> {

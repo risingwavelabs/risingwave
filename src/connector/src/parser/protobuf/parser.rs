@@ -128,8 +128,7 @@ impl ProtobufParserConfig {
 
     /// Maps the protobuf schema to relational schema.
     pub fn map_to_columns(&self) -> ConnectorResult<Vec<Field>> {
-        pb_schema_to_column_descs(&self.message_descriptor, &self.messages_as_jsonb)
-            .map_err(|e| e.into())
+        pb_schema_to_fields(&self.message_descriptor, &self.messages_as_jsonb).map_err(|e| e.into())
     }
 }
 

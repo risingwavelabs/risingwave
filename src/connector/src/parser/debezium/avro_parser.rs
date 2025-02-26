@@ -21,7 +21,7 @@ use apache_avro::{Schema, from_avro_datum};
 use risingwave_common::catalog::Field;
 use risingwave_common::try_match_expand;
 use risingwave_connector_codec::decoder::avro::{
-    AvroAccess, AvroParseOptions, ResolvedAvroSchema, avro_schema_to_column_descs,
+    AvroAccess, AvroParseOptions, ResolvedAvroSchema, avro_schema_to_fields,
     get_nullable_union_inner,
 };
 
@@ -121,7 +121,7 @@ impl DebeziumAvroParserConfig {
     }
 
     pub fn extract_pks(&self) -> ConnectorResult<Vec<Field>> {
-        avro_schema_to_column_descs(
+        avro_schema_to_fields(
             &self.key_schema,
             // TODO: do we need to support map type here?
             None,
@@ -162,7 +162,7 @@ impl DebeziumAvroParserConfig {
         // - transaction
         // See <https://debezium.io/documentation/reference/stable/connectors/mysql.html#mysql-events>
 
-        avro_schema_to_column_descs(
+        avro_schema_to_fields(
             // This assumes no external `Ref`s (e.g. "before" referring to "after" or "source").
             // Internal `Ref`s inside the "before" tree are allowed.
             extract_debezium_table_schema(&self.outer_schema)?,
@@ -293,7 +293,7 @@ mod tests {
 }
 "#;
         let key_schema = Schema::parse_str(key_schema_str).unwrap();
-        let names: Vec<String> = avro_schema_to_column_descs(&key_schema, None)
+        let names: Vec<String> = avro_schema_to_fields(&key_schema, None)
             .unwrap()
             .drain(..)
             .map(|d| d.name)
@@ -349,7 +349,7 @@ mod tests {
 }
 "#;
         let schema = Schema::parse_str(test_schema_str).unwrap();
-        let columns = avro_schema_to_column_descs(&schema, None).unwrap();
+        let columns = avro_schema_to_fields(&schema, None).unwrap();
         for col in &columns {
             println!("name = {}, type = {}", col.name, col.data_type);
             if col.name.contains("unconstrained") {
@@ -361,11 +361,9 @@ mod tests {
     #[test]
     fn test_map_to_columns() {
         let outer_schema = get_outer_schema();
-        let columns = avro_schema_to_column_descs(
-            extract_debezium_table_schema(&outer_schema).unwrap(),
-            None,
-        )
-        .unwrap();
+        let columns =
+            avro_schema_to_fields(extract_debezium_table_schema(&outer_schema).unwrap(), None)
+                .unwrap();
 
         assert_eq!(columns.len(), 4);
         assert_eq!(Field::new("id", DataType::Int32), columns[0]);

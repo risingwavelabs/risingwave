@@ -39,7 +39,7 @@ fn check(
     expected_risingwave_schema: expect_test::Expect,
     expected_risingwave_data: expect_test::Expect,
 ) {
-    let rw_schema = pb_schema_to_column_descs(
+    let rw_schema = pb_schema_to_fields(
         &pb_schema,
         &HashSet::from(["google.protobuf.Any".to_owned()]),
     );

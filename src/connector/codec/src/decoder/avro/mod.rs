@@ -26,7 +26,7 @@ use risingwave_common::types::{
     Timestamptz, ToOwnedDatum,
 };
 
-pub use self::schema::{MapHandling, ResolvedAvroSchema, avro_schema_to_column_descs};
+pub use self::schema::{MapHandling, ResolvedAvroSchema, avro_schema_to_fields};
 use super::utils::scaled_bigint_to_rust_decimal;
 use super::{Access, AccessError, AccessResult, bail_uncategorized, uncategorized};
 use crate::decoder::avro::schema::avro_schema_to_struct_field_name;

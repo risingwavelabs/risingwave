@@ -30,7 +30,7 @@ use crate::decoder::{AccessError, AccessResult, uncategorized};
 
 pub const PROTOBUF_MESSAGES_AS_JSONB: &str = "messages_as_jsonb";
 
-pub fn pb_schema_to_column_descs(
+pub fn pb_schema_to_fields(
     message_descriptor: &MessageDescriptor,
     messages_as_jsonb: &HashSet<String>,
 ) -> anyhow::Result<Vec<Field>> {
