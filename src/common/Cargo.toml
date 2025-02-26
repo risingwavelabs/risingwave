@@ -22,8 +22,8 @@ arrow-53-schema = { package = "arrow-schema", version = "53" }
 async-trait = "0.1"
 auto_enums = { workspace = true }
 auto_impl = "1"
-bitflags = "2"
 bitfield-struct = "0.10"
+bitflags = "2"
 byteorder = "1"
 bytes = "1"
 chrono = { version = "0.4", default-features = false, features = [
