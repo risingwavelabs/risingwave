@@ -81,9 +81,10 @@ pub async fn handle_alter_parallelism(
                     reader.get_source_by_name(db_name, schema_path, &real_table_name)?;
 
                 if !source.info.is_shared() {
-                    return Err(ErrorCode::InvalidInputSyntax(format!(
-                        "cannot alter parallelism of non-shared source.\nUse `ALTER MATERIALIZED VIEW SET PARALLELISM` to alter the materialized view using the source instead.",
-                    ))
+                    return Err(ErrorCode::InvalidInputSyntax(
+                        "cannot alter parallelism of non-shared source.\nUse `ALTER MATERIALIZED VIEW SET PARALLELISM` to alter the materialized view using the source instead."
+                        .to_owned()
+                    )
                     .into());
                 }
 
