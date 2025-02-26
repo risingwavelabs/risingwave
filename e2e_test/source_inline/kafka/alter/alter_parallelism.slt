@@ -174,5 +174,26 @@ select * from mv_kafka_2 order by x;
 statement ok
 drop source s_kafka cascade;
 
+statement ok
+SET streaming_use_shared_source = false;
+
+statement ok
+create source s_kafka_non_shared(x int)
+WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'alter_parallelism'
+)
+FORMAT PLAIN ENCODE JSON;
+
+statement error
+alter source s_kafka_non_shared set parallelism = 5;
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Invalid input syntax: cannot alter parallelism of non-shared source.
+Use `ALTER MATERIALIZED VIEW SET PARALLELISM` to alter the materialized view using the source instead.
+
+
 system ok
 rpk topic delete alter_parallelism;
