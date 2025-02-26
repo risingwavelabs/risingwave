@@ -132,15 +132,14 @@ pub struct IcebergConnection {
     #[serde(rename = "gcs.credential")]
     pub gcs_credential: Option<String>,
 
-    /// Path of iceberg warehouse, only applicable in storage catalog.
+    /// Path of iceberg warehouse.
     #[serde(rename = "warehouse.path")]
     pub warehouse_path: Option<String>,
     /// Catalog id, can be omitted for storage catalog or when
     /// caller's AWS account ID matches glue id
     #[serde(rename = "glue.id")]
     pub glue_id: Option<String>,
-    /// Catalog name, can be omitted for storage catalog, but
-    /// must be set for other catalogs.
+    /// Catalog name, default value is risingwave.
     #[serde(rename = "catalog.name")]
     pub catalog_name: Option<String>,
     /// URI of iceberg catalog, only applicable in rest catalog.

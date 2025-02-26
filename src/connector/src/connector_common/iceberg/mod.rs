@@ -60,8 +60,7 @@ pub struct IcebergCommon {
     /// caller's AWS account ID matches glue id
     #[serde(rename = "glue.id")]
     pub glue_id: Option<String>,
-    /// Catalog name, can be omitted for storage catalog, but
-    /// must be set for other catalogs.
+    /// Catalog name, default value is risingwave.
     #[serde(rename = "catalog.name")]
     pub catalog_name: Option<String>,
     /// URI of iceberg catalog, only applicable in rest catalog.
