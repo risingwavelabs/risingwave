@@ -266,6 +266,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                                     );
                                                     self.rate_limit_rps = *new_rate_limit;
                                                     need_rebuild_reader = true;
+                                                    splits_on_fetch = 0;
                                                 }
                                             }
                                             _ => (),
