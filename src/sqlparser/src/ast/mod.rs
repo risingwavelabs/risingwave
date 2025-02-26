@@ -3295,9 +3295,12 @@ impl TryFrom<Vec<SqlOption>> for CreateFunctionWithOptions {
 
 impl Display for CreateFunctionWithOptions {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self == &Self::default() {
+            return Ok(());
+        }
         let mut options = vec![];
         if let Some(v) = self.always_retry_on_network_error {
-            options.push(format!("always_retry_network_errors = {}", v));
+            options.push(format!("always_retry_on_network_error = {}", v));
         }
         if let Some(v) = self.r#async {
             options.push(format!("async = {}", v));
@@ -3634,7 +3637,7 @@ mod tests {
             },
         };
         assert_eq!(
-            "CREATE FUNCTION foo(INT) RETURNS INT LANGUAGE python IMMUTABLE AS 'SELECT 1' WITH ( ALWAYS_RETRY_NETWORK_ERRORS = true )",
+            "CREATE FUNCTION foo(INT) RETURNS INT LANGUAGE python IMMUTABLE AS 'SELECT 1' WITH ( always_retry_on_network_error = true )",
             format!("{}", create_function)
         );
     }
