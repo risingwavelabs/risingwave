@@ -695,7 +695,7 @@ where
             let backfill_progress = backfill_state.get_progress(&vnode)?;
             let current_pos = match backfill_progress {
                 BackfillProgressPerVnode::NotStarted => None,
-                BackfillProgressPerVnode::Completed {..} => {
+                BackfillProgressPerVnode::Completed { .. } => {
                     continue;
                 }
                 BackfillProgressPerVnode::InProgress { current_pos, .. } => {
