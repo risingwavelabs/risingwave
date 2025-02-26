@@ -327,11 +327,11 @@ test_scale_in() {
 
   psql -c "create table t(v1 int); insert into t select * from generate_series(1, 1000); flush"
   psql -c "set background_ddl=true; set backfill_rate_limit=10; create materialized view m1 as select * from t; flush"
-  internal_table=$(psql -t -c "show internal tables;" | rg -v 'INFO')
+  internal_table=$(psql -t -c "show internal tables;" | grep -v 'INFO')
 
   for i in $(seq 1 100000); do
     sleep 1
-    progress=$(psql -c "select progress from rw_ddl_progress" | rg -o "[0-9]*\.[0-9]*%" |  sed 's/\([0-9]*\)\..*/\1/' )
+    progress=$(psql -c "select progress from rw_ddl_progress" | grep -o "[0-9]*\.[0-9]*%" |  sed 's/\([0-9]*\)\..*/\1/' )
     echo "progress ${progress}%"
 
     if [[ "$progress" -gt 70 ]]; then
@@ -343,7 +343,7 @@ test_scale_in() {
 
   for i in $(seq 1 100000); do
     sleep 1
-    progress=$(psql -c "select progress from rw_ddl_progress" | rg -o "[0-9]*\.[0-9]*%" |  sed 's/\([0-9]*\)\..*/\1/' )
+    progress=$(psql -c "select progress from rw_ddl_progress" | grep -o "[0-9]*\.[0-9]*%" |  sed 's/\([0-9]*\)\..*/\1/' )
     echo "progress ${progress}%"
 
     if [[ "$progress" -gt 90 ]]; then
@@ -417,6 +417,8 @@ main() {
   test_replication_with_column_pruning
   test_sink_backfill_recovery
   test_snapshot_backfill
+
+  test_scale_in
 
   # Only if profile is "ci-release", run it.
   if [[ ${profile:-} == "ci-release" ]]; then
