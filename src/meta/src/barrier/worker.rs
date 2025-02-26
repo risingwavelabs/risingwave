@@ -220,7 +220,7 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
 
             let paused = self.take_pause_on_bootstrap().await.unwrap_or(false);
             let paused_reason = paused.then_some(PausedReason::Manual);
-
+            tracing::info!("bootstrap recovery start!");
             self.recovery(paused_reason, None, RecoveryReason::Bootstrap)
                 .instrument(span)
                 .await;
@@ -490,6 +490,8 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
 
             let reason = RecoveryReason::Failover(err.clone());
 
+            // We don't have span in release mode, so add an additional log here.
+            tracing::warn!(error = %err.as_report(), "failover recovery start!");
             // No need to clean dirty tables for barrier recovery,
             // The foreground stream job should cleanup their own tables.
             self.recovery(None, Some(err), reason)
@@ -521,6 +523,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
             None,
         );
 
+        tracing::info!("adhoc recovery start!");
         // No need to clean dirty tables for barrier recovery,
         // The foreground stream job should cleanup their own tables.
         self.recovery(None, Some(err), RecoveryReason::Adhoc)
@@ -724,7 +727,8 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     ),
                 )
             };
-            if recovery_result.is_err() {
+            if let Err(err) = &recovery_result {
+                tracing::error!(error = %err.as_report(), "recovery failed");
                 GLOBAL_META_METRICS.recovery_failure_cnt.inc();
             }
             recovery_result
