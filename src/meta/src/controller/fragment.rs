@@ -345,7 +345,7 @@ impl CatalogController {
         max_parallelism: usize,
         job_definition: Option<String>,
     ) -> MetaResult<PbTableFragments> {
-        let mut pb_fragments = BTreeMap::new();
+        let mut pb_fragments = HashMap::new();
 
         let mut pb_actor_splits = HashMap::new();
         let mut pb_actor_status = HashMap::new();
@@ -1325,7 +1325,7 @@ impl CatalogController {
 
         let job_definitions = resolve_streaming_job_definition(
             &inner.db,
-            &HashSet::from_iter(job_ids.iter().copied()),
+            &HashSet::from_iter(upstream_job_ids.iter().copied()),
         )
         .await?;
 
@@ -1516,6 +1516,11 @@ impl CatalogController {
     /// Get the `Materialize` fragment of the specified table.
     pub async fn get_mview_fragment(&self, job_id: ObjectId) -> MetaResult<PbFragment> {
         let inner = self.inner.read().await;
+
+        let job_definition = resolve_streaming_job_definition(&inner.db, &HashSet::from([job_id]))
+            .await?
+            .remove(&job_id);
+
         let mut fragments = Fragment::find()
             .filter(fragment::Column::JobId.eq(job_id))
             .all(&inner.db)
@@ -1539,7 +1544,7 @@ impl CatalogController {
             actors.push(actor);
         }
 
-        Ok(Self::compose_fragment(fragment, actors, actor_dispatchers)?.0)
+        Ok(Self::compose_fragment(fragment, actors, actor_dispatchers, job_definition)?.0)
     }
 
     /// Get the actor count of `Materialize` or `Sink` fragment of the specified table.
