@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use rand::Rng;
-use risingwave_common::array::stream_record::{Record, RecordType};
 use risingwave_common::array::Op;
+use risingwave_common::array::stream_record::{Record, RecordType};
 use risingwave_common::field_generator::{FieldGeneratorImpl, VarcharProperty};
 use risingwave_common::util::iter_util::ZipEqFast;
 use smallvec::SmallVec;

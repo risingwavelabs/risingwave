@@ -25,11 +25,11 @@ use risingwave_pb::expr::agg_call::PbKind as PbAggKind;
 use risingwave_pb::expr::expr_node::PbType as ScalarFunctionType;
 use risingwave_pb::expr::table_function::PbType as TableFunctionType;
 
+use crate::ExprError;
 use crate::aggregate::{AggCall, BoxedAggregateFunction};
 use crate::error::Result;
 use crate::expr::BoxedExpression;
 use crate::table_function::BoxedTableFunction;
-use crate::ExprError;
 
 mod udf;
 

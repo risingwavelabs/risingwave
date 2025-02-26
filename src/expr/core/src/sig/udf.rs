@@ -18,7 +18,7 @@
 //!
 //! See expr/impl/src/udf for the implementations.
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use enum_as_inner::EnumAsInner;
 use futures::stream::BoxStream;
 use risingwave_common::array::arrow::arrow_array_udf::{ArrayRef, BooleanArray, RecordBatch};

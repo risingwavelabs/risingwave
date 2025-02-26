@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::array::ListRef;
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_expr::{ExprError, Result, function};
 
 /// Returns the total number of elements in the array.
 ///

@@ -14,14 +14,14 @@
 
 use std::ops::Bound;
 use std::ops::Bound::Unbounded;
-use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
 use std::time::Instant;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use clap::Subcommand;
 use futures::future::try_join_all;
-use futures::{pin_mut, Future, StreamExt};
+use futures::{Future, StreamExt, pin_mut};
 use risingwave_common::row::{self, OwnedRow};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_storage::store::PrefetchOptions;
@@ -29,8 +29,8 @@ use size::Size;
 use tokio::task::JoinHandle;
 
 use super::table::{get_table_catalog, make_state_table};
-use crate::common::HummockServiceOpts;
 use crate::CtlContext;
+use crate::common::HummockServiceOpts;
 
 #[derive(Subcommand)]
 pub enum BenchCommands {

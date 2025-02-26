@@ -47,7 +47,7 @@ pub async fn handle_drop_view(
                             .into())
                     } else {
                         Err(e.into())
-                    }
+                    };
                 }
             };
 

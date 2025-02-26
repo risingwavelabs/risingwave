@@ -19,8 +19,8 @@ use std::sync::Arc;
 
 use bytes::BufMut;
 
-use super::filter::FilterBuilder;
 use super::Sstable;
+use super::filter::FilterBuilder;
 use crate::hummock::MemoryLimiter;
 
 pub trait BitSlice {

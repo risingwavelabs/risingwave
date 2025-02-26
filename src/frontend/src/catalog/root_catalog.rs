@@ -38,7 +38,7 @@ use crate::catalog::database_catalog::DatabaseCatalog;
 use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::secret_catalog::SecretCatalog;
 use crate::catalog::system_catalog::{
-    get_sys_tables_in_schema, get_sys_views_in_schema, SystemTableCatalog,
+    SystemTableCatalog, get_sys_tables_in_schema, get_sys_views_in_schema,
 };
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::{DatabaseId, IndexCatalog, SchemaId};
@@ -620,6 +620,21 @@ impl Catalog {
         ))
     }
 
+    pub fn get_source_by_id<'a>(
+        &self,
+        db_name: &'a str,
+        schema_path: SchemaPath<'a>,
+        source_id: &SourceId,
+    ) -> CatalogResult<(&Arc<SourceCatalog>, &'a str)> {
+        schema_path
+            .try_find(|schema_name| {
+                Ok(self
+                    .get_schema_by_name(db_name, schema_name)?
+                    .get_source_by_id(source_id))
+            })?
+            .ok_or_else(|| CatalogError::NotFound("source", source_id.to_string()))
+    }
+
     /// Used to get `TableCatalog` for Materialized Views, Tables and Indexes.
     /// Retrieves all tables, created or creating.
     pub fn get_any_table_by_name<'a>(
@@ -677,15 +692,12 @@ impl Catalog {
 
     // Used by test_utils only.
     pub fn alter_table_name_by_id(&mut self, table_id: &TableId, table_name: &str) {
-        let (mut database_id, mut schema_id) = (0, 0);
         let mut found = false;
         for database in self.database_by_name.values() {
             if !found {
                 for schema in database.iter_schemas() {
                     if schema.iter_user_table().any(|t| t.id() == *table_id) {
                         found = true;
-                        database_id = database.id();
-                        schema_id = schema.id();
                         break;
                     }
                 }
@@ -693,10 +705,7 @@ impl Catalog {
         }
 
         if found {
-            let mut table = self
-                .get_any_table_by_id(table_id)
-                .unwrap()
-                .to_prost(schema_id, database_id);
+            let mut table = self.get_any_table_by_id(table_id).unwrap().to_prost();
             table.name = table_name.to_owned();
             self.update_table(&table);
         }

@@ -17,7 +17,7 @@ use std::iter::once;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use assert_matches::assert_matches;
 use itertools::Itertools;
 use parking_lot::Mutex;

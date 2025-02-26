@@ -13,19 +13,19 @@
 // limitations under the License.
 
 use pretty_xmlish::XmlNode;
-use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::ProjectNode;
+use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::expr::ExprNode;
 
 use super::batch::prelude::*;
-use super::utils::{childless_record, Distill};
+use super::utils::{Distill, childless_record};
 use super::{
-    generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch,
+    ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch, generic,
 };
 use crate::error::Result;
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor};
-use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::ToLocalBatch;
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::utils::ColIndexMappingRewriteExt;
 
 /// `BatchProject` implements [`super::LogicalProject`] to evaluate specified expressions on input

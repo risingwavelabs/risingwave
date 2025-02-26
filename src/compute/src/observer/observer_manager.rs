@@ -16,8 +16,8 @@ use risingwave_common::license::LicenseManager;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManagerRef;
 use risingwave_common_service::ObserverState;
-use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::SubscribeResponse;
+use risingwave_pb::meta::subscribe_response::{Info, Operation};
 
 pub struct ComputeObserverNode {
     system_params_manager: LocalSystemParamsManagerRef,

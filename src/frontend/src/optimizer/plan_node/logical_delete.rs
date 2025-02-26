@@ -16,8 +16,8 @@ use risingwave_common::catalog::TableVersionId;
 
 use super::utils::impl_distill_by_unit;
 use super::{
-    gen_filter_and_pushdown, generic, BatchDelete, ColPrunable, ExprRewritable, Logical,
-    LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
+    BatchDelete, ColPrunable, ExprRewritable, Logical, LogicalProject, PlanBase, PlanRef,
+    PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream, gen_filter_and_pushdown, generic,
 };
 use crate::catalog::TableId;
 use crate::error::Result;

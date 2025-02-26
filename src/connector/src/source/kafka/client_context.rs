@@ -109,7 +109,7 @@ impl KafkaContextCommon {
         _oauthbearer_config: Option<&str>,
     ) -> Result<OAuthToken, Box<dyn std::error::Error>> {
         use aws_msk_iam_sasl_signer::generate_auth_token_from_credentials_provider;
-        use tokio::time::{timeout, Duration};
+        use tokio::time::{Duration, timeout};
 
         if let Some(IamAuthEnv {
             credentials_provider,

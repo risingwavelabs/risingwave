@@ -28,8 +28,8 @@ use crate::source::data_gen_util::spawn_data_generation_stream;
 use crate::source::datagen::source::SEQUENCE_FIELD_KIND;
 use crate::source::datagen::{DatagenProperties, DatagenSplit, FieldDesc};
 use crate::source::{
-    into_chunk_stream, BoxSourceChunkStream, Column, DataType, SourceContextRef, SourceMessage,
-    SplitId, SplitMetaData, SplitReader,
+    BoxSourceChunkStream, Column, DataType, SourceContextRef, SourceMessage, SplitId,
+    SplitMetaData, SplitReader, into_chunk_stream,
 };
 
 pub struct DatagenSplitReader {

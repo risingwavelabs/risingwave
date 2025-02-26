@@ -17,11 +17,13 @@ use std::ops::DerefMut;
 use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
+use bytes::Bytes;
 use parking_lot::{Mutex, MutexGuard};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bitmap::Bitmap;
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_connector::sink::log_store::{ChunkId, LogStoreResult, TruncateOffset};
-use tokio::sync::{oneshot, Notify};
+use tokio::sync::{Notify, oneshot};
 
 use crate::common::log_store_impl::kv_log_store::{
     KvLogStoreMetrics, ReaderTruncationOffsetType, SeqIdType,
@@ -241,20 +243,24 @@ impl<T> SharedMutex<T> {
 }
 
 pub(crate) struct LogStoreBufferSender {
-    init_epoch_tx: Option<oneshot::Sender<u64>>,
+    init_epoch_tx: Option<oneshot::Sender<(EpochPair, Option<Option<Bytes>>)>>,
     buffer: SharedMutex<LogStoreBufferInner>,
     update_notify: Arc<Notify>,
 }
 
 impl LogStoreBufferSender {
-    pub(crate) fn init(&mut self, epoch: u64) {
+    pub(crate) fn init(
+        &mut self,
+        epoch: EpochPair,
+        aligned_init_range_start: Option<Option<Bytes>>,
+    ) {
         if let Err(e) = self
             .init_epoch_tx
             .take()
             .expect("should be Some in first init")
-            .send(epoch)
+            .send((epoch, aligned_init_range_start))
         {
-            error!("unable to send init epoch: {}", e);
+            error!("unable to send init epoch: {:?}", e);
         }
     }
 
@@ -351,13 +357,13 @@ impl LogStoreBufferSender {
 }
 
 pub(crate) struct LogStoreBufferReceiver {
-    init_epoch_rx: Option<oneshot::Receiver<u64>>,
+    init_epoch_rx: Option<oneshot::Receiver<(EpochPair, Option<Option<Bytes>>)>>,
     buffer: SharedMutex<LogStoreBufferInner>,
     update_notify: Arc<Notify>,
 }
 
 impl LogStoreBufferReceiver {
-    pub(crate) async fn init(&mut self) -> u64 {
+    pub(crate) async fn init(&mut self) -> (EpochPair, Option<Option<Bytes>>) {
         self.init_epoch_rx
             .take()
             .expect("should be Some in first init")

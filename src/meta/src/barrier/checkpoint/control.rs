@@ -14,7 +14,7 @@
 
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::future::{poll_fn, Future};
+use std::future::{Future, poll_fn};
 use std::mem::take;
 use std::task::Poll;
 
@@ -26,8 +26,8 @@ use risingwave_meta_model::WorkerId;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::meta::PausedReason;
-use risingwave_pb::stream_service::streaming_control_stream_response::ResetDatabaseResponse;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
+use risingwave_pb::stream_service::streaming_control_stream_response::ResetDatabaseResponse;
 use tracing::{debug, warn};
 
 use crate::barrier::checkpoint::creating_job::{CompleteJobType, CreatingStreamingJobControl};
@@ -41,7 +41,7 @@ use crate::barrier::complete_task::{BarrierCompleteOutput, CompleteBarrierTask};
 use crate::barrier::info::{BarrierInfo, InflightDatabaseInfo, InflightStreamingJobInfo};
 use crate::barrier::notifier::Notifier;
 use crate::barrier::progress::{CreateMviewProgressTracker, TrackingCommand, TrackingJob};
-use crate::barrier::rpc::{from_partial_graph_id, ControlStreamManager};
+use crate::barrier::rpc::{ControlStreamManager, from_partial_graph_id};
 use crate::barrier::schedule::{NewBarrier, PeriodicBarriers};
 use crate::barrier::utils::collect_creating_job_commit_epoch_info;
 use crate::barrier::{
@@ -239,7 +239,10 @@ impl CheckpointControl {
                         return Ok(());
                     }
                     _ => {
-                        panic!("new database graph info can only be created for normal creating streaming job, but get command: {} {:?}", database_id, command)
+                        panic!(
+                            "new database graph info can only be created for normal creating streaming job, but get command: {} {:?}",
+                            database_id, command
+                        )
                     }
                 },
             };
@@ -811,10 +814,12 @@ impl DatabaseCheckpointControl {
                     .remove(&table_id)
                     .expect("should exist");
                 assert!(creating_streaming_job.is_finished());
-                assert!(epoch_state
-                    .finished_jobs
-                    .insert(table_id, (creating_streaming_job.info, resps))
-                    .is_none());
+                assert!(
+                    epoch_state
+                        .finished_jobs
+                        .insert(table_id, (creating_streaming_job.info, resps))
+                        .is_none()
+                );
             }
         }
         assert!(self.completing_barrier.is_none());
@@ -1033,14 +1038,9 @@ impl DatabaseCheckpointControl {
         {
             match job_type {
                 CreateStreamingJobType::Normal | CreateStreamingJobType::SinkIntoTable(_) => {
-                    for stream_actor in info
-                        .stream_job_fragments
-                        .fragments
-                        .values_mut()
-                        .flat_map(|fragment| fragment.actors.iter_mut())
-                    {
+                    for fragment in info.stream_job_fragments.fragments.values_mut() {
                         fill_snapshot_backfill_epoch(
-                            stream_actor.nodes.as_mut().expect("should exist"),
+                            fragment.nodes.as_mut().expect("should exist"),
                             None,
                             cross_db_snapshot_backfill_info,
                         )?;
@@ -1069,14 +1069,9 @@ impl DatabaseCheckpointControl {
                             "must not set previously"
                         );
                     }
-                    for stream_actor in info
-                        .stream_job_fragments
-                        .fragments
-                        .values_mut()
-                        .flat_map(|fragment| fragment.actors.iter_mut())
-                    {
+                    for fragment in info.stream_job_fragments.fragments.values_mut() {
                         fill_snapshot_backfill_epoch(
-                            stream_actor.nodes.as_mut().expect("should exist"),
+                            fragment.nodes.as_mut().expect("should exist"),
                             Some(snapshot_backfill_info),
                             cross_db_snapshot_backfill_info,
                         )?;

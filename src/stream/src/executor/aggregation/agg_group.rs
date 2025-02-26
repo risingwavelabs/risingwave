@@ -16,8 +16,8 @@ use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use risingwave_common::array::stream_record::{Record, RecordType};
 use risingwave_common::array::StreamChunk;
+use risingwave_common::array::stream_record::{Record, RecordType};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::must_match;
@@ -31,8 +31,8 @@ use risingwave_storage::StateStore;
 use super::agg_state::{AggState, AggStateStorage};
 use crate::common::table::state_table::StateTable;
 use crate::consistency::consistency_panic;
-use crate::executor::error::StreamExecutorResult;
 use crate::executor::PkIndices;
+use crate::executor::error::StreamExecutorResult;
 
 #[derive(Debug)]
 pub struct Context {

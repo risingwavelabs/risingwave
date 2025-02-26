@@ -23,7 +23,8 @@ use risingwave_connector::match_sink_name_str;
 use risingwave_connector::sink::catalog::{SinkFormatDesc, SinkId, SinkType};
 use risingwave_connector::sink::file_sink::fs::FsSink;
 use risingwave_connector::sink::{
-    SinkError, SinkMetaClient, SinkParam, SinkWriterParam, CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION,
+    CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION, SinkError, SinkMetaClient, SinkParam, SinkWriterParam,
+    build_sink,
 };
 use risingwave_pb::catalog::Table;
 use risingwave_pb::plan_common::PbColumnCatalog;
@@ -33,7 +34,7 @@ use url::Url;
 use super::*;
 use crate::common::log_store_impl::in_mem::BoundedInMemLogStoreFactory;
 use crate::common::log_store_impl::kv_log_store::{
-    KvLogStoreFactory, KvLogStoreMetrics, KvLogStorePkInfo, KV_LOG_STORE_V2_INFO,
+    KV_LOG_STORE_V2_INFO, KvLogStoreFactory, KvLogStoreMetrics, KvLogStorePkInfo,
 };
 use crate::executor::{SinkExecutor, StreamExecutorError};
 
@@ -231,6 +232,9 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             connector, sink_id.sink_id, params.executor_id
         );
 
+        let sink = build_sink(sink_param.clone())
+            .map_err(|e| StreamExecutorError::from((e, sink_param.sink_id.sink_id)))?;
+
         let exec = match node.log_store_type() {
             // Default value is the normal in memory log store to be backward compatible with the
             // previously unset value
@@ -241,6 +245,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                     params.info.clone(),
                     input_executor,
                     sink_write_param,
+                    sink,
                     sink_param,
                     columns,
                     factory,
@@ -263,6 +268,8 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                 let input_schema = input_executor.schema();
                 let pk_info = resolve_pk_info(input_schema, &table)?;
 
+                let align_init_epoch = sink.is_coordinated_sink();
+
                 // TODO: support setting max row count in config
                 let factory = KvLogStoreFactory::new(
                     state_store,
@@ -272,6 +279,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                     metrics,
                     log_store_identity,
                     pk_info,
+                    align_init_epoch,
                 );
 
                 SinkExecutor::new(
@@ -279,6 +287,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                     params.info.clone(),
                     input_executor,
                     sink_write_param,
+                    sink,
                     sink_param,
                     columns,
                     factory,
@@ -305,7 +314,9 @@ struct JdbcUrl {
 
 fn parse_jdbc_url(url: &str) -> anyhow::Result<JdbcUrl> {
     if !url.starts_with("jdbc:postgresql") {
-        bail!("invalid jdbc url, to switch to postgres rust connector, we need to use the url jdbc:postgresql://...")
+        bail!(
+            "invalid jdbc url, to switch to postgres rust connector, we need to use the url jdbc:postgresql://..."
+        )
     }
 
     // trim the "jdbc:" prefix to make it a valid url

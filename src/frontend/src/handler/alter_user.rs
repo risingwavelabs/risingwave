@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::UserInfo;
+use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_sqlparser::ast::{AlterUserStatement, ObjectName, UserOption, UserOptions};
 
 use super::RwPgResponse;
@@ -24,7 +24,7 @@ use crate::error::ErrorCode::{self, InternalError, PermissionDenied};
 use crate::error::Result;
 use crate::handler::HandlerArgs;
 use crate::user::user_authentication::{
-    build_oauth_info, encrypted_password, OAUTH_ISSUER_KEY, OAUTH_JWKS_URL_KEY,
+    OAUTH_ISSUER_KEY, OAUTH_JWKS_URL_KEY, build_oauth_info, encrypted_password,
 };
 use crate::user::user_catalog::UserCatalog;
 
@@ -195,8 +195,8 @@ pub async fn handle_alter_user(
 mod tests {
     use std::collections::HashMap;
 
-    use risingwave_pb::user::auth_info::EncryptionType;
     use risingwave_pb::user::AuthInfo;
+    use risingwave_pb::user::auth_info::EncryptionType;
 
     use crate::test_utils::LocalFrontend;
 
@@ -211,14 +211,18 @@ mod tests {
             .run_sql("ALTER USER userB RENAME TO user")
             .await
             .unwrap();
-        assert!(user_info_reader
-            .read_guard()
-            .get_user_by_name("userB")
-            .is_none());
-        assert!(user_info_reader
-            .read_guard()
-            .get_user_by_name("user")
-            .is_some());
+        assert!(
+            user_info_reader
+                .read_guard()
+                .get_user_by_name("userB")
+                .is_none()
+        );
+        assert!(
+            user_info_reader
+                .read_guard()
+                .get_user_by_name("user")
+                .is_some()
+        );
 
         frontend.run_sql("ALTER USER user WITH NOSUPERUSER CREATEDB PASSWORD 'md59f2fa6a30871a92249bdd2f1eeee4ef6'").await.unwrap();
 

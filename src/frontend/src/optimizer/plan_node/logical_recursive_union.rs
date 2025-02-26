@@ -16,20 +16,20 @@ use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::bail_not_implemented;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
-use smallvec::{smallvec, SmallVec};
+use smallvec::{SmallVec, smallvec};
 
 use super::expr_visitable::ExprVisitable;
 use super::generic::GenericPlanRef;
-use super::utils::{childless_record, Distill};
+use super::utils::{Distill, childless_record};
 use super::{
-    generic, ColPrunable, ColumnPruningContext, ExprRewritable, Logical, PlanBase, PlanTreeNode,
+    ColPrunable, ColumnPruningContext, ExprRewritable, Logical, PlanBase, PlanTreeNode,
     PredicatePushdown, PredicatePushdownContext, RewriteStreamContext, ToBatch, ToStream,
-    ToStreamContext,
+    ToStreamContext, generic,
 };
+use crate::PlanRef;
 use crate::binder::ShareId;
 use crate::error::Result;
 use crate::utils::Condition;
-use crate::PlanRef;
 
 /// `LogicalRecursiveUnion` returns the union of the rows of its inputs.
 /// note: if `all` is false, it needs to eliminate duplicates.

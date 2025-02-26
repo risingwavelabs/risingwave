@@ -17,7 +17,7 @@
 use std::fmt::Write;
 use std::process::Command;
 
-use crate::{add_hummock_backend, Application, HummockInMemoryStrategy, ServiceConfig};
+use crate::{Application, HummockInMemoryStrategy, ServiceConfig, add_hummock_backend};
 
 /// Generate environment variables (put in file `.risingwave/config/risedev-env`)
 /// from the given service configurations to be used by future

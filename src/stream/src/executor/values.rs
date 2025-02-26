@@ -189,10 +189,12 @@ mod tests {
             ActorContext::for_test(actor_id),
             schema,
             progress,
-            vec![exprs
-                .into_iter()
-                .map(NonStrictExpression::for_test)
-                .collect()],
+            vec![
+                exprs
+                    .into_iter()
+                    .map(NonStrictExpression::for_test)
+                    .collect(),
+            ],
             barrier_receiver,
         );
         let mut values_executor = Box::new(values_executor_struct).execute();

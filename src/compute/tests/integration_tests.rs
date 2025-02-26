@@ -15,8 +15,8 @@
 #![feature(coroutines)]
 #![feature(proc_macro_hygiene, stmt_expr_attributes)]
 
-use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
 
 use futures::stream::StreamExt;
 use futures_async_stream::try_stream;
@@ -30,13 +30,13 @@ use risingwave_batch_executors::{
 use risingwave_common::array::{Array, DataChunk, F64Array, SerialArray};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{
-    ColumnDesc, ColumnId, ConflictBehavior, Field, Schema, TableId, INITIAL_TABLE_VERSION_ID,
+    ColumnDesc, ColumnId, ConflictBehavior, Field, INITIAL_TABLE_VERSION_ID, Schema, TableId,
 };
 use risingwave_common::row::OwnedRow;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::test_prelude::DataChunkTestExt;
 use risingwave_common::types::{DataType, IntoOrdered};
-use risingwave_common::util::epoch::{test_epoch, EpochExt, EpochPair};
+use risingwave_common::util::epoch::{EpochExt, EpochPair, test_epoch};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common_rate_limit::RateLimit;
@@ -487,7 +487,10 @@ async fn test_row_seq_scan() -> StreamResult<()> {
     ]));
 
     epoch.inc_for_test();
-    state.commit(epoch).await.unwrap();
+    state
+        .commit_assert_no_update_vnode_bitmap(epoch)
+        .await
+        .unwrap();
 
     let executor = Box::new(RowSeqScanExecutor::new(
         table,

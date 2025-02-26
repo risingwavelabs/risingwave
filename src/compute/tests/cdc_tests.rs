@@ -17,8 +17,8 @@
 
 use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
-use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
 use std::time::Duration;
 
 use futures::stream::StreamExt;
@@ -30,13 +30,13 @@ use risingwave_common::array::{
 };
 use risingwave_common::catalog::{ColumnDesc, ColumnId, ConflictBehavior, Field, Schema, TableId};
 use risingwave_common::types::{Datum, JsonbVal};
-use risingwave_common::util::epoch::{test_epoch, EpochExt};
+use risingwave_common::util::epoch::{EpochExt, test_epoch};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
+use risingwave_connector::source::SplitImpl;
+use risingwave_connector::source::cdc::DebeziumCdcSplit;
 use risingwave_connector::source::cdc::external::{
     CdcTableType, DebeziumOffset, DebeziumSourceOffset, ExternalTableConfig, SchemaTableName,
 };
-use risingwave_connector::source::cdc::DebeziumCdcSplit;
-use risingwave_connector::source::SplitImpl;
 use risingwave_hummock_sdk::test_batch_query_epoch;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::table::batch_table::BatchTable;
@@ -46,9 +46,9 @@ use risingwave_stream::error::StreamResult;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::executor::test_utils::MockSource;
 use risingwave_stream::executor::{
-    expect_first_barrier, ActorContext, AddMutation, Barrier, BoxedMessageStream,
-    CdcBackfillExecutor, CdcScanOptions, Execute, Executor as StreamExecutor, ExecutorInfo,
-    ExternalStorageTable, MaterializeExecutor, Message, Mutation, StreamExecutorError,
+    ActorContext, AddMutation, Barrier, BoxedMessageStream, CdcBackfillExecutor, CdcScanOptions,
+    Execute, Executor as StreamExecutor, ExecutorInfo, ExternalStorageTable, MaterializeExecutor,
+    Message, Mutation, StreamExecutorError, expect_first_barrier,
 };
 
 // mock upstream binlog offset starting from "1.binlog, pos=0"

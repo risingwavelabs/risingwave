@@ -15,25 +15,25 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use fail::fail_point;
-use futures::{stream, StreamExt};
+use futures::{StreamExt, stream};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{
-    HummockContextId, HummockSstableObjectId, HummockVersionId, LocalSstableInfo,
-    INVALID_VERSION_ID,
+    HummockContextId, HummockSstableObjectId, HummockVersionId, INVALID_VERSION_ID,
+    LocalSstableInfo,
 };
 use risingwave_meta_model::hummock_gc_history;
 use risingwave_pb::hummock::{HummockPinnedVersion, ValidationTask};
 use sea_orm::{DatabaseConnection, EntityTrait};
 
 use crate::controller::SqlMetaStore;
+use crate::hummock::HummockManager;
 use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::worker::{HummockManagerEvent, HummockManagerEventSender};
 use crate::hummock::manager::{commit_multi_var, start_measure_real_process_timer};
 use crate::hummock::metrics_utils::trigger_pin_unpin_version_state;
-use crate::hummock::HummockManager;
-use crate::manager::{MetadataManager, META_NODE_ID};
+use crate::manager::{META_NODE_ID, MetadataManager};
 use crate::model::BTreeMapTransaction;
 use crate::rpc::metrics::MetaMetrics;
 

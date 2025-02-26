@@ -20,17 +20,17 @@ use std::sync::Arc;
 use bytes::{BufMut, Bytes, BytesMut};
 use either::Either;
 use foyer::CacheHint;
-use futures::{pin_mut, Stream, StreamExt, TryStreamExt};
+use futures::{Stream, StreamExt, TryStreamExt, pin_mut};
 use futures_async_stream::for_await;
-use itertools::{izip, Itertools};
+use itertools::{Itertools, izip};
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{ArrayImplBuilder, ArrayRef, DataChunk, Op, StreamChunk};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{
-    get_dist_key_in_pk_indices, ColumnDesc, ColumnId, TableId, TableOption,
+    ColumnDesc, ColumnId, TableId, TableOption, get_dist_key_in_pk_indices,
 };
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt, VnodeCountCompat};
-use risingwave_common::row::{self, once, Once, OwnedRow, Row, RowExt};
+use risingwave_common::row::{self, Once, OwnedRow, Row, RowExt, once};
 use risingwave_common::types::{DataType, Datum, DefaultOrd, DefaultOrdered, ScalarImpl};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::EpochPair;
@@ -38,15 +38,16 @@ use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::BasicSerde;
+use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_hummock_sdk::key::{
-    end_bound_of_prefix, prefixed_range_with_vnode, start_bound_of_excluded_prefix, CopyFromSlice,
-    TableKey, TableKeyRange,
+    CopyFromSlice, TableKey, TableKeyRange, end_bound_of_prefix, prefixed_range_with_vnode,
+    start_bound_of_excluded_prefix,
 };
 use risingwave_hummock_sdk::table_watermark::{
     VnodeWatermark, WatermarkDirection, WatermarkSerdeType,
 };
-use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::catalog::Table;
+use risingwave_storage::StateStore;
 use risingwave_storage::error::{ErrorKind, StorageError, StorageResult};
 use risingwave_storage::hummock::CachePolicy;
 use risingwave_storage::mem_table::MemTableError;
@@ -55,18 +56,13 @@ use risingwave_storage::row_serde::row_serde_util::{
     deserialize_pk_with_vnode, serialize_pk, serialize_pk_with_vnode,
 };
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
-use risingwave_storage::store::{
-    InitOptions, LocalStateStore, NewLocalOptions, OpConsistencyLevel, PrefetchOptions,
-    ReadLogOptions, ReadOptions, SealCurrentEpochOptions, StateStoreIter, StateStoreIterExt,
-    TryWaitEpochOptions,
-};
+use risingwave_storage::store::*;
 use risingwave_storage::table::merge_sort::merge_sort;
 use risingwave_storage::table::{
-    deserialize_log_stream, ChangeLogRow, KeyedRow, TableDistribution,
+    ChangeLogRow, KeyedRow, TableDistribution, deserialize_log_stream,
 };
-use risingwave_storage::StateStore;
 use thiserror_ext::AsReport;
-use tracing::{trace, Instrument};
+use tracing::{Instrument, trace};
 
 use crate::cache::cache_may_stale;
 use crate::common::state_cache::{StateCache, StateCacheFiller};
@@ -162,6 +158,10 @@ pub struct StateTableInner<
     op_consistency_level: StateTableOpConsistencyLevel,
 
     clean_watermark_index_in_pk: Option<i32>,
+
+    /// Flag to indicate whether the state table has called `commit`, but has not called
+    /// `post_yield_barrier` on the `StateTablePostCommit` callback yet.
+    on_post_commit: bool,
 }
 
 /// `StateTable` will use `BasicSerde` as default
@@ -533,6 +533,7 @@ where
             i2o_mapping,
             op_consistency_level: state_table_op_consistency_level,
             clean_watermark_index_in_pk: table_catalog.clean_watermark_index_in_pk,
+            on_post_commit: false,
         }
     }
 
@@ -664,7 +665,9 @@ where
         } else {
             #[cfg(debug_assertions)]
             if self.prefix_hint_len != 0 {
-                warn!("prefix_hint_len is not equal to pk.len(), may not be able to utilize bloom filter");
+                warn!(
+                    "prefix_hint_len is not equal to pk.len(), may not be able to utilize bloom filter"
+                );
             }
             None
         };
@@ -682,43 +685,111 @@ where
             .await
             .map_err(Into::into)
     }
+}
+
+/// A callback struct returned from [`StateTableInner::commit`].
+///
+/// Introduced to support single barrier configuration change proposed in <https://github.com/risingwavelabs/risingwave/issues/18312>.
+/// In brief, to correctly handle the configuration change, when each stateful executor receives an upstream barrier, it should handle
+/// the barrier in the order of `state_table.commit()` -> `yield barrier` -> `update_vnode_bitmap`.
+///
+/// The `StateTablePostCommit` captures the mutable reference of `state_table` when calling `state_table.commit()`, and after the executor
+/// runs `yield barrier`, it should call `StateTablePostCommit::post_yield_barrier` to apply the vnode bitmap update if there is any.
+/// The `StateTablePostCommit` is marked with `must_use`. The method name `post_yield_barrier` indicates that it should be called after
+/// we have yielded the barrier. In `StateTable`, we add a flag `on_post_commit`, to indicate that whether the `StateTablePostCommit` is handled
+/// properly. On `state_table.commit()`, we will mark the `on_post_commit` as true, and in `StateTablePostCommit::post_yield_barrier`, we will
+/// remark the flag as false, and on `state_table.commit()`, we will assert that the `on_post_commit` must be false. Note that, the `post_yield_barrier`
+/// should be called for all barriers rather than only for the barrier with update vnode bitmap. In this way, though we don't have scale test for all
+/// streaming executor, we can ensure that all executor covered by normal e2e test have properly handled the `StateTablePostCommit`.
+#[must_use]
+pub struct StateTablePostCommit<
+    'a,
+    S,
+    SD = BasicSerde,
+    const IS_REPLICATED: bool = false,
+    const USE_WATERMARK_CACHE: bool = false,
+> where
+    S: StateStore,
+    SD: ValueRowSerde,
+{
+    inner: &'a mut StateTableInner<S, SD, IS_REPLICATED, USE_WATERMARK_CACHE>,
+}
+
+impl<'a, S, SD, const IS_REPLICATED: bool, const USE_WATERMARK_CACHE: bool>
+    StateTablePostCommit<'a, S, SD, IS_REPLICATED, USE_WATERMARK_CACHE>
+where
+    S: StateStore,
+    SD: ValueRowSerde,
+{
+    pub async fn post_yield_barrier(
+        mut self,
+        new_vnodes: Option<Arc<Bitmap>>,
+    ) -> StreamExecutorResult<
+        Option<(
+            (
+                Arc<Bitmap>,
+                Arc<Bitmap>,
+                &'a mut StateTableInner<S, SD, IS_REPLICATED, USE_WATERMARK_CACHE>,
+            ),
+            bool,
+        )>,
+    > {
+        self.inner.on_post_commit = false;
+        Ok(if let Some(new_vnodes) = new_vnodes {
+            let (old_vnodes, cache_may_stale) =
+                self.update_vnode_bitmap(new_vnodes.clone()).await?;
+            Some(((new_vnodes, old_vnodes, self.inner), cache_may_stale))
+        } else {
+            None
+        })
+    }
+
+    pub fn inner(&self) -> &StateTableInner<S, SD, IS_REPLICATED, USE_WATERMARK_CACHE> {
+        &*self.inner
+    }
 
     /// Update the vnode bitmap of the state table, returns the previous vnode bitmap.
-    #[must_use = "the executor should decide whether to manipulate the cache based on the previous vnode bitmap"]
-    pub fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) -> (Arc<Bitmap>, bool) {
+    async fn update_vnode_bitmap(
+        &mut self,
+        new_vnodes: Arc<Bitmap>,
+    ) -> StreamExecutorResult<(Arc<Bitmap>, bool)> {
         assert!(
-            !self.is_dirty(),
+            !self.inner.is_dirty(),
             "vnode bitmap should only be updated when state table is clean"
         );
-        let prev_vnodes = self.local_store.update_vnode_bitmap(new_vnodes.clone());
+        let prev_vnodes = self
+            .inner
+            .local_store
+            .update_vnode_bitmap(new_vnodes.clone())
+            .await?;
         assert_eq!(
             &prev_vnodes,
-            self.vnodes(),
+            self.inner.vnodes(),
             "state table and state store vnode bitmap mismatches"
         );
 
-        if self.distribution.is_singleton() {
+        if self.inner.distribution.is_singleton() {
             assert_eq!(
                 &new_vnodes,
-                self.vnodes(),
+                self.inner.vnodes(),
                 "should not update vnode bitmap for singleton table"
             );
         }
-        assert_eq!(self.vnodes().len(), new_vnodes.len());
+        assert_eq!(self.inner.vnodes().len(), new_vnodes.len());
 
-        let cache_may_stale = cache_may_stale(self.vnodes(), &new_vnodes);
+        let cache_may_stale = cache_may_stale(self.inner.vnodes(), &new_vnodes);
 
         if cache_may_stale {
-            self.pending_watermark = None;
+            self.inner.pending_watermark = None;
             if USE_WATERMARK_CACHE {
-                self.watermark_cache.clear();
+                self.inner.watermark_cache.clear();
             }
         }
 
-        (
-            self.distribution.update_vnode_bitmap(new_vnodes),
+        Ok((
+            self.inner.distribution.update_vnode_bitmap(new_vnodes),
             cache_may_stale,
-        )
+        ))
     }
 }
 
@@ -939,15 +1010,34 @@ where
         self.committed_watermark.as_ref()
     }
 
-    pub async fn commit(&mut self, new_epoch: EpochPair) -> StreamExecutorResult<()> {
+    pub async fn commit(
+        &mut self,
+        new_epoch: EpochPair,
+    ) -> StreamExecutorResult<StateTablePostCommit<'_, S, SD, IS_REPLICATED, USE_WATERMARK_CACHE>>
+    {
         self.commit_inner(new_epoch, None).await
+    }
+
+    #[cfg(test)]
+    pub async fn commit_for_test(&mut self, new_epoch: EpochPair) -> StreamExecutorResult<()> {
+        self.commit_assert_no_update_vnode_bitmap(new_epoch).await
+    }
+
+    pub async fn commit_assert_no_update_vnode_bitmap(
+        &mut self,
+        new_epoch: EpochPair,
+    ) -> StreamExecutorResult<()> {
+        let post_commit = self.commit_inner(new_epoch, None).await?;
+        post_commit.post_yield_barrier(None).await?;
+        Ok(())
     }
 
     pub async fn commit_may_switch_consistent_op(
         &mut self,
         new_epoch: EpochPair,
         op_consistency_level: StateTableOpConsistencyLevel,
-    ) -> StreamExecutorResult<()> {
+    ) -> StreamExecutorResult<StateTablePostCommit<'_, S, SD, IS_REPLICATED, USE_WATERMARK_CACHE>>
+    {
         if self.op_consistency_level != op_consistency_level {
             info!(
                 ?new_epoch,
@@ -967,7 +1057,9 @@ where
         &mut self,
         new_epoch: EpochPair,
         switch_consistent_op: Option<StateTableOpConsistencyLevel>,
-    ) -> StreamExecutorResult<()> {
+    ) -> StreamExecutorResult<StateTablePostCommit<'_, S, SD, IS_REPLICATED, USE_WATERMARK_CACHE>>
+    {
+        assert!(!self.on_post_commit);
         assert_eq!(self.epoch(), new_epoch.prev);
         let switch_op_consistency_level = switch_consistent_op.map(|new_consistency_level| {
             assert_ne!(self.op_consistency_level, new_consistency_level);
@@ -1053,7 +1145,8 @@ where
             }
         }
 
-        Ok(())
+        self.on_post_commit = true;
+        Ok(StateTablePostCommit { inner: self })
     }
 
     /// Commit pending watermark and return vnode bitmap-watermark pairs to seal.
@@ -1556,7 +1649,7 @@ fn fill_non_output_indices(
 mod tests {
     use std::fmt::Debug;
 
-    use expect_test::{expect, Expect};
+    use expect_test::{Expect, expect};
 
     use super::*;
 

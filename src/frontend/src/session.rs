@@ -47,7 +47,7 @@ use risingwave_common::catalog::{
     DEFAULT_DATABASE_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID,
 };
 use risingwave_common::config::{
-    load_config, BatchConfig, MetaConfig, MetricLevel, StreamingConfig,
+    BatchConfig, MetaConfig, MetricLevel, StreamingConfig, load_config,
 };
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::secret::LocalSecretManager;
@@ -67,9 +67,9 @@ use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_heap_profiling::HeapProfiler;
 use risingwave_common_service::{MetricsManager, ObserverManager};
-use risingwave_connector::source::monitor::{SourceMetrics, GLOBAL_SOURCE_METRICS};
-use risingwave_pb::common::worker_node::Property as AddWorkerNodeProperty;
+use risingwave_connector::source::monitor::{GLOBAL_SOURCE_METRICS, SourceMetrics};
 use risingwave_pb::common::WorkerType;
+use risingwave_pb::common::worker_node::Property as AddWorkerNodeProperty;
 use risingwave_pb::frontend_service::frontend_service_server::FrontendServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::user::auth_info::EncryptionType;
@@ -95,18 +95,18 @@ use crate::catalog::secret_catalog::SecretCatalog;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::subscription_catalog::SubscriptionCatalog;
 use crate::catalog::{
-    check_schema_writable, CatalogError, DatabaseId, OwnedByUserCatalog, SchemaId, TableId,
+    CatalogError, DatabaseId, OwnedByUserCatalog, SchemaId, TableId, check_schema_writable,
 };
 use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::describe::infer_describe;
 use crate::handler::extended_handle::{
-    handle_bind, handle_execute, handle_parse, Portal, PrepareStatement,
+    Portal, PrepareStatement, handle_bind, handle_execute, handle_parse,
 };
 use crate::handler::privilege::ObjectCheckItem;
 use crate::handler::show::{infer_show_create_object, infer_show_object};
 use crate::handler::util::to_pg_field;
 use crate::handler::variable::infer_show_variable;
-use crate::handler::{handle, RwPgResponse};
+use crate::handler::{RwPgResponse, handle};
 use crate::health_service::HealthServiceImpl;
 use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
 use crate::monitor::{CursorMetrics, FrontendMetrics, GLOBAL_FRONTEND_METRICS};
@@ -114,14 +114,14 @@ use crate::observer::FrontendObserverNode;
 use crate::rpc::FrontendServiceImpl;
 use crate::scheduler::streaming_manager::{StreamingJobTracker, StreamingJobTrackerRef};
 use crate::scheduler::{
-    DistributedQueryMetrics, HummockSnapshotManager, HummockSnapshotManagerRef, QueryManager,
-    GLOBAL_DISTRIBUTED_QUERY_METRICS,
+    DistributedQueryMetrics, GLOBAL_DISTRIBUTED_QUERY_METRICS, HummockSnapshotManager,
+    HummockSnapshotManagerRef, QueryManager,
 };
 use crate::telemetry::FrontendTelemetryCreator;
+use crate::user::UserId;
 use crate::user::user_authentication::md5_hash_with_salt;
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterImpl};
-use crate::user::UserId;
 use crate::{FrontendOpts, PgResponseStream, TableCatalog};
 
 pub(crate) mod current;
@@ -803,6 +803,16 @@ impl SessionImpl {
         self.auth_context.read().database.clone()
     }
 
+    pub fn database_id(&self) -> DatabaseId {
+        let db_name = self.database();
+        self.env
+            .catalog_reader()
+            .read_guard()
+            .get_database_by_name(&db_name)
+            .map(|db| db.id())
+            .expect("session database not found")
+    }
+
     pub fn user_name(&self) -> String {
         self.auth_context.read().user_name.clone()
     }
@@ -1239,22 +1249,36 @@ impl SessionImpl {
             return Ok(());
         }
 
-        let gen_message = |violated_limit: &ActorCountPerParallelism,
+        let gen_message = |ActorCountPerParallelism {
+                               worker_id_to_actor_count,
+                               hard_limit,
+                               soft_limit,
+                           }: ActorCountPerParallelism,
                            exceed_hard_limit: bool|
          -> String {
             let (limit_type, action) = if exceed_hard_limit {
-                ("critical", "Please scale the cluster before proceeding!")
+                ("critical", "Scale the cluster immediately to proceed.")
             } else {
-                ("recommended", "Scaling the cluster is recommended.")
+                (
+                    "recommended",
+                    "Consider scaling the cluster for optimal performance.",
+                )
             };
             format!(
-                "\n- {}\n- {}\n- {}\n- {}\n- {}\n{}",
-                format_args!("Actor count per parallelism exceeds the {} limit.", limit_type),
-                format_args!("Depending on your workload, this may overload the cluster and cause performance/stability issues. {}", action),
-                "Contact us via slack or https://risingwave.com/contact-us/ for further enquiry.",
-                "You can bypass this check via SQL `SET bypass_cluster_limits TO true`.",
-                "You can check actor count distribution via SQL `SELECT * FROM rw_worker_actor_count`.",
-                violated_limit,
+                r#"Actor count per parallelism exceeds the {limit_type} limit.
+
+Depending on your workload, this may overload the cluster and cause performance/stability issues. {action}
+
+HINT:
+- For best practices on managing streaming jobs: https://docs.risingwave.com/operate/manage-a-large-number-of-streaming-jobs
+- To bypass the check (if the cluster load is acceptable): `[ALTER SYSTEM] SET bypass_cluster_limits TO true`.
+  See https://docs.risingwave.com/operate/view-configure-runtime-parameters#how-to-configure-runtime-parameters
+- Contact us via slack or https://risingwave.com/contact-us/ for further enquiry.
+
+DETAILS:
+- hard limit: {hard_limit}
+- soft limit: {soft_limit}
+- worker_id_to_actor_count: {worker_id_to_actor_count:?}"#,
             )
         };
 
@@ -1264,10 +1288,10 @@ impl SessionImpl {
                 cluster_limit::ClusterLimit::ActorCount(l) => {
                     if l.exceed_hard_limit() {
                         return Err(RwError::from(ErrorCode::ProtocolError(gen_message(
-                            &l, true,
+                            l, true,
                         ))));
                     } else if l.exceed_soft_limit() {
-                        self.notice_to_user(gen_message(&l, false));
+                        self.notice_to_user(gen_message(l, false));
                     }
                 }
             }
@@ -1497,7 +1521,9 @@ impl Session for SessionImpl {
         let string = stmt.to_string();
         let sql_str = string.as_str();
         let sql: Arc<str> = Arc::from(sql_str);
-        let rsp = handle(self, stmt, sql.clone(), vec![format]).await?;
+        // The handle can be slow. Release potential large String early.
+        drop(string);
+        let rsp = handle(self, stmt, sql, vec![format]).await?;
         Ok(rsp)
     }
 

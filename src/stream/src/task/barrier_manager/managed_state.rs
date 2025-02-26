@@ -15,14 +15,14 @@
 use std::cell::LazyCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt::{Debug, Display, Formatter};
-use std::future::{pending, poll_fn, Future};
+use std::future::{Future, pending, poll_fn};
 use std::mem::replace;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Instant;
 
-use futures::stream::FuturesOrdered;
 use futures::FutureExt;
+use futures::stream::FuturesOrdered;
 use prometheus::HistogramTimer;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::util::epoch::EpochPair;
@@ -34,8 +34,8 @@ use tokio::task::JoinHandle;
 
 use super::progress::BackfillState;
 use crate::error::{StreamError, StreamResult};
-use crate::executor::monitor::StreamingMetrics;
 use crate::executor::Barrier;
+use crate::executor::monitor::StreamingMetrics;
 use crate::task::{
     ActorId, LocalBarrierManager, PartialGraphId, SharedContext, StreamActorManager,
 };
@@ -75,11 +75,11 @@ struct BarrierState {
 
 use risingwave_common::must_match;
 use risingwave_pb::stream_plan::SubscriptionUpstreamInfo;
+use risingwave_pb::stream_service::InjectBarrierRequest;
 use risingwave_pb::stream_service::barrier_complete_response::PbCreateMviewProgress;
 use risingwave_pb::stream_service::streaming_control_stream_request::{
     DatabaseInitialPartialGraph, InitialPartialGraph,
 };
-use risingwave_pb::stream_service::InjectBarrierRequest;
 
 use crate::task::barrier_manager::await_epoch_completed_future::AwaitEpochCompletedFuture;
 use crate::task::barrier_manager::{LocalBarrierEvent, ScoredStreamError};
@@ -238,10 +238,11 @@ impl InflightActorState {
             })?;
         }
 
-        assert!(self
-            .inflight_barriers
-            .insert(barrier.epoch.prev, partial_graph_id)
-            .is_none());
+        assert!(
+            self.inflight_barriers
+                .insert(barrier.epoch.prev, partial_graph_id)
+                .is_none()
+        );
 
         match &mut self.status {
             InflightActorStatus::IssuedFirst(pending_barriers) => {
@@ -761,7 +762,17 @@ impl DatabaseManagedBarrierState {
         let mut new_actors = HashSet::new();
         let subscriptions =
             LazyCell::new(|| Arc::new(graph_state.mv_depended_subscriptions.clone()));
-        for actor in request.actors_to_build {
+        for (node, actor) in request
+            .actors_to_build
+            .into_iter()
+            .flat_map(|fragment_actors| {
+                let node = Arc::new(fragment_actors.node.unwrap());
+                fragment_actors
+                    .actors
+                    .into_iter()
+                    .map(move |actor| (node.clone(), actor))
+            })
+        {
             let upstream = actor.fragment_upstreams;
             let actor = actor.actor.unwrap();
             let actor_id = actor.actor_id;
@@ -770,24 +781,26 @@ impl DatabaseManagedBarrierState {
             assert!(request.actor_ids_to_collect.contains(&actor_id));
             let (join_handle, monitor_join_handle) = self.actor_manager.spawn_actor(
                 actor,
+                node,
                 (*subscriptions).clone(),
                 upstream,
                 self.current_shared_context.clone(),
                 self.local_barrier_manager.clone(),
             );
-            assert!(self
-                .actor_states
-                .try_insert(
-                    actor_id,
-                    InflightActorState::start(
+            assert!(
+                self.actor_states
+                    .try_insert(
                         actor_id,
-                        partial_graph_id,
-                        barrier,
-                        join_handle,
-                        monitor_join_handle
+                        InflightActorState::start(
+                            actor_id,
+                            partial_graph_id,
+                            barrier,
+                            join_handle,
+                            monitor_join_handle
+                        )
                     )
-                )
-                .is_ok());
+                    .is_ok()
+            );
         }
 
         // Spawn a trivial join handle to be compatible with the unit test
@@ -795,19 +808,20 @@ impl DatabaseManagedBarrierState {
             for actor_id in &request.actor_ids_to_collect {
                 if !self.actor_states.contains_key(actor_id) {
                     let join_handle = self.actor_manager.runtime.spawn(async { pending().await });
-                    assert!(self
-                        .actor_states
-                        .try_insert(
-                            *actor_id,
-                            InflightActorState::start(
+                    assert!(
+                        self.actor_states
+                            .try_insert(
                                 *actor_id,
-                                partial_graph_id,
-                                barrier,
-                                join_handle,
-                                None,
+                                InflightActorState::start(
+                                    *actor_id,
+                                    partial_graph_id,
+                                    barrier,
+                                    join_handle,
+                                    None,
+                                )
                             )
-                        )
-                        .is_ok());
+                            .is_ok()
+                    );
                     new_actors.insert(*actor_id);
                 }
             }

@@ -106,10 +106,12 @@ mod tests {
         let view = View::find().one(&mgr.inner.read().await.db).await?.unwrap();
         mgr.drop_object(ObjectType::View, view.view_id, DropMode::Cascade)
             .await?;
-        assert!(View::find_by_id(view.view_id)
-            .one(&mgr.inner.read().await.db)
-            .await?
-            .is_none());
+        assert!(
+            View::find_by_id(view.view_id)
+                .one(&mgr.inner.read().await.db)
+                .await?
+                .is_none()
+        );
 
         Ok(())
     }
@@ -159,10 +161,12 @@ mod tests {
             DropMode::Restrict,
         )
         .await?;
-        assert!(Object::find_by_id(function.function_id)
-            .one(&mgr.inner.read().await.db)
-            .await?
-            .is_none());
+        assert!(
+            Object::find_by_id(function.function_id)
+                .one(&mgr.inner.read().await.db)
+                .await?
+                .is_none()
+        );
 
         Ok(())
     }
@@ -243,10 +247,12 @@ mod tests {
 
         mgr.drop_object(ObjectType::Source, source_id, DropMode::Cascade)
             .await?;
-        assert!(View::find_by_id(view_id)
-            .one(&mgr.inner.read().await.db)
-            .await?
-            .is_none());
+        assert!(
+            View::find_by_id(view_id)
+                .one(&mgr.inner.read().await.db)
+                .await?
+                .is_none()
+        );
 
         Ok(())
     }

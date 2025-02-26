@@ -15,7 +15,7 @@
 use std::future::ready;
 
 use anyhow::anyhow;
-use futures::future::{select, Either};
+use futures::future::{Either, select};
 use futures::{FutureExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::TableId;
@@ -141,7 +141,7 @@ impl<T: UpstreamTable, S: StateStore> UpstreamTableExecutor<T, S> {
                         }
                     })
                     .await?;
-                progress_state.commit(barrier.epoch).await?;
+
                 if !finish_reported {
                     let mut row_count = 0;
                     let mut is_finished = true;
@@ -175,15 +175,14 @@ impl<T: UpstreamTable, S: StateStore> UpstreamTableExecutor<T, S> {
                     }
                 }
 
+                let post_commit = progress_state.commit(barrier.epoch).await?;
                 let update_vnode_bitmap = barrier.as_update_vnode_bitmap(self.actor_ctx.id);
-                let barrier_epoch = barrier.epoch;
                 yield Message::Barrier(barrier);
-                if let Some(new_vnode_bitmap) = update_vnode_bitmap {
+                if let Some(new_vnode_bitmap) =
+                    post_commit.post_yield_barrier(update_vnode_bitmap).await?
+                {
                     drop(stream);
                     upstream_table.update_vnode_bitmap(new_vnode_bitmap.clone());
-                    progress_state
-                        .update_vnode_bitmap(new_vnode_bitmap, barrier_epoch)
-                        .await?;
                     // recreate the stream on update vnode bitmap
                     stream = ConsumeUpstreamStream::new(
                         progress_state.latest_progress(),

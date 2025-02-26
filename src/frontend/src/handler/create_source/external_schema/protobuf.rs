@@ -44,7 +44,7 @@ pub async fn extract_protobuf_table_schema(
     Ok(column_descs
         .into_iter()
         .map(|col| ColumnCatalog {
-            column_desc: col.into(),
+            column_desc: ColumnDesc::from_field_without_column_id(&col),
             is_hidden: false,
         })
         .collect_vec())

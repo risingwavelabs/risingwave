@@ -25,13 +25,13 @@ use tokio::sync::mpsc::unbounded_channel;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 
+use crate::MetaResult;
 use crate::barrier::worker::GlobalBarrierWorker;
-use crate::barrier::{schedule, BarrierManagerRequest, BarrierManagerStatus, RecoveryReason};
+use crate::barrier::{BarrierManagerRequest, BarrierManagerStatus, RecoveryReason, schedule};
 use crate::hummock::HummockManagerRef;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{MetaSrvEnv, MetadataManager};
 use crate::stream::{ScaleControllerRef, SourceManagerRef};
-use crate::MetaResult;
 
 pub struct GlobalBarrierManager {
     status: Arc<ArcSwap<BarrierManagerStatus>>,

@@ -22,7 +22,7 @@ use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::UnboundedReceiver;
 
-use super::{barrier_to_message_stream, StreamSourceCore};
+use super::{StreamSourceCore, barrier_to_message_stream};
 use crate::executor::prelude::*;
 use crate::executor::stream_reader::StreamReaderWithPause;
 

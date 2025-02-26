@@ -17,8 +17,8 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use apache_avro::Schema;
-use aws_sdk_glue::types::{SchemaId, SchemaVersionNumber};
 use aws_sdk_glue::Client;
+use aws_sdk_glue::types::{SchemaId, SchemaVersionNumber};
 use moka::future::Cache;
 
 use crate::connector_common::AwsAuthProps;

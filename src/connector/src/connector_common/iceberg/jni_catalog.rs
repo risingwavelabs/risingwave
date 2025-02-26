@@ -28,12 +28,13 @@ use iceberg::{
     TableUpdate,
 };
 use itertools::Itertools;
-use jni::objects::{GlobalRef, JObject};
 use jni::JavaVM;
+use jni::objects::{GlobalRef, JObject};
 use risingwave_common::bail;
 use risingwave_jni_core::call_method;
-use risingwave_jni_core::jvm_runtime::{execute_with_jni_env, jobj_to_str, JVM};
+use risingwave_jni_core::jvm_runtime::{JVM, execute_with_jni_env, jobj_to_str};
 use serde::{Deserialize, Serialize};
+use thiserror_ext::AsReport;
 
 use crate::error::ConnectorResult;
 
@@ -362,6 +363,19 @@ impl Catalog for JniCatalog {
             )
             .with_source(e)
         })
+    }
+}
+
+impl Drop for JniCatalog {
+    fn drop(&mut self) {
+        let _ = execute_with_jni_env(self.jvm, |env| {
+            call_method!(env, self.java_catalog.as_obj(), {void close()})
+                .with_context(|| "Failed to close iceberg catalog".to_owned())?;
+            Ok(())
+        })
+        .inspect_err(
+            |e| tracing::error!(error = ?e.as_report(), "Failed to close iceberg catalog"),
+        );
     }
 }
 

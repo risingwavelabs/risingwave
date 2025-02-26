@@ -13,15 +13,15 @@
 // limitations under the License.
 
 use futures_async_stream::try_stream;
-use futures_util::stream::BoxStream;
 use futures_util::StreamExt;
+use futures_util::stream::BoxStream;
 use risingwave_common::array::{Array, ArrayBuilder, ArrayImpl, DataChunk};
 use risingwave_common::types::{DataType, DatumRef};
-use risingwave_pb::expr::table_function::PbType;
 use risingwave_pb::expr::PbTableFunction;
+use risingwave_pb::expr::table_function::PbType;
 
 use super::{ExprError, Result};
-use crate::expr::{build_from_prost as expr_build_from_prost, BoxedExpression};
+use crate::expr::{BoxedExpression, build_from_prost as expr_build_from_prost};
 
 mod empty;
 mod repeat;

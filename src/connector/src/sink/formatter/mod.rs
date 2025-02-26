@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Field;
 
@@ -239,13 +239,11 @@ impl EncoderBuild for TextEncoder {
             | DataType::Serial => {}
             _ => {
                 // why we don't allow float as text for key encode: https://github.com/risingwavelabs/risingwave/pull/16377#discussion_r1591864960
-                return Err(SinkError::Config(
-                    anyhow!(
-                            "The key encode is TEXT, but the primary key column {} has type {}. The key encode TEXT requires the primary key column to be of type varchar, bool, small int, int, big int, serial or rw_int256.",
-                            schema_ref.name,
-                            schema_ref.data_type
-                        ),
-                ));
+                return Err(SinkError::Config(anyhow!(
+                    "The key encode is TEXT, but the primary key column {} has type {}. The key encode TEXT requires the primary key column to be of type varchar, bool, small int, int, big int, serial or rw_int256.",
+                    schema_ref.name,
+                    schema_ref.data_type
+                )));
             }
         }
 

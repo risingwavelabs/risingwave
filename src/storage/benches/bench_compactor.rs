@@ -17,22 +17,22 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use criterion::async_executor::FuturesExecutor;
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use foyer::{CacheHint, Engine, HybridCacheBuilder};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::config::{MetricLevel, ObjectStoreConfig};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::DataType;
-use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
 use risingwave_common::util::value_encoding::ValueRowSerializer;
+use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::{InMemObjectStore, ObjectStore, ObjectStoreImpl};
-use risingwave_pb::hummock::compact_task::PbTaskType;
 use risingwave_pb::hummock::PbTableSchema;
+use risingwave_pb::hummock::compact_task::PbTaskType;
 use risingwave_storage::compaction_catalog_manager::CompactionCatalogAgent;
 use risingwave_storage::hummock::compactor::compactor_runner::compact_and_build_sst;
 use risingwave_storage::hummock::compactor::{
@@ -52,7 +52,7 @@ use risingwave_storage::hummock::{
     SstableStoreConfig, SstableWriterOptions, Xor16FilterBuilder,
 };
 use risingwave_storage::monitor::{
-    global_hummock_state_store_metrics, CompactorMetrics, StoreLocalStatistic,
+    CompactorMetrics, StoreLocalStatistic, global_hummock_state_store_metrics,
 };
 
 pub async fn mock_sstable_store() -> SstableStoreRef {

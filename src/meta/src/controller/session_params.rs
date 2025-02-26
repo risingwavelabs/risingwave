@@ -18,8 +18,8 @@ use itertools::Itertools;
 use risingwave_common::session_config::{SessionConfig, SessionConfigError};
 use risingwave_meta_model::prelude::SessionParameter;
 use risingwave_meta_model::session_parameter;
-use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::SetSessionParamRequest;
+use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait, TransactionTrait};
 use thiserror_ext::AsReport;
@@ -190,11 +190,13 @@ mod tests {
         .await
         .unwrap();
         // check deprecated params are cleaned up.
-        assert!(SessionParameter::find_by_id("deprecated_param".to_owned())
-            .one(&session_param_ctl.db)
-            .await
-            .unwrap()
-            .is_none());
+        assert!(
+            SessionParameter::find_by_id("deprecated_param".to_owned())
+                .one(&session_param_ctl.db)
+                .await
+                .unwrap()
+                .is_none()
+        );
         // check new params are set.
         let params = session_param_ctl.get_params().await;
         assert_eq!(params.get("rw_implicit_flush").unwrap(), new_params);

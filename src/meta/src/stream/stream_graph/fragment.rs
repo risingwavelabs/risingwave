@@ -17,12 +17,12 @@ use std::num::NonZeroUsize;
 use std::ops::{Deref, DerefMut};
 use std::sync::LazyLock;
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::{
-    generate_internal_table_name_with_type, TableId, CDC_SOURCE_COLUMN_NUM,
+    CDC_SOURCE_COLUMN_NUM, TableId, generate_internal_table_name_with_type,
 };
 use risingwave_common::hash::VnodeCount;
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -43,12 +43,12 @@ use risingwave_pb::stream_plan::{
     StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamScanNode, StreamScanType,
 };
 
+use crate::MetaResult;
 use crate::barrier::SnapshotBackfillInfo;
 use crate::manager::{MetaSrvEnv, StreamingJob, StreamingJobType};
 use crate::model::{ActorId, FragmentId};
 use crate::stream::stream_graph::id::{GlobalFragmentId, GlobalFragmentIdGen, GlobalTableIdGen};
 use crate::stream::stream_graph::schedule::Distribution;
-use crate::MetaResult;
 
 /// The fragment in the building phase, including the [`StreamFragment`] from the frontend and
 /// several additional helper fields.
@@ -85,7 +85,8 @@ impl BuildingFragment {
         Self::fill_internal_tables(&mut fragment, job, table_id_gen);
 
         let job_id = Self::fill_job(&mut fragment, job).then(|| job.id());
-        let upstream_table_columns = Self::extract_upstream_table_columns(&mut fragment);
+        let upstream_table_columns =
+            Self::extract_upstream_table_columns_except_cross_db_backfill(&fragment);
 
         Self {
             inner: fragment,
@@ -201,19 +202,25 @@ impl BuildingFragment {
         has_job
     }
 
-    /// Extract the required columns (in IDs) of each upstream table.
-    fn extract_upstream_table_columns(
-        // TODO: no need to take `&mut` here
-        fragment: &mut StreamFragment,
+    /// Extract the required columns (in IDs) of each upstream table except for cross-db backfill.
+    fn extract_upstream_table_columns_except_cross_db_backfill(
+        fragment: &StreamFragment,
     ) -> HashMap<TableId, Vec<i32>> {
         let mut table_columns = HashMap::new();
 
         stream_graph_visitor::visit_fragment(fragment, |node_body| {
             let (table_id, column_ids) = match node_body {
-                NodeBody::StreamScan(stream_scan) => (
-                    stream_scan.table_id.into(),
-                    stream_scan.upstream_column_ids.clone(),
-                ),
+                NodeBody::StreamScan(stream_scan) => {
+                    if stream_scan.get_stream_scan_type().unwrap()
+                        == StreamScanType::CrossDbSnapshotBackfill
+                    {
+                        return;
+                    }
+                    (
+                        stream_scan.table_id.into(),
+                        stream_scan.upstream_column_ids.clone(),
+                    )
+                }
                 NodeBody::CdcFilter(cdc_filter) => (cdc_filter.upstream_source_id.into(), vec![]),
                 NodeBody::SourceBackfill(backfill) => (
                     backfill.upstream_source_id.into(),
@@ -230,13 +237,6 @@ impl BuildingFragment {
                 .try_insert(table_id, column_ids)
                 .expect("currently there should be no two same upstream tables in a fragment");
         });
-
-        assert_eq!(
-            table_columns.len(),
-            fragment.upstream_table_ids.len(),
-            "fragment type: {:b}",
-            fragment.fragment_type_mask
-        );
 
         table_columns
     }
@@ -683,7 +683,8 @@ pub fn fill_snapshot_backfill_epoch(
     let mut applied = false;
     visit_stream_node_cont_mut(node, |node| {
         if let Some(NodeBody::StreamScan(stream_scan)) = node.node_body.as_mut()
-            && stream_scan.stream_scan_type == StreamScanType::SnapshotBackfill as i32
+            && (stream_scan.stream_scan_type == StreamScanType::SnapshotBackfill as i32
+                || stream_scan.stream_scan_type == StreamScanType::CrossDbSnapshotBackfill as i32)
         {
             result = try {
                 let table_id = TableId::new(stream_scan.table_id);
@@ -928,7 +929,7 @@ impl CompleteStreamFragmentGraph {
                             {
                                 // Resolve the required output columns from the upstream materialized view.
                                 let (dist_key_indices, output_indices) = {
-                                    let nodes = upstream_fragment.actors[0].get_nodes().unwrap();
+                                    let nodes = upstream_fragment.get_nodes().unwrap();
                                     let mview_node =
                                         nodes.get_node_body().unwrap().as_materialize().unwrap();
                                     let all_column_ids = mview_node.column_ids();
@@ -972,7 +973,7 @@ impl CompleteStreamFragmentGraph {
                                     GlobalFragmentId::new(source_fragment.fragment_id);
 
                                 let output_indices = {
-                                    let nodes = upstream_fragment.actors[0].get_nodes().unwrap();
+                                    let nodes = upstream_fragment.get_nodes().unwrap();
                                     let source_node =
                                         nodes.get_node_body().unwrap().as_source().unwrap();
 
@@ -1005,11 +1006,17 @@ impl CompleteStreamFragmentGraph {
 
                                 (source_job_id, edge)
                             } else {
-                                bail!("the upstream fragment should be a MView or Source, got fragment type: {:b}", upstream_fragment.fragment_type_mask)
+                                bail!(
+                                    "the upstream fragment should be a MView or Source, got fragment type: {:b}",
+                                    upstream_fragment.fragment_type_mask
+                                )
                             }
                         }
                         StreamingJobType::Source | StreamingJobType::Table(_) => {
-                            bail!("the streaming job shouldn't have an upstream fragment, job_type: {:?}", job_type)
+                            bail!(
+                                "the streaming job shouldn't have an upstream fragment, job_type: {:?}",
+                                job_type
+                            )
                         }
                     };
 
@@ -1202,6 +1209,7 @@ impl CompleteStreamFragmentGraph {
         id: GlobalFragmentId,
         actors: Vec<StreamActor>,
         distribution: Distribution,
+        stream_node: StreamNode,
     ) -> Fragment {
         let building_fragment = self.get_fragment(id).into_building().unwrap();
         let internal_tables = building_fragment.extract_internal_tables();
@@ -1240,6 +1248,7 @@ impl CompleteStreamFragmentGraph {
             state_table_ids,
             upstream_fragment_ids,
             maybe_vnode_count: VnodeCount::set(vnode_count).to_protobuf(),
+            nodes: Some(stream_node),
         }
     }
 

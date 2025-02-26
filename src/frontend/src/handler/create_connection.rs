@@ -25,15 +25,15 @@ use risingwave_pb::secret::SecretRef;
 use risingwave_sqlparser::ast::CreateConnectionStatement;
 
 use super::RwPgResponse;
+use crate::WithOptions;
 use crate::binder::Binder;
-use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::SecretId;
+use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::error::ErrorCode::ProtocolError;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::HandlerArgs;
 use crate::session::SessionImpl;
 use crate::utils::{resolve_privatelink_in_with_option, resolve_secret_ref_in_with_options};
-use crate::WithOptions;
 
 pub(crate) const CONNECTION_TYPE_PROP: &str = "type";
 

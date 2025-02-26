@@ -22,12 +22,12 @@ use bytes::Bytes;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::util::epoch::MAX_SPILL_TIMES;
-use risingwave_hummock_sdk::key::{is_empty_key_range, vnode_range, TableKey, TableKeyRange};
+use risingwave_common::util::epoch::{EpochPair, MAX_SPILL_TIMES};
+use risingwave_hummock_sdk::EpochWithGap;
+use risingwave_hummock_sdk::key::{TableKey, TableKeyRange, is_empty_key_range, vnode_range};
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_watermark::WatermarkSerdeType;
-use risingwave_hummock_sdk::EpochWithGap;
-use tracing::{warn, Instrument};
+use tracing::{Instrument, warn};
 
 use super::version::{StagingData, VersionUpdate};
 use crate::error::StorageResult;
@@ -42,7 +42,7 @@ use crate::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatch, SharedBufferBatchIterator, SharedBufferBatchOldValues, SharedBufferItem,
     SharedBufferValue,
 };
-use crate::hummock::store::version::{read_filter_for_version, HummockVersionReader};
+use crate::hummock::store::version::{HummockVersionReader, read_filter_for_version};
 use crate::hummock::utils::{
     do_delete_sanity_check, do_insert_sanity_check, do_update_sanity_check, sanity_check_enabled,
     wait_for_epoch,
@@ -62,7 +62,7 @@ pub struct LocalHummockStorage {
     mem_table: MemTable,
 
     spill_offset: u16,
-    epoch: Option<u64>,
+    epoch: Option<EpochPair>,
 
     table_id: TableId,
     op_consistency_level: OpConsistencyLevel,
@@ -477,7 +477,7 @@ impl LocalStateStore for LocalHummockStorage {
     }
 
     fn epoch(&self) -> u64 {
-        self.epoch.expect("should have set the epoch")
+        self.epoch.expect("should have set the epoch").curr
     }
 
     fn is_dirty(&self) -> bool {
@@ -487,8 +487,9 @@ impl LocalStateStore for LocalHummockStorage {
     async fn init(&mut self, options: InitOptions) -> StorageResult<()> {
         let epoch = options.epoch;
         wait_for_epoch(&self.version_update_notifier_tx, epoch.prev, self.table_id).await?;
-        assert!(
-            self.epoch.replace(epoch.curr).is_none(),
+        assert_eq!(
+            self.epoch.replace(epoch),
+            None,
             "local state store of table id {:?} is init for more than once",
             self.table_id
         );
@@ -511,10 +512,13 @@ impl LocalStateStore for LocalHummockStorage {
             self.mem_table.op_consistency_level.update(new_level);
             self.op_consistency_level.update(new_level);
         }
-        let prev_epoch = self
+        let epoch = self
             .epoch
-            .replace(next_epoch)
+            .as_mut()
             .expect("should have init epoch before seal the first epoch");
+        let prev_epoch = epoch.curr;
+        epoch.prev = prev_epoch;
+        epoch.curr = next_epoch;
         self.spill_offset = 0;
         assert!(
             next_epoch > prev_epoch,
@@ -553,12 +557,22 @@ impl LocalStateStore for LocalHummockStorage {
         }
     }
 
-    fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
+    async fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> StorageResult<Arc<Bitmap>> {
+        wait_for_epoch(
+            &self.version_update_notifier_tx,
+            self.epoch.expect("should have init").prev,
+            self.table_id,
+        )
+        .await?;
+        assert!(self.mem_table.buffer.is_empty());
         let mut read_version = self.read_version.write();
-        assert!(read_version.staging().is_empty(), "There is uncommitted staging data in read version table_id {:?} instance_id {:?} on vnode bitmap update",
-            self.table_id(), self.instance_id()
+        assert!(
+            read_version.staging().is_empty(),
+            "There is uncommitted staging data in read version table_id {:?} instance_id {:?} on vnode bitmap update",
+            self.table_id(),
+            self.instance_id()
         );
-        read_version.update_vnode_bitmap(vnodes)
+        Ok(read_version.update_vnode_bitmap(vnodes))
     }
 }
 

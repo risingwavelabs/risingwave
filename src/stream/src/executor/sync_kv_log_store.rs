@@ -65,7 +65,7 @@ use std::mem::replace;
 use std::pin::Pin;
 
 use anyhow::anyhow;
-use futures::future::{select, BoxFuture, Either};
+use futures::future::{BoxFuture, Either, select};
 use futures::stream::StreamFuture;
 use futures::{FutureExt, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
@@ -74,22 +74,24 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::must_match;
 use risingwave_connector::sink::log_store::{ChunkId, LogStoreResult};
+use risingwave_storage::StateStore;
 use risingwave_storage::store::{
     LocalStateStore, NewLocalOptions, OpConsistencyLevel, StateStoreRead,
 };
-use risingwave_storage::StateStore;
 use rw_futures_util::drop_either_future;
 
 use crate::common::log_store_impl::kv_log_store::buffer::LogStoreBufferItem;
+use crate::common::log_store_impl::kv_log_store::reader::LogStoreReadStateStreamRangeStart;
 use crate::common::log_store_impl::kv_log_store::reader::timeout_auto_rebuild::TimeoutAutoRebuildIter;
 use crate::common::log_store_impl::kv_log_store::serde::{
     KvLogStoreItem, LogStoreItemMergeStream, LogStoreRowSerde,
 };
 use crate::common::log_store_impl::kv_log_store::state::{
-    new_log_store_state, LogStoreReadState, LogStoreStateWriteChunkFuture, LogStoreWriteState,
+    LogStorePostSealCurrentEpoch, LogStoreReadState, LogStoreStateWriteChunkFuture,
+    LogStoreWriteState, new_log_store_state,
 };
 use crate::common::log_store_impl::kv_log_store::{
-    FlushInfo, KvLogStoreMetrics, ReaderTruncationOffsetType, SeqIdType, FIRST_SEQ_ID,
+    FIRST_SEQ_ID, FlushInfo, KvLogStoreMetrics, ReaderTruncationOffsetType, SeqIdType,
 };
 use crate::executor::prelude::*;
 use crate::executor::{
@@ -98,7 +100,7 @@ use crate::executor::{
 
 type ReadFlushedChunkFuture = BoxFuture<'static, LogStoreResult<(ChunkId, StreamChunk, u64)>>;
 
-struct SyncedKvLogStoreExecutor<S: StateStore> {
+pub struct SyncedKvLogStoreExecutor<S: StateStore> {
     actor_context: ActorContextRef,
     table_id: TableId,
     metrics: KvLogStoreMetrics,
@@ -113,7 +115,6 @@ struct SyncedKvLogStoreExecutor<S: StateStore> {
 }
 // Stream interface
 impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
-    #[cfg_attr(not(test), expect(dead_code))]
     pub(crate) fn new(
         actor_context: ActorContextRef,
         table_id: u32,
@@ -276,7 +277,11 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
             };
             let mut read_future = ReadFuture::ReadingPersistedStream(
                 read_state
-                    .read_persisted_log_store(&self.metrics, initial_write_epoch.prev, None)
+                    .read_persisted_log_store(
+                        &self.metrics,
+                        initial_write_epoch.prev,
+                        LogStoreReadStateStreamRangeStart::Unbounded,
+                    )
                     .await?,
             );
 
@@ -301,7 +306,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                             WriteFutureEvent::UpstreamMessageReceived(msg) => {
                                 match msg {
                                     Message::Barrier(barrier) => {
-                                        Self::write_barrier(
+                                        let write_state_post_write_barrier = Self::write_barrier(
                                             &mut write_state,
                                             barrier.clone(),
                                             &self.metrics,
@@ -314,9 +319,11 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                                             barrier.as_update_vnode_bitmap(self.actor_context.id);
                                         let barrier_epoch = barrier.epoch;
                                         yield Message::Barrier(barrier);
+                                        write_state_post_write_barrier
+                                            .post_yield_barrier(update_vnode_bitmap.clone())
+                                            .await?;
                                         if let Some(vnode_bitmap) = update_vnode_bitmap {
                                             // Apply Vnode Update
-                                            write_state.update_vnode_bitmap(&vnode_bitmap);
                                             read_state.update_vnode_bitmap(vnode_bitmap);
                                             initial_write_epoch = barrier_epoch;
                                             input = stream;
@@ -497,13 +504,13 @@ impl<S: StateStoreRead> ReadFuture<S> {
 
 // Write methods
 impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
-    async fn write_barrier(
-        write_state: &mut LogStoreWriteState<S::Local>,
+    async fn write_barrier<'a>(
+        write_state: &'a mut LogStoreWriteState<S::Local>,
         barrier: Barrier,
         metrics: &KvLogStoreMetrics,
         truncation_offset: Option<ReaderTruncationOffsetType>,
         buffer: &mut SyncedLogStoreBuffer,
-    ) -> StreamExecutorResult<()> {
+    ) -> StreamExecutorResult<LogStorePostSealCurrentEpoch<'a, S::Local>> {
         let epoch = barrier.epoch.prev;
         let mut writer = write_state.start_writer(false);
         // FIXME(kwannoel): Handle paused stream.
@@ -538,7 +545,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
         flush_info.report(metrics);
 
         // Apply truncation
-        write_state.seal_current_epoch(barrier.epoch.curr, truncation_offset);
+        let post_seal = write_state.seal_current_epoch(barrier.epoch.curr, truncation_offset);
 
         // Add to buffer
         buffer.buffer.push_back((
@@ -551,7 +558,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
         buffer.next_chunk_id = 0;
         buffer.update_unconsumed_buffer_metrics();
 
-        Ok(())
+        Ok(post_seal)
     }
 }
 
@@ -598,7 +605,7 @@ impl SyncedLogStoreBuffer {
                 vnode_bitmap,
                 ..
             },
-        )) = self.buffer.front_mut()
+        )) = self.buffer.back_mut()
         {
             assert!(
                 *prev_end_seq_id < start_seq_id,
@@ -624,7 +631,9 @@ impl SyncedLogStoreBuffer {
                     chunk_id,
                 },
             ));
-            tracing::trace!("Adding flushed item to buffer: start_seq_id: {start_seq_id}, end_seq_id: {end_seq_id}, chunk_id: {chunk_id}");
+            tracing::trace!(
+                "Adding flushed item to buffer: start_seq_id: {start_seq_id}, end_seq_id: {end_seq_id}, chunk_id: {chunk_id}"
+            );
         }
         // FIXME(kwannoel): Seems these metrics are updated _after_ the flush info is reported.
         self.update_unconsumed_buffer_metrics();
@@ -711,10 +720,10 @@ mod tests {
     use risingwave_storage::memory::MemoryStateStore;
 
     use super::*;
+    use crate::common::log_store_impl::kv_log_store::KV_LOG_STORE_V2_INFO;
     use crate::common::log_store_impl::kv_log_store::test_utils::{
         check_stream_chunk_eq, gen_test_log_store_table, test_payload_schema,
     };
-    use crate::common::log_store_impl::kv_log_store::KV_LOG_STORE_V2_INFO;
     use crate::executor::test_utils::MockSource;
 
     fn init_logger() {

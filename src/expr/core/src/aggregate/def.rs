@@ -31,10 +31,10 @@ use risingwave_pb::expr::{
     PbAggCall, PbAggType, PbExprNode, PbInputRef, PbUserDefinedFunctionMetadata,
 };
 
-use crate::expr::{
-    build_from_prost, BoxedExpression, ExpectExt, Expression, LiteralExpression, Token,
-};
 use crate::Result;
+use crate::expr::{
+    BoxedExpression, ExpectExt, Expression, LiteralExpression, Token, build_from_prost,
+};
 
 /// Represents an aggregation function.
 // TODO(runji):

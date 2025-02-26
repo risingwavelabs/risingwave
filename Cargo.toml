@@ -96,8 +96,8 @@ normal = ["workspace-hack"]
 development = ["expect-test", "pretty_assertions"]
 
 [workspace.dependencies]
-foyer = { version = "0.14.0", features = ["tracing", "nightly"] }
-mixtrics ={ version = "0.0.2", features = ["prometheus"] }
+foyer = { version = "0.14.1", features = ["tracing", "nightly"] }
+mixtrics = { version = "0.0.3", features = ["prometheus"] }
 apache-avro = { git = "https://github.com/risingwavelabs/avro", rev = "25113ba88234a9ae23296e981d8302c290fdaa4b", features = [
     "snappy",
     "zstandard",
@@ -166,7 +166,7 @@ opendal = "0.49"
 arrow-flight = "53"
 arrow-udf-js = "0.5"
 arrow-udf-wasm = { version = "0.4", features = ["build"] }
-arrow-udf-python = "0.4"
+arrow-udf-python = { git = "https://github.com/arrow-udf/arrow-udf", rev = "0b185be96a37bdcd644fe40d1f0ccf0b7972a99a" }
 arrow-udf-flight = "0.4"
 clap = { version = "4", features = ["cargo", "derive", "env"] }
 # Use a forked version which removes the dependencies on dynamo db to reduce

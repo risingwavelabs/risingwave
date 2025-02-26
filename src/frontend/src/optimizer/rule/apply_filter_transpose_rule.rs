@@ -17,8 +17,8 @@ use risingwave_pb::plan_common::JoinType;
 
 use super::{ApplyOffsetRewriter, BoxedRule, Rule};
 use crate::expr::ExprRewriter;
-use crate::optimizer::plan_node::{LogicalApply, LogicalFilter, PlanTreeNodeUnary};
 use crate::optimizer::PlanRef;
+use crate::optimizer::plan_node::{LogicalApply, LogicalFilter, PlanTreeNodeUnary};
 use crate::utils::Condition;
 
 /// Transpose `LogicalApply` and `LogicalFilter`.

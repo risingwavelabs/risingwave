@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::catalog::{ColumnCatalog, Engine};
+use risingwave_common::catalog::ColumnCatalog;
 use risingwave_common::hash::VnodeCount;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::{bail, bail_not_implemented};
@@ -29,8 +29,7 @@ use risingwave_pb::stream_plan::{ProjectNode, StreamFragmentGraph};
 use risingwave_sqlparser::ast::{AlterTableOperation, ColumnOption, ObjectName, Statement};
 
 use super::create_source::SqlColumnStrategy;
-use super::create_table::{generate_stream_graph_for_replace_table, ColumnIdGenerator};
-use super::util::SourceSchemaCompatExt;
+use super::create_table::{ColumnIdGenerator, generate_stream_graph_for_replace_table};
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::purify::try_purify_table_source_create_sql_ast;
 use crate::catalog::root_catalog::SchemaPath;
@@ -101,50 +100,14 @@ pub async fn get_replace_table_plan(
     // Create handler args as if we're creating a new table with the altered definition.
     let handler_args = HandlerArgs::new(session.clone(), &new_definition, Arc::from(""))?;
     let col_id_gen = ColumnIdGenerator::new_alter(old_catalog);
-    let Statement::CreateTable {
-        columns,
-        constraints,
-        source_watermarks,
-        append_only,
-        on_conflict,
-        with_version_column,
-        wildcard_idx,
-        cdc_table_info,
-        format_encode,
-        include_column_options,
-        engine,
-        ..
-    } = new_definition
-    else {
-        panic!("unexpected statement type: {:?}", new_definition);
-    };
-
-    let format_encode = format_encode
-        .clone()
-        .map(|format_encode| format_encode.into_v2_with_warning());
-
-    let engine = match engine {
-        risingwave_sqlparser::ast::Engine::Hummock => Engine::Hummock,
-        risingwave_sqlparser::ast::Engine::Iceberg => Engine::Iceberg,
-    };
 
     let (mut graph, table, source, job_type) = generate_stream_graph_for_replace_table(
         session,
         table_name,
         old_catalog,
-        format_encode,
         handler_args.clone(),
+        new_definition,
         col_id_gen,
-        columns.clone(),
-        wildcard_idx,
-        constraints,
-        source_watermarks,
-        append_only,
-        on_conflict,
-        with_version_column,
-        cdc_table_info,
-        include_column_options,
-        engine,
         sql_column_strategy,
     )
     .await?;
@@ -255,6 +218,12 @@ pub async fn handle_alter_table_column(
         return Err(RwError::from(ErrorCode::BindError(
             "Alter a table with incoming sink and generated column has not been implemented."
                 .to_owned(),
+        )));
+    }
+
+    if original_catalog.webhook_info.is_some() {
+        return Err(RwError::from(ErrorCode::BindError(
+            "Adding/dropping a column of a table with webhook has not been implemented.".to_owned(),
         )));
     }
 
@@ -431,7 +400,9 @@ pub fn fetch_table_catalog_for_alter(
 mod tests {
     use std::collections::HashMap;
 
-    use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, ROWID_PREFIX};
+    use risingwave_common::catalog::{
+        DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, ROW_ID_COLUMN_NAME,
+    };
     use risingwave_common::types::DataType;
 
     use crate::catalog::root_catalog::SchemaPath;
@@ -482,7 +453,10 @@ mod tests {
         // Check the old columns and IDs are not changed.
         assert_eq!(columns["i"], altered_columns["i"]);
         assert_eq!(columns["r"], altered_columns["r"]);
-        assert_eq!(columns[ROWID_PREFIX], altered_columns[ROWID_PREFIX]);
+        assert_eq!(
+            columns[ROW_ID_COLUMN_NAME],
+            altered_columns[ROW_ID_COLUMN_NAME]
+        );
 
         // Check the version is updated.
         assert_eq!(

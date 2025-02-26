@@ -17,9 +17,9 @@ use std::fmt::Debug;
 use std::ops::Range;
 
 use itertools::Itertools;
+use risingwave_hummock_sdk::KeyComparator;
 use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
-use risingwave_hummock_sdk::KeyComparator;
 
 pub trait OverlapInfo: Debug {
     fn check_overlap(&self, a: &SstableInfo) -> bool;

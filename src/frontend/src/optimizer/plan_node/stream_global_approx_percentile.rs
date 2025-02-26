@@ -15,20 +15,20 @@ use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::GlobalApproxPercentileNode;
+use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
+use crate::PlanRef;
 use crate::expr::{ExprRewriter, ExprVisitor, Literal};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::stream::StreamPlanRef;
-use crate::optimizer::plan_node::utils::{childless_record, Distill, TableCatalogBuilder};
+use crate::optimizer::plan_node::utils::{Distill, TableCatalogBuilder, childless_record};
 use crate::optimizer::plan_node::{
     ExprRewritable, PlanAggCall, PlanBase, PlanTreeNodeUnary, Stream, StreamNode,
 };
 use crate::optimizer::property::{Distribution, FunctionalDependencySet, WatermarkColumns};
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::PlanRef;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamGlobalApproxPercentile {

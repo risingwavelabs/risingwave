@@ -15,8 +15,8 @@
 use core::time::Duration;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
-use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
 use std::time::Instant;
 
 use async_recursion::async_recursion;
@@ -41,9 +41,9 @@ use risingwave_pb::stream_service::{
 };
 use risingwave_storage::monitor::HummockTraceFutureExt;
 use risingwave_storage::table::batch_table::BatchTable;
-use risingwave_storage::{dispatch_state_store, StateStore};
+use risingwave_storage::{StateStore, dispatch_state_store};
 use thiserror_ext::AsReport;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
+use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use tokio::task::JoinHandle;
 use tonic::Status;
 
@@ -58,7 +58,7 @@ use crate::executor::{
     ExecutorInfo, MergeExecutorInput, SnapshotBackfillExecutor, TroublemakerExecutor,
     WrapperExecutor,
 };
-use crate::from_proto::{create_executor, MergeExecutorBuilder};
+use crate::from_proto::{MergeExecutorBuilder, create_executor};
 use crate::task::barrier_manager::{
     ControlStreamHandle, EventSender, LocalActorOperation, LocalBarrierWorker,
 };
@@ -602,6 +602,7 @@ impl StreamActorManager {
     async fn create_actor(
         self: Arc<Self>,
         actor: StreamActor,
+        node: Arc<StreamNode>,
         shared_context: Arc<SharedContext>,
         related_subscriptions: Arc<HashMap<TableId, HashSet<u32>>>,
         upstreams: HashMap<FragmentId, UpstreamActors>,
@@ -626,7 +627,7 @@ impl StreamActorManager {
             let (executor, subtasks) = self
                 .create_nodes(
                     actor.fragment_id,
-                    actor.get_nodes()?,
+                    &node,
                     self.env.clone(),
                     &actor_context,
                     vnode_bitmap,
@@ -660,6 +661,7 @@ impl StreamActorManager {
     pub(super) fn spawn_actor(
         self: &Arc<Self>,
         actor: StreamActor,
+        node: Arc<StreamNode>,
         related_subscriptions: Arc<HashMap<TableId, HashSet<u32>>>,
         upstreams: HashMap<FragmentId, UpstreamActors>,
         current_shared_context: Arc<SharedContext>,
@@ -674,7 +676,7 @@ impl StreamActorManager {
                     format!("Actor {actor_id}: `{}`", stream_actor_ref.mview_definition);
                 let barrier_manager = local_barrier_manager.clone();
                 // wrap the future of `create_actor` with `boxed` to avoid stack overflow
-                let actor = self.clone().create_actor(actor, current_shared_context, related_subscriptions, upstreams, barrier_manager.clone()).boxed().and_then(|actor| actor.run()).map(move |result| {
+                let actor = self.clone().create_actor(actor, node, current_shared_context, related_subscriptions, upstreams, barrier_manager.clone()).boxed().and_then(|actor| actor.run()).map(move |result| {
                     if let Err(err) = result {
                         // TODO: check error type and panic if it's unexpected.
                         // Intentionally use `?` on the report to also include the backtrace.

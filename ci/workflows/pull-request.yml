@@ -110,7 +110,6 @@ steps:
     depends_on:
       - "build"
       - "build-other"
-      - "docslt"
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
@@ -130,7 +129,7 @@ steps:
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 8
+    timeout_in_minutes: 9
     retry: *auto-retry
 
   - label: "meta backup test"
@@ -156,6 +155,7 @@ steps:
       || build.env("CI_STEPS") =~ /(^|,)e2e-parallel-tests?(,|$$)/
     depends_on:
       - "build"
+      - "build-other"
       - "docslt"
     plugins:
       - docker-compose#v5.5.0: *docker-compose
@@ -168,7 +168,6 @@ steps:
     command: "ci/scripts/e2e-test-parallel-for-opendal.sh -p ci-dev"
     depends_on:
       - "build"
-      - "docslt"
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
@@ -239,7 +238,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end iceberg sink test"
-    if: build.pull_request.labels includes "ci/run-e2e-iceberg-sink-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-iceberg-sink-tests?(,|$$)/
+    if: build.pull_request.labels includes "ci/run-e2e-iceberg-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-iceberg-sink-tests?(,|$$)/
     command: "ci/scripts/e2e-iceberg-sink-test.sh -p ci-dev"
     depends_on:
       - "build"
@@ -253,7 +252,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end iceberg sink v2 test"
-    if: build.pull_request.labels includes "ci/run-e2e-iceberg-sink-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-iceberg-sink-tests?(,|$$)/
+    if: build.pull_request.labels includes "ci/run-e2e-iceberg-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-iceberg-sink-tests?(,|$$)/
     command: "ci/scripts/e2e-iceberg-sink-v2-test.sh -p ci-dev"
     depends_on:
       - "build"
@@ -267,7 +266,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end iceberg cdc test"
-    if: build.pull_request.labels includes "ci/run-e2e-iceberg-sink-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-iceberg-sink-tests?(,|$$)/
+    if: build.pull_request.labels includes "ci/run-e2e-iceberg-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-iceberg-sink-tests?(,|$$)/
     command: "ci/scripts/e2e-iceberg-cdc.sh -p ci-dev"
     depends_on:
       - "build"
@@ -281,7 +280,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end iceberg engine test"
-    if: build.pull_request.labels includes "ci/run-e2e-iceberg-engine-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-iceberg-engine-tests?(,|$$)/
+    if: build.pull_request.labels includes "ci/run-e2e-iceberg-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-iceberg-engine-tests?(,|$$)/
     command: "ci/scripts/e2e-iceberg-engine-test.sh -p ci-dev"
     depends_on:
       - "build"

@@ -599,8 +599,8 @@ impl StreamChunk {
     ///
     /// # Example
     /// ```
-    /// use risingwave_common::array::stream_chunk::StreamChunkTestExt as _;
     /// use risingwave_common::array::StreamChunk;
+    /// use risingwave_common::array::stream_chunk::StreamChunkTestExt as _;
     /// let chunk = StreamChunk::from_pretty(
     ///     "  I I I I      // type chars
     ///     U- 2 5 . .      // '.' means NULL

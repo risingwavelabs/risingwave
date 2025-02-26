@@ -35,22 +35,22 @@ use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_sqlparser::ast::{Ident, ObjectName, Statement};
 
 use super::SessionImpl;
-use crate::catalog::subscription_catalog::SubscriptionCatalog;
 use crate::catalog::TableId;
+use crate::catalog::subscription_catalog::SubscriptionCatalog;
 use crate::error::{ErrorCode, Result, RwError};
+use crate::handler::HandlerArgs;
 use crate::handler::declare_cursor::create_chunk_stream_for_cursor;
 use crate::handler::query::{
-    gen_batch_plan_by_statement, gen_batch_plan_fragmenter, BatchQueryPlanResult,
+    BatchQueryPlanResult, gen_batch_plan_by_statement, gen_batch_plan_fragmenter,
 };
 use crate::handler::util::{
-    convert_logstore_u64_to_unix_millis, gen_query_from_table_name_order_by, pg_value_format,
-    to_pg_field, DataChunkToRowSetAdapter, StaticSessionData,
+    DataChunkToRowSetAdapter, StaticSessionData, convert_logstore_u64_to_unix_millis,
+    gen_query_from_table_name_order_by, pg_value_format, to_pg_field,
 };
-use crate::handler::HandlerArgs;
 use crate::monitor::{CursorMetrics, PeriodicCursorMetrics};
-use crate::optimizer::plan_node::{generic, BatchLogSeqScan};
-use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::PlanRoot;
+use crate::optimizer::plan_node::{BatchLogSeqScan, generic};
+use crate::optimizer::property::{Order, RequiredDist};
 use crate::scheduler::{DistributedQueryStream, LocalQueryStream};
 use crate::{OptimizerContext, OptimizerContextRef, PgResponseStream, PlanRef, TableCatalog};
 
@@ -247,7 +247,11 @@ impl Display for State {
             } => write!(
                 f,
                 "Fetch {{ from_snapshot: {}, rw_timestamp: {}, expected_timestamp: {:?}, cached rows: {}, query init at {}ms before }}",
-                from_snapshot, rw_timestamp, expected_timestamp, remaining_rows.len(), init_query_timer.elapsed().as_millis()
+                from_snapshot,
+                rw_timestamp,
+                expected_timestamp,
+                remaining_rows.len(),
+                init_query_timer.elapsed().as_millis()
             ),
             State::Invalid => write!(f, "Invalid"),
         }

@@ -17,12 +17,12 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use apache_avro::types::Value;
-use apache_avro::{from_avro_datum, Reader, Schema};
+use apache_avro::{Reader, Schema, from_avro_datum};
+use risingwave_common::catalog::Field;
 use risingwave_common::{bail, try_match_expand};
 use risingwave_connector_codec::decoder::avro::{
-    avro_schema_to_column_descs, AvroAccess, AvroParseOptions, ResolvedAvroSchema,
+    AvroAccess, AvroParseOptions, ResolvedAvroSchema, avro_schema_to_fields,
 };
-use risingwave_pb::plan_common::ColumnDesc;
 
 use super::{ConfluentSchemaCache, GlueSchemaCache as _, GlueSchemaCacheImpl};
 use crate::error::ConnectorResult;
@@ -32,7 +32,7 @@ use crate::parser::{
     AccessBuilder, AvroProperties, EncodingProperties, MapHandling, SchemaLocation,
 };
 use crate::schema::schema_registry::{
-    extract_schema_id, get_subject_by_strategy, handle_sr_list, Client,
+    Client, extract_schema_id, get_subject_by_strategy, handle_sr_list,
 };
 
 // Default avro access builder
@@ -228,9 +228,8 @@ impl AvroParserConfig {
         }
     }
 
-    pub fn map_to_columns(&self) -> ConnectorResult<Vec<ColumnDesc>> {
-        avro_schema_to_column_descs(&self.schema.original_schema, self.map_handling)
-            .map_err(Into::into)
+    pub fn map_to_columns(&self) -> ConnectorResult<Vec<Field>> {
+        avro_schema_to_fields(&self.schema.original_schema, self.map_handling).map_err(Into::into)
     }
 }
 

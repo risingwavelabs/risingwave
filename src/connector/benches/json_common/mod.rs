@@ -23,7 +23,8 @@ use risingwave_connector::source::SourceColumnDesc;
 pub const NUM_RECORDS: usize = 1 << 18; // ~ 250,000
 
 pub fn generate_json_row(rng: &mut impl Rng) -> String {
-    format!("{{\"i32\":{},\"bool\":{},\"i16\":{},\"i64\":{},\"f32\":{},\"f64\":{},\"varchar\":\"{}\",\"date\":\"{}\",\"timestamp\":\"{}\"}}",
+    format!(
+        "{{\"i32\":{},\"bool\":{},\"i16\":{},\"i64\":{},\"f32\":{},\"f64\":{},\"varchar\":\"{}\",\"date\":\"{}\",\"timestamp\":\"{}\"}}",
         rng.gen::<i32>(),
         rng.gen::<bool>(),
         rng.gen::<i16>(),
@@ -36,7 +37,8 @@ pub fn generate_json_row(rng: &mut impl Rng) -> String {
             .collect::<String>(),
         Date::from_num_days_from_ce_uncheck((rng.gen::<u32>() % (1 << 20)) as i32).0,
         {
-            let datetime = Timestamp::from_timestamp_uncheck((rng.gen::<u32>() % (1u32 << 28)) as i64, 0).0;
+            let datetime =
+                Timestamp::from_timestamp_uncheck((rng.gen::<u32>() % (1u32 << 28)) as i64, 0).0;
             format!("{:?} {:?}", datetime.date(), datetime.time())
         }
     )

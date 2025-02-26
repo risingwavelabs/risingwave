@@ -25,9 +25,9 @@ use risingwave_common::bitmap::BitmapBuilder;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::range::RangeBoundsExt;
-use risingwave_common::util::epoch::{test_epoch, EpochExt, INVALID_EPOCH};
+use risingwave_common::util::epoch::{EpochExt, INVALID_EPOCH, test_epoch};
 use risingwave_hummock_sdk::key::{
-    gen_key_from_bytes, prefixed_range_with_vnode, FullKey, TableKey, UserKey, TABLE_PREFIX_LEN,
+    FullKey, TABLE_PREFIX_LEN, TableKey, UserKey, gen_key_from_bytes, prefixed_range_with_vnode,
 };
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
@@ -46,7 +46,7 @@ use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::*;
 
 use crate::local_state_store_test_utils::LocalStateStoreTestExt;
-use crate::test_utils::{gen_key_from_str, prepare_hummock_test_env, TestIngestBatch};
+use crate::test_utils::{TestIngestBatch, gen_key_from_str, prepare_hummock_test_env};
 
 #[tokio::test]
 async fn test_storage_basic() {
@@ -919,20 +919,22 @@ async fn test_delete_get() {
         .await
         .unwrap();
     test_env.wait_sync_committed_version().await;
-    assert!(test_env
-        .storage
-        .get(
-            gen_key_from_str(VirtualNode::ZERO, "bb"),
-            epoch2,
-            ReadOptions {
-                prefix_hint: None,
-                cache_policy: CachePolicy::Fill(CacheHint::Normal),
-                ..Default::default()
-            }
-        )
-        .await
-        .unwrap()
-        .is_none());
+    assert!(
+        test_env
+            .storage
+            .get(
+                gen_key_from_str(VirtualNode::ZERO, "bb"),
+                epoch2,
+                ReadOptions {
+                    prefix_hint: None,
+                    cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                    ..Default::default()
+                }
+            )
+            .await
+            .unwrap()
+            .is_none()
+    );
 }
 
 #[tokio::test]
@@ -1044,20 +1046,22 @@ async fn test_multiple_epoch_sync() {
                     .unwrap(),
                 "222".as_bytes()
             );
-            assert!(hummock_storage_clone
-                .get(
-                    gen_key_from_str(VirtualNode::ZERO, "bb"),
-                    epoch2,
-                    ReadOptions {
-                        table_id: TEST_TABLE_ID,
-                        read_committed,
-                        cache_policy: CachePolicy::Fill(CacheHint::Normal),
-                        ..Default::default()
-                    },
-                )
-                .await
-                .unwrap()
-                .is_none());
+            assert!(
+                hummock_storage_clone
+                    .get(
+                        gen_key_from_str(VirtualNode::ZERO, "bb"),
+                        epoch2,
+                        ReadOptions {
+                            table_id: TEST_TABLE_ID,
+                            read_committed,
+                            cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                            ..Default::default()
+                        },
+                    )
+                    .await
+                    .unwrap()
+                    .is_none()
+            );
             assert_eq!(
                 hummock_storage_clone
                     .get(
@@ -2164,12 +2168,18 @@ async fn test_table_watermark() {
         .init_for_test_with_prev_epoch(epoch1, prev_epoch)
         .await
         .unwrap();
-    local1.update_vnode_bitmap(vnode_bitmap1.clone());
+    local1
+        .update_vnode_bitmap(vnode_bitmap1.clone())
+        .await
+        .unwrap();
     local2
         .init_for_test_with_prev_epoch(epoch1, prev_epoch)
         .await
         .unwrap();
-    local2.update_vnode_bitmap(vnode_bitmap2.clone());
+    local2
+        .update_vnode_bitmap(vnode_bitmap2.clone())
+        .await
+        .unwrap();
 
     fn gen_inner_key(index: usize) -> Bytes {
         Bytes::copy_from_slice(format!("key_{:05}", index).as_bytes())

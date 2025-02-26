@@ -31,13 +31,13 @@ use risingwave_meta::manager::{MessageStatus, MetaSrvEnv, NotificationManagerRef
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::subscribe_response::{Info, Operation as RespOperation};
 use risingwave_pb::meta::{SubscribeResponse, SubscribeType};
-use risingwave_storage::hummock::store::LocalHummockStorage;
 use risingwave_storage::hummock::HummockStorage;
+use risingwave_storage::hummock::store::LocalHummockStorage;
 use risingwave_storage::store::{
-    to_owned_item, LocalStateStore, StateStoreIterExt, StateStoreRead,
+    LocalStateStore, StateStoreIterExt, StateStoreRead, to_owned_item,
 };
 use risingwave_storage::{StateStore, StateStoreIter, StateStoreReadIter};
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
+use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 
 pub(crate) struct GlobalReplayIter<S>
 where
