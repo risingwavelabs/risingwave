@@ -20,6 +20,7 @@ use anyhow::anyhow;
 use itertools::Itertools;
 
 use super::DataType;
+use crate::catalog::ColumnId;
 use crate::util::iter_util::ZipEqFast;
 
 /// A cheaply cloneable struct type.
@@ -34,12 +35,14 @@ impl Debug for StructType {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct StructTypeInner {
     /// The name and data type of each field.
     ///
     /// If fields are unnamed, the names will be `f1`, `f2`, etc.
     fields: Box<[(String, DataType)]>,
+
+    field_ids: Option<Box<[ColumnId]>>,
     /// Whether the fields are unnamed.
     is_unnamed: bool,
 }
@@ -54,6 +57,7 @@ impl StructType {
 
         Self(Arc::new(StructTypeInner {
             fields,
+            field_ids: None,
             is_unnamed: false,
         }))
     }
@@ -74,8 +78,23 @@ impl StructType {
 
         Self(Arc::new(StructTypeInner {
             fields,
+            field_ids: None,
             is_unnamed: true,
         }))
+    }
+
+    pub fn with_ids(self, ids: impl IntoIterator<Item = ColumnId>) -> Self {
+        let ids: Box<[ColumnId]> = ids.into_iter().collect();
+
+        assert_eq!(ids.len(), self.len(), "ids length mismatches");
+        assert!(
+            ids.iter().all(|id| *id != ColumnId::placeholder()),
+            "ids should not contain placeholder value"
+        );
+
+        let mut inner = Arc::unwrap_or_clone(self.0);
+        inner.field_ids = Some(ids);
+        Self(Arc::new(inner))
     }
 
     /// Whether the fields are unnamed.
@@ -110,6 +129,18 @@ impl StructType {
     /// If fields are unnamed, the field names will be `f1`, `f2`, etc.
     pub fn iter(&self) -> impl ExactSizeIterator<Item = (&str, &DataType)> {
         self.0.fields.iter().map(|(name, ty)| (name.as_str(), ty))
+    }
+
+    pub fn ids(&self) -> Option<impl ExactSizeIterator<Item = ColumnId> + '_> {
+        if self.is_empty() {
+            // Always return `Some(empty iterator)` for empty structs.
+            Some(Either::Left(std::iter::empty()))
+        } else {
+            self.0
+                .field_ids
+                .as_ref()
+                .map(|ids| Either::Right(ids.iter().copied()))
+        }
     }
 
     /// Compares the datatype with another, ignoring nested field names and metadata.
