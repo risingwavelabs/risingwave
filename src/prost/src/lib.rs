@@ -449,6 +449,7 @@ impl std::fmt::Debug for data::DataType {
             interval_type,
             field_type,
             field_names,
+            field_ids,
             type_name,
             // currently all data types are nullable
             is_nullable: _,
@@ -473,6 +474,9 @@ impl std::fmt::Debug for data::DataType {
         }
         if !self.field_names.is_empty() {
             s.field("field_names", field_names);
+        }
+        if !self.field_ids.is_empty() {
+            s.field("field_ids", field_ids);
         }
         s.finish()
     }
