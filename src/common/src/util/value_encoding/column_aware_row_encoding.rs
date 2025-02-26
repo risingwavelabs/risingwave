@@ -58,8 +58,8 @@ mod new_serde {
 
     fn new_serialize_struct(struct_type: &StructType, value: StructRef<'_>, buf: &mut impl BufMut) {
         let serializer = super::Serializer::new_new(
-            &[],                          // TODO: column ids
-            struct_type.types().cloned(), // TODO: avoid this clone
+            &struct_type.ids().unwrap().collect_vec(), // TODO: avoid this clone
+            struct_type.types().cloned(),              // TODO: avoid this clone
         );
 
         let bytes = serializer.serialize(value); // TODO: serialize into the buf directly
@@ -115,7 +115,7 @@ mod new_serde {
 
     fn new_deserialize_struct(struct_def: &StructType, data: &mut &[u8]) -> Result<ScalarImpl> {
         let deserializer = super::Deserializer::new(
-            &[],                                              // TODO: column ids
+            &struct_def.ids().unwrap().collect_vec(), // TODO: avoid this clone
             struct_def.types().cloned().collect_vec().into(), // TODO: avoid this clone
             std::iter::empty(),
         );
@@ -329,7 +329,10 @@ impl Serializer {
         }
     }
 
-    pub fn new_new(column_ids: &[ColumnId], data_types: impl Iterator<Item = DataType>) -> Self {
+    pub fn new_new(
+        column_ids: &[ColumnId],
+        data_types: impl IntoIterator<Item = DataType>,
+    ) -> Self {
         // currently we hard-code ColumnId as i32
         let mut encoded_column_ids = Vec::with_capacity(column_ids.len() * 4);
         for id in column_ids {
@@ -338,7 +341,7 @@ impl Serializer {
 
         Self {
             encoded_column_ids,
-            data_types: data_types.collect(),
+            data_types: data_types.into_iter().collect(),
         }
     }
 
