@@ -126,7 +126,7 @@ impl ValueRowSerdeNew for ColumnAwareSerde {
             }
         });
 
-        let serializer = Serializer::new(&column_ids);
+        let serializer = Serializer::new_new(&column_ids, schema.clone());
         let deserializer = Deserializer::new(&column_ids, schema.into(), column_with_default);
         ColumnAwareSerde {
             serializer,
