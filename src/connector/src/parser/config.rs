@@ -212,9 +212,6 @@ impl SpecificParserConfig {
                     messages_as_jsonb,
                     ..Default::default()
                 };
-                if format == SourceFormat::Upsert {
-                    config.enable_upsert = true;
-                }
                 if info.use_schema_registry {
                     config
                         .topic
@@ -335,7 +332,6 @@ pub struct ProtobufProperties {
     pub row_schema_location: String,
     pub aws_auth_props: Option<AwsAuthProps>,
     pub client_config: SchemaRegistryAuth,
-    pub enable_upsert: bool,
     pub topic: String,
     pub key_message_name: Option<String>,
     pub name_strategy: PbSchemaRegistryNameStrategy,
