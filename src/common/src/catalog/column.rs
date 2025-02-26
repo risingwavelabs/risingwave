@@ -207,7 +207,7 @@ impl ColumnDesc {
     }
 
     pub fn from_field_without_column_id(field: &Field) -> Self {
-        Self::from_field_with_column_id(field, 0)
+        Self::from_field_with_column_id(field, ColumnId::placeholder().into())
     }
 
     pub fn is_generated(&self) -> bool {
