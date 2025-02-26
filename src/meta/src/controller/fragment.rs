@@ -28,10 +28,10 @@ use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::{Actor, Fragment, FragmentRelation, Sink, StreamingJob};
 use risingwave_meta_model::{
-    ActorId, ActorUpstreamActors, ConnectorSplits, DatabaseId, ExprContext, FragmentId, I32Array,
-    JobStatus, ObjectId, SchemaId, SinkId, SourceId, StreamNode, StreamingParallelism, TableId,
-    VnodeBitmap, WorkerId, actor, actor_dispatcher, database, fragment, fragment_relation, object,
-    sink, source, streaming_job, table,
+    ActorId, ConnectorSplits, DatabaseId, ExprContext, FragmentId, I32Array, JobStatus, ObjectId,
+    SchemaId, SinkId, SourceId, StreamNode, StreamingParallelism, TableId, VnodeBitmap, WorkerId,
+    actor, actor_dispatcher, database, fragment, fragment_relation, object, sink, source,
+    streaming_job, table,
 };
 use risingwave_meta_model_migration::{Alias, SelectStatement};
 use risingwave_pb::common::PbActorLocation;
@@ -325,14 +325,13 @@ impl CatalogController {
         let mut pb_actor_status = BTreeMap::new();
 
         for (fragment, actors, actor_dispatcher, upstream_fragments) in fragments {
-            let (fragment, actor_upstreams, fragment_actor_status, fragment_actor_splits) =
-                Self::compose_fragment(
-                    fragment,
-                    actors,
-                    actor_dispatcher,
-                    job_definition.clone(),
-                    upstream_fragments,
-                )?;
+            let (fragment, fragment_actor_status, fragment_actor_splits) = Self::compose_fragment(
+                fragment,
+                actors,
+                actor_dispatcher,
+                job_definition.clone(),
+                upstream_fragments,
+            )?;
 
             pb_fragments.insert(fragment.fragment_id, fragment);
 
