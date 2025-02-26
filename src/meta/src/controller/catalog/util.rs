@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_meta_model::{ConnectionParams, SecretRef};
+
 use super::*;
 
 pub(crate) async fn update_internal_tables(
@@ -526,5 +528,192 @@ impl CatalogController {
                 ))
             })
             .collect())
+    }
+
+    /// apply new connector settings from source/sink table to fragment table
+    /// expect to change the source/sink table first and then call this function to apply to fragments
+    ///
+    /// CAUTION: pause the cluster before calling this function
+    pub async fn risectl_flush_connector(&self) -> MetaResult<()> {
+        use std::collections::BTreeMap;
+
+        use risingwave_common::util::stream_graph_visitor::visit_stream_node_mut;
+        use risingwave_pb::secret::PbSecretRef;
+
+        use crate::error::MetaErrorInner;
+
+        let inner = self.inner.read().await;
+        let txn = inner.db.begin().await?;
+
+        let fragments: Vec<(FragmentId, StreamNode)> = Fragment::find()
+            .select_only()
+            .columns([fragment::Column::FragmentId, fragment::Column::StreamNode])
+            .into_tuple()
+            .all(&txn)
+            .await?;
+
+        let connections: HashMap<_, _> = Connection::find()
+            .select_only()
+            .columns([connection::Column::ConnectionId, connection::Column::Params])
+            .into_tuple::<(ConnectionId, ConnectionParams)>()
+            .all(&txn)
+            .await?
+            .into_iter()
+            .map(|(connection_id, params)| (connection_id, params.to_protobuf()))
+            .collect();
+
+        type PropsAndSecretRef = (BTreeMap<String, String>, BTreeMap<String, PbSecretRef>);
+        let sources: HashMap<SourceId, PropsAndSecretRef> = Source::find()
+            .select_only()
+            .columns([
+                source::Column::SourceId,
+                source::Column::WithProperties,
+                source::Column::SecretRef,
+                source::Column::ConnectionId,
+            ])
+            .into_tuple()
+            .all(&txn)
+            .await?
+            .into_iter()
+            .map(
+                |(source_id, with_properties, secret_ref, connection_id): (
+                    _,
+                    Property,
+                    Option<SecretRef>,
+                    Option<ConnectionId>,
+                )| {
+                    (
+                        source_id,
+                        with_properties.into_inner(),
+                        secret_ref.map(|secret_ref| secret_ref.to_protobuf()),
+                        connection_id,
+                    )
+                },
+            )
+            .map(
+                |(source_id, mut with_properties, secret_ref, connection_id)| {
+                    let mut secret_ref = secret_ref.unwrap_or_default();
+                    if let Some(connection_id) = connection_id {
+                        if let Some(connection_params) = connections.get(&connection_id).cloned() {
+                            // we dont check connection type because we assume the connection type is already checked when creating source/sink
+                            with_properties.extend(connection_params.properties.into_iter());
+                            secret_ref.extend(connection_params.secret_refs.into_iter());
+                        } else {
+                            return Err(MetaError::from(MetaErrorInner::CatalogIdNotFound(
+                                "Connection",
+                                connection_id.to_string(),
+                            )));
+                        }
+                    }
+
+                    Ok((source_id, (with_properties, secret_ref)))
+                },
+            )
+            .collect::<MetaResult<_>>()?;
+        let sinks: HashMap<SinkId, PropsAndSecretRef> = Sink::find()
+            .select_only()
+            .columns([
+                sink::Column::SinkId,
+                sink::Column::Properties,
+                sink::Column::SecretRef,
+                sink::Column::ConnectionId,
+            ])
+            .into_tuple::<(SinkId, Property, Option<SecretRef>, Option<ConnectionId>)>()
+            .all(&txn)
+            .await?
+            .into_iter()
+            .map(|(sink_id, with_properties, secret_ref, connection_id)| {
+                (
+                    sink_id,
+                    with_properties.into_inner(),
+                    secret_ref.map(|secret_ref| secret_ref.to_protobuf()),
+                    connection_id,
+                )
+            })
+            .map(
+                |(sink_id, mut with_properties, secret_ref, connection_id)| {
+                    let mut secret_ref = secret_ref.unwrap_or_default();
+                    if let Some(connection_id) = connection_id {
+                        if let Some(connection_params) = connections.get(&connection_id).cloned() {
+                            // we dont check connection type because we assume the connection type is already checked when creating source/sink
+                            with_properties.extend(connection_params.properties.into_iter());
+                            secret_ref.extend(connection_params.secret_refs.into_iter());
+                        } else {
+                            return Err(MetaError::from(MetaErrorInner::CatalogIdNotFound(
+                                "Connection",
+                                connection_id.to_string(),
+                            )));
+                        }
+                    }
+
+                    Ok((sink_id, (with_properties, secret_ref)))
+                },
+            )
+            .collect::<MetaResult<_>>()?;
+
+        for (fragment_id, stream_node) in fragments {
+            let mut update_flag = false;
+            let mut stream_node = stream_node.to_protobuf();
+            visit_stream_node_mut(&mut stream_node, |node| match node {
+                NodeBody::Source(source) => {
+                    if let Some(source_inner) = source.source_inner.as_mut() {
+                        let Some((new_with_properties, new_secret_ref)) =
+                            sources.get(&(source_inner.source_id as i32))
+                        else {
+                            unreachable!(
+                                "source {} not found in fragment {}",
+                                source_inner.source_id, fragment_id
+                            );
+                        };
+
+                        source_inner.with_properties.extend(
+                            new_with_properties
+                                .iter()
+                                .map(|(k, v)| (k.clone(), v.clone())),
+                        );
+                        source_inner
+                            .secret_refs
+                            .extend(new_secret_ref.iter().map(|(k, v)| (k.clone(), *v)));
+                        update_flag = true;
+                    }
+                }
+                NodeBody::Sink(sink) => {
+                    if let Some(sink_desc) = sink.sink_desc.as_mut() {
+                        let Some((new_with_properties, new_secret_ref)) =
+                            sinks.get(&(sink_desc.id as i32))
+                        else {
+                            unreachable!(
+                                "sink {} not found in fragment {}",
+                                sink_desc.id, fragment_id
+                            );
+                        };
+
+                        sink_desc.properties.extend(
+                            new_with_properties
+                                .iter()
+                                .map(|(k, v)| (k.clone(), v.clone())),
+                        );
+                        sink_desc
+                            .secret_refs
+                            .extend(new_secret_ref.iter().map(|(k, v)| (k.clone(), *v)));
+                        update_flag = true;
+                    }
+                }
+                _ => {}
+            });
+            if update_flag {
+                Fragment::update_many()
+                    .col_expr(
+                        fragment::Column::StreamNode,
+                        StreamNode::from(&stream_node).into(),
+                    )
+                    .filter(fragment::Column::FragmentId.eq(fragment_id))
+                    .exec(&txn)
+                    .await?;
+            }
+        }
+
+        txn.commit().await?;
+        Ok(())
     }
 }
