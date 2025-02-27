@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::util::stream_graph_visitor::{visit_stream_node, visit_stream_node_mut};
 use risingwave_meta_model::{ConnectionParams, SecretRef};
 
 use super::*;
@@ -534,27 +535,98 @@ impl CatalogController {
     /// expect to change the source/sink table first and then call this function to apply to fragments
     ///
     /// CAUTION: pause the cluster before calling this function
-    pub async fn risectl_flush_connector(&self) -> MetaResult<()> {
-        use std::collections::BTreeMap;
-
-        use risingwave_common::util::stream_graph_visitor::visit_stream_node_mut;
-        use risingwave_pb::secret::PbSecretRef;
-
-        use crate::error::MetaErrorInner;
-
+    pub async fn risectl_flush_connector(&self, job_id: ObjectId) -> MetaResult<()> {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
 
         let fragments: Vec<(FragmentId, StreamNode)> = Fragment::find()
             .select_only()
             .columns([fragment::Column::FragmentId, fragment::Column::StreamNode])
+            .filter(fragment::Column::JobId.eq(job_id))
             .into_tuple()
             .all(&txn)
             .await?;
 
-        let connections: HashMap<_, _> = Connection::find()
+        let mut rely_sources = HashSet::new();
+        let mut rely_sinks = HashSet::new();
+        let mut rely_connections = HashSet::new();
+
+        for (_, stream_node) in &fragments {
+            visit_stream_node(&stream_node.to_protobuf(), |node| match &node {
+                NodeBody::Source(source) => {
+                    source.source_inner.iter().for_each(|source| {
+                        rely_sources.insert(source.source_id as i32);
+                    });
+                }
+                NodeBody::Sink(sink) => {
+                    if let Some(sink_desc) = &sink.sink_desc {
+                        rely_sinks.insert(sink_desc.id as i32);
+                    }
+                }
+                _ => {}
+            });
+        }
+
+        let mut source_id_props_mapping = Source::find()
+            .select_only()
+            .columns([
+                source::Column::SourceId,
+                source::Column::ConnectionId,
+                source::Column::WithProperties,
+                source::Column::SecretRef,
+            ])
+            .filter(source::Column::SourceId.is_in(rely_sources))
+            .into_tuple::<(SourceId, Option<ConnectionId>, Property, Option<SecretRef>)>()
+            .all(&txn)
+            .await?
+            .into_iter()
+            .map(|(source_id, connection_id, with_properties, secret_ref)| {
+                connection_id.iter().for_each(|id| {
+                    rely_connections.insert(*id);
+                });
+                (
+                    source_id,
+                    (
+                        connection_id,
+                        with_properties.into_inner(),
+                        secret_ref.unwrap_or_default().to_protobuf(),
+                    ),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+
+        let mut sinks_id_props_mapping = Sink::find()
+            .select_only()
+            .columns([
+                sink::Column::SinkId,
+                sink::Column::ConnectionId,
+                sink::Column::Properties,
+                sink::Column::SecretRef,
+            ])
+            .filter(sink::Column::SinkId.is_in(rely_sinks))
+            .into_tuple::<(SinkId, Option<ConnectionId>, Property, Option<SecretRef>)>()
+            .all(&txn)
+            .await?
+            .into_iter()
+            .map(|(sink_id, connection_id, with_properties, secret_ref)| {
+                connection_id.iter().for_each(|id| {
+                    rely_connections.insert(*id);
+                });
+                (
+                    sink_id,
+                    (
+                        connection_id,
+                        with_properties.into_inner(),
+                        secret_ref.unwrap_or_default().to_protobuf(),
+                    ),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+
+        let connections_id_mapping: HashMap<_, _> = Connection::find()
             .select_only()
             .columns([connection::Column::ConnectionId, connection::Column::Params])
+            .filter(connection::Column::ConnectionId.is_in(rely_connections))
             .into_tuple::<(ConnectionId, ConnectionParams)>()
             .all(&txn)
             .await?
@@ -562,94 +634,46 @@ impl CatalogController {
             .map(|(connection_id, params)| (connection_id, params.to_protobuf()))
             .collect();
 
-        type PropsAndSecretRef = (BTreeMap<String, String>, BTreeMap<String, PbSecretRef>);
-        let sources: HashMap<SourceId, PropsAndSecretRef> = Source::find()
-            .select_only()
-            .columns([
-                source::Column::SourceId,
-                source::Column::WithProperties,
-                source::Column::SecretRef,
-                source::Column::ConnectionId,
-            ])
-            .into_tuple()
-            .all(&txn)
-            .await?
-            .into_iter()
-            .map(
-                |(source_id, with_properties, secret_ref, connection_id): (
-                    _,
-                    Property,
-                    Option<SecretRef>,
-                    Option<ConnectionId>,
-                )| {
-                    (
-                        source_id,
-                        with_properties.into_inner(),
-                        secret_ref.map(|secret_ref| secret_ref.to_protobuf()),
-                        connection_id,
-                    )
-                },
-            )
-            .map(
-                |(source_id, mut with_properties, secret_ref, connection_id)| {
-                    let mut secret_ref = secret_ref.unwrap_or_default();
-                    if let Some(connection_id) = connection_id {
-                        if let Some(connection_params) = connections.get(&connection_id).cloned() {
-                            // we dont check connection type because we assume the connection type is already checked when creating source/sink
-                            with_properties.extend(connection_params.properties.into_iter());
-                            secret_ref.extend(connection_params.secret_refs.into_iter());
-                        } else {
-                            return Err(MetaError::from(MetaErrorInner::CatalogIdNotFound(
-                                "Connection",
-                                connection_id.to_string(),
-                            )));
-                        }
-                    }
-
-                    Ok((source_id, (with_properties, secret_ref)))
-                },
-            )
-            .collect::<MetaResult<_>>()?;
-        let sinks: HashMap<SinkId, PropsAndSecretRef> = Sink::find()
-            .select_only()
-            .columns([
-                sink::Column::SinkId,
-                sink::Column::Properties,
-                sink::Column::SecretRef,
-                sink::Column::ConnectionId,
-            ])
-            .into_tuple::<(SinkId, Property, Option<SecretRef>, Option<ConnectionId>)>()
-            .all(&txn)
-            .await?
-            .into_iter()
-            .map(|(sink_id, with_properties, secret_ref, connection_id)| {
-                (
-                    sink_id,
-                    with_properties.into_inner(),
-                    secret_ref.map(|secret_ref| secret_ref.to_protobuf()),
-                    connection_id,
-                )
-            })
-            .map(
-                |(sink_id, mut with_properties, secret_ref, connection_id)| {
-                    let mut secret_ref = secret_ref.unwrap_or_default();
-                    if let Some(connection_id) = connection_id {
-                        if let Some(connection_params) = connections.get(&connection_id).cloned() {
-                            // we dont check connection type because we assume the connection type is already checked when creating source/sink
-                            with_properties.extend(connection_params.properties.into_iter());
-                            secret_ref.extend(connection_params.secret_refs.into_iter());
-                        } else {
-                            return Err(MetaError::from(MetaErrorInner::CatalogIdNotFound(
-                                "Connection",
-                                connection_id.to_string(),
-                            )));
-                        }
-                    }
-
-                    Ok((sink_id, (with_properties, secret_ref)))
-                },
-            )
-            .collect::<MetaResult<_>>()?;
+        source_id_props_mapping
+            .iter_mut()
+            .for_each(|(_, (connection_id, props, secret_ref))| {
+                if let Some(conn_id) = connection_id
+                    && let Some(conn_params) = connections_id_mapping.get(conn_id)
+                {
+                    props.extend(
+                        conn_params
+                            .get_properties()
+                            .iter()
+                            .map(|(k, v)| (k.clone(), v.clone())),
+                    );
+                    secret_ref.extend(
+                        conn_params
+                            .get_secret_refs()
+                            .iter()
+                            .map(|(k, v)| (k.clone(), *v)),
+                    );
+                }
+            });
+        sinks_id_props_mapping
+            .iter_mut()
+            .for_each(|(_, (connection_id, props, secret_ref))| {
+                if let Some(conn_id) = connection_id
+                    && let Some(conn_params) = connections_id_mapping.get(conn_id)
+                {
+                    props.extend(
+                        conn_params
+                            .get_properties()
+                            .iter()
+                            .map(|(k, v)| (k.clone(), v.clone())),
+                    );
+                    secret_ref.extend(
+                        conn_params
+                            .get_secret_refs()
+                            .iter()
+                            .map(|(k, v)| (k.clone(), *v)),
+                    );
+                }
+            });
 
         for (fragment_id, stream_node) in fragments {
             let mut update_flag = false;
@@ -657,8 +681,8 @@ impl CatalogController {
             visit_stream_node_mut(&mut stream_node, |node| match node {
                 NodeBody::Source(source) => {
                     if let Some(source_inner) = source.source_inner.as_mut() {
-                        let Some((new_with_properties, new_secret_ref)) =
-                            sources.get(&(source_inner.source_id as i32))
+                        let Some((_, new_with_properties, new_secret_ref)) =
+                            source_id_props_mapping.get(&(source_inner.source_id as i32))
                         else {
                             unreachable!(
                                 "source {} not found in fragment {}",
@@ -666,21 +690,15 @@ impl CatalogController {
                             );
                         };
 
-                        source_inner.with_properties.extend(
-                            new_with_properties
-                                .iter()
-                                .map(|(k, v)| (k.clone(), v.clone())),
-                        );
-                        source_inner
-                            .secret_refs
-                            .extend(new_secret_ref.iter().map(|(k, v)| (k.clone(), *v)));
+                        source_inner.with_properties = new_with_properties.clone();
+                        source_inner.secret_refs = new_secret_ref.clone();
                         update_flag = true;
                     }
                 }
                 NodeBody::Sink(sink) => {
                     if let Some(sink_desc) = sink.sink_desc.as_mut() {
-                        let Some((new_with_properties, new_secret_ref)) =
-                            sinks.get(&(sink_desc.id as i32))
+                        let Some((_, new_with_properties, new_secret_ref)) =
+                            sinks_id_props_mapping.get(&(sink_desc.id as i32))
                         else {
                             unreachable!(
                                 "sink {} not found in fragment {}",
@@ -688,14 +706,8 @@ impl CatalogController {
                             );
                         };
 
-                        sink_desc.properties.extend(
-                            new_with_properties
-                                .iter()
-                                .map(|(k, v)| (k.clone(), v.clone())),
-                        );
-                        sink_desc
-                            .secret_refs
-                            .extend(new_secret_ref.iter().map(|(k, v)| (k.clone(), *v)));
+                        sink_desc.properties = new_with_properties.clone();
+                        sink_desc.secret_refs = new_secret_ref.clone();
                         update_flag = true;
                     }
                 }
