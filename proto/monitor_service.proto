@@ -93,6 +93,9 @@ message TieredCacheTracingRequest {
 
 message TieredCacheTracingResponse {}
 
+message ProfileStatsRequest {}
+message ProfileStatsResponse {}
+
 service MonitorService {
   rpc StackTrace(StackTraceRequest) returns (StackTraceResponse);
   rpc Profiling(ProfilingRequest) returns (ProfilingResponse);
@@ -101,4 +104,5 @@ service MonitorService {
   rpc AnalyzeHeap(AnalyzeHeapRequest) returns (AnalyzeHeapResponse);
   rpc GetStreamingStats(GetStreamingStatsRequest) returns (GetStreamingStatsResponse);
   rpc TieredCacheTracing(TieredCacheTracingRequest) returns (TieredCacheTracingResponse);
+  rpc GetProfileStats(ProfileStatsRequest) returns (ProfileStatsResponse);
 }

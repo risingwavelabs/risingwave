@@ -12,6 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod in_mem_stats;
-pub mod streaming_stats;
-pub use streaming_stats::*;
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::sync::atomic::AtomicU32;
+
+use parking_lot::RwLock;
+
+pub type Count = Arc<AtomicU32>;
+
+#[derive(Clone)]
+pub struct CountMap(Arc<RwLock<HashMap<u32, Count>>>);
+
+impl CountMap {
+    pub(crate) fn new() -> Self {
+        CountMap(Arc::new(RwLock::new(HashMap::new())))
+    }
+
+    pub(crate) fn new_counter(&self, id: u32) -> Count {
+        let mut map = self.0.write();
+        let counter = Arc::new(AtomicU32::new(0));
+        map.insert(id, counter.clone());
+        counter
+    }
+}
