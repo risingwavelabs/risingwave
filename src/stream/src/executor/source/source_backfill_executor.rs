@@ -634,6 +634,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                     );
 
                                     let barrier_epoch = barrier.epoch;
+                                    let is_checkpoint = barrier.is_checkpoint();
                                     // yield barrier after reporting progress
                                     yield Message::Barrier(barrier);
 
@@ -648,7 +649,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                         .await?;
                                     }
 
-                                    if !state_table_initialized {
+                                    if !state_table_initialized && is_checkpoint {
                                         // This is for self.backfill_finished() to be safe: wait until this actor can read all actors' written data.
                                         // We wait for 2nd epoch
                                         let epoch = barrier_epoch.prev;
