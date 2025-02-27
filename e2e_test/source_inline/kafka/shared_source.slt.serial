@@ -246,6 +246,7 @@ internal_table.mjs --name s0 --type source
 2,"{""split_info"": {""partition"": 2, ""start_offset"": 12, ""stop_offset"": null, ""topic"": ""shared_source""}, ""split_type"": ""kafka""}"
 3,"{""split_info"": {""partition"": 3, ""start_offset"": 13, ""stop_offset"": null, ""topic"": ""shared_source""}, ""split_type"": ""kafka""}"
 
+
 # Test: rate limit and resume won't lose data
 
 statement ok
