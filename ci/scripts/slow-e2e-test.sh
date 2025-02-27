@@ -28,8 +28,8 @@ download_and_prepare_rw "$profile" common
 
 
 echo "--- Download artifacts"
-mkdir -p e2e_test/udf/wasm/target/wasm32-wasi/release/
-buildkite-agent artifact download udf.wasm e2e_test/udf/wasm/target/wasm32-wasi/release/
+mkdir -p e2e_test/udf/wasm/target/wasm32-wasip1/release/
+buildkite-agent artifact download udf.wasm e2e_test/udf/wasm/target/wasm32-wasip1/release/
 buildkite-agent artifact download udf.jar ./
 
 echo "--- e2e, $mode, slow tests"

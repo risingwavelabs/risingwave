@@ -7,8 +7,8 @@ source ci/scripts/common.sh
 
 echo "--- Build Rust UDF"
 cd e2e_test/udf/wasm
-rustup target add wasm32-wasi
-cargo build --release --target wasm32-wasi
+rustup target add wasm32-wasip1
+cargo build --release --target wasm32-wasip1
 cd ../../..
 
 echo "--- Build Java packages"
@@ -35,7 +35,7 @@ tar --zstd -cf java-binding-integration-test.tar.zst bin java/java-binding-integ
 echo "--- Upload built artifacts"
 cp java/connector-node/assembly/target/risingwave-connector-1.0.0.tar.gz ./risingwave-connector.tar.gz
 cp e2e_test/udf/java/target/risingwave-udf-example.jar ./udf.jar
-cp e2e_test/udf/wasm/target/wasm32-wasi/release/udf.wasm udf.wasm
+cp e2e_test/udf/wasm/target/wasm32-wasip1/release/udf.wasm udf.wasm
 buildkite-agent artifact upload ./risingwave-connector.tar.gz
 buildkite-agent artifact upload ./java-binding-integration-test.tar.zst
 buildkite-agent artifact upload ./udf.jar
