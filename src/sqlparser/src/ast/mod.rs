@@ -1632,10 +1632,19 @@ pub enum Statement {
 }
 
 impl fmt::Display for Statement {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut buf = String::new();
+        self.fmt_inner(&mut buf)?;
+        let _ = Parser::parse_sql(&buf).unwrap();
+        f.write_str(&buf)
+    }
+}
+
+impl Statement {
     // Clippy thinks this function is too complicated, but it is painful to
     // split up without extracting structs for each `Statement` variant.
     #[allow(clippy::cognitive_complexity)]
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt_inner(&self, mut f: impl std::fmt::Write) -> fmt::Result {
         match self {
             Statement::Explain {
                 analyze,
@@ -1647,9 +1656,9 @@ impl fmt::Display for Statement {
                 if *analyze {
                     write!(f, "ANALYZE ")?;
                 }
-                options.fmt(f)?;
+                write!(f, "{}", options)?;
 
-                write!(f, "{}", statement)
+                statement.fmt_inner(f)
             }
             Statement::Query(s) => write!(f, "{}", s),
             Statement::Truncate { table_name } => {
@@ -2214,7 +2223,8 @@ impl fmt::Display for Statement {
                 if !data_types.is_empty() {
                     write!(f, "({}) ", display_comma_separated(data_types))?;
                 }
-                write!(f, "AS {}", statement)
+                write!(f, "AS ")?;
+                statement.fmt_inner(f)
             }
             Statement::Comment {
                 object_type,
