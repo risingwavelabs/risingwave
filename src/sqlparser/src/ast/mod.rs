@@ -2822,24 +2822,12 @@ impl fmt::Display for SqlOption {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum SqlOptionValue {
     Value(Value),
     SecretRef(SecretRefValue),
     ConnectionRef(ConnectionRefValue),
-}
-
-impl fmt::Debug for SqlOptionValue {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            SqlOptionValue::Value(value) => write!(f, "{:?}", value),
-            SqlOptionValue::SecretRef(secret_ref) => write!(f, "secret {:?}", secret_ref),
-            SqlOptionValue::ConnectionRef(connection_ref) => {
-                write!(f, "connection {:?}", connection_ref)
-            }
-        }
-    }
 }
 
 impl fmt::Display for SqlOptionValue {
