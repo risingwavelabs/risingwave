@@ -1612,6 +1612,14 @@ pub enum Statement {
         /// options of the explain statement
         options: ExplainOptions,
     },
+    /// EXPLAIN ANALYZE for stream job
+    /// We introduce a new statement rather than reuse `EXPLAIN` because
+    /// the body of the statement is not an SQL query.
+    /// FIXME(kwannoel): Support SINK s, MATERIALIZED VIEW s, etc...
+    /// TODO(kwannoel): Make profiling duration configurable: EXPLAIN ANALYZE (DURATION 1s) ...
+    ExplainAnalyzeStreamJob {
+        job_id: u32,
+    },
     /// CREATE USER
     CreateUser(CreateUserStatement),
     /// ALTER USER
@@ -1657,6 +1665,9 @@ impl fmt::Display for Statement {
                 options.fmt(f)?;
 
                 write!(f, "{}", statement)
+            }
+            Statement::ExplainAnalyzeStreamJob { job_id } => {
+                write!(f, "EXPLAIN ANALYZE {}", job_id)
             }
             Statement::Query(s) => write!(f, "{}", s),
             Statement::Truncate { table_name } => {
