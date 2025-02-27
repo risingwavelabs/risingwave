@@ -109,8 +109,10 @@ fn render_graph_with_metrics(
 
         let child_prefix = if is_root {
             ""
+        } else if last_child {
+            "   "
         } else {
-            if last_child { "   " } else { "│  " }
+            "│  "
         };
         let child_prefix = format!("{}{}", prefix, child_prefix);
 
@@ -125,11 +127,7 @@ fn render_graph_with_metrics(
         ];
         rows.push(row);
         for (position, dependency) in node.dependencies.iter().enumerate() {
-            stack.push((
-                child_prefix.clone(),
-                position == 0,
-                *dependency,
-            ));
+            stack.push((child_prefix.clone(), position == 0, *dependency));
         }
     }
     rows
