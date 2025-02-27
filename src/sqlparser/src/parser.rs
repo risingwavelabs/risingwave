@@ -4278,6 +4278,12 @@ impl Parser<'_> {
             self.expect_token(&Token::RParen)?;
         }
 
+        if analyze {
+            let job_id = self.parse_literal_uint()? as u32;
+            let statement = Statement::ExplainAnalyzeStreamJob { job_id };
+            return Ok(statement);
+        }
+
         let statement = self.parse_statement()?;
         Ok(Statement::Explain {
             analyze,
