@@ -1034,7 +1034,6 @@ impl<R: RangeKv> LocalStateStore for RangeKvLocalStateStore<R> {
                             &key,
                             &value,
                             sanity_check_read_snapshot,
-                            self.table_id,
                             self.table_option,
                             &self.op_consistency_level,
                         )
@@ -1048,7 +1047,6 @@ impl<R: RangeKv> LocalStateStore for RangeKvLocalStateStore<R> {
                             &key,
                             &old_value,
                             sanity_check_read_snapshot,
-                            self.table_id,
                             self.table_option,
                             &self.op_consistency_level,
                         )
@@ -1063,7 +1061,6 @@ impl<R: RangeKv> LocalStateStore for RangeKvLocalStateStore<R> {
                             &old_value,
                             &new_value,
                             sanity_check_read_snapshot,
-                            self.table_id,
                             self.table_option,
                             &self.op_consistency_level,
                         )
@@ -1448,7 +1445,7 @@ mod tests {
     use crate::hummock::iterator::test_utils::{
         iterator_test_table_key_of, iterator_test_value_of,
     };
-    use crate::hummock::test_utils::StateStoreReadTestExt;
+    use crate::hummock::test_utils::{ReadOptions, *};
     use crate::memory::sled::SledStateStore;
 
     #[tokio::test]
@@ -1570,7 +1567,7 @@ mod tests {
         );
         assert_eq!(
             state_store
-                .get(TableKey(Bytes::from("a")), 0, ReadOptions::default(),)
+                .get(TableKey(Bytes::from("a")), 0, ReadOptions::default())
                 .await
                 .unwrap(),
             Some(Bytes::from("v1"))

@@ -639,7 +639,6 @@ async fn open_hummock_iters(
             .iter(
                 range.clone(),
                 ReadOptions {
-                    table_id: TableId { table_id },
                     cache_policy: CachePolicy::Fill(CacheHint::Normal),
                     ..Default::default()
                 },
