@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
+use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::list_table_fragments_response::FragmentInfo;
 
 use crate::error::Result;
@@ -46,12 +47,40 @@ struct StreamNode {
     dependencies: Vec<u32>,
 }
 
-async fn list_stream_worker_nodes(env: &FrontendEnv) -> Result<()> {
+async fn list_stream_worker_nodes(env: &FrontendEnv) -> Result<Vec<WorkerNode>> {
     let worker_nodes = env.meta_client().list_all_nodes().await?;
     let stream_worker_nodes = worker_nodes
         .into_iter()
         .filter(|node| node.property.as_ref().unwrap().is_streaming)
         .collect::<Vec<_>>();
+    Ok(stream_worker_nodes)
+}
+
+type OperatorId = u32;
+
+struct StreamNodeMetrics {
+    operator_id: OperatorId,
+    epoch: u32,
+    total_input_throughput: u32,
+    total_output_throughput: u32,
+    total_input_latency: u32,
+    total_output_latency: u32,
+}
+
+struct StreamNodeStats {
+    inner: HashMap<OperatorId, StreamNodeMetrics>,
+}
+
+async fn get_stream_node_stats(
+    env: &FrontendEnv,
+    worker_nodes: &[WorkerNode],
+) -> Result<StreamNodeStats> {
+    for node in worker_nodes {
+        let compute_client = env.client_pool().get(node).await?;
+        // TODO
+        // compute_client.monitor_client.get_profile_stats()
+    }
+    todo!()
 }
 
 fn extract_stream_node_infos(fragments: Vec<FragmentInfo>) -> HashMap<u32, StreamNode> {
