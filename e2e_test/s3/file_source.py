@@ -287,7 +287,7 @@ def check_for_new_files(file_num, item_num_per_file, fmt):
 
 
 if __name__ == "__main__":
-    FILE_NUM = 400
+    FILE_NUM = 2000
     ITEM_NUM_PER_FILE = 4
     data = gen_data(FILE_NUM, ITEM_NUM_PER_FILE)
 
@@ -356,8 +356,8 @@ if __name__ == "__main__":
     # clean up s3 files
     for idx, _ in enumerate(formatted_files):
         client.remove_object("hummock001", _s3(idx, 0))
-        
-        
+
+
     # test file source handle incremental files
     data = gen_data(FILE_NUM, ITEM_NUM_PER_FILE)
     fmt = "json"
@@ -366,7 +366,7 @@ if __name__ == "__main__":
     data_batch1 = data[:split_idx]
     data_batch2 = data[split_idx:]
     run_id = str(random.randint(1000, 9999))
-    print(f"S3 Source New File Test: run ID: {run_id} to buckek")
+    print(f"S3 Source New File Test: run ID: {run_id} to bucket")
 
     formatted_batch1 = FORMATTER[fmt](data_batch1)
     upload_to_s3_bucket(config, client, run_id, formatted_batch1, 0, "test_incremental/")

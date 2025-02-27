@@ -876,7 +876,7 @@ def section_streaming(outer_panels):
                             f"sum(rate({metric('file_source_input_row_count')}[$__rate_interval])) by (source_id, source_name, fragment_id)",
                             "{{source_name}} source_id {{source_id}} (fragment {{fragment_id}})",
                         ),
-                        
+
                     ],
                 ),
                 panels.timeseries_rowsps(

@@ -22,9 +22,7 @@ use risingwave_common::bail;
 use risingwave_common::row::Row;
 use risingwave_common_rate_limit::RateLimiter;
 use risingwave_connector::error::ConnectorError;
-use risingwave_connector::source::{
-    BoxSourceChunkStream, BoxStreamingFileSourceChunkStream, SourceColumnDesc, SplitId,
-};
+use risingwave_connector::source::{BoxSourceChunkStream, SourceColumnDesc, SplitId};
 use risingwave_pb::plan_common::additional_column::ColumnType;
 use risingwave_pb::plan_common::AdditionalColumn;
 pub use state_table_handler::*;
@@ -136,67 +134,29 @@ pub async fn apply_rate_limit(stream: BoxSourceChunkStream, rate_limit_rps: Opti
     #[for_await]
     for chunk in stream {
         let chunk = chunk?;
-        yield process_chunk(chunk, rate_limit_rps, &limiter).await;
-    }
-}
+        let chunk_size = chunk.capacity();
 
-#[try_stream(ok = Option<StreamChunk>, error = ConnectorError)]
-pub async fn apply_rate_limit_with_for_streaming_file_source_reader(
-    stream: BoxStreamingFileSourceChunkStream,
-    rate_limit_rps: Option<u32>,
-) {
-    if rate_limit_rps == Some(0) {
-        // block the stream until the rate limit is reset
-        let future = futures::future::pending::<()>();
-        future.await;
-        unreachable!();
-    }
-
-    let limiter = RateLimiter::new(
-        rate_limit_rps
-            .inspect(|limit| tracing::info!(rate_limit = limit, "rate limit applied"))
-            .into(),
-    );
-
-    #[for_await]
-    for chunk in stream {
-        let chunk_option = chunk?;
-        match chunk_option {
-            Some(chunk) => {
-                let processed_chunk = process_chunk(chunk, rate_limit_rps, &limiter).await;
-                yield Some(processed_chunk);
-            }
-            None => yield None,
+        if rate_limit_rps.is_none() || chunk_size == 0 {
+            // no limit, or empty chunk
+            yield chunk;
+            continue;
         }
+
+        let limit = rate_limit_rps.unwrap() as u64;
+        let required_permits = chunk.compute_rate_limit_chunk_permits();
+        if required_permits > limit {
+            // This should not happen after the mentioned PR.
+            tracing::error!(
+                chunk_size,
+                required_permits,
+                limit,
+                "unexpected large chunk size"
+            );
+        }
+
+        limiter.wait(required_permits).await;
+        yield chunk;
     }
-}
-
-async fn process_chunk(
-    chunk: StreamChunk,
-    rate_limit_rps: Option<u32>,
-    limiter: &RateLimiter,
-) -> StreamChunk {
-    let chunk_size = chunk.capacity();
-
-    if rate_limit_rps.is_none() || chunk_size == 0 {
-        // no limit, or empty chunk
-        return chunk;
-    }
-
-    let limit = rate_limit_rps.unwrap() as u64;
-    let required_permits = chunk.compute_rate_limit_chunk_permits();
-    if required_permits > limit {
-        // This should not happen after the mentioned PR.
-        tracing::error!(
-            chunk_size,
-            required_permits,
-            limit,
-            "unexpected large chunk size"
-        );
-    }
-
-    limiter.wait(required_permits).await;
-    chunk
 }
 
 pub fn get_infinite_backoff_strategy() -> impl Iterator<Item = Duration> {

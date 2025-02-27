@@ -18,6 +18,7 @@ use risingwave_common::array::arrow::arrow_array_iceberg::RecordBatch;
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::{ArrayBuilderImpl, DataChunk, StreamChunk};
 use risingwave_common::types::{Datum, ScalarImpl};
+use tokio_stream::StreamExt;
 
 use crate::parser::ConnectorResult;
 use crate::source::iceberg::is_parquet_schema_match_source_schema;
@@ -57,14 +58,19 @@ impl ParquetParser {
             >,
         >,
     ) {
-        #[for_await]
-        for record_batch in record_batch_stream {
+        let mut record_batch_stream = record_batch_stream.peekable();
+        while let Some(record_batch) = record_batch_stream.next().await {
             let record_batch: RecordBatch = record_batch?;
+
+            let is_last = record_batch_stream.peek().await.is_none();
+
             // Convert each record batch into a stream chunk according to user defined schema.
             let chunk: StreamChunk = self.convert_record_batch_to_stream_chunk(
                 record_batch,
+                is_last,
                 file_source_input_row_count_metrics.clone(),
             )?;
+
             yield chunk;
         }
     }
@@ -96,6 +102,7 @@ impl ParquetParser {
     fn convert_record_batch_to_stream_chunk(
         &mut self,
         record_batch: RecordBatch,
+        is_last_chunk: bool,
         file_source_input_row_count_metrics: Option<
             risingwave_common::metrics::LabelGuardedMetric<
                 prometheus::core::GenericCounter<prometheus::core::AtomicU64>,
@@ -132,10 +139,18 @@ impl ParquetParser {
                         {
                             match additional_column_type {
                                 risingwave_pb::plan_common::additional_column::ColumnType::Offset(_) => {
-                                    let mut array_builder = ArrayBuilderImpl::with_type(column_size, source_column.data_type.clone());
-                                    for _ in 0..record_batch.num_rows() {
-                                        let datum: Datum = Some(ScalarImpl::Utf8((self.offset).to_string().into()));
-                                        self.inc_offset();
+                                    let mut array_builder =
+                                    ArrayBuilderImpl::with_type(column_size, source_column.data_type.clone());
+                                    for i in 0..record_batch.num_rows(){
+                                        // Set the offset of the last line of each file to usize::MAX to indicate that the file has been read to the end.
+                                        let datum: Datum = if is_last_chunk && i == record_batch.num_rows() - 1 {
+                                            Some(ScalarImpl::Utf8((usize::MAX).to_string().into()))
+                                        } else {
+                                            Some(ScalarImpl::Utf8((self.offset).to_string().into()))
+                                        };
+                                        if !(is_last_chunk && i == record_batch.num_rows() - 1) {
+                                            self.inc_offset();
+                                        }
                                         array_builder.append(datum);
                                     }
                                     Arc::new(array_builder.finish())
