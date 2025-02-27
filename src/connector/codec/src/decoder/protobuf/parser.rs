@@ -18,11 +18,11 @@ use anyhow::Context;
 use itertools::Itertools;
 use prost_reflect::{Cardinality, FieldDescriptor, Kind, MessageDescriptor, ReflectMessage, Value};
 use risingwave_common::array::{ListValue, StructValue};
+use risingwave_common::catalog::Field;
 use risingwave_common::types::{
     DataType, DatumCow, Decimal, F32, F64, JsonbVal, MapType, MapValue, ScalarImpl, StructType,
     ToOwnedDatum,
 };
-use risingwave_pb::plan_common::ColumnDesc;
 use thiserror::Error;
 use thiserror_ext::Macro;
 
@@ -30,19 +30,18 @@ use crate::decoder::{AccessError, AccessResult, uncategorized};
 
 pub const PROTOBUF_MESSAGES_AS_JSONB: &str = "messages_as_jsonb";
 
-pub fn pb_schema_to_column_descs(
+pub fn pb_schema_to_fields(
     message_descriptor: &MessageDescriptor,
     messages_as_jsonb: &HashSet<String>,
-) -> anyhow::Result<Vec<ColumnDesc>> {
+) -> anyhow::Result<Vec<Field>> {
     let mut parse_trace: Vec<String> = vec![];
     message_descriptor
         .fields()
         .map(|field| {
-            use risingwave_common::catalog::{ColumnDesc, ColumnId};
             let field_type = protobuf_type_mapping(&field, &mut parse_trace, messages_as_jsonb)
                 .context("failed to map protobuf type")?;
-            let desc = ColumnDesc::named(field.name(), ColumnId::placeholder(), field_type);
-            Ok(desc.to_protobuf())
+            let column = Field::new(field.name(), field_type);
+            Ok(column)
         })
         .collect()
 }

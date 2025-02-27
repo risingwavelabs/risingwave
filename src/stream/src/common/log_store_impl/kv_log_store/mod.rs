@@ -24,7 +24,8 @@ use risingwave_connector::sink::log_store::LogStoreFactory;
 use risingwave_pb::catalog::Table;
 use risingwave_storage::StateStore;
 use risingwave_storage::store::{LocalStateStore, NewLocalOptions, OpConsistencyLevel};
-use tokio::sync::watch;
+use tokio::sync::mpsc::unbounded_channel;
+use tokio::sync::{oneshot, watch};
 
 use crate::common::log_store_impl::kv_log_store::buffer::new_log_store_buffer;
 use crate::common::log_store_impl::kv_log_store::reader::KvLogStoreReader;
@@ -409,6 +410,9 @@ impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
     type Reader = KvLogStoreReader<<S::Local as LocalStateStore>::FlushedSnapshotReader>;
     type Writer = KvLogStoreWriter<S::Local>;
 
+    const ALLOW_REWIND: bool = true;
+    const REBUILD_SINK_ON_UPDATE_VNODE_BITMAP: bool = true;
+
     async fn build(self) -> (Self::Reader, Self::Writer) {
         let table_id = TableId::new(self.table_catalog.id);
         let (pause_tx, pause_rx) = watch::channel(false);
@@ -430,9 +434,14 @@ impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
 
         let (read_state, write_state) = new_log_store_state(table_id, local_state_store, serde);
 
+        let (init_epoch_tx, init_epoch_rx) = oneshot::channel();
+        let (update_vnode_bitmap_tx, update_vnode_bitmap_rx) = unbounded_channel();
+
         let reader = KvLogStoreReader::new(
             read_state,
             rx,
+            init_epoch_rx,
+            update_vnode_bitmap_rx,
             self.metrics.clone(),
             pause_rx,
             self.identity.clone(),
@@ -442,6 +451,8 @@ impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
         let writer = KvLogStoreWriter::new(
             write_state,
             tx,
+            init_epoch_tx,
+            update_vnode_bitmap_tx,
             self.metrics,
             pause_tx,
             self.identity,

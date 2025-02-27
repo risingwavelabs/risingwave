@@ -14,11 +14,10 @@
 
 use std::fs;
 
-use risingwave_common::catalog::ColumnDesc;
 use risingwave_connector_codec::JsonSchema;
 use url::Url;
 
-use crate::utils::{ColumnDescTestDisplay, *};
+use crate::utils::{FieldTestDisplay, *};
 
 #[tokio::test]
 async fn test_json_schema_parse() {
@@ -101,11 +100,8 @@ async fn test_json_schema_parse() {
     let columns = json_schema
         .json_schema_to_columns(Url::parse("http://test_schema_uri.test").unwrap())
         .await
-        .unwrap()
-        .into_iter()
-        .map(ColumnDesc::from)
-        .collect_vec();
-    let column_display = columns.iter().map(ColumnDescTestDisplay).collect_vec();
+        .unwrap();
+    let column_display = columns.iter().map(FieldTestDisplay).collect_vec();
 
     expect![[r#"
         {
@@ -214,14 +210,14 @@ async fn test_json_schema_parse() {
 
     expect![[r#"
         [
-            cats(#2147483646): Jsonb,
-            id(#2147483646): Varchar,
-            meta(#2147483646): Struct {
+            cats: Jsonb,
+            id: Varchar,
+            meta: Struct {
                 active: Jsonb,
                 tags: Jsonb,
             },
-            name(#2147483646): Jsonb,
-            recurrent(#2147483646): Struct {
+            name: Jsonb,
+            recurrent: Struct {
                 id: Varchar,
                 next: Struct {
                     id: Varchar,
