@@ -98,6 +98,7 @@ pub fn atanh_f64(input: F64) -> F64 {
 static DEGREE_THIRTY: f64 = 30.0;
 static DEGREE_FORTY_FIVE: f64 = 45.0;
 static DEGREE_SIXTY: f64 = 60.0;
+static DEGREE_NINETY: f64 = 90.0;
 static DEGREE_ONE_HALF: f64 = 0.5;
 static DEGREE_ONE: f64 = 1.0;
 static RADIANS_PER_DEGREE: f64 = 0.017_453_292_519_943_295;
@@ -435,6 +436,32 @@ pub fn acosd_f64(input: F64) -> F64 {
         return F64::from(f64::NAN);
     }
     result.into()
+}
+
+// return the invert tangent of x in degrees, the inverse tangent function maps all inputs to
+// values in the range [-90, 90]. For the 5 special case inputs (0, 1, -1, +INF and -INF), this
+// function will return exact values (0, 45, -45, 90 and -90 degrees respectively).
+#[function("atand(float8) -> float8")]
+pub fn atand_f64(input: F64) -> F64 {
+    if input.0.is_nan() {
+        return F64::from(f64::NAN);
+    }
+
+    if input.0.is_infinite() {
+        if input.0.is_sign_positive() {
+            return DEGREE_NINETY.into();
+        } else {
+            return (-DEGREE_NINETY).into();
+        }
+    }
+
+    let atan_arg1 = atan_f64(input);
+    let result = (atan_arg1 / atan_f64(DEGREE_ONE.into())) * DEGREE_FORTY_FIVE;
+
+    if result.0.is_infinite() {
+        return F64::from(f64::NAN);
+    }
+    result
 }
 
 #[function("degrees(float8) -> float8")]

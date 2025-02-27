@@ -704,3 +704,34 @@ query R
 SELECT abs(acosd(1) - 0.0) < 1e-14
 ----
 t
+
+query R
+SELECT atand(0)
+----
+0
+
+query R
+SELECT atand(1)
+----
+45
+
+query R
+SELECT atand(-1)
+----
+-45
+
+query R
+SELECT atand('Inf')
+----
+90
+
+query R
+SELECT atand('-Inf')
+----
+-90
+
+query R
+SELECT atand('NaN')
+----
+NaN
+
