@@ -27,7 +27,7 @@ use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{ProjectNode, StreamFragmentGraph};
 use risingwave_sqlparser::ast::{
-    AlterColumnOperation, AlterTableOperation, ColumnOption, Ident, ObjectName, Statement,
+    AlterColumnOperation, AlterTableOperation, ColumnOption, ObjectName, Statement,
 };
 
 use super::create_source::SqlColumnStrategy;

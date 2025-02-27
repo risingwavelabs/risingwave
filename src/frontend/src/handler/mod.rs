@@ -771,8 +771,7 @@ pub async fn handle(
             | AlterTableOperation::DropConstraint { .. }
             | AlterTableOperation::RenameColumn { .. }
             | AlterTableOperation::ChangeColumn { .. }
-            | AlterTableOperation::RenameConstraint { .. }
-            | AlterTableOperation::AlterColumn { .. } => {
+            | AlterTableOperation::RenameConstraint { .. } => {
                 bail_not_implemented!(
                     "Unhandled statement: {}",
                     Statement::AlterTable { name, operation }
