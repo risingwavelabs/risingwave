@@ -261,6 +261,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
             new_log_store_state(self.table_id, local_state_store, self.serde);
         initial_write_state.init(first_write_epoch).await?;
 
+        let mut pause_stream = first_barrier.is_pause_on_startup();
         let mut initial_write_epoch = first_write_epoch;
 
         // We only recreate the consume stream when:
@@ -289,8 +290,15 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
 
             loop {
                 let select_result = {
-                    let read_future =
-                        read_future.next_chunk(&read_state, &mut buffer, &self.metrics);
+                    let read_future = async {
+                        if pause_stream {
+                            pending().await
+                        } else {
+                            read_future
+                                .next_chunk(&read_state, &mut buffer, &self.metrics)
+                                .await
+                        }
+                    };
                     pin_mut!(read_future);
                     let write_future = write_future.next_event();
                     pin_mut!(write_future);
@@ -306,6 +314,18 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                             WriteFutureEvent::UpstreamMessageReceived(msg) => {
                                 match msg {
                                     Message::Barrier(barrier) => {
+                                        if let Some(mutation) = barrier.mutation.as_deref() {
+                                            match mutation {
+                                                Mutation::Pause => {
+                                                    pause_stream = true;
+                                                }
+                                                Mutation::Resume => {
+                                                    pause_stream = false;
+                                                }
+                                                _ => {}
+                                            }
+                                        }
+
                                         let write_state_post_write_barrier = Self::write_barrier(
                                             &mut write_state,
                                             barrier.clone(),
@@ -510,7 +530,6 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
     ) -> StreamExecutorResult<LogStorePostSealCurrentEpoch<'a, S::Local>> {
         let epoch = barrier.epoch.prev;
         let mut writer = write_state.start_writer(false);
-        // FIXME(kwannoel): Handle paused stream.
         writer.write_barrier(epoch, barrier.is_checkpoint())?;
 
         // FIXME(kwannoel): Flush all unflushed chunks
