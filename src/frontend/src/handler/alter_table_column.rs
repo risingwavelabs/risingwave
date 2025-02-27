@@ -243,27 +243,6 @@ pub async fn handle_alter_table_column(
         ))?;
     }
 
-    // Check if the column to drop is referenced by any generated columns.
-    let check_column_referred_by_generated_column = |column_name: &Ident| {
-        for column in original_catalog.columns() {
-            if let Some(expr) = column.generated_expr() {
-                let expr = ExprImpl::from_expr_proto(expr)?;
-                let refs = expr.collect_input_refs(original_catalog.columns().len());
-                for idx in refs.ones() {
-                    let refed_column = &original_catalog.columns()[idx];
-                    if refed_column.name() == column_name.real_value() {
-                        bail!(format!(
-                            "failed to drop column \"{}\" because it's referenced by a generated column \"{}\"",
-                            column_name,
-                            column.name()
-                        ))
-                    }
-                }
-            }
-        }
-        Result::Ok(())
-    };
-
     // The `sql_column_strategy` will be `FollowChecked` if the operation is `AddColumn`, and
     // `FollowUnchecked` if the operation is `DropColumn`.
     //
@@ -323,7 +302,22 @@ pub async fn handle_alter_table_column(
             }
 
             // Check if the column to drop is referenced by any generated columns.
-            check_column_referred_by_generated_column(&column_name)?;
+            for column in original_catalog.columns() {
+                if let Some(expr) = column.generated_expr() {
+                    let expr = ExprImpl::from_expr_proto(expr)?;
+                    let refs = expr.collect_input_refs(original_catalog.columns().len());
+                    for idx in refs.ones() {
+                        let refed_column = &original_catalog.columns()[idx];
+                        if refed_column.name() == column_name.real_value() {
+                            bail!(format!(
+                                "failed to drop column \"{}\" because it's referenced by a generated column \"{}\"",
+                                column_name,
+                                column.name()
+                            ))
+                        }
+                    }
+                }
+            }
 
             // Locate the column by name and remove it.
             let column_name = column_name.real_value();
@@ -360,9 +354,6 @@ pub async fn handle_alter_table_column(
             else {
                 bail_not_implemented!(issue = 6903, "{op}");
             };
-
-            // Check if the column to alter is referenced by any generated columns.
-            check_column_referred_by_generated_column(&column_name)?;
 
             // Locate the column by name and update its data type.
             let column_name = column_name.real_value();
