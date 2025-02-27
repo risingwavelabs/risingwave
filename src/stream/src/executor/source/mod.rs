@@ -145,7 +145,8 @@ pub async fn apply_rate_limit(stream: BoxSourceChunkStream, rate_limit_rps: Opti
         let limit = rate_limit_rps.unwrap() as u64;
         let required_permits = chunk.compute_rate_limit_chunk_permits();
         if required_permits > limit {
-            // This should not happen after the mentioned PR.
+            // This should not happen after https://github.com/risingwavelabs/risingwave/pull/19698.
+            // But if it does happen, let's don't panic and just log an error.
             tracing::error!(
                 chunk_size,
                 required_permits,
