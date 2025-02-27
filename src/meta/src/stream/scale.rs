@@ -15,12 +15,12 @@
 use std::cmp::{Ordering, min};
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
+use std::fmt::Debug;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, anyhow};
-use futures::future::try_join_all;
 use itertools::Itertools;
 use num_integer::Integer;
 use num_traits::abs;
@@ -39,8 +39,7 @@ use risingwave_pb::meta::table_fragments::fragment::{
 };
 use risingwave_pb::meta::table_fragments::{self, ActorStatus, PbFragment, State};
 use risingwave_pb::stream_plan::{
-    Dispatcher, DispatcherType, FragmentTypeFlag, PbDispatcher, PbStreamActor, StreamActor,
-    StreamNode,
+    Dispatcher, DispatcherType, FragmentTypeFlag, PbStreamActor, StreamActor, StreamNode,
 };
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Receiver;
@@ -139,6 +138,7 @@ impl CustomFragmentInfo {
 use educe::Educe;
 use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_common::system_param::reader::SystemParamsRead;
+use futures::future::try_join_all;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 
@@ -537,12 +537,7 @@ impl ScaleController {
                 },
             ) in actors
             {
-                let dispatchers = actor_dispatchers
-                    .remove(&actor_id)
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(PbDispatcher::from)
-                    .collect();
+                let dispatchers = actor_dispatchers.remove(&actor_id).unwrap_or_default();
 
                 let actor_info = CustomActorInfo {
                     actor_id: actor_id as _,
