@@ -2836,7 +2836,7 @@ impl fmt::Display for SqlOptionValue {
             SqlOptionValue::Value(value) => write!(f, "{}", value),
             SqlOptionValue::SecretRef(secret_ref) => write!(f, "secret {}", secret_ref),
             SqlOptionValue::ConnectionRef(connection_ref) => {
-                write!(f, "connection {}", connection_ref)
+                write!(f, "{}", connection_ref)
             }
         }
     }
