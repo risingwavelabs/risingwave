@@ -18,11 +18,11 @@ use anyhow::Context;
 use apache_avro::AvroResult;
 use apache_avro::schema::{DecimalSchema, NamesRef, RecordSchema, ResolvedSchema, Schema};
 use itertools::Itertools;
+use risingwave_common::catalog::Field;
 use risingwave_common::error::NotImplemented;
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::types::{DataType, Decimal, MapType, StructType};
 use risingwave_common::{bail, bail_not_implemented};
-use risingwave_pb::plan_common::ColumnDesc;
 
 use super::get_nullable_union_inner;
 
@@ -72,11 +72,10 @@ impl MapHandling {
 
 /// This function expects original schema (with `Ref`).
 /// TODO: change `map_handling` to some `Config`, and also unify debezium.
-/// TODO: use `ColumnDesc` in common instead of PB.
-pub fn avro_schema_to_column_descs(
+pub fn avro_schema_to_fields(
     schema: &Schema,
     map_handling: Option<MapHandling>,
-) -> anyhow::Result<Vec<ColumnDesc>> {
+) -> anyhow::Result<Vec<Field>> {
     let resolved = ResolvedSchema::try_from(schema)?;
     let mut ancestor_records: Vec<String> = vec![];
     let root_type = avro_type_mapping(
@@ -90,11 +89,7 @@ pub fn avro_schema_to_column_descs(
     };
     let fields = root_struct
         .iter()
-        .map(|(name, data_type)| {
-            use risingwave_common::catalog::{ColumnDesc, ColumnId};
-            let desc = ColumnDesc::named(name, ColumnId::placeholder(), data_type.clone());
-            desc.to_protobuf()
-        })
+        .map(|(name, data_type)| Field::new(name, data_type.clone()))
         .collect();
     Ok(fields)
 }

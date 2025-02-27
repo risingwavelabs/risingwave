@@ -81,6 +81,7 @@ use risingwave_storage::store::{
 use rw_futures_util::drop_either_future;
 
 use crate::common::log_store_impl::kv_log_store::buffer::LogStoreBufferItem;
+use crate::common::log_store_impl::kv_log_store::reader::LogStoreReadStateStreamRangeStart;
 use crate::common::log_store_impl::kv_log_store::reader::timeout_auto_rebuild::TimeoutAutoRebuildIter;
 use crate::common::log_store_impl::kv_log_store::serde::{
     KvLogStoreItem, LogStoreItemMergeStream, LogStoreRowSerde,
@@ -276,7 +277,11 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
             };
             let mut read_future = ReadFuture::ReadingPersistedStream(
                 read_state
-                    .read_persisted_log_store(&self.metrics, initial_write_epoch.prev, None)
+                    .read_persisted_log_store(
+                        &self.metrics,
+                        initial_write_epoch.prev,
+                        LogStoreReadStateStreamRangeStart::Unbounded,
+                    )
                     .await?,
             );
 
@@ -474,9 +479,6 @@ impl<S: StateStoreRead> ReadFuture<S> {
                     LogStoreBufferItem::Barrier { .. } => {
                         continue;
                     }
-                    LogStoreBufferItem::UpdateVnodes(_) => {
-                        unreachable!("UpdateVnodes should not be in buffer")
-                    }
                 }
             },
         }
@@ -530,9 +532,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                         *flushed = true;
                     }
                 }
-                LogStoreBufferItem::Flushed { .. }
-                | LogStoreBufferItem::Barrier { .. }
-                | LogStoreBufferItem::UpdateVnodes(_) => {}
+                LogStoreBufferItem::Flushed { .. } | LogStoreBufferItem::Barrier { .. } => {}
             }
         }
 
@@ -678,7 +678,6 @@ impl SyncedLogStoreBuffer {
                 LogStoreBufferItem::Barrier { .. } => {
                     epoch_count += 1;
                 }
-                LogStoreBufferItem::UpdateVnodes(_) => {}
             }
         }
         self.metrics.buffer_unconsumed_epoch_count.set(epoch_count);
