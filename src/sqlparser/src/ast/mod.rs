@@ -1301,7 +1301,7 @@ pub enum Statement {
         /// On conflict behavior
         on_conflict: Option<OnConflict>,
         /// with_version_column behind on conflict
-        with_version_column: Option<String>,
+        with_version_column: Option<Ident>,
         /// `AS ( query )`
         query: Option<Box<Query>>,
         /// `FROM cdc_source TABLE database_name.table_name`
@@ -1706,7 +1706,7 @@ impl Statement {
                 }
                 write!(f, "{}", source)?;
                 if !returning.is_empty() {
-                    write!(f, " RETURNING ({})", display_comma_separated(returning))?;
+                    write!(f, " RETURNING {}", display_comma_separated(returning))?;
                 }
                 Ok(())
             }
@@ -3386,11 +3386,22 @@ impl fmt::Display for AsOf {
         use AsOf::*;
         match self {
             ProcessTime => write!(f, " FOR SYSTEM_TIME AS OF PROCTIME()"),
-            ProcessTimeWithInterval((value, leading_field)) => write!(
-                f,
-                " FOR SYSTEM_TIME AS OF NOW() - {} {}",
-                value, leading_field
-            ),
+            ProcessTimeWithInterval((value, leading_field)) => {
+                if value == "0" && leading_field == &DateTimeField::Second {
+                    return Ok(());
+                }
+                write!(
+                    f,
+                    " FOR SYSTEM_TIME AS OF NOW() - {}",
+                    Value::Interval {
+                        value: value.clone(),
+                        leading_field: Some(leading_field.clone()),
+                        leading_precision: None,
+                        last_field: None,
+                        fractional_seconds_precision: None
+                    }
+                )
+            }
             TimestampNum(ts) => write!(f, " FOR SYSTEM_TIME AS OF {}", ts),
             TimestampString(ts) => write!(f, " FOR SYSTEM_TIME AS OF '{}'", ts),
             VersionNum(v) => write!(f, " FOR SYSTEM_VERSION AS OF {}", v),

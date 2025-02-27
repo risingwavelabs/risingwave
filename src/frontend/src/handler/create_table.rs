@@ -1931,7 +1931,7 @@ pub async fn generate_stream_graph_for_replace_table(
         definition: handler_args.normalized_sql.clone(),
         append_only,
         on_conflict: on_conflict.into(),
-        with_version_column: with_version_column.clone(),
+        with_version_column: with_version_column.as_ref().map(|x| x.real_value()),
         webhook_info: original_catalog.webhook_info.clone(),
         engine,
     };
@@ -1993,7 +1993,7 @@ pub async fn generate_stream_graph_for_replace_table(
                 cdc_with_options,
                 col_id_gen,
                 on_conflict,
-                with_version_column,
+                with_version_column.map(|x| x.real_value()),
                 IncludeOption::default(),
                 table_name,
                 resolved_table_name,
