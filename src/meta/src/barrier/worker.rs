@@ -724,7 +724,8 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     ),
                 )
             };
-            if recovery_result.is_err() {
+            if let Err(err) = &recovery_result {
+                tracing::error!(error = %err.as_report(), "recovery failed");
                 GLOBAL_META_METRICS.recovery_failure_cnt.inc();
             }
             recovery_result
