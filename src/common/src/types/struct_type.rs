@@ -42,7 +42,12 @@ struct StructTypeInner {
     /// If fields are unnamed, the names will be `f1`, `f2`, etc.
     fields: Box<[(String, DataType)]>,
 
+    /// The ids of the fields. Used in serialization for nested-schema evolution purposes.
+    ///
+    /// Only present if this data type is persisted within a table schema (`ColumnDesc`)
+    /// in a new version of the catalog that supports nested-schema evolution.
     field_ids: Option<Box<[ColumnId]>>,
+
     /// Whether the fields are unnamed.
     is_unnamed: bool,
 }
@@ -83,6 +88,7 @@ impl StructType {
         }))
     }
 
+    /// Attaches given field ids to the struct type.
     pub fn with_ids(self, ids: impl IntoIterator<Item = ColumnId>) -> Self {
         let ids: Box<[ColumnId]> = ids.into_iter().collect();
 
@@ -131,6 +137,10 @@ impl StructType {
         self.0.fields.iter().map(|(name, ty)| (name.as_str(), ty))
     }
 
+    /// Gets an iterator over the field ids.
+    ///
+    /// Returns `None` if they are not present. See documentation on the field `field_ids`
+    /// for the cases.
     pub fn ids(&self) -> Option<impl ExactSizeIterator<Item = ColumnId> + '_> {
         if self.is_empty() {
             // Always return `Some(empty iterator)` for empty structs.
