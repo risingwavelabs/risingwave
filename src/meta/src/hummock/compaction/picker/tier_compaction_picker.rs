@@ -89,6 +89,10 @@ impl TierCompactionPicker {
             let overlapping_max_compact_file_numer = self.config.level0_max_compact_file_number;
 
             for other in &l0.sub_levels[idx + 1..] {
+                if other.level_type != LevelType::Overlapping {
+                    break;
+                }
+
                 if compaction_bytes > max_compaction_bytes {
                     break;
                 }
