@@ -36,6 +36,7 @@ use risingwave_connector::sink::catalog::SinkId;
 use crate::common::log_store_impl::kv_log_store::{
     REWIND_BACKOFF_FACTOR, REWIND_BASE_DELAY, REWIND_MAX_DELAY,
 };
+use crate::executor::monitor::in_mem_stats::{Count, CountMap};
 use crate::executor::prelude::ActorId;
 use crate::task::FragmentId;
 
@@ -45,6 +46,18 @@ pub struct StreamingMetrics {
 
     // Executor metrics (disabled by default)
     pub executor_row_count: RelabeledGuardedIntCounterVec<3>,
+
+    // TODO(kwannoel): I'm considering having a totally separate in-memory
+    // struct for these metrics,
+    // i.e. just store them in a hashmap on the CN,
+    // and drop them once profiling done.
+    // Profiling Metrics:
+    // Aggregated per stream node (e.g. hash agg, join, project, etc...)
+    // Only active when profiling, should be dropped otherwise.
+    pub stream_node_input_row_count: CountMap,
+    pub stream_node_output_row_count: CountMap,
+    pub stream_node_input_blocking_duration_ns: CountMap,
+    pub stream_node_output_blocking_duration_ns: CountMap,
 
     // Streaming actor metrics from tokio (disabled by default)
     actor_execution_time: LabelGuardedGaugeVec<1>,
@@ -213,6 +226,11 @@ impl StreamingMetrics {
         )
         .unwrap()
         .relabel_debug_1(level);
+
+        let stream_node_input_row_count = CountMap::new();
+        let stream_node_output_row_count = CountMap::new();
+        let stream_node_input_blocking_duration_ns = CountMap::new();
+        let stream_node_output_blocking_duration_ns = CountMap::new();
 
         let source_output_row_count = register_guarded_int_counter_vec_with_registry!(
             "stream_source_output_rows_counts",
@@ -1063,6 +1081,10 @@ impl StreamingMetrics {
         Self {
             level,
             executor_row_count,
+            stream_node_input_row_count,
+            stream_node_output_row_count,
+            stream_node_input_blocking_duration_ns,
+            stream_node_output_blocking_duration_ns,
             actor_execution_time,
             actor_scheduled_duration,
             actor_scheduled_cnt,
@@ -1529,6 +1551,21 @@ impl StreamingMetrics {
                 .with_guarded_label_values(label_list),
         }
     }
+
+    pub fn new_profile_metrics(&self, operator_id: u32) -> ProfileMetrics {
+        ProfileMetrics {
+            stream_node_input_row_count: self.stream_node_input_row_count.new_counter(operator_id),
+            stream_node_output_row_count: self
+                .stream_node_output_row_count
+                .new_counter(operator_id),
+            stream_node_input_blocking_duration_ns: self
+                .stream_node_input_blocking_duration_ns
+                .new_counter(operator_id),
+            stream_node_output_blocking_duration_ns: self
+                .stream_node_output_blocking_duration_ns
+                .new_counter(operator_id),
+        }
+    }
 }
 
 pub(crate) struct ActorInputMetrics {
@@ -1621,4 +1658,11 @@ pub struct OverWindowMetrics {
     pub over_window_accessed_entry_count: LabelGuardedIntCounter<3>,
     pub over_window_compute_count: LabelGuardedIntCounter<3>,
     pub over_window_same_output_count: LabelGuardedIntCounter<3>,
+}
+
+pub struct ProfileMetrics {
+    pub stream_node_input_row_count: Count,
+    pub stream_node_output_row_count: Count,
+    pub stream_node_input_blocking_duration_ns: Count,
+    pub stream_node_output_blocking_duration_ns: Count,
 }

@@ -288,6 +288,14 @@ impl MonitorService for MonitorServiceImpl {
         Ok(Response::new(AnalyzeHeapResponse { result: file }))
     }
 
+    async fn get_profile_stats(
+        &self,
+        _request: Request<GetProfileStatsRequest>,
+    ) -> Result<Response<GetProfileStatsResponse>, Status> {
+        let metrics = global_streaming_metrics(MetricLevel::Info);
+        todo!()
+    }
+
     #[cfg_attr(coverage, coverage(off))]
     async fn get_streaming_stats(
         &self,
