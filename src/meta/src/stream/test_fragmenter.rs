@@ -517,7 +517,7 @@ async fn test_graph_builder() -> MetaResult<()> {
         );
     }
     for fragment in stream_job_fragments.fragments() {
-        let mut node = fragment.get_nodes().unwrap();
+        let mut node = &fragment.nodes;
         while !node.get_input().is_empty() {
             node = node.get_input().first().unwrap();
         }

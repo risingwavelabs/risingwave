@@ -1040,7 +1040,7 @@ impl DatabaseCheckpointControl {
                 CreateStreamingJobType::Normal | CreateStreamingJobType::SinkIntoTable(_) => {
                     for fragment in info.stream_job_fragments.fragments.values_mut() {
                         fill_snapshot_backfill_epoch(
-                            fragment.nodes.as_mut().expect("should exist"),
+                            &mut fragment.nodes,
                             None,
                             cross_db_snapshot_backfill_info,
                         )?;
@@ -1071,7 +1071,7 @@ impl DatabaseCheckpointControl {
                     }
                     for fragment in info.stream_job_fragments.fragments.values_mut() {
                         fill_snapshot_backfill_epoch(
-                            fragment.nodes.as_mut().expect("should exist"),
+                            &mut fragment.nodes,
                             Some(snapshot_backfill_info),
                             cross_db_snapshot_backfill_info,
                         )?;

@@ -84,8 +84,11 @@ message TableFragments {
     reserved "vnode_mapping";
 
     repeated uint32 state_table_ids = 6;
-    reserved 7;
-    reserved "upstream_fragment_ids";
+    // Note that this can be derived backwards from the upstream actors of the Actor held by the Fragment,
+    // but in some scenarios (e.g. Scaling) it will lead to a lot of duplicate code,
+    // so we pre-generate and store it here, this member will only be initialized when creating the Fragment
+    // and modified when creating the mv-on-mv
+    repeated uint32 upstream_fragment_ids = 7;
 
     // Total vnode count of the fragment (then all internal tables).
     // Duplicated from the length of the vnode bitmap in any actor of the fragment.

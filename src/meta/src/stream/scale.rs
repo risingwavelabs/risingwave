@@ -750,7 +750,7 @@ impl ScaleController {
                 }
             }
 
-            if (fragment.get_fragment_type_mask() & FragmentTypeFlag::Source as u32) != 0
+            if (fragment.fragment_type_mask & FragmentTypeFlag::Source as u32) != 0
                 && fragment.node.find_stream_source().is_some()
             {
                 stream_source_fragment_ids.insert(*fragment_id);
@@ -811,7 +811,7 @@ impl ScaleController {
             for noshuffle_downstream in no_shuffle_reschedule.keys() {
                 let fragment = fragment_map.get(noshuffle_downstream).unwrap();
                 // SourceScan is always a NoShuffle downstream, rescheduled together with the upstream Source.
-                if (fragment.get_fragment_type_mask() & FragmentTypeFlag::SourceScan as u32) != 0 {
+                if (fragment.fragment_type_mask & FragmentTypeFlag::SourceScan as u32) != 0 {
                     let stream_node = &fragment.node;
                     if let Some((_source_id, upstream_source_fragment_id)) =
                         stream_node.find_source_backfill()
