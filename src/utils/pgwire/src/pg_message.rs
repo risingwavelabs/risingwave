@@ -326,7 +326,7 @@ impl FeMessage {
         if payload_len > 0 {
             // Use smaller batches to process the payload instead of handling it all at once to minimize memory usage.
             const BUF_SIZE: usize = 1024;
-            let mut buf: Vec<u8> = vec![0; 1024];
+            let mut buf: Vec<u8> = vec![0; BUF_SIZE];
             for _ in 0..(payload_len as usize) / BUF_SIZE {
                 stream.read_exact(&mut buf).await?;
             }
