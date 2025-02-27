@@ -3623,7 +3623,7 @@ impl Parser<'_> {
                 if self.expect_keyword(Keyword::TO).is_err()
                     && self.expect_token(&Token::Eq).is_err()
                 {
-                    return self.expected("TO or = after ALTER TABLE SET PARALLELISM");
+                    return self.expected("TO or = after ALTER SOURCE SET PARALLELISM");
                 }
 
                 let value = self.parse_set_variable()?;

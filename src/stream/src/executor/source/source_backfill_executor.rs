@@ -658,8 +658,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                                 HummockReadEpoch::Committed(epoch),
                                                 TryWaitEpochOptions { table_id },
                                             )
-                                            .await
-                                            .expect("failed to wait epoch");
+                                            .await?;
                                         tracing::info!("finished waiting for epoch: {}", epoch);
                                         state_table_initialized = true;
                                     }

@@ -345,7 +345,7 @@ impl fmt::Display for AlterTableOperation {
             } => {
                 write!(
                     f,
-                    "SET PARALLELISM TO {} {}",
+                    "SET PARALLELISM TO {}{}",
                     parallelism,
                     if *deferred { " DEFERRED" } else { "" }
                 )
@@ -384,7 +384,7 @@ impl fmt::Display for AlterIndexOperation {
             } => {
                 write!(
                     f,
-                    "SET PARALLELISM TO {} {}",
+                    "SET PARALLELISM TO {}{}",
                     parallelism,
                     if *deferred { " DEFERRED" } else { "" }
                 )
@@ -411,7 +411,7 @@ impl fmt::Display for AlterViewOperation {
             } => {
                 write!(
                     f,
-                    "SET PARALLELISM TO {} {}",
+                    "SET PARALLELISM TO {}{}",
                     parallelism,
                     if *deferred { " DEFERRED" } else { "" }
                 )
@@ -456,7 +456,7 @@ impl fmt::Display for AlterSinkOperation {
             } => {
                 write!(
                     f,
-                    "SET PARALLELISM TO {} {}",
+                    "SET PARALLELISM TO {}{}",
                     parallelism,
                     if *deferred { " DEFERRED" } else { "" }
                 )
@@ -525,7 +525,7 @@ impl fmt::Display for AlterSourceOperation {
             } => {
                 write!(
                     f,
-                    "SET PARALLELISM TO {} {}",
+                    "SET PARALLELISM TO {}{}",
                     parallelism,
                     if *deferred { " DEFERRED" } else { "" }
                 )
