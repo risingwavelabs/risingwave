@@ -4,6 +4,7 @@ use risingwave_pb::meta::list_table_fragments_response::FragmentInfo;
 
 use crate::error::Result;
 use crate::handler::{HandlerArgs, RwPgResponse};
+use crate::session::FrontendEnv;
 
 pub async fn handle_explain_analyze_stream_job(
     handler_args: HandlerArgs,
@@ -43,6 +44,14 @@ struct StreamNode {
     identity: String,
     actor_ids: Vec<u32>,
     dependencies: Vec<u32>,
+}
+
+async fn list_stream_worker_nodes(env: &FrontendEnv) -> Result<()> {
+    let worker_nodes = env.meta_client().list_all_nodes().await?;
+    let stream_worker_nodes = worker_nodes
+        .into_iter()
+        .filter(|node| node.property.as_ref().unwrap().is_streaming)
+        .collect::<Vec<_>>();
 }
 
 fn extract_stream_node_infos(fragments: Vec<FragmentInfo>) -> HashMap<u32, StreamNode> {
