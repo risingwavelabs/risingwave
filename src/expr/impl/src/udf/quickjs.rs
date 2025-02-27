@@ -57,12 +57,12 @@ static QUICKJS: UdfImplDescriptor = UdfImplDescriptor {
                 let body = format!(
                     "export function{} {}({}) {{ {} }}",
                     if opts.kind.is_table() { "*" } else { "" },
-                    opts.identifier,
+                    opts.name_in_runtime,
                     opts.arg_names.join(","),
                     opts.body.context("body is required")?,
                 );
                 runtime.add_function(
-                    opts.identifier,
+                    opts.name_in_runtime,
                     UdfArrowConvert::default().to_arrow_field("", opts.return_type)?,
                     CallMode::CalledOnNullInput,
                     &body,
