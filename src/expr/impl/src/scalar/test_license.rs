@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Functions for testing whether license and paid tier features are working.
+
 use anyhow::Context;
 use risingwave_common::license::{Feature, LicenseManager};
 use risingwave_common::types::JsonbVal;
 use risingwave_expr::{ExprError, Result, function};
 
-/// A function that checks if the `TestPaid` feature is available.
-///
-/// It's mainly for testing purposes only.
+/// Checks if the `TestPaid` feature is available.
 #[function("test_paid_tier() -> boolean")]
 pub fn test_paid_tier() -> Result<bool> {
     Feature::TestPaid
@@ -28,6 +28,7 @@ pub fn test_paid_tier() -> Result<bool> {
     Ok(true)
 }
 
+/// Dump the license information.
 #[function("license() -> jsonb")]
 pub fn license() -> Result<JsonbVal> {
     let license = LicenseManager::get()
