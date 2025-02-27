@@ -434,6 +434,7 @@ service ClusterService {
   rpc ListAllNodes(ListAllNodesRequest) returns (ListAllNodesResponse);
   rpc GetClusterRecoveryStatus(GetClusterRecoveryStatusRequest) returns (GetClusterRecoveryStatusResponse);
   rpc GetMetaStoreInfo(GetMetaStoreInfoRequest) returns (GetMetaStoreInfoResponse);
+  rpc FlushConnector(FlushConnectorRequest) returns (FlushConnectorResponse);
 }
 
 enum SubscribeType {
@@ -893,3 +894,9 @@ message ListRateLimitsResponse {
   }
   repeated RateLimitInfo rate_limits = 1;
 }
+
+message FlushConnectorRequest {
+  uint32 job_id = 1;
+}
+
+message FlushConnectorResponse {}

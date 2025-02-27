@@ -18,8 +18,8 @@ use comfy_table::{Attribute, Cell, Row, Table};
 use itertools::Itertools;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_connector::source::{SplitImpl, SplitMetaData};
-use risingwave_pb::meta::GetClusterInfoResponse;
 use risingwave_pb::meta::table_fragments::State;
+use risingwave_pb::meta::{FlushConnectorResponse, GetClusterInfoResponse};
 use risingwave_pb::source::ConnectorSplits;
 use risingwave_pb::stream_plan::FragmentTypeFlag;
 
@@ -29,6 +29,15 @@ pub async fn get_cluster_info(context: &CtlContext) -> anyhow::Result<GetCluster
     let meta_client = context.meta_client().await?;
     let response = meta_client.get_cluster_info().await?;
     Ok(response)
+}
+
+pub async fn flush_connector(
+    context: &CtlContext,
+    job_id: u32,
+) -> anyhow::Result<FlushConnectorResponse> {
+    let meta_client = context.meta_client().await?;
+    let resp = meta_client.flush_connector(job_id).await?;
+    Ok(resp)
 }
 
 pub async fn source_split_info(context: &CtlContext, ignore_id: bool) -> anyhow::Result<()> {

@@ -462,6 +462,13 @@ enum MetaCommands {
         #[clap(long, required = true)]
         endpoint: String,
     },
+
+    /// Flush connector settings from source/sink table to fragment table
+    FlushConnector {
+        /// job id
+        #[clap(long, required = true)]
+        job_id: u32,
+    },
 }
 
 #[derive(Subcommand, Clone, Debug)]
@@ -801,6 +808,9 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Meta(MetaCommands::ClusterInfo) => cmd_impl::meta::cluster_info(context).await?,
         Commands::Meta(MetaCommands::SourceSplitInfo { ignore_id }) => {
             cmd_impl::meta::source_split_info(context, ignore_id).await?
+        }
+        Commands::Meta(MetaCommands::FlushConnector { job_id }) => {
+            cmd_impl::meta::flush_connector(context, job_id).await?;
         }
         Commands::Meta(MetaCommands::Reschedule {
             from,

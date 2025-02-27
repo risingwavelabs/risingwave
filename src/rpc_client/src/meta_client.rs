@@ -1079,6 +1079,12 @@ impl MetaClient {
         Ok(resp)
     }
 
+    pub async fn flush_connector(&self, job_id: u32) -> Result<FlushConnectorResponse> {
+        let request = FlushConnectorRequest { job_id };
+        let resp = self.inner.flush_connector(request).await?;
+        Ok(resp)
+    }
+
     pub async fn reschedule(
         &self,
         worker_reschedules: HashMap<u32, PbWorkerReschedule>,
@@ -2090,6 +2096,7 @@ macro_rules! for_all_meta_rpc {
             ,{ cluster_client, list_all_nodes, ListAllNodesRequest, ListAllNodesResponse }
             ,{ cluster_client, get_cluster_recovery_status, GetClusterRecoveryStatusRequest, GetClusterRecoveryStatusResponse }
             ,{ cluster_client, get_meta_store_info, GetMetaStoreInfoRequest, GetMetaStoreInfoResponse }
+            ,{ cluster_client, flush_connector, FlushConnectorRequest, FlushConnectorResponse }
             ,{ heartbeat_client, heartbeat, HeartbeatRequest, HeartbeatResponse }
             ,{ stream_client, flush, FlushRequest, FlushResponse }
             ,{ stream_client, pause, PauseRequest, PauseResponse }

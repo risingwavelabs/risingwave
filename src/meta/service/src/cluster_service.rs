@@ -21,9 +21,10 @@ use risingwave_pb::meta::cluster_service_server::ClusterService;
 use risingwave_pb::meta::{
     ActivateWorkerNodeRequest, ActivateWorkerNodeResponse, AddWorkerNodeRequest,
     AddWorkerNodeResponse, DeleteWorkerNodeRequest, DeleteWorkerNodeResponse,
-    GetClusterRecoveryStatusRequest, GetClusterRecoveryStatusResponse, GetMetaStoreInfoRequest,
-    GetMetaStoreInfoResponse, ListAllNodesRequest, ListAllNodesResponse,
-    UpdateWorkerNodeSchedulabilityRequest, UpdateWorkerNodeSchedulabilityResponse,
+    FlushConnectorRequest, FlushConnectorResponse, GetClusterRecoveryStatusRequest,
+    GetClusterRecoveryStatusResponse, GetMetaStoreInfoRequest, GetMetaStoreInfoResponse,
+    ListAllNodesRequest, ListAllNodesResponse, UpdateWorkerNodeSchedulabilityRequest,
+    UpdateWorkerNodeSchedulabilityResponse,
 };
 use tonic::{Request, Response, Status};
 
@@ -178,5 +179,17 @@ impl ClusterService for ClusterServiceImpl {
                 .cluster_controller
                 .meta_store_endpoint(),
         }))
+    }
+
+    async fn flush_connector(
+        &self,
+        request: Request<FlushConnectorRequest>,
+    ) -> Result<Response<FlushConnectorResponse>, Status> {
+        let req = request.into_inner();
+        self.metadata_manager
+            .catalog_controller
+            .risectl_flush_connector(req.job_id as _)
+            .await?;
+        Ok(Response::new(FlushConnectorResponse {}))
     }
 }
