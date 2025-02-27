@@ -432,7 +432,6 @@ KafkaProperties:
   - name: aws.msk.signer_timeout_sec
     field_type: u64
     required: false
-    default: default::default_msk_signer_timeout_sec
 KinesisProperties:
   fields:
   - name: scan.startup.mode
@@ -1087,7 +1086,6 @@ PulsarProperties:
   - name: aws.msk.signer_timeout_sec
     field_type: u64
     required: false
-    default: default::default_msk_signer_timeout_sec
   - name: iceberg.enabled
     field_type: bool
     required: false

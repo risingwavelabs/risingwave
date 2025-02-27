@@ -96,17 +96,8 @@ pub struct AwsAuthProps {
     pub external_id: Option<String>,
     #[serde(rename = "aws.profile", alias = "profile")]
     pub profile: Option<String>,
-    #[serde(
-        rename = "aws.msk.signer_timeout_sec",
-        default = "default::default_msk_signer_timeout_sec"
-    )]
-    pub msk_signer_timeout_sec: u64,
-}
-
-mod default {
-    pub fn default_msk_signer_timeout_sec() -> u64 {
-        10
-    }
+    #[serde(rename = "aws.msk.signer_timeout_sec")]
+    pub msk_signer_timeout_sec: Option<u64>,
 }
 
 impl AwsAuthProps {
