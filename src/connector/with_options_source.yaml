@@ -111,8 +111,7 @@ IcebergProperties:
     required: false
   - name: catalog.name
     field_type: String
-    comments: |-
-      Catalog name, default value is risingwave.
+    comments: Catalog name, default value is risingwave.
     required: false
   - name: catalog.uri
     field_type: String
