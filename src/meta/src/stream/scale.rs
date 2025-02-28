@@ -136,9 +136,9 @@ impl CustomFragmentInfo {
 }
 
 use educe::Educe;
+use futures::future::try_join_all;
 use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_common::system_param::reader::SystemParamsRead;
-use futures::future::try_join_all;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 
