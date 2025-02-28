@@ -866,7 +866,7 @@ pub async fn bind_create_source_or_table_with_connector(
     // XXX: why do we use col_id_gen here? It doesn't seem to be very necessary.
     // XXX: should we also change the col id for struct fields?
     for c in &mut columns {
-        col_id_gen.generate_new(c)?;
+        col_id_gen.generate(c)?;
     }
     debug_assert_column_ids_distinct(&columns);
 

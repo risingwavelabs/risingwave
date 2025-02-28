@@ -77,7 +77,7 @@ impl ColumnIdGenerator {
     /// Generate [`ColumnId`]s for the given column and its nested fields (if any).
     ///
     /// Returns an error if there's incompatible data type change.
-    pub fn generate_new(&mut self, col: &mut ColumnCatalog) -> Result<()> {
+    pub fn generate(&mut self, col: &mut ColumnCatalog) -> Result<()> {
         let mut path = vec![Segment::Field(col.name().to_owned())];
 
         if self.unalterable_columns.contains(col.name()) {
@@ -275,36 +275,6 @@ impl ColumnIdGenerator {
         }
     }
 
-    /// Generates a new [`ColumnId`] for a column with the given field.
-    ///
-    /// Returns an error if the data type of the column has been changed.
-    pub fn generate(&mut self, field: impl FieldLike) -> Result<ColumnId> {
-        // if let Some((id, original_type)) = self.existing.get(field.name()) {
-        //     // Intentionally not using `datatype_equals` here because we want nested types to be
-        //     // exactly the same, **NOT** ignoring field names as they may be referenced in expressions
-        //     // of generated columns or downstream jobs.
-        //     // TODO: support compatible changes on types, typically for `STRUCT` types.
-        //     //       https://github.com/risingwavelabs/risingwave/issues/19755
-        //     if original_type == field.data_type() {
-        //         Ok(*id)
-        //     } else {
-        //         bail_not_implemented!(
-        //             "The data type of column \"{}\" has been changed from \"{}\" to \"{}\". \
-        //              This is currently not supported, even if it could be a compatible change in external systems.",
-        //             field.name(),
-        //             original_type,
-        //             field.data_type()
-        //         );
-        //     }
-        // } else {
-        //     let id = self.next_column_id;
-        //     self.next_column_id = self.next_column_id.next();
-        //     Ok(id)
-        // }
-
-        todo!()
-    }
-
     /// Consume this generator and return a [`TableVersion`] for the table to be created or altered.
     pub fn into_version(self) -> TableVersion {
         TableVersion {
@@ -316,12 +286,13 @@ impl ColumnIdGenerator {
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, Field};
+    use risingwave_common::types::StructType;
+
     use super::*;
 
     struct BrandNewColumn(&'static str);
     use BrandNewColumn as B;
-    use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, Field};
-    use risingwave_common::types::StructType;
 
     impl FieldLike for BrandNewColumn {
         fn name(&self) -> &str {
@@ -333,11 +304,33 @@ mod tests {
         }
     }
 
+    #[easy_ext::ext(ColumnIdGeneratorTestExt)]
+    impl ColumnIdGenerator {
+        fn generate_simple(&mut self, field: impl FieldLike) -> Result<ColumnId> {
+            let original_data_type = field.data_type().clone();
+
+            let field = Field::new(field.name(), original_data_type.clone());
+            let mut col = ColumnCatalog {
+                column_desc: ColumnDesc::from_field_without_column_id(&field),
+                is_hidden: false,
+            };
+            self.generate(&mut col)?;
+
+            assert_eq!(
+                col.column_desc.data_type, original_data_type,
+                "data type has changed after generating column id, \
+                 are you calling this on a composite type?"
+            );
+
+            Ok(col.column_desc.column_id)
+        }
+    }
+
     #[test]
     fn test_col_id_gen_initial() {
         let mut gen = ColumnIdGenerator::new_initial();
-        assert_eq!(gen.generate(B("v1")).unwrap(), ColumnId::new(1));
-        assert_eq!(gen.generate(B("v2")).unwrap(), ColumnId::new(2));
+        assert_eq!(gen.generate_simple(B("v1")).unwrap(), ColumnId::new(1));
+        assert_eq!(gen.generate_simple(B("v2")).unwrap(), ColumnId::new(2));
     }
 
     #[test]
@@ -373,25 +366,26 @@ mod tests {
             ..Default::default()
         });
 
-        assert_eq!(gen.generate(B("v1")).unwrap(), ColumnId::new(4));
-        assert_eq!(gen.generate(B("v2")).unwrap(), ColumnId::new(5));
+        assert_eq!(gen.generate_simple(B("v1")).unwrap(), ColumnId::new(4));
+        assert_eq!(gen.generate_simple(B("v2")).unwrap(), ColumnId::new(5));
         assert_eq!(
-            gen.generate(Field::new("f32", DataType::Float32)).unwrap(),
+            gen.generate_simple(Field::new("f32", DataType::Float32))
+                .unwrap(),
             ColumnId::new(1)
         );
 
         // mismatched data type
-        gen.generate(Field::new("f64", DataType::Float32))
+        gen.generate_simple(Field::new("f64", DataType::Float32))
             .unwrap_err();
 
         // mismatched data type
         // we require the nested data type to be exactly the same
-        gen.generate(Field::new(
+        gen.generate_simple(Field::new(
             "nested",
             StructType::new([("f1", DataType::Int32), ("f2", DataType::Int64)]).into(),
         ))
         .unwrap_err();
 
-        assert_eq!(gen.generate(B("v3")).unwrap(), ColumnId::new(6));
+        assert_eq!(gen.generate_simple(B("v3")).unwrap(), ColumnId::new(6));
     }
 }
