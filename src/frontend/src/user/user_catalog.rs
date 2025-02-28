@@ -164,7 +164,7 @@ impl UserCatalog {
         self.refresh_acl_modes();
     }
 
-    pub fn check_privilege(&self, object: &GrantObject, mode: AclMode) -> bool {
+    pub fn has_privilege(&self, object: &GrantObject, mode: AclMode) -> bool {
         self.get_acl(object)
             .map_or(false, |acl_set| acl_set.has_mode(mode))
     }

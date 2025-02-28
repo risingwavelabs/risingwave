@@ -53,7 +53,7 @@ impl SessionImpl {
                 if item.owner == user.id {
                     continue;
                 }
-                let has_privilege = user.check_privilege(&item.object, item.mode);
+                let has_privilege = user.has_privilege(&item.object, item.mode);
                 if !has_privilege {
                     return Err(PermissionDenied("Do not have the privilege".to_owned()).into());
                 }

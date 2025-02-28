@@ -229,14 +229,13 @@ impl Binder {
                     if user.is_super || user.id == owner {
                         return Ok(());
                     }
-                    if !user.check_privilege(&object, mode) {
+                    if !user.has_privilege(&object, mode) {
                         return Err(PermissionDenied("Do not have the privilege".to_owned()).into());
                     }
 
                     // check CONNECT privilege for cross-db access
                     if self.database_id != database_id
-                        && !user
-                            .check_privilege(&PbObject::DatabaseId(database_id), AclMode::Connect)
+                        && !user.has_privilege(&PbObject::DatabaseId(database_id), AclMode::Connect)
                     {
                         return Err(
                             PermissionDenied("Do not have CONNECT privilege".to_owned()).into()

@@ -1444,7 +1444,7 @@ impl SessionManagerImpl {
                 )));
             }
             let has_privilege =
-                user.check_privilege(&Object::DatabaseId(database_id), AclMode::Connect);
+                user.has_privilege(&Object::DatabaseId(database_id), AclMode::Connect);
             if !user.is_super && !has_privilege {
                 return Err(Box::new(Error::new(
                     ErrorKind::PermissionDenied,
