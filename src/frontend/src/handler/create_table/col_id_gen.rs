@@ -16,9 +16,7 @@ use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
 use risingwave_common::bail;
-use risingwave_common::catalog::{
-    ColumnCatalog, FieldLike, INITIAL_TABLE_VERSION_ID, TableVersionId,
-};
+use risingwave_common::catalog::{ColumnCatalog, INITIAL_TABLE_VERSION_ID, TableVersionId};
 use risingwave_common::types::{DataType, MapType, StructType};
 
 use crate::TableCatalog;
@@ -26,35 +24,9 @@ use crate::catalog::ColumnId;
 use crate::catalog::table_catalog::TableVersion;
 use crate::error::Result;
 
-type Existing = HashMap<Path, (ColumnId, DataType)>;
-
-/// Column ID generator for a new table or a new version of an existing table to alter.
-#[derive(Debug)]
-pub struct ColumnIdGenerator {
-    // /// Existing column names and their IDs and data types.
-    // ///
-    // /// This is used for aligning column IDs between versions (`ALTER`s). If a column already
-    // /// exists and the data type matches, its ID is reused. Otherwise, a new ID is generated.
-    // ///
-    // /// For a new table, this is empty.
-    // existing: HashMap<String, (ColumnId, DataType)>,
-    existing: Existing,
-
-    unalterable_columns: HashSet<String>,
-
-    /// The next column ID to generate, used for new columns that do not exist in `existing`.
-    next_column_id: ColumnId,
-
-    /// The version ID of the table to be created or altered.
-    ///
-    /// For a new table, this is 0. For altering an existing table, this is the **next** version ID
-    /// of the `version_id` field in the original table catalog.
-    version_id: TableVersionId,
-}
-
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 enum Segment {
-    Field(String),
+    Field(String), // for both top-level columns and struct fields
     ListElement,
     MapKey,
     MapValue,
@@ -73,8 +45,129 @@ impl std::fmt::Display for Segment {
 
 type Path = Vec<Segment>;
 
+type Existing = HashMap<Path, (ColumnId, DataType)>;
+
+/// Column ID generator for a new table or a new version of an existing table to alter.
+#[derive(Debug)]
+pub struct ColumnIdGenerator {
+    /// Existing fields and their IDs and data types.
+    ///
+    /// This is used for aligning field IDs between versions (`ALTER`s). If a field already
+    /// exists and the data type matches, its ID is reused. Otherwise, a new ID is generated.
+    ///
+    /// For a new table, this is empty.
+    existing: Existing,
+
+    /// Columns whose data type cannot be altered because they were persisted with legacy encoding,
+    /// i.e., the `field_ids` are unset for struct data type.
+    unalterable_columns: HashSet<String>,
+
+    /// The next column ID to generate, used for new columns that do not exist in `existing`.
+    next_column_id: ColumnId,
+
+    /// The version ID of the table to be created or altered.
+    ///
+    /// For a new table, this is 0. For altering an existing table, this is the **next** version ID
+    /// of the `version_id` field in the original table catalog.
+    version_id: TableVersionId,
+}
+
 impl ColumnIdGenerator {
-    /// Generate [`ColumnId`]s for the given column and its nested fields (if any).
+    /// Creates a new [`ColumnIdGenerator`] for altering an existing table.
+    pub fn new_alter(original: &TableCatalog) -> Self {
+        fn handle(
+            existing: &mut Existing,
+            alterable: &mut bool,
+            path: &mut Path,
+            id: ColumnId,
+            data_type: DataType,
+        ) {
+            macro_rules! with_segment {
+                ($segment:expr, $block:block) => {
+                    path.push($segment);
+                    $block
+                    path.pop();
+                };
+            }
+
+            const P: ColumnId = ColumnId::placeholder();
+
+            match &data_type {
+                DataType::Struct(fields) => {
+                    // Mark this column as unalterable if field_ids are unset, i.e., legacy encoding.
+                    if fields.ids().is_none() {
+                        *alterable = false;
+                    }
+
+                    for ((field_name, field_data_type), field_id) in
+                        fields.iter().zip_eq(fields.ids_or_placeholder())
+                    {
+                        with_segment!(Segment::Field(field_name.to_owned()), {
+                            handle(existing, alterable, path, field_id, field_data_type.clone());
+                        });
+                    }
+                }
+                DataType::List(inner) => {
+                    with_segment!(Segment::ListElement, {
+                        handle(existing, alterable, path, P, *inner.clone());
+                    });
+                }
+                DataType::Map(map) => {
+                    with_segment!(Segment::MapKey, {
+                        handle(existing, alterable, path, P, map.key().clone());
+                    });
+                    with_segment!(Segment::MapValue, {
+                        handle(existing, alterable, path, P, map.value().clone());
+                    });
+                }
+                _ => {}
+            }
+
+            existing
+                .try_insert(path.clone(), (id, data_type))
+                .unwrap_or_else(|_| panic!("duplicate path: {:?}", path));
+        }
+
+        let mut existing = Existing::new();
+        let mut unalterable_columns = HashSet::new();
+
+        for col in original.columns() {
+            let mut path = vec![Segment::Field(col.name().to_owned())];
+            let mut alterable = true;
+            handle(
+                &mut existing,
+                &mut alterable,
+                &mut path,
+                col.column_id(),
+                col.data_type().clone(),
+            );
+            if !alterable {
+                unalterable_columns.insert(col.name().to_owned());
+            }
+        }
+
+        let version = original.version().expect("version field not set");
+
+        Self {
+            existing,
+            unalterable_columns,
+            next_column_id: version.next_column_id,
+            version_id: version.version_id + 1,
+        }
+    }
+
+    /// Creates a new [`ColumnIdGenerator`] for a new table.
+    pub fn new_initial() -> Self {
+        Self {
+            existing: Existing::new(),
+            unalterable_columns: HashSet::new(),
+            next_column_id: ColumnId::first_user_column(),
+            version_id: INITIAL_TABLE_VERSION_ID,
+        }
+    }
+
+    /// Generate [`ColumnId`]s for the given column and its nested fields (if any) recursively.
+    /// The IDs of nested fields will be reflected in the updated [`DataType`] of the column.
     ///
     /// Returns an error if there's incompatible data type change.
     pub fn generate(&mut self, col: &mut ColumnCatalog) -> Result<()> {
@@ -186,95 +279,6 @@ impl ColumnIdGenerator {
         Ok(())
     }
 
-    /// Creates a new [`ColumnIdGenerator`] for altering an existing table.
-    pub fn new_alter(original: &TableCatalog) -> Self {
-        fn handle(
-            existing: &mut Existing,
-            alterable: &mut bool,
-            path: &mut Path,
-            id: ColumnId,
-            data_type: DataType,
-        ) {
-            macro_rules! with_segment {
-                ($segment:expr, $block:block) => {
-                    path.push($segment);
-                    $block
-                    path.pop();
-                };
-            }
-
-            const P: ColumnId = ColumnId::placeholder();
-
-            match &data_type {
-                DataType::Struct(fields) => {
-                    if fields.ids().is_none() {
-                        *alterable = false;
-                    }
-
-                    for ((field_name, field_data_type), field_id) in
-                        fields.iter().zip_eq(fields.ids_or_placeholder())
-                    {
-                        with_segment!(Segment::Field(field_name.to_owned()), {
-                            handle(existing, alterable, path, field_id, field_data_type.clone());
-                        });
-                    }
-                }
-                DataType::List(inner) => {
-                    with_segment!(Segment::ListElement, {
-                        handle(existing, alterable, path, P, *inner.clone());
-                    });
-                }
-                DataType::Map(map) => {
-                    with_segment!(Segment::MapKey, {
-                        handle(existing, alterable, path, P, map.key().clone());
-                    });
-                    with_segment!(Segment::MapValue, {
-                        handle(existing, alterable, path, P, map.value().clone());
-                    });
-                }
-                _ => {}
-            }
-
-            existing.try_insert(path.clone(), (id, data_type)).unwrap();
-        }
-
-        let mut existing = Existing::new();
-        let mut unalterable_columns = HashSet::new();
-        for col in original.columns() {
-            let mut path = vec![Segment::Field(col.name().to_owned())];
-            let mut alterable = true;
-            handle(
-                &mut existing,
-                &mut alterable,
-                &mut path,
-                col.column_id(),
-                col.data_type().clone(),
-            );
-            if !alterable {
-                unalterable_columns.insert(col.name().to_owned());
-            }
-        }
-
-        let version = original.version().expect("version field not set");
-
-        Self {
-            existing,
-            unalterable_columns,
-            next_column_id: version.next_column_id,
-            version_id: version.version_id + 1,
-        }
-    }
-
-    /// Creates a new [`ColumnIdGenerator`] for a new table.
-    pub fn new_initial() -> Self {
-        Self {
-            existing: Existing::new(),
-            unalterable_columns: HashSet::new(),
-            next_column_id: ColumnId::first_user_column(),
-            version_id: INITIAL_TABLE_VERSION_ID,
-        }
-    }
-
     /// Consume this generator and return a [`TableVersion`] for the table to be created or altered.
     pub fn into_version(self) -> TableVersion {
         TableVersion {
@@ -286,8 +290,10 @@ impl ColumnIdGenerator {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, Field};
+    use expect_test::expect;
+    use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, Field, FieldLike};
     use risingwave_common::types::StructType;
+    use thiserror_ext::AsReport;
 
     use super::*;
 
@@ -300,7 +306,7 @@ mod tests {
         }
 
         fn data_type(&self) -> &DataType {
-            unreachable!("for brand new columns, data type will not be accessed")
+            &DataType::Boolean
         }
     }
 
@@ -323,6 +329,17 @@ mod tests {
             );
 
             Ok(col.column_desc.column_id)
+        }
+
+        fn generate_composite(&mut self, field: impl FieldLike) -> Result<(ColumnId, DataType)> {
+            let field = Field::new(field.name(), field.data_type().clone());
+            let mut col = ColumnCatalog {
+                column_desc: ColumnDesc::from_field_without_column_id(&field),
+                is_hidden: false,
+            };
+            self.generate(&mut col)?;
+
+            Ok((col.column_desc.column_id, col.column_desc.data_type))
         }
     }
 
@@ -375,17 +392,256 @@ mod tests {
         );
 
         // mismatched data type
-        gen.generate_simple(Field::new("f64", DataType::Float32))
+        let err = gen
+            .generate_simple(Field::new("f64", DataType::Float32))
             .unwrap_err();
+        expect![[r#"incompatible data type change from Float64 to Float32 at path "f64""#]]
+            .assert_eq(&err.to_report_string());
 
-        // mismatched data type
+        // mismatched composite data type
         // we require the nested data type to be exactly the same
-        gen.generate_simple(Field::new(
-            "nested",
-            StructType::new([("f1", DataType::Int32), ("f2", DataType::Int64)]).into(),
-        ))
-        .unwrap_err();
+        let err = gen
+            .generate_simple(Field::new(
+                "nested",
+                StructType::new([("f1", DataType::Int32), ("f2", DataType::Int64)]).into(),
+            ))
+            .unwrap_err();
+        expect![[r#"column "nested" was persisted with legacy encoding thus cannot be altered, consider dropping and readding the column"#]].assert_eq(&err.to_report_string());
+
+        // matched composite data type, should work
+        let id = gen
+            .generate_simple(Field::new(
+                "nested",
+                StructType::new([("f1", DataType::Int32)]).into(),
+            ))
+            .unwrap();
+        assert_eq!(id, ColumnId::new(3));
 
         assert_eq!(gen.generate_simple(B("v3")).unwrap(), ColumnId::new(6));
+    }
+
+    #[test]
+    fn test_col_id_gen_alter_composite_type() {
+        let ori_type = || {
+            DataType::from(StructType::new([
+                ("f1", DataType::Int32),
+                (
+                    "map",
+                    MapType::from_kv(
+                        DataType::Varchar,
+                        DataType::List(Box::new(
+                            StructType::new([("f2", DataType::Int32), ("f3", DataType::Boolean)])
+                                .into(),
+                        )),
+                    )
+                    .into(),
+                ),
+            ]))
+        };
+
+        let new_type = || {
+            DataType::from(StructType::new([
+                ("f4", DataType::Int32),
+                (
+                    "map",
+                    MapType::from_kv(
+                        DataType::Varchar,
+                        DataType::List(Box::new(
+                            StructType::new([
+                                ("f5", DataType::Int32),
+                                ("f3", DataType::Boolean),
+                                ("f6", DataType::Float32),
+                            ])
+                            .into(),
+                        )),
+                    )
+                    .into(),
+                ),
+            ]))
+        };
+
+        let incompatible_new_type = || {
+            DataType::from(StructType::new([(
+                "map",
+                MapType::from_kv(
+                    DataType::Varchar,
+                    DataType::List(Box::new(
+                        StructType::new([("f6", DataType::Float64)]).into(),
+                    )),
+                )
+                .into(),
+            )]))
+        };
+
+        let mut gen = ColumnIdGenerator::new_initial();
+        let mut col = ColumnCatalog {
+            column_desc: ColumnDesc::from_field_without_column_id(&Field::new(
+                "nested",
+                ori_type(),
+            )),
+            is_hidden: false,
+        };
+        gen.generate(&mut col).unwrap();
+        let version = gen.into_version();
+
+        expect![[r#"
+            ColumnCatalog {
+                column_desc: ColumnDesc {
+                    data_type: Struct(
+                        StructType {
+                            fields: [
+                                (
+                                    "f1",
+                                    Int32,
+                                ),
+                                (
+                                    "map",
+                                    Map(
+                                        MapType(
+                                            (
+                                                Varchar,
+                                                List(
+                                                    Struct(
+                                                        StructType {
+                                                            fields: [
+                                                                (
+                                                                    "f2",
+                                                                    Int32,
+                                                                ),
+                                                                (
+                                                                    "f3",
+                                                                    Boolean,
+                                                                ),
+                                                            ],
+                                                            field_ids: [
+                                                                #2,
+                                                                #3,
+                                                            ],
+                                                        },
+                                                    ),
+                                                ),
+                                            ),
+                                        ),
+                                    ),
+                                ),
+                            ],
+                            field_ids: [
+                                #1,
+                                #4,
+                            ],
+                        },
+                    ),
+                    column_id: #5,
+                    name: "nested",
+                    generated_or_default_column: None,
+                    description: None,
+                    additional_column: AdditionalColumn {
+                        column_type: None,
+                    },
+                    version: Pr13707,
+                    system_column: None,
+                },
+                is_hidden: false,
+            }
+        "#]]
+        .assert_debug_eq(&col);
+
+        let mut gen = ColumnIdGenerator::new_alter(&TableCatalog {
+            columns: vec![col],
+            version: Some(version),
+            ..Default::default()
+        });
+        let mut new_col = ColumnCatalog {
+            column_desc: ColumnDesc::from_field_without_column_id(&Field::new(
+                "nested",
+                new_type(),
+            )),
+            is_hidden: false,
+        };
+        gen.generate(&mut new_col).unwrap();
+        let version = gen.into_version();
+
+        expect![[r#"
+            ColumnCatalog {
+                column_desc: ColumnDesc {
+                    data_type: Struct(
+                        StructType {
+                            fields: [
+                                (
+                                    "f4",
+                                    Int32,
+                                ),
+                                (
+                                    "map",
+                                    Map(
+                                        MapType(
+                                            (
+                                                Varchar,
+                                                List(
+                                                    Struct(
+                                                        StructType {
+                                                            fields: [
+                                                                (
+                                                                    "f5",
+                                                                    Int32,
+                                                                ),
+                                                                (
+                                                                    "f3",
+                                                                    Boolean,
+                                                                ),
+                                                                (
+                                                                    "f6",
+                                                                    Float32,
+                                                                ),
+                                                            ],
+                                                            field_ids: [
+                                                                #7,
+                                                                #3,
+                                                                #8,
+                                                            ],
+                                                        },
+                                                    ),
+                                                ),
+                                            ),
+                                        ),
+                                    ),
+                                ),
+                            ],
+                            field_ids: [
+                                #6,
+                                #4,
+                            ],
+                        },
+                    ),
+                    column_id: #5,
+                    name: "nested",
+                    generated_or_default_column: None,
+                    description: None,
+                    additional_column: AdditionalColumn {
+                        column_type: None,
+                    },
+                    version: Pr13707,
+                    system_column: None,
+                },
+                is_hidden: false,
+            }
+        "#]]
+        .assert_debug_eq(&new_col);
+
+        let mut gen = ColumnIdGenerator::new_alter(&TableCatalog {
+            columns: vec![new_col],
+            version: Some(version),
+            ..Default::default()
+        });
+
+        let mut new_col = ColumnCatalog {
+            column_desc: ColumnDesc::from_field_without_column_id(&Field::new(
+                "nested",
+                incompatible_new_type(),
+            )),
+            is_hidden: false,
+        };
+        let err = gen.generate(&mut new_col).unwrap_err();
+        expect![[r#"incompatible data type change from Float32 to Float64 at path "nested.map.value.element.f6""#]].assert_eq(&err.to_report_string());
     }
 }

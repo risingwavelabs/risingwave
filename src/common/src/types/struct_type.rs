@@ -30,9 +30,12 @@ pub struct StructType(Arc<StructTypeInner>);
 
 impl Debug for StructType {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("StructType")
-            .field("fields", &self.0.fields)
-            .finish()
+        let mut d = f.debug_struct("StructType");
+        d.field("fields", &self.0.fields);
+        if let Some(ids) = &self.0.field_ids {
+            d.field("field_ids", ids);
+        }
+        d.finish()
     }
 }
 
