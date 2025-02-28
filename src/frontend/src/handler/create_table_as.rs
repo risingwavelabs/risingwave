@@ -75,7 +75,7 @@ pub async fn handle_create_as(
                         column_desc: ColumnDesc::from_field_without_column_id(field),
                         is_hidden: false,
                     };
-                    col_id_gen.generate_new(&mut col)?;
+                    col_id_gen.generate(&mut col)?;
                     Result::Ok(col)
                 })
                 .try_collect()?
