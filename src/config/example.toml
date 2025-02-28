@@ -199,9 +199,6 @@ compactor_max_overlap_sst_count = 64
 compactor_max_preload_meta_file_count = 32
 time_travel_version_cache_capacity = 2
 
-[storage.cache]
-compactor_meta_cache_capacity_mb = 128
-
 [storage.cache.block_cache_eviction]
 algorithm = "Lru"
 
