@@ -194,8 +194,7 @@ impl PostgresExternalTable {
             SeaType::Numeric(_) => Ok(PgType::NUMERIC),
             SeaType::Real => Ok(PgType::FLOAT4),
             SeaType::DoublePrecision => Ok(PgType::FLOAT8),
-            SeaType::Varchar(_) => Ok(PgType::VARCHAR),
-            SeaType::Char(_) => Ok(PgType::CHAR),
+            SeaType::Char(_) | SeaType::Varchar(_) => Ok(PgType::VARCHAR),
             SeaType::Text => Ok(PgType::TEXT),
             SeaType::Bytea => Ok(PgType::BYTEA),
             SeaType::Timestamp(_) => Ok(PgType::TIMESTAMP),
@@ -207,7 +206,7 @@ impl PostgresExternalTable {
             SeaType::Boolean => Ok(PgType::BOOL),
             SeaType::Point => Ok(PgType::POINT),
             SeaType::Uuid => Ok(PgType::UUID),
-            SeaType::JsonBinary => Ok(PgType::JSONB),
+            SeaType::Json | SeaType::JsonBinary => Ok(PgType::JSONB),
             SeaType::Array(t) => {
                 let Some(t) = t.col_type.as_ref() else {
                     bail!("missing array type")
@@ -221,8 +220,7 @@ impl PostgresExternalTable {
                     SeaType::Numeric(_) => Ok(PgType::NUMERIC_ARRAY),
                     SeaType::Real => Ok(PgType::FLOAT4_ARRAY),
                     SeaType::DoublePrecision => Ok(PgType::FLOAT8_ARRAY),
-                    SeaType::Varchar(_) => Ok(PgType::VARCHAR_ARRAY),
-                    SeaType::Char(_) => Ok(PgType::CHAR_ARRAY),
+                    SeaType::Char(_) | SeaType::Varchar(_) => Ok(PgType::VARCHAR_ARRAY),
                     SeaType::Text => Ok(PgType::TEXT_ARRAY),
                     SeaType::Bytea => Ok(PgType::BYTEA_ARRAY),
                     SeaType::Timestamp(_) => Ok(PgType::TIMESTAMP_ARRAY),
@@ -234,7 +232,7 @@ impl PostgresExternalTable {
                     SeaType::Boolean => Ok(PgType::BOOL_ARRAY),
                     SeaType::Point => Ok(PgType::POINT_ARRAY),
                     SeaType::Uuid => Ok(PgType::UUID_ARRAY),
-                    SeaType::JsonBinary => Ok(PgType::JSONB_ARRAY),
+                    SeaType::Json | SeaType::JsonBinary => Ok(PgType::JSONB_ARRAY),
                     SeaType::Array(_) => bail!("nested array type is not supported"),
                     SeaType::Unknown(name) => {
                         // Treat as enum type
