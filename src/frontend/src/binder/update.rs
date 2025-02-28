@@ -137,7 +137,7 @@ impl Binder {
         self.check_privilege(
             PbObject::TableId(table_catalog.id.table_id),
             table_catalog.database_id,
-            AclMode::Insert,
+            AclMode::Update,
             table_catalog.owner,
         )?;
 

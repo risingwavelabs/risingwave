@@ -374,7 +374,7 @@ pub async fn handle_show_object(
                 .expect("user not found");
             iter_schema_items(&session, &schema, &reader, |schema| {
                 schema
-                    .iter_created_mvs_with_acl(current_user)
+                    .iter_user_table_with_acl(current_user)
                     .map(|t| t.name.clone())
                     .collect()
             })
