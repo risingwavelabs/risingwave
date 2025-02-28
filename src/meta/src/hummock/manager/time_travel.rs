@@ -143,6 +143,34 @@ impl HummockManager {
                 .into_tuple()
                 .all(&txn)
                 .await?;
+        // Reuse hummock_time_travel_epoch_version_insert_batch_size as threshold.
+        let delete_sst_batch_size = self
+            .env
+            .opts
+            .hummock_time_travel_epoch_version_insert_batch_size;
+        let mut sst_ids_to_delete: HashSet<_> = HashSet::default();
+        async fn delete_sst_in_batch(
+            txn: &DatabaseTransaction,
+            sst_ids_to_delete: HashSet<HummockSstableId>,
+            delete_sst_batch_size: usize,
+        ) -> Result<()> {
+            for start_idx in 0..=(sst_ids_to_delete.len().saturating_sub(1) / delete_sst_batch_size)
+            {
+                hummock_sstable_info::Entity::delete_many()
+                    .filter(
+                        hummock_sstable_info::Column::SstId.is_in(
+                            sst_ids_to_delete
+                                .iter()
+                                .skip(start_idx * delete_sst_batch_size)
+                                .take(delete_sst_batch_size)
+                                .copied(),
+                        ),
+                    )
+                    .exec(txn)
+                    .await?;
+            }
+            Ok(())
+        }
         for delta_id_to_delete in delta_ids_to_delete {
             let delta_to_delete = hummock_time_travel_delta::Entity::find_by_id(delta_id_to_delete)
                 .one(&txn)
@@ -158,21 +186,19 @@ impl HummockManager {
             );
             let new_sst_ids = delta_to_delete.newly_added_sst_ids();
             // The SST ids added and then deleted by compaction between the 2 versions.
-            let sst_ids_to_delete = &new_sst_ids - &latest_valid_version_sst_ids;
-            let res = hummock_sstable_info::Entity::delete_many()
-                .filter(hummock_sstable_info::Column::SstId.is_in(sst_ids_to_delete))
-                .exec(&txn)
+            sst_ids_to_delete.extend(&new_sst_ids - &latest_valid_version_sst_ids);
+            if sst_ids_to_delete.len() >= delete_sst_batch_size {
+                delete_sst_in_batch(
+                    &txn,
+                    std::mem::take(&mut sst_ids_to_delete),
+                    delete_sst_batch_size,
+                )
                 .await?;
+            }
             let new_object_ids = delta_to_delete.newly_added_object_ids();
             object_ids_to_delete.extend(&new_object_ids - &latest_valid_version_object_ids);
-            tracing::debug!(
-                delta_id = delta_to_delete.id.to_u64(),
-                "delete {} rows from hummock_sstable_info",
-                res.rows_affected
-            );
         }
         let mut next_version_sst_ids = latest_valid_version_sst_ids;
-        let mut sst_ids_to_delete: HashSet<_> = HashSet::default();
         for prev_version_id in version_ids_to_delete {
             let prev_version = {
                 let prev_version = hummock_time_travel_version::Entity::find_by_id(prev_version_id)
@@ -191,38 +217,20 @@ impl HummockManager {
             let sst_ids = prev_version.get_sst_ids();
             // The SST ids deleted by compaction between the 2 versions.
             sst_ids_to_delete.extend(&sst_ids - &next_version_sst_ids);
-            // Reuse hummock_time_travel_epoch_version_insert_batch_size as threshold.
-            if sst_ids_to_delete.len()
-                >= self
-                    .env
-                    .opts
-                    .hummock_time_travel_epoch_version_insert_batch_size
-            {
-                let res = hummock_sstable_info::Entity::delete_many()
-                    .filter(
-                        hummock_sstable_info::Column::SstId
-                            .is_in(std::mem::take(&mut sst_ids_to_delete)),
-                    )
-                    .exec(&txn)
-                    .await?;
-                tracing::debug!(
-                    "delete {} rows from hummock_sstable_info",
-                    res.rows_affected
-                );
+            if sst_ids_to_delete.len() >= delete_sst_batch_size {
+                delete_sst_in_batch(
+                    &txn,
+                    std::mem::take(&mut sst_ids_to_delete),
+                    delete_sst_batch_size,
+                )
+                .await?;
             }
             let new_object_ids = prev_version.get_object_ids();
             object_ids_to_delete.extend(&new_object_ids - &latest_valid_version_object_ids);
             next_version_sst_ids = sst_ids;
         }
         if !sst_ids_to_delete.is_empty() {
-            let res = hummock_sstable_info::Entity::delete_many()
-                .filter(hummock_sstable_info::Column::SstId.is_in(sst_ids_to_delete))
-                .exec(&txn)
-                .await?;
-            tracing::debug!(
-                "delete {} rows from hummock_sstable_info",
-                res.rows_affected
-            );
+            delete_sst_in_batch(&txn, sst_ids_to_delete, delete_sst_batch_size).await?;
         }
 
         if !object_ids_to_delete.is_empty() {
