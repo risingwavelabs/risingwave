@@ -268,7 +268,7 @@ pub fn execute_with_jni_env<T>(
             })?;
             let message = call_method!(env, exception, {String getMessage()})?;
             let message = jobj_to_str(&mut env, message)?;
-            return Err(anyhow::anyhow!("Caught Java Exception: {}", message).into());
+            return Err(anyhow::anyhow!("Caught Java Exception: {}", message));
         }
         Ok(false) => {
             // No exception, do nothing
