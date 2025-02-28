@@ -173,7 +173,7 @@ impl IcebergCommon {
                     }
                 }
                 None => {
-                    if catalog_type != "rest" || catalog_type != "rest_rust" {
+                    if catalog_type != "rest" && catalog_type != "rest_rust" {
                         bail!("`warehouse.path` must be set in {} catalog", &catalog_type);
                     }
                 }
