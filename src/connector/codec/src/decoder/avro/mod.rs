@@ -266,14 +266,26 @@ impl<'a> AvroParseOptionsInner<'a> {
                     .names()
                     .zip_eq_fast(struct_type_info.types())
                     .map(|(field_name, field_type)| {
-                        if let Some(idx) = record_schema.lookup.get(field_name) {
-                            let value = &descs[*idx].1;
-                            let schema = &record_schema.fields[*idx].schema;
-                            Ok(self
+
+                        let by_value = descs.iter().find_position(|(n, _)| n == field_name);
+                        let by_type = record_schema.lookup.get(field_name);
+                        match (by_value, by_type) {
+                            (None, None) => Ok(None),
+                            (Some((vi, (_, v))), Some(ti)) => {
+                                if vi != *ti {
+                                    tracing::warn!("avro record mismatch: {field_name} is #{ti} in schema but #{vi} in value")
+                                }
+                                let value = v; // &descs[*idx].1;
+                                let schema = &record_schema.fields[*ti].schema;
+                                Ok(self
                                 .convert_to_datum(schema, value, field_type)?
                                 .to_owned_datum())
-                        } else {
-                            Ok(None)
+                            }
+                            (Some(_), None) => Ok(None),
+                            (None, Some(ti)) => {
+                                tracing::warn!("avro record mismatch: {field_name} is #{ti} in schema but missing in value");
+                                Ok(None)
+                            }
                         }
                     })
                     .collect::<Result<_, AccessError>>()?
@@ -414,21 +426,24 @@ impl Access for AvroAccess<'_> {
                     else {
                         return Err(create_error());
                     };
-                    assert_eq!(
-                        fields.iter().map(|(name, _)| name.as_str()).collect_vec(),
-                        record_schema
-                            .fields
-                            .iter()
-                            .map(|f| f.name.as_str())
-                            .collect_vec(),
-                        "in record {}",
-                        record_schema.name.fullname(None),
-                    );
-                    if let Some(idx) = record_schema.lookup.get(key) {
-                        value = &fields[*idx].1;
-                        unresolved_schema = &record_schema.fields[*idx].schema;
-                        i += 1;
-                        continue;
+                    let by_value = fields.iter().find_position(|(n, _)| n == key);
+                    let by_type = record_schema.lookup.get(key);
+                    match (by_value, by_type) {
+                        (None, None) => {}
+                        (Some((vi, (_, v))), Some(ti)) => {
+                            if vi != *ti {
+                                tracing::warn!("avro record mismatch: {key} is #{ti} in schema but #{vi} in value")
+                            }
+                            value = v; // &fields[*idx].1;
+                            unresolved_schema = &record_schema.fields[*ti].schema;
+                            i += 1;
+                            continue;
+                        }
+                        (Some(_), None) => {}
+                        (None, Some(ti)) => {
+                            tracing::warn!("avro record mismatch: {key} is #{ti} in schema but missing in value");
+                            return Ok(DatumCow::NULL);
+                        }
                     }
                 }
                 _ => (),
