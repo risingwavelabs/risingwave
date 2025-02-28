@@ -153,12 +153,14 @@ impl Catalog {
                 .unwrap()
                 .create_sys_table(sys_table);
         }
-        for sys_view in get_sys_views_in_schema(proto.name.as_str()) {
+        for mut sys_view in get_sys_views_in_schema(proto.name.as_str()) {
+            sys_view.database_id = proto.database_id;
+            sys_view.schema_id = proto.id;
             self.get_database_mut(proto.database_id)
                 .unwrap()
                 .get_schema_mut(proto.id)
                 .unwrap()
-                .create_sys_view(sys_view);
+                .create_sys_view(Arc::new(sys_view));
         }
     }
 

@@ -65,10 +65,11 @@ pub use values::BoundValues;
 use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::schema_catalog::SchemaCatalog;
-use crate::catalog::{CatalogResult, TableId, ViewId};
+use crate::catalog::{CatalogResult, DatabaseId, TableId, ViewId};
 use crate::error::ErrorCode;
 use crate::expr::ExprImpl;
 use crate::session::{AuthContext, SessionImpl, TemporarySourceManager};
+use crate::user::user_service::UserInfoReadGuard;
 
 pub type ShareId = usize;
 
@@ -88,7 +89,9 @@ enum BindFor {
 pub struct Binder {
     // TODO: maybe we can only lock the database, but not the whole catalog.
     catalog: CatalogReadGuard,
+    user: UserInfoReadGuard,
     db_name: String,
+    database_id: DatabaseId,
     session_id: SessionId,
     context: BindContext,
     auth_context: Arc<AuthContext>,
@@ -328,7 +331,9 @@ impl Binder {
     ) -> Binder {
         Binder {
             catalog: session.env().catalog_reader().read_guard(),
+            user: session.env().user_info_reader().read_guard(),
             db_name: session.database(),
+            database_id: session.database_id(),
             session_id: session.id(),
             context: BindContext::new(),
             auth_context: session.auth_context(),
