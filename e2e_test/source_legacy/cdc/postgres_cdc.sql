@@ -157,4 +157,4 @@ CREATE TABLE test_pg_default_value (
     "city" varchar(200) default 'Shanghai',
     PRIMARY KEY ("id")
 );
-INSERT INTO test_pg_default_value VALUES (1, 'bugen');
+INSERT INTO test_pg_default_value(id, name) VALUES (1, 'bugen');
