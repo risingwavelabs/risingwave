@@ -111,6 +111,9 @@ pub mod telemetry;
 #[path = "sim/secret.rs"]
 pub mod secret;
 #[rustfmt::skip]
+#[path = "sim/serverless_backfill_controller.rs"]
+pub mod serverless_backfill_controller;
+#[rustfmt::skip]
 #[path = "connector_service.serde.rs"]
 pub mod connector_service_serde;
 #[rustfmt::skip]

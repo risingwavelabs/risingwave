@@ -18,12 +18,13 @@ use either::Either;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{FunctionId, ObjectId, TableId};
 use risingwave_pb::catalog::PbTable;
+use risingwave_pb::serverless_backfill_controller::{PbProvisionRequest, PbProvisionResponse};
 use risingwave_sqlparser::ast::{EmitMode, Ident, ObjectName, Query};
 
 use super::RwPgResponse;
 use crate::binder::{Binder, BoundQuery, BoundSetExpr};
 use crate::catalog::check_column_name_not_reserved;
-use crate::error::ErrorCode::ProtocolError;
+use crate::error::ErrorCode::{InvalidInputSyntax, ProtocolError};
 use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::Explain;
@@ -36,6 +37,7 @@ use crate::stream_fragmenter::build_graph;
 use crate::utils::ordinal;
 
 pub const RESOURCE_GROUP_KEY: &str = "resource_group";
+pub const CLOUD_SERVERLESS_BACKFILL_ENABLED: &str = "cloud.serverless_backfill_enabled";
 
 pub(super) fn parse_column_names(columns: &[Ident]) -> Option<Vec<String>> {
     if columns.is_empty() {
@@ -150,6 +152,7 @@ pub fn gen_create_mv_plan_bound(
 pub async fn handle_create_mv(
     handler_args: HandlerArgs,
     if_not_exists: bool,
+    // is_serverless_backfill: bool, // TODO: maybe here?
     name: ObjectName,
     query: Query,
     columns: Vec<Ident>,
@@ -176,6 +179,23 @@ pub async fn handle_create_mv(
     )
     .await
 }
+
+/// Send heartbeat signal to meta service.
+// pub async fn send_provision_request() -> Result<()> {
+//     let request = ProvisionRequest {};
+//     let resp = self.inner.heartbeat(request).await?;
+//     if let Some(status) = resp.status {
+//         if status.code() == risingwave_pb::common::status::Code::UnknownWorker {
+//             // Ignore the error if we're already shutting down.
+//             // Otherwise, exit the process.
+//             if !self.shutting_down.load(Relaxed) {
+//                 tracing::error!(message = status.message, "worker expired");
+//                 std::process::exit(1);
+//             }
+//         }
+//     }
+//     Ok(())
+// }
 
 pub async fn handle_create_mv_bound(
     handler_args: HandlerArgs,
@@ -204,7 +224,25 @@ pub async fn handle_create_mv_bound(
         let context = OptimizerContext::from_handler_args(handler_args);
         let mut with_options = context.with_options().clone();
 
+        // what is resource_group?
+        // create materialized view m with ( resource_group = 'test' ) as select * from t;
+        // Is this 'test'?
         let resource_group = with_options.remove(&RESOURCE_GROUP_KEY.to_owned());
+
+        // syntax is
+        // CREATE MATERIALIZED VIEW ... WITH ( cloud.serverless_backfill_enabled=true )
+        let is_serverless_backfill = with_options
+            .remove(&CLOUD_SERVERLESS_BACKFILL_ENABLED.to_owned())
+            .unwrap_or_default()
+            .parse::<bool>()
+            .unwrap_or(false);
+
+        if resource_group.is_some() && is_serverless_backfill {
+            return Err(RwError::from(InvalidInputSyntax(
+                "Please do not specify serverless backfilling and resource_group together"
+                    .to_owned(),
+            )));
+        }
 
         if resource_group.is_some()
             && !context
@@ -229,6 +267,9 @@ pub async fn handle_create_mv_bound(
 It only indicates the physical clustering of the data, which may improve the performance of queries issued against this materialized view.
 "#.to_owned());
         }
+
+        // TODO: I need to query the SBC before continuing with the resource group
+        //   let req = ProvisionRequest
 
         let (plan, table) =
             gen_create_mv_plan_bound(&session, context.into(), query, name, columns, emit_mode)?;
