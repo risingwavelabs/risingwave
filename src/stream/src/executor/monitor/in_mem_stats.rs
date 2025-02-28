@@ -34,4 +34,11 @@ impl CountMap {
         map.insert(id, counter.clone());
         counter
     }
+
+    pub fn collect(&self) -> HashMap<u32, u32> {
+        let map = self.0.read();
+        map.iter()
+            .map(|(&k, v)| (k, v.load(std::sync::atomic::Ordering::Relaxed)))
+            .collect()
+    }
 }
