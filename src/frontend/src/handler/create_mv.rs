@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashSet;
+use std::thread;
 
 use either::Either;
 use pgwire::pg_response::{PgResponse, StatementType};
@@ -183,6 +184,7 @@ pub async fn handle_create_mv(
 }
 
 /// Send a provision request to the serverless backfill controller
+#[tokio::main]
 pub async fn provision_serverless_backfill() -> Result<String> {
     // , Box<dyn std::error::Error>
     let request = tonic::Request::new(ProvisionRequest {});
@@ -271,8 +273,15 @@ It only indicates the physical clustering of the data, which may improve the per
 "#.to_owned());
         }
 
+        tracing::debug!("before calling SBC");
+
+        let x: std::result::Result<String, _> = thread::spawn(|| provision_serverless_backfill())
+            .join()
+            .expect("Thread panicked"); // TODO: Do not panic
+        tracing::debug!("after calling SBC");
+
         let resource_group = if is_serverless_backfill {
-            match provision_serverless_backfill().await {
+            match x {
                 Err(e) => {
                     return Err(RwError::from(ProtocolError(format!(
                         "failed to provision serverless backfill nodes: {}",
@@ -284,6 +293,7 @@ It only indicates the physical clustering of the data, which may improve the per
         } else {
             resource_group
         };
+        tracing::debug!(resource_group = resource_group, "after calling SBC");
 
         if resource_group.is_some()
             && !context
