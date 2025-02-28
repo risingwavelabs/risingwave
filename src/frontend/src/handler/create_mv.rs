@@ -19,7 +19,7 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{FunctionId, ObjectId, TableId};
 use risingwave_pb::catalog::PbTable;
 use risingwave_pb::serverless_backfill_controller::{
-    ProvisionRequest, ProvisionResponse, node_group_controller_service_client,
+    ProvisionRequest, node_group_controller_service_client,
 };
 use risingwave_sqlparser::ast::{EmitMode, Ident, ObjectName, Query};
 
@@ -183,7 +183,7 @@ pub async fn handle_create_mv(
 }
 
 /// Send a provision request to the serverless backfill controller
-pub async fn send_provision_request() -> Result<String> {
+pub async fn provision_serverless_backfill() -> Result<String> {
     // , Box<dyn std::error::Error>
     let request = tonic::Request::new(ProvisionRequest {});
     let mut client =
@@ -256,15 +256,6 @@ pub async fn handle_create_mv_bound(
             )));
         }
 
-        if resource_group.is_some()
-            && !context
-                .session_ctx()
-                .config()
-                .streaming_use_arrangement_backfill()
-        {
-            return Err(RwError::from(ProtocolError("The session config arrangement backfill must be enabled to use the resource_group option".to_owned())));
-        }
-
         if !with_options.is_empty() {
             // get other useful fields by `remove`, the logic here is to reject unknown options.
             return Err(RwError::from(ProtocolError(format!(
@@ -280,8 +271,28 @@ It only indicates the physical clustering of the data, which may improve the per
 "#.to_owned());
         }
 
-        // TODO: I need to query the SBC before continuing with the resource group
-        //   let req = ProvisionRequest
+        let resource_group = if is_serverless_backfill {
+            match provision_serverless_backfill().await {
+                Err(e) => {
+                    return Err(RwError::from(ProtocolError(format!(
+                        "failed to provision serverless backfill nodes: {}",
+                        e
+                    ))));
+                }
+                Ok(val) => Some(val),
+            }
+        } else {
+            resource_group
+        };
+
+        if resource_group.is_some()
+            && !context
+                .session_ctx()
+                .config()
+                .streaming_use_arrangement_backfill()
+        {
+            return Err(RwError::from(ProtocolError("The session config arrangement backfill must be enabled to use the resource_group option".to_owned())));
+        }
 
         let (plan, table) =
             gen_create_mv_plan_bound(&session, context.into(), query, name, columns, emit_mode)?;
@@ -327,125 +338,125 @@ It only indicates the physical clustering of the data, which may improve the per
     ))
 }
 
-// #[cfg(test)]
-// pub mod tests {
-// use std::collections::HashMap;
-//
-// use pgwire::pg_response::StatementType::CREATE_MATERIALIZED_VIEW;
-// use risingwave_common::catalog::{
-// DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, ROW_ID_COLUMN_NAME, RW_TIMESTAMP_COLUMN_NAME,
-// };
-// use risingwave_common::types::{DataType, StructType};
-//
-// use crate::catalog::root_catalog::SchemaPath;
-// use crate::test_utils::{LocalFrontend, PROTO_FILE_DATA, create_proto_file};
-//
-// #[tokio::test]
-// async fn test_create_mv_handler() {
-// let proto_file = create_proto_file(PROTO_FILE_DATA);
-// let sql = format!(
-// r#"CREATE SOURCE t1
-// WITH (connector = 'kinesis')
-// FORMAT PLAIN ENCODE PROTOBUF (message = '.test.TestRecord', schema.location = 'file://{}')"#,
-// proto_file.path().to_str().unwrap()
-// );
-// let frontend = LocalFrontend::new(Default::default()).await;
-// frontend.run_sql(sql).await.unwrap();
-//
-// let sql = "create materialized view mv1 as select t1.country from t1";
-// frontend.run_sql(sql).await.unwrap();
-//
-// let session = frontend.session_ref();
-// let catalog_reader = session.env().catalog_reader().read_guard();
-// let schema_path = SchemaPath::Name(DEFAULT_SCHEMA_NAME);
-//
-// Check source exists.
-// let (source, _) = catalog_reader
-// .get_source_by_name(DEFAULT_DATABASE_NAME, schema_path, "t1")
-// .unwrap();
-// assert_eq!(source.name, "t1");
-//
-// Check table exists.
-// let (table, _) = catalog_reader
-// .get_created_table_by_name(DEFAULT_DATABASE_NAME, schema_path, "mv1")
-// .unwrap();
-// assert_eq!(table.name(), "mv1");
-//
-// let columns = table
-// .columns
-// .iter()
-// .map(|col| (col.name(), col.data_type().clone()))
-// .collect::<HashMap<&str, DataType>>();
-//
-// let city_type = StructType::new(vec![
-// ("address", DataType::Varchar),
-// ("zipcode", DataType::Varchar),
-// ])
-// .into();
-// let expected_columns = maplit::hashmap! {
-// ROW_ID_COLUMN_NAME => DataType::Serial,
-// "country" => StructType::new(
-// vec![("address", DataType::Varchar),("city", city_type),("zipcode", DataType::Varchar)],
-// ).into(),
-// RW_TIMESTAMP_COLUMN_NAME => DataType::Timestamptz,
-// };
-// assert_eq!(columns, expected_columns);
-// }
-//
-// When creating MV, a unique column name must be specified for each column
-// #[tokio::test]
-// async fn test_no_alias() {
-// let frontend = LocalFrontend::new(Default::default()).await;
-//
-// let sql = "create table t(x varchar)";
-// frontend.run_sql(sql).await.unwrap();
-//
-// Aggregation without alias is ok.
-// let sql = "create materialized view mv0 as select count(x) from t";
-// frontend.run_sql(sql).await.unwrap();
-//
-// Same aggregations without alias is forbidden, because it make the same column name.
-// let sql = "create materialized view mv1 as select count(x), count(*) from t";
-// let err = frontend.run_sql(sql).await.unwrap_err();
-// assert_eq!(
-// err.to_string(),
-// "Invalid input syntax: column \"count\" specified more than once"
-// );
-//
-// Literal without alias is forbidden.
-// let sql = "create materialized view mv1 as select 1";
-// let err = frontend.run_sql(sql).await.unwrap_err();
-// assert_eq!(
-// err.to_string(),
-// "Bind error: An alias must be specified for the 1st expression (counting from 1) in result relation"
-// );
-//
-// some expression without alias is forbidden.
-// let sql = "create materialized view mv1 as select x is null from t";
-// let err = frontend.run_sql(sql).await.unwrap_err();
-// assert_eq!(
-// err.to_string(),
-// "Bind error: An alias must be specified for the 1st expression (counting from 1) in result relation"
-// );
-// }
-//
-// Creating MV with order by returns a special notice
-// #[tokio::test]
-// async fn test_create_mv_with_order_by() {
-// let frontend = LocalFrontend::new(Default::default()).await;
-//
-// let sql = "create table t(x varchar)";
-// frontend.run_sql(sql).await.unwrap();
-//
-// Without order by
-// let sql = "create materialized view mv1 as select * from t";
-// let response = frontend.run_sql(sql).await.unwrap();
-// assert_eq!(response.stmt_type(), CREATE_MATERIALIZED_VIEW);
-// assert!(response.notices().is_empty());
-//
-// With order by
-// let sql = "create materialized view mv2 as select * from t order by x";
-// let response = frontend.run_sql(sql).await.unwrap();
-// assert_eq!(response.stmt_type(), CREATE_MATERIALIZED_VIEW);
-// }
-// }
+#[cfg(test)]
+pub mod tests {
+    use std::collections::HashMap;
+
+    use pgwire::pg_response::StatementType::CREATE_MATERIALIZED_VIEW;
+    use risingwave_common::catalog::{
+        DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, ROW_ID_COLUMN_NAME, RW_TIMESTAMP_COLUMN_NAME,
+    };
+    use risingwave_common::types::{DataType, StructType};
+
+    use crate::catalog::root_catalog::SchemaPath;
+    use crate::test_utils::{LocalFrontend, PROTO_FILE_DATA, create_proto_file};
+
+    #[tokio::test]
+    async fn test_create_mv_handler() {
+        let proto_file = create_proto_file(PROTO_FILE_DATA);
+        let sql = format!(
+            r#"CREATE SOURCE t1
+    WITH (connector = 'kinesis')
+    FORMAT PLAIN ENCODE PROTOBUF (message = '.test.TestRecord', schema.location = 'file://{}')"#,
+            proto_file.path().to_str().unwrap()
+        );
+        let frontend = LocalFrontend::new(Default::default()).await;
+        frontend.run_sql(sql).await.unwrap();
+
+        let sql = "create materialized view mv1 as select t1.country from t1";
+        frontend.run_sql(sql).await.unwrap();
+
+        let session = frontend.session_ref();
+        let catalog_reader = session.env().catalog_reader().read_guard();
+        let schema_path = SchemaPath::Name(DEFAULT_SCHEMA_NAME);
+
+        // Check source exists.
+        let (source, _) = catalog_reader
+            .get_source_by_name(DEFAULT_DATABASE_NAME, schema_path, "t1")
+            .unwrap();
+        assert_eq!(source.name, "t1");
+
+        // Check table exists.
+        let (table, _) = catalog_reader
+            .get_created_table_by_name(DEFAULT_DATABASE_NAME, schema_path, "mv1")
+            .unwrap();
+        assert_eq!(table.name(), "mv1");
+
+        let columns = table
+            .columns
+            .iter()
+            .map(|col| (col.name(), col.data_type().clone()))
+            .collect::<HashMap<&str, DataType>>();
+
+        let city_type = StructType::new(vec![
+            ("address", DataType::Varchar),
+            ("zipcode", DataType::Varchar),
+        ])
+        .into();
+        let expected_columns = maplit::hashmap! {
+            ROW_ID_COLUMN_NAME => DataType::Serial,
+            "country" => StructType::new(
+                 vec![("address", DataType::Varchar),("city", city_type),("zipcode", DataType::Varchar)],
+            ).into(),
+            RW_TIMESTAMP_COLUMN_NAME => DataType::Timestamptz,
+        };
+        assert_eq!(columns, expected_columns);
+    }
+
+    /// When creating MV, a unique column name must be specified for each column
+    #[tokio::test]
+    async fn test_no_alias() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+
+        let sql = "create table t(x varchar)";
+        frontend.run_sql(sql).await.unwrap();
+
+        // Aggregation without alias is ok.
+        let sql = "create materialized view mv0 as select count(x) from t";
+        frontend.run_sql(sql).await.unwrap();
+
+        // Same aggregations without alias is forbidden, because it make the same column name.
+        let sql = "create materialized view mv1 as select count(x), count(*) from t";
+        let err = frontend.run_sql(sql).await.unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "Invalid input syntax: column \"count\" specified more than once"
+        );
+
+        // Literal without alias is forbidden.
+        let sql = "create materialized view mv1 as select 1";
+        let err = frontend.run_sql(sql).await.unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "Bind error: An alias must be specified for the 1st expression (counting from 1) in result relation"
+        );
+
+        // some expression without alias is forbidden.
+        let sql = "create materialized view mv1 as select x is null from t";
+        let err = frontend.run_sql(sql).await.unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "Bind error: An alias must be specified for the 1st expression (counting from 1) in result relation"
+        );
+    }
+
+    /// Creating MV with order by returns a special notice
+    #[tokio::test]
+    async fn test_create_mv_with_order_by() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+
+        let sql = "create table t(x varchar)";
+        frontend.run_sql(sql).await.unwrap();
+
+        // Without order by
+        let sql = "create materialized view mv1 as select * from t";
+        let response = frontend.run_sql(sql).await.unwrap();
+        assert_eq!(response.stmt_type(), CREATE_MATERIALIZED_VIEW);
+        assert!(response.notices().is_empty());
+
+        // With order by
+        let sql = "create materialized view mv2 as select * from t order by x";
+        let response = frontend.run_sql(sql).await.unwrap();
+        assert_eq!(response.stmt_type(), CREATE_MATERIALIZED_VIEW);
+    }
+}
