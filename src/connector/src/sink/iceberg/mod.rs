@@ -500,6 +500,10 @@ impl Sink for IcebergSink {
         ))
     }
 
+    fn is_coordinated_sink(&self) -> bool {
+        true
+    }
+
     async fn new_coordinator(&self) -> Result<Self::Coordinator> {
         let catalog = self.config.create_catalog().await?;
         let table = self.create_and_validate_table().await?;

@@ -124,7 +124,7 @@ impl ReplaceStreamJobPlan {
                 self.streaming_job.id().into(),
                 InflightFragmentInfo {
                     fragment_id: fragment.fragment_id,
-                    nodes: fragment.nodes.clone().unwrap(),
+                    nodes: fragment.nodes.clone(),
                     actors: fragment
                         .actors
                         .iter()
@@ -227,7 +227,7 @@ impl CreateStreamingJobCommandInfo {
                     fragment.fragment_id,
                     InflightFragmentInfo {
                         fragment_id: fragment.fragment_id,
-                        nodes: fragment.nodes.clone().unwrap(),
+                        nodes: fragment.nodes.clone(),
                         actors: fragment
                             .actors
                             .iter()

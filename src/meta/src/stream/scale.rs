@@ -15,12 +15,12 @@
 use std::cmp::{Ordering, min};
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
+use std::fmt::Debug;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, anyhow};
-use futures::future::try_join_all;
 use itertools::Itertools;
 use num_integer::Integer;
 use num_traits::abs;
@@ -29,7 +29,7 @@ use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::hash::ActorMapping;
 use risingwave_common::util::iter_util::ZipEqDebug;
-use risingwave_meta_model::{ObjectId, WorkerId, actor, fragment};
+use risingwave_meta_model::{ObjectId, WorkerId, actor, fragment, streaming_job};
 use risingwave_pb::common::{PbActorLocation, WorkerNode, WorkerType};
 use risingwave_pb::meta::FragmentWorkerSlotMappings;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -39,7 +39,7 @@ use risingwave_pb::meta::table_fragments::fragment::{
 };
 use risingwave_pb::meta::table_fragments::{self, ActorStatus, PbFragment, State};
 use risingwave_pb::stream_plan::{
-    Dispatcher, DispatcherType, FragmentTypeFlag, PbDispatcher, PbStreamActor, StreamActor,
+    Dispatcher, FragmentTypeFlag, PbDispatcher, PbDispatcherType, PbStreamActor, StreamActor,
     StreamNode,
 };
 use thiserror_ext::AsReport;
@@ -68,7 +68,6 @@ pub struct CustomFragmentInfo {
     pub fragment_type_mask: u32,
     pub distribution_type: PbFragmentDistributionType,
     pub state_table_ids: Vec<u32>,
-    pub upstream_fragment_ids: Vec<u32>,
     pub node: StreamNode,
     pub actor_template: PbStreamActor,
     pub actors: Vec<CustomActorInfo>,
@@ -109,7 +108,6 @@ impl From<&PbFragment> for CustomFragmentInfo {
             fragment_type_mask: fragment.fragment_type_mask,
             distribution_type: fragment.distribution_type(),
             state_table_ids: fragment.state_table_ids.clone(),
-            upstream_fragment_ids: fragment.upstream_fragment_ids.clone(),
             node: fragment.nodes.clone().unwrap(),
             actor_template: fragment
                 .actors
@@ -137,7 +135,9 @@ impl CustomFragmentInfo {
 }
 
 use educe::Educe;
+use futures::future::try_join_all;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
+use risingwave_meta_model::actor_dispatcher::DispatcherType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 
 use super::SourceChange;
@@ -156,8 +156,6 @@ pub struct RescheduleContext {
     /// Meta information of all `Fragment`, used to find the `Fragment`'s `Actor`
     #[educe(Debug(ignore))]
     fragment_map: HashMap<FragmentId, CustomFragmentInfo>,
-    /// Index of all `Actor` upstreams, specific to `Dispatcher`
-    upstream_dispatchers: HashMap<ActorId, Vec<(FragmentId, DispatcherId, DispatcherType)>>,
     /// Fragments with `StreamSource`
     stream_source_fragment_ids: HashSet<FragmentId>,
     /// Fragments with `StreamSourceBackfill` and the corresponding upstream source fragment
@@ -168,6 +166,10 @@ pub struct RescheduleContext {
     no_shuffle_source_fragment_ids: HashSet<FragmentId>,
     // index for dispatcher type from upstream fragment to downstream fragment
     fragment_dispatcher_map: HashMap<FragmentId, HashMap<FragmentId, DispatcherType>>,
+    fragment_upstreams: HashMap<
+        risingwave_meta_model::FragmentId,
+        HashMap<risingwave_meta_model::FragmentId, DispatcherType>,
+    >,
 }
 
 impl RescheduleContext {
@@ -493,28 +495,17 @@ impl ScaleController {
         let mut fragment_state = HashMap::new();
         let mut fragment_to_table = HashMap::new();
 
-        async fn fulfill_index_by_fragment_ids(
+        fn fulfill_index_by_fragment_ids(
             actor_map: &mut HashMap<u32, CustomActorInfo>,
             fragment_map: &mut HashMap<FragmentId, CustomFragmentInfo>,
             actor_status: &mut BTreeMap<ActorId, WorkerId>,
             fragment_state: &mut HashMap<FragmentId, State>,
             fragment_to_table: &mut HashMap<FragmentId, TableId>,
-            mgr: &MetadataManager,
-            fragment_ids: Vec<risingwave_meta_model::FragmentId>,
-        ) -> Result<(), MetaError> {
-            let RescheduleWorkingSet {
-                fragments,
-                actors,
-                mut actor_dispatchers,
-                fragment_downstreams: _,
-                fragment_upstreams: _,
-                related_jobs,
-                job_resource_groups: _job_resource_groups,
-            } = mgr
-                .catalog_controller
-                .resolve_working_set_for_reschedule_fragments(fragment_ids)
-                .await?;
-
+            fragments: HashMap<risingwave_meta_model::FragmentId, fragment::Model>,
+            actors: HashMap<risingwave_meta_model::ActorId, actor::Model>,
+            mut actor_dispatchers: HashMap<risingwave_meta_model::ActorId, Vec<PbDispatcher>>,
+            related_jobs: HashMap<ObjectId, (streaming_job::Model, String)>,
+        ) {
             let mut fragment_actors: HashMap<
                 risingwave_meta_model::FragmentId,
                 Vec<CustomActorInfo>,
@@ -535,12 +526,7 @@ impl ScaleController {
                 },
             ) in actors
             {
-                let dispatchers = actor_dispatchers
-                    .remove(&actor_id)
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(PbDispatcher::from)
-                    .collect();
+                let dispatchers = actor_dispatchers.remove(&actor_id).unwrap_or_default();
 
                 let actor_info = CustomActorInfo {
                     actor_id: actor_id as _,
@@ -570,8 +556,7 @@ impl ScaleController {
                     distribution_type,
                     stream_node,
                     state_table_ids,
-                    upstream_fragment_id,
-                    vnode_count: _,
+                    ..
                 },
             ) in fragments
             {
@@ -594,7 +579,6 @@ impl ScaleController {
                     fragment_type_mask: fragment_type_mask as _,
                     distribution_type: distribution_type.into(),
                     state_table_ids: state_table_ids.into_u32_array(),
-                    upstream_fragment_ids: upstream_fragment_id.into_u32_array(),
                     node: stream_node.to_protobuf(),
                     actor_template: PbStreamActor {
                         actor_id,
@@ -619,9 +603,13 @@ impl ScaleController {
                     table_fragments::PbState::from(related_job.job_status),
                 );
             }
-            Ok(())
         }
         let fragment_ids = reschedule.keys().map(|id| *id as _).collect();
+        let working_set = self
+            .metadata_manager
+            .catalog_controller
+            .resolve_working_set_for_reschedule_fragments(fragment_ids)
+            .await?;
 
         fulfill_index_by_fragment_ids(
             &mut actor_map,
@@ -629,10 +617,11 @@ impl ScaleController {
             &mut actor_status,
             &mut fragment_state,
             &mut fragment_to_table,
-            &self.metadata_manager,
-            fragment_ids,
-        )
-        .await?;
+            working_set.fragments,
+            working_set.actors,
+            working_set.actor_dispatchers,
+            working_set.related_jobs,
+        );
 
         // NoShuffle relation index
         let mut no_shuffle_source_fragment_ids = HashSet::new();
@@ -649,19 +638,19 @@ impl ScaleController {
 
             Self::resolve_no_shuffle_upstream_fragments(
                 reschedule,
-                &fragment_map,
                 &no_shuffle_source_fragment_ids,
                 &no_shuffle_target_fragment_ids,
+                &working_set.fragment_upstreams,
             )?;
 
             if !table_parallelisms.is_empty() {
                 // We need to reiterate through the NO_SHUFFLE dependencies in order to ascertain which downstream table the custom modifications of the table have been propagated from.
                 Self::resolve_no_shuffle_upstream_tables(
                     original_reschedule_keys,
-                    &fragment_map,
                     &no_shuffle_source_fragment_ids,
                     &no_shuffle_target_fragment_ids,
                     &fragment_to_table,
+                    &working_set.fragment_upstreams,
                     table_parallelisms,
                 )?;
             }
@@ -669,26 +658,6 @@ impl ScaleController {
 
         let mut fragment_dispatcher_map = HashMap::new();
         Self::build_fragment_dispatcher_index(&actor_map, &mut fragment_dispatcher_map);
-
-        // Then, we collect all available upstreams
-        let mut upstream_dispatchers: HashMap<
-            ActorId,
-            Vec<(FragmentId, DispatcherId, DispatcherType)>,
-        > = HashMap::new();
-        for stream_actor in actor_map.values() {
-            for dispatcher in &stream_actor.dispatcher {
-                for downstream_actor_id in &dispatcher.downstream_actor_id {
-                    upstream_dispatchers
-                        .entry(*downstream_actor_id as ActorId)
-                        .or_default()
-                        .push((
-                            stream_actor.fragment_id as FragmentId,
-                            dispatcher.dispatcher_id as DispatcherId,
-                            dispatcher.r#type(),
-                        ));
-                }
-            }
-        }
 
         let mut stream_source_fragment_ids = HashSet::new();
         let mut stream_source_backfill_fragment_ids = HashMap::new();
@@ -781,7 +750,7 @@ impl ScaleController {
                 }
             }
 
-            if (fragment.get_fragment_type_mask() & FragmentTypeFlag::Source as u32) != 0
+            if (fragment.fragment_type_mask & FragmentTypeFlag::Source as u32) != 0
                 && fragment.node.find_stream_source().is_some()
             {
                 stream_source_fragment_ids.insert(*fragment_id);
@@ -842,7 +811,7 @@ impl ScaleController {
             for noshuffle_downstream in no_shuffle_reschedule.keys() {
                 let fragment = fragment_map.get(noshuffle_downstream).unwrap();
                 // SourceScan is always a NoShuffle downstream, rescheduled together with the upstream Source.
-                if (fragment.get_fragment_type_mask() & FragmentTypeFlag::SourceScan as u32) != 0 {
+                if (fragment.fragment_type_mask & FragmentTypeFlag::SourceScan as u32) != 0 {
                     let stream_node = &fragment.node;
                     if let Some((_source_id, upstream_source_fragment_id)) =
                         stream_node.find_source_backfill()
@@ -861,12 +830,12 @@ impl ScaleController {
             actor_map,
             actor_status,
             fragment_map,
-            upstream_dispatchers,
             stream_source_fragment_ids,
             stream_source_backfill_fragment_ids,
             no_shuffle_target_fragment_ids,
             no_shuffle_source_fragment_ids,
             fragment_dispatcher_map,
+            fragment_upstreams: working_set.fragment_upstreams,
         })
     }
 
@@ -1001,7 +970,7 @@ impl ScaleController {
             // build actor group map
             for upstream_actor in &upstream_fragment.actors {
                 for dispatcher in &upstream_actor.dispatcher {
-                    if let DispatcherType::NoShuffle = dispatcher.get_type().unwrap() {
+                    if let PbDispatcherType::NoShuffle = dispatcher.get_type().unwrap() {
                         let downstream_actor_id =
                             *dispatcher.downstream_actor_id.iter().exactly_one().unwrap();
 
@@ -1330,16 +1299,13 @@ impl ScaleController {
 
             let fragment = &ctx.fragment_map[&fragment_id];
 
-            let in_degree_types: HashSet<_> = fragment
-                .upstream_fragment_ids
-                .iter()
-                .flat_map(|upstream_fragment_id| {
-                    ctx.fragment_dispatcher_map
-                        .get(upstream_fragment_id)
-                        .and_then(|dispatcher_map| {
-                            dispatcher_map.get(&fragment.fragment_id).cloned()
-                        })
-                })
+            let in_degree_types: HashSet<_> = ctx
+                .fragment_upstreams
+                .get(&(fragment_id as _))
+                .map(|upstreams| upstreams.values())
+                .into_iter()
+                .flatten()
+                .cloned()
                 .collect();
 
             let upstream_dispatcher_mapping = match fragment.distribution_type() {
@@ -1363,17 +1329,16 @@ impl ScaleController {
 
             let mut upstream_fragment_dispatcher_set = BTreeSet::new();
 
-            for actor in &fragment.actors {
-                if let Some(upstream_actor_tuples) = ctx.upstream_dispatchers.get(&actor.actor_id) {
-                    for (upstream_fragment_id, upstream_dispatcher_id, upstream_dispatcher_type) in
-                        upstream_actor_tuples
-                    {
+            {
+                if let Some(upstreams) = ctx.fragment_upstreams.get(&(fragment.fragment_id as _)) {
+                    for (upstream_fragment_id, upstream_dispatcher_type) in upstreams {
                         match upstream_dispatcher_type {
-                            DispatcherType::Unspecified => unreachable!(),
                             DispatcherType::NoShuffle => {}
                             _ => {
-                                upstream_fragment_dispatcher_set
-                                    .insert((*upstream_fragment_id, *upstream_dispatcher_id));
+                                upstream_fragment_dispatcher_set.insert((
+                                    *upstream_fragment_id as FragmentId,
+                                    fragment.fragment_id as DispatcherId,
+                                ));
                             }
                         }
                     }
@@ -1562,7 +1527,7 @@ impl ScaleController {
             for actor_id in actors_to_remove.keys() {
                 let actor = ctx.actor_map.get(actor_id).unwrap();
                 for dispatcher in &actor.dispatcher {
-                    if DispatcherType::NoShuffle == dispatcher.get_type().unwrap() {
+                    if PbDispatcherType::NoShuffle == dispatcher.get_type().unwrap() {
                         let downstream_actor_id = dispatcher.downstream_actor_id.iter().exactly_one().expect("there should be only one downstream actor id in NO_SHUFFLE dispatcher");
 
                         let _should_exists = fragment_actors_to_remove
@@ -1604,7 +1569,9 @@ impl ScaleController {
                 fragment_actors_to_create.get(&downstream_fragment_id);
 
             match dispatcher.r#type() {
-                d @ (DispatcherType::Hash | DispatcherType::Simple | DispatcherType::Broadcast) => {
+                d @ (PbDispatcherType::Hash
+                | PbDispatcherType::Simple
+                | PbDispatcherType::Broadcast) => {
                     if let Some(downstream_actors_to_remove) = downstream_fragment_actors_to_remove
                     {
                         dispatcher
@@ -1620,11 +1587,11 @@ impl ScaleController {
                     }
 
                     // There should be still exactly one downstream actor
-                    if d == DispatcherType::Simple {
+                    if d == PbDispatcherType::Simple {
                         assert_eq!(dispatcher.downstream_actor_id.len(), 1);
                     }
                 }
-                DispatcherType::NoShuffle => {
+                PbDispatcherType::NoShuffle => {
                     assert_eq!(dispatcher.downstream_actor_id.len(), 1);
                     let downstream_actor_id = no_shuffle_downstream_actors_map
                         .get(&new_actor.actor_id)
@@ -1632,7 +1599,7 @@ impl ScaleController {
                         .unwrap();
                     dispatcher.downstream_actor_id = vec![*downstream_actor_id as ActorId];
                 }
-                DispatcherType::Unspecified => unreachable!(),
+                PbDispatcherType::Unspecified => unreachable!(),
             }
 
             if let Some(mapping) = dispatcher.hash_mapping.as_mut() {
@@ -2138,7 +2105,7 @@ impl ScaleController {
                 for downstream_actor_id in &dispatcher.downstream_actor_id {
                     if let Some(downstream_actor) = actor_map.get(downstream_actor_id) {
                         // Checking for no shuffle dispatchers
-                        if dispatcher.r#type() == DispatcherType::NoShuffle {
+                        if dispatcher.r#type() == PbDispatcherType::NoShuffle {
                             no_shuffle_source_fragment_ids.insert(actor.fragment_id as FragmentId);
                             no_shuffle_target_fragment_ids
                                 .insert(downstream_actor.fragment_id as FragmentId);
@@ -2164,7 +2131,7 @@ impl ScaleController {
                             .or_default()
                             .insert(
                                 downstream_actor.fragment_id as FragmentId,
-                                dispatcher.r#type(),
+                                dispatcher.r#type().into(),
                             );
                     }
                 }
@@ -2174,10 +2141,13 @@ impl ScaleController {
 
     pub fn resolve_no_shuffle_upstream_tables(
         fragment_ids: HashSet<FragmentId>,
-        fragment_map: &HashMap<FragmentId, CustomFragmentInfo>,
         no_shuffle_source_fragment_ids: &HashSet<FragmentId>,
         no_shuffle_target_fragment_ids: &HashSet<FragmentId>,
         fragment_to_table: &HashMap<FragmentId, TableId>,
+        fragment_upstreams: &HashMap<
+            risingwave_meta_model::FragmentId,
+            HashMap<risingwave_meta_model::FragmentId, DispatcherType>,
+        >,
         table_parallelisms: &mut HashMap<TableId, TableParallelism>,
     ) -> MetaResult<()> {
         let mut queue: VecDeque<FragmentId> = fragment_ids.iter().cloned().collect();
@@ -2192,7 +2162,14 @@ impl ScaleController {
             }
 
             // for upstream
-            for upstream_fragment_id in &fragment_map[&fragment_id].upstream_fragment_ids {
+            for upstream_fragment_id in fragment_upstreams
+                .get(&(fragment_id as _))
+                .map(|upstreams| upstreams.keys())
+                .into_iter()
+                .flatten()
+            {
+                let upstream_fragment_id = *upstream_fragment_id as FragmentId;
+                let upstream_fragment_id = &upstream_fragment_id;
                 if !no_shuffle_source_fragment_ids.contains(upstream_fragment_id) {
                     continue;
                 }
@@ -2238,9 +2215,12 @@ impl ScaleController {
 
     pub fn resolve_no_shuffle_upstream_fragments<T>(
         reschedule: &mut HashMap<FragmentId, T>,
-        fragment_map: &HashMap<FragmentId, CustomFragmentInfo>,
         no_shuffle_source_fragment_ids: &HashSet<FragmentId>,
         no_shuffle_target_fragment_ids: &HashSet<FragmentId>,
+        fragment_upstreams: &HashMap<
+            risingwave_meta_model::FragmentId,
+            HashMap<risingwave_meta_model::FragmentId, DispatcherType>,
+        >,
     ) -> MetaResult<()>
     where
         T: Clone + Eq,
@@ -2255,7 +2235,14 @@ impl ScaleController {
             }
 
             // for upstream
-            for upstream_fragment_id in &fragment_map[&fragment_id].upstream_fragment_ids {
+            for upstream_fragment_id in fragment_upstreams
+                .get(&(fragment_id as _))
+                .map(|upstreams| upstreams.keys())
+                .into_iter()
+                .flatten()
+            {
+                let upstream_fragment_id = *upstream_fragment_id as FragmentId;
+                let upstream_fragment_id = &upstream_fragment_id;
                 if !no_shuffle_source_fragment_ids.contains(upstream_fragment_id) {
                     continue;
                 }

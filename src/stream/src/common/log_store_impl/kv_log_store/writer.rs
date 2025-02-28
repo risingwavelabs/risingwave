@@ -15,6 +15,7 @@
 use std::sync::Arc;
 
 use anyhow::anyhow;
+use bytes::Bytes;
 use futures::FutureExt;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bitmap::Bitmap;
@@ -23,7 +24,8 @@ use risingwave_connector::sink::log_store::{
     LogStoreResult, LogWriter, LogWriterPostFlushCurrentEpoch,
 };
 use risingwave_storage::store::LocalStateStore;
-use tokio::sync::watch;
+use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::{oneshot, watch};
 
 use crate::common::log_store_impl::kv_log_store::buffer::LogStoreBufferSender;
 use crate::common::log_store_impl::kv_log_store::state::LogStoreWriteState;
@@ -35,6 +37,8 @@ pub struct KvLogStoreWriter<LS: LocalStateStore> {
     state: LogStoreWriteState<LS>,
 
     tx: LogStoreBufferSender,
+    init_epoch_tx: Option<oneshot::Sender<(EpochPair, Option<Option<Bytes>>)>>,
+    update_vnode_bitmap_tx: UnboundedSender<(Arc<Bitmap>, u64, Option<Option<Bytes>>)>,
 
     metrics: KvLogStoreMetrics,
 
@@ -43,24 +47,33 @@ pub struct KvLogStoreWriter<LS: LocalStateStore> {
     is_paused: bool,
 
     identity: String,
+
+    align_epoch_on_init: bool,
 }
 
 impl<LS: LocalStateStore> KvLogStoreWriter<LS> {
+    #[expect(clippy::too_many_arguments)]
     pub(crate) fn new(
         state: LogStoreWriteState<LS>,
         tx: LogStoreBufferSender,
+        init_epoch_tx: oneshot::Sender<(EpochPair, Option<Option<Bytes>>)>,
+        update_vnode_bitmap_tx: UnboundedSender<(Arc<Bitmap>, u64, Option<Option<Bytes>>)>,
         metrics: KvLogStoreMetrics,
         paused_notifier: watch::Sender<bool>,
         identity: String,
+        align_epoch_on_init: bool,
     ) -> Self {
         Self {
             seq_id: FIRST_SEQ_ID,
             state,
             tx,
+            init_epoch_tx: Some(init_epoch_tx),
+            update_vnode_bitmap_tx,
             metrics,
             paused_notifier,
             identity,
             is_paused: false,
+            align_epoch_on_init,
         }
     }
 }
@@ -77,7 +90,19 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
             info!("KvLogStore of {} paused on bootstrap", self.identity);
         }
         self.seq_id = FIRST_SEQ_ID;
-        self.tx.init(epoch.curr);
+        let init_offset_range_start = if self.align_epoch_on_init {
+            Some(self.state.aligned_init_range_start())
+        } else {
+            None
+        };
+        if let Err((e, _)) = self
+            .init_epoch_tx
+            .take()
+            .expect("should be Some in first init")
+            .send((epoch, init_offset_range_start))
+        {
+            error!("unable to send init epoch: {:?}", e);
+        }
         Ok(())
     }
 
@@ -147,16 +172,26 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
         let truncate_offset = self.tx.pop_truncation(epoch);
         let post_seal_epoch = self.state.seal_current_epoch(next_epoch, truncate_offset);
         self.tx.barrier(epoch, is_checkpoint, next_epoch);
+        let update_vnode_bitmap_tx = &mut self.update_vnode_bitmap_tx;
         let tx = &mut self.tx;
+        let align_epoch_on_init = self.align_epoch_on_init;
         self.seq_id = FIRST_SEQ_ID;
         Ok(LogWriterPostFlushCurrentEpoch::new(
             move |new_vnodes: Option<Arc<Bitmap>>| {
                 async move {
-                    post_seal_epoch
+                    let state = post_seal_epoch
                         .post_yield_barrier(new_vnodes.clone())
                         .await?;
                     if let Some(new_vnodes) = new_vnodes {
-                        tx.update_vnode(next_epoch, new_vnodes);
+                        let aligned_range_start = if align_epoch_on_init {
+                            Some(state.aligned_init_range_start())
+                        } else {
+                            None
+                        };
+                        update_vnode_bitmap_tx
+                            .send((new_vnodes, next_epoch, aligned_range_start))
+                            .map_err(|_| anyhow!("fail to send update vnode bitmap to reader"))?;
+                        tx.clear();
                     }
                     Ok(())
                 }

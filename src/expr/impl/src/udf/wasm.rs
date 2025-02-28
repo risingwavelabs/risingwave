@@ -92,6 +92,17 @@ fn create_rust(opts: CreateFunctionOptions<'_>) -> Result<CreateFunctionOutput> 
 
     let wasm_binary = std::thread::spawn(move || {
         let mut opts = arrow_udf_wasm::build::BuildOpts::default();
+        // Use the same chrono feature setting as src/expr/impl/Cargo.toml
+        // Use a fixed chrono version 0.4.39 because the latest 0.4.40 failed to compile.
+        // TODO: may avoid setting a fixed version when succeed to compile with latest chrono version
+        opts.manifest = r#"
+[dependencies]
+chrono = { version = "=0.4.39", default-features = false, features = [
+    "clock",
+    "std",
+] }
+"#
+        .to_owned();
         opts.arrow_udf_version = Some("0.5".to_owned());
         opts.script = script;
         // use a fixed tempdir to reuse the build cache

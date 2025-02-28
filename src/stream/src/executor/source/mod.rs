@@ -30,6 +30,8 @@ pub use state_table_handler::*;
 mod executor_core;
 pub use executor_core::StreamSourceCore;
 
+mod reader_stream;
+
 mod legacy_fs_source_executor;
 #[expect(deprecated)]
 pub use legacy_fs_source_executor::*;
