@@ -121,7 +121,7 @@ impl Catalog for JniCatalog {
         execute_with_jni_env(self.jvm, |env| {
             let result_json =
                 call_method!(env, self.java_catalog.as_obj(), {String listNamespaces()})
-                    .with_context(|| format!("Failed to list iceberg namespaces"))?;
+                    .with_context(|| "Failed to list iceberg namespaces".to_string())?;
 
             let rust_json_str = jobj_to_str(env, result_json)?;
 
