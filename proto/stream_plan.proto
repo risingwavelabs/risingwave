@@ -110,6 +110,10 @@ message DropSubscriptionsMutation {
   repeated SubscriptionUpstreamInfo info = 1;
 }
 
+message ProfilingStartMutation {
+    repeated uint32 fragment_ids = 1;
+}
+
 message BarrierMutation {
   oneof mutation {
     // Add new dispatchers to some actors, used for creating materialized views.
@@ -129,6 +133,8 @@ message BarrierMutation {
     ThrottleMutation throttle = 10;
     // Drop subscription on mv
     DropSubscriptionsMutation drop_subscriptions = 12;
+    // Start Profiling
+    ProfilingStartMutation profiling_start = 13;
     // Combined mutation.
     // Currently, it can only be Add & Update, which is for sink into table.
     CombinedMutation combined = 100;
