@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::list_table_fragments_response::FragmentInfo;
+use risingwave_pb::monitor_service::{GetProfileStatsRequest, GetProfileStatsResponse};
 
 use crate::error::Result;
 use crate::handler::{HandlerArgs, RwPgResponse};
@@ -26,10 +27,35 @@ pub async fn handle_explain_analyze_stream_job(
 
     // Trigger barrier via meta node to profile specific actors
 
-    // Scrape baseline metrics from the meta node, group by actors.
+    // Get the worker nodes
+    let worker_nodes = list_stream_worker_nodes(handler_args.session.env()).await?;
+
+    // Scrape baseline metrics from the compute node
+    let mut aggregated_stats = StreamNodeStats::new();
+    for node in &worker_nodes {
+        let mut compute_client = handler_args.session.env().client_pool().get(node).await?;
+        let stats = compute_client
+            .monitor_client
+            .get_profile_stats(GetProfileStatsRequest {})
+            .await
+            .expect("get profiling stats failed");
+        aggregated_stats.start_record(adjacency_list.keys(), &stats.into_inner());
+    }
+
+    // TODO: Sleep for `DURATION` to collect metrics
 
     // Scrape metrics after `DURATION` from the meta node,
     // group by actors.
+    for node in &worker_nodes {
+        let mut compute_client = handler_args.session.env().client_pool().get(node).await?;
+        let stats = compute_client
+            .monitor_client
+            .get_profile_stats(GetProfileStatsRequest {})
+            .await
+            .expect("get profiling stats failed");
+        aggregated_stats.finish_record(adjacency_list.keys(), &stats.into_inner());
+    }
+
     // Call get streaming stats via compute client.
 
     // Trigger barrier via meta node to stop profiling specific actors
@@ -58,6 +84,7 @@ async fn list_stream_worker_nodes(env: &FrontendEnv) -> Result<Vec<WorkerNode>> 
 
 type OperatorId = u32;
 
+#[derive(Default)]
 struct StreamNodeMetrics {
     operator_id: OperatorId,
     epoch: u32,
@@ -71,16 +98,79 @@ struct StreamNodeStats {
     inner: HashMap<OperatorId, StreamNodeMetrics>,
 }
 
-async fn get_stream_node_stats(
-    env: &FrontendEnv,
-    worker_nodes: &[WorkerNode],
-) -> Result<StreamNodeStats> {
-    for node in worker_nodes {
-        let compute_client = env.client_pool().get(node).await?;
-        // TODO
-        // compute_client.monitor_client.get_profile_stats()
+impl StreamNodeStats {
+    fn new() -> Self {
+        StreamNodeStats {
+            inner: HashMap::new(),
+        }
     }
-    todo!()
+
+    /// Establish metrics baseline for profiling
+    fn start_record<'a>(
+        &mut self,
+        operator_ids: impl Iterator<Item = &'a OperatorId>,
+        metrics: &'a GetProfileStatsResponse,
+    ) {
+        for operator_id in operator_ids {
+            let stats = self.inner.entry(*operator_id).or_default();
+            stats.operator_id = *operator_id;
+            stats.epoch = 0;
+            stats.total_input_throughput += metrics
+                .stream_node_input_row_count
+                .get(operator_id)
+                .cloned()
+                .unwrap_or(0);
+            stats.total_output_throughput += metrics
+                .stream_node_output_row_count
+                .get(operator_id)
+                .cloned()
+                .unwrap_or(0);
+            stats.total_input_latency += metrics
+                .stream_node_input_blocking_duration_ns
+                .get(operator_id)
+                .cloned()
+                .unwrap_or(0);
+            stats.total_output_latency += metrics
+                .stream_node_input_row_count
+                .get(operator_id)
+                .cloned()
+                .unwrap_or(0);
+        }
+    }
+
+    /// Compute the deltas for reporting
+    fn finish_record<'a>(
+        &mut self,
+        operator_ids: impl Iterator<Item = &'a OperatorId>,
+        metrics: &'a GetProfileStatsResponse,
+    ) {
+        for operator_id in operator_ids {
+            if let Some(stats) = self.inner.get_mut(operator_id) {
+                stats.total_input_throughput -= metrics
+                    .stream_node_input_row_count
+                    .get(operator_id)
+                    .cloned()
+                    .unwrap_or(0);
+                stats.total_output_throughput -= metrics
+                    .stream_node_output_row_count
+                    .get(operator_id)
+                    .cloned()
+                    .unwrap_or(0);
+                stats.total_input_latency -= metrics
+                    .stream_node_input_blocking_duration_ns
+                    .get(operator_id)
+                    .cloned()
+                    .unwrap_or(0);
+                stats.total_output_latency -= metrics
+                    .stream_node_input_row_count
+                    .get(operator_id)
+                    .cloned()
+                    .unwrap_or(0);
+            } else {
+                // TODO: warn missing metrics!
+            }
+        }
+    }
 }
 
 fn extract_stream_node_infos(fragments: Vec<FragmentInfo>) -> HashMap<u32, StreamNode> {
