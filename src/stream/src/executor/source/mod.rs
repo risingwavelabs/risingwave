@@ -32,9 +32,6 @@ pub use executor_core::StreamSourceCore;
 
 mod reader_stream;
 
-mod legacy_fs_source_executor;
-#[expect(deprecated)]
-pub use legacy_fs_source_executor::*;
 mod source_executor;
 pub use source_executor::*;
 mod source_backfill_executor;
