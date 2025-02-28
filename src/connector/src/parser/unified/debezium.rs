@@ -17,8 +17,8 @@ use std::str::FromStr;
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId};
 use risingwave_common::types::{
-    DataType, Datum, DatumCow, Scalar, ScalarImpl, ScalarRefImpl, Timestamp, Timestamptz,
-    ToDatumRef, ToOwnedDatum,
+    DataType, Datum, DatumCow, ListValue, Scalar, ScalarImpl, ScalarRefImpl, StructValue,
+    Timestamp, Timestamptz, ToDatumRef, ToOwnedDatum,
 };
 use risingwave_connector_codec::decoder::AccessExt;
 use risingwave_pb::plan_common::additional_column::ColumnType;
@@ -477,6 +477,9 @@ where
     }
 }
 
+/// Access support for Mongo
+///
+/// For now, we considerate `strong_schema` typed `MongoDB` Debezium event jsons only.
 pub struct MongoJsonAccess<A> {
     accessor: A,
     strong_schema: bool,
@@ -537,19 +540,20 @@ pub fn extract_bson_id(id_type: &DataType, bson_doc: &serde_json::Value) -> Acce
     Ok(id)
 }
 
+/// Extract the field data from the bson document
+///
+/// BSON document is a JSON object with some special fields, such as:
+/// long integer: {"$numberLong": "1630454400000"}
+/// date time: {"$date": {"$numberLong": "1630454400000"}}
+///
+/// For now, we support only the Canonical format of the date and timestamp.
 // similar to extract the "_id" field from the message payload
 pub fn extract_bson_field(
     type_expected: &DataType,
     bson_doc: &serde_json::Value,
-    field: &str,
+    field: Option<&str>,
 ) -> AccessResult {
-    let datum = if let Some(value) = bson_doc.get(field) {
-        value
-    } else {
-        bson_doc
-    };
-
-    let type_error = || AccessError::TypeError {
+    let type_error = |datum: &serde_json::Value| AccessError::TypeError {
         expected: type_expected.to_string(),
         got: match bson_doc {
             serde_json::Value::Null => "null",
@@ -563,15 +567,36 @@ pub fn extract_bson_field(
         value: datum.to_string(),
     };
 
+    let datum = if field.is_some() {
+        let Some(bson_doc) = bson_doc.get(field.unwrap()) else {
+            return Err(type_error(bson_doc));
+        };
+        bson_doc
+    } else {
+        bson_doc
+    };
+
     let field_datum: Datum = match type_expected {
         DataType::Jsonb => ScalarImpl::Jsonb(datum.clone().into()).into(),
         DataType::Varchar => match datum {
             serde_json::Value::String(s) => Some(ScalarImpl::Utf8(s.clone().into())),
-            serde_json::Value::Object(obj) if obj.contains_key("$oid") && field == "_id" => Some(
-                ScalarImpl::Utf8(obj["$oid"].as_str().to_owned().unwrap_or_default().into()),
-            ),
-            _ => return Err(type_error()),
+            serde_json::Value::Object(obj) if obj.contains_key("$oid") && field == Some("_id") => {
+                Some(ScalarImpl::Utf8(
+                    obj["$oid"].as_str().to_owned().unwrap_or_default().into(),
+                ))
+            }
+            _ => return Err(type_error(datum)),
         },
+        DataType::Int16 => {
+            if let serde_json::Value::Object(ref obj) = datum
+                && obj.contains_key("$numberInt")
+            {
+                let int_str = obj["$numberInt"].as_str().unwrap_or_default();
+                Some(ScalarImpl::Int16(int_str.parse().unwrap_or_default()))
+            } else {
+                return Err(type_error(datum));
+            }
+        }
         DataType::Int32 => {
             if let serde_json::Value::Object(ref obj) = datum
                 && obj.contains_key("$numberInt")
@@ -579,7 +604,7 @@ pub fn extract_bson_field(
                 let int_str = obj["$numberInt"].as_str().unwrap_or_default();
                 Some(ScalarImpl::Int32(int_str.parse().unwrap_or_default()))
             } else {
-                return Err(type_error());
+                return Err(type_error(datum));
             }
         }
         DataType::Int64 => {
@@ -589,7 +614,18 @@ pub fn extract_bson_field(
                 let int_str = obj["$numberLong"].as_str().unwrap_or_default();
                 Some(ScalarImpl::Int64(int_str.parse().unwrap_or_default()))
             } else {
-                return Err(type_error());
+                return Err(type_error(datum));
+            }
+        }
+
+        DataType::Int256 => {
+            if let serde_json::Value::Object(ref obj) = datum
+                && obj.contains_key("$numberLong")
+            {
+                let int_str = obj["$numberLong"].as_str().unwrap_or_default();
+                Some(ScalarImpl::Int256(int_str.parse().unwrap_or_default()))
+            } else {
+                return Err(type_error(datum));
             }
         }
 
@@ -606,7 +642,7 @@ pub fn extract_bson_field(
                 };
                 Some(ScalarImpl::Float64(num.into()))
             } else {
-                return Err(type_error());
+                return Err(type_error(datum));
             }
         }
 
@@ -623,7 +659,7 @@ pub fn extract_bson_field(
                 };
                 Some(ScalarImpl::Float32(num.into()))
             } else {
-                return Err(type_error());
+                return Err(type_error(datum));
             }
         }
 
@@ -631,14 +667,14 @@ pub fn extract_bson_field(
             if let serde_json::Value::Object(ref mp) = datum {
                 if mp.contains_key("$timestamp") {
                     // todo: fallback to extract date on error
-                    bson_extract_timestamp(datum, field, type_expected)?
+                    bson_extract_timestamp(datum, type_expected)?
                 } else if mp.contains_key("$date") {
-                    bson_extract_date(datum, field, type_expected)?
+                    bson_extract_date(datum, type_expected)?
                 } else {
-                    return Err(type_error());
+                    return Err(type_error(datum));
                 }
             } else {
-                return Err(type_error());
+                return Err(type_error(datum));
             }
         }
         DataType::Decimal => {
@@ -649,7 +685,7 @@ pub fn extract_bson_field(
                 let dec = risingwave_common::types::Decimal::from_str(number).unwrap_or_default();
                 Some(ScalarImpl::Decimal(dec))
             } else {
-                return Err(type_error());
+                return Err(type_error(datum));
             }
         }
 
@@ -668,20 +704,48 @@ pub fn extract_bson_field(
                 let bytea = ScalarImpl::Bytea(bytes.into());
                 Some(bytea)
             } else {
-                return Err(type_error());
+                return Err(type_error(datum));
             }
         }
 
-        _ => unreachable!("DebeziumMongoJsonParser::new must ensure {field} column datatypes."),
+        DataType::Struct(struct_fields) => {
+            let mut datums = vec![];
+            for (field_name, field_type) in struct_fields.iter() {
+                let field_datum = extract_bson_field(field_type, datum, Some(field_name))?;
+                datums.push(field_datum);
+            }
+            let value = StructValue::new(datums);
+
+            Some(ScalarImpl::Struct(value))
+        }
+
+        DataType::List(list_type) => {
+            let Some(d_array) = datum.as_array() else {
+                return Err(type_error(datum));
+            };
+
+            let mut builder = list_type.create_array_builder(d_array.len());
+            for item in d_array {
+                builder.append(extract_bson_field(list_type, item, None)?);
+            }
+            Some(ScalarImpl::from(ListValue::new(builder.finish())))
+        }
+
+        _ => {
+            if let Some(field_name) = field {
+                unreachable!(
+                    "DebeziumMongoJsonParser::new must ensure {field_name} column datatypes."
+                )
+            } else {
+                let type_expected = type_expected.to_string();
+                unreachable!("DebeziumMongoJsonParser::new must ensure type of `{type_expected}` matches datum `{datum}`")
+            }
+        }
     };
     Ok(field_datum)
 }
 
-fn bson_extract_date(
-    bson_doc: &serde_json::Value,
-    field: &str,
-    type_expected: &DataType,
-) -> AccessResult {
+fn bson_extract_date(bson_doc: &serde_json::Value, type_expected: &DataType) -> AccessResult {
     // according to mongodb extended json v2
     // the date could be:
     //
@@ -740,7 +804,7 @@ fn bson_extract_date(
                 let dt = chrono_datetime.into();
                 Some(ScalarImpl::Timestamptz(dt))
             }
-            _ => unreachable!("DebeziumMongoJsonParser::new must ensure {field} column datatypes."),
+            _ => unreachable!("DebeziumMongoJsonParser::new must ensure column datatypes."),
         }
     } else if let serde_json::Value::Object(ref obj) = datum
         && obj.contains_key("date")
@@ -773,7 +837,7 @@ fn bson_extract_date(
                 let dt = datetime.into();
                 Some(ScalarImpl::Timestamptz(dt))
             }
-            _ => unreachable!("DebeziumMongoJsonParser::new must ensure {field} column datatypes."),
+            _ => unreachable!("DebeziumMongoJsonParser::new must ensure column datatypes."),
         }
     } else {
         return Err(type_error());
@@ -781,11 +845,7 @@ fn bson_extract_date(
     Ok(res)
 }
 
-fn bson_extract_timestamp(
-    bson_doc: &serde_json::Value,
-    field: &str,
-    type_expected: &DataType,
-) -> AccessResult {
+fn bson_extract_timestamp(bson_doc: &serde_json::Value, type_expected: &DataType) -> AccessResult {
     // according to mongodb extended json v2
     // the date could be:
     //
@@ -800,12 +860,14 @@ fn bson_extract_timestamp(
     //
     // Relaxed: {"$date": "2021-09-01T00:00:00.000Z"}
     // date is encoded as ISO8601 string
+    //
+    // *For now, we support the Canonical format only.*
 
     let Some(obj) = bson_doc["$timestamp"].as_object() else {
         return Err(AccessError::TypeError {
             expected: "timestamp".into(),
-            got: bson_doc.to_string(),
-            value: field.to_string(),
+            got: "object".into(),
+            value: bson_doc.to_string(),
         });
     };
 
@@ -834,7 +896,7 @@ fn bson_extract_timestamp(
             let dt = chrono_datetime.into();
             Some(ScalarImpl::Timestamptz(dt))
         }
-        _ => unreachable!("DebeziumMongoJsonParser::new must ensure {field} column datatypes."),
+        _ => unreachable!("DebeziumMongoJsonParser::new must ensure column datatypes."),
     };
 
     Ok(res)
@@ -862,11 +924,11 @@ where
             ["after" | "before", "_id"] => {
                 let payload = self.access_owned(&[path[0]], &DataType::Jsonb)?;
                 if let Some(ScalarImpl::Jsonb(bson_doc)) = payload {
-                    return Ok(extract_bson_id(type_expected, &bson_doc.take())?.into());
+                    Ok(extract_bson_id(type_expected, &bson_doc.take())?.into())
                 } else {
                     // fail to extract the "_id" field from the message payload
                     Err(AccessError::Undefined {
-                        name: "_id".to_string(),
+                        name: "_id".to_owned(),
                         path: path[0].to_owned(),
                     })?
                 }
@@ -875,7 +937,7 @@ where
             ["after" | "before", field] if self.strong_schema => {
                 let payload = self.access_owned(&[path[0]], &DataType::Jsonb)?;
                 if let Some(ScalarImpl::Jsonb(bson_doc)) = payload {
-                    return Ok(extract_bson_field(type_expected, &bson_doc.take(), field)?.into());
+                    Ok(extract_bson_field(type_expected, &bson_doc.take(), Some(field))?.into())
                 } else {
                     // fail to extract the "_id" field from the message payload
                     Err(AccessError::Undefined {
