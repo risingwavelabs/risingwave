@@ -14,8 +14,6 @@
 
 //! bind columns from external schema
 
-use risingwave_connector::parser::debezium_cdc_source_schema;
-
 use super::*;
 
 mod json;
@@ -346,7 +344,7 @@ fn bind_columns_from_source_for_cdc(
         }
     };
 
-    let columns = debezium_cdc_source_schema();
+    let columns = ColumnCatalog::debezium_cdc_source_cols().to_vec();
     let schema_config = get_json_schema_location(&mut format_encode_options_to_consume)?;
 
     let stream_source_info = StreamSourceInfo {

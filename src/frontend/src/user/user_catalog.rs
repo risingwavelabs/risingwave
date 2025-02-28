@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 
 use risingwave_common::acl::{AclMode, AclModeSet};
 use risingwave_pb::user::grant_privilege::{Action, Object as GrantObject, Object};

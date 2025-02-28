@@ -13,15 +13,15 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_pb::user::grant_privilege::{ActionWithGrantOption, PbObject};
 use risingwave_pb::user::PbGrantPrivilege;
+use risingwave_pb::user::grant_privilege::{ActionWithGrantOption, PbObject};
 use risingwave_sqlparser::ast::{GrantObjects, Privileges, Statement};
 
 use super::RwPgResponse;
 use crate::binder::Binder;
+use crate::catalog::CatalogError;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::table_catalog::TableType;
-use crate::catalog::CatalogError;
 use crate::error::{ErrorCode, Result};
 use crate::handler::HandlerArgs;
 use crate::session::SessionImpl;
@@ -410,11 +410,13 @@ mod tests {
             let user_reader = session.env().user_info_reader();
             let reader = user_reader.read_guard();
             let user_info = reader.get_user_by_name("user1").unwrap();
-            assert!(user_info
-                .grant_privileges
-                .iter()
-                .filter(|gp| gp.object == Some(PbObject::DatabaseId(database_id)))
-                .all(|p| p.action_with_opts.iter().all(|ao| !ao.with_grant_option)));
+            assert!(
+                user_info
+                    .grant_privileges
+                    .iter()
+                    .filter(|gp| gp.object == Some(PbObject::DatabaseId(database_id)))
+                    .all(|p| p.action_with_opts.iter().all(|ao| !ao.with_grant_option))
+            );
         }
 
         frontend

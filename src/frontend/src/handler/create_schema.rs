@@ -22,8 +22,8 @@ use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::{CatalogError, OwnedByUserCatalog};
 use crate::error::{ErrorCode, Result};
-use crate::handler::privilege::ObjectCheckItem;
 use crate::handler::HandlerArgs;
+use crate::handler::privilege::ObjectCheckItem;
 
 pub async fn handle_create_schema(
     handler_args: HandlerArgs,

@@ -108,7 +108,10 @@ fi
         writeln!(x, r#"if [[ "$DO_SYNC" -eq 1 ]]; then"#)?;
         writeln!(x, "# --- Sync Config ---")?;
         writeln!(x, r#"echo "$(tput setaf 2)(1/4) sync config$(tput sgr0)""#)?;
-        writeln!(x, "echo -e \"If this step takes too long time, maybe EC2 IP has been changed. You'll need to re-run:\\n* $(tput setaf 2)terraform apply$(tput sgr0) to get the latest IP,\\n* and then $(tput setaf 2)./risedev compose-deploy <profile>$(tput sgr0) again to update the deploy script.\"")?;
+        writeln!(
+            x,
+            "echo -e \"If this step takes too long time, maybe EC2 IP has been changed. You'll need to re-run:\\n* $(tput setaf 2)terraform apply$(tput sgr0) to get the latest IP,\\n* and then $(tput setaf 2)./risedev compose-deploy <profile>$(tput sgr0) again to update the deploy script.\""
+        )?;
         writeln!(x, "parallel --linebuffer bash << EOF")?;
         for instance in ec2_instances {
             let host = &instance.dns_host;
@@ -165,7 +168,9 @@ fi
             } else {
                 ""
             };
-            writeln!(y, "ssh {ssh_extra_args} ubuntu@{public_ip} \"bash -c 'cd {base_folder} && docker compose kill && docker compose down --remove-orphans{down_extra_arg} && docker pull {}'\"",
+            writeln!(
+                y,
+                "ssh {ssh_extra_args} ubuntu@{public_ip} \"bash -c 'cd {base_folder} && docker compose kill && docker compose down --remove-orphans{down_extra_arg} && docker pull {}'\"",
                 compose_config.image.risingwave
             )?;
             if tear_down_volumes {
@@ -211,7 +216,10 @@ fi
             )?;
             let public_ip = &instance.public_ip;
             let base_folder = "~/risingwave-deploy";
-            writeln!(x, "ssh {ssh_extra_args} ubuntu@{public_ip} \"bash -c 'cd {base_folder} && docker compose up -d {step}'\"")?;
+            writeln!(
+                x,
+                "ssh {ssh_extra_args} ubuntu@{public_ip} \"bash -c 'cd {base_folder} && docker compose up -d {step}'\""
+            )?;
         }
         writeln!(x, r#"fi"#)?;
         writeln!(x)?;
@@ -229,7 +237,10 @@ fi
             writeln!(y, r#"echo "{id}: $(tput setaf 2)check status$(tput sgr0)""#,)?;
             let public_ip = &instance.public_ip;
             let base_folder = "~/risingwave-deploy";
-            writeln!(y, "ssh {ssh_extra_args} ubuntu@{public_ip} \"bash -c 'cd {base_folder} && docker compose ps'\"")?;
+            writeln!(
+                y,
+                "ssh {ssh_extra_args} ubuntu@{public_ip} \"bash -c 'cd {base_folder} && docker compose ps'\""
+            )?;
 
             let sh = format!("_check.{id}.partial.sh");
             fs_err::write(Path::new(output_directory).join(&sh), y)?;

@@ -24,8 +24,8 @@ use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
 use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch, SyncResult};
 use risingwave_hummock_trace::{
-    init_collector, should_use_trace, ConcurrentId, MayTraceSpan, OperationResult, StorageType,
-    TraceResult, TraceSpan, TracedBytes, TracedSealCurrentEpochOptions, LOCAL_ID,
+    ConcurrentId, LOCAL_ID, MayTraceSpan, OperationResult, StorageType, TraceResult, TraceSpan,
+    TracedBytes, TracedSealCurrentEpochOptions, init_collector, should_use_trace,
 };
 use thiserror_ext::AsReport;
 
@@ -258,8 +258,8 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
     }
 
     // TODO: add trace span
-    fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
-        self.inner.update_vnode_bitmap(vnodes)
+    async fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> StorageResult<Arc<Bitmap>> {
+        self.inner.update_vnode_bitmap(vnodes).await
     }
 
     fn get_table_watermark(&self, vnode: VirtualNode) -> Option<Bytes> {

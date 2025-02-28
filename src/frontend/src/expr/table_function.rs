@@ -22,15 +22,15 @@ use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::{DataType, ScalarImpl, StructType};
 use risingwave_connector::source::iceberg::{
-    extract_bucket_and_file_name, get_parquet_fields, list_data_directory, new_azblob_operator,
-    new_gcs_operator, new_s3_operator, FileScanBackend,
+    FileScanBackend, extract_bucket_and_file_name, get_parquet_fields, list_data_directory,
+    new_azblob_operator, new_gcs_operator, new_s3_operator,
 };
-pub use risingwave_pb::expr::table_function::PbType as TableFunctionType;
 use risingwave_pb::expr::PbTableFunction;
+pub use risingwave_pb::expr::table_function::PbType as TableFunctionType;
 use thiserror_ext::AsReport;
 use tokio_postgres::types::Type as TokioPgType;
 
-use super::{infer_type, Expr, ExprImpl, ExprRewriter, Literal, RwResult};
+use super::{Expr, ExprImpl, ExprRewriter, Literal, RwResult, infer_type};
 use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::catalog::function_catalog::{FunctionCatalog, FunctionKind};
 use crate::catalog::root_catalog::SchemaPath;
@@ -114,7 +114,7 @@ impl TableFunction {
                                 return Err(BindError(
                                     "file_scan function only accepts string arguments".to_owned(),
                                 )
-                                .into())
+                                .into());
                             }
                         }
                     }

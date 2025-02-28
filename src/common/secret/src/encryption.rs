@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use aws_lc_rs::aead::{Aad, Nonce, RandomizedNonceKey, AES_128_GCM};
+use aws_lc_rs::aead::{AES_128_GCM, Aad, Nonce, RandomizedNonceKey};
 use serde::{Deserialize, Serialize};
 
 use super::{SecretError, SecretResult};

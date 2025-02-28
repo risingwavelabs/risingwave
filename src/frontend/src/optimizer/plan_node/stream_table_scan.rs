@@ -25,8 +25,9 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{PbStreamNode, StreamScanType};
 
 use super::stream::prelude::*;
-use super::utils::{childless_record, Distill};
-use super::{generic, ExprRewritable, PlanBase, PlanNodeId, PlanRef, StreamNode};
+use super::utils::{Distill, childless_record};
+use super::{ExprRewritable, PlanBase, PlanNodeId, PlanRef, StreamNode, generic};
+use crate::TableCatalog;
 use crate::catalog::ColumnId;
 use crate::expr::{ExprRewriter, ExprVisitor, FunctionCall};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
@@ -34,7 +35,6 @@ use crate::optimizer::plan_node::utils::{IndicesDisplay, TableCatalogBuilder};
 use crate::optimizer::property::{Distribution, DistributionDisplay, MonotonicityMap};
 use crate::scheduler::SchedulerResult;
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::TableCatalog;
 
 /// `StreamTableScan` is a virtual plan node to represent a stream table scan. It will be converted
 /// to stream scan + merge node (for upstream materialize) + batch table scan when converting to `MView`
@@ -269,7 +269,9 @@ impl Distill for StreamTableScan {
 
 impl StreamNode for StreamTableScan {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
-        unreachable!("stream scan cannot be converted into a prost body -- call `adhoc_to_stream_prost` instead.")
+        unreachable!(
+            "stream scan cannot be converted into a prost body -- call `adhoc_to_stream_prost` instead."
+        )
     }
 }
 

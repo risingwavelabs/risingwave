@@ -23,8 +23,8 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::expr::{self, BoxedExpression};
 use risingwave_expr::table_function::{self, BoxedTableFunction, TableFunctionOutputIter};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::expr::project_set_select_item::PbSelectItem;
 use risingwave_pb::expr::PbProjectSetSelectItem;
+use risingwave_pb::expr::project_set_select_item::PbSelectItem;
 
 use crate::error::{BatchError, Result};
 use crate::executor::{
@@ -231,8 +231,8 @@ mod tests {
     use risingwave_expr::table_function::repeat;
 
     use super::*;
-    use crate::executor::test_utils::MockExecutor;
     use crate::executor::ValuesExecutor;
+    use crate::executor::test_utils::MockExecutor;
     use crate::*;
 
     const CHUNK_SIZE: usize = 1024;

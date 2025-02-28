@@ -22,11 +22,11 @@ use risingwave_expr::window_function::{Frame, WindowFuncKind};
 use risingwave_pb::expr::PbWindowFunction;
 
 use super::{DistillUnit, GenericPlanNode, GenericPlanRef};
+use crate::OptimizerContextRef;
 use crate::expr::{InputRef, InputRefDisplay};
 use crate::optimizer::plan_node::utils::childless_record;
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::ColIndexMappingRewriteExt;
-use crate::OptimizerContextRef;
 
 /// Rewritten version of [`crate::expr::WindowFunction`] which uses `InputRef` instead of
 /// `ExprImpl`.
@@ -117,8 +117,8 @@ impl std::fmt::Debug for PlanWindowFunctionDisplay<'_> {
 
 impl PlanWindowFunction {
     pub fn to_protobuf(&self) -> PbWindowFunction {
-        use risingwave_pb::expr::window_function::{PbGeneralType, PbType};
         use WindowFuncKind::*;
+        use risingwave_pb::expr::window_function::{PbGeneralType, PbType};
 
         let r#type = match &self.kind {
             RowNumber => PbType::General(PbGeneralType::RowNumber as _),

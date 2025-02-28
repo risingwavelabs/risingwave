@@ -24,7 +24,7 @@ use crate::error::ErrorCode::{self, PermissionDenied};
 use crate::error::Result;
 use crate::handler::HandlerArgs;
 use crate::user::user_authentication::{
-    build_oauth_info, encrypted_password, OAUTH_ISSUER_KEY, OAUTH_JWKS_URL_KEY,
+    OAUTH_ISSUER_KEY, OAUTH_JWKS_URL_KEY, build_oauth_info, encrypted_password,
 };
 use crate::user::user_catalog::UserCatalog;
 
@@ -144,8 +144,8 @@ mod tests {
     use std::collections::HashMap;
 
     use risingwave_common::catalog::DEFAULT_DATABASE_NAME;
-    use risingwave_pb::user::auth_info::EncryptionType;
     use risingwave_pb::user::AuthInfo;
+    use risingwave_pb::user::auth_info::EncryptionType;
 
     use crate::test_utils::LocalFrontend;
 
@@ -178,33 +178,39 @@ mod tests {
             .run_sql("CREATE USER usercreator WITH NOSUPERUSER CREATEUSER PASSWORD ''")
             .await
             .unwrap();
-        assert!(frontend
-            .run_user_sql(
-                "CREATE USER fail WITH PASSWORD 'md5827ccb0eea8a706c4c34a16891f84e7b'",
-                DEFAULT_DATABASE_NAME.to_owned(),
-                "user".to_owned(),
-                user_info.id
-            )
-            .await
-            .is_err());
+        assert!(
+            frontend
+                .run_user_sql(
+                    "CREATE USER fail WITH PASSWORD 'md5827ccb0eea8a706c4c34a16891f84e7b'",
+                    DEFAULT_DATABASE_NAME.to_owned(),
+                    "user".to_owned(),
+                    user_info.id
+                )
+                .await
+                .is_err()
+        );
 
-        assert!(frontend
-            .run_user_sql(
-                "CREATE USER success WITH NOSUPERUSER PASSWORD ''",
-                DEFAULT_DATABASE_NAME.to_owned(),
-                "usercreator".to_owned(),
-                user_info.id
-            )
-            .await
-            .is_ok());
-        assert!(frontend
-            .run_user_sql(
-                "CREATE USER fail2 WITH SUPERUSER PASSWORD ''",
-                DEFAULT_DATABASE_NAME.to_owned(),
-                "usercreator".to_owned(),
-                user_info.id
-            )
-            .await
-            .is_err());
+        assert!(
+            frontend
+                .run_user_sql(
+                    "CREATE USER success WITH NOSUPERUSER PASSWORD ''",
+                    DEFAULT_DATABASE_NAME.to_owned(),
+                    "usercreator".to_owned(),
+                    user_info.id
+                )
+                .await
+                .is_ok()
+        );
+        assert!(
+            frontend
+                .run_user_sql(
+                    "CREATE USER fail2 WITH SUPERUSER PASSWORD ''",
+                    DEFAULT_DATABASE_NAME.to_owned(),
+                    "usercreator".to_owned(),
+                    user_info.id
+                )
+                .await
+                .is_err()
+        );
     }
 }

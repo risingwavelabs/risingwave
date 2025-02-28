@@ -20,18 +20,18 @@ use anyhow::Context;
 use bytes::Bytes;
 use futures::StreamExt;
 use futures_async_stream::{for_await, try_stream};
-use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::StreamChunk;
+use risingwave_common::array::stream_record::Record;
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::{self, OwnedRow, Row, RowExt};
 use risingwave_common::types::{
     DefaultOrd, DefaultOrdered, ScalarImpl, ScalarRefImpl, ToOwnedDatum,
 };
 use risingwave_common::util::memcmp_encoding::MemcmpEncoded;
-use risingwave_storage::store::PrefetchOptions;
-use risingwave_storage::table::merge_sort::merge_sort;
-use risingwave_storage::table::KeyedRow;
 use risingwave_storage::StateStore;
+use risingwave_storage::store::PrefetchOptions;
+use risingwave_storage::table::KeyedRow;
+use risingwave_storage::table::merge_sort::merge_sort;
 
 use super::{StreamExecutorError, StreamExecutorResult};
 use crate::common::state_cache::{StateCache, StateCacheFiller, TopNStateCache};

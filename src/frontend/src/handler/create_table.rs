@@ -16,7 +16,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use clap::ValueEnum;
 use either::Either;
 use fixedbitset::FixedBitSet;
@@ -24,9 +24,9 @@ use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use prost::Message as _;
 use risingwave_common::catalog::{
-    CdcTableDesc, ColumnCatalog, ColumnDesc, ConflictBehavior, Engine, FieldLike, TableId,
-    TableVersionId, DEFAULT_SCHEMA_NAME, INITIAL_TABLE_VERSION_ID, RISINGWAVE_ICEBERG_ROW_ID,
-    ROWID_PREFIX,
+    CdcTableDesc, ColumnCatalog, ColumnDesc, ConflictBehavior, DEFAULT_SCHEMA_NAME, Engine,
+    FieldLike, INITIAL_TABLE_VERSION_ID, RISINGWAVE_ICEBERG_ROW_ID, ROW_ID_COLUMN_NAME, TableId,
+    TableVersionId,
 };
 use risingwave_common::config::MetaBackend;
 use risingwave_common::license::Feature;
@@ -40,9 +40,9 @@ use risingwave_connector::jvm_runtime::JVM;
 use risingwave_connector::sink::decouple_checkpoint_log_sink::COMMIT_CHECKPOINT_INTERVAL;
 use risingwave_connector::source::cdc::build_cdc_table_id;
 use risingwave_connector::source::cdc::external::{
-    ExternalTableConfig, ExternalTableImpl, DATABASE_NAME_KEY, SCHEMA_NAME_KEY, TABLE_NAME_KEY,
+    DATABASE_NAME_KEY, ExternalTableConfig, ExternalTableImpl, SCHEMA_NAME_KEY, TABLE_NAME_KEY,
 };
-use risingwave_connector::{source, WithOptionsSecResolved, WithPropertiesExt};
+use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt, source};
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::connection_params::ConnectionType;
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
@@ -52,8 +52,8 @@ use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::{
     AdditionalColumn, ColumnDescVersion, DefaultColumnDesc, GeneratedColumnDesc,
 };
-use risingwave_pb::secret::secret_ref::PbRefAsType;
 use risingwave_pb::secret::PbSecretRef;
+use risingwave_pb::secret::secret_ref::PbRefAsType;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_sqlparser::ast::{
     CdcTableInfo, ColumnDef, ColumnOption, CompatibleFormatEncode, ConnectionRefValue, CreateSink,
@@ -64,21 +64,21 @@ use risingwave_sqlparser::ast::{
 use risingwave_sqlparser::parser::{IncludeOption, Parser};
 use thiserror_ext::AsReport;
 
-use super::create_source::{bind_columns_from_source, CreateSourceType, SqlColumnStrategy};
-use super::{create_sink, create_source, RwPgResponse};
-use crate::binder::{bind_data_type, bind_struct_field, Clause, SecureCompareContext};
+use super::create_source::{CreateSourceType, SqlColumnStrategy, bind_columns_from_source};
+use super::{RwPgResponse, create_sink, create_source};
+use crate::binder::{Clause, SecureCompareContext, bind_data_type};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
-use crate::catalog::table_catalog::{TableVersion, ICEBERG_SINK_PREFIX, ICEBERG_SOURCE_PREFIX};
-use crate::catalog::{check_valid_column_name, ColumnId, DatabaseId, SchemaId};
-use crate::error::{bail_bind_error, ErrorCode, Result, RwError};
+use crate::catalog::table_catalog::{ICEBERG_SINK_PREFIX, ICEBERG_SOURCE_PREFIX, TableVersion};
+use crate::catalog::{ColumnId, DatabaseId, SchemaId, check_column_name_not_reserved};
+use crate::error::{ErrorCode, Result, RwError, bail_bind_error};
 use crate::expr::{Expr, ExprImpl, ExprRewriter};
+use crate::handler::HandlerArgs;
 use crate::handler::create_source::{
-    bind_connector_props, bind_create_source_or_table_with_connector, bind_source_watermark,
-    handle_addition_columns, UPSTREAM_SOURCE_KEY,
+    UPSTREAM_SOURCE_KEY, bind_connector_props, bind_create_source_or_table_with_connector,
+    bind_source_watermark, handle_addition_columns,
 };
 use crate::handler::util::SourceSchemaCompatExt;
-use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::generic::{CdcScanOptions, SourceNodeKind};
 use crate::optimizer::plan_node::{LogicalCdcScan, LogicalSource};
 use crate::optimizer::property::{Order, RequiredDist};
@@ -242,24 +242,14 @@ pub fn bind_sql_columns(
             // additional column name may have prefix _rw
             // When converting dropping the connector from table, the additional columns are converted to normal columns and keep the original name.
             // Under this case, we loosen the check for _rw prefix.
-            check_valid_column_name(&name.real_value())?;
+            check_column_name_not_reserved(&name.real_value())?;
         }
 
-        let field_descs: Vec<ColumnDesc> = if let AstDataType::Struct(fields) = &data_type {
-            fields
-                .iter()
-                .map(bind_struct_field)
-                .collect::<Result<Vec<_>>>()?
-        } else {
-            vec![]
-        };
         columns.push(ColumnCatalog {
             column_desc: ColumnDesc {
                 data_type: bind_data_type(&data_type)?,
                 column_id: ColumnId::placeholder(),
                 name: name.real_value(),
-                field_descs,
-                type_name: "".to_owned(),
                 generated_or_default_column: None,
                 description: None,
                 additional_column: AdditionalColumn { column_type: None },
@@ -1250,7 +1240,7 @@ pub(super) async fn handle_create_table_plan(
                     .into(),
                 "Remove the FORMAT and ENCODE specification".into(),
             )
-            .into())
+            .into());
         }
     };
     Ok((plan, source, table, job_type))
@@ -1593,7 +1583,9 @@ pub async fn create_iceberg_engine_table(
                     let s3_region = if let Ok(s3_region) = std::env::var("AWS_REGION") {
                         s3_region
                     } else {
-                        bail!("To create an iceberg engine table with s3 backend, AWS_REGION needed to be set");
+                        bail!(
+                            "To create an iceberg engine table with s3 backend, AWS_REGION needed to be set"
+                        );
                     };
                     let s3_bucket = s3.strip_prefix("hummock+s3://").unwrap().to_owned();
                     (
@@ -1747,7 +1739,7 @@ pub async fn create_iceberg_engine_table(
         pks = vec![RISINGWAVE_ICEBERG_ROW_ID.to_owned()];
         let [stmt]: [_; 1] = Parser::parse_sql(&format!(
             "select {} as {}, * from {}",
-            ROWID_PREFIX, RISINGWAVE_ICEBERG_ROW_ID, table_name
+            ROW_ID_COLUMN_NAME, RISINGWAVE_ICEBERG_ROW_ID, table_name
         ))
         .context("unable to parse query")?
         .try_into()
@@ -1806,7 +1798,9 @@ pub async fn create_iceberg_engine_table(
 
     let sink_decouple = session.config().sink_decouple();
     if matches!(sink_decouple, SinkDecouple::Disable) && commit_checkpoint_interval > 1 {
-        bail!("config conflict: `commit_checkpoint_interval` larger than 1 means that sink decouple must be enabled, but session config sink_decouple is disabled")
+        bail!(
+            "config conflict: `commit_checkpoint_interval` larger than 1 means that sink decouple must be enabled, but session config sink_decouple is disabled"
+        )
     }
 
     sink_with.insert(
@@ -2147,12 +2141,12 @@ fn bind_webhook_info(
 #[cfg(test)]
 mod tests {
     use risingwave_common::catalog::{
-        Field, DEFAULT_DATABASE_NAME, ROWID_PREFIX, RW_TIMESTAMP_COLUMN_NAME,
+        DEFAULT_DATABASE_NAME, Field, ROW_ID_COLUMN_NAME, RW_TIMESTAMP_COLUMN_NAME,
     };
     use risingwave_common::types::{DataType, StructType};
 
     use super::*;
-    use crate::test_utils::{create_proto_file, LocalFrontend, PROTO_FILE_DATA};
+    use crate::test_utils::{LocalFrontend, PROTO_FILE_DATA, create_proto_file};
 
     struct BrandNewColumn(&'static str);
     use BrandNewColumn as B;
@@ -2253,7 +2247,7 @@ mod tests {
             .collect::<HashMap<&str, DataType>>();
 
         let expected_columns = maplit::hashmap! {
-            ROWID_PREFIX => DataType::Serial,
+            ROW_ID_COLUMN_NAME => DataType::Serial,
             "v1" => DataType::Int16,
             "v2" => StructType::new(
                 vec![("v3", DataType::Int64),("v4", DataType::Float64),("v5", DataType::Float64)],

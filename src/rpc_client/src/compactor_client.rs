@@ -27,7 +27,7 @@ use risingwave_pb::meta::{GetSystemParamsRequest, GetSystemParamsResponse};
 use risingwave_pb::monitor_service::monitor_service_client::MonitorServiceClient;
 use risingwave_pb::monitor_service::{StackTraceRequest, StackTraceResponse};
 use tokio::sync::RwLock;
-use tokio_retry::strategy::{jitter, ExponentialBackoff};
+use tokio_retry::strategy::{ExponentialBackoff, jitter};
 use tonic::transport::{Channel, Endpoint};
 
 use crate::error::{Result, RpcError};

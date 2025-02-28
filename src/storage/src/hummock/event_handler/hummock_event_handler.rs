@@ -33,14 +33,14 @@ use risingwave_hummock_sdk::version::{HummockVersionCommon, LocalHummockVersionD
 use risingwave_hummock_sdk::{HummockEpoch, SyncResult};
 use tokio::spawn;
 use tokio::sync::mpsc::error::SendError;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::sync::oneshot;
 use tracing::{debug, error, info, trace, warn};
 
 use super::refiller::{CacheRefillConfig, CacheRefiller};
 use super::{LocalInstanceGuard, LocalInstanceId, ReadVersionMappingType};
 use crate::compaction_catalog_manager::CompactionCatalogManagerRef;
-use crate::hummock::compactor::{await_tree_key, compact, CompactorContext};
+use crate::hummock::compactor::{CompactorContext, await_tree_key, compact};
 use crate::hummock::event_handler::refiller::{CacheRefillerEvent, SpawnRefillTask};
 use crate::hummock::event_handler::uploader::{
     HummockUploader, SpawnUploadTask, SyncedData, UploadTaskOutput,
@@ -871,7 +871,7 @@ mod tests {
     use risingwave_common::bitmap::Bitmap;
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
-    use risingwave_common::util::epoch::{test_epoch, EpochExt};
+    use risingwave_common::util::epoch::{EpochExt, test_epoch};
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_hummock_sdk::version::HummockVersion;
     use risingwave_pb::hummock::{PbHummockVersion, StateTableInfo};
@@ -879,12 +879,13 @@ mod tests {
     use tokio::sync::mpsc::unbounded_channel;
     use tokio::sync::oneshot;
 
+    use crate::hummock::HummockError;
     use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
     use crate::hummock::event_handler::refiller::{CacheRefillConfig, CacheRefiller};
-    use crate::hummock::event_handler::uploader::test_utils::{
-        gen_imm, gen_imm_inner, prepare_uploader_order_test_spawn_task_fn, TEST_TABLE_ID,
-    };
     use crate::hummock::event_handler::uploader::UploadTaskOutput;
+    use crate::hummock::event_handler::uploader::test_utils::{
+        TEST_TABLE_ID, gen_imm, gen_imm_inner, prepare_uploader_order_test_spawn_task_fn,
+    };
     use crate::hummock::event_handler::{
         HummockEvent, HummockEventHandler, HummockReadVersionRef, LocalInstanceGuard,
     };
@@ -893,7 +894,6 @@ mod tests {
     use crate::hummock::local_version::recent_versions::RecentVersions;
     use crate::hummock::store::version::{StagingData, VersionUpdate};
     use crate::hummock::test_utils::default_opts_for_test;
-    use crate::hummock::HummockError;
     use crate::mem_table::ImmutableMemtable;
     use crate::monitor::HummockStateStoreMetrics;
     use crate::store::SealCurrentEpochOptions;

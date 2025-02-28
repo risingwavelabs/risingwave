@@ -14,7 +14,7 @@
 
 use risingwave_common::array::DataChunk;
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{literal_type_match, DataType, Datum};
+use risingwave_common::types::{DataType, Datum, literal_type_match};
 use risingwave_common::util::value_encoding::DatumFromProtoExt;
 use risingwave_pb::expr::ExprNode;
 
@@ -91,7 +91,7 @@ mod tests {
     use risingwave_common::array::{I32Array, StructValue};
     use risingwave_common::types::test_utils::IntervalTestExt;
     use risingwave_common::types::{Decimal, Interval, IntoOrdered, Scalar, ScalarImpl};
-    use risingwave_common::util::value_encoding::{serialize_datum, DatumToProtoExt};
+    use risingwave_common::util::value_encoding::{DatumToProtoExt, serialize_datum};
     use risingwave_pb::data::data_type::{IntervalType, TypeName};
     use risingwave_pb::data::{PbDataType, PbDatum};
     use risingwave_pb::expr::expr_node::RexNode::{self, Constant};

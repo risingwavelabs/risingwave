@@ -28,8 +28,8 @@ use std::ops::{Range, RangeBounds};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use madsim::rand::{thread_rng, RngCore};
-use madsim::time::{sleep, Duration};
+use madsim::rand::{RngCore, thread_rng};
+use madsim::time::{Duration, sleep};
 use risingwave_common::range::RangeBoundsExt;
 
 use self::client::Client;

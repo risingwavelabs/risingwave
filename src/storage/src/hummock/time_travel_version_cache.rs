@@ -15,13 +15,13 @@
 use std::future::Future;
 use std::pin::Pin;
 
-use futures::future::Shared;
 use futures::FutureExt;
+use futures::future::Shared;
 use moka::sync::Cache;
 use risingwave_hummock_sdk::HummockEpoch;
 
-use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::HummockResult;
+use crate::hummock::local_version::pinned_version::PinnedVersion;
 
 type InflightResult = Shared<Pin<Box<dyn Future<Output = HummockResult<PinnedVersion>> + Send>>>;
 

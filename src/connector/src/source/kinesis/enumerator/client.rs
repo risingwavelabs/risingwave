@@ -14,8 +14,8 @@
 
 use anyhow::anyhow;
 use async_trait::async_trait;
-use aws_sdk_kinesis::types::Shard;
 use aws_sdk_kinesis::Client as kinesis_client;
+use aws_sdk_kinesis::types::Shard;
 use risingwave_common::bail;
 
 use crate::error::ConnectorResult as Result;

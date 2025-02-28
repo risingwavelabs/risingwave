@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use await_tree::InstrumentAwait;
 use futures::FutureExt;
 use risingwave_common::array::StreamChunk;
@@ -25,7 +25,7 @@ use risingwave_connector::sink::log_store::{
     LogWriterPostFlushCurrentEpoch, TruncateOffset,
 };
 use tokio::sync::mpsc::{
-    channel, unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender,
+    Receiver, Sender, UnboundedReceiver, UnboundedSender, channel, unbounded_channel,
 };
 use tokio::sync::oneshot;
 
@@ -103,6 +103,9 @@ impl BoundedInMemLogStoreFactory {
 impl LogStoreFactory for BoundedInMemLogStoreFactory {
     type Reader = BoundedInMemLogStoreReader;
     type Writer = BoundedInMemLogStoreWriter;
+
+    const ALLOW_REWIND: bool = false;
+    const REBUILD_SINK_ON_UPDATE_VNODE_BITMAP: bool = false;
 
     async fn build(self) -> (Self::Reader, Self::Writer) {
         let (init_epoch_tx, init_epoch_rx) = oneshot::channel();
@@ -241,8 +244,8 @@ impl LogReader for BoundedInMemLogStoreReader {
         Ok(())
     }
 
-    async fn rewind(&mut self) -> LogStoreResult<(bool, Option<Bitmap>)> {
-        Ok((false, None))
+    async fn rewind(&mut self) -> LogStoreResult<()> {
+        Err(anyhow!("should not call rewind on it"))
     }
 }
 
@@ -332,7 +335,7 @@ mod tests {
     use futures::FutureExt;
     use risingwave_common::array::{Op, StreamChunkBuilder};
     use risingwave_common::types::{DataType, ScalarImpl};
-    use risingwave_common::util::epoch::{test_epoch, EpochPair};
+    use risingwave_common::util::epoch::{EpochPair, test_epoch};
     use risingwave_connector::sink::log_store::{
         LogReader, LogStoreFactory, LogStoreReadItem, LogWriter, TruncateOffset,
     };
@@ -353,15 +356,17 @@ mod tests {
         let mut builder =
             StreamChunkBuilder::unlimited(vec![DataType::Int64, DataType::Varchar], None);
         for (i, op) in ops.into_iter().enumerate() {
-            assert!(builder
-                .append_row(
-                    op,
-                    [
-                        Some(ScalarImpl::Int64(i as i64)),
-                        Some(ScalarImpl::Utf8(format!("name_{}", i).into_boxed_str()))
-                    ]
-                )
-                .is_none());
+            assert!(
+                builder
+                    .append_row(
+                        op,
+                        [
+                            Some(ScalarImpl::Int64(i as i64)),
+                            Some(ScalarImpl::Utf8(format!("name_{}", i).into_boxed_str()))
+                        ]
+                    )
+                    .is_none()
+            );
         }
         let stream_chunk = builder.take().unwrap();
         let stream_chunk_clone = stream_chunk.clone();
@@ -440,18 +445,22 @@ mod tests {
                 chunk_id: chunk_id1_2,
             })
             .unwrap();
-        assert!(poll_fn(|cx| Poll::Ready(join_handle.poll_unpin(cx)))
-            .await
-            .is_pending());
+        assert!(
+            poll_fn(|cx| Poll::Ready(join_handle.poll_unpin(cx)))
+                .await
+                .is_pending()
+        );
         reader
             .truncate(TruncateOffset::Chunk {
                 epoch: epoch1,
                 chunk_id: chunk_id2_1,
             })
             .unwrap();
-        assert!(poll_fn(|cx| Poll::Ready(join_handle.poll_unpin(cx)))
-            .await
-            .is_pending());
+        assert!(
+            poll_fn(|cx| Poll::Ready(join_handle.poll_unpin(cx)))
+                .await
+                .is_pending()
+        );
         reader
             .truncate(TruncateOffset::Barrier { epoch: epoch1 })
             .unwrap();

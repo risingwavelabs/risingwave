@@ -18,14 +18,14 @@ use itertools::Itertools;
 use risingwave_common::catalog::{DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_FOR_PG};
 use risingwave_meta_model::prelude::{Object, User, UserPrivilege};
 use risingwave_meta_model::user_privilege::Action;
-use risingwave_meta_model::{object, user, user_privilege, AuthInfo, PrivilegeId, UserId};
+use risingwave_meta_model::{AuthInfo, PrivilegeId, UserId, object, user, user_privilege};
 use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Operation as NotificationOperation,
 };
 use risingwave_pb::user::update_user_request::PbUpdateField;
 use risingwave_pb::user::{PbGrantPrivilege, PbUserInfo};
-use sea_orm::sea_query::{OnConflict, SimpleExpr, Value};
 use sea_orm::ActiveValue::Set;
+use sea_orm::sea_query::{OnConflict, SimpleExpr, Value};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, PaginatorTrait, QueryFilter,
     QuerySelect, TransactionTrait,
@@ -33,12 +33,12 @@ use sea_orm::{
 
 use crate::controller::catalog::CatalogController;
 use crate::controller::utils::{
-    check_user_name_duplicate, ensure_privileges_not_referred, ensure_user_id,
-    extract_grant_obj_id, get_index_state_tables_by_table_id, get_internal_tables_by_id,
-    get_object_owner, get_referring_privileges_cascade, get_user_privilege, list_user_info_by_ids,
-    PartialUserPrivilege,
+    PartialUserPrivilege, check_user_name_duplicate, ensure_privileges_not_referred,
+    ensure_user_id, extract_grant_obj_id, get_index_state_tables_by_table_id,
+    get_internal_tables_by_id, get_object_owner, get_referring_privileges_cascade,
+    get_user_privilege, list_user_info_by_ids,
 };
-use crate::manager::{NotificationVersion, IGNORED_NOTIFICATION_VERSION};
+use crate::manager::{IGNORED_NOTIFICATION_VERSION, NotificationVersion};
 use crate::{MetaError, MetaResult};
 
 impl CatalogController {

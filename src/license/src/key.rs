@@ -29,8 +29,7 @@ use serde::{Deserialize, Serialize};
 ///     exp: 9999999999,
 /// }
 /// ```
-pub(crate) const TEST_PAID_LICENSE_KEY_CONTENT: &str =
- "eyJhbGciOiJSUzUxMiIsInR5cCI6IkpXVCJ9.\
+pub(crate) const TEST_PAID_LICENSE_KEY_CONTENT: &str = "eyJhbGciOiJSUzUxMiIsInR5cCI6IkpXVCJ9.\
   eyJzdWIiOiJydy10ZXN0IiwidGllciI6InBhaWQiLCJpc3MiOiJ0ZXN0LnJpc2luZ3dhdmUuY29tIiwiZXhwIjo5OTk5OTk5OTk5fQ.\
   c6Gmb6xh3dBDYX_4cOnHUbwRXJbUCM7W3mrJA77nLC5FkoOLpGstzvQ7qfnPVBu412MFtKRDvh-Lk8JwG7pVa0WLw16DeHTtVHxZukMTZ1Q_ciZ1xKeUx_pwUldkVzv6c9j99gNqPSyTjzOXTdKlidBRLer2zP0v3Lf-ZxnMG0tEcIbTinTb3BNCtAQ8bwBSRP-X48cVTWafjaZxv_zGiJT28uV3bR6jwrorjVB4VGvqhsJi6Fd074XOmUlnOleoAtyzKvjmGC5_FvnL0ztIe_I0z_pyCMfWpyJ_J4C7rCP1aVWUImyoowLmVDA-IKjclzOW5Fvi0wjXsc6OckOc_A";
 
@@ -49,8 +48,7 @@ pub(crate) const TEST_PAID_LICENSE_KEY_CONTENT: &str =
 ///     exp: 2147471999,
 /// }
 /// ```
-pub(crate) const PROD_PAID_4_CORE_LICENSE_KEY_CONTENT: &str =
- "eyJhbGciOiJSUzUxMiIsInR5cCI6IkpXVCJ9.\
+pub(crate) const PROD_PAID_4_CORE_LICENSE_KEY_CONTENT: &str = "eyJhbGciOiJSUzUxMiIsInR5cCI6IkpXVCJ9.\
   eyJzdWIiOiJydy1kZWZhdWx0LXBhaWQtNC1jb3JlIiwiaXNzIjoicHJvZC5yaXNpbmd3YXZlLmNvbSIsInRpZXIiOiJwYWlkIiwiZXhwIjoyMTQ3NDcxOTk5LCJpYXQiOjE3Mzc3MDQxMjQsImNwdV9jb3JlX2xpbWl0Ijo0fQ.\
   BvCClH6vb_TH-UHKLK76nSP0RfuJDF8ay0WHBpaJFWTVt_phcl9claWPWWk6KTpj_5eJi-TWTDzThE2JKsHjRk9Uo48MtZcOUBZsGsc_NUyShRjd1DS9LmzzI6ouwEWO5BfMFxQ4ZuJFRcQP7_EtC5vHVGILXCThOE--Cj1YLz5rC4mi6WMNdgfWAmnJh6FtfruHvqQEqq8m23CuosS8XHG5DMOIwdmP9jCHYFtJQaYNOQVQW90vHp69Uqmcv8lZD57rUvrQYFGyekERg2JWlMWar2z2vyiN4u73Qje7MJ3EB9pkXE0wvAfJ3bPpATgKd96SxCJL1kYPeCJkVdFPQg";
 

@@ -16,8 +16,8 @@ use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 
 use crate::error::{ConnectorError, ConnectorResult};
-use crate::source::nats::split::NatsSplit;
 use crate::source::SplitImpl;
+use crate::source::nats::split::NatsSplit;
 
 pub fn fill_adaptive_split(
     split_template: &SplitImpl,

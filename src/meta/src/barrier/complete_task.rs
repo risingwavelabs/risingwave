@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::future::{pending, Future};
+use std::future::{Future, pending};
 use std::mem::replace;
 use std::sync::Arc;
 

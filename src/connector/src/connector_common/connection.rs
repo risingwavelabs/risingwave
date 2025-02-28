@@ -16,10 +16,10 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use anyhow::Context;
-use opendal::services::{Gcs, S3};
 use opendal::Operator;
-use rdkafka::consumer::{BaseConsumer, Consumer};
+use opendal::services::{Gcs, S3};
 use rdkafka::ClientConfig;
+use rdkafka::consumer::{BaseConsumer, Consumer};
 use risingwave_common::bail;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_pb::catalog::PbConnection;

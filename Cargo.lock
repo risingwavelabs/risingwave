@@ -777,8 +777,7 @@ dependencies = [
 [[package]]
 name = "arrow-udf-python"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c0b80da061a53aac237e711fddb01709002ba2e006f9fd4c72a430d4938dd921"
+source = "git+https://github.com/arrow-udf/arrow-udf?rev=0b185be96a37bdcd644fe40d1f0ccf0b7972a99a#0b185be96a37bdcd644fe40d1f0ccf0b7972a99a"
 dependencies = [
  "anyhow",
  "arrow-array 53.2.0",
@@ -1171,11 +1170,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "aws-lc-fips-sys"
+version = "0.13.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "33e4aa2478e3ff7e6c2624558abfdad004a57ba975974b4769a4c0d12831f143"
+dependencies = [
+ "bindgen 0.69.5",
+ "cc",
+ "cmake",
+ "dunce",
+ "fs_extra",
+ "paste",
+ "regex",
+]
+
+[[package]]
 name = "aws-lc-rs"
 version = "1.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ea835662a0af02443aa1396d39be523bbf8f11ee6fad20329607c480bea48c3"
 dependencies = [
+ "aws-lc-fips-sys",
  "aws-lc-sys",
  "paste",
  "zeroize",
@@ -2367,9 +2382,9 @@ checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
 
 [[package]]
 name = "chrono"
-version = "0.4.38"
+version = "0.4.39"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a21f936df1771bf62b77f047b726c4625ff2e8aa607c01ec06e5a05bd8463401"
+checksum = "7e36cc9d416881d2e24f9a963be5fb1cd90966419ac844274161d10488b3e825"
 dependencies = [
  "android-tzdata",
  "iana-time-zone",
@@ -10475,7 +10490,6 @@ dependencies = [
  "risingwave_rpc_client",
  "risingwave_storage",
  "rw_futures_util",
- "scopeguard",
  "tempfile",
  "thiserror-ext",
  "tikv-jemallocator",
@@ -11000,6 +11014,7 @@ dependencies = [
  "rustls-pemfile 2.2.0",
  "rustls-pki-types",
  "rw_futures_util",
+ "scopeguard",
  "sea-schema",
  "serde",
  "serde_derive",
@@ -16393,6 +16408,7 @@ dependencies = [
 name = "workspace-config"
 version = "2.3.0-alpha"
 dependencies = [
+ "aws-lc-rs",
  "libz-sys",
  "log",
  "lzma-sys",

@@ -22,12 +22,12 @@ use risingwave_sqlparser::ast::{EmitMode, Ident, ObjectName, Query};
 
 use super::RwPgResponse;
 use crate::binder::{Binder, BoundQuery, BoundSetExpr};
-use crate::catalog::check_valid_column_name;
+use crate::catalog::check_column_name_not_reserved;
 use crate::error::ErrorCode::ProtocolError;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::HandlerArgs;
-use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::Explain;
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, RelationCollectorVisitor};
 use crate::planner::Planner;
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
@@ -119,7 +119,7 @@ pub fn gen_create_mv_plan_bound(
     plan_root.set_req_dist_as_same_as_req_order();
     if let Some(col_names) = col_names {
         for name in &col_names {
-            check_valid_column_name(name)?;
+            check_column_name_not_reserved(name)?;
         }
         plan_root.set_out_names(col_names)?;
     }
@@ -279,12 +279,12 @@ pub mod tests {
 
     use pgwire::pg_response::StatementType::CREATE_MATERIALIZED_VIEW;
     use risingwave_common::catalog::{
-        DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, ROWID_PREFIX, RW_TIMESTAMP_COLUMN_NAME,
+        DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, ROW_ID_COLUMN_NAME, RW_TIMESTAMP_COLUMN_NAME,
     };
     use risingwave_common::types::{DataType, StructType};
 
     use crate::catalog::root_catalog::SchemaPath;
-    use crate::test_utils::{create_proto_file, LocalFrontend, PROTO_FILE_DATA};
+    use crate::test_utils::{LocalFrontend, PROTO_FILE_DATA, create_proto_file};
 
     #[tokio::test]
     async fn test_create_mv_handler() {
@@ -329,7 +329,7 @@ pub mod tests {
         ])
         .into();
         let expected_columns = maplit::hashmap! {
-            ROWID_PREFIX => DataType::Serial,
+            ROW_ID_COLUMN_NAME => DataType::Serial,
             "country" => StructType::new(
                  vec![("address", DataType::Varchar),("city", city_type),("zipcode", DataType::Varchar)],
             ).into(),

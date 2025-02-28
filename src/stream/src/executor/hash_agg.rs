@@ -22,15 +22,15 @@ use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_common_estimate_size::collections::EstimatedHashMap;
 use risingwave_common_estimate_size::EstimateSize;
-use risingwave_expr::aggregate::{build_retractable, AggCall, BoxedAggregateFunction};
+use risingwave_common_estimate_size::collections::EstimatedHashMap;
+use risingwave_expr::aggregate::{AggCall, BoxedAggregateFunction, build_retractable};
 use risingwave_pb::stream_plan::PbAggNodeVersion;
 
 use super::agg_common::{AggExecutorArgs, HashAggExecutorExtraArgs};
 use super::aggregation::{
-    agg_call_filter_res, iter_table_storage, AggStateCacheStats, AggStateStorage,
-    DistinctDeduplicater, GroupKey, OnlyOutputIfHasInput,
+    AggStateCacheStats, AggStateStorage, DistinctDeduplicater, GroupKey, OnlyOutputIfHasInput,
+    agg_call_filter_res, iter_table_storage,
 };
 use super::monitor::HashAggMetrics;
 use super::sort_buffer::SortBuffer;
@@ -198,11 +198,13 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         // NOTE: we assume the prefix of table pk is exactly the group key
         let group_key_table_pk_projection =
             &args.intermediate_state_table.pk_indices()[..group_key_len];
-        assert!(group_key_table_pk_projection
-            .iter()
-            .sorted()
-            .copied()
-            .eq(0..group_key_len));
+        assert!(
+            group_key_table_pk_projection
+                .iter()
+                .sorted()
+                .copied()
+                .eq(0..group_key_len)
+        );
 
         Ok(Self {
             input: args.input,

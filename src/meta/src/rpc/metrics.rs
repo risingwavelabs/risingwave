@@ -19,11 +19,11 @@ use std::time::Duration;
 
 use prometheus::core::{AtomicF64, GenericGaugeVec};
 use prometheus::{
+    Histogram, HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec, Registry,
     exponential_buckets, histogram_opts, register_gauge_vec_with_registry,
     register_histogram_vec_with_registry, register_histogram_with_registry,
     register_int_counter_vec_with_registry, register_int_counter_with_registry,
-    register_int_gauge_vec_with_registry, register_int_gauge_with_registry, Histogram,
-    HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec, Registry,
+    register_int_gauge_vec_with_registry, register_int_gauge_with_registry,
 };
 use risingwave_common::metrics::{
     LabelGuardedHistogramVec, LabelGuardedIntCounterVec, LabelGuardedIntGaugeVec,
@@ -36,7 +36,7 @@ use risingwave_common::{
 use risingwave_connector::source::monitor::EnumeratorMetrics as SourceEnumeratorMetrics;
 use risingwave_meta_model::WorkerId;
 use risingwave_object_store::object::object_metrics::{
-    ObjectStoreMetrics, GLOBAL_OBJECT_STORE_METRICS,
+    GLOBAL_OBJECT_STORE_METRICS, ObjectStoreMetrics,
 };
 use risingwave_pb::common::WorkerType;
 use thiserror_ext::AsReport;

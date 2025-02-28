@@ -19,14 +19,14 @@ use futures::{FutureExt, TryFuture};
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use super::super::SinkError;
 use super::elasticsearch_opensearch_config::ElasticSearchOpenSearchConfig;
 use super::elasticsearch_opensearch_formatter::{BuildBulkPara, ElasticSearchOpenSearchFormatter};
+use crate::sink::Result;
 use crate::sink::log_store::DeliveryFutureManagerAddFuture;
 use crate::sink::writer::AsyncTruncateSinkWriter;
-use crate::sink::Result;
 
 pub enum ElasticSearchOpenSearchClient {
     ElasticSearch(elasticsearch::Elasticsearch),

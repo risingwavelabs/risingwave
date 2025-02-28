@@ -20,10 +20,10 @@ use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{ColumnDesc, TableDesc};
 
 use super::generic::{GenericPlanNode, GenericPlanRef};
-use super::utils::{childless_record, Distill};
+use super::utils::{Distill, childless_record};
 use super::{
-    generic, BatchFilter, BatchProject, ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef,
-    PredicatePushdown, ToBatch, ToStream,
+    BatchFilter, BatchProject, ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef,
+    PredicatePushdown, ToBatch, ToStream, generic,
 };
 use crate::error::Result;
 use crate::expr::{CorrelatedInputRef, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
@@ -242,9 +242,11 @@ impl ColPrunable for LogicalSysScan {
             .iter()
             .map(|i| self.required_col_idx()[*i])
             .collect();
-        assert!(output_col_idx
-            .iter()
-            .all(|i| self.output_col_idx().contains(i)));
+        assert!(
+            output_col_idx
+                .iter()
+                .all(|i| self.output_col_idx().contains(i))
+        );
 
         self.clone_with_output_indices(output_col_idx).into()
     }

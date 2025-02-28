@@ -20,16 +20,16 @@ use std::env;
 
 use risingwave_pb::telemetry::PbTelemetryClusterType;
 pub use risingwave_telemetry_event::{
-    current_timestamp, post_telemetry_report_pb, report_event_common, request_to_telemetry_event,
-    TelemetryError, TelemetryResult,
+    TelemetryError, TelemetryResult, current_timestamp, post_telemetry_report_pb,
+    report_event_common, request_to_telemetry_event,
 };
 use serde::{Deserialize, Serialize};
 use sysinfo::System;
 
+use crate::RW_VERSION;
 use crate::util::env_var::env_var_is_true_or;
 use crate::util::resource_util::cpu::total_cpu_available;
 use crate::util::resource_util::memory::{system_memory_available_bytes, total_memory_used_bytes};
-use crate::RW_VERSION;
 
 type Result<T> = core::result::Result<T, TelemetryError>;
 

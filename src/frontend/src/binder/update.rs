@@ -25,11 +25,11 @@ use risingwave_sqlparser::ast::{Assignment, AssignmentValue, Expr, ObjectName, S
 
 use super::statement::RewriteExprsRecursive;
 use super::{Binder, BoundBaseTable};
+use crate::TableCatalog;
 use crate::catalog::TableId;
-use crate::error::{bail_bind_error, bind_error, ErrorCode, Result, RwError};
+use crate::error::{ErrorCode, Result, RwError, bail_bind_error, bind_error};
 use crate::expr::{Expr as _, ExprImpl, SubqueryKind};
 use crate::user::UserId;
-use crate::TableCatalog;
 
 /// Project into `exprs` in `BoundUpdate` to get the new values for updating.
 #[derive(Debug, Clone, Copy)]
@@ -231,7 +231,9 @@ impl Binder {
                 }
 
                 (_ids, AssignmentValue::Expr(_expr)) => {
-                    bail_bind_error!("source for a multiple-column UPDATE item must be a sub-SELECT or ROW() expression");
+                    bail_bind_error!(
+                        "source for a multiple-column UPDATE item must be a sub-SELECT or ROW() expression"
+                    );
                 }
             }
         }

@@ -13,18 +13,17 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, PG_CATALOG_SCHEMA_NAME};
+use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_common::types::{DataType, MapType, StructType};
 use risingwave_common::util::iter_util::zip_eq_fast;
 use risingwave_common::{bail_no_function, bail_not_implemented, not_implemented};
-use risingwave_pb::plan_common::{AdditionalColumn, ColumnDescVersion};
 use risingwave_sqlparser::ast::{
     Array, BinaryOperator, DataType as AstDataType, EscapeChar, Expr, Function, JsonPredicateType,
-    ObjectName, Query, StructField, TrimWhereField, UnaryOperator,
+    ObjectName, Query, TrimWhereField, UnaryOperator,
 };
 
-use crate::binder::expr::function::is_sys_function_without_args;
 use crate::binder::Binder;
+use crate::binder::expr::function::is_sys_function_without_args;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall, InputRef, Parameter, SubqueryKind};
 use crate::handler::create_sql_function::SQL_UDF_PATTERN;
@@ -992,35 +991,6 @@ impl Binder {
     }
 }
 
-/// Given a type `STRUCT<v1 int>`, this function binds the field `v1 int`.
-pub fn bind_struct_field(column_def: &StructField) -> Result<ColumnDesc> {
-    let field_descs = if let AstDataType::Struct(defs) = &column_def.data_type {
-        defs.iter()
-            .map(|f| {
-                Ok(ColumnDesc::named(
-                    f.name.real_value(),
-                    ColumnId::new(0), // Literals don't have `column_id`.
-                    bind_data_type(&f.data_type)?,
-                ))
-            })
-            .collect::<Result<Vec<_>>>()?
-    } else {
-        vec![]
-    };
-    Ok(ColumnDesc {
-        data_type: bind_data_type(&column_def.data_type)?,
-        column_id: ColumnId::new(0),
-        name: column_def.name.real_value(),
-        field_descs,
-        type_name: "".to_owned(),
-        generated_or_default_column: None,
-        description: None,
-        additional_column: AdditionalColumn { column_type: None },
-        version: ColumnDescVersion::LATEST,
-        system_column: None,
-    })
-}
-
 pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
     let new_err = || not_implemented!("unsupported data type: {:}", data_type);
     let data_type = match data_type {
@@ -1084,7 +1054,7 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
                         "Column type SERIAL is not supported".into(),
                         "Please remove the SERIAL column".into(),
                     )
-                    .into())
+                    .into());
                 }
                 _ => return Err(new_err().into()),
             }

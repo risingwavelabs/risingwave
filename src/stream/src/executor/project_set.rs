@@ -19,11 +19,11 @@ use risingwave_common::bail;
 use risingwave_common::row::RowExt;
 use risingwave_common::types::ToOwnedDatum;
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_expr::ExprError;
 use risingwave_expr::expr::{self, EvalErrorReport, NonStrictExpression};
 use risingwave_expr::table_function::{self, BoxedTableFunction, TableFunctionOutputIter};
-use risingwave_expr::ExprError;
-use risingwave_pb::expr::project_set_select_item::PbSelectItem;
 use risingwave_pb::expr::PbProjectSetSelectItem;
+use risingwave_pb::expr::project_set_select_item::PbSelectItem;
 
 use crate::executor::prelude::*;
 use crate::task::ActorEvalErrorReport;

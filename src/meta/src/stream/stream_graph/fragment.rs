@@ -17,12 +17,12 @@ use std::num::NonZeroUsize;
 use std::ops::{Deref, DerefMut};
 use std::sync::LazyLock;
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::{
-    generate_internal_table_name_with_type, TableId, CDC_SOURCE_COLUMN_NUM,
+    CDC_SOURCE_COLUMN_NUM, TableId, generate_internal_table_name_with_type,
 };
 use risingwave_common::hash::VnodeCount;
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -43,12 +43,12 @@ use risingwave_pb::stream_plan::{
     StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamScanNode, StreamScanType,
 };
 
+use crate::MetaResult;
 use crate::barrier::SnapshotBackfillInfo;
 use crate::manager::{MetaSrvEnv, StreamingJob, StreamingJobType};
 use crate::model::{ActorId, FragmentId};
 use crate::stream::stream_graph::id::{GlobalFragmentId, GlobalFragmentIdGen, GlobalTableIdGen};
 use crate::stream::stream_graph::schedule::Distribution;
-use crate::MetaResult;
 
 /// The fragment in the building phase, including the [`StreamFragment`] from the frontend and
 /// several additional helper fields.
@@ -1006,11 +1006,17 @@ impl CompleteStreamFragmentGraph {
 
                                 (source_job_id, edge)
                             } else {
-                                bail!("the upstream fragment should be a MView or Source, got fragment type: {:b}", upstream_fragment.fragment_type_mask)
+                                bail!(
+                                    "the upstream fragment should be a MView or Source, got fragment type: {:b}",
+                                    upstream_fragment.fragment_type_mask
+                                )
                             }
                         }
                         StreamingJobType::Source | StreamingJobType::Table(_) => {
-                            bail!("the streaming job shouldn't have an upstream fragment, job_type: {:?}", job_type)
+                            bail!(
+                                "the streaming job shouldn't have an upstream fragment, job_type: {:?}",
+                                job_type
+                            )
                         }
                     };
 

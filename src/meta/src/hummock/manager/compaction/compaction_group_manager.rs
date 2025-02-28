@@ -19,10 +19,10 @@ use std::sync::Arc;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::INVALID_EPOCH;
+use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::get_compaction_group_ids;
 use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGroupId};
 use risingwave_hummock_sdk::version::GroupDelta;
-use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_meta_model::compaction_config;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
 use risingwave_pb::hummock::write_limits::WriteLimit;
@@ -34,12 +34,12 @@ use tokio::sync::OnceCell;
 
 use super::CompactionGroupStatistic;
 use crate::hummock::compaction::compaction_config::{
-    validate_compaction_config, CompactionConfigBuilder,
+    CompactionConfigBuilder, validate_compaction_config,
 };
 use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::transaction::HummockVersionTransaction;
 use crate::hummock::manager::versioning::Versioning;
-use crate::hummock::manager::{commit_multi_var, HummockManager};
+use crate::hummock::manager::{HummockManager, commit_multi_var};
 use crate::hummock::metrics_utils::remove_compaction_group_in_sst_stat;
 use crate::hummock::model::CompactionGroup;
 use crate::hummock::sequence::next_compaction_group_id;
@@ -256,16 +256,18 @@ impl HummockManager {
                     group_deltas.push(group_delta);
                 }
             }
-            assert!(new_version_delta
-                .state_table_info_delta
-                .insert(
-                    TableId::new(*table_id),
-                    PbStateTableInfoDelta {
-                        committed_epoch,
-                        compaction_group_id: *raw_group_id,
-                    }
-                )
-                .is_none());
+            assert!(
+                new_version_delta
+                    .state_table_info_delta
+                    .insert(
+                        TableId::new(*table_id),
+                        PbStateTableInfoDelta {
+                            committed_epoch,
+                            compaction_group_id: *raw_group_id,
+                        }
+                    )
+                    .is_none()
+            );
         }
         new_version_delta.pre_apply();
         commit_multi_var!(self.meta_store_ref(), version, compaction_groups_txn)?;

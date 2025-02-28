@@ -25,15 +25,15 @@ use risingwave_common::memory::MemoryContext;
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
-use risingwave_common::util::sort_util::{cmp_datum_iter, OrderType};
+use risingwave_common::util::sort_util::{OrderType, cmp_datum_iter};
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_expr::expr::BoxedExpression;
 
 use crate::error::BatchError;
 use crate::executor::join::chunked_data::ChunkedData;
 use crate::executor::{
-    utils, BoxedDataChunkListStream, BoxedExecutor, BufferChunkExecutor, EquiJoinParams,
-    HashJoinExecutor, JoinHashMap, JoinType, LookupExecutorBuilder, RowId,
+    BoxedDataChunkListStream, BoxedExecutor, BufferChunkExecutor, EquiJoinParams, HashJoinExecutor,
+    JoinHashMap, JoinType, LookupExecutorBuilder, RowId, utils,
 };
 use crate::task::ShutdownToken;
 

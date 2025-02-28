@@ -18,9 +18,9 @@ use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
 
 use super::type_inference::cast;
-use super::{infer_some_all, infer_type, CastContext, CastError, Expr, ExprImpl, Literal};
+use super::{CastContext, CastError, Expr, ExprImpl, Literal, infer_some_all, infer_type};
 use crate::error::Result as RwResult;
-use crate::expr::{bail_cast_error, ExprDisplay, ExprType, ExprVisitor, ImpureAnalyzer};
+use crate::expr::{ExprDisplay, ExprType, ExprVisitor, ImpureAnalyzer, bail_cast_error};
 
 #[derive(Clone, Eq, PartialEq, Hash)]
 pub struct FunctionCall {

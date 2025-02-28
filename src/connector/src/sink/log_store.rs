@@ -15,7 +15,7 @@
 use std::cmp::Ordering;
 use std::collections::VecDeque;
 use std::fmt::Debug;
-use std::future::{poll_fn, Future};
+use std::future::{Future, poll_fn};
 use std::pin::pin;
 use std::sync::Arc;
 use std::task::Poll;
@@ -186,12 +186,12 @@ pub trait LogReader: Send + Sized + 'static {
     /// Reset the log reader to after the latest truncate offset
     ///
     /// The return flag means whether the log store support rewind
-    fn rewind(
-        &mut self,
-    ) -> impl Future<Output = LogStoreResult<(bool, Option<Bitmap>)>> + Send + '_;
+    fn rewind(&mut self) -> impl Future<Output = LogStoreResult<()>> + Send + '_;
 }
 
 pub trait LogStoreFactory: Send + 'static {
+    const ALLOW_REWIND: bool;
+    const REBUILD_SINK_ON_UPDATE_VNODE_BITMAP: bool;
     type Reader: LogReader;
     type Writer: LogWriter;
 
@@ -226,9 +226,7 @@ impl<F: Fn(StreamChunk) -> StreamChunk + Send + 'static, R: LogReader> LogReader
         self.inner.truncate(offset)
     }
 
-    fn rewind(
-        &mut self,
-    ) -> impl Future<Output = LogStoreResult<(bool, Option<Bitmap>)>> + Send + '_ {
+    fn rewind(&mut self) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
         self.inner.rewind()
     }
 }
@@ -273,9 +271,7 @@ impl<R: LogReader> LogReader for BackpressureMonitoredLogReader<R> {
         self.inner.truncate(offset)
     }
 
-    fn rewind(
-        &mut self,
-    ) -> impl Future<Output = LogStoreResult<(bool, Option<Bitmap>)>> + Send + '_ {
+    fn rewind(&mut self) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
         self.inner.rewind().inspect_ok(|_| {
             self.wait_new_future_start_time = None;
         })
@@ -335,9 +331,7 @@ impl<R: LogReader> LogReader for MonitoredLogReader<R> {
         self.inner.truncate(offset)
     }
 
-    fn rewind(
-        &mut self,
-    ) -> impl Future<Output = LogStoreResult<(bool, Option<Bitmap>)>> + Send + '_ {
+    fn rewind(&mut self) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
         self.inner.rewind().instrument_await("log_reader_rewind")
     }
 }
@@ -546,9 +540,7 @@ impl<R: LogReader> LogReader for RateLimitedLogReader<R> {
         }
     }
 
-    fn rewind(
-        &mut self,
-    ) -> impl Future<Output = LogStoreResult<(bool, Option<Bitmap>)>> + Send + '_ {
+    fn rewind(&mut self) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
         self.core.unconsumed_chunk_queue.clear();
         self.core.consumed_offset_queue.clear();
         self.core.next_chunk_id = 0;
@@ -836,7 +828,7 @@ impl<F: TryFuture<Ok = ()> + Unpin + 'static> DeliveryFutureManager<F> {
 
 #[cfg(test)]
 mod tests {
-    use std::future::{poll_fn, Future};
+    use std::future::{Future, poll_fn};
     use std::pin::pin;
     use std::task::Poll;
 
@@ -907,9 +899,11 @@ mod tests {
     async fn test_empty() {
         let mut manager = DeliveryFutureManager::<TestFuture>::new(2);
         let mut future = pin!(manager.next_truncate_offset());
-        assert!(poll_fn(|cx| Poll::Ready(future.as_mut().poll(cx)))
-            .await
-            .is_pending());
+        assert!(
+            poll_fn(|cx| Poll::Ready(future.as_mut().poll(cx)))
+                .await
+                .is_pending()
+        );
     }
 
     #[tokio::test]
@@ -919,10 +913,12 @@ mod tests {
         let chunk_id1 = 1;
         let (tx1_1, rx1_1) = oneshot::channel();
         let mut write_chunk = manager.start_write_chunk(epoch1, chunk_id1);
-        assert!(!write_chunk
-            .add_future_may_await(to_test_future(rx1_1))
-            .await
-            .unwrap());
+        assert!(
+            !write_chunk
+                .add_future_may_await(to_test_future(rx1_1))
+                .await
+                .unwrap()
+        );
         assert_eq!(manager.future_count, 1);
         {
             let mut next_truncate_offset = pin!(manager.next_truncate_offset());
@@ -960,27 +956,35 @@ mod tests {
         let (tx1_3, rx1_3) = oneshot::channel();
         let epoch2 = test_epoch(234);
         let (tx2_1, rx2_1) = oneshot::channel();
-        assert!(!manager
-            .start_write_chunk(epoch1, chunk_id1)
-            .add_future_may_await(to_test_future(rx1_1))
-            .await
-            .unwrap());
-        assert!(!manager
-            .start_write_chunk(epoch1, chunk_id2)
-            .add_future_may_await(to_test_future(rx1_2))
-            .await
-            .unwrap());
-        assert!(!manager
-            .start_write_chunk(epoch1, chunk_id3)
-            .add_future_may_await(to_test_future(rx1_3))
-            .await
-            .unwrap());
+        assert!(
+            !manager
+                .start_write_chunk(epoch1, chunk_id1)
+                .add_future_may_await(to_test_future(rx1_1))
+                .await
+                .unwrap()
+        );
+        assert!(
+            !manager
+                .start_write_chunk(epoch1, chunk_id2)
+                .add_future_may_await(to_test_future(rx1_2))
+                .await
+                .unwrap()
+        );
+        assert!(
+            !manager
+                .start_write_chunk(epoch1, chunk_id3)
+                .add_future_may_await(to_test_future(rx1_3))
+                .await
+                .unwrap()
+        );
         manager.add_barrier(epoch1);
-        assert!(!manager
-            .start_write_chunk(epoch2, chunk_id1)
-            .add_future_may_await(to_test_future(rx2_1))
-            .await
-            .unwrap());
+        assert!(
+            !manager
+                .start_write_chunk(epoch2, chunk_id1)
+                .add_future_may_await(to_test_future(rx2_1))
+                .await
+                .unwrap()
+        );
         assert_eq!(manager.future_count, 4);
         {
             let mut next_truncate_offset = pin!(manager.next_truncate_offset());
@@ -1044,14 +1048,18 @@ mod tests {
 
         {
             let mut write_chunk = manager.start_write_chunk(epoch, chunk_id1);
-            assert!(!write_chunk
-                .add_future_may_await(to_test_future(rx1_1))
-                .await
-                .unwrap());
-            assert!(!write_chunk
-                .add_future_may_await(to_test_future(rx1_2))
-                .await
-                .unwrap());
+            assert!(
+                !write_chunk
+                    .add_future_may_await(to_test_future(rx1_1))
+                    .await
+                    .unwrap()
+            );
+            assert!(
+                !write_chunk
+                    .add_future_may_await(to_test_future(rx1_2))
+                    .await
+                    .unwrap()
+            );
             assert_eq!(manager.future_count, 2);
         }
 
@@ -1059,27 +1067,33 @@ mod tests {
             let mut write_chunk = manager.start_write_chunk(epoch, chunk_id2);
             {
                 let mut future1 = pin!(write_chunk.add_future_may_await(to_test_future(rx2_1)));
-                assert!(poll_fn(|cx| Poll::Ready(future1.as_mut().poll(cx)))
-                    .await
-                    .is_pending());
+                assert!(
+                    poll_fn(|cx| Poll::Ready(future1.as_mut().poll(cx)))
+                        .await
+                        .is_pending()
+                );
                 tx1_1.send(Ok(())).unwrap();
                 assert!(future1.await.unwrap());
             }
             assert_eq!(2, write_chunk.future_count());
             {
                 let mut future2 = pin!(write_chunk.add_future_may_await(to_test_future(rx2_2)));
-                assert!(poll_fn(|cx| Poll::Ready(future2.as_mut().poll(cx)))
-                    .await
-                    .is_pending());
+                assert!(
+                    poll_fn(|cx| Poll::Ready(future2.as_mut().poll(cx)))
+                        .await
+                        .is_pending()
+                );
                 tx1_2.send(Ok(())).unwrap();
                 assert!(future2.await.unwrap());
             }
             assert_eq!(2, write_chunk.future_count());
             {
                 let mut future3 = pin!(write_chunk.await_one_delivery());
-                assert!(poll_fn(|cx| Poll::Ready(future3.as_mut().poll(cx)))
-                    .await
-                    .is_pending());
+                assert!(
+                    poll_fn(|cx| Poll::Ready(future3.as_mut().poll(cx)))
+                        .await
+                        .is_pending()
+                );
                 tx2_1.send(Ok(())).unwrap();
                 future3.await.unwrap();
             }
@@ -1098,9 +1112,11 @@ mod tests {
 
         {
             let mut future = pin!(manager.next_truncate_offset());
-            assert!(poll_fn(|cx| Poll::Ready(future.as_mut().poll(cx)))
-                .await
-                .is_pending());
+            assert!(
+                poll_fn(|cx| Poll::Ready(future.as_mut().poll(cx)))
+                    .await
+                    .is_pending()
+            );
             tx2_2.send(Ok(())).unwrap();
             assert_eq!(
                 future.await.unwrap(),

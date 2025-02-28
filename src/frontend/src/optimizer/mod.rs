@@ -60,15 +60,16 @@ use risingwave_pb::stream_plan::StreamScanType;
 use self::heuristic_optimizer::ApplyOrder;
 use self::plan_node::generic::{self, PhysicalPlanRef};
 use self::plan_node::{
-    stream_enforce_eowc_requirement, BatchProject, Convention, LogicalProject, LogicalSource,
-    PartitionComputeInfo, StreamDml, StreamMaterialize, StreamProject, StreamRowIdGen, StreamSink,
-    StreamWatermarkFilter, ToStreamContext,
+    BatchProject, Convention, LogicalProject, LogicalSource, PartitionComputeInfo, StreamDml,
+    StreamMaterialize, StreamProject, StreamRowIdGen, StreamSink, StreamWatermarkFilter,
+    ToStreamContext, stream_enforce_eowc_requirement,
 };
 #[cfg(debug_assertions)]
 use self::plan_visitor::InputRefValidator;
-use self::plan_visitor::{has_batch_exchange, CardinalityVisitor, StreamKeyChecker};
+use self::plan_visitor::{CardinalityVisitor, StreamKeyChecker, has_batch_exchange};
 use self::property::{Cardinality, RequiredDist};
 use self::rule::*;
+use crate::TableCatalog;
 use crate::catalog::table_catalog::TableType;
 use crate::catalog::{DatabaseId, SchemaId};
 use crate::error::{ErrorCode, Result};
@@ -82,7 +83,6 @@ use crate::optimizer::plan_node::{
 use crate::optimizer::plan_visitor::{RwTimestampValidator, TemporalJoinValidator};
 use crate::optimizer::property::Distribution;
 use crate::utils::{ColIndexMappingRewriteExt, WithOptionsSecResolved};
-use crate::TableCatalog;
 
 /// `PlanRoot` is used to describe a plan. planner will construct a `PlanRoot` with `LogicalNode`.
 /// and required distribution and order. And `PlanRoot` can generate corresponding streaming or
@@ -269,15 +269,20 @@ impl PlanRoot {
         );
         Ok(LogicalProject::create(
             agg.into(),
-            vec![FunctionCall::new(
-                ExprType::Coalesce,
-                vec![
-                    InputRef::new(0, return_type).into(),
-                    ExprImpl::literal_list(ListValue::empty(&input_column_type), input_column_type),
-                ],
-            )
-            .unwrap()
-            .into()],
+            vec![
+                FunctionCall::new(
+                    ExprType::Coalesce,
+                    vec![
+                        InputRef::new(0, return_type).into(),
+                        ExprImpl::literal_list(
+                            ListValue::empty(&input_column_type),
+                            input_column_type,
+                        ),
+                    ],
+                )
+                .unwrap()
+                .into(),
+            ],
         ))
     }
 

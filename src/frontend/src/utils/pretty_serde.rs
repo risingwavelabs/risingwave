@@ -86,7 +86,7 @@ impl Serialize for PrettySerde<'_> {
 mod tests {
     use std::fmt::Debug;
 
-    use expect_test::{expect, Expect};
+    use expect_test::{Expect, expect};
 
     use super::*;
 

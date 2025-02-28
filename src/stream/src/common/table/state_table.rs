@@ -20,17 +20,17 @@ use std::sync::Arc;
 use bytes::{BufMut, Bytes, BytesMut};
 use either::Either;
 use foyer::CacheHint;
-use futures::{pin_mut, Stream, StreamExt, TryStreamExt};
+use futures::{Stream, StreamExt, TryStreamExt, pin_mut};
 use futures_async_stream::for_await;
-use itertools::{izip, Itertools};
+use itertools::{Itertools, izip};
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{ArrayImplBuilder, ArrayRef, DataChunk, Op, StreamChunk};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{
-    get_dist_key_in_pk_indices, ColumnDesc, ColumnId, TableId, TableOption,
+    ColumnDesc, ColumnId, TableId, TableOption, get_dist_key_in_pk_indices,
 };
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt, VnodeCountCompat};
-use risingwave_common::row::{self, once, Once, OwnedRow, Row, RowExt};
+use risingwave_common::row::{self, Once, OwnedRow, Row, RowExt, once};
 use risingwave_common::types::{DataType, Datum, DefaultOrd, DefaultOrdered, ScalarImpl};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::EpochPair;
@@ -38,15 +38,16 @@ use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::BasicSerde;
+use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_hummock_sdk::key::{
-    end_bound_of_prefix, prefixed_range_with_vnode, start_bound_of_excluded_prefix, CopyFromSlice,
-    TableKey, TableKeyRange,
+    CopyFromSlice, TableKey, TableKeyRange, end_bound_of_prefix, prefixed_range_with_vnode,
+    start_bound_of_excluded_prefix,
 };
 use risingwave_hummock_sdk::table_watermark::{
     VnodeWatermark, WatermarkDirection, WatermarkSerdeType,
 };
-use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::catalog::Table;
+use risingwave_storage::StateStore;
 use risingwave_storage::error::{ErrorKind, StorageError, StorageResult};
 use risingwave_storage::hummock::CachePolicy;
 use risingwave_storage::mem_table::MemTableError;
@@ -55,18 +56,13 @@ use risingwave_storage::row_serde::row_serde_util::{
     deserialize_pk_with_vnode, serialize_pk, serialize_pk_with_vnode,
 };
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
-use risingwave_storage::store::{
-    InitOptions, LocalStateStore, NewLocalOptions, OpConsistencyLevel, PrefetchOptions,
-    ReadLogOptions, ReadOptions, SealCurrentEpochOptions, StateStoreIter, StateStoreIterExt,
-    TryWaitEpochOptions,
-};
+use risingwave_storage::store::*;
 use risingwave_storage::table::merge_sort::merge_sort;
 use risingwave_storage::table::{
-    deserialize_log_stream, ChangeLogRow, KeyedRow, TableDistribution,
+    ChangeLogRow, KeyedRow, TableDistribution, deserialize_log_stream,
 };
-use risingwave_storage::StateStore;
 use thiserror_ext::AsReport;
-use tracing::{trace, Instrument};
+use tracing::{Instrument, trace};
 
 use crate::cache::cache_may_stale;
 use crate::common::state_cache::{StateCache, StateCacheFiller};
@@ -193,7 +189,7 @@ where
         Ok(())
     }
 
-    async fn try_wait_committed_epoch(&self, prev_epoch: u64) -> StorageResult<()> {
+    pub async fn try_wait_committed_epoch(&self, prev_epoch: u64) -> StorageResult<()> {
         self.store
             .try_wait_epoch(
                 HummockReadEpoch::Committed(prev_epoch),
@@ -669,7 +665,9 @@ where
         } else {
             #[cfg(debug_assertions)]
             if self.prefix_hint_len != 0 {
-                warn!("prefix_hint_len is not equal to pk.len(), may not be able to utilize bloom filter");
+                warn!(
+                    "prefix_hint_len is not equal to pk.len(), may not be able to utilize bloom filter"
+                );
             }
             None
         };
@@ -715,7 +713,6 @@ pub struct StateTablePostCommit<
     SD: ValueRowSerde,
 {
     inner: &'a mut StateTableInner<S, SD, IS_REPLICATED, USE_WATERMARK_CACHE>,
-    barrier_epoch: EpochPair,
 }
 
 impl<'a, S, SD, const IS_REPLICATED: bool, const USE_WATERMARK_CACHE: bool>
@@ -739,10 +736,8 @@ where
     > {
         self.inner.on_post_commit = false;
         Ok(if let Some(new_vnodes) = new_vnodes {
-            self.inner
-                .try_wait_committed_epoch(self.barrier_epoch.prev)
-                .await?;
-            let (old_vnodes, cache_may_stale) = self.update_vnode_bitmap(new_vnodes.clone());
+            let (old_vnodes, cache_may_stale) =
+                self.update_vnode_bitmap(new_vnodes.clone()).await?;
             Some(((new_vnodes, old_vnodes, self.inner), cache_may_stale))
         } else {
             None
@@ -754,7 +749,10 @@ where
     }
 
     /// Update the vnode bitmap of the state table, returns the previous vnode bitmap.
-    fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) -> (Arc<Bitmap>, bool) {
+    async fn update_vnode_bitmap(
+        &mut self,
+        new_vnodes: Arc<Bitmap>,
+    ) -> StreamExecutorResult<(Arc<Bitmap>, bool)> {
         assert!(
             !self.inner.is_dirty(),
             "vnode bitmap should only be updated when state table is clean"
@@ -762,7 +760,8 @@ where
         let prev_vnodes = self
             .inner
             .local_store
-            .update_vnode_bitmap(new_vnodes.clone());
+            .update_vnode_bitmap(new_vnodes.clone())
+            .await?;
         assert_eq!(
             &prev_vnodes,
             self.inner.vnodes(),
@@ -787,10 +786,10 @@ where
             }
         }
 
-        (
+        Ok((
             self.inner.distribution.update_vnode_bitmap(new_vnodes),
             cache_may_stale,
-        )
+        ))
     }
 }
 
@@ -1147,10 +1146,7 @@ where
         }
 
         self.on_post_commit = true;
-        Ok(StateTablePostCommit {
-            inner: self,
-            barrier_epoch: new_epoch,
-        })
+        Ok(StateTablePostCommit { inner: self })
     }
 
     /// Commit pending watermark and return vnode bitmap-watermark pairs to seal.
@@ -1653,7 +1649,7 @@ fn fill_non_output_indices(
 mod tests {
     use std::fmt::Debug;
 
-    use expect_test::{expect, Expect};
+    use expect_test::{Expect, expect};
 
     use super::*;
 

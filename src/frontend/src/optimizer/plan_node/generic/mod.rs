@@ -21,7 +21,7 @@ use std::hash::Hash;
 use pretty_xmlish::XmlNode;
 use risingwave_common::catalog::Schema;
 
-use super::{stream, EqJoinPredicate, PlanNodeId};
+use super::{EqJoinPredicate, PlanNodeId, stream};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::{Distribution, FunctionalDependencySet};
 

@@ -17,10 +17,10 @@ use risingwave_common::bail;
 use risingwave_sqlparser::ast::{ObjectName, SetVariableValue, SetVariableValueSingle, Value};
 
 use super::{HandlerArgs, RwPgResponse};
+use crate::Binder;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::table_catalog::TableType;
 use crate::error::{ErrorCode, Result};
-use crate::Binder;
 
 pub async fn handle_alter_resource_group(
     handler_args: HandlerArgs,

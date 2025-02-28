@@ -272,7 +272,10 @@ impl DmlExecutor {
                             let txn_buffer = active_txn_map.remove(&txn_id)
                                 .unwrap_or_else(|| panic!("Receive an unexpected transaction rollback message. Active transaction map doesn't contain this transaction txn_id = {}.", txn_id));
                             if txn_buffer.overflow {
-                                tracing::warn!("txn_id={} large transaction tries to rollback, but part of its data has already been sent to the downstream.", txn_id);
+                                tracing::warn!(
+                                    "txn_id={} large transaction tries to rollback, but part of its data has already been sent to the downstream.",
+                                    txn_id
+                                );
                             }
                         }
                         TxnMsg::Data(txn_id, chunk) => {
@@ -287,14 +290,20 @@ impl DmlExecutor {
                                     txn_buffer.vec.push(chunk);
                                     if txn_buffer.vec.len() > MAX_CHUNK_FOR_ATOMICITY {
                                         // Too many chunks for atomicity. Drain and yield them.
-                                        tracing::warn!("txn_id={} Too many chunks for atomicity. Sent them to the downstream anyway.", txn_id);
+                                        tracing::warn!(
+                                            "txn_id={} Too many chunks for atomicity. Sent them to the downstream anyway.",
+                                            txn_id
+                                        );
                                         for chunk in txn_buffer.vec.drain(..) {
                                             yield Message::Chunk(chunk);
                                         }
                                         txn_buffer.overflow = true;
                                     }
                                 }
-                                None => panic!("Receive an unexpected transaction data message. Active transaction map doesn't contain this transaction txn_id = {}.", txn_id),
+                                None => panic!(
+                                    "Receive an unexpected transaction data message. Active transaction map doesn't contain this transaction txn_id = {}.",
+                                    txn_id
+                                ),
                             };
                         }
                     }

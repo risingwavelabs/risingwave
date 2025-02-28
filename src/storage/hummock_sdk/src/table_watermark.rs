@@ -25,14 +25,14 @@ use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::types::ToDatumRef;
-use risingwave_common::util::sort_util::{cmp_datum, OrderType};
+use risingwave_common::util::sort_util::{OrderType, cmp_datum};
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::hummock::table_watermarks::PbEpochNewWatermarks;
 use risingwave_pb::hummock::{PbVnodeWatermark, TableWatermarks as PbTableWatermarks};
 use tracing::{debug, warn};
 
-use crate::key::{prefix_slice_with_vnode, vnode, TableKey, TableKeyRange};
 use crate::HummockEpoch;
+use crate::key::{TableKey, TableKeyRange, prefix_slice_with_vnode, vnode};
 
 #[derive(Clone)]
 pub struct ReadTableWatermark {
@@ -552,11 +552,13 @@ impl TableWatermarks {
     pub fn apply_new_table_watermarks(&mut self, newly_added_watermarks: &TableWatermarks) {
         assert_eq!(self.direction, newly_added_watermarks.direction);
         assert!(self.watermarks.iter().map(|(epoch, _)| epoch).is_sorted());
-        assert!(newly_added_watermarks
-            .watermarks
-            .iter()
-            .map(|(epoch, _)| epoch)
-            .is_sorted());
+        assert!(
+            newly_added_watermarks
+                .watermarks
+                .iter()
+                .map(|(epoch, _)| epoch)
+                .is_sorted()
+        );
         // ensure that the newly added watermarks have a later epoch than the previous latest epoch.
         if let Some((prev_last_epoch, _)) = self.watermarks.last()
             && let Some((new_first_epoch, _)) = newly_added_watermarks.watermarks.first()
@@ -645,8 +647,10 @@ impl TableWatermarks {
         // epoch watermark are added from later epoch to earlier epoch.
         // reverse to ensure that earlier epochs are at the front
         result_epoch_watermark.reverse();
-        assert!(result_epoch_watermark
-            .is_sorted_by(|(first_epoch, _), (second_epoch, _)| { first_epoch < second_epoch }));
+        assert!(
+            result_epoch_watermark
+                .is_sorted_by(|(first_epoch, _), (second_epoch, _)| { first_epoch < second_epoch })
+        );
         *self = TableWatermarks {
             watermarks: result_epoch_watermark,
             direction: self.direction,
@@ -801,14 +805,14 @@ mod tests {
     use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
-    use risingwave_common::util::epoch::{test_epoch, EpochExt};
+    use risingwave_common::util::epoch::{EpochExt, test_epoch};
     use risingwave_pb::hummock::{PbHummockVersion, StateTableInfo};
 
     use crate::compaction_group::StaticCompactionGroupId;
-    use crate::key::{is_empty_key_range, prefixed_range_with_vnode, TableKeyRange};
+    use crate::key::{TableKeyRange, is_empty_key_range, prefixed_range_with_vnode};
     use crate::table_watermark::{
-        merge_multiple_new_table_watermarks, TableWatermarks, TableWatermarksIndex, VnodeWatermark,
-        WatermarkDirection, WatermarkSerdeType,
+        TableWatermarks, TableWatermarksIndex, VnodeWatermark, WatermarkDirection,
+        WatermarkSerdeType, merge_multiple_new_table_watermarks,
     };
     use crate::version::HummockVersion;
 

@@ -16,7 +16,7 @@ use winnow::combinator::{cut_err, delimited};
 use winnow::error::{ContextError, StrContext};
 use winnow::{PResult, Parser};
 
-use super::{token, TokenStream};
+use super::{TokenStream, token};
 use crate::tokenizer::Token;
 
 /// Consume a [number][Token::Number] from token.

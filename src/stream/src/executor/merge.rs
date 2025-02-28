@@ -634,7 +634,7 @@ where
                         Poll::Ready(Some(Ok(MessageInner::Chunk(chunk_out))))
                     } else {
                         Poll::Pending
-                    }
+                    };
                 }
 
                 Poll::Ready(Some(result)) => {
@@ -997,13 +997,15 @@ mod tests {
 
         macro_rules! assert_recv_pending {
             () => {
-                assert!(merge
-                    .next()
-                    .now_or_never()
-                    .flatten()
-                    .transpose()
-                    .unwrap()
-                    .is_none());
+                assert!(
+                    merge
+                        .next()
+                        .now_or_never()
+                        .flatten()
+                        .transpose()
+                        .unwrap()
+                        .is_none()
+                );
             };
         }
         macro_rules! recv {

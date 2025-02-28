@@ -14,7 +14,7 @@
 
 //! Benchmarking JSON parsers for scenarios with exact key matches and case-insensitive key matches.
 
-use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
+use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
 use futures::StreamExt;
 use maplit::hashmap;
 use rand::Rng;

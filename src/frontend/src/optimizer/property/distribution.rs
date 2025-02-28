@@ -52,14 +52,14 @@ use itertools::Itertools;
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::catalog::{FieldDisplay, Schema, TableId};
 use risingwave_common::hash::WorkerSlotId;
+use risingwave_pb::batch_plan::ExchangeInfo;
 use risingwave_pb::batch_plan::exchange_info::{
     ConsistentHashInfo, Distribution as PbDistribution, DistributionMode, HashInfo,
 };
-use risingwave_pb::batch_plan::ExchangeInfo;
 
 use super::super::plan_node::*;
-use crate::catalog::catalog_service::CatalogReader;
 use crate::catalog::FragmentId;
+use crate::catalog::catalog_service::CatalogReader;
 use crate::error::Result;
 use crate::optimizer::property::Order;
 

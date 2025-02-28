@@ -46,15 +46,14 @@ use super::nats::source::NatsMeta;
 use super::nexmark::source::message::NexmarkMeta;
 use super::{AZBLOB_CONNECTOR, GCS_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR};
 use crate::error::ConnectorResult as Result;
-use crate::parser::schema_change::SchemaChangeEnvelope;
 use crate::parser::ParserConfig;
-use crate::source::monitor::EnumeratorMetrics;
+use crate::parser::schema_change::SchemaChangeEnvelope;
 use crate::source::SplitImpl::{CitusCdc, MongodbCdc, MysqlCdc, PostgresCdc, SqlServerCdc};
+use crate::source::monitor::EnumeratorMetrics;
 use crate::with_options::WithOptions;
 use crate::{
-    dispatch_source_prop, dispatch_split_impl, for_all_connections, for_all_sources,
-    impl_connection, impl_connector_properties, impl_split, match_source_name_str,
-    WithOptionsSecResolved,
+    WithOptionsSecResolved, dispatch_source_prop, dispatch_split_impl, for_all_connections,
+    for_all_sources, impl_connection, impl_connector_properties, impl_split, match_source_name_str,
 };
 
 const SPLIT_TYPE_FIELD: &str = "split_type";
@@ -188,7 +187,7 @@ pub trait SplitEnumerator: Sized + Send {
     type Properties;
 
     async fn new(properties: Self::Properties, context: SourceEnumeratorContextRef)
-        -> Result<Self>;
+    -> Result<Self>;
     async fn list_splits(&mut self) -> Result<Vec<Self::Split>>;
     /// Do some cleanup work when a fragment is dropped, e.g., drop Kafka consumer group.
     async fn on_drop_fragments(&mut self, _fragment_ids: Vec<u32>) -> Result<()> {
@@ -447,6 +446,9 @@ pub type BoxSourceMessageStream =
     BoxStream<'static, crate::error::ConnectorResult<Vec<SourceMessage>>>;
 /// Stream of [`StreamChunk`]s parsed from the messages from the external source.
 pub type BoxSourceChunkStream = BoxStream<'static, crate::error::ConnectorResult<StreamChunk>>;
+pub type StreamChunkWithState = (StreamChunk, HashMap<SplitId, SplitImpl>);
+pub type BoxSourceChunkWithStateStream =
+    BoxStream<'static, crate::error::ConnectorResult<StreamChunkWithState>>;
 
 // Manually expand the trait alias to improve IDE experience.
 pub trait SourceChunkStream:

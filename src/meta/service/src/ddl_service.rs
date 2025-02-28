@@ -30,8 +30,8 @@ use risingwave_meta::stream::{JobParallelismTarget, JobRescheduleTarget, JobReso
 use risingwave_meta_model::ObjectId;
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::{Comment, Connection, CreateType, Secret, Table};
-use risingwave_pb::common::worker_node::State;
 use risingwave_pb::common::WorkerType;
+use risingwave_pb::common::worker_node::State;
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::drop_table_request::PbSourceId;
 use risingwave_pb::ddl_service::*;
@@ -40,6 +40,7 @@ use risingwave_pb::meta::event_log;
 use thiserror_ext::AsReport;
 use tonic::{Request, Response, Status};
 
+use crate::MetaError;
 use crate::barrier::BarrierManagerRef;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{MetaSrvEnv, StreamingJob};
@@ -47,7 +48,6 @@ use crate::rpc::ddl_controller::{
     DdlCommand, DdlController, DropMode, ReplaceStreamJobInfo, StreamingJobId,
 };
 use crate::stream::{GlobalStreamManagerRef, SourceManagerRef};
-use crate::MetaError;
 
 #[derive(Clone)]
 pub struct DdlServiceImpl {

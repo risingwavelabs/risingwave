@@ -28,20 +28,20 @@ use risingwave_connector::source::kafka::PRIVATELINK_CONNECTION;
 use risingwave_expr::scalar::like::{i_like_default, like_default};
 use risingwave_pb::catalog::connection;
 use risingwave_sqlparser::ast::{
-    display_comma_separated, Ident, ObjectName, ShowCreateType, ShowObject, ShowStatementFilter,
+    Ident, ObjectName, ShowCreateType, ShowObject, ShowStatementFilter, display_comma_separated,
 };
 
-use super::{fields_to_descriptors, RwPgResponse, RwPgResponseBuilderExt};
+use super::{RwPgResponse, RwPgResponseBuilderExt, fields_to_descriptors};
 use crate::binder::{Binder, Relation};
 use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::{CatalogError, IndexCatalog};
 use crate::error::{Result, RwError};
-use crate::handler::create_connection::print_connection_params;
 use crate::handler::HandlerArgs;
-use crate::session::cursor_manager::SubscriptionCursor;
+use crate::handler::create_connection::print_connection_params;
 use crate::session::SessionImpl;
+use crate::session::cursor_manager::SubscriptionCursor;
 use crate::user::has_access_to_object;
 
 pub fn get_columns_from_table(
@@ -161,29 +161,67 @@ struct ShowObjectRow {
 pub struct ShowColumnRow {
     pub name: String,
     pub r#type: String,
-    pub is_hidden: Option<String>,
+    pub is_hidden: Option<String>, // XXX: why not bool?
     pub description: Option<String>,
 }
 
 impl ShowColumnRow {
+    /// Create a row with the given information. If the data type is a struct or list,
+    /// flatten the data type to also generate rows for its fields.
+    fn flatten(
+        name: String,
+        data_type: DataType,
+        is_hidden: bool,
+        description: Option<String>,
+    ) -> Vec<Self> {
+        // TODO(struct): use struct's type name once supported.
+        let r#type = match &data_type {
+            DataType::Struct(_) => "struct".to_owned(),
+            DataType::List(box DataType::Struct(_)) => "struct[]".to_owned(),
+            d => d.to_string(),
+        };
+
+        let mut rows = vec![ShowColumnRow {
+            name: name.clone(),
+            r#type,
+            is_hidden: Some(is_hidden.to_string()),
+            description,
+        }];
+
+        match data_type {
+            DataType::Struct(st) => {
+                rows.extend(st.iter().flat_map(|(field_name, field_data_type)| {
+                    Self::flatten(
+                        format!("{}.{}", name, field_name),
+                        field_data_type.clone(),
+                        is_hidden,
+                        None,
+                    )
+                }));
+            }
+
+            DataType::List(inner @ box DataType::Struct(_)) => {
+                rows.extend(Self::flatten(
+                    format!("{}[1]", name),
+                    *inner,
+                    is_hidden,
+                    None,
+                ));
+            }
+
+            _ => {}
+        }
+
+        rows
+    }
+
     pub fn from_catalog(col: ColumnCatalog) -> Vec<Self> {
-        col.column_desc
-            .flatten()
-            .into_iter()
-            .map(|c| {
-                let type_name = if let DataType::Struct { .. } = c.data_type {
-                    c.type_name.clone()
-                } else {
-                    c.data_type.to_string()
-                };
-                ShowColumnRow {
-                    name: c.name,
-                    r#type: type_name,
-                    is_hidden: Some(col.is_hidden.to_string()),
-                    description: c.description,
-                }
-            })
-            .collect()
+        Self::flatten(
+            col.column_desc.name,
+            col.column_desc.data_type,
+            col.is_hidden,
+            col.column_desc.description,
+        )
     }
 }
 
@@ -828,7 +866,7 @@ mod tests {
 
     use futures_async_stream::for_await;
 
-    use crate::test_utils::{create_proto_file, LocalFrontend, PROTO_FILE_DATA};
+    use crate::test_utils::{LocalFrontend, PROTO_FILE_DATA, create_proto_file};
 
     #[tokio::test]
     async fn test_show_source() {
@@ -883,7 +921,7 @@ mod tests {
                 ),
                 (
                     "country",
-                    "test.Country",
+                    "struct",
                 ),
                 (
                     "country.address",
@@ -891,7 +929,7 @@ mod tests {
                 ),
                 (
                     "country.city",
-                    "test.City",
+                    "struct",
                 ),
                 (
                     "country.city.address",

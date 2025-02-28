@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::num::NonZeroUsize;
 
 use anyhow::anyhow;
@@ -24,19 +24,10 @@ use risingwave_common::util::stream_graph_visitor::{visit_stream_node, visit_str
 use risingwave_common::{bail, current_cluster_version};
 use risingwave_connector::WithPropertiesExt;
 use risingwave_meta_model::actor::ActorStatus;
-use risingwave_meta_model::actor_dispatcher::DispatcherType;
 use risingwave_meta_model::object::ObjectType;
-use risingwave_meta_model::prelude::{
-    Actor, ActorDispatcher, Fragment, FragmentRelation, Index, Object, ObjectDependency, Sink,
-    Source, StreamingJob as StreamingJobModel, Table,
-};
+use risingwave_meta_model::prelude::{StreamingJob as StreamingJobModel, *};
 use risingwave_meta_model::table::TableType;
-use risingwave_meta_model::{
-    actor, actor_dispatcher, fragment, fragment_relation, index, object, object_dependency, sink,
-    source, streaming_job, table, ActorId, ActorUpstreamActors, ColumnCatalogArray, CreateType,
-    DatabaseId, ExprNodeArray, FragmentId, I32Array, IndexId, JobStatus, ObjectId, SchemaId,
-    SinkId, SourceId, StreamNode, StreamingParallelism, UserId,
-};
+use risingwave_meta_model::*;
 use risingwave_pb::catalog::source::PbOptionalAssociatedTableId;
 use risingwave_pb::catalog::table::PbOptionalAssociatedSourceId;
 use risingwave_pb::catalog::{PbCreateType, PbTable};
@@ -50,12 +41,10 @@ use risingwave_pb::source::{PbConnectorSplit, PbConnectorSplits};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
-use risingwave_pb::stream_plan::{
-    PbDispatcher, PbDispatcherType, PbFragmentTypeFlag, PbStreamActor, PbStreamNode,
-};
+use risingwave_pb::stream_plan::{PbDispatcher, PbFragmentTypeFlag, PbStreamActor, PbStreamNode};
 use risingwave_pb::user::PbUserInfo;
-use sea_orm::sea_query::{BinOper, Expr, Query, SimpleExpr};
 use sea_orm::ActiveValue::Set;
+use sea_orm::sea_query::{BinOper, Expr, Query, SimpleExpr};
 use sea_orm::{
     ActiveEnum, ActiveModelTrait, ColumnTrait, DatabaseTransaction, EntityTrait, IntoActiveModel,
     IntoSimpleExpr, JoinType, ModelTrait, NotSet, PaginatorTrait, QueryFilter, QuerySelect,
@@ -63,14 +52,14 @@ use sea_orm::{
 };
 
 use crate::barrier::{ReplaceStreamJobPlan, Reschedule};
+use crate::controller::ObjectModel;
 use crate::controller::catalog::{CatalogController, DropTableConnectorContext};
 use crate::controller::rename::ReplaceTableExprRewriter;
 use crate::controller::utils::{
-    build_object_group_for_delete, check_relation_name_duplicate, check_sink_into_table_cycle,
-    ensure_object_id, ensure_user_id, get_fragment_actor_ids, get_fragment_mappings,
-    get_internal_tables_by_id, rebuild_fragment_mapping_from_actors, PartialObject,
+    PartialObject, build_object_group_for_delete, check_relation_name_duplicate,
+    check_sink_into_table_cycle, ensure_object_id, ensure_user_id, get_fragment_actor_ids,
+    get_fragment_mappings, get_internal_tables_by_id, rebuild_fragment_mapping_from_actors,
 };
-use crate::controller::ObjectModel;
 use crate::manager::{NotificationVersion, StreamingJob, StreamingJobType};
 use crate::model::{StreamContext, StreamJobFragments, TableParallelism};
 use crate::stream::{JobReschedulePostUpdates, SplitAssignment};
@@ -425,16 +414,26 @@ impl CatalogController {
                             continue;
                         }
 
-                        let target_fragment_id = dispatcher.dispatcher_id;
+                        let target_fragment_id = dispatcher.dispatcher_id as FragmentId;
 
                         fragment_relations.insert(
                             key,
                             fragment_relation::Model {
                                 source_fragment_id: fragment.fragment_id,
                                 target_fragment_id,
-                                dispatcher_type: dispatcher.dispatcher_type,
-                                dist_key_indices: dispatcher.dist_key_indices.clone(),
-                                output_indices: dispatcher.output_indices.clone(),
+                                dispatcher_type: dispatcher.get_type().unwrap().into(),
+                                dist_key_indices: dispatcher
+                                    .dist_key_indices
+                                    .iter()
+                                    .map(|idx| *idx as i32)
+                                    .collect_vec()
+                                    .into(),
+                                output_indices: dispatcher
+                                    .output_indices
+                                    .iter()
+                                    .map(|idx| *idx as i32)
+                                    .collect_vec()
+                                    .into(),
                             },
                         );
                     }
@@ -443,9 +442,9 @@ impl CatalogController {
         }
 
         // Add fragments.
-        let (fragments, actor_with_dispatchers): (Vec<_>, Vec<_>) = fragment_actors
+        let (fragments, actors): (Vec<_>, Vec<_>) = fragment_actors
             .into_iter()
-            .map(|(fragment, actors, actor_dispatchers)| (fragment, (actors, actor_dispatchers)))
+            .map(|(fragment, actors, _)| (fragment, actors))
             .unzip();
         for fragment in fragments {
             let fragment_id = fragment.fragment_id;
@@ -494,17 +493,10 @@ impl CatalogController {
         }
 
         // Add actors and actor dispatchers.
-        for (actors, actor_dispatchers) in actor_with_dispatchers {
+        for actors in actors {
             for actor in actors {
                 let actor = actor.into_active_model();
                 Actor::insert(actor).exec(&txn).await?;
-            }
-            for (_, actor_dispatchers) in actor_dispatchers {
-                for actor_dispatcher in actor_dispatchers {
-                    let mut actor_dispatcher = actor_dispatcher.into_active_model();
-                    actor_dispatcher.id = NotSet;
-                    ActorDispatcher::insert(actor_dispatcher).exec(&txn).await?;
-                }
             }
         }
 
@@ -738,23 +730,6 @@ impl CatalogController {
 
         for (_, relation) in fragment_relations {
             FragmentRelation::insert(relation.into_active_model())
-                .exec(&txn)
-                .await?;
-        }
-
-        let mut actor_dispatchers = vec![];
-        for (actor_id, dispatchers) in new_actor_dispatchers.values().flatten() {
-            for dispatcher in dispatchers {
-                let mut actor_dispatcher =
-                    actor_dispatcher::Model::from((*actor_id, dispatcher.clone()))
-                        .into_active_model();
-                actor_dispatcher.id = NotSet;
-                actor_dispatchers.push(actor_dispatcher);
-            }
-        }
-
-        if !actor_dispatchers.is_empty() {
-            ActorDispatcher::insert_many(actor_dispatchers)
                 .exec(&txn)
                 .await?;
         }
@@ -1230,43 +1205,7 @@ impl CatalogController {
             .await?;
 
         // 2. update merges.
-        // 2.1 update downstream actor's upstream_actor_ids
-        for merge_update in merge_updates.values().flatten() {
-            assert!(merge_update.removed_upstream_actor_id.is_empty());
-            assert!(merge_update.new_upstream_fragment_id.is_some());
-            let (actor_id, mut upstream_actors) =
-                Actor::find_by_id(merge_update.actor_id as ActorId)
-                    .select_only()
-                    .columns([actor::Column::ActorId, actor::Column::UpstreamActorIds])
-                    .into_tuple::<(ActorId, ActorUpstreamActors)>()
-                    .one(txn)
-                    .await?
-                    .ok_or_else(|| {
-                        MetaError::catalog_id_not_found("actor", merge_update.actor_id)
-                    })?;
-
-            assert!(upstream_actors
-                .0
-                .remove(&(merge_update.upstream_fragment_id as FragmentId))
-                .is_some());
-            upstream_actors.0.insert(
-                merge_update.new_upstream_fragment_id.unwrap() as _,
-                merge_update
-                    .added_upstream_actor_id
-                    .iter()
-                    .map(|id| *id as _)
-                    .collect(),
-            );
-            actor::ActiveModel {
-                actor_id: Set(actor_id),
-                upstream_actor_ids: Set(upstream_actors),
-                ..Default::default()
-            }
-            .update(txn)
-            .await?;
-        }
-
-        // 2.2 update downstream fragment's Merge node, and upstream_fragment_id
+        // update downstream fragment's Merge node, and upstream_fragment_id
         for (fragment_id, merge_updates) in merge_updates {
             let (fragment_id, mut stream_node, mut upstream_fragment_id) =
                 Fragment::find_by_id(fragment_id as FragmentId)
@@ -1682,23 +1621,6 @@ impl CatalogController {
         reschedules: HashMap<FragmentId, Reschedule>,
         post_updates: &JobReschedulePostUpdates,
     ) -> MetaResult<()> {
-        fn update_actors(
-            actors: &mut Vec<ActorId>,
-            to_remove: &HashSet<ActorId>,
-            to_create: &Vec<ActorId>,
-        ) {
-            let actor_id_set: HashSet<_> = actors.iter().copied().collect();
-            for actor_id in to_create {
-                debug_assert!(!actor_id_set.contains(actor_id));
-            }
-            for actor_id in to_remove {
-                debug_assert!(actor_id_set.contains(actor_id));
-            }
-
-            actors.retain(|actor_id| !to_remove.contains(actor_id));
-            actors.extend_from_slice(to_create);
-        }
-
         let new_created_actors: HashSet<_> = reschedules
             .values()
             .flat_map(|reschedule| {
@@ -1716,20 +1638,14 @@ impl CatalogController {
 
         let mut fragment_mapping_to_notify = vec![];
 
-        // for assert only
-        let mut assert_dispatcher_update_checker = HashSet::new();
-
         for (
             fragment_id,
             Reschedule {
-                added_actors,
                 removed_actors,
                 vnode_bitmap_updates,
                 actor_splits,
                 newly_created_actors,
-                upstream_fragment_dispatcher_ids,
-                upstream_dispatcher_mapping,
-                downstream_fragment_ids,
+                ..
             },
         ) in reschedules
         {
@@ -1744,37 +1660,16 @@ impl CatalogController {
 
             // add new actors
             for (
-                (
-                    PbStreamActor {
-                        actor_id,
-                        fragment_id,
-                        dispatcher,
-                        vnode_bitmap,
-                        expr_context,
-                        ..
-                    },
-                    node_actor_upstreams,
-                ),
+                PbStreamActor {
+                    actor_id,
+                    fragment_id,
+                    vnode_bitmap,
+                    expr_context,
+                    ..
+                },
                 actor_status,
             ) in newly_created_actors
             {
-                let mut actor_upstreams = BTreeMap::<FragmentId, BTreeSet<ActorId>>::new();
-                let mut new_actor_dispatchers = vec![];
-
-                for (fragment_id, upstream_actor_ids) in node_actor_upstreams {
-                    actor_upstreams
-                        .entry(fragment_id as FragmentId)
-                        .or_default()
-                        .extend(upstream_actor_ids.iter().map(|id| *id as ActorId));
-                }
-
-                let actor_upstreams: BTreeMap<FragmentId, Vec<ActorId>> = actor_upstreams
-                    .into_iter()
-                    .map(|(k, v)| (k, v.into_iter().collect()))
-                    .collect();
-
-                let actor_upstreams = ActorUpstreamActors(actor_upstreams);
-
                 let splits = actor_splits
                     .get(&actor_id)
                     .map(|splits| splits.iter().map(PbConnectorSplit::from).collect_vec());
@@ -1785,40 +1680,12 @@ impl CatalogController {
                     status: Set(ActorStatus::Running),
                     splits: Set(splits.map(|splits| (&PbConnectorSplits { splits }).into())),
                     worker_id: Set(actor_status.worker_id() as _),
-                    upstream_actor_ids: Set(actor_upstreams),
+                    upstream_actor_ids: Set(Default::default()),
                     vnode_bitmap: Set(vnode_bitmap.as_ref().map(|bitmap| bitmap.into())),
                     expr_context: Set(expr_context.as_ref().unwrap().into()),
                 })
                 .exec(&txn)
                 .await?;
-
-                for PbDispatcher {
-                    r#type: dispatcher_type,
-                    dist_key_indices,
-                    output_indices,
-                    hash_mapping,
-                    dispatcher_id,
-                    downstream_actor_id,
-                } in dispatcher
-                {
-                    new_actor_dispatchers.push(actor_dispatcher::ActiveModel {
-                        id: Default::default(),
-                        actor_id: Set(actor_id as _),
-                        dispatcher_type: Set(PbDispatcherType::try_from(dispatcher_type)
-                            .unwrap()
-                            .into()),
-                        dist_key_indices: Set(dist_key_indices.into()),
-                        output_indices: Set(output_indices.into()),
-                        hash_mapping: Set(hash_mapping.as_ref().map(|mapping| mapping.into())),
-                        dispatcher_id: Set(dispatcher_id as _),
-                        downstream_actor_ids: Set(downstream_actor_id.into()),
-                    })
-                }
-                if !new_actor_dispatchers.is_empty() {
-                    ActorDispatcher::insert_many(new_actor_dispatchers)
-                        .exec(&txn)
-                        .await?;
-                }
             }
 
             // actor update
@@ -1874,90 +1741,6 @@ impl CatalogController {
                 .collect_vec();
 
             fragment_mapping_to_notify.extend(rebuild_fragment_mapping_from_actors(job_actors));
-
-            // for downstream and upstream
-            let removed_actor_ids: HashSet<_> = removed_actors
-                .iter()
-                .map(|actor_id| *actor_id as ActorId)
-                .collect();
-
-            let added_actor_ids = added_actors
-                .values()
-                .flatten()
-                .map(|actor_id| *actor_id as ActorId)
-                .collect_vec();
-
-            // first step, upstream fragment
-            for (upstream_fragment_id, dispatcher_id) in upstream_fragment_dispatcher_ids {
-                let upstream_fragment = Fragment::find_by_id(upstream_fragment_id as FragmentId)
-                    .one(&txn)
-                    .await?
-                    .ok_or_else(|| MetaError::catalog_id_not_found("fragment", fragment_id))?;
-
-                let all_dispatchers = actor_dispatcher::Entity::find()
-                    .join(JoinType::InnerJoin, actor_dispatcher::Relation::Actor.def())
-                    .filter(actor::Column::FragmentId.eq(upstream_fragment.fragment_id))
-                    .filter(actor_dispatcher::Column::DispatcherId.eq(dispatcher_id as i32))
-                    .all(&txn)
-                    .await?;
-
-                for dispatcher in all_dispatchers {
-                    debug_assert!(assert_dispatcher_update_checker.insert(dispatcher.id));
-                    if new_created_actors.contains(&dispatcher.actor_id) {
-                        continue;
-                    }
-
-                    let mut dispatcher = dispatcher.into_active_model();
-
-                    // Only hash dispatcher needs mapping
-                    if dispatcher.dispatcher_type.as_ref() == &DispatcherType::Hash {
-                        dispatcher.hash_mapping = Set(upstream_dispatcher_mapping
-                            .as_ref()
-                            .map(|m| risingwave_meta_model::ActorMapping::from(&m.to_protobuf())));
-                    }
-
-                    let mut new_downstream_actor_ids =
-                        dispatcher.downstream_actor_ids.as_ref().inner_ref().clone();
-
-                    update_actors(
-                        new_downstream_actor_ids.as_mut(),
-                        &removed_actor_ids,
-                        &added_actor_ids,
-                    );
-
-                    dispatcher.downstream_actor_ids = Set(new_downstream_actor_ids.into());
-                    dispatcher.update(&txn).await?;
-                }
-            }
-
-            // second step, downstream fragment
-            for downstream_fragment_id in downstream_fragment_ids {
-                let actors = Actor::find()
-                    .filter(actor::Column::FragmentId.eq(downstream_fragment_id as FragmentId))
-                    .all(&txn)
-                    .await?;
-
-                for actor in actors {
-                    if new_created_actors.contains(&actor.actor_id) {
-                        continue;
-                    }
-
-                    let mut actor = actor.into_active_model();
-
-                    let mut new_upstream_actor_ids =
-                        actor.upstream_actor_ids.as_ref().inner_ref().clone();
-
-                    update_actors(
-                        new_upstream_actor_ids.get_mut(&fragment_id).unwrap(),
-                        &removed_actor_ids,
-                        &added_actor_ids,
-                    );
-
-                    actor.upstream_actor_ids = Set(new_upstream_actor_ids.into());
-
-                    actor.update(&txn).await?;
-                }
-            }
         }
 
         let JobReschedulePostUpdates {

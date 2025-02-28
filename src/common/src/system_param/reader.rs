@@ -17,7 +17,7 @@ use std::borrow::Borrow;
 use risingwave_license::LicenseKeyRef;
 use risingwave_pb::meta::PbSystemParams;
 
-use super::{default, ParamValue};
+use super::{ParamValue, default};
 use crate::for_all_params;
 
 /// Information about a system parameter.

@@ -18,11 +18,11 @@ use futures::future::{try_join, try_join_all};
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::types::DefaultOrd;
 use risingwave_common::{bail, row};
-use risingwave_expr::expr::{
-    build_func_non_strict, ExpressionBoxExt, InputRefExpression, LiteralExpression,
-    NonStrictExpression,
-};
 use risingwave_expr::Result as ExprResult;
+use risingwave_expr::expr::{
+    ExpressionBoxExt, InputRefExpression, LiteralExpression, NonStrictExpression,
+    build_func_non_strict,
+};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::expr::expr_node::Type;
 use risingwave_storage::table::batch_table::BatchTable;
@@ -198,7 +198,9 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                 }
                 Message::Watermark(watermark) => {
                     if watermark.col_idx == event_time_col_idx {
-                        tracing::warn!("WatermarkFilterExecutor received a watermark on the event it is filtering.");
+                        tracing::warn!(
+                            "WatermarkFilterExecutor received a watermark on the event it is filtering."
+                        );
                         let watermark = watermark.val;
                         if let Some(cur_watermark) = current_watermark.clone()
                             && cur_watermark.default_cmp(&watermark).is_lt()
@@ -603,7 +605,7 @@ mod tests {
         let mut executor = executor.execute();
 
         // push the 1st barrier after failover
-        tx.push_barrier(test_epoch(4), false);
+        tx.push_barrier(test_epoch(3), false);
         executor.next().await.unwrap().unwrap();
 
         // Init watermark after failover

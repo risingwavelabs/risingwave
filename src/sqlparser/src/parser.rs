@@ -31,8 +31,8 @@ use winnow::{PResult, Parser as _};
 use crate::ast::*;
 use crate::keywords::{self, Keyword};
 use crate::parser_v2::{
-    dollar_quoted_string, keyword, literal_i64, literal_uint, single_quoted_string, token_number,
-    ParserExt as _,
+    ParserExt as _, dollar_quoted_string, keyword, literal_i64, literal_uint, single_quoted_string,
+    token_number,
 };
 use crate::tokenizer::*;
 use crate::{impl_parse_to, parser_v2};
@@ -3017,6 +3017,13 @@ impl Parser<'_> {
             const CONNECTION_REF_KEY: &str = "connection";
             if name.real_value().eq_ignore_ascii_case(CONNECTION_REF_KEY) {
                 let connection_name = self.parse_object_name()?;
+                // tolerate previous buggy Display that outputs `connection = connection foo`
+                let connection_name = match connection_name.0.as_slice() {
+                    [ident] if ident.real_value() == CONNECTION_REF_KEY => {
+                        self.parse_object_name()?
+                    }
+                    _ => connection_name,
+                };
                 SqlOptionValue::ConnectionRef(ConnectionRefValue { connection_name })
             } else {
                 self.parse_value_and_obj_ref::<false>()?

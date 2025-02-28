@@ -17,8 +17,8 @@ use std::collections::{BTreeMap, HashMap};
 use risingwave_pb::secret::PbSecretRef;
 
 use crate::sink::catalog::SinkFormatDesc;
-use crate::source::cdc::external::CdcTableType;
 use crate::source::cdc::MYSQL_CDC_CONNECTOR;
+use crate::source::cdc::external::CdcTableType;
 use crate::source::iceberg::ICEBERG_CONNECTOR;
 use crate::source::{
     AZBLOB_CONNECTOR, GCS_CONNECTOR, KAFKA_CONNECTOR, LEGACY_S3_CONNECTOR, OPENDAL_S3_CONNECTOR,

@@ -19,12 +19,12 @@
 
 use std::collections::BTreeMap;
 
-use risingwave_common::util::sort_util::ColumnOrder;
+use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
 use super::{BoxedRule, Rule};
+use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::{LogicalScan, LogicalTopN, PlanTreeNodeUnary};
 use crate::optimizer::property::Order;
-use crate::optimizer::PlanRef;
 
 pub struct TopNOnIndexRule {}
 
@@ -32,9 +32,6 @@ impl Rule for TopNOnIndexRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let logical_top_n: &LogicalTopN = plan.as_logical_top_n()?;
         let logical_scan: LogicalScan = logical_top_n.input().as_logical_scan()?.to_owned();
-        if !logical_scan.predicate().always_true() {
-            return None;
-        }
         let order = logical_top_n.topn_order();
         if order.column_orders.is_empty() {
             return None;
@@ -58,14 +55,32 @@ impl TopNOnIndexRule {
         logical_scan: LogicalScan,
         required_order: &Order,
     ) -> Option<PlanRef> {
-        let order_satisfied_index = logical_scan.indexes_satisfy_order(required_order);
-        for index in order_satisfied_index {
-            if let Some(index_scan) = logical_scan.to_index_scan_if_index_covered(index) {
-                return Some(logical_top_n.clone_with_input(index_scan.into()).into());
+        let scan_predicates = logical_scan.predicate();
+        let input_refs = scan_predicates.get_eq_const_input_refs();
+        let prefix = input_refs
+            .into_iter()
+            .map(|input_ref| ColumnOrder {
+                column_index: input_ref.index,
+                order_type: OrderType::ascending(),
+            })
+            .collect();
+        let order_satisfied_index =
+            logical_scan.indexes_satisfy_order_with_prefix(required_order, &prefix);
+        let mut longest_prefix: Option<Order> = None;
+        let mut selected_index = None;
+        for (index, prefix) in order_satisfied_index {
+            if prefix.len() >= longest_prefix.as_ref().map_or(0, |p| p.len()) {
+                longest_prefix = Some(prefix.clone());
+                if let Some(index_scan) = logical_scan.to_index_scan_if_index_covered(index) {
+                    selected_index = Some(
+                        logical_top_n
+                            .clone_with_input_and_prefix(index_scan.into(), prefix)
+                            .into(),
+                    );
+                }
             }
         }
-
-        None
+        selected_index
     }
 
     fn try_on_pk(

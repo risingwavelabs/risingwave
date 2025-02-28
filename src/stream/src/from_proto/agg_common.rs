@@ -19,8 +19,8 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::util::sort_util::ColumnOrder;
 
 use super::*;
-use crate::common::table::state_table::StateTable;
 use crate::common::StateTableColumnMapping;
+use crate::common::table::state_table::StateTable;
 use crate::executor::aggregation::AggStateStorage;
 
 /// Parse from stream proto plan agg call states, generate state tables and column mappings.

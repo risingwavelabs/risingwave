@@ -20,11 +20,11 @@ use risingwave_common::catalog::{Field, Schema, TableVersionId};
 use risingwave_common::types::DataType;
 
 use super::{DistillUnit, GenericPlanNode, GenericPlanRef};
+use crate::OptimizerContextRef;
 use crate::catalog::TableId;
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::utils::childless_record;
 use crate::optimizer::property::FunctionalDependencySet;
-use crate::OptimizerContextRef;
 
 #[derive(Debug, Clone, Educe)]
 #[educe(PartialEq, Eq, Hash)]

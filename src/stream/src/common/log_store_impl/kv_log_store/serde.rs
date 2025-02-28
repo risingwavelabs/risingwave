@@ -19,7 +19,7 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use bytes::Bytes;
 use futures::stream::{FuturesUnordered, Peekable, StreamFuture};
-use futures::{pin_mut, Stream, StreamExt, TryStreamExt};
+use futures::{Stream, StreamExt, TryStreamExt, pin_mut};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
@@ -35,14 +35,14 @@ use risingwave_common::util::value_encoding::{
     BasicSerde, ValueRowDeserializer, ValueRowSerializer,
 };
 use risingwave_connector::sink::log_store::LogStoreResult;
-use risingwave_hummock_sdk::key::{next_key, TableKey};
 use risingwave_hummock_sdk::HummockEpoch;
+use risingwave_hummock_sdk::key::{TableKey, next_key};
 use risingwave_pb::catalog::Table;
 use risingwave_storage::error::StorageResult;
 use risingwave_storage::row_serde::row_serde_util::{serialize_pk, serialize_pk_with_vnode};
 use risingwave_storage::row_serde::value_serde::ValueRowSerdeNew;
 use risingwave_storage::store::{StateStoreIterExt, StateStoreReadIter};
-use risingwave_storage::table::{compute_vnode, SINGLETON_VNODE};
+use risingwave_storage::table::{SINGLETON_VNODE, compute_vnode};
 use rw_futures_util::select_all;
 
 use crate::common::log_store_impl::kv_log_store::{
@@ -471,8 +471,8 @@ impl LogStoreRowSerde {
             return Err(anyhow!(
                 "should not get empty row when decoding stream chunk. start seq id: {}, end seq id {}",
                 start_seq_id,
-                end_seq_id)
-            );
+                end_seq_id
+            ));
         }
         read_info.report(metrics);
         Ok(StreamChunk::from_parts(
@@ -894,13 +894,13 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
         }
         // End of stream
         match &self.stream_state {
-            StreamState::BarrierEmitted { .. } => {},
-            s => return Err(
-                anyhow!(
+            StreamState::BarrierEmitted { .. } => {}
+            s => {
+                return Err(anyhow!(
                     "when any of the stream reaches the end, it should be right after emitting an barrier. Current state: {:?}",
                     s
-                )
-            ),
+                ));
+            }
         }
         assert!(
             self.barrier_streams.is_empty(),
@@ -914,9 +914,10 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
         if cfg!(debug_assertions) {
             while let Some((opt, _stream)) = self.row_streams.next().await {
                 if let Some(result) = opt {
-                    return Err(
-                        anyhow!("when any of the stream reaches the end, other stream should also reaches the end, but poll result: {:?}", result)
-                    );
+                    return Err(anyhow!(
+                        "when any of the stream reaches the end, other stream should also reaches the end, but poll result: {:?}",
+                        result
+                    ));
                 }
             }
         }
@@ -933,7 +934,7 @@ mod tests {
 
     use bytes::Bytes;
     use futures::stream::empty;
-    use futures::{pin_mut, stream, Stream, StreamExt, TryStreamExt};
+    use futures::{Stream, StreamExt, TryStreamExt, pin_mut, stream};
     use itertools::Itertools;
     use rand::prelude::SliceRandom;
     use rand::thread_rng;
@@ -943,7 +944,7 @@ mod tests {
     use risingwave_common::row::{OwnedRow, Row};
     use risingwave_common::types::DataType;
     use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
-    use risingwave_common::util::epoch::{test_epoch, EpochExt};
+    use risingwave_common::util::epoch::{EpochExt, test_epoch};
     use risingwave_hummock_sdk::key::FullKey;
     use risingwave_storage::error::StorageResult;
     use risingwave_storage::store::{
@@ -954,14 +955,14 @@ mod tests {
     use tokio::sync::oneshot::Sender;
 
     use crate::common::log_store_impl::kv_log_store::serde::{
-        merge_log_store_item_stream, KvLogStoreItem, LogStoreOp, LogStoreRowOp,
-        LogStoreRowOpStream, LogStoreRowSerde,
+        KvLogStoreItem, LogStoreOp, LogStoreRowOp, LogStoreRowOpStream, LogStoreRowSerde,
+        merge_log_store_item_stream,
     };
     use crate::common::log_store_impl::kv_log_store::test_utils::{
-        check_rows_eq, gen_test_data, gen_test_log_store_table, TEST_TABLE_ID,
+        TEST_TABLE_ID, check_rows_eq, gen_test_data, gen_test_log_store_table,
     };
     use crate::common::log_store_impl::kv_log_store::{
-        KvLogStorePkInfo, KvLogStoreReadMetrics, SeqIdType, KV_LOG_STORE_V2_INFO,
+        KV_LOG_STORE_V2_INFO, KvLogStorePkInfo, KvLogStoreReadMetrics, SeqIdType,
     };
 
     const EPOCH0: u64 = test_epoch(1);
@@ -1461,9 +1462,11 @@ mod tests {
             }
         }
 
-        assert!(poll_fn(|cx| Poll::Ready(stream.poll_next_unpin(cx)))
-            .await
-            .is_pending());
+        assert!(
+            poll_fn(|cx| Poll::Ready(stream.poll_next_unpin(cx)))
+                .await
+                .is_pending()
+        );
 
         tx1.send(()).unwrap();
 
@@ -1497,9 +1500,11 @@ mod tests {
             }
         }
 
-        assert!(poll_fn(|cx| Poll::Ready(stream.poll_next_unpin(cx)))
-            .await
-            .is_pending());
+        assert!(
+            poll_fn(|cx| Poll::Ready(stream.poll_next_unpin(cx)))
+                .await
+                .is_pending()
+        );
 
         tx2.send(()).unwrap();
 

@@ -88,7 +88,7 @@ impl<Id: Ord + Hash + std::fmt::Debug> BufferedWatermarks<Id> {
         while !self.first_buffered_watermarks.is_empty()
             && (self.first_buffered_watermarks.len() == len
                 || watermark_to_emit.as_ref().map_or(false, |watermark| {
-                    watermark == &self.first_buffered_watermarks.peek().unwrap().0 .0
+                    watermark == &self.first_buffered_watermarks.peek().unwrap().0.0
                 }))
         {
             let Reverse((watermark, id)) = self.first_buffered_watermarks.pop().unwrap();

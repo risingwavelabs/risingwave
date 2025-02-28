@@ -19,7 +19,7 @@ use risingwave_sqlparser::ast::{ObjectName, OperateFunctionArg};
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::error::{ErrorCode, Result};
-use crate::{bind_data_type, Binder};
+use crate::{Binder, bind_data_type};
 
 // Steps for validation:
 // 1. Check permission to alter original object.

@@ -12,21 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::atomic::Ordering::Relaxed;
 use std::sync::Arc;
+use std::sync::atomic::Ordering::Relaxed;
 use std::time::Duration;
 
 use anyhow::Result;
 use itertools::Itertools;
-use rand::{thread_rng, Rng};
+use rand::{Rng, thread_rng};
 use risingwave_common::hash::WorkerSlotId;
 use risingwave_simulation::cluster::{Cluster, KillOpts};
 use risingwave_simulation::ctl_ext::predicate::identity_contains;
 use tokio::time::sleep;
 
 use crate::sink::utils::{
-    start_sink_test_cluster, SimulationTestSink, SimulationTestSource, CREATE_SINK, CREATE_SOURCE,
-    DROP_SINK, DROP_SOURCE,
+    CREATE_SINK, CREATE_SOURCE, DROP_SINK, DROP_SOURCE, SimulationTestSink, SimulationTestSource,
+    start_sink_test_cluster,
 };
 use crate::{assert_eq_with_err_returned as assert_eq, assert_with_err_returned as assert};
 

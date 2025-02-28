@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use itertools::Itertools;
 use rand::Rng;
 use risingwave_common::types::DataType;
@@ -22,8 +22,8 @@ use risingwave_sqlparser::ast::{
     Values,
 };
 
-use crate::sql_gen::SqlGenerator;
 use crate::Table;
+use crate::sql_gen::SqlGenerator;
 
 impl<'a, R: Rng + 'a> SqlGenerator<'a, R> {
     pub(crate) fn generate_insert_statement(

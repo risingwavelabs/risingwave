@@ -20,8 +20,8 @@ use std::time::Duration;
 
 use anyhow::anyhow;
 use fail::fail_point;
-use futures::future::try_join_all;
 use futures::StreamExt;
+use futures::future::try_join_all;
 use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::util::epoch::Epoch;
@@ -33,7 +33,7 @@ use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::meta::PausedReason;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::{
-    AddMutation, Barrier, BarrierMutation, StreamNode, SubscriptionUpstreamInfo,
+    AddMutation, Barrier, BarrierMutation, StreamActor, StreamNode, SubscriptionUpstreamInfo,
 };
 use risingwave_pb::stream_service::inject_barrier_request::build_actor_info::UpstreamActors;
 use risingwave_pb::stream_service::inject_barrier_request::{
@@ -44,8 +44,8 @@ use risingwave_pb::stream_service::streaming_control_stream_request::{
     RemovePartialGraphRequest, ResetDatabaseRequest,
 };
 use risingwave_pb::stream_service::{
-    streaming_control_stream_request, streaming_control_stream_response, InjectBarrierRequest,
-    StreamingControlStreamRequest,
+    InjectBarrierRequest, StreamingControlStreamRequest, streaming_control_stream_request,
+    streaming_control_stream_response,
 };
 use risingwave_rpc_client::StreamingControlHandle;
 use thiserror_ext::AsReport;
@@ -126,16 +126,17 @@ impl ControlStreamManager {
         for i in 1..=MAX_RETRY {
             match context.new_control_stream(&node, &init_request).await {
                 Ok(handle) => {
-                    assert!(self
-                        .nodes
-                        .insert(
-                            node_id,
-                            ControlStreamNode {
-                                worker: node.clone(),
-                                handle,
-                            }
-                        )
-                        .is_none());
+                    assert!(
+                        self.nodes
+                            .insert(
+                                node_id,
+                                ControlStreamNode {
+                                    worker: node.clone(),
+                                    handle,
+                                }
+                            )
+                            .is_none()
+                    );
                     info!(?node_host, "add control stream worker");
                     return;
                 }
@@ -326,7 +327,7 @@ impl ControlStreamManager {
         database_id: DatabaseId,
         info: InflightDatabaseInfo,
         state_table_committed_epochs: &mut HashMap<TableId, u64>,
-        stream_actors: &mut HashMap<ActorId, StreamActorWithUpstreams>,
+        stream_actors: &mut HashMap<ActorId, StreamActor>,
         source_splits: &mut HashMap<ActorId, Vec<SplitImpl>>,
         background_jobs: &mut HashMap<TableId, (String, StreamJobFragments)>,
         subscription_info: InflightSubscriptionInfo,
@@ -377,19 +378,43 @@ impl ControlStreamManager {
             kind: BarrierKind::Initial,
         };
 
-        let mut node_actors: HashMap<_, HashMap<FragmentId, (StreamNode, Vec<_>)>> = HashMap::new();
+        let mut stream_actors: HashMap<_, _> = info
+            .fragment_infos()
+            .flat_map(|fragment_info| fragment_info.actors.keys())
+            .map(|actor_id| {
+                let stream_actor = stream_actors.remove(actor_id).expect("should exist");
+                (stream_actor.actor_id, stream_actor)
+            })
+            .collect();
+
+        let mut actor_upstreams = Command::collect_actor_upstreams(
+            stream_actors.values().map(|actor| {
+                (
+                    actor.actor_id,
+                    actor.fragment_id,
+                    actor.dispatcher.as_slice(),
+                )
+            }),
+            None,
+        );
+
+        let mut node_actors: HashMap<
+            _,
+            HashMap<FragmentId, (StreamNode, Vec<StreamActorWithUpstreams>)>,
+        > = HashMap::new();
         for fragment_info in info.fragment_infos() {
             for (actor_id, worker_id) in &fragment_info.actors {
                 let worker_id = *worker_id as WorkerId;
                 let actor_id = *actor_id as ActorId;
                 let stream_actor = stream_actors.remove(&actor_id).expect("should exist");
+                let upstream = actor_upstreams.remove(&actor_id).unwrap_or_default();
                 node_actors
                     .entry(worker_id)
                     .or_default()
                     .entry(fragment_info.fragment_id)
                     .or_insert_with(|| (fragment_info.nodes.clone(), vec![]))
                     .1
-                    .push(stream_actor);
+                    .push((stream_actor, upstream));
             }
         }
 

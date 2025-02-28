@@ -37,8 +37,8 @@ use tokio::sync::watch::Sender;
 use crate::catalog::root_catalog::Catalog;
 use crate::catalog::{FragmentId, SecretId};
 use crate::scheduler::HummockSnapshotManagerRef;
-use crate::user::user_manager::UserInfoManager;
 use crate::user::UserInfoVersion;
+use crate::user::user_manager::UserInfoManager;
 
 pub struct FrontendObserverNode {
     worker_node_manager: WorkerNodeManagerRef,
