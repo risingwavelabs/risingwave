@@ -16,7 +16,7 @@ use std::collections::HashMap;
 
 use either::Either;
 use futures::stream::{select_all, select_with_strategy};
-use futures::{stream, TryStreamExt};
+use futures::{TryStreamExt, stream};
 use itertools::Itertools;
 use risingwave_common::array::{DataChunk, Op};
 use risingwave_common::bail;
@@ -30,9 +30,9 @@ use crate::common::table::state_table::ReplicatedStateTable;
 #[cfg(debug_assertions)]
 use crate::executor::backfill::utils::METADATA_STATE_LEN;
 use crate::executor::backfill::utils::{
-    compute_bounds, create_builder, get_progress_per_vnode, mapping_chunk, mapping_message,
-    mark_chunk_ref_by_vnode, persist_state_per_vnode, update_pos_by_vnode,
-    BackfillProgressPerVnode, BackfillState,
+    BackfillProgressPerVnode, BackfillState, compute_bounds, create_builder,
+    get_progress_per_vnode, mapping_chunk, mapping_message, mark_chunk_ref_by_vnode,
+    persist_state_per_vnode, update_pos_by_vnode,
 };
 use crate::executor::prelude::*;
 use crate::task::CreateMviewProgressReporter;
@@ -231,13 +231,15 @@ where
                     let paused =
                         paused || matches!(self.rate_limiter.rate_limit(), RateLimit::Pause);
                     // Create the snapshot stream
-                    let right_snapshot = pin!(Self::make_snapshot_stream(
-                        &upstream_table,
-                        backfill_state.clone(), // FIXME: Use mutable reference instead.
-                        paused,
-                        &self.rate_limiter,
-                    )
-                    .map(Either::Right));
+                    let right_snapshot = pin!(
+                        Self::make_snapshot_stream(
+                            &upstream_table,
+                            backfill_state.clone(), // FIXME: Use mutable reference instead.
+                            paused,
+                            &self.rate_limiter,
+                        )
+                        .map(Either::Right)
+                    );
 
                     // Prefer to select upstream, so we can stop snapshot stream as soon as the
                     // barrier comes.
@@ -448,7 +450,9 @@ where
                     upstream_table.write_chunk(chunk);
                 }
 
-                upstream_table.commit(barrier.epoch).await?;
+                upstream_table
+                    .commit_assert_no_update_vnode_bitmap(barrier.epoch)
+                    .await?;
 
                 metrics
                     .backfill_snapshot_read_row_count
@@ -549,7 +553,9 @@ where
                 if let Message::Barrier(barrier) = &msg {
                     if is_completely_finished {
                         // If already finished, no need to persist any state. But we need to advance the epoch anyway
-                        self.state_table.commit(barrier.epoch).await?;
+                        self.state_table
+                            .commit_assert_no_update_vnode_bitmap(barrier.epoch)
+                            .await?;
                     } else {
                         // If snapshot was empty, we do not need to backfill,
                         // but we still need to persist the finished state.
@@ -595,7 +601,9 @@ where
             if let Some(msg) = mapping_message(msg?, &self.output_indices) {
                 if let Message::Barrier(barrier) = &msg {
                     // If already finished, no need persist any state, but we need to advance the epoch of the state table anyway.
-                    self.state_table.commit(barrier.epoch).await?;
+                    self.state_table
+                        .commit_assert_no_update_vnode_bitmap(barrier.epoch)
+                        .await?;
                 }
                 yield msg;
             }
@@ -687,8 +695,10 @@ where
             let backfill_progress = backfill_state.get_progress(&vnode)?;
             let current_pos = match backfill_progress {
                 BackfillProgressPerVnode::NotStarted => None,
-                BackfillProgressPerVnode::Completed { current_pos, .. }
-                | BackfillProgressPerVnode::InProgress { current_pos, .. } => {
+                BackfillProgressPerVnode::Completed { .. } => {
+                    continue;
+                }
+                BackfillProgressPerVnode::InProgress { current_pos, .. } => {
                     Some(current_pos.clone())
                 }
             };

@@ -14,10 +14,10 @@
 
 pub mod utils;
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use risingwave_batch::monitor::BatchSpillMetrics;
 use risingwave_batch::task::ShutdownToken;
-use risingwave_batch_executors::executor::test_utils::{gen_projected_data, MockExecutor};
+use risingwave_batch_executors::executor::test_utils::{MockExecutor, gen_projected_data};
 use risingwave_batch_executors::executor::{BoxedExecutor, JoinType};
 use risingwave_batch_executors::hash_join::HashJoinExecutor;
 use risingwave_common::catalog::schema_test_utils::field_n;
@@ -75,6 +75,7 @@ fn create_hash_join_executor(
         cond,
         "HashJoinExecutor".into(),
         CHUNK_SIZE,
+        None,
         None,
         BatchSpillMetrics::for_test(),
         ShutdownToken::empty(),

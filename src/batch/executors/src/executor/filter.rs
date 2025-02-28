@@ -17,7 +17,7 @@ use risingwave_common::array::ArrayImpl::Bool;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
-use risingwave_expr::expr::{build_batch_expr_from_prost, BoxedExpression};
+use risingwave_expr::expr::{BoxedExpression, build_batch_expr_from_prost};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::error::{BatchError, Result};
@@ -160,9 +160,11 @@ mod tests {
 
         let fields = &filter_executor.schema().fields;
 
-        assert!(fields
-            .iter()
-            .all(|f| f.data_type == DataType::List(Box::new(DataType::Int32))));
+        assert!(
+            fields
+                .iter()
+                .all(|f| f.data_type == DataType::List(Box::new(DataType::Int32)))
+        );
 
         let mut stream = filter_executor.execute();
 

@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use std::collections::BTreeSet;
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::SystemTime;
 
 use anyhow::anyhow;
@@ -34,25 +34,26 @@ use risingwave_hummock_sdk::{
     SyncResult,
 };
 use risingwave_pb::common::{HostAddress, WorkerType};
-use risingwave_pb::hummock::compact_task::TaskStatus;
+use risingwave_pb::hummock::compact_task::{TaskStatus, TaskType};
 use risingwave_pb::hummock::subscribe_compaction_event_request::{Event, ReportTask};
 use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
 use risingwave_pb::hummock::{
-    compact_task, PbHummockVersion, SubscribeCompactionEventRequest,
-    SubscribeCompactionEventResponse,
+    PbHummockVersion, SubscribeCompactionEventRequest, SubscribeCompactionEventResponse,
+    compact_task,
 };
 use risingwave_rpc_client::error::{Result, RpcError};
 use risingwave_rpc_client::{
     CompactionEventItem, HummockMetaClient, HummockMetaClientChangeLogInfo,
 };
 use thiserror_ext::AsReport;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
+use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use tokio::task::JoinHandle;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::hummock::compaction::selector::{
-    default_compaction_selector, CompactionSelector, SpaceReclaimCompactionSelector,
+    CompactionSelector, SpaceReclaimCompactionSelector, default_compaction_selector,
 };
+use crate::hummock::error::Error;
 use crate::hummock::{CommitEpochInfo, HummockManager, NewTableFragmentInfo};
 
 pub struct MockHummockMetaClient {
@@ -289,6 +290,22 @@ impl HummockMetaClient for MockHummockMetaClient {
                 }
 
                 let (group, task_type) = group_and_type.unwrap();
+
+                if let TaskType::Ttl = task_type {
+                    match hummock_manager_compact
+                        .metadata_manager_ref()
+                        .get_all_table_options()
+                        .await
+                        .map_err(|err| Error::MetaStore(err.into()))
+                    {
+                        Ok(table_options) => {
+                            hummock_manager_compact.update_table_id_to_table_option(table_options);
+                        }
+                        Err(e) => {
+                            tracing::error!(error = %e.as_report(), "get_all_table_options fail");
+                        }
+                    }
+                }
 
                 let mut selector: Box<dyn CompactionSelector> = match task_type {
                     compact_task::TaskType::Dynamic => default_compaction_selector(),

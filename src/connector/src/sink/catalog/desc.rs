@@ -23,11 +23,11 @@ use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::stream_plan::PbSinkDesc;
 
 use super::{SinkCatalog, SinkFormatDesc, SinkId, SinkType};
+use crate::sink::CONNECTOR_TYPE_KEY;
 use crate::sink::file_sink::azblob::AZBLOB_SINK;
 use crate::sink::file_sink::fs::FS_SINK;
 use crate::sink::file_sink::s3::S3_SINK;
 use crate::sink::file_sink::webhdfs::WEBHDFS_SINK;
-use crate::sink::CONNECTOR_TYPE_KEY;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SinkDesc {

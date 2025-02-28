@@ -36,11 +36,11 @@ use risingwave_pb::meta::table_fragments::fragment::{
 };
 use risingwave_pb::stream_plan::DispatcherType::{self, *};
 
+use crate::MetaResult;
 use crate::model::ActorId;
 use crate::stream::schedule_units_for_slots;
 use crate::stream::stream_graph::fragment::CompleteStreamFragmentGraph;
 use crate::stream::stream_graph::id::GlobalFragmentId as Id;
-use crate::MetaResult;
 
 type HashMappingId = usize;
 
@@ -293,7 +293,7 @@ impl Scheduler {
         // Vnode count requirements: if a fragment is going to look up an existing table,
         // it must have the same vnode count as that table.
         for (&id, fragment) in graph.building_fragments() {
-            visit_fragment(&mut (*fragment).clone(), |node| {
+            visit_fragment(fragment, |node| {
                 use risingwave_pb::stream_plan::stream_node::NodeBody;
                 let vnode_count = match node {
                     NodeBody::StreamScan(node) => {
@@ -480,7 +480,9 @@ mod tests {
             match (reqs.get(&id), expected) {
                 (None, Result::DefaultHash) => {}
                 (Some(actual), Result::Required(expected)) if *actual == expected => {}
-                (actual, expected) => panic!("unexpected result for fragment {id:?}\nactual: {actual:?}\nexpected: {expected:?}"),
+                (actual, expected) => panic!(
+                    "unexpected result for fragment {id:?}\nactual: {actual:?}\nexpected: {expected:?}"
+                ),
             }
         }
     }

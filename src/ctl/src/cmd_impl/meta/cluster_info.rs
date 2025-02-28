@@ -18,8 +18,8 @@ use comfy_table::{Attribute, Cell, Row, Table};
 use itertools::Itertools;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_connector::source::{SplitImpl, SplitMetaData};
-use risingwave_pb::meta::table_fragments::State;
 use risingwave_pb::meta::GetClusterInfoResponse;
+use risingwave_pb::meta::table_fragments::State;
 use risingwave_pb::source::ConnectorSplits;
 use risingwave_pb::stream_plan::FragmentTypeFlag;
 
@@ -115,7 +115,7 @@ pub async fn source_split_info(context: &CtlContext, ignore_id: bool) -> anyhow:
             for actor in &fragment.actors {
                 if let Some((split_count, splits)) = actor_splits_map.get(&actor.actor_id) {
                     println!(
-                        "\t\tActor{} ({} splits): [{}]{}",
+                        "\t\tActor{} ({} splits): [{}]",
                         if ignore_id {
                             "".to_owned()
                         } else {
@@ -123,24 +123,6 @@ pub async fn source_split_info(context: &CtlContext, ignore_id: bool) -> anyhow:
                         },
                         split_count,
                         splits,
-                        if !actor.upstream_actor_id.is_empty() {
-                            let upstream_splits = actor
-                                .upstream_actor_id
-                                .iter()
-                                .find_map(|id| actor_splits_map.get(id))
-                                .expect("should have one upstream source actor");
-                            format!(
-                                " <- Upstream Actor{}: [{}]",
-                                if ignore_id {
-                                    "".to_owned()
-                                } else {
-                                    format!(" #{}", actor.upstream_actor_id[0])
-                                },
-                                upstream_splits.1
-                            )
-                        } else {
-                            "".to_owned()
-                        }
                     );
                 } else {
                     println!(

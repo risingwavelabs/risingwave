@@ -12,41 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::num::NonZeroU64;
-
-use thiserror::Error;
-
-use crate::{LicenseKeyError, LicenseManager};
-
-/// The error type for CPU core limit exceeded as per the license key.
-#[derive(Debug, Clone, Error)]
-#[error("invalid license key")]
-pub enum CpuCoreLimitExceeded {
-    #[error("cannot check CPU core limit due to license key error")]
-    LicenseKeyError(#[from] LicenseKeyError),
-
-    #[error(
-        "CPU core limit exceeded as per the license key, \
-        requesting {actual} while the maximum allowed is {limit}"
-    )]
-    Exceeded { limit: NonZeroU64, actual: u64 },
-}
-
-impl LicenseManager {
-    /// Check if the given CPU core count exceeds the limit as per the license key.
-    pub fn check_cpu_core_limit(&self, cpu_core_count: u64) -> Result<(), CpuCoreLimitExceeded> {
-        let license = self.license()?;
-
-        match license.cpu_core_limit {
-            Some(limit) if cpu_core_count > limit.get() => Err(CpuCoreLimitExceeded::Exceeded {
-                limit,
-                actual: cpu_core_count,
-            }),
-            _ => Ok(()),
-        }
-    }
-}
-
 // Tests below only work in debug mode.
 #[cfg(debug_assertions)]
 #[cfg(test)]
@@ -54,14 +19,14 @@ mod tests {
     use expect_test::expect;
     use thiserror_ext::AsReport as _;
 
-    use super::*;
-    use crate::{LicenseKey, TEST_PAID_LICENSE_KEY_CONTENT};
+    use crate::{Feature, LicenseKey, LicenseManager, TEST_PAID_LICENSE_KEY_CONTENT};
 
-    fn do_test(key: &str, cpu_core_count: u64, expect: expect_test::Expect) {
+    fn do_test(key: &str, cpu_core_count: usize, expect: expect_test::Expect) {
         let manager = LicenseManager::new();
         manager.refresh(LicenseKey(key));
+        manager.update_cpu_core_count(cpu_core_count);
 
-        match manager.check_cpu_core_limit(cpu_core_count) {
+        match Feature::TestPaid.check_available_with(&manager) {
             Ok(_) => expect.assert_eq("ok"),
             Err(error) => expect.assert_eq(&error.to_report_string()),
         }
@@ -73,27 +38,39 @@ mod tests {
     }
 
     #[test]
-    fn test_no_license_key_no_limit() {
-        do_test("", 114514, expect!["ok"]);
-    }
-
-    #[test]
     fn test_invalid_license_key() {
         const KEY: &str = "invalid";
 
-        do_test(KEY, 0, expect!["cannot check CPU core limit due to license key error: invalid license key: InvalidToken"]);
-        do_test(KEY, 114514, expect!["cannot check CPU core limit due to license key error: invalid license key: InvalidToken"]);
+        do_test(
+            KEY,
+            0,
+            expect![
+                "feature TestPaid is not available due to license error: invalid license key: InvalidToken"
+            ],
+        );
+        do_test(
+            KEY,
+            114514,
+            expect![
+                "feature TestPaid is not available due to license error: invalid license key: InvalidToken"
+            ],
+        );
     }
 
     #[test]
     fn test_limit() {
-        const KEY: &str =
-         "eyJhbGciOiJSUzUxMiIsInR5cCI6IkpXVCJ9.\
-          eyJzdWIiOiJmcmVlLXRlc3QtMzIiLCJpc3MiOiJwcm9kLnJpc2luZ3dhdmUuY29tIiwidGllciI6ImZyZWUiLCJleHAiOjE4NTI1NTk5OTksImlhdCI6MTcyMzcwMTk5NCwiY3B1X2NvcmVfbGltaXQiOjMyfQ.\
-          rsATtzlduLUkGQeXkOROtyGUpafdDhi18iKdYAzAldWQuO9KevNcnD8a6geCShZSGte65bI7oYtv7GHx8i66ge3B1SVsgGgYr10ebphPUNUQenYoN0mpD4Wn0prPStOgANzYZOI2ntMGAaeWStji1x67_iho6r0W9r6RX3kMvzFSbiObSIfvTdrMULeg-xeHc3bT_ErRhaXq7MAa2Oiq3lcK2sNgEvc9KYSP9YbhSik9CBkc8lcyeVoc48SSWEaBU-c8-Ge0fzjgWHI9KIsUV5Ihe66KEfs0PqdRoSWbgskYGzA3o8wHIbtJbJiPzra373kkFH9MGY0HOsw9QeJLGQ";
+        const KEY: &str = "eyJhbGciOiJSUzUxMiIsInR5cCI6IkpXVCJ9.\
+          eyJzdWIiOiJwYWlkLXRlc3QtMzIiLCJpc3MiOiJ0ZXN0LnJpc2luZ3dhdmUuY29tIiwidGllciI6InBhaWQiLCJleHAiOjIxNTA0OTU5OTksImlhdCI6MTczNzYxMjQ5NSwiY3B1X2NvcmVfbGltaXQiOjMyfQ.\
+          SQpX2Dmon5Mb04VUbHyxsU7owJhcdLZHqUefxAXBwG5AqgKdpfS0XUePW5E4D-EfxtH_cWJiD4QDFsfdRUz88g_n_KvfNUObMW7NV5TUoRs_ImtS4ySugExNX3JzJi71QqgI8kugStQ7uOR9kZ_C-cCc_IG2CwwEmhhW1Ij0vX7qjhG5JNMit_bhxPY7Rh27ppgPTqWxJFTTsw-9B7O5WR_yIlaDjxVzk0ALm_j6DPB249gG3dkeK0rP0AK_ip2cK6iQdy8Cge7ATD6yUh4c_aR6GILDF6-vyB7QdWU6DdQS4KhdkPNWoe_Z9psotcXQJ7NhQ39hk8tdLzmTfGDDBA";
 
         do_test(KEY, 31, expect!["ok"]);
         do_test(KEY, 32, expect!["ok"]);
-        do_test(KEY, 33, expect!["CPU core limit exceeded as per the license key, requesting 33 while the maximum allowed is 32"]);
+        do_test(
+            KEY,
+            33,
+            expect![
+                "feature TestPaid is not available due to license error: the license key is currently not effective because the CPU core in the cluster (33) exceeds the maximum allowed by the license key (32); consider removing some nodes or acquiring a new license key with a higher limit"
+            ],
+        );
     }
 }

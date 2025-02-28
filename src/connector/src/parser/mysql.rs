@@ -228,8 +228,8 @@ pub fn mysql_row_to_owned_row(mysql_row: &mut MysqlRow, schema: &Schema) -> Owne
 mod tests {
 
     use futures::pin_mut;
-    use mysql_async::prelude::*;
     use mysql_async::Row as MySqlRow;
+    use mysql_async::prelude::*;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::row::Row;
     use risingwave_common::types::DataType;

@@ -58,20 +58,20 @@ pub struct BoxSource {
 impl BoxSource {
     pub fn new(
         list_splits: impl FnMut(
-                TestSourceProperties,
-                SourceEnumeratorContextRef,
-            ) -> ConnectorResult<Vec<TestSourceSplit>>
-            + Send
-            + 'static,
+            TestSourceProperties,
+            SourceEnumeratorContextRef,
+        ) -> ConnectorResult<Vec<TestSourceSplit>>
+        + Send
+        + 'static,
         into_source_stream: impl FnMut(
-                TestSourceProperties,
-                Vec<TestSourceSplit>,
-                ParserConfig,
-                SourceContextRef,
-                Option<Vec<Column>>,
-            ) -> BoxSourceChunkStream
-            + Send
-            + 'static,
+            TestSourceProperties,
+            Vec<TestSourceSplit>,
+            ParserConfig,
+            SourceContextRef,
+            Option<Vec<Column>>,
+        ) -> BoxSourceChunkStream
+        + Send
+        + 'static,
     ) -> BoxSource {
         BoxSource {
             list_split: Box::new(list_splits),
@@ -106,11 +106,13 @@ impl Drop for TestSourceRegistryGuard {
 }
 
 pub fn registry_test_source(box_source: BoxSource) -> TestSourceRegistryGuard {
-    assert!(get_registry()
-        .box_source
-        .lock()
-        .replace(box_source)
-        .is_none());
+    assert!(
+        get_registry()
+            .box_source
+            .lock()
+            .replace(box_source)
+            .is_none()
+    );
     TestSourceRegistryGuard
 }
 

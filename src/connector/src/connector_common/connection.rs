@@ -16,10 +16,10 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use anyhow::Context;
-use opendal::services::{Gcs, S3};
 use opendal::Operator;
-use rdkafka::consumer::{BaseConsumer, Consumer};
+use opendal::services::{Gcs, S3};
 use rdkafka::ClientConfig;
+use rdkafka::consumer::{BaseConsumer, Consumer};
 use risingwave_common::bail;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_pb::catalog::PbConnection;
@@ -32,16 +32,17 @@ use with_options::WithOptions;
 use crate::connector_common::{
     AwsAuthProps, IcebergCommon, KafkaConnectionProps, KafkaPrivateLinkCommon,
 };
+use crate::deserialize_optional_bool_from_string;
 use crate::error::ConnectorResult;
 use crate::schema::schema_registry::Client as ConfluentSchemaRegistryClient;
+use crate::source::build_connection;
 use crate::source::kafka::{KafkaContextCommon, RwConsumerContext};
-use crate::{deserialize_optional_bool_from_string, dispatch_connection_impl, ConnectionImpl};
 
 pub const SCHEMA_REGISTRY_CONNECTION_TYPE: &str = "schema_registry";
 
 #[async_trait]
-pub trait Connection {
-    async fn test_connection(&self) -> ConnectorResult<()>;
+pub trait Connection: Send {
+    async fn validate_connection(&self) -> ConnectorResult<()>;
 }
 
 #[serde_as]
@@ -64,9 +65,8 @@ pub async fn validate_connection(connection: &PbConnection) -> ConnectorResult<(
                 let secret_refs = cp.secret_refs.clone().into_iter().collect();
                 let props_secret_resolved =
                     LocalSecretManager::global().fill_secrets(options, secret_refs)?;
-                let connection_impl =
-                    ConnectionImpl::from_proto(cp.connection_type(), props_secret_resolved)?;
-                dispatch_connection_impl!(connection_impl, inner, inner.test_connection().await?)
+                let connection = build_connection(cp.connection_type(), props_secret_resolved)?;
+                connection.validate_connection().await?
             }
             risingwave_pb::catalog::connection::Info::PrivateLinkService(_) => unreachable!(),
         }
@@ -76,7 +76,7 @@ pub async fn validate_connection(connection: &PbConnection) -> ConnectorResult<(
 
 #[async_trait]
 impl Connection for KafkaConnection {
-    async fn test_connection(&self) -> ConnectorResult<()> {
+    async fn validate_connection(&self) -> ConnectorResult<()> {
         let client = self.build_client().await?;
         // describe cluster here
         client.fetch_metadata(None, Duration::from_secs(10)).await?;
@@ -135,6 +135,10 @@ pub struct IcebergConnection {
     /// Path of iceberg warehouse, only applicable in storage catalog.
     #[serde(rename = "warehouse.path")]
     pub warehouse_path: Option<String>,
+    /// Catalog id, can be omitted for storage catalog or when
+    /// caller's AWS account ID matches glue id
+    #[serde(rename = "glue.id")]
+    pub glue_id: Option<String>,
     /// Catalog name, can be omitted for storage catalog, but
     /// must be set for other catalogs.
     #[serde(rename = "catalog.name")]
@@ -175,7 +179,7 @@ pub struct IcebergConnection {
 
 #[async_trait]
 impl Connection for IcebergConnection {
-    async fn test_connection(&self) -> ConnectorResult<()> {
+    async fn validate_connection(&self) -> ConnectorResult<()> {
         let info = match &self.warehouse_path {
             Some(warehouse_path) => {
                 let url = Url::parse(warehouse_path);
@@ -210,7 +214,7 @@ impl Connection for IcebergConnection {
             }
         };
 
-        // test storage
+        // Test warehouse
         if let Some((scheme, bucket, root)) = info {
             match scheme.as_str() {
                 "s3" | "s3a" => {
@@ -246,7 +250,11 @@ impl Connection for IcebergConnection {
             }
         }
 
-        // test catalog
+        if self.catalog_type.is_none() {
+            bail!("`catalog.type` must be set");
+        }
+
+        // Test catalog
         let iceberg_common = IcebergCommon {
             catalog_type: self.catalog_type.clone(),
             region: self.region.clone(),
@@ -255,6 +263,7 @@ impl Connection for IcebergConnection {
             secret_key: self.secret_key.clone(),
             gcs_credential: self.gcs_credential.clone(),
             warehouse_path: self.warehouse_path.clone(),
+            glue_id: self.glue_id.clone(),
             catalog_name: self.catalog_name.clone(),
             catalog_uri: self.catalog_uri.clone(),
             credential: self.credential.clone(),
@@ -298,7 +307,7 @@ pub struct ConfluentSchemaRegistryConnection {
 
 #[async_trait]
 impl Connection for ConfluentSchemaRegistryConnection {
-    async fn test_connection(&self) -> ConnectorResult<()> {
+    async fn validate_connection(&self) -> ConnectorResult<()> {
         // GET /config to validate the connection
         let client = ConfluentSchemaRegistryClient::try_from(self)?;
         client.validate_connection().await?;

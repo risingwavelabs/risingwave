@@ -20,6 +20,7 @@ use parking_lot::RwLock;
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeManagerRef;
 use risingwave_common::catalog::CatalogVersion;
 use risingwave_common::hash::WorkerSlotMapping;
+use risingwave_common::license::LicenseManager;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManagerRef;
@@ -36,8 +37,8 @@ use tokio::sync::watch::Sender;
 use crate::catalog::root_catalog::Catalog;
 use crate::catalog::{FragmentId, SecretId};
 use crate::scheduler::HummockSnapshotManagerRef;
-use crate::user::user_manager::UserInfoManager;
 use crate::user::UserInfoVersion;
+use crate::user::user_manager::UserInfoManager;
 
 pub struct FrontendObserverNode {
     worker_node_manager: WorkerNodeManagerRef,
@@ -114,6 +115,9 @@ impl ObserverState for FrontendObserverNode {
             Info::Recovery(_) => {
                 self.compute_client_pool.invalidate_all();
             }
+            Info::ComputeNodeTotalCpuCount(count) => {
+                LicenseManager::get().update_cpu_core_count(count as _);
+            }
         }
     }
 
@@ -147,6 +151,7 @@ impl ObserverState for FrontendObserverNode {
             session_params,
             version,
             secrets,
+            compute_node_total_cpu_count,
         } = snapshot;
 
         for db in databases {
@@ -208,6 +213,7 @@ impl ObserverState for FrontendObserverNode {
         *self.session_params.write() =
             serde_json::from_str(&session_params.unwrap().params).unwrap();
         LocalSecretManager::global().init_secrets(secrets);
+        LicenseManager::get().update_cpu_core_count(compute_node_total_cpu_count as _);
     }
 }
 

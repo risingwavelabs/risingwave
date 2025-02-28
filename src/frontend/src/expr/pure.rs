@@ -276,6 +276,7 @@ impl ExprVisitor for ImpureAnalyzer {
             // expression output is not deterministic
             Type::Vnode // obtain vnode count from the context
             | Type::TestPaidTier
+            | Type::License
             | Type::Proctime
             | Type::PgSleep
             | Type::PgSleepFor
@@ -294,7 +295,8 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::HasSchemaPrivilege
             | Type::MakeTimestamptz
             | Type::PgIsInRecovery
-            | Type::RwRecoveryStatus => self.impure = true,
+            | Type::RwRecoveryStatus
+            | Type::PgTableIsVisible => self.impure = true,
         }
     }
 }
@@ -320,7 +322,7 @@ mod tests {
     use risingwave_common::types::DataType;
     use risingwave_pb::expr::expr_node::Type;
 
-    use crate::expr::{is_impure, is_pure, ExprImpl, FunctionCall, InputRef};
+    use crate::expr::{ExprImpl, FunctionCall, InputRef, is_impure, is_pure};
 
     fn expect_pure(expr: &ExprImpl) {
         assert!(is_pure(expr));

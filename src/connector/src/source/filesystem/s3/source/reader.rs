@@ -36,32 +36,32 @@ use crate::connector_common::AwsAuthProps;
 use crate::error::ConnectorResult;
 use crate::parser::ParserConfig;
 use crate::source::base::{SplitMetaData, SplitReader};
-use crate::source::filesystem::file_common::FsSplit;
+use crate::source::filesystem::file_common::LegacyFsSplit;
 use crate::source::filesystem::nd_streaming::need_nd_streaming;
-use crate::source::filesystem::s3::S3Properties;
+use crate::source::filesystem::s3::LegacyS3Properties;
 use crate::source::{
-    into_chunk_stream, BoxSourceChunkStream, Column, SourceContextRef, SourceMessage, SourceMeta,
+    BoxSourceChunkStream, Column, SourceContextRef, SourceMessage, SourceMeta, into_chunk_stream,
 };
 
 const STREAM_READER_CAPACITY: usize = 4096;
 
 #[derive(Debug)]
-pub struct S3FileReader {
+pub struct LegacyS3FileReader {
     #[expect(dead_code)]
     split_offset: HashMap<String, u64>,
     bucket_name: String,
     s3_client: s3_client::Client,
-    splits: Vec<FsSplit>,
+    splits: Vec<LegacyFsSplit>,
     parser_config: ParserConfig,
     source_ctx: SourceContextRef,
 }
 
-impl S3FileReader {
+impl LegacyS3FileReader {
     #[try_stream(boxed, ok = Vec<SourceMessage>, error = crate::error::ConnectorError)]
     pub async fn stream_read_object(
         client_for_s3: s3_client::Client,
         bucket_name: String,
-        split: FsSplit,
+        split: LegacyFsSplit,
         source_ctx: SourceContextRef,
     ) {
         let actor_id = source_ctx.actor_id.to_string();
@@ -73,7 +73,7 @@ impl S3FileReader {
 
         let object_name = split.name.clone();
 
-        let byte_stream = match S3FileReader::get_object(
+        let byte_stream = match LegacyS3FileReader::get_object(
             &client_for_s3,
             &bucket_name,
             &object_name,
@@ -171,13 +171,13 @@ impl S3FileReader {
 }
 
 #[async_trait]
-impl SplitReader for S3FileReader {
-    type Properties = S3Properties;
-    type Split = FsSplit;
+impl SplitReader for LegacyS3FileReader {
+    type Properties = LegacyS3Properties;
+    type Split = LegacyFsSplit;
 
     async fn new(
-        props: S3Properties,
-        splits: Vec<FsSplit>,
+        props: LegacyS3Properties,
+        splits: Vec<LegacyFsSplit>,
         parser_config: ParserConfig,
         source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
@@ -189,7 +189,7 @@ impl SplitReader for S3FileReader {
         let bucket_name = props.common.bucket_name;
         let s3_client = s3_client(&sdk_config, Some(default_conn_config()));
 
-        let s3_file_reader = S3FileReader {
+        let s3_file_reader = LegacyS3FileReader {
             split_offset: HashMap::new(),
             bucket_name,
             s3_client,
@@ -206,7 +206,7 @@ impl SplitReader for S3FileReader {
     }
 }
 
-impl S3FileReader {
+impl LegacyS3FileReader {
     #[try_stream(boxed, ok = StreamChunk, error = crate::error::ConnectorError)]
     async fn into_stream_inner(self) {
         for split in self.splits {
@@ -246,9 +246,9 @@ mod tests {
         CommonParserConfig, CsvProperties, EncodingProperties, ProtocolProperties,
         SpecificParserConfig,
     };
+    use crate::source::filesystem::LegacyS3SplitEnumerator;
     use crate::source::filesystem::file_common::CompressionFormat;
     use crate::source::filesystem::s3::S3PropertiesCommon;
-    use crate::source::filesystem::S3SplitEnumerator;
     use crate::source::{
         SourceColumnDesc, SourceContext, SourceEnumeratorContext, SplitEnumerator,
     };
@@ -256,7 +256,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_s3_split_reader() {
-        let props: S3Properties = S3PropertiesCommon {
+        let props: LegacyS3Properties = S3PropertiesCommon {
             region_name: "ap-southeast-1".to_owned(),
             bucket_name: "mingchao-s3-source".to_owned(),
             match_pattern: None,
@@ -267,7 +267,7 @@ mod tests {
         }
         .into();
         let mut enumerator =
-            S3SplitEnumerator::new(props.clone(), SourceEnumeratorContext::dummy().into())
+            LegacyS3SplitEnumerator::new(props.clone(), SourceEnumeratorContext::dummy().into())
                 .await
                 .unwrap();
         let splits = enumerator.list_splits().await.unwrap();
@@ -292,9 +292,10 @@ mod tests {
             },
         };
 
-        let reader = S3FileReader::new(props, splits, config, SourceContext::dummy().into(), None)
-            .await
-            .unwrap();
+        let reader =
+            LegacyS3FileReader::new(props, splits, config, SourceContext::dummy().into(), None)
+                .await
+                .unwrap();
 
         let msg_stream = reader.into_stream_inner();
         #[for_await]

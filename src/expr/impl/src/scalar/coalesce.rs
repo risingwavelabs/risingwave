@@ -19,7 +19,7 @@ use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_expr::expr::{BoxedExpression, Expression};
-use risingwave_expr::{build_function, Result};
+use risingwave_expr::{Result, build_function};
 
 #[derive(Debug)]
 pub struct CoalesceExpression {

@@ -48,7 +48,7 @@ services:
       - "./postgres_prepare.sql:/postgres_prepare.sql"
 
   debezium:
-    image: debezium-connect
+    image: debezium/connect:1.9
     build: .
     environment:
       BOOTSTRAP_SERVERS: message_queue:29092

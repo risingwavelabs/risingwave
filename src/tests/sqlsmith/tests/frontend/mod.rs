@@ -22,11 +22,11 @@ use risingwave_frontend::handler::HandlerArgs;
 use risingwave_frontend::session::SessionImpl;
 use risingwave_frontend::test_utils::LocalFrontend;
 use risingwave_frontend::{
-    handler, Binder, FrontendOpts, OptimizerContext, OptimizerContextRef, Planner,
+    Binder, FrontendOpts, OptimizerContext, OptimizerContextRef, Planner, handler,
 };
 use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlsmith::{
-    is_permissible_error, mview_sql_gen, parse_create_table_statements, parse_sql, sql_gen, Table,
+    Table, is_permissible_error, mview_sql_gen, parse_create_table_statements, parse_sql, sql_gen,
 };
 use thiserror_ext::AsReport;
 use tokio::runtime::Runtime;

@@ -18,10 +18,10 @@ use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{CdcTableDesc, ColumnDesc};
 
 use super::generic::GenericPlanRef;
-use super::utils::{childless_record, Distill};
+use super::utils::{Distill, childless_record};
 use super::{
-    generic, ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef, PredicatePushdown, ToBatch,
-    ToStream,
+    ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef, PredicatePushdown, ToBatch, ToStream,
+    generic,
 };
 use crate::catalog::ColumnId;
 use crate::error::Result;
@@ -150,9 +150,11 @@ impl ColPrunable for LogicalCdcScan {
             .iter()
             .map(|i| self.output_col_idx()[*i])
             .collect();
-        assert!(output_col_idx
-            .iter()
-            .all(|i| self.output_col_idx().contains(i)));
+        assert!(
+            output_col_idx
+                .iter()
+                .all(|i| self.output_col_idx().contains(i))
+        );
 
         self.clone_with_output_indices(output_col_idx).into()
     }

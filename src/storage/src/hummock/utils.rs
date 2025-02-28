@@ -12,18 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::backtrace::Backtrace;
 use std::cmp::Ordering;
 use std::collections::VecDeque;
 use std::fmt::{Debug, Formatter};
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::{Bound, RangeBounds};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering as AtomicOrdering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering as AtomicOrdering};
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use foyer::CacheHint;
-use futures::{pin_mut, Stream, StreamExt};
+use futures::{Stream, StreamExt, pin_mut};
 use parking_lot::Mutex;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::config::StorageMemoryConfig;
@@ -31,15 +32,15 @@ use risingwave_expr::codegen::try_stream;
 use risingwave_hummock_sdk::can_concat;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::key::{
-    bound_table_key_range, EmptySliceRef, FullKey, TableKey, UserKey,
+    EmptySliceRef, FullKey, TableKey, UserKey, bound_table_key_range,
 };
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
-use tokio::sync::oneshot::{channel, Receiver, Sender};
+use tokio::sync::oneshot::{Receiver, Sender, channel};
 
 use super::{HummockError, HummockResult, SstableStoreRef};
 use crate::error::{StorageError, StorageResult};
-use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::CachePolicy;
+use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::mem_table::{KeyOp, MemTableError};
 use crate::monitor::MemoryCollector;
 use crate::store::{OpConsistencyLevel, ReadOptions, StateStoreKeyedRow, StateStoreRead};
@@ -637,6 +638,11 @@ pub(crate) async fn wait_for_update(
     loop {
         match tokio::time::timeout(Duration::from_secs(30), receiver.changed()).await {
             Err(_) => {
+                let backtrace = if cfg!(debug_assertions) {
+                    format!("{:?}", Backtrace::capture())
+                } else {
+                    "backtrace log not enabled in non-debug mode".into()
+                };
                 // The reason that we need to retry here is batch scan in
                 // chain/rearrange_chain is waiting for an
                 // uncommitted epoch carried by the CreateMV barrier, which
@@ -649,6 +655,7 @@ pub(crate) async fn wait_for_update(
                 tracing::warn!(
                     info = periodic_debug_info(),
                     elapsed = ?start_time.elapsed(),
+                    backtrace,
                     "timeout when waiting for version update",
                 );
                 continue;
@@ -805,21 +812,23 @@ pub(crate) async fn merge_stream<'a>(
 
 #[cfg(test)]
 mod tests {
-    use std::future::{poll_fn, Future};
+    use std::future::{Future, poll_fn};
     use std::sync::Arc;
     use std::task::Poll;
 
-    use futures::future::join_all;
     use futures::FutureExt;
+    use futures::future::join_all;
     use rand::random;
 
     use crate::hummock::utils::MemoryLimiter;
 
     async fn assert_pending(future: &mut (impl Future + Unpin)) {
         for _ in 0..10 {
-            assert!(poll_fn(|cx| Poll::Ready(future.poll_unpin(cx)))
-                .await
-                .is_pending());
+            assert!(
+                poll_fn(|cx| Poll::Ready(future.poll_unpin(cx)))
+                    .await
+                    .is_pending()
+            );
         }
     }
 

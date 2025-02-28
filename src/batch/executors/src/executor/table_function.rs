@@ -16,7 +16,7 @@ use futures_async_stream::try_stream;
 use risingwave_common::array::{ArrayImpl, DataChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
-use risingwave_expr::table_function::{build_from_prost, check_error, BoxedTableFunction};
+use risingwave_expr::table_function::{BoxedTableFunction, build_from_prost, check_error};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};

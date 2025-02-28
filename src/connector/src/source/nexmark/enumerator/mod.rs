@@ -15,8 +15,8 @@
 use async_trait::async_trait;
 
 use crate::error::ConnectorResult;
-use crate::source::nexmark::split::NexmarkSplit;
 use crate::source::nexmark::NexmarkProperties;
+use crate::source::nexmark::split::NexmarkSplit;
 use crate::source::{SourceEnumeratorContextRef, SplitEnumerator};
 
 pub struct NexmarkSplitEnumerator {

@@ -15,10 +15,10 @@
 use risingwave_common::types::DataType;
 use risingwave_pb::expr::table_function::PbType as PbTableFuncType;
 
-use crate::expr::{Expr, ExprRewriter};
-use crate::optimizer::plan_node::{generic, LogicalNow};
-use crate::optimizer::rule::{BoxedRule, Rule};
 use crate::PlanRef;
+use crate::expr::{Expr, ExprRewriter};
+use crate::optimizer::plan_node::{LogicalNow, generic};
+use crate::optimizer::rule::{BoxedRule, Rule};
 
 pub struct GenerateSeriesWithNowRule {}
 impl Rule for GenerateSeriesWithNowRule {

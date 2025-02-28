@@ -163,7 +163,6 @@ mod tests {
     use risingwave_common::types::{ScalarImpl, ToOwnedDatum};
 
     use super::*;
-    use crate::parser::unified::debezium::extract_bson_id;
     use crate::parser::SourceStreamChunkBuilder;
     use crate::source::cdc::CDC_STRONG_SCHEMA_KEY;
     use crate::source::{ConnectorProperties, SourceCtrlOpts};

@@ -19,13 +19,13 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::plan_common::JoinType;
 
 use super::{EqJoinPredicate, GenericPlanNode, GenericPlanRef};
+use crate::TableCatalog;
 use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::stream;
 use crate::optimizer::plan_node::utils::TableCatalogBuilder;
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition};
-use crate::TableCatalog;
 
 /// [`Join`] combines two relations according to some condition.
 ///

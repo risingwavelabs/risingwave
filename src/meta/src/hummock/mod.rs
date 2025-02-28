@@ -34,8 +34,8 @@ pub use mock_hummock_meta_client::MockHummockMetaClient;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
-use crate::backup_restore::BackupManagerRef;
 use crate::MetaOpts;
+use crate::backup_restore::BackupManagerRef;
 
 /// Start hummock's asynchronous tasks.
 pub fn start_hummock_workers(
@@ -83,7 +83,7 @@ pub fn start_vacuum_metadata_loop(
                     return;
                 }
             }
-            if let Err(err) = hummock_manager.delete_metadata().await {
+            if let Err(err) = hummock_manager.delete_version_deltas().await {
                 tracing::warn!(error = %err.as_report(), "Vacuum metadata error");
             }
         }

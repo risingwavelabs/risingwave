@@ -30,9 +30,9 @@ use risingwave_pb::meta::list_table_fragments_response::{
     ActorInfo, FragmentInfo, TableFragmentInfo,
 };
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerService;
+use risingwave_pb::meta::table_fragments::PbState;
 use risingwave_pb::meta::table_fragments::actor_status::PbActorState;
 use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
-use risingwave_pb::meta::table_fragments::PbState;
 use risingwave_pb::meta::*;
 use tonic::{Request, Response, Status};
 
@@ -137,7 +137,7 @@ impl StreamManagerService for StreamServiceImpl {
                     .await?
             }
             ThrottleTarget::Unspecified => {
-                return Err(Status::invalid_argument("unspecified throttle target"))
+                return Err(Status::invalid_argument("unspecified throttle target"));
             }
         };
 
@@ -226,7 +226,7 @@ impl StreamManagerService for StreamServiceImpl {
                                 .into_iter()
                                 .map(|actor| ActorInfo {
                                     id: actor.actor_id,
-                                    node: actor.nodes,
+                                    node: fragment.nodes.clone(),
                                     dispatcher: actor.dispatcher,
                                 })
                                 .collect_vec(),
@@ -243,10 +243,10 @@ impl StreamManagerService for StreamServiceImpl {
     }
 
     #[cfg_attr(coverage, coverage(off))]
-    async fn list_table_fragment_states(
+    async fn list_streaming_job_states(
         &self,
-        _request: Request<ListTableFragmentStatesRequest>,
-    ) -> Result<Response<ListTableFragmentStatesResponse>, Status> {
+        _request: Request<ListStreamingJobStatesRequest>,
+    ) -> Result<Response<ListStreamingJobStatesResponse>, Status> {
         let job_infos = self
             .metadata_manager
             .catalog_controller
@@ -258,8 +258,10 @@ impl StreamManagerService for StreamServiceImpl {
                 |StreamingJobInfo {
                      job_id,
                      job_status,
+                     name,
                      parallelism,
                      max_parallelism,
+                     resource_group,
                      ..
                  }| {
                     let parallelism = match parallelism {
@@ -268,17 +270,19 @@ impl StreamManagerService for StreamServiceImpl {
                         StreamingParallelism::Fixed(n) => model::TableParallelism::Fixed(n as _),
                     };
 
-                    list_table_fragment_states_response::TableFragmentState {
+                    list_streaming_job_states_response::StreamingJobState {
                         table_id: job_id as _,
+                        name,
                         state: PbState::from(job_status) as _,
                         parallelism: Some(parallelism.into()),
                         max_parallelism: max_parallelism as _,
+                        resource_group,
                     }
                 },
             )
             .collect_vec();
 
-        Ok(Response::new(ListTableFragmentStatesResponse { states }))
+        Ok(Response::new(ListStreamingJobStatesResponse { states }))
     }
 
     #[cfg_attr(coverage, coverage(off))]
@@ -305,6 +309,7 @@ impl StreamManagerService for StreamServiceImpl {
                     fragment_type_mask: fragment_desc.fragment_type_mask as _,
                     parallelism: fragment_desc.parallelism as _,
                     vnode_count: fragment_desc.vnode_count as _,
+                    node: Some(fragment_desc.stream_node.to_protobuf()),
                 },
             )
             .collect_vec();

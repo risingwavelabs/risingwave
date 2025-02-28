@@ -22,12 +22,12 @@ pub use enumerator::*;
 use nexmark::config::{NexmarkConfig, RateShape};
 use nexmark::event::EventType;
 use serde::Deserialize;
-use serde_with::{serde_as, DisplayFromStr};
+use serde_with::{DisplayFromStr, serde_as};
 pub use split::*;
 use with_options::WithOptions;
 
-use crate::source::nexmark::source::reader::NexmarkSplitReader;
 use crate::source::SourceProperties;
+use crate::source::nexmark::source::reader::NexmarkSplitReader;
 
 pub const NEXMARK_CONNECTOR: &str = "nexmark";
 

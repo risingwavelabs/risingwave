@@ -18,7 +18,7 @@ use std::str::FromStr;
 
 use fancy_regex::{Regex, RegexBuilder};
 use risingwave_common::array::{ArrayBuilder, ListValue, Utf8Array, Utf8ArrayBuilder};
-use risingwave_expr::{bail, function, ExprError, Result};
+use risingwave_expr::{ExprError, Result, bail, function};
 use thiserror_ext::AsReport;
 
 #[derive(Debug)]
@@ -192,7 +192,7 @@ fn regexp_count(text: &str, start: i32, regex: &RegexpContext) -> Result<i32> {
             return Err(ExprError::InvalidParam {
                 name: "start",
                 reason: start.to_string().into(),
-            })
+            });
         }
         _ => start as usize - 1,
     };
@@ -276,7 +276,7 @@ fn regexp_replace(
             return Err(ExprError::InvalidParam {
                 name: "start",
                 reason: start.to_string().into(),
-            })
+            });
         }
         _ => start as usize - 1,
     };

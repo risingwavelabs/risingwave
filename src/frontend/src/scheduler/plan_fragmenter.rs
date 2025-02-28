@@ -20,7 +20,6 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use async_recursion::async_recursion;
-use chrono::{MappedLocalTime, TimeZone};
 use enum_as_inner::EnumAsInner;
 use futures::TryStreamExt;
 use iceberg::expr::Predicate as IcebergPredicate;
@@ -29,18 +28,16 @@ use petgraph::{Directed, Graph};
 use pgwire::pg_server::SessionId;
 use risingwave_batch::error::BatchError;
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
-use risingwave_common::bail;
 use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::{Schema, TableDesc};
 use risingwave_common::hash::table_distribution::TableDistribution;
 use risingwave_common::hash::{WorkerSlotId, WorkerSlotMapping};
-use risingwave_common::types::Timestamptz;
 use risingwave_common::util::scan_range::ScanRange;
 use risingwave_connector::source::filesystem::opendal_source::opendal_enumerator::OpendalEnumerator;
 use risingwave_connector::source::filesystem::opendal_source::{
     OpendalAzblob, OpendalGcs, OpendalS3,
 };
-use risingwave_connector::source::iceberg::{IcebergSplitEnumerator, IcebergTimeTravelInfo};
+use risingwave_connector::source::iceberg::IcebergSplitEnumerator;
 use risingwave_connector::source::kafka::KafkaSplitEnumerator;
 use risingwave_connector::source::reader::reader::build_opendal_fs_list_for_batch;
 use risingwave_connector::source::{
@@ -51,20 +48,21 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{ExchangeInfo, ScanRange as ScanRangeProto};
 use risingwave_pb::plan_common::Field as PbField;
 use risingwave_sqlparser::ast::AsOf;
-use serde::ser::SerializeStruct;
 use serde::Serialize;
+use serde::ser::SerializeStruct;
 use uuid::Uuid;
 
 use super::SchedulerError;
-use crate::catalog::catalog_service::CatalogReader;
 use crate::catalog::TableId;
+use crate::catalog::catalog_service::CatalogReader;
 use crate::error::RwError;
+use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::generic::{GenericPlanRef, PhysicalPlanRef};
+use crate::optimizer::plan_node::utils::to_iceberg_time_travel_as_of;
 use crate::optimizer::plan_node::{
     BatchIcebergScan, BatchKafkaScan, BatchSource, PlanNodeId, PlanNodeType,
 };
 use crate::optimizer::property::Distribution;
-use crate::optimizer::PlanRef;
 use crate::scheduler::SchedulerResult;
 
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
@@ -383,49 +381,7 @@ impl SourceScanInfo {
                     IcebergSplitEnumerator::new(*prop, SourceEnumeratorContext::dummy().into())
                         .await?;
 
-                let time_travel_info = match fetch_info.as_of {
-                    Some(AsOf::VersionNum(v)) => Some(IcebergTimeTravelInfo::Version(v)),
-                    Some(AsOf::TimestampNum(ts)) => {
-                        Some(IcebergTimeTravelInfo::TimestampMs(ts * 1000))
-                    }
-                    Some(AsOf::VersionString(_)) => {
-                        bail!("Unsupported version string in iceberg time travel")
-                    }
-                    Some(AsOf::TimestampString(ts)) => {
-                        let date_time = speedate::DateTime::parse_str_rfc3339(&ts)
-                            .map_err(|_e| anyhow!("fail to parse timestamp"))?;
-                        let timestamp = if date_time.time.tz_offset.is_none() {
-                            // If the input does not specify a time zone, use the time zone set by the "SET TIME ZONE" command.
-                            let tz =
-                                Timestamptz::lookup_time_zone(&timezone).map_err(|e| anyhow!(e))?;
-                            match tz.with_ymd_and_hms(
-                                date_time.date.year.into(),
-                                date_time.date.month.into(),
-                                date_time.date.day.into(),
-                                date_time.time.hour.into(),
-                                date_time.time.minute.into(),
-                                date_time.time.second.into(),
-                            ) {
-                                MappedLocalTime::Single(d) => Ok(d.timestamp()),
-                                MappedLocalTime::Ambiguous(_, _) | MappedLocalTime::None => {
-                                    Err(anyhow!(format!(
-                                        "failed to parse the timestamp {ts} with the specified time zone {tz}"
-                                    )))
-                                }
-                            }?
-                        } else {
-                            date_time.timestamp_tz()
-                        };
-
-                        Some(IcebergTimeTravelInfo::TimestampMs(
-                            timestamp * 1000 + date_time.time.microsecond as i64 / 1000,
-                        ))
-                    }
-                    Some(AsOf::ProcessTime) | Some(AsOf::ProcessTimeWithInterval(_)) => {
-                        unreachable!()
-                    }
-                    None => None,
-                };
+                let time_travel_info = to_iceberg_time_travel_as_of(&fetch_info.as_of, &timezone)?;
 
                 let split_info = iceberg_enumerator
                     .list_splits_batch(

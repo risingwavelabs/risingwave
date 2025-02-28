@@ -18,7 +18,7 @@ use std::pin::pin;
 use std::time::Duration;
 
 use anyhow::anyhow;
-use futures::future::{select, Either};
+use futures::future::{Either, select};
 use risingwave_common::catalog::{DatabaseId, TableId, TableOption};
 use risingwave_meta_model::{ObjectId, SinkId, SourceId, WorkerId};
 use risingwave_pb::catalog::{PbSink, PbSource, PbTable};
@@ -26,10 +26,10 @@ use risingwave_pb::common::worker_node::{PbResource, Property as AddNodeProperty
 use risingwave_pb::common::{HostAddress, PbWorkerNode, PbWorkerType, WorkerNode, WorkerType};
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::meta::table_fragments::{Fragment, PbFragment};
-use risingwave_pb::stream_plan::{PbDispatchStrategy, StreamActor};
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
+use risingwave_pb::stream_plan::{PbDispatchStrategy, PbStreamScanType, StreamActor};
+use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 use tokio::sync::oneshot;
-use tokio::time::{sleep, Instant};
+use tokio::time::{Instant, sleep};
 use tracing::warn;
 
 use crate::barrier::Reschedule;
@@ -463,6 +463,15 @@ impl MetadataManager {
         Ok(table_ids.into_iter().map(|id| id as u32).collect())
     }
 
+    pub async fn get_table_associated_source_id(
+        &self,
+        table_id: u32,
+    ) -> MetaResult<Option<SourceId>> {
+        self.catalog_controller
+            .get_table_associated_source_id(table_id as _)
+            .await
+    }
+
     pub async fn get_table_catalog_by_ids(&self, ids: Vec<u32>) -> MetaResult<Vec<PbTable>> {
         self.catalog_controller
             .get_table_by_ids(ids.into_iter().map(|id| id as _).collect())
@@ -557,13 +566,18 @@ impl MetadataManager {
         Ok(actor_ids.into_iter().map(|id| id as ActorId).collect())
     }
 
+    // (backfill_actor_id, upstream_source_actor_id)
     pub async fn get_running_actors_for_source_backfill(
         &self,
-        id: FragmentId,
+        source_backfill_fragment_id: FragmentId,
+        source_fragment_id: FragmentId,
     ) -> MetaResult<HashSet<(ActorId, ActorId)>> {
         let actor_ids = self
             .catalog_controller
-            .get_running_actors_for_source_backfill(id as _)
+            .get_running_actors_for_source_backfill(
+                source_backfill_fragment_id as _,
+                source_fragment_id as _,
+            )
             .await?;
         Ok(actor_ids
             .into_iter()
@@ -752,6 +766,17 @@ impl MetadataManager {
     pub async fn list_rate_limits(&self) -> MetaResult<Vec<RateLimitInfo>> {
         let rate_limits = self.catalog_controller.list_rate_limits().await?;
         Ok(rate_limits)
+    }
+
+    pub async fn get_job_backfill_scan_types(
+        &self,
+        job_id: &TableId,
+    ) -> MetaResult<HashMap<FragmentId, PbStreamScanType>> {
+        let backfill_types = self
+            .catalog_controller
+            .get_job_fragment_backfill_scan_type(job_id.table_id as _)
+            .await?;
+        Ok(backfill_types)
     }
 }
 

@@ -13,18 +13,17 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, PG_CATALOG_SCHEMA_NAME};
+use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_common::types::{DataType, MapType, StructType};
 use risingwave_common::util::iter_util::zip_eq_fast;
 use risingwave_common::{bail_no_function, bail_not_implemented, not_implemented};
-use risingwave_pb::plan_common::{AdditionalColumn, ColumnDescVersion};
 use risingwave_sqlparser::ast::{
     Array, BinaryOperator, DataType as AstDataType, EscapeChar, Expr, Function, JsonPredicateType,
-    ObjectName, Query, StructField, TrimWhereField, UnaryOperator,
+    ObjectName, Query, TrimWhereField, UnaryOperator,
 };
 
-use crate::binder::expr::function::is_sys_function_without_args;
 use crate::binder::Binder;
+use crate::binder::expr::function::is_sys_function_without_args;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall, InputRef, Parameter, SubqueryKind};
 use crate::handler::create_sql_function::SQL_UDF_PATTERN;
@@ -97,7 +96,9 @@ impl Binder {
                     // TODO(Kexiang): Generated columns or INCLUDE clause should be supported.
                     if ident.real_value() == *"headers" {
                         Ok(InputRef::new(0, DataType::Jsonb).into())
-                    } else if ident.real_value() == ctx.secret_name {
+                    } else if ctx.secret_name.is_some()
+                        && ident.real_value() == *ctx.secret_name.as_ref().unwrap()
+                    {
                         Ok(InputRef::new(1, DataType::Varchar).into())
                     } else if ident.real_value() == ctx.column_name {
                         Ok(InputRef::new(2, DataType::Bytea).into())
@@ -935,6 +936,20 @@ impl Binder {
                     Err(ErrorCode::BindError(format!("Can't cast {} to regproc", lhs_ty)).into())
                 }
             }
+            // Redirect cast char to varchar to make system like Metabase happy.
+            // Char is not supported in RisingWave, but some ecosystem tools like Metabase will use it.
+            // Notice that the behavior of `char` and `varchar` is different in PostgreSQL.
+            // The following sql result should be different in PostgreSQL:
+            // ```
+            // select 'a'::char(2) = 'a '::char(2);
+            // ----------
+            // t
+            //
+            // select 'a'::varchar = 'a '::varchar;
+            // ----------
+            // f
+            // ```
+            AstDataType::Char(_) => self.bind_cast_inner(expr, DataType::Varchar),
             _ => self.bind_cast_inner(expr, bind_data_type(&data_type)?),
         }
     }
@@ -974,35 +989,6 @@ impl Binder {
 
         Ok(bound_inner)
     }
-}
-
-/// Given a type `STRUCT<v1 int>`, this function binds the field `v1 int`.
-pub fn bind_struct_field(column_def: &StructField) -> Result<ColumnDesc> {
-    let field_descs = if let AstDataType::Struct(defs) = &column_def.data_type {
-        defs.iter()
-            .map(|f| {
-                Ok(ColumnDesc::named(
-                    f.name.real_value(),
-                    ColumnId::new(0), // Literals don't have `column_id`.
-                    bind_data_type(&f.data_type)?,
-                ))
-            })
-            .collect::<Result<Vec<_>>>()?
-    } else {
-        vec![]
-    };
-    Ok(ColumnDesc {
-        data_type: bind_data_type(&column_def.data_type)?,
-        column_id: ColumnId::new(0),
-        name: column_def.name.real_value(),
-        field_descs,
-        type_name: "".to_owned(),
-        generated_or_default_column: None,
-        description: None,
-        additional_column: AdditionalColumn { column_type: None },
-        version: ColumnDescVersion::Pr13707,
-        system_column: None,
-    })
 }
 
 pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
@@ -1068,7 +1054,7 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
                         "Column type SERIAL is not supported".into(),
                         "Please remove the SERIAL column".into(),
                     )
-                    .into())
+                    .into());
                 }
                 _ => return Err(new_err().into()),
             }

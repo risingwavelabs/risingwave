@@ -17,16 +17,16 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::LazyLock;
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use itertools::Itertools;
 use sqlx::{ConnectOptions, Database};
 use url::Url;
 
-use super::{risingwave_cmd, ExecuteContext, Task};
+use super::{ExecuteContext, Task, risingwave_cmd};
 use crate::util::{get_program_args, get_program_env_cmd, get_program_name, is_env_set};
 use crate::{
-    add_hummock_backend, add_tempo_endpoint, Application, HummockInMemoryStrategy, MetaBackend,
-    MetaNodeConfig,
+    Application, HummockInMemoryStrategy, MetaBackend, MetaNodeConfig, add_hummock_backend,
+    add_tempo_endpoint,
 };
 
 /// URL for connecting to the SQL meta store, retrieved from the env var `RISEDEV_SQL_ENDPOINT`.
@@ -107,7 +107,7 @@ impl MetaNodeService {
                 return Err(anyhow!(
                     "unexpected prometheus config {:?}, only 1 instance is supported",
                     config.provide_prometheus
-                ))
+                ));
             }
         }
 

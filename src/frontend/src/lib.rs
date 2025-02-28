@@ -50,7 +50,7 @@ use std::time::Duration;
 
 pub use catalog::TableCatalog;
 mod binder;
-pub use binder::{bind_data_type, Binder};
+pub use binder::{Binder, bind_data_type};
 pub mod expr;
 pub mod handler;
 pub use handler::PgResponseStream;
@@ -69,7 +69,7 @@ use risingwave_common::util::resource_util::memory::system_memory_available_byte
 use risingwave_common::util::tokio_util::sync::CancellationToken;
 pub use stream_fragmenter::build_graph;
 mod utils;
-pub use utils::{explain_stream_graph, WithOptions, WithOptionsSecResolved};
+pub use utils::{WithOptions, WithOptionsSecResolved, explain_stream_graph};
 pub(crate) mod error;
 mod meta_client;
 pub mod test_utils;

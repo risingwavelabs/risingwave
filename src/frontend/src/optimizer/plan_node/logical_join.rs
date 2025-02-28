@@ -17,17 +17,19 @@ use std::collections::HashMap;
 use fixedbitset::FixedBitSet;
 use itertools::{EitherOrBoth, Itertools};
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_pb::plan_common::JoinType;
+use risingwave_expr::bail;
+use risingwave_pb::expr::expr_node::PbType;
+use risingwave_pb::plan_common::{AsOfJoinDesc, JoinType, PbAsOfJoinInequalityType};
 use risingwave_pb::stream_plan::StreamScanType;
 use risingwave_sqlparser::ast::AsOf;
 
 use super::generic::{
-    push_down_into_join, push_down_join_condition, GenericPlanNode, GenericPlanRef,
+    GenericPlanNode, GenericPlanRef, push_down_into_join, push_down_join_condition,
 };
-use super::utils::{childless_record, Distill};
+use super::utils::{Distill, childless_record};
 use super::{
-    generic, ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef, PlanTreeNodeBinary,
-    PredicatePushdown, StreamHashJoin, StreamProject, ToBatch, ToStream,
+    ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef, PlanTreeNodeBinary, PredicatePushdown,
+    StreamHashJoin, StreamProject, ToBatch, ToStream, generic,
 };
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{CollectInputRef, Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, InputRef};
@@ -1379,7 +1381,7 @@ impl LogicalJoin {
         let logical_join = self.clone_with_left_right(left, right);
 
         let inequality_desc =
-            StreamAsOfJoin::get_inequality_desc_from_predicate(predicate.clone(), left_len)?;
+            Self::get_inequality_desc_from_predicate(predicate.other_cond().clone(), left_len)?;
 
         Ok(StreamAsOfJoin::new(
             logical_join.core.clone(),
@@ -1387,17 +1389,71 @@ impl LogicalJoin {
             inequality_desc,
         ))
     }
+
+    /// Convert the logical `AsOf` join to a Hash join + a Group top 1.
+    fn to_batch_asof_join(
+        &self,
+        logical_join: generic::Join<PlanRef>,
+        predicate: EqJoinPredicate,
+    ) -> Result<PlanRef> {
+        use super::batch::prelude::*;
+
+        if predicate.eq_keys().is_empty() {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "AsOf join requires at least 1 equal condition".to_owned(),
+            )
+            .into());
+        }
+
+        let left_schema_len = logical_join.left.schema().len();
+        let asof_desc =
+            Self::get_inequality_desc_from_predicate(predicate.non_eq_cond(), left_schema_len)?;
+
+        let batch_join = BatchHashJoin::new(logical_join, predicate, Some(asof_desc));
+        Ok(batch_join.into())
+    }
+
+    pub fn get_inequality_desc_from_predicate(
+        predicate: Condition,
+        left_input_len: usize,
+    ) -> Result<AsOfJoinDesc> {
+        let expr: ExprImpl = predicate.into();
+        if let Some((left_input_ref, expr_type, right_input_ref)) = expr.as_comparison_cond() {
+            if left_input_ref.index() < left_input_len && right_input_ref.index() >= left_input_len
+            {
+                Ok(AsOfJoinDesc {
+                    left_idx: left_input_ref.index() as u32,
+                    right_idx: (right_input_ref.index() - left_input_len) as u32,
+                    inequality_type: Self::expr_type_to_comparison_type(expr_type)?.into(),
+                })
+            } else {
+                bail!("inequal condition from the same side should be push down in optimizer");
+            }
+        } else {
+            Err(ErrorCode::InvalidInputSyntax(
+                "AsOf join requires exactly 1 ineuquality condition".to_owned(),
+            )
+            .into())
+        }
+    }
+
+    fn expr_type_to_comparison_type(expr_type: PbType) -> Result<PbAsOfJoinInequalityType> {
+        match expr_type {
+            PbType::LessThan => Ok(PbAsOfJoinInequalityType::AsOfInequalityTypeLt),
+            PbType::LessThanOrEqual => Ok(PbAsOfJoinInequalityType::AsOfInequalityTypeLe),
+            PbType::GreaterThan => Ok(PbAsOfJoinInequalityType::AsOfInequalityTypeGt),
+            PbType::GreaterThanOrEqual => Ok(PbAsOfJoinInequalityType::AsOfInequalityTypeGe),
+            _ => Err(ErrorCode::InvalidInputSyntax(format!(
+                "Invalid comparison type: {}",
+                expr_type.as_str_name()
+            ))
+            .into()),
+        }
+    }
 }
 
 impl ToBatch for LogicalJoin {
     fn to_batch(&self) -> Result<PlanRef> {
-        if JoinType::AsofInner == self.join_type() || JoinType::AsofLeftOuter == self.join_type() {
-            return Err(ErrorCode::NotSupported(
-                "AsOf join in batch query".to_owned(),
-                "AsOf join is only supported in streaming query".to_owned(),
-            )
-            .into());
-        }
         let predicate = EqJoinPredicate::create(
             self.left().schema().len(),
             self.right().schema().len(),
@@ -1411,7 +1467,9 @@ impl ToBatch for LogicalJoin {
         let ctx = self.base.ctx();
         let config = ctx.session_ctx().config();
 
-        if predicate.has_eq() {
+        if self.join_type() == JoinType::AsofInner || self.join_type() == JoinType::AsofLeftOuter {
+            self.to_batch_asof_join(logical_join, predicate)
+        } else if predicate.has_eq() {
             if !predicate.eq_keys_are_type_aligned() {
                 return Err(ErrorCode::InternalError(format!(
                     "Join eq keys are not aligned for predicate: {predicate:?}"
@@ -1427,7 +1485,7 @@ impl ToBatch for LogicalJoin {
                 }
             }
 
-            Ok(BatchHashJoin::new(logical_join, predicate).into())
+            Ok(BatchHashJoin::new(logical_join, predicate, None).into())
         } else {
             // Convert to Nested-loop Join for non-equal joins
             Ok(BatchNestedLoopJoin::new(logical_join).into())
@@ -1612,7 +1670,7 @@ mod tests {
     use risingwave_pb::expr::expr_node::Type;
 
     use super::*;
-    use crate::expr::{assert_eq_input_ref, FunctionCall, Literal};
+    use crate::expr::{FunctionCall, Literal, assert_eq_input_ref};
     use crate::optimizer::optimizer_context::OptimizerContext;
     use crate::optimizer::plan_node::LogicalValues;
     use crate::optimizer::property::FunctionalDependency;
@@ -1937,7 +1995,7 @@ mod tests {
     /// ```
     #[tokio::test]
     #[ignore] // ignore due to refactor logical scan, but the test seem to duplicate with the explain test
-              // framework, maybe we will remove it?
+    // framework, maybe we will remove it?
     async fn test_join_to_stream() {
         // let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
         // let fields: Vec<Field> = (1..7)

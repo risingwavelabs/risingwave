@@ -21,11 +21,11 @@ use risingwave_common::bail;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_meta_model::ObjectId;
 use risingwave_pb::catalog::{CreateType, Subscription, Table};
-use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use risingwave_pb::stream_plan::Dispatcher;
+use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::Sender;
-use tokio::sync::{oneshot, Mutex};
+use tokio::sync::{Mutex, oneshot};
 use tracing::Instrument;
 
 use super::{
@@ -36,6 +36,7 @@ use crate::barrier::{
     BarrierScheduler, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
     ReplaceStreamJobPlan, SnapshotBackfillInfo,
 };
+use crate::controller::catalog::DropTableConnectorContext;
 use crate::error::bail_invalid_parameter;
 use crate::manager::{
     MetaSrvEnv, MetadataManager, NotificationVersion, StreamingJob, StreamingJobType,
@@ -56,12 +57,7 @@ pub struct CreateStreamingJobOption {
 /// Note: for better readability, keep this struct complete and immutable once created.
 pub struct CreateStreamingJobContext {
     /// New dispatchers to add from upstream actors to downstream actors.
-    pub dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
-
-    /// Upstream root fragments' actor ids grouped by table id.
-    ///
-    /// Refer to the doc on [`MetadataManager::get_upstream_root_fragments`] for the meaning of "root".
-    pub upstream_root_actors: HashMap<TableId, Vec<ActorId>>,
+    pub dispatchers: HashMap<FragmentId, HashMap<ActorId, Vec<Dispatcher>>>,
 
     /// Internal tables in the streaming job.
     pub internal_tables: BTreeMap<u32, Table>,
@@ -85,6 +81,7 @@ pub struct CreateStreamingJobContext {
     pub replace_table_job_info: Option<(StreamingJob, ReplaceStreamJobContext, StreamJobFragments)>,
 
     pub snapshot_backfill_info: Option<SnapshotBackfillInfo>,
+    pub cross_db_snapshot_backfill_info: SnapshotBackfillInfo,
 
     pub option: CreateStreamingJobOption,
 
@@ -177,10 +174,10 @@ pub struct ReplaceStreamJobContext {
     pub old_fragments: StreamJobFragments,
 
     /// The updates to be applied to the downstream chain actors. Used for schema change.
-    pub merge_updates: Vec<MergeUpdate>,
+    pub merge_updates: HashMap<FragmentId, Vec<MergeUpdate>>,
 
     /// New dispatchers to add from upstream actors to downstream actors.
-    pub dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
+    pub dispatchers: HashMap<FragmentId, HashMap<ActorId, Vec<Dispatcher>>>,
 
     /// The locations of the actors to build in the new job to replace.
     pub building_locations: Locations,
@@ -191,6 +188,9 @@ pub struct ReplaceStreamJobContext {
     pub streaming_job: StreamingJob,
 
     pub tmp_id: u32,
+
+    /// Used for dropping an associated source. Dropping source and related internal tables.
+    pub drop_table_connector_ctx: Option<DropTableConnectorContext>,
 }
 
 /// `GlobalStreamManager` manages all the streams in the system.
@@ -340,13 +340,13 @@ impl GlobalStreamManager {
         CreateStreamingJobContext {
             streaming_job,
             dispatchers,
-            upstream_root_actors,
             definition,
             create_type,
             job_type,
             replace_table_job_info,
             internal_tables,
             snapshot_backfill_info,
+            cross_db_snapshot_backfill_info,
             ..
         }: CreateStreamingJobContext,
     ) -> MetaResult<NotificationVersion> {
@@ -366,7 +366,10 @@ impl GlobalStreamManager {
                 .await?;
 
             let tmp_table_id = stream_job_fragments.stream_job_id();
-            let init_split_assignment = self.source_manager.allocate_splits(&tmp_table_id).await?;
+            let init_split_assignment = self
+                .source_manager
+                .allocate_splits(&stream_job_fragments)
+                .await?;
 
             replace_table_command = Some(ReplaceStreamJobPlan {
                 old_fragments: context.old_fragments,
@@ -376,19 +379,21 @@ impl GlobalStreamManager {
                 init_split_assignment,
                 streaming_job,
                 tmp_id: tmp_table_id.table_id,
+                to_drop_state_table_ids: Vec::new(), /* the create streaming job command will not drop any state table */
             });
         }
-
-        let table_id = stream_job_fragments.stream_job_id();
 
         // Here we need to consider:
         // - Shared source
         // - Table with connector
         // - MV on shared source
-        let mut init_split_assignment = self.source_manager.allocate_splits(&table_id).await?;
+        let mut init_split_assignment = self
+            .source_manager
+            .allocate_splits(&stream_job_fragments)
+            .await?;
         init_split_assignment.extend(
             self.source_manager
-                .allocate_splits_for_backfill(&table_id, &dispatchers)
+                .allocate_splits_for_backfill(&stream_job_fragments, &dispatchers)
                 .await?,
         );
 
@@ -398,7 +403,6 @@ impl GlobalStreamManager {
 
         let info = CreateStreamingJobCommandInfo {
             stream_job_fragments,
-            upstream_root_actors,
             dispatchers,
             init_split_assignment,
             definition: definition.clone(),
@@ -408,28 +412,25 @@ impl GlobalStreamManager {
             create_type,
         };
 
-        let command = if let Some(snapshot_backfill_info) = snapshot_backfill_info {
+        let job_type = if let Some(snapshot_backfill_info) = snapshot_backfill_info {
             tracing::debug!(
                 ?snapshot_backfill_info,
                 "sending Command::CreateSnapshotBackfillStreamingJob"
             );
-            Command::CreateStreamingJob {
-                info,
-                job_type: CreateStreamingJobType::SnapshotBackfill(snapshot_backfill_info),
-            }
+            CreateStreamingJobType::SnapshotBackfill(snapshot_backfill_info)
         } else {
             tracing::debug!("sending Command::CreateStreamingJob");
             if let Some(replace_table_command) = replace_table_command {
-                Command::CreateStreamingJob {
-                    info,
-                    job_type: CreateStreamingJobType::SinkIntoTable(replace_table_command),
-                }
+                CreateStreamingJobType::SinkIntoTable(replace_table_command)
             } else {
-                Command::CreateStreamingJob {
-                    info,
-                    job_type: CreateStreamingJobType::Normal,
-                }
+                CreateStreamingJobType::Normal
             }
+        };
+
+        let command = Command::CreateStreamingJob {
+            info,
+            job_type,
+            cross_db_snapshot_backfill_info,
         };
 
         if need_pause {
@@ -463,17 +464,21 @@ impl GlobalStreamManager {
             dispatchers,
             tmp_id,
             streaming_job,
+            drop_table_connector_ctx,
             ..
         }: ReplaceStreamJobContext,
     ) -> MetaResult<()> {
-        let tmp_table_id = new_fragments.stream_job_id();
         let init_split_assignment = if streaming_job.is_source() {
             self.source_manager
-                .allocate_splits_for_replace_source(&tmp_table_id, &merge_updates)
+                .allocate_splits_for_replace_source(&new_fragments, &merge_updates)
                 .await?
         } else {
-            self.source_manager.allocate_splits(&tmp_table_id).await?
+            self.source_manager.allocate_splits(&new_fragments).await?
         };
+        tracing::info!(
+            "replace_stream_job - allocate split: {:?}",
+            init_split_assignment
+        );
 
         self.barrier_scheduler
             .run_config_change_command_with_pause(
@@ -486,6 +491,15 @@ impl GlobalStreamManager {
                     init_split_assignment,
                     streaming_job,
                     tmp_id,
+                    to_drop_state_table_ids: {
+                        if let Some(drop_table_connector_ctx) = &drop_table_connector_ctx {
+                            vec![TableId::new(
+                                drop_table_connector_ctx.to_remove_state_table_id as _,
+                            )]
+                        } else {
+                            Vec::new()
+                        }
+                    },
                 }),
             )
             .await?;
@@ -607,6 +621,27 @@ impl GlobalStreamManager {
         deferred: bool,
     ) -> MetaResult<()> {
         let _reschedule_job_lock = self.reschedule_lock_write_guard().await;
+        let background_jobs = self
+            .metadata_manager
+            .list_background_creating_jobs()
+            .await?;
+
+        if !background_jobs.is_empty() {
+            let related_jobs = self
+                .scale_controller
+                .resolve_related_no_shuffle_jobs(&background_jobs)
+                .await?;
+
+            for job in background_jobs {
+                if related_jobs.contains(&job) {
+                    bail!(
+                        "Cannot alter the job {} because the related job {} is currently being created",
+                        table_id,
+                        job.table_id
+                    );
+                }
+            }
+        }
 
         let JobRescheduleTarget {
             parallelism: parallelism_change,
@@ -644,9 +679,9 @@ impl GlobalStreamManager {
                 TableParallelism::Adaptive => {
                     if available_parallelism > max_parallelism {
                         tracing::warn!(
-                        "too many parallelism available, use max parallelism {} will be limited",
-                        max_parallelism
-                    );
+                            "too many parallelism available, use max parallelism {} will be limited",
+                            max_parallelism
+                        );
                     }
                 }
                 TableParallelism::Fixed(parallelism) => {
@@ -706,7 +741,11 @@ impl GlobalStreamManager {
                 .await?;
 
             if reschedule_plan.reschedules.is_empty() {
-                tracing::debug!("empty reschedule plan generated for job {}, set the parallelism directly to {:?}", table_id, reschedule_plan.post_updates);
+                tracing::debug!(
+                    "empty reschedule plan generated for job {}, set the parallelism directly to {:?}",
+                    table_id,
+                    reschedule_plan.post_updates
+                );
                 self.scale_controller
                     .post_apply_reschedule(&HashMap::new(), &reschedule_plan.post_updates)
                     .await?;

@@ -15,8 +15,8 @@
 pub mod prelude {
     // import all split enumerators
     pub use crate::source::datagen::DatagenSplitEnumerator;
+    pub use crate::source::filesystem::LegacyS3SplitEnumerator;
     pub use crate::source::filesystem::opendal_source::OpendalEnumerator;
-    pub use crate::source::filesystem::S3SplitEnumerator;
     pub use crate::source::google_pubsub::PubsubSplitEnumerator as GooglePubsubSplitEnumerator;
     pub use crate::source::iceberg::IcebergSplitEnumerator;
     pub use crate::source::kafka::KafkaSplitEnumerator;
@@ -80,10 +80,10 @@ use risingwave_common::array::{Array, ArrayRef};
 use thiserror_ext::AsReport;
 pub use util::fill_adaptive_split;
 
+pub use crate::source::filesystem::LEGACY_S3_CONNECTOR;
 pub use crate::source::filesystem::opendal_source::{
     AZBLOB_CONNECTOR, GCS_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR,
 };
-pub use crate::source::filesystem::S3_CONNECTOR;
 pub use crate::source::nexmark::NEXMARK_CONNECTOR;
 pub use crate::source::pulsar::PULSAR_CONNECTOR;
 
@@ -166,14 +166,12 @@ impl WaitCheckpointTask {
                 ref ack_policy,
             ) => {
                 async fn ack(context: &JetStreamContext, reply_subject: String) {
-                    match context.publish(reply_subject.clone(), "".into()).await {
+                    match context.publish(reply_subject.clone(), "+ACK".into()).await {
                         Err(e) => {
                             tracing::error!(error = %e.as_report(), subject = ?reply_subject, "failed to ack NATS JetStream message");
                         }
                         Ok(ack_future) => {
-                            if let Err(e) = ack_future.into_future().await {
-                                tracing::error!(error = %e.as_report(), subject = ?reply_subject, "failed to ack NATS JetStream message");
-                            }
+                            let _ = ack_future.into_future().await;
                         }
                     }
                 }
@@ -193,6 +191,9 @@ impl WaitCheckpointTask {
                     JetStreamAckPolicy::None => (),
                     JetStreamAckPolicy::Explicit => {
                         for reply_subject in reply_subjects {
+                            if reply_subject.is_empty() {
+                                continue;
+                            }
                             ack(context, reply_subject).await;
                         }
                     }

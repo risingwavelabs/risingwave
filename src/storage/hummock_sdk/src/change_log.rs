@@ -58,6 +58,16 @@ impl<T> TableChangeLogCommon<T> {
             .flat_map(|epoch_change_log| epoch_change_log.epochs.iter())
             .cloned()
     }
+
+    pub(crate) fn change_log_into_iter(self) -> impl Iterator<Item = EpochNewChangeLogCommon<T>> {
+        self.0.into_iter()
+    }
+
+    pub(crate) fn change_log_iter_mut(
+        &mut self,
+    ) -> impl Iterator<Item = &mut EpochNewChangeLogCommon<T>> {
+        self.0.iter_mut()
+    }
 }
 
 pub type TableChangeLog = TableChangeLogCommon<SstableInfo>;
@@ -148,11 +158,12 @@ impl<T> TableChangeLogCommon<T> {
         let start = self.0.partition_point(|epoch_change_log| {
             epoch_change_log.epochs.last().expect("non-empty") < &epoch
         });
-        debug_assert!(self
-            .0
-            .range(start..)
-            .flat_map(|epoch_change_log| epoch_change_log.epochs.iter())
-            .is_sorted());
+        debug_assert!(
+            self.0
+                .range(start..)
+                .flat_map(|epoch_change_log| epoch_change_log.epochs.iter())
+                .is_sorted()
+        );
         let mut later_epochs = self
             .0
             .range(start..)

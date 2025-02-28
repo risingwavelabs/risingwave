@@ -31,14 +31,16 @@ use winnow::{PResult, Parser as _};
 use crate::ast::*;
 use crate::keywords::{self, Keyword};
 use crate::parser_v2::{
-    dollar_quoted_string, keyword, literal_i64, literal_uint, single_quoted_string, token_number,
-    ParserExt as _,
+    ParserExt as _, dollar_quoted_string, keyword, literal_i64, literal_uint, single_quoted_string,
+    token_number,
 };
 use crate::tokenizer::*;
 use crate::{impl_parse_to, parser_v2};
 
 pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
 pub(crate) const WEBHOOK_CONNECTOR: &str = "webhook";
+
+const WEBHOOK_WAIT_FOR_PERSISTENCE: &str = "webhook.wait_for_persistence";
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ParserError {
@@ -2603,10 +2605,19 @@ impl Parser<'_> {
                 parser_err!("VALIDATE is only supported for tables created with webhook source");
             }
 
-            self.expect_keyword(Keyword::SECRET)?;
-            let secret_ref = self.parse_secret_ref()?;
-            if secret_ref.ref_as == SecretRefAsType::File {
-                parser_err!("Secret for SECURE_COMPARE() does not support AS FILE");
+            let wait_for_persistence = with_options
+                .iter()
+                .find(|&opt| opt.name.real_value() == WEBHOOK_WAIT_FOR_PERSISTENCE)
+                .map(|opt| opt.value.to_string().eq_ignore_ascii_case("true"))
+                .unwrap_or(true);
+            let secret_ref = if self.parse_keyword(Keyword::SECRET) {
+                let secret_ref = self.parse_secret_ref()?;
+                if secret_ref.ref_as == SecretRefAsType::File {
+                    parser_err!("Secret for SECURE_COMPARE() does not support AS FILE");
+                };
+                Some(secret_ref)
+            } else {
+                None
             };
 
             self.expect_keyword(Keyword::AS)?;
@@ -2615,6 +2626,7 @@ impl Parser<'_> {
             Some(WebhookSourceInfo {
                 secret_ref,
                 signature_expr,
+                wait_for_persistence,
             })
         } else {
             None
@@ -3005,6 +3017,13 @@ impl Parser<'_> {
             const CONNECTION_REF_KEY: &str = "connection";
             if name.real_value().eq_ignore_ascii_case(CONNECTION_REF_KEY) {
                 let connection_name = self.parse_object_name()?;
+                // tolerate previous buggy Display that outputs `connection = connection foo`
+                let connection_name = match connection_name.0.as_slice() {
+                    [ident] if ident.real_value() == CONNECTION_REF_KEY => {
+                        self.parse_object_name()?
+                    }
+                    _ => connection_name,
+                };
                 SqlOptionValue::ConnectionRef(ConnectionRefValue { connection_name })
             } else {
                 self.parse_value_and_obj_ref::<false>()?
@@ -3168,6 +3187,8 @@ impl Parser<'_> {
                 let column_def = self.parse_column_def()?;
                 AlterTableOperation::AddColumn { column_def }
             }
+        } else if self.parse_keywords(&[Keyword::DROP, Keyword::CONNECTOR]) {
+            AlterTableOperation::DropConnector
         } else if self.parse_keyword(Keyword::RENAME) {
             if self.parse_keyword(Keyword::CONSTRAINT) {
                 let old_name = self.parse_identifier_non_reserved()?;

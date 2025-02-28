@@ -15,14 +15,13 @@
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::{DataType, ScalarImpl};
-use risingwave_common::util::iter_util::ZipEqDebug;
 
 use super::{BoxedRule, Rule};
 use crate::expr::{Expr, TableFunctionType};
+use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 // use crate::optimizer::plan_node::{LogicalMySqlQuery, LogicalTableFunction};
 use crate::optimizer::plan_node::{LogicalMySqlQuery, LogicalTableFunction};
-use crate::optimizer::PlanRef;
 
 /// Transform a special `TableFunction` (with `MYSQL_QUERY` table function type) into a `LogicalMySqlQuery`
 pub struct TableFunctionToMySqlQueryRule {}
@@ -37,9 +36,8 @@ impl Rule for TableFunctionToMySqlQueryRule {
 
         if let DataType::Struct(st) = table_function_return_type.clone() {
             let fields = st
-                .types()
-                .zip_eq_debug(st.names())
-                .map(|(data_type, name)| Field::with_name(data_type.clone(), name.to_owned()))
+                .iter()
+                .map(|(name, data_type)| Field::with_name(data_type.clone(), name.to_owned()))
                 .collect_vec();
 
             let schema = Schema::new(fields);

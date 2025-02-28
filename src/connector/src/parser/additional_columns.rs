@@ -16,7 +16,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
 
 use risingwave_common::bail;
-use risingwave_common::catalog::{max_column_id, ColumnCatalog, ColumnDesc, ColumnId};
+use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId, max_column_id};
 use risingwave_common::types::{DataType, StructType};
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
 use risingwave_pb::plan_common::{
@@ -162,7 +162,9 @@ pub fn build_additional_column_desc(
     if !compatible_columns.contains(additional_col_type) {
         bail!(
             "additional column type {} is not supported for connector {}, acceptable column types: {:?}",
-            additional_col_type, connector_name, compatible_columns
+            additional_col_type,
+            connector_name,
+            compatible_columns
         );
     }
 

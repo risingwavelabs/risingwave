@@ -16,7 +16,7 @@
 
 use std::vec;
 
-use context::{generate_captured_function, CaptureContextAttr, DefineContextAttr};
+use context::{CaptureContextAttr, DefineContextAttr, generate_captured_function};
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use syn::{Error, ItemFn, Result};

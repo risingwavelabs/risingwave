@@ -160,8 +160,8 @@ mod tests {
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::catalog::Field;
 
-    use super::super::test_utils::expr::build_from_pretty;
     use super::super::test_utils::MockSource;
+    use super::super::test_utils::expr::build_from_pretty;
     use super::super::*;
     use super::*;
 

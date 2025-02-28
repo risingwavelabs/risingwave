@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::license::LicenseManager;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManagerRef;
 use risingwave_common_service::ObserverState;
 use risingwave_pb::catalog::Table;
+use risingwave_pb::meta::SubscribeResponse;
 use risingwave_pb::meta::object::PbObjectInfo;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use risingwave_pb::meta::SubscribeResponse;
 use risingwave_storage::compaction_catalog_manager::CompactionCatalogManagerRef;
 
 pub struct CompactorObserverNode {
@@ -60,6 +61,9 @@ impl ObserverState for CompactorObserverNode {
             Info::SystemParams(p) => {
                 self.system_params_manager.try_set_params(p);
             }
+            Info::ComputeNodeTotalCpuCount(count) => {
+                LicenseManager::get().update_cpu_core_count(count as _);
+            }
             _ => {
                 panic!("error type notification");
             }
@@ -73,6 +77,7 @@ impl ObserverState for CompactorObserverNode {
         self.handle_catalog_snapshot(snapshot.tables);
         let snapshot_version = snapshot.version.unwrap();
         self.version = snapshot_version.catalog_version;
+        LicenseManager::get().update_cpu_core_count(snapshot.compute_node_total_cpu_count as _);
     }
 }
 

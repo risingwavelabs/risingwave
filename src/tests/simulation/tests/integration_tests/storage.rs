@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::Result;
 use rand::distributions::{Alphanumeric, DistString};
 use rand::rngs::SmallRng;
-use rand::{thread_rng, RngCore, SeedableRng};
+use rand::{RngCore, SeedableRng, thread_rng};
 use risingwave_simulation::cluster::{Cluster, Configuration};
 use risingwave_simulation::utils::AssertResult;
 

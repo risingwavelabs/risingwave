@@ -28,15 +28,15 @@ use parse_display::{Display, FromStr};
 use paste::paste;
 use postgres_types::{FromSql, IsNull, ToSql, Type};
 use risingwave_common_estimate_size::{EstimateSize, ZeroHeapSize};
-use risingwave_pb::data::data_type::PbTypeName;
 use risingwave_pb::data::PbDataType;
+use risingwave_pb::data::data_type::PbTypeName;
 use rw_iter_util::ZipEqFast as _;
 use serde::{Deserialize, Serialize, Serializer};
 use strum_macros::EnumDiscriminants;
 use thiserror_ext::AsReport;
 
 use crate::array::{
-    ArrayBuilderImpl, ArrayError, ArrayResult, PrimitiveArrayItemType, NULL_VAL_FOR_HASH,
+    ArrayBuilderImpl, ArrayError, ArrayResult, NULL_VAL_FOR_HASH, PrimitiveArrayItemType,
 };
 // Complex type's value is based on the array
 pub use crate::array::{ListRef, ListValue, MapRef, MapValue, StructRef, StructValue};
@@ -78,7 +78,7 @@ pub use risingwave_fields_derive::Fields;
 pub use self::cow::DatumCow;
 pub use self::datetime::{Date, Time, Timestamp};
 pub use self::decimal::{Decimal, PowError as DecimalPowError};
-pub use self::interval::{test_utils, DateTimeField, Interval, IntervalDisplay};
+pub use self::interval::{DateTimeField, Interval, IntervalDisplay, test_utils};
 pub use self::jsonb::{JsonbRef, JsonbVal};
 pub use self::map_type::MapType;
 pub use self::native_type::*;
@@ -212,9 +212,9 @@ impl TryFrom<DataTypeName> for DataType {
             DataTypeName::Time => Ok(DataType::Time),
             DataTypeName::Interval => Ok(DataType::Interval),
             DataTypeName::Jsonb => Ok(DataType::Jsonb),
-            DataTypeName::Struct | DataTypeName::List | DataTypeName::Map => {
-                Err("Functions returning composite types can not be inferred. Please use `FunctionCall::new_unchecked`.")
-            }
+            DataTypeName::Struct | DataTypeName::List | DataTypeName::Map => Err(
+                "Functions returning composite types can not be inferred. Please use `FunctionCall::new_unchecked`.",
+            ),
         }
     }
 }
@@ -341,8 +341,12 @@ impl DataType {
         };
         match self {
             DataType::Struct(t) => {
+                if !t.is_unnamed() {
+                    // To be consistent with `From<&PbDataType>`,
+                    // we only set field names when it's a named struct.
+                    pb.field_names = t.names().map(|s| s.into()).collect();
+                }
                 pb.field_type = t.types().map(|f| f.to_protobuf()).collect();
-                pb.field_names = t.names().map(|s| s.into()).collect();
             }
             DataType::List(datatype) => {
                 pb.field_type = vec![datatype.to_protobuf()];

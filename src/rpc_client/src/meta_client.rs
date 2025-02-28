@@ -14,13 +14,13 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Display};
+use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::Relaxed;
-use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, SystemTime};
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use async_trait::async_trait;
 use cluster_limit_service_client::ClusterLimitServiceClient;
 use either::Either;
@@ -28,8 +28,9 @@ use futures::stream::BoxStream;
 use list_rate_limits_response::RateLimitInfo;
 use lru::LruCache;
 use replace_job_plan::ReplaceJob;
+use risingwave_common::RW_VERSION;
 use risingwave_common::catalog::{FunctionId, IndexId, ObjectId, SecretId, TableId};
-use risingwave_common::config::{MetaConfig, MAX_CONNECTION_WINDOW_SIZE};
+use risingwave_common::config::{MAX_CONNECTION_WINDOW_SIZE, MetaConfig};
 use risingwave_common::hash::WorkerSlotMapping;
 use risingwave_common::monitor::EndpointExt;
 use risingwave_common::system_param::reader::SystemParamsReader;
@@ -39,7 +40,6 @@ use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::meta_addr::MetaAddressStrategy;
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
-use risingwave_common::RW_VERSION;
 use risingwave_error::bail;
 use risingwave_error::tonic::ErrorIsFromTonicServerImpl;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
@@ -78,7 +78,7 @@ use risingwave_pb::meta::list_actor_splits_response::ActorSplit;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
 use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistribution;
 use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
-use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
+use risingwave_pb::meta::list_streaming_job_states_response::StreamingJobState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::meta_member_service_client::MetaMemberServiceClient;
 use risingwave_pb::meta::notification_service_client::NotificationServiceClient;
@@ -95,12 +95,12 @@ use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::user_service_client::UserServiceClient;
 use risingwave_pb::user::*;
 use thiserror_ext::AsReport;
-use tokio::sync::mpsc::{unbounded_channel, Receiver, UnboundedSender};
+use tokio::sync::mpsc::{Receiver, UnboundedSender, unbounded_channel};
 use tokio::sync::oneshot::Sender;
-use tokio::sync::{mpsc, oneshot, RwLock};
+use tokio::sync::{RwLock, mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tokio::time::{self};
-use tokio_retry::strategy::{jitter, ExponentialBackoff};
+use tokio_retry::strategy::{ExponentialBackoff, jitter};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tonic::transport::Endpoint;
 use tonic::{Code, Request, Streaming};
@@ -997,10 +997,10 @@ impl MetaClient {
         Ok(resp.table_fragments)
     }
 
-    pub async fn list_table_fragment_states(&self) -> Result<Vec<TableFragmentState>> {
+    pub async fn list_streaming_job_states(&self) -> Result<Vec<StreamingJobState>> {
         let resp = self
             .inner
-            .list_table_fragment_states(ListTableFragmentStatesRequest {})
+            .list_streaming_job_states(ListStreamingJobStatesRequest {})
             .await?;
         Ok(resp.states)
     }
@@ -2097,7 +2097,7 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, apply_throttle, ApplyThrottleRequest, ApplyThrottleResponse }
             ,{ stream_client, cancel_creating_jobs, CancelCreatingJobsRequest, CancelCreatingJobsResponse }
             ,{ stream_client, list_table_fragments, ListTableFragmentsRequest, ListTableFragmentsResponse }
-            ,{ stream_client, list_table_fragment_states, ListTableFragmentStatesRequest, ListTableFragmentStatesResponse }
+            ,{ stream_client, list_streaming_job_states, ListStreamingJobStatesRequest, ListStreamingJobStatesResponse }
             ,{ stream_client, list_fragment_distribution, ListFragmentDistributionRequest, ListFragmentDistributionResponse }
             ,{ stream_client, list_actor_states, ListActorStatesRequest, ListActorStatesResponse }
             ,{ stream_client, list_actor_splits, ListActorSplitsRequest, ListActorSplitsResponse }

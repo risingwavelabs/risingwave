@@ -20,28 +20,26 @@ use std::time::{Duration, SystemTime};
 
 use chrono::DateTime;
 use futures::future::try_join_all;
-use futures::{future, StreamExt, TryStreamExt};
+use futures::{StreamExt, TryStreamExt, future};
 use itertools::Itertools;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::{
-    get_object_id_from_path, get_sst_data_path, HummockSstableObjectId, OBJECT_SUFFIX,
+    HummockSstableObjectId, OBJECT_SUFFIX, get_object_id_from_path, get_sst_data_path,
 };
 use risingwave_meta_model::hummock_sequence::HUMMOCK_NOW;
-use risingwave_meta_model::{hummock_gc_history, hummock_sequence};
+use risingwave_meta_model::{hummock_gc_history, hummock_sequence, hummock_version_delta};
 use risingwave_meta_model_migration::OnConflict;
 use risingwave_object_store::object::{ObjectMetadataIter, ObjectStoreRef};
 use risingwave_pb::stream_service::GetMinUncommittedSstIdRequest;
 use risingwave_rpc_client::StreamClientPool;
 use sea_orm::{ActiveValue, ColumnTrait, EntityTrait, QueryFilter, Set};
 
-use crate::backup_restore::BackupManagerRef;
-use crate::hummock::error::{Error, Result};
-use crate::hummock::manager::commit_multi_var;
-use crate::hummock::HummockManager;
-use crate::manager::MetadataManager;
-use crate::model::BTreeMapTransaction;
 use crate::MetaResult;
+use crate::backup_restore::BackupManagerRef;
+use crate::hummock::HummockManager;
+use crate::hummock::error::{Error, Result};
+use crate::manager::MetadataManager;
 
 pub(crate) struct GcManager {
     store: ObjectStoreRef,
@@ -175,44 +173,36 @@ impl GcManager {
 }
 
 impl HummockManager {
-    /// Deletes at most `batch_size` deltas.
+    /// Deletes version deltas.
     ///
-    /// Returns (number of deleted deltas, number of remain `deltas_to_delete`).
-    pub async fn delete_version_deltas(&self, batch_size: usize) -> Result<(usize, usize)> {
+    /// Returns number of deleted deltas
+    pub async fn delete_version_deltas(&self) -> Result<usize> {
         let mut versioning_guard = self.versioning.write().await;
         let versioning = versioning_guard.deref_mut();
         let context_info = self.context_info.read().await;
-        let deltas_to_delete_count = versioning
-            .hummock_version_deltas
-            .range(..=versioning.checkpoint.version.id)
-            .count();
         // If there is any safe point, skip this to ensure meta backup has required delta logs to
         // replay version.
         if !context_info.version_safe_points.is_empty() {
-            return Ok((0, deltas_to_delete_count));
+            return Ok(0);
         }
-        let batch = versioning
+        // The context_info lock must be held to prevent any potential metadata backup.
+        // The lock order requires version lock to be held as well.
+        let version_id = versioning.checkpoint.version.id;
+        let res = hummock_version_delta::Entity::delete_many()
+            .filter(hummock_version_delta::Column::Id.lte(version_id.to_u64()))
+            .exec(&self.env.meta_store_ref().conn)
+            .await?;
+        tracing::debug!(rows_affected = res.rows_affected, "Deleted version deltas");
+        versioning
             .hummock_version_deltas
-            .range(..=versioning.checkpoint.version.id)
-            .map(|(k, _)| *k)
-            .take(batch_size)
-            .collect_vec();
-        let mut hummock_version_deltas =
-            BTreeMapTransaction::new(&mut versioning.hummock_version_deltas);
-        if batch.is_empty() {
-            return Ok((0, 0));
-        }
-        for delta_id in &batch {
-            hummock_version_deltas.remove(*delta_id);
-        }
-        commit_multi_var!(self.meta_store_ref(), hummock_version_deltas)?;
+            .retain(|id, _| *id > version_id);
         #[cfg(test)]
         {
             drop(context_info);
             drop(versioning_guard);
             self.check_state_consistency().await;
         }
-        Ok((batch.len(), deltas_to_delete_count - batch.len()))
+        Ok(res.rows_affected as usize)
     }
 
     /// Filters by Hummock version and Writes GC history.
@@ -464,26 +454,6 @@ impl HummockManager {
         Ok(())
     }
 
-    /// Deletes stale Hummock metadata.
-    ///
-    /// Returns number of deleted deltas
-    pub async fn delete_metadata(&self) -> MetaResult<usize> {
-        let batch_size = self.env.opts.hummock_delta_log_delete_batch_size;
-        let mut total_deleted = 0;
-        loop {
-            if total_deleted != 0 && self.env.opts.vacuum_spin_interval_ms != 0 {
-                tokio::time::sleep(Duration::from_millis(self.env.opts.vacuum_spin_interval_ms))
-                    .await;
-            }
-            let (deleted, remain) = self.delete_version_deltas(batch_size).await?;
-            total_deleted += deleted;
-            if total_deleted == 0 || remain < batch_size {
-                break;
-            }
-        }
-        Ok(total_deleted)
-    }
-
     pub async fn delete_time_travel_metadata(&self) -> MetaResult<()> {
         let current_epoch_time = Epoch::now().physical_time();
         let epoch_watermark = Epoch::from_physical_time(
@@ -618,8 +588,8 @@ mod tests {
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_rpc_client::HummockMetaClient;
 
-    use crate::hummock::test_utils::{add_test_tables, setup_compute_env};
     use crate::hummock::MockHummockMetaClient;
+    use crate::hummock::test_utils::{add_test_tables, setup_compute_env};
 
     #[tokio::test]
     async fn test_full_gc() {

@@ -18,12 +18,15 @@ mod prometheus;
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::Debug;
 use std::num::NonZeroU64;
+use std::str::FromStr;
 use std::sync::Arc;
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use async_trait::async_trait;
 use iceberg::arrow::{arrow_schema_to_schema, schema_to_arrow_schema};
-use iceberg::spec::{DataFile, SerializedDataFile};
+use iceberg::spec::{
+    DataFile, SerializedDataFile, Transform, UnboundPartitionField, UnboundPartitionSpec,
+};
 use iceberg::table::Table;
 use iceberg::transaction::Transaction;
 use iceberg::writer::base_writer::data_file_writer::DataFileWriterBuilder;
@@ -31,14 +34,14 @@ use iceberg::writer::base_writer::equality_delete_writer::{
     EqualityDeleteFileWriterBuilder, EqualityDeleteWriterConfig,
 };
 use iceberg::writer::base_writer::sort_position_delete_writer::{
-    SortPositionDeleteWriterBuilder, POSITION_DELETE_SCHEMA,
+    POSITION_DELETE_SCHEMA, SortPositionDeleteWriterBuilder,
 };
+use iceberg::writer::file_writer::ParquetWriterBuilder;
 use iceberg::writer::file_writer::location_generator::{
     DefaultFileNameGenerator, DefaultLocationGenerator,
 };
-use iceberg::writer::file_writer::ParquetWriterBuilder;
 use iceberg::writer::function_writer::equality_delta_writer::{
-    EqualityDeltaWriterBuilder, DELETE_OP, INSERT_OP,
+    DELETE_OP, EqualityDeltaWriterBuilder, INSERT_OP,
 };
 use iceberg::writer::function_writer::fanout_partition_writer::FanoutPartitionWriterBuilder;
 use iceberg::writer::{IcebergWriter, IcebergWriterBuilder};
@@ -47,9 +50,11 @@ use itertools::Itertools;
 use parquet::file::properties::WriterProperties;
 use prometheus::monitored_general_writer::MonitoredGeneralWriterBuilder;
 use prometheus::monitored_position_delete_writer::MonitoredPositionDeleteWriterBuilder;
+use regex::Regex;
 use risingwave_common::array::arrow::arrow_array_iceberg::{Int32Array, RecordBatch};
 use risingwave_common::array::arrow::arrow_schema_iceberg::{
-    self, DataType as ArrowDataType, Field as ArrowField, Schema as ArrowSchema, SchemaRef,
+    self, DataType as ArrowDataType, Field as ArrowField, Fields as ArrowFields,
+    Schema as ArrowSchema, SchemaRef,
 };
 use risingwave_common::array::arrow::{IcebergArrowConvert, IcebergCreateTableArrowConvert};
 use risingwave_common::array::{Op, StreamChunk};
@@ -58,12 +63,12 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntCounter};
 use risingwave_common_estimate_size::EstimateSize;
+use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
-use risingwave_pb::connector_service::SinkMetadata;
 use serde_derive::Deserialize;
 use serde_json::from_value;
-use serde_with::{serde_as, DisplayFromStr};
+use serde_with::{DisplayFromStr, serde_as};
 use thiserror_ext::AsReport;
 use tokio::sync::{mpsc, oneshot};
 use tracing::warn;
@@ -72,11 +77,11 @@ use uuid::Uuid;
 use with_options::WithOptions;
 
 use super::decouple_checkpoint_log_sink::{
-    default_commit_checkpoint_interval, DecoupleCheckpointLogSinkerOf,
+    DecoupleCheckpointLogSinkerOf, default_commit_checkpoint_interval,
 };
 use super::{
-    Sink, SinkError, SinkWriterMetrics, SinkWriterParam, GLOBAL_SINK_METRICS,
-    SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
+    GLOBAL_SINK_METRICS, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, Sink,
+    SinkError, SinkWriterMetrics, SinkWriterParam,
 };
 use crate::connector_common::IcebergCommon;
 use crate::sink::coordinate::CoordinatedSinkWriter;
@@ -108,6 +113,9 @@ pub struct IcebergConfig {
     // Props for java catalog props.
     #[serde(skip)]
     pub java_catalog_props: HashMap<String, String>,
+
+    #[serde(default)]
+    pub partition_by: Option<String>,
 
     /// Commit every n(>0) checkpoints, default is 10.
     #[serde(default = "default_commit_checkpoint_interval")]
@@ -311,13 +319,86 @@ impl IcebergSink {
                 }
             };
 
+            let partition_spec = match &self.config.partition_by {
+                Some(partition_field) => {
+                    let mut partition_fields = Vec::<UnboundPartitionField>::new();
+                    // captures column, transform(column), transform(n,column), transform(n, column)
+                    let re = Regex::new(
+                        r"(?<transform>\w+)(\(((?<n>\d+)?(?:,|(,\s)))?(?<field>\w+)\))?",
+                    )
+                    .unwrap();
+                    if !re.is_match(partition_field) {
+                        bail!(format!(
+                            "Invalid partition fields: {}\nHINT: Supported formats are column, transform(column), transform(n,column), transform(n, column)",
+                            partition_field
+                        ))
+                    }
+                    let caps = re.captures_iter(partition_field);
+                    for (i, mat) in caps.enumerate() {
+                        let (column, transform) =
+                            if mat.name("n").is_none() && mat.name("field").is_none() {
+                                (&mat["transform"], Transform::Identity)
+                            } else {
+                                let mut func = mat["transform"].to_owned();
+                                if func == "bucket" || func == "truncate" {
+                                    let n = &mat
+                                        .name("n")
+                                        .ok_or_else(|| {
+                                            SinkError::Iceberg(anyhow!(
+                                                "The `n` must be set with `bucket` and `truncate`"
+                                            ))
+                                        })?
+                                        .as_str();
+                                    func = format!("{func}[{n}]");
+                                }
+                                (
+                                    &mat["field"],
+                                    Transform::from_str(&func)
+                                        .map_err(|e| SinkError::Iceberg(anyhow!(e)))?,
+                                )
+                            };
+
+                        match iceberg_schema.field_id_by_name(column) {
+                            Some(id) => partition_fields.push(
+                                UnboundPartitionField::builder()
+                                    .source_id(id)
+                                    .transform(transform)
+                                    .name(column.to_owned())
+                                    .field_id(i as i32)
+                                    .build(),
+                            ),
+                            None => bail!(format!(
+                                "Partition source column does not exist in schema: {}",
+                                column
+                            )),
+                        };
+                    }
+                    Some(
+                        UnboundPartitionSpec::builder()
+                            .with_spec_id(0)
+                            .add_partition_fields(partition_fields)
+                            .map_err(|e| SinkError::Iceberg(anyhow!(e)))
+                            .context("failed to add partition columns")?
+                            .build(),
+                    )
+                }
+                None => None,
+            };
+
             let table_creation_builder = TableCreation::builder()
                 .name(self.config.common.table_name.clone())
                 .schema(iceberg_schema);
 
-            let table_creation = match location {
-                Some(location) => table_creation_builder.location(location).build(),
-                None => table_creation_builder.build(),
+            let table_creation = match (location, partition_spec) {
+                (Some(location), Some(partition_spec)) => table_creation_builder
+                    .location(location)
+                    .partition_spec(partition_spec)
+                    .build(),
+                (Some(location), None) => table_creation_builder.location(location).build(),
+                (None, Some(partition_spec)) => table_creation_builder
+                    .partition_spec(partition_spec)
+                    .build(),
+                (None, None) => table_creation_builder.build(),
             };
 
             catalog
@@ -370,6 +451,9 @@ impl Sink for IcebergSink {
     const SINK_NAME: &'static str = ICEBERG_SINK;
 
     async fn validate(&self) -> Result<()> {
+        if "snowflake".eq_ignore_ascii_case(self.config.catalog_type()) {
+            bail!("Snowflake catalog only supports iceberg sources");
+        }
         if "glue".eq_ignore_ascii_case(self.config.catalog_type()) {
             risingwave_common::license::Feature::IcebergSinkWithGlue
                 .check_available()
@@ -414,6 +498,10 @@ impl Sink for IcebergSink {
             metrics,
             commit_checkpoint_interval,
         ))
+    }
+
+    fn is_coordinated_sink(&self) -> bool {
+        true
     }
 
     async fn new_coordinator(&self) -> Result<Self::Coordinator> {
@@ -1298,6 +1386,108 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
     }
 }
 
+const MAP_KEY: &str = "key";
+const MAP_VALUE: &str = "value";
+
+fn get_fields<'a>(
+    our_field_type: &'a risingwave_common::types::DataType,
+    data_type: &ArrowDataType,
+    schema_fields: &mut HashMap<&'a str, &'a risingwave_common::types::DataType>,
+) -> Option<ArrowFields> {
+    match data_type {
+        ArrowDataType::Struct(fields) => {
+            match our_field_type {
+                risingwave_common::types::DataType::Struct(struct_fields) => {
+                    struct_fields.iter().for_each(|(name, data_type)| {
+                        let res = schema_fields.insert(name, data_type);
+                        // This assert is to make sure there is no duplicate field name in the schema.
+                        assert!(res.is_none())
+                    });
+                }
+                risingwave_common::types::DataType::Map(map_fields) => {
+                    schema_fields.insert(MAP_KEY, map_fields.key());
+                    schema_fields.insert(MAP_VALUE, map_fields.value());
+                }
+                risingwave_common::types::DataType::List(list_field) => {
+                    list_field.as_struct().iter().for_each(|(name, data_type)| {
+                        let res = schema_fields.insert(name, data_type);
+                        // This assert is to make sure there is no duplicate field name in the schema.
+                        assert!(res.is_none())
+                    });
+                }
+                _ => {}
+            };
+            Some(fields.clone())
+        }
+        ArrowDataType::List(field) | ArrowDataType::Map(field, _) => {
+            get_fields(our_field_type, field.data_type(), schema_fields)
+        }
+        _ => None, // not a supported complex type and unlikely to show up
+    }
+}
+
+fn check_compatibility(
+    schema_fields: HashMap<&str, &risingwave_common::types::DataType>,
+    fields: &ArrowFields,
+) -> anyhow::Result<bool> {
+    for arrow_field in fields {
+        let our_field_type = schema_fields
+            .get(arrow_field.name().as_str())
+            .ok_or_else(|| anyhow!("Field {} not found in our schema", arrow_field.name()))?;
+
+        // Iceberg source should be able to read iceberg decimal type.
+        let converted_arrow_data_type = IcebergArrowConvert
+            .to_arrow_field("", our_field_type)
+            .map_err(|e| anyhow!(e))?
+            .data_type()
+            .clone();
+
+        let compatible = match (&converted_arrow_data_type, arrow_field.data_type()) {
+            (ArrowDataType::Decimal128(_, _), ArrowDataType::Decimal128(_, _)) => true,
+            (ArrowDataType::Binary, ArrowDataType::LargeBinary) => true,
+            (ArrowDataType::LargeBinary, ArrowDataType::Binary) => true,
+            (ArrowDataType::List(_), ArrowDataType::List(field))
+            | (ArrowDataType::Map(_, _), ArrowDataType::Map(field, _)) => {
+                let mut schema_fields = HashMap::new();
+                get_fields(our_field_type, field.data_type(), &mut schema_fields)
+                    .map_or(true, |fields| {
+                        check_compatibility(schema_fields, &fields).unwrap()
+                    })
+            }
+            // validate nested structs
+            (ArrowDataType::Struct(_), ArrowDataType::Struct(fields)) => {
+                let mut schema_fields = HashMap::new();
+                our_field_type
+                    .as_struct()
+                    .iter()
+                    .for_each(|(name, data_type)| {
+                        let res = schema_fields.insert(name, data_type);
+                        // This assert is to make sure there is no duplicate field name in the schema.
+                        assert!(res.is_none())
+                    });
+                check_compatibility(schema_fields, fields)?
+            }
+            // cases where left != right (metadata, field name mismatch)
+            //
+            // all nested types: in iceberg `field_id` will always be present, but RW doesn't have it:
+            // {"PARQUET:field_id": ".."}
+            //
+            // map: The standard name in arrow is "entries", "key", "value".
+            // in iceberg-rs, it's called "key_value"
+            (left, right) => left.equals_datatype(right),
+        };
+        if !compatible {
+            bail!(
+                "field {}'s type is incompatible\nRisingWave converted data type: {}\niceberg's data type: {}",
+                arrow_field.name(),
+                converted_arrow_data_type,
+                arrow_field.data_type()
+            );
+        }
+    }
+    Ok(true)
+}
+
 /// Try to match our schema with iceberg schema.
 pub fn try_matches_arrow_schema(
     rw_schema: &Schema,
@@ -1313,42 +1503,12 @@ pub fn try_matches_arrow_schema(
 
     let mut schema_fields = HashMap::new();
     rw_schema.fields.iter().for_each(|field| {
-        let res = schema_fields.insert(&field.name, &field.data_type);
+        let res = schema_fields.insert(field.name.as_str(), &field.data_type);
         // This assert is to make sure there is no duplicate field name in the schema.
         assert!(res.is_none())
     });
 
-    for arrow_field in &arrow_schema.fields {
-        let our_field_type = schema_fields
-            .get(arrow_field.name())
-            .ok_or_else(|| anyhow!("Field {} not found in our schema", arrow_field.name()))?;
-
-        // Iceberg source should be able to read iceberg decimal type.
-        let converted_arrow_data_type = IcebergArrowConvert
-            .to_arrow_field("", our_field_type)
-            .map_err(|e| anyhow!(e))?
-            .data_type()
-            .clone();
-
-        let compatible = match (&converted_arrow_data_type, arrow_field.data_type()) {
-            (ArrowDataType::Decimal128(_, _), ArrowDataType::Decimal128(_, _)) => true,
-            (ArrowDataType::Binary, ArrowDataType::LargeBinary) => true,
-            (ArrowDataType::LargeBinary, ArrowDataType::Binary) => true,
-            // cases where left != right (metadata, field name mismatch)
-            //
-            // all nested types: in iceberg `field_id` will always be present, but RW doesn't have it:
-            // {"PARQUET:field_id": ".."}
-            //
-            // map: The standard name in arrow is "entries", "key", "value".
-            // in iceberg-rs, it's called "key_value"
-            (left, right) => left.equals_datatype(right),
-        };
-        if !compatible {
-            bail!("field {}'s type is incompatible\nRisingWave converted data type: {}\niceberg's data type: {}",
-                    arrow_field.name(), converted_arrow_data_type, arrow_field.data_type()
-                );
-        }
-    }
+    check_compatibility(schema_fields, &arrow_schema.fields)?;
     Ok(())
 }
 
@@ -1356,7 +1516,9 @@ pub fn try_matches_arrow_schema(
 mod test {
     use std::collections::BTreeMap;
 
+    use risingwave_common::array::arrow::arrow_schema_iceberg::FieldRef as ArrowFieldRef;
     use risingwave_common::catalog::Field;
+    use risingwave_common::types::{MapType, StructType};
 
     use crate::connector_common::IcebergCommon;
     use crate::sink::decouple_checkpoint_log_sink::DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE;
@@ -1394,6 +1556,140 @@ mod test {
             ArrowField::new("c", ArrowDataType::Int32, false),
         ]);
         try_matches_arrow_schema(&risingwave_schema, &arrow_schema).unwrap();
+
+        let risingwave_schema = Schema::new(vec![
+            Field::with_name(
+                DataType::Struct(StructType::new(vec![
+                    ("a1", DataType::Int32),
+                    (
+                        "a2",
+                        DataType::Struct(StructType::new(vec![
+                            ("a21", DataType::Bytea),
+                            (
+                                "a22",
+                                DataType::Map(MapType::from_kv(DataType::Varchar, DataType::Jsonb)),
+                            ),
+                        ])),
+                    ),
+                ])),
+                "a",
+            ),
+            Field::with_name(
+                DataType::List(Box::new(DataType::Struct(StructType::new(vec![
+                    ("b1", DataType::Int32),
+                    ("b2", DataType::Bytea),
+                    (
+                        "b3",
+                        DataType::Map(MapType::from_kv(DataType::Varchar, DataType::Jsonb)),
+                    ),
+                ])))),
+                "b",
+            ),
+            Field::with_name(
+                DataType::Map(MapType::from_kv(
+                    DataType::Varchar,
+                    DataType::List(Box::new(DataType::Struct(StructType::new([
+                        ("c1", DataType::Int32),
+                        ("c2", DataType::Bytea),
+                        (
+                            "c3",
+                            DataType::Map(MapType::from_kv(DataType::Varchar, DataType::Jsonb)),
+                        ),
+                    ])))),
+                )),
+                "c",
+            ),
+        ]);
+        let arrow_schema = ArrowSchema::new(vec![
+            ArrowField::new(
+                "a",
+                ArrowDataType::Struct(ArrowFields::from(vec![
+                    ArrowField::new("a1", ArrowDataType::Int32, false),
+                    ArrowField::new(
+                        "a2",
+                        ArrowDataType::Struct(ArrowFields::from(vec![
+                            ArrowField::new("a21", ArrowDataType::LargeBinary, false),
+                            ArrowField::new_map(
+                                "a22",
+                                "entries",
+                                ArrowFieldRef::new(ArrowField::new(
+                                    "key",
+                                    ArrowDataType::Utf8,
+                                    false,
+                                )),
+                                ArrowFieldRef::new(ArrowField::new(
+                                    "value",
+                                    ArrowDataType::Utf8,
+                                    false,
+                                )),
+                                false,
+                                false,
+                            ),
+                        ])),
+                        false,
+                    ),
+                ])),
+                false,
+            ),
+            ArrowField::new(
+                "b",
+                ArrowDataType::List(ArrowFieldRef::new(ArrowField::new_list_field(
+                    ArrowDataType::Struct(ArrowFields::from(vec![
+                        ArrowField::new("b1", ArrowDataType::Int32, false),
+                        ArrowField::new("b2", ArrowDataType::LargeBinary, false),
+                        ArrowField::new_map(
+                            "b3",
+                            "entries",
+                            ArrowFieldRef::new(ArrowField::new("key", ArrowDataType::Utf8, false)),
+                            ArrowFieldRef::new(ArrowField::new(
+                                "value",
+                                ArrowDataType::Utf8,
+                                false,
+                            )),
+                            false,
+                            false,
+                        ),
+                    ])),
+                    false,
+                ))),
+                false,
+            ),
+            ArrowField::new_map(
+                "c",
+                "entries",
+                ArrowFieldRef::new(ArrowField::new("key", ArrowDataType::Utf8, false)),
+                ArrowFieldRef::new(ArrowField::new(
+                    "value",
+                    ArrowDataType::List(ArrowFieldRef::new(ArrowField::new_list_field(
+                        ArrowDataType::Struct(ArrowFields::from(vec![
+                            ArrowField::new("c1", ArrowDataType::Int32, false),
+                            ArrowField::new("c2", ArrowDataType::LargeBinary, false),
+                            ArrowField::new_map(
+                                "c3",
+                                "entries",
+                                ArrowFieldRef::new(ArrowField::new(
+                                    "key",
+                                    ArrowDataType::Utf8,
+                                    false,
+                                )),
+                                ArrowFieldRef::new(ArrowField::new(
+                                    "value",
+                                    ArrowDataType::Utf8,
+                                    false,
+                                )),
+                                false,
+                                false,
+                            ),
+                        ])),
+                        false,
+                    ))),
+                    false,
+                )),
+                false,
+                false,
+            ),
+        ]);
+        try_matches_arrow_schema(&risingwave_schema, &arrow_schema).unwrap();
     }
 
     #[test]
@@ -1402,6 +1698,7 @@ mod test {
             ("connector", "iceberg"),
             ("type", "upsert"),
             ("primary_key", "v1"),
+            ("partition_by", "v1, identity(v1), truncate(4,v2), bucket(5,v1), year(v3), month(v4), day(v5), hour(v6), void(v1)"),
             ("warehouse.path", "s3://iceberg"),
             ("s3.endpoint", "http://127.0.0.1:9301"),
             ("s3.access.key", "hummockadmin"),
@@ -1432,6 +1729,7 @@ mod test {
                 secret_key: Some("hummockadmin".to_owned()),
                 gcs_credential: None,
                 catalog_type: Some("jdbc".to_owned()),
+                glue_id: None,
                 catalog_name: Some("demo".to_owned()),
                 database_name: Some("demo_db".to_owned()),
                 table_name: "demo_table".to_owned(),
@@ -1445,6 +1743,7 @@ mod test {
             r#type: "upsert".to_owned(),
             force_append_only: false,
             primary_key: Some(vec!["v1".to_owned()]),
+            partition_by: Some("v1, identity(v1), truncate(4,v2), bucket(5,v1), year(v3), month(v4), day(v5), hour(v6), void(v1)".to_owned()),
             java_catalog_props: [("jdbc.user", "admin"), ("jdbc.password", "123456")]
                 .into_iter()
                 .map(|(k, v)| (k.to_owned(), v.to_owned()))

@@ -19,7 +19,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use bytes::Bytes;
-use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
+use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header};
 use parking_lot::Mutex;
 use risingwave_common::types::DataType;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
@@ -27,13 +27,12 @@ use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_sqlparser::ast::{RedactSqlOptionKeywordsRef, Statement};
 use serde::Deserialize;
 use thiserror_ext::AsReport;
-use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::error::{PsqlError, PsqlResult};
 use crate::net::{AddressRef, Listener, TcpKeepalive};
 use crate::pg_field_descriptor::PgFieldDescriptor;
 use crate::pg_message::TransactionStatus;
-use crate::pg_protocol::{PgProtocol, TlsConfig};
+use crate::pg_protocol::{PgByteStream, PgProtocol, TlsConfig};
 use crate::pg_response::{PgResponse, ValuesStream};
 use crate::types::Format;
 
@@ -95,9 +94,10 @@ pub trait Session: Send + Sync {
         params_types: Vec<Option<DataType>>,
     ) -> impl Future<Output = Result<Self::PreparedStatement, BoxedError>> + Send;
 
-    // TODO: maybe this function should be async and return the notice more timely
-    /// try to take the current notices from the session
-    fn take_notices(self: Arc<Self>) -> Vec<String>;
+    /// Receive the next notice message to send to the client.
+    ///
+    /// This function should be cancellation-safe.
+    fn next_notice(self: &Arc<Self>) -> impl Future<Output = String> + Send;
 
     fn bind(
         self: Arc<Self>,
@@ -331,32 +331,19 @@ pub async fn handle_connection<S, SM>(
     peer_addr: AddressRef,
     redact_sql_option_keywords: Option<RedactSqlOptionKeywordsRef>,
 ) where
-    S: AsyncWrite + AsyncRead + Unpin,
+    S: PgByteStream,
     SM: SessionManager,
 {
-    let mut pg_proto = PgProtocol::new(
+    PgProtocol::new(
         stream,
         session_mgr,
         tls_config,
         peer_addr,
         redact_sql_option_keywords,
-    );
-    loop {
-        let msg = match pg_proto.read_message().await {
-            Ok(msg) => msg,
-            Err(e) => {
-                tracing::error!(error = %e.as_report(), "error when reading message");
-                break;
-            }
-        };
-        tracing::trace!("Received message: {:?}", msg);
-        let ret = pg_proto.process(msg).await;
-        if ret {
-            break;
-        }
-    }
+    )
+    .run()
+    .await;
 }
-
 #[cfg(test)]
 mod tests {
     use std::error::Error;
@@ -364,8 +351,8 @@ mod tests {
     use std::time::Instant;
 
     use bytes::Bytes;
-    use futures::stream::BoxStream;
     use futures::StreamExt;
+    use futures::stream::BoxStream;
     use risingwave_common::types::DataType;
     use risingwave_common::util::tokio_util::sync::CancellationToken;
     use risingwave_sqlparser::ast::Statement;
@@ -376,8 +363,8 @@ mod tests {
     use crate::pg_message::TransactionStatus;
     use crate::pg_response::{PgResponse, RowSetResult, StatementType};
     use crate::pg_server::{
-        pg_serve, BoxedError, ExecContext, ExecContextGuard, Session, SessionId, SessionManager,
-        UserAuthenticator,
+        BoxedError, ExecContext, ExecContextGuard, Session, SessionId, SessionManager,
+        UserAuthenticator, pg_serve,
     };
     use crate::types;
     use crate::types::Row;
@@ -505,8 +492,8 @@ mod tests {
             Ok("".to_owned())
         }
 
-        fn take_notices(self: Arc<Self>) -> Vec<String> {
-            vec![]
+        async fn next_notice(self: &Arc<Self>) -> String {
+            std::future::pending().await
         }
 
         fn transaction_status(&self) -> TransactionStatus {

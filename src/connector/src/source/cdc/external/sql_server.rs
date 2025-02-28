@@ -14,9 +14,9 @@
 
 use std::cmp::Ordering;
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use futures::stream::BoxStream;
-use futures::{pin_mut, StreamExt, TryStreamExt};
+use futures::{StreamExt, TryStreamExt, pin_mut};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::bail;
@@ -27,7 +27,7 @@ use serde_derive::{Deserialize, Serialize};
 use tiberius::{Config, Query, QueryItem};
 
 use crate::error::{ConnectorError, ConnectorResult};
-use crate::parser::{sql_server_row_to_owned_row, ScalarImplTiberiusWrapper};
+use crate::parser::{ScalarImplTiberiusWrapper, sql_server_row_to_owned_row};
 use crate::sink::sqlserver::SqlServerClient;
 use crate::source::cdc::external::{
     CdcOffset, CdcOffsetParseFunc, DebeziumOffset, ExternalTableConfig, ExternalTableReader,
@@ -252,7 +252,9 @@ impl ExternalTableReader for SqlServerExternalTableReader {
                 }
                 hex_string
             }
-            None => bail!("None is returned by `SELECT sys.fn_cdc_get_max_lsn()`, please ensure Sql Server Agent is running."),
+            None => bail!(
+                "None is returned by `SELECT sys.fn_cdc_get_max_lsn()`, please ensure Sql Server Agent is running."
+            ),
         };
 
         tracing::debug!("current max_lsn: {}", max_lsn);

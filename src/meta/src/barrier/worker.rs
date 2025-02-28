@@ -21,8 +21,8 @@ use anyhow::anyhow;
 use arc_swap::ArcSwap;
 use itertools::Itertools;
 use risingwave_common::catalog::DatabaseId;
-use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::system_param::PAUSE_ON_NEXT_BOOTSTRAP_KEY;
+use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{PausedReason, Recovery};
 use risingwave_pb::stream_service::streaming_control_stream_response::Response;
@@ -32,16 +32,16 @@ use tokio::sync::oneshot::{Receiver, Sender};
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 use tonic::Status;
-use tracing::{debug, error, info, warn, Instrument};
+use tracing::{Instrument, debug, error, info, warn};
 
 use crate::barrier::checkpoint::{CheckpointControl, CheckpointControlEvent};
 use crate::barrier::complete_task::{BarrierCompleteOutput, CompletingTask};
 use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl};
-use crate::barrier::rpc::{merge_node_rpc_errors, ControlStreamManager};
+use crate::barrier::rpc::{ControlStreamManager, merge_node_rpc_errors};
 use crate::barrier::schedule::PeriodicBarriers;
 use crate::barrier::{
-    schedule, BarrierManagerRequest, BarrierManagerStatus, BarrierWorkerRuntimeInfoSnapshot,
-    RecoveryReason,
+    BarrierManagerRequest, BarrierManagerStatus, BarrierWorkerRuntimeInfoSnapshot, RecoveryReason,
+    schedule,
 };
 use crate::error::MetaErrorInner;
 use crate::hummock::HummockManagerRef;
@@ -545,7 +545,7 @@ impl<C> GlobalBarrierWorker<C> {
 mod retry_strategy {
     use std::time::Duration;
 
-    use tokio_retry::strategy::{jitter, ExponentialBackoff};
+    use tokio_retry::strategy::{ExponentialBackoff, jitter};
 
     // Retry base interval in milliseconds.
     const RECOVERY_RETRY_BASE_INTERVAL: u64 = 20;
@@ -724,7 +724,8 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     ),
                 )
             };
-            if recovery_result.is_err() {
+            if let Err(err) = &recovery_result {
+                tracing::error!(error = %err.as_report(), "recovery failed");
                 GLOBAL_META_METRICS.recovery_failure_cnt.inc();
             }
             recovery_result

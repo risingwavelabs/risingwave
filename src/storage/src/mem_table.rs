@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
+use std::collections::btree_map::Entry;
 use std::ops::Bound::{Included, Unbounded};
 use std::ops::RangeBounds;
 
@@ -418,17 +418,17 @@ mod tests {
     use bytes::{BufMut, Bytes, BytesMut};
     use itertools::Itertools;
     use rand::seq::SliceRandom;
-    use rand::{thread_rng, Rng};
+    use rand::{Rng, thread_rng};
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
-    use risingwave_common::util::epoch::{test_epoch, EpochExt};
-    use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
+    use risingwave_common::util::epoch::{EpochExt, test_epoch};
     use risingwave_hummock_sdk::EpochWithGap;
+    use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
 
     use crate::hummock::iterator::HummockIterator;
     use crate::hummock::value::HummockValue;
     use crate::mem_table::{KeyOp, MemTable, MemTableHummockIterator, MemTableHummockRevIterator};
-    use crate::store::{OpConsistencyLevel, CHECK_BYTES_EQUAL};
+    use crate::store::{CHECK_BYTES_EQUAL, OpConsistencyLevel};
 
     #[tokio::test]
     async fn test_mem_table_memory_size() {

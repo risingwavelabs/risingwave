@@ -25,8 +25,8 @@ pub use enumerator::*;
 use itertools::Itertools;
 use risingwave_pb::catalog::PbSource;
 use risingwave_pb::connector_service::{PbSourceType, PbTableSchema, SourceType, TableSchema};
-use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::ExternalTableDesc;
+use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use simd_json::prelude::ArrayTrait;
 pub use source::*;
 

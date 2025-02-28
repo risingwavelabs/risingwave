@@ -20,6 +20,7 @@ use risingwave_common::util::sort_util::ColumnOrder;
 use super::top_n_cache::{AppendOnlyTopNCacheTrait, TopNStaging};
 use super::utils::*;
 use super::{ManagedTopNState, TopNCache};
+use crate::common::table::state_table::StateTablePostCommit;
 use crate::executor::prelude::*;
 
 /// If the input is append-only, `AppendOnlyGroupTopNExecutor` does not need
@@ -104,6 +105,8 @@ impl<S: StateStore, const WITH_TIES: bool> TopNExecutorBase
 where
     TopNCache<WITH_TIES>: AppendOnlyTopNCacheTrait,
 {
+    type State = S;
+
     async fn apply_chunk(
         &mut self,
         chunk: StreamChunk,
@@ -136,7 +139,10 @@ where
         Ok(chunk_builder.take())
     }
 
-    async fn flush_data(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
+    async fn flush_data(
+        &mut self,
+        epoch: EpochPair,
+    ) -> StreamExecutorResult<StateTablePostCommit<'_, S>> {
         self.managed_state.flush(epoch).await
     }
 
@@ -160,8 +166,8 @@ where
 #[cfg(test)]
 mod tests {
 
-    use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::StreamChunk;
+    use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
     use risingwave_common::util::epoch::test_epoch;

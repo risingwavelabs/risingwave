@@ -18,7 +18,7 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::generic::{self, PlanAggCall};
 use super::stream::prelude::*;
-use super::utils::{childless_record, plan_node_name, Distill};
+use super::utils::{Distill, childless_record, plan_node_name};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
@@ -148,7 +148,7 @@ impl StreamNode for StreamSimpleAgg {
                 })
                 .collect(),
             row_count_index: self.row_count_idx as u32,
-            version: PbAggNodeVersion::Issue13465 as _,
+            version: PbAggNodeVersion::LATEST as _,
             must_output_per_barrier: self.must_output_per_barrier,
         }))
     }
