@@ -14,7 +14,7 @@
 
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
-use std::sync::Once;
+use std::sync::atomic::AtomicBool;
 use std::time::Instant;
 
 use anyhow::anyhow;
@@ -427,7 +427,8 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
 
         let state_store = self.backfill_state_store.state_store.state_store().clone();
         let table_id = self.backfill_state_store.state_store.table_id().into();
-        static STATE_TABLE_INITIALIZED: Once = Once::new();
+        let state_table_initialized = Arc::new(AtomicBool::new(false));
+        let state_table_initialized_ = state_table_initialized.clone();
         tokio::spawn(async move {
             // This is for self.backfill_finished() to be safe.
             // We wait for 1st epoch's curr, i.e., the 2nd epoch's prev.
@@ -440,7 +441,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                 )
                 .await
                 .expect("failed to wait epoch");
-            STATE_TABLE_INITIALIZED.call_once(|| ());
+            state_table_initialized_.store(true, std::sync::atomic::Ordering::Release);
             tracing::info!("finished waiting for epoch: {}", epoch);
         });
         yield Message::Barrier(barrier);
@@ -625,7 +626,8 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
 
                                     // After we reported finished, we still don't exit the loop.
                                     // Because we need to handle split migration.
-                                    if STATE_TABLE_INITIALIZED.is_completed()
+                                    if state_table_initialized
+                                        .load(std::sync::atomic::Ordering::Acquire)
                                         && self.backfill_finished(&backfill_stage.states).await?
                                     {
                                         break 'backfill_loop;
