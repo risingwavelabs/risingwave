@@ -36,5 +36,5 @@ echo "--- e2e, $mode, slow tests"
 python3 -m pip install --break-system-packages arrow-udf==0.3.0
 RUST_LOG="info" \
 risedev ci-start "$mode"
-sqllogictest -p 4566 -d dev './e2e_test/slow_tests/**/*.slt'
+risedev slt -p 4566 -d dev './e2e_test/slow_tests/**/*.slt'
 risedev kill
