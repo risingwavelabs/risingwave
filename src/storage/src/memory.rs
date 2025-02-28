@@ -1085,7 +1085,12 @@ impl<R: RangeKv> LocalStateStore for RangeKvLocalStateStore<R> {
             if let Some(prev_latest_sealed_epoch) =
                 table_state.latest_sealed_epoch.replace(prev_epoch)
             {
-                assert!(prev_epoch > prev_latest_sealed_epoch);
+                if self.vnodes.len() == 1 {
+                    // for singleton distribution, multiple parallelisms may write at different keys but at the same vnode.
+                    assert!(prev_epoch >= prev_latest_sealed_epoch);
+                } else {
+                    assert!(prev_epoch > prev_latest_sealed_epoch);
+                }
             }
         }
 
