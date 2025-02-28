@@ -536,8 +536,7 @@ pub(crate) fn gen_create_table_plan(
 ) -> Result<(PlanRef, PbTable)> {
     let mut columns = bind_sql_columns(&column_defs, is_for_replace_plan)?;
     for c in &mut columns {
-        col_id_gen.generate_new(c)?;
-        // c.column_desc.column_id = col_id_gen.generate(&*c)?;
+        col_id_gen.generate(c)?;
     }
 
     let (_, secret_refs, connection_refs) = context.with_options().clone().into_parts();
@@ -812,7 +811,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     )?;
 
     for c in &mut columns {
-        col_id_gen.generate_new(c)?;
+        col_id_gen.generate(c)?;
     }
 
     let (mut columns, pk_column_ids, _row_id_index) =
@@ -2167,7 +2166,7 @@ mod tests {
                 let mut columns = bind_sql_columns(&column_defs, false)?;
                 let mut col_id_gen = ColumnIdGenerator::new_initial();
                 for c in &mut columns {
-                    col_id_gen.generate_new(c)?;
+                    col_id_gen.generate(c)?;
                 }
 
                 let pk_names =
