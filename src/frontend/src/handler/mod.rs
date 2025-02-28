@@ -683,7 +683,9 @@ pub async fn handle(
             }
         },
         Statement::AlterTable { name, operation } => match operation {
-            AlterTableOperation::AddColumn { .. } | AlterTableOperation::DropColumn { .. } => {
+            AlterTableOperation::AddColumn { .. }
+            | AlterTableOperation::DropColumn { .. }
+            | AlterTableOperation::AlterColumn { .. } => {
                 alter_table_column::handle_alter_table_column(handler_args, name, operation).await
             }
             AlterTableOperation::RenameTable { table_name } => {
@@ -769,8 +771,7 @@ pub async fn handle(
             | AlterTableOperation::DropConstraint { .. }
             | AlterTableOperation::RenameColumn { .. }
             | AlterTableOperation::ChangeColumn { .. }
-            | AlterTableOperation::RenameConstraint { .. }
-            | AlterTableOperation::AlterColumn { .. } => {
+            | AlterTableOperation::RenameConstraint { .. } => {
                 bail_not_implemented!(
                     "Unhandled statement: {}",
                     Statement::AlterTable { name, operation }
