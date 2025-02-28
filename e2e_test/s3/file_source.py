@@ -278,6 +278,7 @@ def check_for_new_files(file_num, item_num_per_file, fmt):
         cur.execute(f"select count(*) from {_table()}")
         result = cur.fetchone()
         if result[0] == total_rows:
+            cur.execute(f'drop table {_table()};')
             return True
         print(
             f"[retry {retry_no}] Now got {result[0]} rows in table, {total_rows} expected, wait 10s"
@@ -374,7 +375,6 @@ if __name__ == "__main__":
     else:
         print("Test(add new file) fail")
 
-    cur.execute(f'drop table s3_test_json;')
     _s3 = lambda idx, start_bias: f"test_incremental/{run_id}_data_{idx + start_bias}.{fmt}"
     # clean up s3 files in test_incremental dir
     for idx, _ in enumerate(formatted_files):
