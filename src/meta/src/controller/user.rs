@@ -265,9 +265,11 @@ impl CatalogController {
             .one(&txn)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("user", grantor))?;
+        let mut filtered_privileges = vec![];
         if !user.is_super {
-            for privilege in &mut privileges {
+            for mut privilege in privileges {
                 if grantor == get_object_owner(*privilege.oid.as_ref(), &txn).await? {
+                    filtered_privileges.push(privilege);
                     continue;
                 }
                 let filter = user_privilege::Column::UserId
@@ -291,14 +293,17 @@ impl CatalogController {
                     continue;
                 };
                 privilege.dependent_id = Set(Some(privilege_id));
+                filtered_privileges.push(privilege);
             }
+        } else {
+            filtered_privileges = privileges;
         }
 
         // insert privileges
         let user_privileges = user_ids
             .iter()
             .flat_map(|user_id| {
-                privileges.iter().map(|p| {
+                filtered_privileges.iter().map(|p| {
                     let mut p = p.clone();
                     p.user_id = Set(*user_id);
                     p
@@ -601,18 +606,13 @@ mod tests {
             true,
         )
         .await?;
-        // user_1 grant CREATE without grant option to user_2.
-        assert!(
-            mgr.grant_privilege(
-                vec![user_2.user_id],
-                &[create_without_option.clone()],
-                user_1.user_id,
-                false,
-            )
-            .await
-            .is_err(),
-            "user_1 don't have grant option"
-        );
+        mgr.grant_privilege(
+            vec![user_2.user_id],
+            &[create_without_option.clone()],
+            user_1.user_id,
+            false,
+        )
+        .await?;
 
         assert!(
             mgr.drop_user(user_1.user_id).await.is_err(),
