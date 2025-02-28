@@ -482,33 +482,6 @@ KinesisProperties:
     required: false
     alias:
     - kinesis.assumerole.external_id
-LegacyS3Properties:
-  fields:
-  - name: s3.region_name
-    field_type: String
-    required: true
-  - name: s3.bucket_name
-    field_type: String
-    required: true
-  - name: match_pattern
-    field_type: String
-    required: false
-    default: Default::default
-  - name: s3.credentials.access
-    field_type: String
-    required: false
-    default: Default::default
-  - name: s3.credentials.secret
-    field_type: String
-    required: false
-    default: Default::default
-  - name: s3.endpoint_url
-    field_type: String
-    required: false
-  - name: compression_format
-    field_type: CompressionFormat
-    required: false
-    default: Default::default
 MongodbCommon:
   fields:
   - name: mongodb.url
