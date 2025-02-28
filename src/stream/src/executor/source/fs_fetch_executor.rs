@@ -28,14 +28,15 @@ use risingwave_connector::source::filesystem::opendal_source::{
 use risingwave_connector::source::filesystem::OpendalFsSplit;
 use risingwave_connector::source::reader::desc::SourceDesc;
 use risingwave_connector::source::{
-    BoxSourceChunkStream, SourceContext, SourceCtrlOpts, SplitImpl, SplitMetaData,
+    BoxStreamingFileSourceChunkStream, SourceContext, SourceCtrlOpts, SplitImpl, SplitMetaData,
 };
 use risingwave_storage::store::PrefetchOptions;
 use thiserror_ext::AsReport;
 
 use super::{
-    apply_rate_limit, get_split_offset_col_idx, get_split_offset_mapping_from_chunk,
-    prune_additional_cols, SourceStateTableHandler, StreamSourceCore,
+    apply_rate_limit_with_for_streaming_file_source_reader, get_split_offset_col_idx,
+    get_split_offset_mapping_from_chunk, prune_additional_cols, SourceStateTableHandler,
+    StreamSourceCore,
 };
 use crate::common::rate_limit::limited_chunk_size;
 use crate::executor::prelude::*;
@@ -82,7 +83,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
         column_ids: Vec<ColumnId>,
         source_ctx: SourceContext,
         source_desc: &SourceDesc,
-        stream: &mut StreamReaderWithPause<BIASED, StreamChunk>,
+        stream: &mut StreamReaderWithPause<BIASED, Option<StreamChunk>>,
         rate_limit_rps: Option<u32>,
     ) -> StreamExecutorResult<()> {
         let mut batch = Vec::with_capacity(SPLIT_BATCH_SIZE);
@@ -137,34 +138,57 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
             stream.replace_data_stream(stream::pending().boxed());
         } else {
             *splits_on_fetch += batch.len();
-            let batch_reader = Self::build_batched_stream_reader(
-                column_ids,
-                source_ctx,
-                source_desc,
-                Some(batch),
-                rate_limit_rps,
-            )
-            .await?
-            .map_err(StreamExecutorError::connector_error);
-            stream.replace_data_stream(batch_reader);
+
+            let mut merged_stream =
+                stream::empty::<StreamExecutorResult<Option<StreamChunk>>>().boxed();
+            // Change the previous implementation where multiple files shared a single SourceReader
+            // to a new approach where each SourceReader reads only one file.
+            // Then, merge the streams of multiple files serially here.
+            for split in batch {
+                let single_file_stream = Self::build_single_file_stream_reader(
+                    column_ids.clone(),
+                    source_ctx.clone(),
+                    source_desc,
+                    Some(vec![split]),
+                    rate_limit_rps,
+                )
+                .await?
+                .map_err(StreamExecutorError::connector_error);
+                let single_file_stream = single_file_stream.map(|reader| reader);
+                merged_stream = merged_stream.chain(single_file_stream).boxed();
+            }
+
+            stream.replace_data_stream(merged_stream);
         }
 
         Ok(())
     }
 
-    async fn build_batched_stream_reader(
+    // Note: This change applies only to the file source.
+    //
+    // Each SourceReader (for the streaming file source, this is the `OpendalReader` struct)
+    // reads only one file. After the chunk stream returned by the SourceReader,
+    // chain a None to indicate that the file has been fully read.
+    async fn build_single_file_stream_reader(
         column_ids: Vec<ColumnId>,
         source_ctx: SourceContext,
         source_desc: &SourceDesc,
         batch: SplitBatch,
         rate_limit_rps: Option<u32>,
-    ) -> StreamExecutorResult<BoxSourceChunkStream> {
+    ) -> StreamExecutorResult<BoxStreamingFileSourceChunkStream> {
         let (stream, _) = source_desc
             .source
             .build_stream(batch, column_ids, Arc::new(source_ctx), false)
             .await
             .map_err(StreamExecutorError::connector_error)?;
-        Ok(apply_rate_limit(stream, rate_limit_rps).boxed())
+        let optional_stream: BoxStreamingFileSourceChunkStream = stream
+            .map(|item| item.map(Some))
+            .chain(stream::once(async { Ok(None) }))
+            .boxed();
+        Ok(
+            apply_rate_limit_with_for_streaming_file_source_reader(optional_stream, rate_limit_rps)
+                .boxed(),
+        )
     }
 
     fn build_source_ctx(
@@ -214,9 +238,10 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
         state_store_handler.init_epoch(first_epoch).await?;
 
         let mut splits_on_fetch: usize = 0;
-        let mut stream =
-            StreamReaderWithPause::<true, StreamChunk>::new(upstream, stream::pending().boxed());
-
+        let mut stream = StreamReaderWithPause::<true, Option<StreamChunk>>::new(
+            upstream,
+            stream::pending().boxed(),
+        );
         if is_pause_on_startup {
             stream.pause_stream();
         }
@@ -234,6 +259,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
             self.rate_limit_rps,
         )
         .await?;
+        let mut delete_file: Arc<str> = "".into();
 
         while let Some(msg) = stream.next().await {
             match msg {
@@ -344,25 +370,25 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                         //    file, it was necessary to read the metadata to obtain the total number of rows in the file,
                         //    which is an expensive operation.
                         //
-                        // To address these issues, at the end of the last chunk produced for each file's chunk stream, the offset is set to usize::MAX.
-                        // Whenever the fetcher encounters an offset of usize::MAX, it will delete the file.
-                        Either::Right(chunk) => {
-                            let mapping =
-                                get_split_offset_mapping_from_chunk(&chunk, split_idx, offset_idx)
-                                    .unwrap();
-                            debug_assert_eq!(mapping.len(), 1);
-                            if let Some((split_id, offset)) = mapping.into_iter().next() {
-                                // When `offset = usize::MAX` , it indicates that reading the current file (split_id) is finished.
-                                // At this point, it can be deleted from the state table.
-                                if offset.parse::<usize>().unwrap() == usize::MAX {
-                                    splits_on_fetch -= 1;
-                                    state_store_handler.delete(split_id).await?;
-                                } else {
+                        // To address these issues, we changes the approach to determining whether a file is fully
+                        // read by moving the check outside the reader. The fetch executor's right stream has been
+                        // changed from a chunk stream to an `Option<Chunk>` stream. When a file is completely read,
+                        // a `None` value is added at the end of the file stream to signal to the fetch executor that the
+                        // file has been fully read. Upon encountering `None`, the file is deleted.
+                        Either::Right(optional_chunk) => match optional_chunk {
+                            Some(chunk) => {
+                                let mapping = get_split_offset_mapping_from_chunk(
+                                    &chunk, split_idx, offset_idx,
+                                )
+                                .unwrap();
+                                debug_assert_eq!(mapping.len(), 1);
+                                if let Some((split_id, _offset)) = mapping.into_iter().next() {
+                                    delete_file = split_id.clone();
                                     let row = state_store_handler.get(split_id.clone()).await?
-                                    .unwrap_or_else(|| {
-                                        panic!("The fs_split (file_name) {:?} should be in the state table.",
-                                      split_id)
-                                    });
+                                        .unwrap_or_else(|| {
+                                            panic!("The fs_split (file_name) {:?} should be in the state table.",
+                                        split_id)
+                                        });
                                     let fs_split = match row.datum_at(1) {
                                         Some(ScalarRefImpl::Jsonb(jsonb_ref)) => {
                                             OpendalFsSplit::<Src>::restore_from_json(
@@ -376,15 +402,19 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                         .set(split_id, fs_split.encode_to_json())
                                         .await?;
                                 }
+                                let chunk = prune_additional_cols(
+                                    &chunk,
+                                    split_idx,
+                                    offset_idx,
+                                    &source_desc.columns,
+                                );
+                                yield Message::Chunk(chunk);
                             }
-                            let chunk = prune_additional_cols(
-                                &chunk,
-                                split_idx,
-                                offset_idx,
-                                &source_desc.columns,
-                            );
-                            yield Message::Chunk(chunk);
-                        }
+                            None => {
+                                splits_on_fetch -= 1;
+                                state_store_handler.delete(delete_file.clone()).await?;
+                            }
+                        },
                     }
                 }
             }

@@ -331,32 +331,21 @@ if __name__ == "__main__":
                 _local(idx)
             )
 
-    # put s3 files
-    for idx, file_str in enumerate(formatted_files):
-        with open(_local(idx), "w") as f:
-            with gzip.open(_local(idx) + '.gz', 'wb') as f_gz:
-                f_gz.write(file_str.encode('utf-8'))
-                os.fsync(f.fileno())
-
-        client.fput_object(
-            "hummock001",
-            _s3(idx),
-            _local(idx) + '.gz'
-        )
-
     # do test
     print("Test streaming file source...\n")
     do_test(config, FILE_NUM, ITEM_NUM_PER_FILE, run_id, fmt)
 
     print("Test batch read file source...\n")
     test_batch_read(config, FILE_NUM, ITEM_NUM_PER_FILE, run_id, fmt)
-
-    _s3 = lambda idx, start_bias: f"{run_id}_data_{idx + start_bias}.{fmt}"
-
+ 
+    _s3 = lambda idx, start_bias: (
+        f"{run_id}_data_{idx + start_bias}.{fmt}"
+        if fmt != 'json' else
+        f"{run_id}_data_{idx}.{fmt}.gz"
+    )
     # clean up s3 files
     for idx, _ in enumerate(formatted_files):
         client.remove_object("hummock001", _s3(idx, 0))
-
 
     # test file source handle incremental files
     data = gen_data(FILE_NUM, ITEM_NUM_PER_FILE)
@@ -384,11 +373,9 @@ if __name__ == "__main__":
         print("Test(add new file) pass")
     else:
         print("Test(add new file) fail")
-
-    _s3 = lambda idx, start_bias: f"{run_id}_data_{idx + start_bias}.{fmt}"
-
-    # clean up s3 files
-    for idx, _ in enumerate(formatted_files):
-        client.remove_object("hummock001", _s3(idx, 0))
+    
+    cur.execute(f'drop table s3_test_json;')
+    _s3 = lambda idx, start_bias: f"test_incremental/{run_id}_data_{idx + start_bias}.{fmt}"
+    # clean up s3 files in test_incremental dir
     for idx, _ in enumerate(formatted_files):
         client.remove_object("hummock001", _s3(idx, 0))

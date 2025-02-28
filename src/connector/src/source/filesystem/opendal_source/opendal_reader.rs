@@ -204,13 +204,7 @@ impl<Src: OpendalSource> OpendalReader<Src> {
                 // EOF
                 break;
             }
-            let remaining = buf_reader.fill_buf().await?;
-            // Set the offset of the last chunk = uszie::MAX to notify fetch executor that the file has been read to the end.
-            let msg_offset = if remaining.is_empty() {
-                usize::MAX.to_string()
-            } else {
-                (offset + n_read).to_string()
-            };
+            let msg_offset = (offset + n_read).to_string();
             // note that the buffer contains the newline character
             debug_assert_eq!(n_read, line_buf.len());
             if (object_name.ends_with(".gz") || object_name.ends_with(".gzip"))

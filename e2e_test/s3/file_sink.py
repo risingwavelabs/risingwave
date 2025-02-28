@@ -83,7 +83,7 @@ def do_test(config, file_num, item_num_per_file, prefix):
         );''')
     try:
         result = cur.fetchone()
-        assert result[0] == 2000, f'file scan assertion failed: the first column is {result[0]}, expect 0.'
+        assert result[0] == 2000, f'file scan assertion failed: the first column is {result[0]}, expect 2000.'
     except ValueError as e:
         print(f"cur.fetchone() got ValueError: {e}")
 
