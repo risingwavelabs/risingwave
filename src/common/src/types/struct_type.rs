@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use either::Either;
-use itertools::Itertools;
+use itertools::{Itertools, repeat_n};
 
 use super::DataType;
 use crate::catalog::ColumnId;
@@ -143,14 +143,14 @@ impl StructType {
     /// Returns `None` if they are not present. See documentation on the field `field_ids`
     /// for the cases.
     pub fn ids(&self) -> Option<impl ExactSizeIterator<Item = ColumnId> + '_> {
-        if self.is_empty() {
-            // Always return `Some(empty iterator)` for empty structs.
-            Some(Either::Left(std::iter::empty()))
-        } else {
-            self.0
-                .field_ids
-                .as_ref()
-                .map(|ids| Either::Right(ids.iter().copied()))
+        self.0.field_ids.as_ref().map(|ids| ids.iter().copied())
+    }
+
+    /// Get an iterator over the field ids, or a sequence of placeholder ids if they are not present.
+    pub fn ids_or_placeholder(&self) -> impl ExactSizeIterator<Item = ColumnId> + '_ {
+        match self.ids() {
+            Some(ids) => Either::Left(ids),
+            None => Either::Right(repeat_n(ColumnId::placeholder(), self.len())),
         }
     }
 
