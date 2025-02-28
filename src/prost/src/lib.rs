@@ -23,7 +23,6 @@
 // FIXME: This should be fixed!!! https://github.com/risingwavelabs/risingwave/issues/19906
 #![expect(clippy::large_enum_variant)]
 
-use std::collections::HashMap;
 use std::str::FromStr;
 
 use plan_common::AdditionalColumn;
@@ -382,20 +381,6 @@ impl stream_plan::Dispatcher {
             dist_key_indices: self.dist_key_indices.clone(),
             output_indices: self.output_indices.clone(),
         }
-    }
-}
-
-impl meta::table_fragments::Fragment {
-    pub fn dispatches(&self) -> HashMap<i32, stream_plan::DispatchStrategy> {
-        self.actors[0]
-            .dispatcher
-            .iter()
-            .map(|d| {
-                let fragment_id = d.dispatcher_id as _;
-                let strategy = d.as_strategy();
-                (fragment_id, strategy)
-            })
-            .collect()
     }
 }
 
