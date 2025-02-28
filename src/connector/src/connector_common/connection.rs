@@ -183,8 +183,10 @@ impl Connection for IcebergConnection {
             Some(warehouse_path) => {
                 let url = Url::parse(warehouse_path);
                 if url.is_err()
-                    && let Some(catalog_type) = &self.catalog_type
-                    && matches!(self.catalog_type.as_ref(), Some("rest" | "rest_rust"))
+                    && matches!(
+                        self.catalog_type.as_ref().map(|x| x.as_str()),
+                        Some("rest" | "rest_rust")
+                    )
                 {
                     // If the warehouse path is not a valid URL, it could be a warehouse name in rest catalog,
                     // so we allow it to pass here.
@@ -203,9 +205,10 @@ impl Connection for IcebergConnection {
                 }
             }
             None => {
-                if let Some(catalog_type) = &self.catalog_type
-                    && matches!(self.catalog_type.as_ref(), Some("rest" | "rest_rust"))
-                {
+                if matches!(
+                    self.catalog_type.as_ref().map(|x| x.as_str()),
+                    Some("rest" | "rest_rust")
+                ) {
                     None
                 } else {
                     bail!("`warehouse.path` must be set");
