@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod serverless_backfill_controller;
-
 use itertools::Itertools;
 use pgwire::pg_server::{BoxedError, SessionManager};
 use risingwave_pb::ddl_service::{ReplaceJobPlan, TableSchemaChange, replace_job_plan};
