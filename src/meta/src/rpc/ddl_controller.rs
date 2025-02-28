@@ -1699,6 +1699,14 @@ impl DdlController {
             resource_group.clone(),
         )?;
 
+        let parallelism = self
+            .env
+            .system_params_reader()
+            .await
+            .adaptive_parallelism_strategy()
+            .compute_target_parallelism(parallelism.get());
+
+        let parallelism = NonZeroUsize::new(parallelism).expect("parallelism must be positive");
         let actor_graph_builder = ActorGraphBuilder::new(
             id,
             resource_group,
