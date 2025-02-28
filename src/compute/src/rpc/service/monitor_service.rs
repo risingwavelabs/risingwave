@@ -28,11 +28,11 @@ use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_jni_core::jvm_runtime::dump_jvm_stack_traces;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorService;
 use risingwave_pb::monitor_service::{
-    AnalyzeHeapRequest, AnalyzeHeapResponse, ChannelStats, FragmentStats, GetStreamingStatsRequest,
-    GetStreamingStatsResponse, HeapProfilingRequest, HeapProfilingResponse,
-    ListHeapProfilingRequest, ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse,
-    RelationStats, StackTraceRequest, StackTraceResponse, TieredCacheTracingRequest,
-    TieredCacheTracingResponse,
+    AnalyzeHeapRequest, AnalyzeHeapResponse, ChannelStats, FragmentStats, GetProfileStatsRequest,
+    GetProfileStatsResponse, GetStreamingStatsRequest, GetStreamingStatsResponse,
+    HeapProfilingRequest, HeapProfilingResponse, ListHeapProfilingRequest,
+    ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse, RelationStats,
+    StackTraceRequest, StackTraceResponse, TieredCacheTracingRequest, TieredCacheTracingResponse,
 };
 use risingwave_rpc_client::error::ToTonicStatus;
 use risingwave_storage::hummock::compactor::await_tree_key::Compaction;
@@ -293,7 +293,18 @@ impl MonitorService for MonitorServiceImpl {
         _request: Request<GetProfileStatsRequest>,
     ) -> Result<Response<GetProfileStatsResponse>, Status> {
         let metrics = global_streaming_metrics(MetricLevel::Info);
-        todo!()
+        let stream_node_input_row_count = metrics.stream_node_input_row_count.collect();
+        let stream_node_output_row_count = metrics.stream_node_output_row_count.collect();
+        let stream_node_input_blocking_duration_ns =
+            metrics.stream_node_input_blocking_duration_ns.collect();
+        let stream_node_output_blocking_duration_ns =
+            metrics.stream_node_output_blocking_duration_ns.collect();
+        Ok(Response::new(GetProfileStatsResponse {
+            stream_node_input_row_count,
+            stream_node_output_row_count,
+            stream_node_input_blocking_duration_ns,
+            stream_node_output_blocking_duration_ns,
+        }))
     }
 
     #[cfg_attr(coverage, coverage(off))]

@@ -47,10 +47,6 @@ pub struct StreamingMetrics {
     // Executor metrics (disabled by default)
     pub executor_row_count: RelabeledGuardedIntCounterVec<3>,
 
-    // TODO(kwannoel): I'm considering having a totally separate in-memory
-    // struct for these metrics,
-    // i.e. just store them in a hashmap on the CN,
-    // and drop them once profiling done.
     // Profiling Metrics:
     // Aggregated per stream node (e.g. hash agg, join, project, etc...)
     // Only active when profiling, should be dropped otherwise.
