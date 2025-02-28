@@ -17,6 +17,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use anyhow::anyhow;
+use either::Either;
 use itertools::Itertools;
 
 use super::DataType;
