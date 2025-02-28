@@ -437,6 +437,21 @@ pub fn acosd_f64(input: F64) -> F64 {
     result.into()
 }
 
+/// Inverse tangent of y/x, result in degrees, the inverse tangent of y/x maps all inputs to
+/// values in the range [-180, 180].
+#[function("atan2d(float8, float8) -> float8")]
+pub fn atan2d_f64(input_x: F64, input_y: F64) -> F64 {
+    if input_x.0.is_nan() || input_y.0.is_nan() {
+        return F64::from(f64::NAN);
+    }
+    let atan2_arg1_arg2 = atan2_f64(input_x, input_y);
+    let result = (atan2_arg1_arg2 / atan_f64(DEGREE_ONE.into())) * DEGREE_FORTY_FIVE;
+    if result.0.is_nan() {
+        return F64::from(f64::NAN);
+    }
+    result
+}
+
 #[function("degrees(float8) -> float8")]
 pub fn degrees_f64(input: F64) -> F64 {
     input.0.to_degrees().into()

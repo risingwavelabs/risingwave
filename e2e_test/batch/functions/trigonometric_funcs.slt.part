@@ -704,3 +704,23 @@ query R
 SELECT abs(acosd(1) - 0.0) < 1e-14
 ----
 t
+
+query R
+SELECT ATAN2D(1, 0);
+----
+90
+
+query R
+SELECT ATAN2D(-1, 0);
+----
+-90
+
+query R
+SELECT ATAN2D(0, 1);
+----
+0
+
+query R
+SELECT ATAN2D('NaN', 0);
+----
+NaN

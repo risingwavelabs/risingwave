@@ -206,6 +206,7 @@ impl Strong {
             | ExprType::Acosh
             | ExprType::Atanh
             | ExprType::Sinh
+            | ExprType::Atan2d
             | ExprType::Trunc
             | ExprType::Ln
             | ExprType::Log10

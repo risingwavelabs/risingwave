@@ -138,6 +138,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::Acosd
             | Type::Atan
             | Type::Atan2
+            | Type::Atan2d
             | Type::Sqrt
             | Type::Cbrt
             | Type::Sign
