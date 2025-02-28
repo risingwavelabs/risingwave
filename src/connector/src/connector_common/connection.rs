@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use anyhow::Context;
+use iceberg::NamespaceIdent;
 use opendal::Operator;
 use opendal::services::{Gcs, S3};
 use rdkafka::ClientConfig;

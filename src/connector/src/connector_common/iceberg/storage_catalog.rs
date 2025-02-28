@@ -186,7 +186,7 @@ impl Catalog for StorageCatalog {
         &self,
         _parent: Option<&NamespaceIdent>,
     ) -> iceberg::Result<Vec<NamespaceIdent>> {
-        todo!()
+        return Ok(vec![]);
     }
 
     /// Create a new namespace inside the catalog.
@@ -215,7 +215,8 @@ impl Catalog for StorageCatalog {
 
     /// List tables from namespace.
     async fn list_tables(&self, _namespace: &NamespaceIdent) -> iceberg::Result<Vec<TableIdent>> {
-        todo!()
+        // FIXME: the iceberg `file_io` doesn't provide enough api to list files in a directory.
+        Ok(vec![])
     }
 
     async fn update_namespace(
