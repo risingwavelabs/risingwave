@@ -33,7 +33,7 @@ public class JDBCSinkConfig extends CommonSinkConfig {
     private String schemaName;
 
     @JsonProperty(value = "jdbc.query.timeout")
-    private int queryTimeoutSeconds = 600;
+    private int queryTimeoutSeconds = 60;
 
     @JsonCreator
     public JDBCSinkConfig(
