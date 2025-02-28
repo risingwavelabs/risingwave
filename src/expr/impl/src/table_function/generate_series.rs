@@ -12,9 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use chrono_tz::Tz;
 use num_traits::One;
-use risingwave_common::types::{CheckedAdd, Decimal, IsNegative};
-use risingwave_expr::{ExprError, Result, function};
+use risingwave_common::types::{CheckedAdd, Decimal, Interval, IsNegative, Timestamptz};
+use risingwave_expr::expr_context::TIME_ZONE;
+use risingwave_expr::{ExprError, Result, capture_context, function};
 
 #[function("generate_series(int4, int4) -> setof int4")]
 #[function("generate_series(int8, int8) -> setof int8")]
@@ -22,7 +24,7 @@ fn generate_series<T>(start: T, stop: T) -> Result<impl Iterator<Item = T>>
 where
     T: CheckedAdd<Output = T> + PartialOrd + Copy + One + IsNegative,
 {
-    range_generic::<_, _, true>(start, stop, T::one())
+    range_generic::<_, _, _, true>(start, stop, T::one(), ())
 }
 
 #[function("generate_series(decimal, decimal) -> setof decimal")]
@@ -30,7 +32,7 @@ fn generate_series_decimal(start: Decimal, stop: Decimal) -> Result<impl Iterato
 where
 {
     validate_range_parameters(start, stop, Decimal::one())?;
-    range_generic::<Decimal, Decimal, true>(start, stop, Decimal::one())
+    range_generic::<Decimal, Decimal, _, true>(start, stop, Decimal::one(), ())
 }
 
 #[function("generate_series(int4, int4, int4) -> setof int4")]
@@ -41,7 +43,7 @@ where
     T: CheckedAdd<S, Output = T> + PartialOrd + Copy,
     S: IsNegative + Copy,
 {
-    range_generic::<_, _, true>(start, stop, step)
+    range_generic::<_, _, _, true>(start, stop, step, ())
 }
 
 #[function("generate_series(decimal, decimal, decimal) -> setof decimal")]
@@ -51,7 +53,38 @@ fn generate_series_step_decimal(
     step: Decimal,
 ) -> Result<impl Iterator<Item = Decimal>> {
     validate_range_parameters(start, stop, step)?;
-    range_generic::<_, _, true>(start, stop, step)
+    range_generic::<_, _, _, true>(start, stop, step, ())
+}
+
+#[function("generate_series(timestamptz, timestamptz, interval) -> setof timestamptz")]
+fn generate_series_timestamptz_session(
+    start: Timestamptz,
+    stop: Timestamptz,
+    step: Interval,
+) -> Result<impl Iterator<Item = Timestamptz>> {
+    generate_series_timestamptz_impl_captured(start, stop, step)
+}
+
+#[function("generate_series(timestamptz, timestamptz, interval, varchar) -> setof timestamptz")]
+fn generate_series_timestamptz_at_zone(
+    start: Timestamptz,
+    stop: Timestamptz,
+    step: Interval,
+    time_zone: &str,
+) -> Result<impl Iterator<Item = Timestamptz>> {
+    generate_series_timestamptz_impl(time_zone, start, stop, step)
+}
+
+#[capture_context(TIME_ZONE)]
+fn generate_series_timestamptz_impl(
+    time_zone: &str,
+    start: Timestamptz,
+    stop: Timestamptz,
+    step: Interval,
+) -> Result<impl Iterator<Item = Timestamptz>> {
+    let time_zone =
+        Timestamptz::lookup_time_zone(time_zone).map_err(crate::scalar::time_zone_err)?;
+    range_generic::<_, _, _, true>(start, stop, step, time_zone)
 }
 
 #[function("range(int4, int4) -> setof int4")]
@@ -60,7 +93,7 @@ fn range<T>(start: T, stop: T) -> Result<impl Iterator<Item = T>>
 where
     T: CheckedAdd<Output = T> + PartialOrd + Copy + One + IsNegative,
 {
-    range_generic::<_, _, false>(start, stop, T::one())
+    range_generic::<_, _, _, false>(start, stop, T::one(), ())
 }
 
 #[function("range(decimal, decimal) -> setof decimal")]
@@ -68,7 +101,7 @@ fn range_decimal(start: Decimal, stop: Decimal) -> Result<impl Iterator<Item = D
 where
 {
     validate_range_parameters(start, stop, Decimal::one())?;
-    range_generic::<Decimal, Decimal, false>(start, stop, Decimal::one())
+    range_generic::<Decimal, Decimal, _, false>(start, stop, Decimal::one(), ())
 }
 
 #[function("range(int4, int4, int4) -> setof int4")]
@@ -79,7 +112,7 @@ where
     T: CheckedAdd<S, Output = T> + PartialOrd + Copy,
     S: IsNegative + Copy,
 {
-    range_generic::<_, _, false>(start, stop, step)
+    range_generic::<_, _, _, false>(start, stop, step, ())
 }
 
 #[function("range(decimal, decimal, decimal) -> setof decimal")]
@@ -89,18 +122,44 @@ fn range_step_decimal(
     step: Decimal,
 ) -> Result<impl Iterator<Item = Decimal>> {
     validate_range_parameters(start, stop, step)?;
-    range_generic::<_, _, false>(start, stop, step)
+    range_generic::<_, _, _, false>(start, stop, step, ())
+}
+
+pub trait CheckedAddWithExtra<Rhs = Self, Extra = ()> {
+    type Output;
+    fn checked_add_with_extra(self, rhs: Rhs, extra: Extra) -> Option<Self::Output>;
+}
+
+impl<L, R> CheckedAddWithExtra<R, ()> for L
+where
+    L: CheckedAdd<R>,
+{
+    type Output = L::Output;
+
+    fn checked_add_with_extra(self, rhs: R, _: ()) -> Option<Self::Output> {
+        self.checked_add(rhs)
+    }
+}
+
+impl CheckedAddWithExtra<Interval, Tz> for Timestamptz {
+    type Output = Self;
+
+    fn checked_add_with_extra(self, rhs: Interval, extra: Tz) -> Option<Self::Output> {
+        crate::scalar::timestamptz_interval_add_internal(self, rhs, extra).ok()
+    }
 }
 
 #[inline]
-fn range_generic<T, S, const INCLUSIVE: bool>(
+fn range_generic<T, S, E, const INCLUSIVE: bool>(
     start: T,
     stop: T,
     step: S,
+    extra: E,
 ) -> Result<impl Iterator<Item = T>>
 where
-    T: CheckedAdd<S, Output = T> + PartialOrd + Copy,
+    T: CheckedAddWithExtra<S, E, Output = T> + PartialOrd + Copy,
     S: IsNegative + Copy,
+    E: Copy,
 {
     if step.is_zero() {
         return Err(ExprError::InvalidParam {
@@ -119,7 +178,7 @@ where
             _ => {}
         };
         let ret = cur;
-        cur = cur.checked_add(step)?;
+        cur = cur.checked_add_with_extra(step, extra)?;
         Some(ret)
     };
     Ok(std::iter::from_fn(next))

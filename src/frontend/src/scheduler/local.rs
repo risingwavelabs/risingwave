@@ -120,6 +120,7 @@ impl LocalQueryExecution {
         // The following loop can be slow.
         // Release potential large object in Query and PlanNode early.
         drop(self);
+        drop(plan_node);
 
         #[for_await]
         for chunk in executor.execute() {

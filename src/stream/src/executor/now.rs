@@ -390,7 +390,7 @@ mod tests {
         let (tx, mut now) = create_executor(NowMode::UpdateCurrent, &state_store).await;
         tx.send(Barrier::with_prev_epoch_for_test(
             test_epoch(3),
-            test_epoch(2),
+            test_epoch(1),
         ))
         .unwrap();
 
@@ -425,7 +425,7 @@ mod tests {
         drop((tx, now));
         let (tx, mut now) = create_executor(NowMode::UpdateCurrent, &state_store).await;
         tx.send(
-            Barrier::with_prev_epoch_for_test(test_epoch(4), test_epoch(3))
+            Barrier::with_prev_epoch_for_test(test_epoch(4), test_epoch(1))
                 .with_mutation(Mutation::Pause),
         )
         .unwrap();
@@ -610,7 +610,7 @@ mod tests {
 
         tx.send(Barrier::with_prev_epoch_for_test(
             test_epoch(4000),
-            test_epoch(3000),
+            test_epoch(2000),
         ))
         .unwrap();
 

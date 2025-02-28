@@ -276,6 +276,7 @@ impl ExprVisitor for ImpureAnalyzer {
             // expression output is not deterministic
             Type::Vnode // obtain vnode count from the context
             | Type::TestPaidTier
+            | Type::License
             | Type::Proctime
             | Type::PgSleep
             | Type::PgSleepFor

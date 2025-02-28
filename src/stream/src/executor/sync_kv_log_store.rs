@@ -81,6 +81,7 @@ use risingwave_storage::store::{
 use rw_futures_util::drop_either_future;
 
 use crate::common::log_store_impl::kv_log_store::buffer::LogStoreBufferItem;
+use crate::common::log_store_impl::kv_log_store::reader::LogStoreReadStateStreamRangeStart;
 use crate::common::log_store_impl::kv_log_store::reader::timeout_auto_rebuild::TimeoutAutoRebuildIter;
 use crate::common::log_store_impl::kv_log_store::serde::{
     KvLogStoreItem, LogStoreItemMergeStream, LogStoreRowSerde,
@@ -260,6 +261,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
             new_log_store_state(self.table_id, local_state_store, self.serde);
         initial_write_state.init(first_write_epoch).await?;
 
+        let mut pause_stream = first_barrier.is_pause_on_startup();
         let mut initial_write_epoch = first_write_epoch;
 
         // We only recreate the consume stream when:
@@ -276,7 +278,11 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
             };
             let mut read_future = ReadFuture::ReadingPersistedStream(
                 read_state
-                    .read_persisted_log_store(&self.metrics, initial_write_epoch.prev, None)
+                    .read_persisted_log_store(
+                        &self.metrics,
+                        initial_write_epoch.prev,
+                        LogStoreReadStateStreamRangeStart::Unbounded,
+                    )
                     .await?,
             );
 
@@ -284,8 +290,15 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
 
             loop {
                 let select_result = {
-                    let read_future =
-                        read_future.next_chunk(&read_state, &mut buffer, &self.metrics);
+                    let read_future = async {
+                        if pause_stream {
+                            pending().await
+                        } else {
+                            read_future
+                                .next_chunk(&read_state, &mut buffer, &self.metrics)
+                                .await
+                        }
+                    };
                     pin_mut!(read_future);
                     let write_future = write_future.next_event();
                     pin_mut!(write_future);
@@ -301,6 +314,18 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                             WriteFutureEvent::UpstreamMessageReceived(msg) => {
                                 match msg {
                                     Message::Barrier(barrier) => {
+                                        if let Some(mutation) = barrier.mutation.as_deref() {
+                                            match mutation {
+                                                Mutation::Pause => {
+                                                    pause_stream = true;
+                                                }
+                                                Mutation::Resume => {
+                                                    pause_stream = false;
+                                                }
+                                                _ => {}
+                                            }
+                                        }
+
                                         let write_state_post_write_barrier = Self::write_barrier(
                                             &mut write_state,
                                             barrier.clone(),
@@ -315,7 +340,8 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                                         let barrier_epoch = barrier.epoch;
                                         yield Message::Barrier(barrier);
                                         write_state_post_write_barrier
-                                            .post_yield_barrier(update_vnode_bitmap.clone());
+                                            .post_yield_barrier(update_vnode_bitmap.clone())
+                                            .await?;
                                         if let Some(vnode_bitmap) = update_vnode_bitmap {
                                             // Apply Vnode Update
                                             read_state.update_vnode_bitmap(vnode_bitmap);
@@ -473,9 +499,6 @@ impl<S: StateStoreRead> ReadFuture<S> {
                     LogStoreBufferItem::Barrier { .. } => {
                         continue;
                     }
-                    LogStoreBufferItem::UpdateVnodes(_) => {
-                        unreachable!("UpdateVnodes should not be in buffer")
-                    }
                 }
             },
         }
@@ -505,40 +528,38 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
         truncation_offset: Option<ReaderTruncationOffsetType>,
         buffer: &mut SyncedLogStoreBuffer,
     ) -> StreamExecutorResult<LogStorePostSealCurrentEpoch<'a, S::Local>> {
+        // TODO(kwannoel): As an optimization we can also change flushed chunks to be flushed items
+        // to reduce memory consumption of logstore.
+
         let epoch = barrier.epoch.prev;
         let mut writer = write_state.start_writer(false);
-        // FIXME(kwannoel): Handle paused stream.
         writer.write_barrier(epoch, barrier.is_checkpoint())?;
 
-        // FIXME(kwannoel): Flush all unflushed chunks
-        // As an optimization we can also change it into flushed items instead.
-        // This will reduce memory consumption of logstore.
-
-        // TODO: may stop the for loop when seeing any of flushed item to avoid always iterating the whole buffer
-        for (epoch, item) in &mut buffer.buffer {
-            match item {
-                LogStoreBufferItem::StreamChunk {
-                    chunk,
-                    start_seq_id,
-                    end_seq_id,
-                    flushed,
-                    ..
-                } => {
-                    if !*flushed {
-                        writer.write_chunk(chunk, *epoch, *start_seq_id, *end_seq_id)?;
-                        *flushed = true;
+        if barrier.is_checkpoint() {
+            for (epoch, item) in buffer.buffer.iter_mut().rev() {
+                match item {
+                    LogStoreBufferItem::StreamChunk {
+                        chunk,
+                        start_seq_id,
+                        end_seq_id,
+                        flushed,
+                        ..
+                    } => {
+                        if !*flushed {
+                            writer.write_chunk(chunk, *epoch, *start_seq_id, *end_seq_id)?;
+                            *flushed = true;
+                        } else {
+                            break;
+                        }
                     }
+                    LogStoreBufferItem::Flushed { .. } | LogStoreBufferItem::Barrier { .. } => {}
                 }
-                LogStoreBufferItem::Flushed { .. }
-                | LogStoreBufferItem::Barrier { .. }
-                | LogStoreBufferItem::UpdateVnodes(_) => {}
             }
         }
 
+        // Apply truncation
         let (flush_info, _) = writer.finish().await?;
         flush_info.report(metrics);
-
-        // Apply truncation
         let post_seal = write_state.seal_current_epoch(barrier.epoch.curr, truncation_offset);
 
         // Add to buffer
@@ -677,7 +698,6 @@ impl SyncedLogStoreBuffer {
                 LogStoreBufferItem::Barrier { .. } => {
                     epoch_count += 1;
                 }
-                LogStoreBufferItem::UpdateVnodes(_) => {}
             }
         }
         self.metrics.buffer_unconsumed_epoch_count.set(epoch_count);

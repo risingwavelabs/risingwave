@@ -605,7 +605,7 @@ mod tests {
         let mut executor = executor.execute();
 
         // push the 1st barrier after failover
-        tx.push_barrier(test_epoch(4), false);
+        tx.push_barrier(test_epoch(3), false);
         executor.next().await.unwrap().unwrap();
 
         // Init watermark after failover

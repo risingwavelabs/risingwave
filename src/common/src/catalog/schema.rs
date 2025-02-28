@@ -246,17 +246,6 @@ impl Field {
             name: format!("{}.{}", table_name, desc.name),
         }
     }
-
-    /// Get the sub fields if the data type is a struct, otherwise return an empty vector.
-    pub fn sub_fields(&self) -> Vec<Field> {
-        if let DataType::Struct(st) = &self.data_type {
-            st.iter()
-                .map(|(name, data_type)| Field::with_name(data_type.clone(), name))
-                .collect()
-        } else {
-            Vec::new()
-        }
-    }
 }
 
 impl From<&PbField> for Field {

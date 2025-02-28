@@ -143,7 +143,7 @@ impl Writer<MetadataV2> for WriterModelV2ToMetaStoreV2 {
         insert_models(metadata.streaming_jobs.clone(), db).await?;
         insert_models(metadata.fragments.clone(), db).await?;
         insert_models(metadata.actors.clone(), db).await?;
-        insert_models(metadata.actor_dispatchers.clone(), db).await?;
+        insert_models(metadata.fragment_relation.clone(), db).await?;
         insert_models(metadata.connections.clone(), db).await?;
         insert_models(metadata.sources.clone(), db).await?;
         insert_models(metadata.tables.clone(), db).await?;
@@ -175,7 +175,6 @@ macro_rules! for_all_auto_increment {
             {"user", users, user_id},
             {"user_privilege", user_privileges, id},
             {"actor", actors, actor_id},
-            {"actor_dispatcher", actor_dispatchers, id},
             {"fragment", fragments, fragment_id},
             {"object_dependency", object_dependencies, id}
         )
