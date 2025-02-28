@@ -61,7 +61,7 @@ pub async fn handle_explain_analyze_stream_job(
     // Trigger barrier via meta node to stop profiling specific actors
 
     // Render graph with metrics
-    let rows = render_graph_with_metrics(&adjacency_list, root_node);
+    let rows = render_graph_with_metrics(&adjacency_list, root_node, &aggregated_stats);
     todo!()
 }
 
@@ -221,6 +221,7 @@ fn find_root_node(stream_nodes: &HashMap<u32, StreamNode>) -> u32 {
 fn render_graph_with_metrics(
     adjacency_list: &HashMap<u32, StreamNode>,
     root_node: u32,
+    stats: &StreamNodeStats,
 ) -> Vec<Vec<String>> {
     let mut rows = vec![];
     let mut stack = vec![(String::new(), true, root_node)];
@@ -244,6 +245,17 @@ fn render_graph_with_metrics(
         };
         let child_prefix = format!("{}{}", prefix, child_prefix);
 
+        let stats = stats.inner.get(&node_id);
+        let (input_throughput, output_throughput, input_latency, output_latency) = stats
+            .map(|stats| {
+                (
+                    stats.total_input_throughput,
+                    stats.total_output_throughput,
+                    stats.total_input_latency,
+                    stats.total_output_latency,
+                )
+            })
+            .unwrap_or((0, 0, 0, 0));
         let row = vec![
             node.operator_id.to_string(),
             identity_rendered,
@@ -252,6 +264,10 @@ fn render_graph_with_metrics(
                 .map(|id| id.to_string())
                 .collect::<Vec<_>>()
                 .join(", "),
+            input_throughput.to_string(),
+            output_throughput.to_string(),
+            input_latency.to_string(),
+            output_latency.to_string(),
         ];
         rows.push(row);
         for (position, dependency) in node.dependencies.iter().enumerate() {
@@ -307,14 +323,46 @@ mod tests {
             },
         );
         let root_node = find_root_node(&adjacency_list);
-        let rows = render_graph_with_metrics(&adjacency_list, root_node);
+        let rows = render_graph_with_metrics(&adjacency_list, root_node, &StreamNodeStats::new());
         assert_eq!(
             rows,
             vec![
-                vec!["1".to_string(), "A".to_string(), "".to_string()],
-                vec!["2".to_string(), "└─ B".to_string(), "".to_string()],
-                vec!["3".to_string(), "   └─ C".to_string(), "".to_string()],
-                vec!["4".to_string(), "      └─ D".to_string(), "".to_string()],
+                vec![
+                    "1".to_string(),
+                    "A".to_string(),
+                    "".to_string(),
+                    "0".to_string(),
+                    "0".to_string(),
+                    "0".to_string(),
+                    "0".to_string()
+                ],
+                vec![
+                    "2".to_string(),
+                    "└─ B".to_string(),
+                    "".to_string(),
+                    "0".to_string(),
+                    "0".to_string(),
+                    "0".to_string(),
+                    "0".to_string()
+                ],
+                vec![
+                    "3".to_string(),
+                    "   └─ C".to_string(),
+                    "".to_string(),
+                    "0".to_string(),
+                    "0".to_string(),
+                    "0".to_string(),
+                    "0".to_string()
+                ],
+                vec![
+                    "4".to_string(),
+                    "      └─ D".to_string(),
+                    "".to_string(),
+                    "0".to_string(),
+                    "0".to_string(),
+                    "0".to_string(),
+                    "0".to_string()
+                ],
             ]
         );
     }
@@ -382,16 +430,64 @@ mod tests {
             },
         );
         let root_node = find_root_node(&adjacency_list);
-        let rows = render_graph_with_metrics(&adjacency_list, root_node);
+        let rows = render_graph_with_metrics(&adjacency_list, root_node, &StreamNodeStats::new());
         assert_eq!(
             rows,
             vec![
-                vec!["1".to_string(), "A".to_string(), "".to_string()],
-                vec!["6".to_string(), "├─ F".to_string(), "".to_string()],
-                vec!["4".to_string(), "├─ D".to_string(), "".to_string()],
-                vec!["5".to_string(), "│  └─ E".to_string(), "".to_string()],
-                vec!["2".to_string(), "└─ B".to_string(), "".to_string()],
-                vec!["3".to_string(), "   └─ C".to_string(), "".to_string()],
+                vec![
+                    "1".to_string(),
+                    "A".to_string(),
+                    "".to_string(),
+                    "0".to_string(),
+                    "0".to_string(),
+                    "0".to_string(),
+                    "0".to_string()
+                ],
+                vec![
+                    "6".to_string(),
+                    "├─ F".to_string(),
+                    "".to_string(),
+                    "0".to_string(),
+                    "0".to_string(),
+                    "0".to_string(),
+                    "0".to_string()
+                ],
+                vec![
+                    "4".to_string(),
+                    "├─ D".to_string(),
+                    "".to_string(),
+                    "0".to_string(),
+                    "0".to_string(),
+                    "0".to_string(),
+                    "0".to_string()
+                ],
+                vec![
+                    "5".to_string(),
+                    "│  └─ E".to_string(),
+                    "".to_string(),
+                    "0".to_string(),
+                    "0".to_string(),
+                    "0".to_string(),
+                    "0".to_string()
+                ],
+                vec![
+                    "2".to_string(),
+                    "└─ B".to_string(),
+                    "".to_string(),
+                    "0".to_string(),
+                    "0".to_string(),
+                    "0".to_string(),
+                    "0".to_string()
+                ],
+                vec![
+                    "3".to_string(),
+                    "   └─ C".to_string(),
+                    "".to_string(),
+                    "0".to_string(),
+                    "0".to_string(),
+                    "0".to_string(),
+                    "0".to_string()
+                ],
             ]
         );
     }
