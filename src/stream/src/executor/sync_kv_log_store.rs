@@ -1025,13 +1025,6 @@ mod tests {
         }
 
         match stream.next().await {
-            Some(Ok(Message::Barrier(barrier))) => {
-                assert_eq!(barrier.epoch.curr, test_epoch(2));
-            }
-            other => panic!("Expected a barrier message, got {:?}", other),
-        }
-
-        match stream.next().await {
             Some(Ok(Message::Chunk(chunk))) => {
                 assert_eq!(chunk, chunk_1);
             }
@@ -1043,6 +1036,13 @@ mod tests {
                 assert_eq!(chunk, chunk_2);
             }
             other => panic!("Expected a chunk message, got {:?}", other),
+        }
+
+        match stream.next().await {
+            Some(Ok(Message::Barrier(barrier))) => {
+                assert_eq!(barrier.epoch.curr, test_epoch(2));
+            }
+            other => panic!("Expected a barrier message, got {:?}", other),
         }
     }
 
