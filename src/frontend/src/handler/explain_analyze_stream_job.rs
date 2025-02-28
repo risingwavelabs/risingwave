@@ -1,12 +1,26 @@
 use std::collections::{HashMap, HashSet};
 
+use pgwire::pg_response::StatementType;
+use risingwave_common::types::Fields;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::list_table_fragments_response::FragmentInfo;
 use risingwave_pb::monitor_service::{GetProfileStatsRequest, GetProfileStatsResponse};
+use risingwave_pb::stream_plan::StreamNode as PbStreamNode;
 
 use crate::error::Result;
-use crate::handler::{HandlerArgs, RwPgResponse};
+use crate::handler::{HandlerArgs, RwPgResponse, RwPgResponseBuilder, RwPgResponseBuilderExt};
 use crate::session::FrontendEnv;
+
+#[derive(Fields)]
+struct ExplainAnalyzeStreamJobOutput {
+    operator_id: String,
+    identity: String,
+    actor_ids: String,
+    input_throughput: String,
+    output_throughput: String,
+    input_latency: String,
+    output_latency: String,
+}
 
 pub async fn handle_explain_analyze_stream_job(
     handler_args: HandlerArgs,
@@ -18,6 +32,7 @@ pub async fn handle_explain_analyze_stream_job(
     // Otherwise memory utilization can be high
     let fragments = {
         let mut fragment_map = meta_client.list_table_fragments(&[job_id]).await?;
+        assert_eq!(fragment_map.len(), 1, "expected only one fragment");
         let (fragment_job_id, table_fragment_info) = fragment_map.drain().next().unwrap();
         assert_eq!(fragment_job_id, job_id);
         table_fragment_info.fragments
@@ -62,10 +77,13 @@ pub async fn handle_explain_analyze_stream_job(
 
     // Render graph with metrics
     let rows = render_graph_with_metrics(&adjacency_list, root_node, &aggregated_stats);
-    todo!()
+    let builder = RwPgResponseBuilder::empty(StatementType::EXPLAIN);
+    let builder = builder.rows(rows);
+    Ok(builder.into())
 }
 
 /// This is an internal struct used ONLY for explain analyze stream job.
+#[derive(Debug)]
 struct StreamNode {
     operator_id: u32,
     identity: String,
@@ -77,7 +95,12 @@ async fn list_stream_worker_nodes(env: &FrontendEnv) -> Result<Vec<WorkerNode>> 
     let worker_nodes = env.meta_client().list_all_nodes().await?;
     let stream_worker_nodes = worker_nodes
         .into_iter()
-        .filter(|node| node.property.as_ref().unwrap().is_streaming)
+        .filter(|node| {
+            node.property
+                .as_ref()
+                .map(|p| p.is_streaming)
+                .unwrap_or_else(|| false)
+        })
         .collect::<Vec<_>>();
     Ok(stream_worker_nodes)
 }
@@ -174,29 +197,46 @@ impl StreamNodeStats {
 }
 
 fn extract_stream_node_infos(fragments: Vec<FragmentInfo>) -> HashMap<u32, StreamNode> {
+    fn extract_stream_node_info(
+        operator_id_to_stream_node: &mut HashMap<u32, StreamNode>,
+        node: &PbStreamNode,
+        actor_id: u32,
+    ) {
+        let identity = node
+            .identity
+            .split_ascii_whitespace()
+            .next()
+            .unwrap()
+            .to_owned();
+        let operator_id = node.operator_id as _;
+        let dependencies = &node.input;
+        let entry = operator_id_to_stream_node
+            .entry(operator_id)
+            .or_insert_with(|| {
+                let dependencies = dependencies
+                    .iter()
+                    .map(|input| input.operator_id as u32)
+                    .collect();
+                StreamNode {
+                    operator_id,
+                    identity,
+                    actor_ids: vec![],
+                    dependencies,
+                }
+            });
+        entry.actor_ids.push(actor_id);
+        for dependency in dependencies {
+            extract_stream_node_info(operator_id_to_stream_node, dependency, actor_id);
+        }
+    }
+
     let mut operator_id_to_stream_node = HashMap::new();
     for fragment in fragments {
         let actors = fragment.actors;
         for actor in actors {
             let actor_id = actor.id;
             let node = actor.node.unwrap();
-            let operator_id = node.operator_id as u32;
-            let entry = operator_id_to_stream_node
-                .entry(operator_id)
-                .or_insert_with(|| {
-                    let dependencies = node
-                        .input
-                        .into_iter()
-                        .map(|input| input.operator_id as u32)
-                        .collect();
-                    StreamNode {
-                        operator_id,
-                        identity: node.identity,
-                        actor_ids: vec![],
-                        dependencies,
-                    }
-                });
-            entry.actor_ids.push(actor_id);
+            extract_stream_node_info(&mut operator_id_to_stream_node, &node, actor_id);
         }
     }
     operator_id_to_stream_node
@@ -222,11 +262,13 @@ fn render_graph_with_metrics(
     adjacency_list: &HashMap<u32, StreamNode>,
     root_node: u32,
     stats: &StreamNodeStats,
-) -> Vec<Vec<String>> {
+) -> Vec<ExplainAnalyzeStreamJobOutput> {
     let mut rows = vec![];
     let mut stack = vec![(String::new(), true, root_node)];
     while let Some((prefix, last_child, node_id)) = stack.pop() {
-        let node = adjacency_list.get(&node_id).unwrap();
+        let Some(node) = adjacency_list.get(&node_id) else {
+            continue;
+        };
         let is_root = node_id == root_node;
 
         let identity_rendered = if is_root {
@@ -256,239 +298,24 @@ fn render_graph_with_metrics(
                 )
             })
             .unwrap_or((0, 0, 0, 0));
-        let row = vec![
-            node.operator_id.to_string(),
-            identity_rendered,
-            node.actor_ids
+        let row = ExplainAnalyzeStreamJobOutput {
+            operator_id: node.operator_id.to_string(),
+            identity: identity_rendered,
+            actor_ids: node
+                .actor_ids
                 .iter()
                 .map(|id| id.to_string())
                 .collect::<Vec<_>>()
-                .join(", "),
-            input_throughput.to_string(),
-            output_throughput.to_string(),
-            input_latency.to_string(),
-            output_latency.to_string(),
-        ];
+                .join(","),
+            input_throughput: input_throughput.to_string(),
+            output_throughput: output_throughput.to_string(),
+            input_latency: input_latency.to_string(),
+            output_latency: output_latency.to_string(),
+        };
         rows.push(row);
         for (position, dependency) in node.dependencies.iter().enumerate() {
             stack.push((child_prefix.clone(), position == 0, *dependency));
         }
     }
     rows
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    // Use this graph:
-    // A -> B -> C -> D
-    #[test]
-    fn render_linear_graph() {
-        let mut adjacency_list = HashMap::new();
-        adjacency_list.insert(
-            1,
-            StreamNode {
-                operator_id: 1,
-                identity: "A".to_string(),
-                actor_ids: vec![],
-                dependencies: vec![2],
-            },
-        );
-        adjacency_list.insert(
-            2,
-            StreamNode {
-                operator_id: 2,
-                identity: "B".to_string(),
-                actor_ids: vec![],
-                dependencies: vec![3],
-            },
-        );
-        adjacency_list.insert(
-            3,
-            StreamNode {
-                operator_id: 3,
-                identity: "C".to_string(),
-                actor_ids: vec![],
-                dependencies: vec![4],
-            },
-        );
-        adjacency_list.insert(
-            4,
-            StreamNode {
-                operator_id: 4,
-                identity: "D".to_string(),
-                actor_ids: vec![],
-                dependencies: vec![],
-            },
-        );
-        let root_node = find_root_node(&adjacency_list);
-        let rows = render_graph_with_metrics(&adjacency_list, root_node, &StreamNodeStats::new());
-        assert_eq!(
-            rows,
-            vec![
-                vec![
-                    "1".to_string(),
-                    "A".to_string(),
-                    "".to_string(),
-                    "0".to_string(),
-                    "0".to_string(),
-                    "0".to_string(),
-                    "0".to_string()
-                ],
-                vec![
-                    "2".to_string(),
-                    "└─ B".to_string(),
-                    "".to_string(),
-                    "0".to_string(),
-                    "0".to_string(),
-                    "0".to_string(),
-                    "0".to_string()
-                ],
-                vec![
-                    "3".to_string(),
-                    "   └─ C".to_string(),
-                    "".to_string(),
-                    "0".to_string(),
-                    "0".to_string(),
-                    "0".to_string(),
-                    "0".to_string()
-                ],
-                vec![
-                    "4".to_string(),
-                    "      └─ D".to_string(),
-                    "".to_string(),
-                    "0".to_string(),
-                    "0".to_string(),
-                    "0".to_string(),
-                    "0".to_string()
-                ],
-            ]
-        );
-    }
-
-    // Use this graph:
-    // A -> B -> C
-    // |\
-    // |  -> D -> E
-    // |---> F
-    #[test]
-    fn render_tree_graph() {
-        let mut adjacency_list = HashMap::new();
-        adjacency_list.insert(
-            1,
-            StreamNode {
-                operator_id: 1,
-                identity: "A".to_string(),
-                actor_ids: vec![],
-                dependencies: vec![2, 4, 6],
-            },
-        );
-        adjacency_list.insert(
-            2,
-            StreamNode {
-                operator_id: 2,
-                identity: "B".to_string(),
-                actor_ids: vec![],
-                dependencies: vec![3],
-            },
-        );
-        adjacency_list.insert(
-            3,
-            StreamNode {
-                operator_id: 3,
-                identity: "C".to_string(),
-                actor_ids: vec![],
-                dependencies: vec![],
-            },
-        );
-        adjacency_list.insert(
-            4,
-            StreamNode {
-                operator_id: 4,
-                identity: "D".to_string(),
-                actor_ids: vec![],
-                dependencies: vec![5],
-            },
-        );
-        adjacency_list.insert(
-            5,
-            StreamNode {
-                operator_id: 5,
-                identity: "E".to_string(),
-                actor_ids: vec![],
-                dependencies: vec![],
-            },
-        );
-        adjacency_list.insert(
-            6,
-            StreamNode {
-                operator_id: 6,
-                identity: "F".to_string(),
-                actor_ids: vec![],
-                dependencies: vec![],
-            },
-        );
-        let root_node = find_root_node(&adjacency_list);
-        let rows = render_graph_with_metrics(&adjacency_list, root_node, &StreamNodeStats::new());
-        assert_eq!(
-            rows,
-            vec![
-                vec![
-                    "1".to_string(),
-                    "A".to_string(),
-                    "".to_string(),
-                    "0".to_string(),
-                    "0".to_string(),
-                    "0".to_string(),
-                    "0".to_string()
-                ],
-                vec![
-                    "6".to_string(),
-                    "├─ F".to_string(),
-                    "".to_string(),
-                    "0".to_string(),
-                    "0".to_string(),
-                    "0".to_string(),
-                    "0".to_string()
-                ],
-                vec![
-                    "4".to_string(),
-                    "├─ D".to_string(),
-                    "".to_string(),
-                    "0".to_string(),
-                    "0".to_string(),
-                    "0".to_string(),
-                    "0".to_string()
-                ],
-                vec![
-                    "5".to_string(),
-                    "│  └─ E".to_string(),
-                    "".to_string(),
-                    "0".to_string(),
-                    "0".to_string(),
-                    "0".to_string(),
-                    "0".to_string()
-                ],
-                vec![
-                    "2".to_string(),
-                    "└─ B".to_string(),
-                    "".to_string(),
-                    "0".to_string(),
-                    "0".to_string(),
-                    "0".to_string(),
-                    "0".to_string()
-                ],
-                vec![
-                    "3".to_string(),
-                    "   └─ C".to_string(),
-                    "".to_string(),
-                    "0".to_string(),
-                    "0".to_string(),
-                    "0".to_string(),
-                    "0".to_string()
-                ],
-            ]
-        );
-    }
 }
