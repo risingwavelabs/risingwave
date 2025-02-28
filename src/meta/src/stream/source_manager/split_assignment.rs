@@ -15,6 +15,7 @@
 use itertools::Itertools;
 
 use super::*;
+use crate::model::{FragmentActorDispatchers, StreamJobFragments};
 
 impl SourceManager {
     /// Migrates splits from previous actors to the new actors for a rescheduled fragment.
@@ -231,7 +232,7 @@ impl SourceManager {
         &self,
         table_fragments: &StreamJobFragments,
         // dispatchers from SourceExecutor to SourceBackfillExecutor
-        dispatchers: &HashMap<FragmentId, HashMap<ActorId, Vec<Dispatcher>>>,
+        dispatchers: &FragmentActorDispatchers,
     ) -> MetaResult<SplitAssignment> {
         let core = self.core.lock().await;
 

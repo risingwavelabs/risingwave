@@ -990,7 +990,7 @@ impl DatabaseCheckpointControl {
         {
             match job_type {
                 CreateStreamingJobType::Normal | CreateStreamingJobType::SinkIntoTable(_) => {
-                    for fragment in info.stream_job_fragments.fragments.values_mut() {
+                    for fragment in info.stream_job_fragments.inner.fragments.values_mut() {
                         fill_snapshot_backfill_epoch(
                             &mut fragment.nodes,
                             None,
@@ -1021,7 +1021,7 @@ impl DatabaseCheckpointControl {
                             "must not set previously"
                         );
                     }
-                    for fragment in info.stream_job_fragments.fragments.values_mut() {
+                    for fragment in info.stream_job_fragments.inner.fragments.values_mut() {
                         fill_snapshot_backfill_epoch(
                             &mut fragment.nodes,
                             Some(snapshot_backfill_info),
