@@ -322,6 +322,13 @@ message RecoverRequest {}
 
 message RecoverResponse {}
 
+message StartProfilingRequest {
+  uint32 database_id = 1;
+  repeated uint32 fragment_ids = 2;
+}
+
+message StartProfilingResponse {}
+
 service StreamManagerService {
   rpc Flush(FlushRequest) returns (FlushResponse);
   rpc Pause(PauseRequest) returns (PauseResponse);
@@ -336,6 +343,7 @@ service StreamManagerService {
   rpc ApplyThrottle(ApplyThrottleRequest) returns (ApplyThrottleResponse);
   rpc Recover(RecoverRequest) returns (RecoverResponse);
   rpc ListRateLimits(ListRateLimitsRequest) returns (ListRateLimitsResponse);
+  rpc StartProfiling(StartProfilingRequest) returns (StartProfilingResponse);
 }
 
 // Below for cluster service.

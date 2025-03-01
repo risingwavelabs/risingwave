@@ -1552,6 +1552,19 @@ impl MetaClient {
         let resp = self.inner.list_rate_limits(request).await?;
         Ok(resp.rate_limits)
     }
+
+    pub async fn start_profiling(
+        &self,
+        database_id: DatabaseId,
+        fragment_ids: Vec<u32>,
+    ) -> Result<()> {
+        let request = StartProfilingRequest {
+            database_id,
+            fragment_ids,
+        };
+        let _resp = self.inner.start_profiling(request).await?;
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -2104,6 +2117,7 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, list_object_dependencies, ListObjectDependenciesRequest, ListObjectDependenciesResponse }
             ,{ stream_client, recover, RecoverRequest, RecoverResponse }
             ,{ stream_client, list_rate_limits, ListRateLimitsRequest, ListRateLimitsResponse }
+            ,{ stream_client, start_profiling, StartProfilingRequest, StartProfilingResponse }
             ,{ ddl_client, create_table, CreateTableRequest, CreateTableResponse }
             ,{ ddl_client, alter_name, AlterNameRequest, AlterNameResponse }
             ,{ ddl_client, alter_owner, AlterOwnerRequest, AlterOwnerResponse }

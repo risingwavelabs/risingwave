@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
+use itertools::Itertools;
 use pgwire::pg_response::StatementType;
 use risingwave_common::types::Fields;
 use risingwave_pb::common::WorkerNode;
@@ -37,10 +38,15 @@ pub async fn handle_explain_analyze_stream_job(
         assert_eq!(fragment_job_id, job_id);
         table_fragment_info.fragments
     };
+    let fragment_ids = fragments.iter().map(|f| f.id).collect_vec();
     let adjacency_list = extract_stream_node_infos(fragments);
     let root_node = find_root_node(&adjacency_list);
 
     // Trigger barrier via meta node to profile specific actors
+    let database_id = handler_args.session.database_id();
+    meta_client
+        .start_profiling(database_id, fragment_ids)
+        .await?;
 
     // Get the worker nodes
     let worker_nodes = list_stream_worker_nodes(handler_args.session.env()).await?;

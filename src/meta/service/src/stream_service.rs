@@ -461,4 +461,15 @@ impl StreamManagerService for StreamServiceImpl {
             .await?;
         Ok(Response::new(ListRateLimitsResponse { rate_limits }))
     }
+
+    async fn start_profiling(
+        &self,
+        request: Request<StartProfilingRequest>,
+    ) -> Result<Response<StartProfilingResponse>, Status> {
+        let StartProfilingRequest {
+            database_id,
+            fragment_ids,
+        } = request.into_inner();
+        Ok(Response::new(StartProfilingResponse {}))
+    }
 }
