@@ -263,7 +263,7 @@ mod tests {
     use futures::StreamExt;
     use risingwave_common::array::{Array, ArrayImpl, I32Array, StructArray};
     use risingwave_common::catalog::{
-        ColumnDesc, ColumnId, INITIAL_TABLE_VERSION_ID, schema_test_utils,
+        ColumnDesc, ColumnId, Field, INITIAL_TABLE_VERSION_ID, schema_test_utils,
     };
     use risingwave_common::transaction::transaction_message::TxnMsg;
     use risingwave_common::types::{DataType, StructType};
