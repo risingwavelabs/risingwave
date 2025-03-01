@@ -594,7 +594,7 @@ impl ConnectorProperties {
     /// Whether to enable strong schema for the source.
     pub fn enable_strong_schema(&self) -> bool {
         let ConnectorProperties::MongodbCdc(mongo) = self else {
-            return true;
+            return false;
         };
 
         mongo

@@ -160,10 +160,11 @@ mod tests {
     use risingwave_common::array::Op;
     use risingwave_common::catalog::{ColumnDesc, ColumnId};
     use risingwave_common::row::Row;
-    use risingwave_common::types::{ScalarImpl, ToOwnedDatum};
+    use risingwave_common::types::{ScalarImpl, StructType, ToOwnedDatum};
 
     use super::*;
     use crate::parser::SourceStreamChunkBuilder;
+    use crate::parser::unified::debezium::extract_bson_id;
     use crate::source::cdc::CDC_STRONG_SCHEMA_KEY;
     use crate::source::{ConnectorProperties, SourceCtrlOpts};
     #[test]
@@ -260,9 +261,9 @@ mod tests {
             assert_eq!(
             row.datum_at(1).to_owned_datum(),
             (Some(ScalarImpl::Jsonb(
-                serde_json::json!({"_id": {"$numberLong": "1004"},"first_name": "Anne","last_name": "Kretchmar","email": "annek@noanswer.org"}).into()
+                serde_json::json!({"first_name": "Anne","last_name": "Kretchmar","email": "annek@noanswer.org"}).into()
             )))
-        );
+            );
             assert_eq!(
                 row.datum_at(0).to_owned_datum(),
                 (Some(ScalarImpl::Int64(1004)))
@@ -472,6 +473,333 @@ mod tests {
             ];
             for (i, datum) in data.iter().enumerate() {
                 assert_eq!(row.datum_at(i).to_owned_datum(), Some(datum.clone()));
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_bson_v2_debezium_basic_types() {
+        let columns = vec![
+            ColumnDesc::named("_id", ColumnId::new(0), DataType::Int64),
+            ColumnDesc::named("name", ColumnId::new(1), DataType::Varchar),
+            ColumnDesc::named("age", ColumnId::new(2), DataType::Int32),
+            ColumnDesc::named("birth_date", ColumnId::new(3), DataType::Date),
+            ColumnDesc::named("created_at", ColumnId::new(4), DataType::Timestamptz),
+        ];
+
+        let columns = columns
+            .iter()
+            .map(SourceColumnDesc::from)
+            .collect::<Vec<_>>();
+
+        let data = vec![
+        br#"
+        {
+            "schema": {
+                "type": "struct",
+                "fields": [
+                    {"field": "_id", "type": "int64", "optional": false},
+                    {"field": "name", "type": "string", "optional": true},
+                    {"field": "age", "type": "int32", "optional": true},
+                    {"field": "birth_date", "type": "string", "name": "io.debezium.time.Date", "version": 1, "optional": true},
+                    {"field": "created_at", "type": "string", "name": "io.debezium.time.ZonedTimestamp", "version": 1, "optional": true}
+                ],
+                "optional": false,
+                "name": "dbserver1.inventory.users.Envelope"
+            },
+            "payload": {
+                "before": null,
+                "after": "{\"_id\": {\"$numberLong\": \"1004\"}, \"name\": \"John Doe\", \"age\": 30, \"birth_date\": {\"$date\": \"1990-01-01T00:00:00Z\"}, \"created_at\": {\"$timestamp\": {\"t\": 1735689600, \"i\": 0}}}",
+                "source": {
+                    "version": "2.1.4.Final",
+                    "connector": "mongodb",
+                    "name": "dbserver1",
+                    "ts_ms": 1696502096000,
+                    "snapshot": "false",
+                    "db": "inventory",
+                    "collection": "users",
+                    "ord": 1,
+                    "lsid": null,
+                    "txnNumber": null
+                },
+                "op": "c",
+                "ts_ms": 1696502096000
+            }
+        }
+        "#.to_vec(),
+    ];
+
+        let ConnectorProperties::MongodbCdc(mut cdc_props) =
+            ConnectorProperties::MongodbCdc(Box::default())
+        else {
+            unreachable!()
+        };
+
+        cdc_props
+            .properties
+            .insert(CDC_STRONG_SCHEMA_KEY.to_string(), "true".to_string());
+        let source_ctx: Arc<_> = SourceContext {
+            connector_props: ConnectorProperties::MongodbCdc(cdc_props),
+            ..SourceContext::dummy()
+        }
+        .into();
+
+        let expected_birth_date = chrono::NaiveDate::from_ymd_opt(1990, 1, 1).unwrap();
+        let expected_created_at =
+            chrono::DateTime::parse_from_rfc3339("2025-01-01T00:00:00Z").unwrap();
+
+        for datum in data {
+            let mut parser = DebeziumMongoJsonParser::new(columns.clone(), source_ctx.clone())
+                .expect("build parser");
+            let mut builder =
+                SourceStreamChunkBuilder::new(columns.clone(), SourceCtrlOpts::for_test());
+            parser
+                .parse_inner(None, Some(datum), builder.row_writer())
+                .await
+                .unwrap();
+            builder.finish_current_chunk();
+            let chunk = builder.consume_ready_chunks().next().unwrap();
+            let mut rows = chunk.rows();
+            let (op, row) = rows.next().unwrap();
+            assert_eq!(op, Op::Insert);
+
+            let data = vec![
+                ScalarImpl::Int64(1004),
+                ScalarImpl::Utf8("John Doe".into()),
+                ScalarImpl::Int32(30),
+                ScalarImpl::Date(expected_birth_date.clone().into()),
+                ScalarImpl::Timestamptz(expected_created_at.clone().into()),
+            ];
+            for (i, datum) in data.iter().enumerate() {
+                assert_eq!(row.datum_at(i).to_owned_datum(), Some(datum.clone()));
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_bson_v2_debezium_struct() {
+        let columns = vec![
+            ColumnDesc::named("_id", ColumnId::new(0), DataType::Int64),
+            ColumnDesc::named(
+                "struct_data",
+                ColumnId::new(1),
+                DataType::Struct(StructType::new([
+                    ("struct_field1".to_string(), DataType::Int64),
+                    ("struct_field2".to_string(), DataType::Varchar),
+                ])),
+            ),
+        ];
+
+        let columns = columns
+            .iter()
+            .map(SourceColumnDesc::from)
+            .collect::<Vec<_>>();
+
+        let data = vec![
+        br#"
+        {
+            "schema": {
+                "type": "struct",
+                "fields": [
+                    {"field": "_id", "type": "int64", "optional": false},
+                    {
+                        "field": "struct_data",
+                        "type": "struct",
+                        "fields": [
+                            {"field": "struct_field1", "type": "int64", "optional": true},
+                            {"field": "struct_field2", "type": "string", "optional": true}
+                        ],
+                        "optional": true
+                    }
+                ],
+                "optional": false,
+                "name": "dbserver1.inventory.users.Envelope"
+            },
+            "payload": {
+                "before": null,
+                "after": "{\"_id\": {\"$numberLong\": \"1004\"}, \"struct_data\": {\"struct_field1\": {\"$numberLong\": \"1131231321\"}, \"struct_field2\": \"example_value\"}}",
+                "source": {
+                    "version": "2.1.4.Final",
+                    "connector": "mongodb",
+                    "name": "dbserver1",
+                    "ts_ms": 1696502096000,
+                    "snapshot": "false",
+                    "db": "inventory",
+                    "collection": "users",
+                    "ord": 1,
+                    "lsid": null,
+                    "txnNumber": null
+                },
+                "op": "c",
+                "ts_ms": 1696502096000
+            }
+        }
+        "#.to_vec(),
+    ];
+
+        let ConnectorProperties::MongodbCdc(mut cdc_props) =
+            ConnectorProperties::MongodbCdc(Box::default())
+        else {
+            unreachable!()
+        };
+
+        cdc_props
+            .properties
+            .insert(CDC_STRONG_SCHEMA_KEY.to_string(), "true".to_string());
+        let source_ctx: Arc<_> = SourceContext {
+            connector_props: ConnectorProperties::MongodbCdc(cdc_props),
+            ..SourceContext::dummy()
+        }
+        .into();
+
+        for datum in data {
+            let mut parser = DebeziumMongoJsonParser::new(columns.clone(), source_ctx.clone())
+                .expect("build parser");
+            let mut builder =
+                SourceStreamChunkBuilder::new(columns.clone(), SourceCtrlOpts::for_test());
+            parser
+                .parse_inner(None, Some(datum), builder.row_writer())
+                .await
+                .unwrap();
+            builder.finish_current_chunk();
+            let chunk = builder.consume_ready_chunks().next().unwrap();
+            let mut rows = chunk.rows();
+            let (op, row) = rows.next().unwrap();
+            assert_eq!(op, Op::Insert);
+
+            // Verify _id
+            assert_eq!(
+                row.datum_at(0).to_owned_datum(),
+                Some(ScalarImpl::Int64(1004))
+            );
+
+            // Verify struct_data (struct)
+            let struct_data = row.datum_at(1).to_owned_datum().unwrap();
+            if let ScalarImpl::Struct(struct_data) = struct_data {
+                assert_eq!(struct_data.fields()[0], Some(ScalarImpl::Int64(1131231321)));
+                assert_eq!(
+                    struct_data.fields()[1],
+                    Some(ScalarImpl::Utf8("example_value".into()))
+                );
+            } else {
+                panic!("Expected struct type for struct_data");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_bson_v2_debezium_list() {
+        let columns = vec![
+            ColumnDesc::named("_id", ColumnId::new(0), DataType::Int64),
+            ColumnDesc::named(
+                "hobbies",
+                ColumnId::new(1),
+                DataType::List(Box::new(DataType::Varchar)),
+            ),
+        ];
+
+        let columns = columns
+            .iter()
+            .map(SourceColumnDesc::from)
+            .collect::<Vec<_>>();
+
+        let data = vec![
+        br#"
+        {
+            "schema": {
+                "type": "struct",
+                "fields": [
+                    {"field": "_id", "type": "int64", "optional": false},
+                    {
+                        "field": "hobbies",
+                        "type": "array",
+                        "items": {"type": "string", "optional": true},
+                        "optional": true
+                    }
+                ],
+                "optional": false,
+                "name": "dbserver1.inventory.users.Envelope"
+            },
+            "payload": {
+                "before": null,
+                "after": "{\"_id\": {\"$numberLong\": \"1004\"}, \"hobbies\": [\"reading\", \"traveling\", \"coding\"]}",
+                "source": {
+                    "version": "2.1.4.Final",
+                    "connector": "mongodb",
+                    "name": "dbserver1",
+                    "ts_ms": 1696502096000,
+                    "snapshot": "false",
+                    "db": "inventory",
+                    "collection": "users",
+                    "ord": 1,
+                    "lsid": null,
+                    "txnNumber": null
+                },
+                "op": "c",
+                "ts_ms": 1696502096000
+            }
+        }
+        "#.to_vec(),
+    ];
+
+        let ConnectorProperties::MongodbCdc(mut cdc_props) =
+            ConnectorProperties::MongodbCdc(Box::default())
+        else {
+            unreachable!()
+        };
+
+        cdc_props
+            .properties
+            .insert(CDC_STRONG_SCHEMA_KEY.to_string(), "true".to_string());
+        let source_ctx: Arc<_> = SourceContext {
+            connector_props: ConnectorProperties::MongodbCdc(cdc_props),
+            ..SourceContext::dummy()
+        }
+        .into();
+
+        for datum in data {
+            let mut parser = DebeziumMongoJsonParser::new(columns.clone(), source_ctx.clone())
+                .expect("build parser");
+            let mut builder =
+                SourceStreamChunkBuilder::new(columns.clone(), SourceCtrlOpts::for_test());
+            parser
+                .parse_inner(None, Some(datum), builder.row_writer())
+                .await
+                .unwrap();
+            builder.finish_current_chunk();
+            let chunk = builder.consume_ready_chunks().next().unwrap();
+            let mut rows = chunk.rows();
+            let (op, row) = rows.next().unwrap();
+            assert_eq!(op, Op::Insert);
+
+            // Verify _id
+            assert_eq!(
+                row.datum_at(0).to_owned_datum(),
+                Some(ScalarImpl::Int64(1004))
+            );
+
+            // Verify hobbies (list)
+            let hobbies = row.datum_at(1).to_owned_datum().unwrap();
+            if let ScalarImpl::List(list_data) = hobbies {
+                assert_eq!(list_data.len(), 3);
+                assert_eq!(
+                    list_data.get(0),
+                    Some(Some(
+                        ScalarImpl::Utf8("reading".into()).as_scalar_ref_impl()
+                    ))
+                );
+                assert_eq!(
+                    list_data.get(1),
+                    Some(Some(
+                        ScalarImpl::Utf8("traveling".into()).as_scalar_ref_impl()
+                    ))
+                );
+                assert_eq!(
+                    list_data.get(2),
+                    Some(Some(ScalarImpl::Utf8("coding".into()).as_scalar_ref_impl()))
+                );
+            } else {
+                panic!("Expected list type for hobbies");
             }
         }
     }
