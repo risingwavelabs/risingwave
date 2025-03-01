@@ -317,6 +317,8 @@ impl CommandContext {
             }
             Command::DropSubscription { .. } => {}
             Command::MergeSnapshotBackfillStreamingJobs(_) => {}
+            Command::StartProfiling { .. } => {}
+            Command::StopProfiling { .. } => {}
         }
 
         Ok(())

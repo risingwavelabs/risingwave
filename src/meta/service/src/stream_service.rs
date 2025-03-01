@@ -470,6 +470,12 @@ impl StreamManagerService for StreamServiceImpl {
             database_id,
             fragment_ids,
         } = request.into_inner();
+        self.barrier_scheduler
+            .run_command(
+                DatabaseId::new(database_id as _),
+                Command::StartProfiling { fragment_ids },
+            )
+            .await?;
         Ok(Response::new(StartProfilingResponse {}))
     }
 }

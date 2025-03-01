@@ -35,7 +35,8 @@ use risingwave_pb::stream_plan::update_mutation::*;
 use risingwave_pb::stream_plan::{
     AddMutation, BarrierMutation, CombinedMutation, Dispatcher, Dispatchers,
     DropSubscriptionsMutation, PauseMutation, ResumeMutation, SourceChangeSplitMutation,
-    StopMutation, StreamActor, SubscriptionUpstreamInfo, ThrottleMutation, UpdateMutation,
+    StartProfilingMutation, StopMutation, StopProfilingMutation, StreamActor,
+    SubscriptionUpstreamInfo, ThrottleMutation, UpdateMutation,
 };
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::warn;
@@ -361,6 +362,14 @@ pub enum Command {
         subscription_id: u32,
         upstream_mv_table_id: TableId,
     },
+
+    /// `StartProfiling` command generates a `StartProfilingMutation` to notify
+    /// the profile wrapper around specific actors to start profiling.
+    StartProfiling { fragment_ids: Vec<u32> },
+
+    /// `StopProfiling` command generates a `StopProfilingMutation` to notify
+    /// the profile wrapper around specific actors to stop profiling.
+    StopProfiling { fragment_ids: Vec<u32> },
 }
 
 impl Command {
@@ -449,6 +458,8 @@ impl Command {
             Command::Throttle(_) => None,
             Command::CreateSubscription { .. } => None,
             Command::DropSubscription { .. } => None,
+            Command::StartProfiling { .. } => None,
+            Command::StopProfiling { .. } => None,
         }
     }
 
@@ -958,6 +969,16 @@ impl Command {
                         upstream_mv_table_id: upstream_mv_table_id.table_id,
                     }],
                 })),
+                Command::StartProfiling { fragment_ids } => {
+                    Some(Mutation::StartProfiling(StartProfilingMutation {
+                        fragment_ids: fragment_ids.clone(),
+                    }))
+                }
+                Command::StopProfiling { fragment_ids } => {
+                    Some(Mutation::StopProfiling(StopProfilingMutation {
+                        fragment_ids: fragment_ids.clone(),
+                    }))
+                }
             };
 
         mutation

@@ -110,8 +110,12 @@ message DropSubscriptionsMutation {
   repeated SubscriptionUpstreamInfo info = 1;
 }
 
-message ProfilingStartMutation {
+message StartProfilingMutation {
     repeated uint32 fragment_ids = 1;
+}
+
+message StopProfilingMutation {
+  repeated uint32 fragment_ids = 1;
 }
 
 message BarrierMutation {
@@ -134,7 +138,9 @@ message BarrierMutation {
     // Drop subscription on mv
     DropSubscriptionsMutation drop_subscriptions = 12;
     // Start Profiling
-    ProfilingStartMutation profiling_start = 13;
+    StartProfilingMutation start_profiling = 13;
+    // Stop Profiling
+    StopProfilingMutation stop_profiling = 14;
     // Combined mutation.
     // Currently, it can only be Add & Update, which is for sink into table.
     CombinedMutation combined = 100;
