@@ -686,7 +686,7 @@ select * from test_pg_default_value order by id asc;
 2 jack NULL
 
 statement ok
-INSERT INTO test_pg_default_value_disorderd (id) VALUES (1);
+INSERT INTO test_pg_default_value_disorderd (id) VALUES (2);
 
 query II
 select * from test_pg_default_value_disorderd order by id asc;
