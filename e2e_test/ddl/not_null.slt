@@ -1,4 +1,4 @@
-### Test batch input 
+### Test batch input
 
 statement ok
 CREATE TABLE test_struct (
@@ -89,7 +89,7 @@ SELECT COUNT(*) FROM test_array;
 statement ok
 DROP TABLE test_array;
 
-### Test stream input 
+### Test stream input
 
 statement ok
 CREATE TABLE test_person (id INT PRIMARY KEY NOT NULL, name VARCHAR NULL, age INT NOT NULL, height FLOAT NOT NULL);
