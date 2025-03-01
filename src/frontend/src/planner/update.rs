@@ -91,7 +91,7 @@ impl Planner {
                     ExprType::CheckNotNull,
                     vec![
                         new.into(),
-                        ExprImpl::literal_varchar(col.name().to_string()),
+                        ExprImpl::literal_varchar(col.name().to_owned()),
                         ExprImpl::literal_varchar(update.table_name.clone()),
                     ],
                     data_type.clone(),
