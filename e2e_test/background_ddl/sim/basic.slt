@@ -29,6 +29,9 @@ CREATE MATERIALIZED VIEW m3 as SELECT * FROM t;
 statement error
 CREATE MATERIALIZED VIEW m3 as SELECT * FROM t;
 
+statement ok
+wait;
+
 query I
 select count(*) from m1;
 ----
