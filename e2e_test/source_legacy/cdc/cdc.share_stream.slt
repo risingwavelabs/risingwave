@@ -684,6 +684,7 @@ select * from test_pg_default_value order by id asc;
 ----
 1 bugen Shanghai
 2 jack NULL
+
 statement ok
 INSERT INTO test_pg_default_value_disorderd (id) VALUES (1);
 
