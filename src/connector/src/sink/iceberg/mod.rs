@@ -145,24 +145,16 @@ impl IcebergConfig {
             if let Some(primary_key) = &config.primary_key {
                 if primary_key.is_empty() {
                     return Err(SinkError::Config(anyhow!(
-                        "Primary_key must not be empty in {}",
+                        "`primary_key` must not be empty in {}",
                         SINK_TYPE_UPSERT
                     )));
                 }
             } else {
                 return Err(SinkError::Config(anyhow!(
-                    "Must set primary_key in {}",
+                    "Must set `primary_key` in {}",
                     SINK_TYPE_UPSERT
                 )));
             }
-        }
-
-        if config.common.catalog_name.is_none()
-            && config.common.catalog_type.as_deref() != Some("storage")
-        {
-            return Err(SinkError::Config(anyhow!(
-                "catalog.name must be set for non-storage catalog"
-            )));
         }
 
         // All configs start with "catalog." will be treated as java configs.
