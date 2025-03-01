@@ -215,16 +215,16 @@ statement ok
 INSERT INTO test_my_default_value VALUES (2, 'jack');
 
 query II
-select * from test_pg_default_value order by id asc;
+select * from test_my_default_value order by id asc;
 ----
 1 bugen Shanghai
 2 jack NULL
 
 statement ok
-INSERT INTO test_pg_default_value_disorderd (id) VALUES (2);
+INSERT INTO test_my_default_value_disorderd (id) VALUES (2);
 
 query II
-select * from test_pg_default_value_disorderd order by id asc;
+select * from test_my_default_value_disorderd order by id asc;
 ----
 Shanghai 1
 NULL 2
