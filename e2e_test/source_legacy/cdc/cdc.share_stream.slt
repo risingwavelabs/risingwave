@@ -214,17 +214,17 @@ SET RW_IMPLICIT_FLUSH=true;
 statement ok
 INSERT INTO test_my_default_value VALUES (2, 'jack');
 
-query II rowsort
-select * from test_my_default_value;
+query II
+select * from test_pg_default_value order by id asc;
 ----
 1 bugen Shanghai
 2 jack NULL
 
 statement ok
-INSERT INTO test_my_default_value_disorderd (id) VALUES (2);
+INSERT INTO test_pg_default_value_disorderd (id) VALUES (2);
 
-query II rowsort
-select * from test_my_default_value_disorderd;
+query II
+select * from test_pg_default_value_disorderd order by id asc;
 ----
 Shanghai 1
 NULL 2
@@ -693,17 +693,17 @@ SET RW_IMPLICIT_FLUSH=true;
 statement ok
 INSERT INTO test_pg_default_value VALUES (2, 'jack');
 
-query II rowsort
-select * from test_pg_default_value;
+query II
+select * from test_pg_default_value order by id asc;
 ----
 1 bugen Shanghai
 2 jack NULL
 
 statement ok
-INSERT INTO test_pg_default_value_disorderd (id) VALUES (1);
+INSERT INTO test_pg_default_value_disorderd (id) VALUES (2);
 
-query II rowsort
-select * from test_pg_default_value_disorderd;
+query II
+select * from test_pg_default_value_disorderd order by id asc;
 ----
 Shanghai 1
 NULL 2
