@@ -190,11 +190,6 @@ impl Binder {
             })
             .collect();
 
-        // let col_names: Vec<&str> = col_indices_to_insert
-        //     .iter()
-        //     .map(|idx| cols_to_insert_in_table[*idx].name())
-        //     .collect();
-
         // When the column types of `source` query do not match `expected_types`,
         // casting is needed.
         //
@@ -396,7 +391,7 @@ impl Binder {
                             let check_not_null = FunctionCall::new_unchecked(
                                 ExprType::CheckNotNull,
                                 vec![
-                                    expr.into(),
+                                    expr,
                                     ExprImpl::literal_varchar((*col_name).to_owned()),
                                     ExprImpl::literal_varchar(table_name.to_owned()),
                                 ],

@@ -90,7 +90,7 @@ impl Planner {
                 new = FunctionCall::new_unchecked(
                     ExprType::CheckNotNull,
                     vec![
-                        new.into(),
+                        new,
                         ExprImpl::literal_varchar(col.name().to_owned()),
                         ExprImpl::literal_varchar(update.table_name.clone()),
                     ],

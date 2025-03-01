@@ -432,17 +432,6 @@ pub fn secure_compare(left: &str, right: &str) -> bool {
 }
 
 #[function("check_not_null(any, varchar, varchar) -> any")]
-// #[function("check_not_null(*int, varchar) -> auto")]
-// #[function("check_not_null(*float, varchar, varchar) -> auto")]
-// fn check_not_null<T1, T2>(v: Option<T1>, col_name: &str, relation_name: &str) -> Result<Option<T2>>
-// where
-//     T1: Into<T2>,
-// {
-//     if v.is_none() {
-//         return Err(ExprError::NotNullViolation);
-//     }
-//     Ok(v.map(Into::into))
-// }
 fn check_not_null<'a>(
     v: Option<ScalarRefImpl<'a>>,
     col_name: &str,
