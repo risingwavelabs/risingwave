@@ -957,7 +957,7 @@ impl Catalog {
     ) -> CatalogResult<()> {
         let schema = self.get_schema_by_name(db_name, schema_name)?;
 
-        if let Some(table) = schema.get_created_table_by_name(relation_name) {
+        if let Some(table) = schema.get_table_by_name(relation_name) {
             if table.is_index() {
                 Err(CatalogError::Duplicated("index", relation_name.to_owned()))
             } else if table.is_mview() {
