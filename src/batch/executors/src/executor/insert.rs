@@ -343,7 +343,6 @@ mod tests {
             row_id_index,
             false,
             0,
-            vec![true, true, true],
         ));
         let handle = tokio::spawn(async move {
             let mut stream = insert_executor.execute();
