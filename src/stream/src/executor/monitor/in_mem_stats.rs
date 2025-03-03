@@ -25,13 +25,33 @@ pub struct CountMap(Arc<RwLock<HashMap<u32, Count>>>);
 
 impl CountMap {
     pub(crate) fn new() -> Self {
-        CountMap(Arc::new(RwLock::new(HashMap::new())))
+        let inner = Arc::new(RwLock::new(HashMap::new()));
+        {
+            let inner = inner.clone();
+            tokio::spawn(async move {
+                loop {
+                    tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
+                    if Self::should_gc(&inner.read()) {
+                        Self::gc(&mut inner.write());
+                    }
+                }
+            });
+        }
+        CountMap(inner)
     }
 
-    pub(crate) fn new_counter(&self, id: u32) -> Count {
+    pub(crate) fn new_or_get_counter(&self, id: u32) -> Count {
+        {
+            let map = self.0.read();
+            if let Some(counter) = map.get(&id) {
+                return counter.clone();
+            }
+        }
         let mut map = self.0.write();
-        let counter = Arc::new(AtomicU32::new(0));
-        map.insert(id, counter.clone());
+        let counter = map
+            .entry(id)
+            .or_insert_with(|| Arc::new(AtomicU32::new(0)))
+            .clone();
         counter
     }
 
@@ -40,5 +60,22 @@ impl CountMap {
         map.iter()
             .map(|(&k, v)| (k, v.load(std::sync::atomic::Ordering::Relaxed)))
             .collect()
+    }
+
+    /// GC at 50% drop rate
+    pub fn should_gc(map: &HashMap<u32, Count>) -> bool {
+        let total = map.len();
+        let dropped = map
+            .iter()
+            .filter(|(_, v)| Arc::strong_count(v) <= 1)
+            .count();
+        if dropped * 2 > total {
+            return true;
+        }
+        false
+    }
+
+    pub fn gc(map: &mut HashMap<u32, Count>) {
+        map.retain(|_, v| Arc::strong_count(v) > 1);
     }
 }

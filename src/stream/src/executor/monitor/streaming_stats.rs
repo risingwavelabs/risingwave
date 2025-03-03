@@ -1550,16 +1550,18 @@ impl StreamingMetrics {
 
     pub fn new_profile_metrics(&self, operator_id: u32) -> ProfileMetrics {
         ProfileMetrics {
-            stream_node_input_row_count: self.stream_node_input_row_count.new_counter(operator_id),
+            stream_node_input_row_count: self
+                .stream_node_input_row_count
+                .new_or_get_counter(operator_id),
             stream_node_output_row_count: self
                 .stream_node_output_row_count
-                .new_counter(operator_id),
+                .new_or_get_counter(operator_id),
             stream_node_input_blocking_duration_ns: self
                 .stream_node_input_blocking_duration_ns
-                .new_counter(operator_id),
+                .new_or_get_counter(operator_id),
             stream_node_output_blocking_duration_ns: self
                 .stream_node_output_blocking_duration_ns
-                .new_counter(operator_id),
+                .new_or_get_counter(operator_id),
         }
     }
 }
