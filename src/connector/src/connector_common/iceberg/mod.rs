@@ -322,14 +322,14 @@ impl IcebergCommon {
                             .secret_key(self.secret_key.clone())
                             .region(self.region.clone())
                             .endpoint(self.endpoint.clone())
-                            .enable_config_load(self.enable_config_load.clone())
+                            .enable_config_load(self.enable_config_load)
                             .build(),
                     ),
                     "gs" | "gcs" => StorageCatalogConfig::Gcs(
                         storage_catalog::StorageCatalogGcsConfig::builder()
                             .warehouse(warehouse)
                             .credential(self.gcs_credential.clone())
-                            .enable_config_load(self.enable_config_load.clone())
+                            .enable_config_load(self.enable_config_load)
                             .build(),
                     ),
                     scheme => bail!("Unsupported warehouse scheme: {}", scheme),

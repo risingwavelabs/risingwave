@@ -65,47 +65,31 @@ impl StorageCatalog {
         let (warehouse, file_io) = match config {
             StorageCatalogConfig::S3(config) => {
                 let mut file_io_builder = FileIO::from_path(&config.warehouse)?;
-                file_io_builder = if let Some(access_key) = &config.access_key {
-                    file_io_builder.with_prop(S3_ACCESS_KEY_ID, access_key)
-                } else {
-                    file_io_builder
+                if let Some(access_key) = &config.access_key {
+                    file_io_builder = file_io_builder.with_prop(S3_ACCESS_KEY_ID, access_key)
                 };
-                file_io_builder = if let Some(secret_key) = &config.secret_key {
-                    file_io_builder.with_prop(S3_SECRET_ACCESS_KEY, secret_key)
-                } else {
-                    file_io_builder
+                if let Some(secret_key) = &config.secret_key {
+                    file_io_builder = file_io_builder.with_prop(S3_SECRET_ACCESS_KEY, secret_key)
                 };
-                file_io_builder = if let Some(endpoint) = &config.endpoint {
-                    file_io_builder.with_prop(S3_ENDPOINT, endpoint)
-                } else {
-                    file_io_builder
-                };
-                file_io_builder = if let Some(region) = &config.region {
-                    file_io_builder.with_prop(S3_REGION, region)
-                } else {
-                    file_io_builder
-                };
-                file_io_builder = if let Some(enable_config_load) = config.enable_config_load {
-                    file_io_builder
-                        .with_prop(S3_DISABLE_CONFIG_LOAD, (!enable_config_load).to_string())
-                } else {
-                    file_io_builder.with_prop(S3_DISABLE_CONFIG_LOAD, true.to_string())
-                };
+                if let Some(endpoint) = &config.endpoint {
+                    file_io_builder = file_io_builder.with_prop(S3_ENDPOINT, endpoint)
+                }
+                if let Some(region) = &config.region {
+                    file_io_builder = file_io_builder.with_prop(S3_REGION, region)
+                }
+                let enable_config_load = config.enable_config_load.unwrap_or(false);
+                file_io_builder = file_io_builder
+                    .with_prop(S3_DISABLE_CONFIG_LOAD, (!enable_config_load).to_string());
                 (config.warehouse.clone(), file_io_builder.build()?)
             }
             StorageCatalogConfig::Gcs(config) => {
                 let mut file_io_builder = FileIO::from_path(&config.warehouse)?;
-                file_io_builder = if let Some(credential) = &config.credential {
-                    file_io_builder.with_prop(GCS_CREDENTIALS_JSON, credential)
-                } else {
-                    file_io_builder
+                if let Some(credential) = &config.credential {
+                    file_io_builder = file_io_builder.with_prop(GCS_CREDENTIALS_JSON, credential)
                 };
-                file_io_builder = if let Some(enable_config_load) = config.enable_config_load {
-                    file_io_builder
-                        .with_prop(GCS_DISABLE_CONFIG_LOAD, (!enable_config_load).to_string())
-                } else {
-                    file_io_builder.with_prop(S3_DISABLE_CONFIG_LOAD, true.to_string())
-                };
+                let enable_config_load = config.enable_config_load.unwrap_or(false);
+                file_io_builder = file_io_builder
+                    .with_prop(GCS_DISABLE_CONFIG_LOAD, (!enable_config_load).to_string());
                 (config.warehouse.clone(), file_io_builder.build()?)
             }
         };
