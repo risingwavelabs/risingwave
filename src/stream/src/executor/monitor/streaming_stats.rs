@@ -1548,7 +1548,7 @@ impl StreamingMetrics {
         }
     }
 
-    pub fn new_profile_metrics(&self, operator_id: u32) -> ProfileMetrics {
+    pub fn new_profile_metrics(&self, operator_id: u64) -> ProfileMetrics {
         ProfileMetrics {
             stream_node_input_row_count: self
                 .stream_node_input_row_count

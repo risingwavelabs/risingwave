@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::time::Duration;
 
 use pgwire::pg_response::StatementType;
 use risingwave_common::types::Fields;
@@ -6,6 +7,7 @@ use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::list_table_fragments_response::FragmentInfo;
 use risingwave_pb::monitor_service::{GetProfileStatsRequest, GetProfileStatsResponse};
 use risingwave_pb::stream_plan::StreamNode as PbStreamNode;
+use tokio::time::sleep;
 
 use crate::error::Result;
 use crate::handler::{HandlerArgs, RwPgResponse, RwPgResponseBuilder, RwPgResponseBuilderExt};
@@ -38,9 +40,8 @@ pub async fn handle_explain_analyze_stream_job(
         table_fragment_info.fragments
     };
     let adjacency_list = extract_stream_node_infos(fragments);
+    println!("adjacency list: {:?}", adjacency_list);
     let root_node = find_root_node(&adjacency_list);
-
-    // Trigger barrier via meta node to profile specific actors
 
     // Get the worker nodes
     let worker_nodes = list_stream_worker_nodes(handler_args.session.env()).await?;
@@ -57,7 +58,7 @@ pub async fn handle_explain_analyze_stream_job(
         aggregated_stats.start_record(adjacency_list.keys(), &stats.into_inner());
     }
 
-    // TODO: Sleep for `DURATION` to collect metrics
+    sleep(Duration::from_secs(10)).await;
 
     // Scrape metrics after `DURATION` from the meta node,
     // group by actors.
@@ -85,10 +86,10 @@ pub async fn handle_explain_analyze_stream_job(
 /// This is an internal struct used ONLY for explain analyze stream job.
 #[derive(Debug)]
 struct StreamNode {
-    operator_id: u32,
+    operator_id: u64,
     identity: String,
     actor_ids: Vec<u32>,
-    dependencies: Vec<u32>,
+    dependencies: Vec<u64>,
 }
 
 async fn list_stream_worker_nodes(env: &FrontendEnv) -> Result<Vec<WorkerNode>> {
@@ -105,7 +106,7 @@ async fn list_stream_worker_nodes(env: &FrontendEnv) -> Result<Vec<WorkerNode>> 
     Ok(stream_worker_nodes)
 }
 
-type OperatorId = u32;
+type OperatorId = u64;
 
 #[derive(Default)]
 struct StreamNodeMetrics {
@@ -169,26 +170,30 @@ impl StreamNodeStats {
     ) {
         for operator_id in operator_ids {
             if let Some(stats) = self.inner.get_mut(operator_id) {
-                stats.total_input_throughput -= metrics
+                stats.total_input_throughput = metrics
                     .stream_node_input_row_count
                     .get(operator_id)
                     .cloned()
-                    .unwrap_or(0);
-                stats.total_output_throughput -= metrics
+                    .unwrap_or(0)
+                    - stats.total_input_throughput;
+                stats.total_output_throughput = metrics
                     .stream_node_output_row_count
                     .get(operator_id)
                     .cloned()
-                    .unwrap_or(0);
-                stats.total_input_latency -= metrics
+                    .unwrap_or(0)
+                    - stats.total_output_throughput;
+                stats.total_input_latency = metrics
                     .stream_node_input_blocking_duration_ns
                     .get(operator_id)
                     .cloned()
-                    .unwrap_or(0);
-                stats.total_output_latency -= metrics
-                    .stream_node_input_row_count
+                    .unwrap_or(0)
+                    - stats.total_input_latency;
+                stats.total_output_latency = metrics
+                    .stream_node_output_blocking_duration_ns
                     .get(operator_id)
                     .cloned()
-                    .unwrap_or(0);
+                    .unwrap_or(0)
+                    - stats.total_output_latency;
             } else {
                 // TODO: warn missing metrics!
             }
@@ -196,9 +201,10 @@ impl StreamNodeStats {
     }
 }
 
-fn extract_stream_node_infos(fragments: Vec<FragmentInfo>) -> HashMap<u32, StreamNode> {
+fn extract_stream_node_infos(fragments: Vec<FragmentInfo>) -> HashMap<u64, StreamNode> {
     fn extract_stream_node_info(
-        operator_id_to_stream_node: &mut HashMap<u32, StreamNode>,
+        fragment_id: u32,
+        operator_id_to_stream_node: &mut HashMap<u64, StreamNode>,
         node: &PbStreamNode,
         actor_id: u32,
     ) {
@@ -208,14 +214,14 @@ fn extract_stream_node_infos(fragments: Vec<FragmentInfo>) -> HashMap<u32, Strea
             .next()
             .unwrap()
             .to_owned();
-        let operator_id = node.operator_id as _;
+        let operator_id = unique_operator_id(fragment_id, node.operator_id);
         let dependencies = &node.input;
         let entry = operator_id_to_stream_node
             .entry(operator_id)
             .or_insert_with(|| {
                 let dependencies = dependencies
                     .iter()
-                    .map(|input| input.operator_id as u32)
+                    .map(|input| unique_operator_id(fragment_id, input.operator_id))
                     .collect();
                 StreamNode {
                     operator_id,
@@ -226,7 +232,12 @@ fn extract_stream_node_infos(fragments: Vec<FragmentInfo>) -> HashMap<u32, Strea
             });
         entry.actor_ids.push(actor_id);
         for dependency in dependencies {
-            extract_stream_node_info(operator_id_to_stream_node, dependency, actor_id);
+            extract_stream_node_info(
+                fragment_id,
+                operator_id_to_stream_node,
+                dependency,
+                actor_id,
+            );
         }
     }
 
@@ -236,20 +247,30 @@ fn extract_stream_node_infos(fragments: Vec<FragmentInfo>) -> HashMap<u32, Strea
         for actor in actors {
             let actor_id = actor.id;
             let node = actor.node.unwrap();
-            extract_stream_node_info(&mut operator_id_to_stream_node, &node, actor_id);
+            extract_stream_node_info(
+                fragment.id,
+                &mut operator_id_to_stream_node,
+                &node,
+                actor_id,
+            );
         }
     }
     operator_id_to_stream_node
 }
 
-fn find_root_node(stream_nodes: &HashMap<u32, StreamNode>) -> u32 {
+fn find_root_node(stream_nodes: &HashMap<u64, StreamNode>) -> u64 {
     let mut all_nodes = stream_nodes.keys().copied().collect::<HashSet<_>>();
     for node in stream_nodes.values() {
         for dependency in &node.dependencies {
             all_nodes.remove(dependency);
         }
     }
-    assert_eq!(all_nodes.len(), 1);
+    assert_eq!(
+        all_nodes.len(),
+        1,
+        "expected only one root node: {:?}",
+        all_nodes
+    );
     let mut all_nodes = all_nodes.drain();
     all_nodes.next().unwrap()
 }
@@ -259,8 +280,8 @@ fn find_root_node(stream_nodes: &HashMap<u32, StreamNode>) -> u32 {
 // | Operator ID | Identity | Actor IDs | Metrics ... |
 // Each node will be indented based on its depth in the graph.
 fn render_graph_with_metrics(
-    adjacency_list: &HashMap<u32, StreamNode>,
-    root_node: u32,
+    adjacency_list: &HashMap<u64, StreamNode>,
+    root_node: u64,
     stats: &StreamNodeStats,
 ) -> Vec<ExplainAnalyzeStreamJobOutput> {
     let mut rows = vec![];
@@ -318,4 +339,10 @@ fn render_graph_with_metrics(
         }
     }
     rows
+}
+
+/// Generate a globally unique operator id.
+fn unique_operator_id(fragment_id: u32, operator_id: u64) -> u64 {
+    assert!(operator_id <= u32::MAX as u64);
+    ((fragment_id as u64) << 32) + operator_id
 }
