@@ -33,6 +33,7 @@ mod m20241125_043732_connection_params;
 mod m20241202_071413_resource_group;
 mod m20241226_074013_clean_watermark_index_in_pk;
 mod m20250106_072104_fragment_relation;
+mod m20250121_085800_change_wasm_udf_identifier;
 mod m20250210_170743_function_options;
 mod utils;
 
@@ -105,6 +106,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20241202_071413_resource_group::Migration),
             Box::new(m20241226_074013_clean_watermark_index_in_pk::Migration),
             Box::new(m20250106_072104_fragment_relation::Migration),
+            Box::new(m20250121_085800_change_wasm_udf_identifier::Migration),
             Box::new(m20250210_170743_function_options::Migration),
         ]
     }

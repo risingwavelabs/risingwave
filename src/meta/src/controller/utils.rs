@@ -897,7 +897,6 @@ pub fn extract_grant_obj_id(object: &PbGrantObject) -> ObjectId {
         | PbGrantObject::ViewId(id)
         | PbGrantObject::FunctionId(id)
         | PbGrantObject::SubscriptionId(id) => *id as _,
-        _ => unreachable!("invalid object type: {:?}", object),
     }
 }
 
