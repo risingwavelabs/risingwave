@@ -562,7 +562,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         log_reader.init().await?;
 
         loop {
-            let a = tokio::select! {
+            let result = tokio::select! {
                 config = update_config_rx.recv() => {
                     Ok(config)
                 },
@@ -572,13 +572,22 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                     result.map(|_| None)
                 }
             };
-            match a {
+            match result {
                 Ok(Some(config)) => {
                     match log_reader.rewind().await {
                         Ok((true, curr_vnode_bitmap)) => {
                             sink_writer_param.vnode_bitmap = curr_vnode_bitmap;
                             sink_param.properties.extend(config);
                             sink.update_config(sink_param.properties.clone())
+                                .map_err(|e| {
+                                    StreamExecutorError::from((e, sink_param.sink_id.sink_id))
+                                })?;
+                            info!(
+                                executor_id = sink_writer_param.executor_id,
+                                sink_id = sink_param.sink_id.sink_id,
+                                "alter sink config successfully with rewind"
+                            );
+                            Ok(())
                         }
                         Ok((false, _)) => {
                             sink_param.properties.extend(config);
@@ -586,14 +595,19 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                 .map_err(|e| {
                                     StreamExecutorError::from((e, sink_param.sink_id.sink_id))
                                 })?;
-                            Err(anyhow!("fail to rewind log readerm").into())
+                            info!(
+                                executor_id = sink_writer_param.executor_id,
+                                sink_id = sink_param.sink_id.sink_id,
+                                "alter sink config successfully without rewind"
+                            );
+                            Ok(())
                         }
                         Err(rewind_err) => {
                             error!(
                                 error = %rewind_err.as_report(),
-                                "fail to rewind log reader"
+                                "fail to rewind log reader after alter table"
                             );
-                            Err(anyhow!("fail to rewind log readerm").into())
+                            Err(anyhow!("fail to rewind log after alter table").into())
                         }
                     }
                     .map_err(|e| StreamExecutorError::from((e, sink_param.sink_id.sink_id)))?;
@@ -632,7 +646,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                         Err(rewind_err) => {
                             error!(
                                 error = %rewind_err.as_report(),
-                                "fail to rewind log reader"
+                                "fail to rewind log reader after sink error"
                             );
                             Err(e)
                         }
