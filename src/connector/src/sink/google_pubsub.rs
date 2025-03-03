@@ -139,17 +139,23 @@ impl Sink for GooglePubSubSink {
         Ok(())
     }
 
-    async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
-        Ok(GooglePubSubSinkWriter::new(
-            self.config.clone(),
-            self.schema.clone(),
-            self.pk_indices.clone(),
-            &self.format_desc,
-            self.db_name.clone(),
-            self.sink_from_name.clone(),
-        )
-        .await?
-        .into_log_sinker(PUBSUB_SEND_FUTURE_BUFFER_MAX_SIZE))
+    async fn new_log_sinker(
+        &self,
+        _writer_param: SinkWriterParam,
+    ) -> Result<(Self::LogSinker, Option<u64>)> {
+        Ok((
+            GooglePubSubSinkWriter::new(
+                self.config.clone(),
+                self.schema.clone(),
+                self.pk_indices.clone(),
+                &self.format_desc,
+                self.db_name.clone(),
+                self.sink_from_name.clone(),
+            )
+            .await?
+            .into_log_sinker(PUBSUB_SEND_FUTURE_BUFFER_MAX_SIZE),
+            None,
+        ))
     }
 }
 

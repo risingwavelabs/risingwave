@@ -186,7 +186,10 @@ pub trait LogReader: Send + Sized + 'static {
     /// Reset the log reader to after the latest truncate offset
     ///
     /// The return flag means whether the log store support rewind
-    fn rewind(&mut self) -> impl Future<Output = LogStoreResult<()>> + Send + '_;
+    fn rewind(
+        &mut self,
+        log_store_rewind_start_epoch: Option<u64>,
+    ) -> impl Future<Output = LogStoreResult<()>> + Send + '_;
 }
 
 pub trait LogStoreFactory: Send + 'static {
@@ -226,8 +229,11 @@ impl<F: Fn(StreamChunk) -> StreamChunk + Send + 'static, R: LogReader> LogReader
         self.inner.truncate(offset)
     }
 
-    fn rewind(&mut self) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
-        self.inner.rewind()
+    fn rewind(
+        &mut self,
+        log_store_rewind_start_epoch: Option<u64>,
+    ) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
+        self.inner.rewind(log_store_rewind_start_epoch)
     }
 }
 
@@ -271,10 +277,15 @@ impl<R: LogReader> LogReader for BackpressureMonitoredLogReader<R> {
         self.inner.truncate(offset)
     }
 
-    fn rewind(&mut self) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
-        self.inner.rewind().inspect_ok(|_| {
-            self.wait_new_future_start_time = None;
-        })
+    fn rewind(
+        &mut self,
+        log_store_rewind_start_epoch: Option<u64>,
+    ) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
+        self.inner
+            .rewind(log_store_rewind_start_epoch)
+            .inspect_ok(|_| {
+                self.wait_new_future_start_time = None;
+            })
     }
 }
 
@@ -331,8 +342,13 @@ impl<R: LogReader> LogReader for MonitoredLogReader<R> {
         self.inner.truncate(offset)
     }
 
-    fn rewind(&mut self) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
-        self.inner.rewind().instrument_await("log_reader_rewind")
+    fn rewind(
+        &mut self,
+        log_store_rewind_start_epoch: Option<u64>,
+    ) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
+        self.inner
+            .rewind(log_store_rewind_start_epoch)
+            .instrument_await("log_reader_rewind")
     }
 }
 
@@ -540,11 +556,14 @@ impl<R: LogReader> LogReader for RateLimitedLogReader<R> {
         }
     }
 
-    fn rewind(&mut self) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
+    fn rewind(
+        &mut self,
+        log_store_rewind_start_epoch: Option<u64>,
+    ) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
         self.core.unconsumed_chunk_queue.clear();
         self.core.consumed_offset_queue.clear();
         self.core.next_chunk_id = 0;
-        self.core.inner.rewind()
+        self.core.inner.rewind(log_store_rewind_start_epoch)
     }
 }
 

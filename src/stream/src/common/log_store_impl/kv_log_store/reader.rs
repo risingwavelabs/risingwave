@@ -608,7 +608,7 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
         Ok(())
     }
 
-    async fn rewind(&mut self) -> LogStoreResult<()> {
+    async fn rewind(&mut self, log_store_rewind_start_epoch: Option<u64>) -> LogStoreResult<()> {
         self.rewind_delay.rewind_delay(self.truncate_offset).await;
         self.latest_offset = None;
         if self.truncate_offset.is_none()
@@ -632,7 +632,7 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
         } else {
             self.future_state = KvLogStoreReaderFutureState::Empty;
         }
-        self.rx.rewind();
+        self.rx.rewind(log_store_rewind_start_epoch);
 
         Ok(())
     }

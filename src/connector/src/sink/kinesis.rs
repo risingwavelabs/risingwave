@@ -108,17 +108,23 @@ impl Sink for KinesisSink {
         Ok(())
     }
 
-    async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
-        Ok(KinesisSinkWriter::new(
-            self.config.clone(),
-            self.schema.clone(),
-            self.pk_indices.clone(),
-            &self.format_desc,
-            self.db_name.clone(),
-            self.sink_from_name.clone(),
-        )
-        .await?
-        .into_log_sinker(KINESIS_SINK_MAX_PENDING_CHUNK_NUM))
+    async fn new_log_sinker(
+        &self,
+        _writer_param: SinkWriterParam,
+    ) -> Result<(Self::LogSinker, Option<u64>)> {
+        Ok((
+            KinesisSinkWriter::new(
+                self.config.clone(),
+                self.schema.clone(),
+                self.pk_indices.clone(),
+                &self.format_desc,
+                self.db_name.clone(),
+                self.sink_from_name.clone(),
+            )
+            .await?
+            .into_log_sinker(KINESIS_SINK_MAX_PENDING_CHUNK_NUM),
+            None,
+        ))
     }
 }
 

@@ -82,6 +82,7 @@ use risingwave_pb::catalog::PbSinkType;
 use risingwave_pb::connector_service::{PbSinkParam, SinkMetadata, TableSchema};
 use risingwave_rpc_client::MetaClient;
 use risingwave_rpc_client::error::RpcError;
+use sea_orm::DatabaseConnection;
 use starrocks::STARROCKS_SINK;
 use thiserror::Error;
 use thiserror_ext::AsReport;
@@ -644,14 +645,17 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
     }
 
     async fn validate(&self) -> Result<()>;
-    async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker>;
+    async fn new_log_sinker(
+        &self,
+        writer_param: SinkWriterParam,
+    ) -> Result<(Self::LogSinker, Option<u64>)>;
 
     fn is_coordinated_sink(&self) -> bool {
         false
     }
 
     #[expect(clippy::unused_async)]
-    async fn new_coordinator(&self) -> Result<Self::Coordinator> {
+    async fn new_coordinator(&self, _db: DatabaseConnection) -> Result<Self::Coordinator> {
         Err(SinkError::Coordinator(anyhow!("no coordinator")))
     }
 }
@@ -689,7 +693,7 @@ pub trait LogSinker: 'static {
 #[async_trait]
 pub trait SinkCommitCoordinator {
     /// Initialize the sink committer coordinator
-    async fn init(&mut self) -> Result<()>;
+    async fn init(&mut self) -> Result<Option<u64>>;
     /// After collecting the metadata from each sink writer, a coordinator will call `commit` with
     /// the set of metadata. The metadata is serialized into bytes, because the metadata is expected
     /// to be passed between different gRPC node, so in this general trait, the metadata is
@@ -701,8 +705,8 @@ pub struct DummySinkCommitCoordinator;
 
 #[async_trait]
 impl SinkCommitCoordinator for DummySinkCommitCoordinator {
-    async fn init(&mut self) -> Result<()> {
-        Ok(())
+    async fn init(&mut self) -> Result<Option<u64>> {
+        Ok(None)
     }
 
     async fn commit(&mut self, _epoch: u64, _metadata: Vec<SinkMetadata>) -> Result<()> {
@@ -921,6 +925,12 @@ pub enum SinkError {
 impl From<icelake::Error> for SinkError {
     fn from(value: icelake::Error) -> Self {
         SinkError::Iceberg(anyhow!(value))
+    }
+}
+
+impl From<sea_orm::DbErr> for SinkError {
+    fn from(err: sea_orm::DbErr) -> Self {
+        SinkError::Iceberg(anyhow!(err))
     }
 }
 

@@ -70,8 +70,11 @@ impl<T: TrivialSinkName> Sink for TrivialSink<T> {
         Ok(false)
     }
 
-    async fn new_log_sinker(&self, _writer_env: SinkWriterParam) -> Result<Self::LogSinker> {
-        Ok(Self(PhantomData))
+    async fn new_log_sinker(
+        &self,
+        _writer_env: SinkWriterParam,
+    ) -> Result<(Self::LogSinker, Option<u64>)> {
+        Ok((Self(PhantomData), None))
     }
 
     async fn validate(&self) -> Result<()> {

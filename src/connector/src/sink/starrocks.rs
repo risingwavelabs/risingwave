@@ -28,6 +28,7 @@ use risingwave_common::types::DataType;
 use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
+use sea_orm::DatabaseConnection;
 use serde::Deserialize;
 use serde_derive::Serialize;
 use serde_json::Value;
@@ -301,7 +302,10 @@ impl Sink for StarrocksSink {
         Ok(())
     }
 
-    async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
+    async fn new_log_sinker(
+        &self,
+        writer_param: SinkWriterParam,
+    ) -> Result<(Self::LogSinker, Option<u64>)> {
         let commit_checkpoint_interval =
             NonZeroU64::new(self.config.commit_checkpoint_interval).expect(
                 "commit_checkpoint_interval should be greater than 0, and it should be checked in config validation",
@@ -332,10 +336,9 @@ impl Sink for StarrocksSink {
         )
         .await?;
 
-        Ok(DecoupleCheckpointLogSinkerOf::new(
-            writer,
-            metrics,
-            commit_checkpoint_interval,
+        Ok((
+            DecoupleCheckpointLogSinkerOf::new(writer, metrics, commit_checkpoint_interval),
+            None,
         ))
     }
 
@@ -343,7 +346,7 @@ impl Sink for StarrocksSink {
         true
     }
 
-    async fn new_coordinator(&self) -> Result<Self::Coordinator> {
+    async fn new_coordinator(&self, _db: DatabaseConnection) -> Result<Self::Coordinator> {
         let header = HeaderBuilder::new()
             .add_common_header()
             .set_user_password(
@@ -888,9 +891,9 @@ pub struct StarrocksSinkCommitter {
 
 #[async_trait::async_trait]
 impl SinkCommitCoordinator for StarrocksSinkCommitter {
-    async fn init(&mut self) -> Result<()> {
+    async fn init(&mut self) -> Result<Option<u64>> {
         tracing::info!("Starrocks commit coordinator inited.");
-        Ok(())
+        Ok(None)
     }
 
     async fn commit(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()> {

@@ -50,6 +50,7 @@ use risingwave_rpc_client::{
     SinkWriterStreamHandle,
 };
 use rw_futures_util::drop_either_future;
+use sea_orm::DatabaseConnection;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{Receiver, unbounded_channel};
@@ -154,8 +155,14 @@ impl<R: RemoteSinkTrait> Sink for RemoteSink<R> {
         }
     }
 
-    async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
-        RemoteLogSinker::new(self.param.clone(), writer_param, Self::SINK_NAME).await
+    async fn new_log_sinker(
+        &self,
+        writer_param: SinkWriterParam,
+    ) -> Result<(Self::LogSinker, Option<u64>)> {
+        Ok((
+            RemoteLogSinker::new(self.param.clone(), writer_param, Self::SINK_NAME).await?,
+            None,
+        ))
     }
 
     async fn validate(&self) -> Result<()> {
@@ -531,31 +538,37 @@ impl<R: RemoteSinkTrait> Sink for CoordinatedRemoteSink<R> {
         Ok(())
     }
 
-    async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
+    async fn new_log_sinker(
+        &self,
+        writer_param: SinkWriterParam,
+    ) -> Result<(Self::LogSinker, Option<u64>)> {
         let metrics = SinkWriterMetrics::new(&writer_param);
-        Ok(CoordinatedSinkWriter::new(
-            writer_param
-                .meta_client
-                .expect("should have meta client")
-                .sink_coordinate_client()
-                .await,
-            self.param.clone(),
-            writer_param.vnode_bitmap.ok_or_else(|| {
-                SinkError::Remote(anyhow!(
-                    "sink needs coordination and should not have singleton input"
-                ))
-            })?,
-            CoordinatedRemoteSinkWriter::new(self.param.clone(), metrics.clone()).await?,
-        )
-        .await?
-        .into_log_sinker(metrics))
+        Ok((
+            CoordinatedSinkWriter::new(
+                writer_param
+                    .meta_client
+                    .expect("should have meta client")
+                    .sink_coordinate_client()
+                    .await,
+                self.param.clone(),
+                writer_param.vnode_bitmap.ok_or_else(|| {
+                    SinkError::Remote(anyhow!(
+                        "sink needs coordination and should not have singleton input"
+                    ))
+                })?,
+                CoordinatedRemoteSinkWriter::new(self.param.clone(), metrics.clone()).await?,
+            )
+            .await?
+            .into_log_sinker(metrics),
+            None,
+        ))
     }
 
     fn is_coordinated_sink(&self) -> bool {
         true
     }
 
-    async fn new_coordinator(&self) -> Result<Self::Coordinator> {
+    async fn new_coordinator(&self, _db: DatabaseConnection) -> Result<Self::Coordinator> {
         RemoteCoordinator::new::<R>(self.param.clone()).await
     }
 }
@@ -675,8 +688,8 @@ impl RemoteCoordinator {
 
 #[async_trait]
 impl SinkCommitCoordinator for RemoteCoordinator {
-    async fn init(&mut self) -> Result<()> {
-        Ok(())
+    async fn init(&mut self) -> Result<Option<u64>> {
+        Ok(None)
     }
 
     async fn commit(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()> {

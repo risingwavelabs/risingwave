@@ -63,6 +63,7 @@ use risingwave_connector::source::{
 };
 use risingwave_stream::executor::test_utils::prelude::ColumnDesc;
 use risingwave_stream::executor::{Barrier, Message, MessageStreamItem, StreamExecutorError};
+use sea_orm::DatabaseConnection;
 use serde::{Deserialize, Deserializer};
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Sender;
@@ -131,7 +132,7 @@ impl LogReader for MockRangeLogReader {
         Ok(())
     }
 
-    async fn rewind(&mut self) -> LogStoreResult<()> {
+    async fn rewind(&mut self, _log_store_rewind_start_epoch: Option<u64>) -> LogStoreResult<()> {
         Err(anyhow!("should not call rewind"))
     }
 }
@@ -377,13 +378,13 @@ where
     <S as risingwave_connector::sink::Sink>::Coordinator: std::marker::Send,
     <S as risingwave_connector::sink::Sink>::Coordinator: 'static,
 {
-    if let Ok(coordinator) = sink.new_coordinator().await {
+    if let Ok(coordinator) = sink.new_coordinator(DatabaseConnection::Disconnected).await {
         sink_writer_param.meta_client = Some(SinkMetaClient::MockMetaClient(MockMetaClient::new(
             Box::new(coordinator),
         )));
         sink_writer_param.vnode_bitmap = Some(Bitmap::ones(1));
     }
-    let log_sinker = sink.new_log_sinker(sink_writer_param).await.unwrap();
+    let (log_sinker, _) = sink.new_log_sinker(sink_writer_param).await.unwrap();
     match log_sinker.consume_log_and_sink(&mut log_reader).await {
         Ok(_) => Err("Stream closed".to_owned()),
         Err(e) => Err(e.to_report_string()),

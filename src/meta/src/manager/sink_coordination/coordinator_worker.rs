@@ -26,6 +26,7 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_connector::dispatch_sink;
 use risingwave_connector::sink::{Sink, SinkCommitCoordinator, SinkParam, build_sink};
 use risingwave_pb::connector_service::SinkMetadata;
+use sea_orm::DatabaseConnection;
 use thiserror_ext::AsReport;
 use tokio::select;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -165,7 +166,10 @@ impl CoordinationHandleManager {
         .await
     }
 
-    async fn next_commit_request(&mut self) -> anyhow::Result<(usize, Bitmap, u64, SinkMetadata)> {
+    async fn next_commit_request(
+        &mut self,
+        log_store_rewind_start_epoch: Option<u64>,
+    ) -> anyhow::Result<(usize, Bitmap, u64, SinkMetadata)> {
         loop {
             select! {
                 handle = self.request_rx.recv() => {
@@ -173,7 +177,7 @@ impl CoordinationHandleManager {
                     if handle.param() != &self.param {
                         warn!(prev_param = ?self.param, new_param = ?handle.param(), "sink param mismatch");
                     }
-                    handle.start()?;
+                    handle.start(log_store_rewind_start_epoch)?;
                     let handle_id = self.next_handle_id;
                     self.next_handle_id += 1;
                     self.writer_handles.insert(handle_id, handle);
@@ -195,6 +199,7 @@ impl CoordinatorWorker {
     pub async fn run(
         param: SinkParam,
         request_rx: UnboundedReceiver<SinkWriterCoordinationHandle>,
+        db: DatabaseConnection,
     ) {
         let sink = match build_sink(param.clone()) {
             Ok(sink) => sink,
@@ -208,7 +213,7 @@ impl CoordinatorWorker {
             }
         };
         dispatch_sink!(sink, sink, {
-            let coordinator = match sink.new_coordinator().await {
+            let coordinator = match sink.new_coordinator(db).await {
                 Ok(coordinator) => coordinator,
                 Err(e) => {
                     error!(
@@ -252,10 +257,12 @@ impl CoordinatorWorker {
         &mut self,
         mut coordinator: impl SinkCommitCoordinator,
     ) -> anyhow::Result<()> {
-        coordinator.init().await?;
+        let log_store_rewind_start_epoch = coordinator.init().await?;
         loop {
-            let (handle_id, vnode_bitmap, epoch, metadata) =
-                self.handle_manager.next_commit_request().await?;
+            let (handle_id, vnode_bitmap, epoch, metadata) = self
+                .handle_manager
+                .next_commit_request(log_store_rewind_start_epoch)
+                .await?;
             self.pending_epochs
                 .entry(epoch)
                 .or_insert_with(|| EpochCommitRequests::new(epoch))

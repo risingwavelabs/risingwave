@@ -168,17 +168,23 @@ impl Sink for PulsarSink {
 
     const SINK_NAME: &'static str = PULSAR_SINK;
 
-    async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
-        Ok(PulsarSinkWriter::new(
-            self.config.clone(),
-            self.schema.clone(),
-            self.downstream_pk.clone(),
-            &self.format_desc,
-            self.db_name.clone(),
-            self.sink_from_name.clone(),
-        )
-        .await?
-        .into_log_sinker(PULSAR_SEND_FUTURE_BUFFER_MAX_SIZE))
+    async fn new_log_sinker(
+        &self,
+        _writer_param: SinkWriterParam,
+    ) -> Result<(Self::LogSinker, Option<u64>)> {
+        Ok((
+            PulsarSinkWriter::new(
+                self.config.clone(),
+                self.schema.clone(),
+                self.downstream_pk.clone(),
+                &self.format_desc,
+                self.db_name.clone(),
+                self.sink_from_name.clone(),
+            )
+            .await?
+            .into_log_sinker(PULSAR_SEND_FUTURE_BUFFER_MAX_SIZE),
+            None,
+        ))
     }
 
     async fn validate(&self) -> Result<()> {
