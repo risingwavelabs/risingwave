@@ -1347,7 +1347,7 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
         // Load the latest table to avoid concurrent modification with the best effort.
         self.table = Self::reload_table(
             self.catalog.as_ref(),
-            &self.table.identifier(),
+            self.table.identifier(),
             expect_schema_id,
             expect_partition_spec_id,
         )
