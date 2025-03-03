@@ -1,0 +1,199 @@
+# Note: this test should use 4 parallelism, depending on the risedev profile.
+# TODO: test-specific risedev profile https://github.com/risingwavelabs/risingwave/issues/20525
+
+control substitution on
+
+system ok
+rpk topic create alter_parallelism -p 10
+
+system ok
+cat<<EOF | rpk topic produce alter_parallelism -f "%p %v\n" -p 0
+0 {"x":10}
+0 {"x":1}
+0 {"x":2}
+EOF
+
+statement ok
+create source s_kafka(x int)
+WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'alter_parallelism'
+)
+FORMAT PLAIN ENCODE JSON;
+
+statement ok
+create materialized view mv_kafka as select * from s_kafka;
+
+query ???
+select name, flags, parallelism from rw_fragments JOIN rw_relations ON rw_fragments.table_id = rw_relations.id order by name;
+----
+mv_kafka	{MVIEW,SOURCE_SCAN}	4
+s_kafka	{SOURCE}	4
+
+# split assignment is non-deterministic. so commented out.
+# system ok
+# risectl meta source-split-info
+# ----
+# Table #26
+# 	Fragment #1 (Source)
+# 		Actor #1   (3 splits): [1,7,8]
+# 		Actor #2   (2 splits): [0,5]
+# 		Actor #3   (2 splits): [2,6]
+# 		Actor #4   (3 splits): [3,4,9]
+# Table #28
+# 	Fragment #2 (SourceScan)
+# 		Actor #5   (3 splits): [1,7,8]
+# 		Actor #6   (2 splits): [0,5]
+# 		Actor #7   (2 splits): [2,6]
+# 		Actor #8   (3 splits): [3,4,9]
+
+
+system ok
+cat<<EOF | rpk topic produce alter_parallelism -f "%p %v\n" -p 0
+1 {"x":100}
+1 {"x":11}
+1 {"x":22}
+EOF
+
+statement ok
+ALTER MATERIALIZED VIEW mv_kafka SET PARALLELISM TO 2;
+
+# scale down
+# ALTER MV should have no effect, because of NoShuffle
+query ???
+select name, flags, parallelism from rw_fragments JOIN rw_relations ON rw_fragments.table_id = rw_relations.id order by name;
+----
+mv_kafka	{MVIEW,SOURCE_SCAN}	4
+s_kafka	{SOURCE}	4
+
+# ALTER SOURCE will change both the source and the mv parallelism.
+statement ok
+alter source s_kafka set parallelism = 2;
+
+query ???
+select name, flags, parallelism from rw_fragments JOIN rw_relations ON rw_fragments.table_id = rw_relations.id order by name;
+----
+mv_kafka	{MVIEW,SOURCE_SCAN}	2
+s_kafka	{SOURCE}	2
+
+# system ok
+# risectl meta source-split-info
+# ----
+# Table #26
+# 	Fragment #1 (Source)
+# 		Actor #1   (5 splits): [1,2,5,6,9]
+# 		Actor #2   (5 splits): [0,3,4,7,8]
+# Table #28
+# 	Fragment #2 (SourceScan)
+# 		Actor #5   (5 splits): [1,2,5,6,9]
+# 		Actor #6   (5 splits): [0,3,4,7,8]
+
+
+system ok
+cat<<EOF | rpk topic produce alter_parallelism -f "%p %v\n" -p 0
+2 {"x":1000}
+2 {"x":111}
+2 {"x":222}
+EOF
+
+statement ok
+create materialized view mv_kafka_2 as select * from s_kafka;
+
+query ???
+select name, flags, parallelism from rw_fragments JOIN rw_relations ON rw_fragments.table_id = rw_relations.id order by name;
+----
+mv_kafka	{MVIEW,SOURCE_SCAN}	2
+mv_kafka_2	{MVIEW,SOURCE_SCAN}	2
+s_kafka	{SOURCE}	2
+
+
+# scale up
+statement ok
+alter source s_kafka set parallelism = 5;
+
+query ???
+select name, flags, parallelism from rw_fragments JOIN rw_relations ON rw_fragments.table_id = rw_relations.id order by name;
+----
+mv_kafka	{MVIEW,SOURCE_SCAN}	5
+mv_kafka_2	{MVIEW,SOURCE_SCAN}	5
+s_kafka	{SOURCE}	5
+
+# system ok
+# risectl meta source-split-info
+# ----
+# Table #26
+# 	Fragment #1 (Source)
+# 		Actor #1   (2 splits): [2,9]
+# 		Actor #2   (2 splits): [0,6]
+# 		Actor #14  (2 splits): [3,7]
+# 		Actor #15  (2 splits): [1,8]
+# 		Actor #16  (2 splits): [4,5]
+# Table #28
+# 	Fragment #2 (SourceScan)
+# 		Actor #5   (2 splits): [2,9]
+# 		Actor #6   (2 splits): [0,6]
+# 		Actor #11  (2 splits): [3,7]
+# 		Actor #12  (2 splits): [1,8]
+# 		Actor #13  (2 splits): [4,5]
+# Table #30
+# 	Fragment #3 (SourceScan)
+# 		Actor #9   (2 splits): [2,9]
+# 		Actor #10  (2 splits): [0,6]
+# 		Actor #17  (2 splits): [3,7]
+# 		Actor #18  (2 splits): [1,8]
+# 		Actor #19  (2 splits): [4,5]
+
+
+query I
+select * from mv_kafka order by x;
+----
+1
+2
+10
+11
+22
+100
+111
+222
+1000
+
+
+query I
+select * from mv_kafka_2 order by x;
+----
+1
+2
+10
+11
+22
+100
+111
+222
+1000
+
+statement ok
+drop source s_kafka cascade;
+
+statement ok
+SET streaming_use_shared_source = false;
+
+statement ok
+create source s_kafka_non_shared(x int)
+WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'alter_parallelism'
+)
+FORMAT PLAIN ENCODE JSON;
+
+statement error
+alter source s_kafka_non_shared set parallelism = 5;
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Invalid input syntax: cannot alter parallelism of non-shared source.
+Use `ALTER MATERIALIZED VIEW SET PARALLELISM` to alter the materialized view using the source instead.
+
+
+system ok
+rpk topic delete alter_parallelism;

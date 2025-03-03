@@ -26,7 +26,9 @@ use risingwave_pb::catalog::{Source, Table};
 use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{ProjectNode, StreamFragmentGraph};
-use risingwave_sqlparser::ast::{AlterTableOperation, ColumnOption, ObjectName, Statement};
+use risingwave_sqlparser::ast::{
+    AlterColumnOperation, AlterTableOperation, ColumnOption, ObjectName, Statement,
+};
 
 use super::create_source::SqlColumnStrategy;
 use super::create_table::{ColumnIdGenerator, generate_stream_graph_for_replace_table};
@@ -342,6 +344,32 @@ pub async fn handle_alter_table_column(
             }
 
             SqlColumnStrategy::FollowUnchecked
+        }
+
+        AlterTableOperation::AlterColumn { column_name, op } => {
+            let AlterColumnOperation::SetDataType {
+                data_type,
+                using: None,
+            } = op
+            else {
+                bail_not_implemented!(issue = 6903, "{op}");
+            };
+
+            // Locate the column by name and update its data type.
+            let column_name = column_name.real_value();
+            let column = columns
+                .iter_mut()
+                .find(|c| c.name.real_value() == column_name)
+                .ok_or_else(|| {
+                    ErrorCode::InvalidInputSyntax(format!(
+                        "column \"{}\" of table \"{}\" does not exist",
+                        column_name, table_name
+                    ))
+                })?;
+
+            column.data_type = Some(data_type);
+
+            SqlColumnStrategy::FollowChecked
         }
 
         _ => unreachable!(),
