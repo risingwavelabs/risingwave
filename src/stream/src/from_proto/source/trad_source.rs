@@ -197,7 +197,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 if is_legacy_fs_connector {
                     // Changed to default since v2.0 https://github.com/risingwavelabs/risingwave/pull/17963
                     bail!(
-                        "legacy s3 connector is fully deprecated since v2.3.0, please DROP and recreate the s3 source.\nexecutor: {:?}",
+                        "legacy s3 connector is fully deprecated since v2.4.0, please DROP and recreate the s3 source.\nexecutor: {:?}",
                         params
                     );
                 } else if is_fs_v2_connector {

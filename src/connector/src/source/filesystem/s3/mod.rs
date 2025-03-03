@@ -46,11 +46,11 @@ pub struct S3PropertiesCommon {
 #[derive(Debug, Clone, PartialEq)]
 pub struct LegacyS3;
 
-/// Note: legacy s3 source is fully deprecated since v2.3.0.
+/// Note: legacy s3 source is fully deprecated since v2.4.0.
 /// The properties and enumerator are kept, so that meta can start normally.
 pub type LegacyS3Properties = DummyProperties<LegacyS3>;
 
-/// Note: legacy s3 source is fully deprecated since v2.3.0.
+/// Note: legacy s3 source is fully deprecated since v2.4.0.
 /// The properties and enumerator are kept, so that meta can start normally.
 pub type LegacyS3SplitEnumerator = DummySplitEnumerator<LegacyS3>;
 
