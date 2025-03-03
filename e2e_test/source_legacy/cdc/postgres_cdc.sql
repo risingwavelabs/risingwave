@@ -151,9 +151,10 @@ INSERT INTO partitioned_timestamp_table (c_int, c_boolean, c_timestamp) VALUES
 create publication rw_publication_pubviaroot_false for TABLE partitioned_timestamp_table;
 
 
-CREATE TABLE test_default_value (
+CREATE TABLE test_pg_default_value (
     "id" int,
     "name" varchar(64),
     "city" varchar(200) default 'Shanghai',
     PRIMARY KEY ("id")
 );
+INSERT INTO test_pg_default_value(id, name) VALUES (1, 'bugen');

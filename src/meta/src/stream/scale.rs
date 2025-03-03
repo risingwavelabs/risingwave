@@ -136,6 +136,8 @@ impl CustomFragmentInfo {
 
 use educe::Educe;
 use futures::future::try_join_all;
+use risingwave_common::system_param::AdaptiveParallelismStrategy;
+use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_meta_model::actor_dispatcher::DispatcherType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -1896,6 +1898,12 @@ impl ScaleController {
             "generate_table_resize_plan, after build_index"
         );
 
+        let adaptive_parallelism_strategy = self
+            .env
+            .system_params_reader()
+            .await
+            .adaptive_parallelism_strategy();
+
         let mut target_plan = HashMap::new();
 
         for (
@@ -1979,7 +1987,10 @@ impl ScaleController {
                     }
                     FragmentDistributionType::Hash => match parallelism {
                         TableParallelism::Adaptive => {
-                            if available_slot_count > max_parallelism {
+                            let target_slot_count = adaptive_parallelism_strategy
+                                .compute_target_parallelism(available_slot_count);
+
+                            if target_slot_count > max_parallelism {
                                 tracing::warn!(
                                     "available parallelism for table {table_id} is larger than max parallelism, force limit to {max_parallelism}"
                                 );
@@ -1987,6 +1998,23 @@ impl ScaleController {
                                 let target_worker_slots = schedule_units_for_slots(
                                     &available_worker_slots,
                                     max_parallelism,
+                                    table_id,
+                                )?;
+
+                                target_plan.insert(
+                                    fragment_id,
+                                    Self::diff_worker_slot_changes(
+                                        &fragment_slots,
+                                        &target_worker_slots,
+                                    ),
+                                );
+                            } else if available_slot_count != target_slot_count {
+                                tracing::info!(
+                                    "available parallelism for table {table_id} is limit by adaptive strategy {adaptive_parallelism_strategy}, resetting to {target_slot_count}"
+                                );
+                                let target_worker_slots = schedule_units_for_slots(
+                                    &available_worker_slots,
+                                    target_slot_count,
                                     table_id,
                                 )?;
 
@@ -2393,7 +2421,7 @@ impl GlobalStreamManager {
         let _guard = self.source_manager.pause_tick().await;
 
         self.barrier_scheduler
-            .run_config_change_command_with_pause(database_id, command)
+            .run_command(database_id, command)
             .await?;
 
         tracing::info!("reschedule done");
@@ -2584,6 +2612,8 @@ impl GlobalStreamManager {
             .map(|worker| (worker.id, worker))
             .collect();
 
+        let mut previous_adaptive_parallelism_strategy = AdaptiveParallelismStrategy::default();
+
         let mut should_trigger = false;
 
         loop {
@@ -2625,6 +2655,14 @@ impl GlobalStreamManager {
                     };
 
                     match notification {
+                        LocalNotification::SystemParamsChange(reader) => {
+                            let new_strategy = reader.adaptive_parallelism_strategy();
+                            if new_strategy != previous_adaptive_parallelism_strategy {
+                                tracing::info!("adaptive parallelism strategy changed from {:?} to {:?}", previous_adaptive_parallelism_strategy, new_strategy);
+                                should_trigger = true;
+                                previous_adaptive_parallelism_strategy = new_strategy;
+                            }
+                        }
                         LocalNotification::WorkerNodeActivated(worker) => {
                             if !worker_is_streaming_compute(&worker) {
                                 continue;
