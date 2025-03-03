@@ -44,6 +44,7 @@ use super::kinesis::KinesisMeta;
 use super::monitor::{EnumeratorMetrics, SourceMetrics};
 use super::nats::source::NatsMeta;
 use super::nexmark::source::message::NexmarkMeta;
+use super::pulsar::source::PulsarMeta;
 use super::{AZBLOB_CONNECTOR, GCS_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR};
 use crate::error::ConnectorResult as Result;
 use crate::parser::ParserConfig;
@@ -792,6 +793,7 @@ impl SourceMessage {
 pub enum SourceMeta {
     Kafka(KafkaMeta),
     Kinesis(KinesisMeta),
+    Pulsar(PulsarMeta),
     Nexmark(NexmarkMeta),
     GooglePubsub(GooglePubsubMeta),
     Datagen(DatagenMeta),
