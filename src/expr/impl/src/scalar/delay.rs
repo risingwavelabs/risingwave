@@ -14,7 +14,7 @@
 
 use std::time::Duration;
 
-use risingwave_common::types::{Interval, F64};
+use risingwave_common::types::{F64, Interval};
 use risingwave_expr::function;
 
 /// Makes the current session's process sleep until the given number of seconds have elapsed.

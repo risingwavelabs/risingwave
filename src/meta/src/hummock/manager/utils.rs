@@ -57,9 +57,9 @@ macro_rules! commit_multi_var_with_provided_txn {
 use risingwave_hummock_sdk::SstObjectIdRange;
 pub(crate) use {commit_multi_var, commit_multi_var_with_provided_txn};
 
+use crate::hummock::HummockManager;
 use crate::hummock::error::Result;
 use crate::hummock::sequence::next_sstable_object_id;
-use crate::hummock::HummockManager;
 
 impl HummockManager {
     #[cfg(test)]

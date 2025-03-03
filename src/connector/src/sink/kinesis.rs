@@ -14,11 +14,11 @@
 
 use std::collections::BTreeMap;
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
+use aws_sdk_kinesis::Client as KinesisClient;
 use aws_sdk_kinesis::operation::put_records::PutRecordsOutput;
 use aws_sdk_kinesis::primitives::Blob;
 use aws_sdk_kinesis::types::{PutRecordsRequestEntry, PutRecordsResultEntry};
-use aws_sdk_kinesis::Client as KinesisClient;
 use futures::{FutureExt, TryFuture};
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
@@ -27,8 +27,8 @@ use serde_derive::Deserialize;
 use serde_with::serde_as;
 use with_options::WithOptions;
 
-use super::catalog::SinkFormatDesc;
 use super::SinkParam;
+use super::catalog::SinkFormatDesc;
 use crate::connector_common::KinesisCommon;
 use crate::dispatch_sink_formatter_str_key_impl;
 use crate::sink::formatter::SinkFormatterImpl;
@@ -195,7 +195,7 @@ mod opaque_type {
 
     use thiserror_ext::AsReport;
     use tokio::time::sleep;
-    use tokio_retry::strategy::{jitter, ExponentialBackoff};
+    use tokio_retry::strategy::{ExponentialBackoff, jitter};
     use tracing::warn;
 
     use super::*;

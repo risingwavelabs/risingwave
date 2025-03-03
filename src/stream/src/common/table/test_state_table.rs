@@ -15,13 +15,13 @@
 use std::collections::HashSet;
 use std::ops::Bound::{self, *};
 
-use futures::{pin_mut, StreamExt};
+use futures::{StreamExt, pin_mut};
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::row::{self, OwnedRow};
 use risingwave_common::types::{DataType, Scalar, ScalarImpl, Timestamptz};
-use risingwave_common::util::epoch::{test_epoch, EpochPair};
+use risingwave_common::util::epoch::{EpochPair, test_epoch};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::BasicSerde;
 use risingwave_hummock_test::test_utils::prepare_hummock_test_env;
@@ -85,7 +85,7 @@ async fn test_state_table_update_insert() {
     test_env
         .storage
         .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
-    state_table.commit(epoch).await.unwrap();
+    state_table.commit_for_test(epoch).await.unwrap();
 
     state_table.delete(OwnedRow::new(vec![
         Some(6_i32.into()),
@@ -144,7 +144,7 @@ async fn test_state_table_update_insert() {
     test_env
         .storage
         .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
-    state_table.commit(epoch).await.unwrap();
+    state_table.commit_for_test(epoch).await.unwrap();
 
     let row6_commit = state_table
         .get_row(&OwnedRow::new(vec![Some(6_i32.into())]))
@@ -184,7 +184,7 @@ async fn test_state_table_update_insert() {
     test_env
         .storage
         .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
-    state_table.commit(epoch).await.unwrap();
+    state_table.commit_for_test(epoch).await.unwrap();
 
     // one epoch: delete (1, 2, 3, 4), insert (5, 6, 7, None), delete(5, 6, 7, None)
     state_table.delete(OwnedRow::new(vec![
@@ -216,7 +216,7 @@ async fn test_state_table_update_insert() {
     test_env
         .storage
         .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
-    state_table.commit(epoch).await.unwrap();
+    state_table.commit_for_test(epoch).await.unwrap();
 
     let row1_commit = state_table
         .get_row(&OwnedRow::new(vec![Some(1_i32.into())]))
@@ -287,7 +287,7 @@ async fn test_state_table_iter_with_prefix() {
     test_env
         .storage
         .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
-    state_table.commit(epoch).await.unwrap();
+    state_table.commit_for_test(epoch).await.unwrap();
 
     state_table.insert(OwnedRow::new(vec![
         Some(1_i32.into()),
@@ -422,7 +422,7 @@ async fn test_state_table_iter_with_pk_range() {
     test_env
         .storage
         .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
-    state_table.commit(epoch).await.unwrap();
+    state_table.commit_for_test(epoch).await.unwrap();
 
     state_table.insert(OwnedRow::new(vec![
         Some(1_i32.into()),
@@ -636,7 +636,7 @@ async fn test_state_table_iter_with_value_indices() {
     test_env
         .storage
         .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
-    state_table.commit(epoch).await.unwrap();
+    state_table.commit_for_test(epoch).await.unwrap();
 
     // write [3, 33, 333], [4, 44, 444], [5, 55, 555], [7, 77, 777], [8, 88, 888]into mem_table,
     // [3, 33, 3333], [6, 66, 666], [9, 99, 999] exists in
@@ -830,7 +830,7 @@ async fn test_state_table_iter_with_shuffle_value_indices() {
     test_env
         .storage
         .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
-    state_table.commit(epoch).await.unwrap();
+    state_table.commit_for_test(epoch).await.unwrap();
 
     // write [3, 33, 333], [4, 44, 444], [5, 55, 555], [7, 77, 777], [8, 88, 888]into mem_table,
     // [3, 33, 3333], [6, 66, 666], [9, 99, 999] exists in
@@ -1405,7 +1405,7 @@ async fn test_state_table_watermark_cache_ignore_null() {
     test_env
         .storage
         .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
-    state_table.commit(epoch).await.unwrap();
+    state_table.commit_for_test(epoch).await.unwrap();
 
     let cache = state_table.get_watermark_cache();
     assert_eq!(cache.len(), 1);
@@ -1492,7 +1492,7 @@ async fn test_state_table_watermark_cache_write_chunk() {
     test_env
         .storage
         .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
-    state_table.commit(epoch).await.unwrap();
+    state_table.commit_for_test(epoch).await.unwrap();
 
     let inserts_1 = vec![
         (
@@ -1604,7 +1604,7 @@ async fn test_state_table_watermark_cache_write_chunk() {
     test_env
         .storage
         .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
-    state_table.commit(epoch).await.unwrap();
+    state_table.commit_for_test(epoch).await.unwrap();
 
     // After sync, we should scan all rows into watermark cache.
     let cache = state_table.get_watermark_cache();
@@ -1707,7 +1707,7 @@ async fn test_state_table_watermark_cache_refill() {
     test_env
         .storage
         .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
-    state_table.commit(epoch).await.unwrap();
+    state_table.commit_for_test(epoch).await.unwrap();
 
     // After the first barrier, watermark cache won't be filled.
     let cache = state_table.get_watermark_cache();
@@ -1779,7 +1779,7 @@ async fn test_state_table_iter_prefix_and_sub_range() {
     test_env
         .storage
         .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
-    state_table.commit(epoch).await.unwrap();
+    state_table.commit_for_test(epoch).await.unwrap();
 
     let pk_prefix = OwnedRow::new(vec![Some(1_i32.into())]);
 
@@ -1966,8 +1966,8 @@ async fn test_replicated_state_table_replication() {
     test_env
         .storage
         .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
-    state_table.commit(epoch).await.unwrap();
-    replicated_state_table.commit(epoch).await.unwrap();
+    state_table.commit_for_test(epoch).await.unwrap();
+    replicated_state_table.commit_for_test(epoch).await.unwrap();
     test_env.commit_epoch(epoch.prev).await;
 
     {
@@ -2029,8 +2029,8 @@ async fn test_replicated_state_table_replication() {
     test_env
         .storage
         .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
-    state_table.commit(epoch).await.unwrap();
-    replicated_state_table.commit(epoch).await.unwrap();
+    state_table.commit_for_test(epoch).await.unwrap();
+    replicated_state_table.commit_for_test(epoch).await.unwrap();
 
     {
         let range_bounds: (Bound<OwnedRow>, Bound<OwnedRow>) = (
@@ -2163,7 +2163,7 @@ async fn test_non_pk_prefix_watermark_read() {
     test_env
         .storage
         .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
-    state_table.commit(epoch).await.unwrap();
+    state_table.commit_for_test(epoch).await.unwrap();
     test_env.commit_epoch(epoch.prev).await;
 
     {
@@ -2201,7 +2201,7 @@ async fn test_non_pk_prefix_watermark_read() {
         test_env
             .storage
             .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
-        state_table.commit(epoch).await.unwrap();
+        state_table.commit_for_test(epoch).await.unwrap();
         test_env.commit_epoch(epoch.prev).await;
 
         // do not rewrite key-range or filter data for non-pk-prefix watermark

@@ -14,16 +14,15 @@
 
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::catalog::Field;
+use risingwave_common::catalog::{ColumnCatalog, Field};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_connector::parser::debezium_cdc_source_schema;
-use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::PbStreamNode;
+use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::stream::prelude::*;
-use super::utils::{childless_record, Distill};
-use super::{generic, ExprRewritable, PlanBase, PlanRef, StreamNode};
+use super::utils::{Distill, childless_record};
+use super::{ExprRewritable, PlanBase, PlanRef, StreamNode, generic};
 use crate::catalog::ColumnId;
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
@@ -127,7 +126,9 @@ impl Distill for StreamCdcTableScan {
 
 impl StreamNode for StreamCdcTableScan {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
-        unreachable!("stream scan cannot be converted into a prost body -- call `adhoc_to_stream_prost` instead.")
+        unreachable!(
+            "stream scan cannot be converted into a prost body -- call `adhoc_to_stream_prost` instead."
+        )
     }
 }
 
@@ -151,15 +152,11 @@ impl StreamCdcTableScan {
             .map(|x| *x as u32)
             .collect_vec();
 
-        // The schema of the shared cdc source upstream is different from snapshot,
-        // refer to `debezium_cdc_source_schema()` for details.
-        let cdc_source_schema = {
-            let columns = debezium_cdc_source_schema();
-            columns
-                .into_iter()
-                .map(|c| Field::from(c.column_desc).to_prost())
-                .collect_vec()
-        };
+        // The schema of the shared cdc source upstream is different from snapshot.
+        let cdc_source_schema = ColumnCatalog::debezium_cdc_source_cols()
+            .into_iter()
+            .map(|c| Field::from(c.column_desc).to_prost())
+            .collect_vec();
 
         let catalog = self
             .build_backfill_state_catalog(state)

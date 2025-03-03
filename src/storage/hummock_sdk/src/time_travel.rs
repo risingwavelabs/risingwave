@@ -16,7 +16,7 @@ use std::collections::{HashMap, HashSet};
 
 use risingwave_pb::hummock::hummock_version::PbLevels;
 use risingwave_pb::hummock::hummock_version_delta::{PbChangeLogDelta, PbGroupDeltas};
-use risingwave_pb::hummock::{group_delta, PbEpochNewChangeLog, PbLevel, PbSstableInfo};
+use risingwave_pb::hummock::{PbEpochNewChangeLog, PbLevel, PbSstableInfo, group_delta};
 
 use crate::change_log::{TableChangeLog, TableChangeLogCommon};
 use crate::compaction_group::StateTableId;
@@ -189,16 +189,18 @@ impl From<(&HummockVersionDelta, &HashSet<StateTableId>)> for IncompleteHummockV
                     if !time_travel_table_ids.contains(&table_id.table_id()) {
                         return None;
                     }
-                    debug_assert!(log_delta
-                        .new_log
-                        .new_value
-                        .iter()
-                        .chain(log_delta.new_log.old_value.iter())
-                        .all(|s| {
-                            s.table_ids
-                                .iter()
-                                .any(|tid| time_travel_table_ids.contains(tid))
-                        }));
+                    debug_assert!(
+                        log_delta
+                            .new_log
+                            .new_value
+                            .iter()
+                            .chain(log_delta.new_log.old_value.iter())
+                            .all(|s| {
+                                s.table_ids
+                                    .iter()
+                                    .any(|tid| time_travel_table_ids.contains(tid))
+                            })
+                    );
 
                     Some((*table_id, PbChangeLogDelta::from(log_delta).into()))
                 })

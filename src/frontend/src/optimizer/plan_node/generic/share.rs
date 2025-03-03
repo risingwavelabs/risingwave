@@ -18,8 +18,8 @@ use std::hash::Hash;
 use risingwave_common::catalog::Schema;
 
 use super::{GenericPlanNode, GenericPlanRef};
-use crate::optimizer::property::FunctionalDependencySet;
 use crate::OptimizerContextRef;
+use crate::optimizer::property::FunctionalDependencySet;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Share<PlanRef> {

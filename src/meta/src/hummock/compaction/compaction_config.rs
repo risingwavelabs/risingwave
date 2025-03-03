@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::config::default::compaction_config;
 use risingwave_common::config::CompactionConfig as CompactionConfigOpt;
-use risingwave_pb::hummock::compaction_config::CompactionMode;
+use risingwave_common::config::default::compaction_config;
 use risingwave_pb::hummock::CompactionConfig;
+use risingwave_pb::hummock::compaction_config::CompactionMode;
 
 pub struct CompactionConfigBuilder {
     config: CompactionConfig,

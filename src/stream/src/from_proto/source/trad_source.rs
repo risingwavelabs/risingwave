@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::catalog::{
-    default_key_column_name_version_mapping, KAFKA_TIMESTAMP_COLUMN_NAME,
+    KAFKA_TIMESTAMP_COLUMN_NAME, default_key_column_name_version_mapping,
 };
 use risingwave_connector::source::reader::desc::SourceDescBuilder;
 use risingwave_connector::source::should_copy_to_format_encode_options;
@@ -29,16 +29,14 @@ use risingwave_pb::stream_plan::SourceNode;
 use risingwave_storage::panic_store::PanicStateStore;
 
 use super::*;
+use crate::executor::TroublemakerExecutor;
 use crate::executor::source::{
     FsListExecutor, SourceExecutor, SourceStateTableHandler, StreamSourceCore,
 };
-use crate::executor::TroublemakerExecutor;
 
 pub struct SourceExecutorBuilder;
 
 pub fn create_source_desc_builder(
-    source_type: &str, // "source" or "source backfill"
-    source_id: &TableId,
     mut source_columns: Vec<PbColumnCatalog>,
     params: &ExecutorParams,
     source_info: PbStreamSourceInfo,
@@ -109,8 +107,6 @@ pub fn create_source_desc_builder(
         });
     }
 
-    telemetry_source_build(source_type, source_id, &source_info, &with_properties);
-
     SourceDescBuilder::new(
         source_columns.clone(),
         params.env.source_metrics(),
@@ -168,8 +164,6 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 );
 
                 let source_desc_builder = create_source_desc_builder(
-                    "source",
-                    &source_id,
                     source.columns.clone(),
                     &params,
                     source_info,

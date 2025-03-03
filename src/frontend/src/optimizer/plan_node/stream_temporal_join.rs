@@ -16,13 +16,14 @@ use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::plan_common::JoinType;
-use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::TemporalJoinNode;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_sqlparser::ast::AsOf;
 
 use super::stream::prelude::*;
-use super::utils::{childless_record, watermark_pretty, Distill};
-use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary};
+use super::utils::{Distill, childless_record, watermark_pretty};
+use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, generic};
+use crate::TableCatalog;
 use crate::expr::{Expr, ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanNode;
@@ -34,7 +35,6 @@ use crate::optimizer::plan_node::{
 use crate::scheduler::SchedulerResult;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::ColIndexMappingRewriteExt;
-use crate::TableCatalog;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamTemporalJoin {

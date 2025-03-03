@@ -15,8 +15,8 @@
 use std::collections::HashMap;
 
 use risingwave_pb::hummock::{HummockVersionStats, TableStats as PbTableStats};
-use sea_orm::entity::prelude::*;
 use sea_orm::FromJsonQueryResult;
+use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::HummockVersionId;

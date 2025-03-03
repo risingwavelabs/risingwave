@@ -17,7 +17,7 @@ use std::sync::Arc;
 use either::Either;
 use itertools::Itertools;
 use risingwave_common::bail_not_implemented;
-use risingwave_common::catalog::{debug_assert_column_ids_distinct, is_system_schema, Field};
+use risingwave_common::catalog::{Field, debug_assert_column_ids_distinct, is_system_schema};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_connector::WithPropertiesExt;
 use risingwave_sqlparser::ast::{AsOf, Statement, TableAlias};
@@ -69,6 +69,7 @@ impl Binder {
     /// Binds table or source, or logical view according to what we get from the catalog.
     pub fn bind_relation_by_name_inner(
         &mut self,
+        db_name: Option<&str>,
         schema_name: Option<&str>,
         table_name: &str,
         alias: Option<TableAlias>,
@@ -94,17 +95,17 @@ impl Binder {
         let (ret, columns) = {
             match schema_name {
                 Some(schema_name) => {
+                    let db_name = db_name.unwrap_or(&self.db_name);
                     let schema_path = SchemaPath::Name(schema_name);
                     if is_system_schema(schema_name) {
-                        if let Ok(sys_table_catalog) = self.catalog.get_sys_table_by_name(
-                            &self.db_name,
-                            schema_name,
-                            table_name,
-                        ) {
+                        if let Ok(sys_table_catalog) =
+                            self.catalog
+                                .get_sys_table_by_name(db_name, schema_name, table_name)
+                        {
                             resolve_sys_table_relation(sys_table_catalog)
                         } else if let Ok((view_catalog, _)) =
                             self.catalog
-                                .get_view_by_name(&self.db_name, schema_path, table_name)
+                                .get_view_by_name(db_name, schema_path, table_name)
                         {
                             self.resolve_view_relation(&view_catalog.clone())?
                         } else {
@@ -127,17 +128,17 @@ impl Binder {
                         self.resolve_source_relation(&source_catalog.clone(), as_of)
                     } else if let Ok((table_catalog, schema_name)) = self
                         .catalog
-                        .get_created_table_by_name(&self.db_name, schema_path, table_name)
+                        .get_created_table_by_name(db_name, schema_path, table_name)
                     {
                         self.resolve_table_relation(table_catalog.clone(), schema_name, as_of)?
                     } else if let Ok((source_catalog, _)) =
                         self.catalog
-                            .get_source_by_name(&self.db_name, schema_path, table_name)
+                            .get_source_by_name(db_name, schema_path, table_name)
                     {
                         self.resolve_source_relation(&source_catalog.clone(), as_of)
                     } else if let Ok((view_catalog, _)) =
                         self.catalog
-                            .get_view_by_name(&self.db_name, schema_path, table_name)
+                            .get_view_by_name(db_name, schema_path, table_name)
                     {
                         self.resolve_view_relation(&view_catalog.clone())?
                     } else {
@@ -174,8 +175,8 @@ impl Binder {
                                 {
                                     return Ok(self
                                         .resolve_source_relation(&source_catalog.clone(), as_of));
-                                } else if let Some(table_catalog) =
-                                    schema.get_created_table_by_name(table_name)
+                                } else if let Some(table_catalog) = schema
+                                    .get_created_table_or_any_internal_table_by_name(table_name)
                                 {
                                     return self.resolve_table_relation(
                                         table_catalog.clone(),
@@ -367,19 +368,19 @@ impl Binder {
                 return Err(ErrorCode::InvalidInputSyntax(format!(
                     "cannot change index \"{table_name}\""
                 ))
-                .into())
+                .into());
             }
             TableType::MaterializedView => {
                 return Err(ErrorCode::InvalidInputSyntax(format!(
                     "cannot change materialized view \"{table_name}\""
                 ))
-                .into())
+                .into());
             }
             TableType::Internal => {
                 return Err(ErrorCode::InvalidInputSyntax(format!(
                     "cannot change internal table \"{table_name}\""
                 ))
-                .into())
+                .into());
             }
         }
 

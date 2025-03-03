@@ -16,14 +16,14 @@ use std::cmp::max;
 use std::collections::{BTreeMap, HashMap};
 
 use itertools::Itertools;
+use petgraph::Graph;
 use petgraph::dot::Dot;
 use petgraph::graph::NodeIndex;
-use petgraph::Graph;
 use pretty_xmlish::{Pretty, PrettyConfig};
 use risingwave_common::util::stream_graph_visitor;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::stream_plan::stream_fragment_graph::StreamFragmentEdge;
-use risingwave_pb::stream_plan::{stream_node, DispatcherType, StreamFragmentGraph, StreamNode};
+use risingwave_pb::stream_plan::{DispatcherType, StreamFragmentGraph, StreamNode, stream_node};
 
 use super::PrettySerde;
 use crate::TableCatalog;

@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use rand::seq::SliceRandom;
 use rand::SeedableRng;
+use rand::seq::SliceRandom;
 
 use crate::bitmap::{Bitmap, BitmapBuilder};
 

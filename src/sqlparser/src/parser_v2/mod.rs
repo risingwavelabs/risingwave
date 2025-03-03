@@ -10,7 +10,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use winnow::combinator::{separated, trace, Context};
+use winnow::combinator::{Context, separated, trace};
 use winnow::error::{AddContext, ContextError, StrContext};
 use winnow::stream::{Stream, StreamIsPartial};
 use winnow::token::any;

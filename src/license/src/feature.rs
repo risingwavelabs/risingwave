@@ -14,7 +14,7 @@
 
 use thiserror::Error;
 
-use super::{report_telemetry, LicenseError, LicenseManager, Tier};
+use super::{LicenseError, LicenseManager, Tier, report_telemetry};
 
 /// Define all features that are available based on the tier of the license.
 ///
@@ -57,6 +57,7 @@ macro_rules! for_all_features {
             { SqlServerCdcSource,   Paid,       "CDC source connector for Sql Server." },
             { CdcAutoSchemaChange,  Paid,       "Auto replicate upstream DDL to CDC Table." },
             { IcebergSinkWithGlue,  Paid,       "Delivering data to Iceberg with Glue catalog." },
+            { IcebergEngine,        Paid,       "Creating table with an iceberg engine." },
         }
     };
 }

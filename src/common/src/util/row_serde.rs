@@ -247,7 +247,7 @@ mod tests {
     fn test_encoding_data_size() {
         use std::mem::size_of;
 
-        use crate::types::{Interval, F64};
+        use crate::types::{F64, Interval};
 
         let order_types = vec![OrderType::ascending()];
         let schema = vec![DataType::Int16];

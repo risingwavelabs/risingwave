@@ -28,16 +28,16 @@ use super::create_sink::gen_sink_plan;
 use super::query::gen_batch_plan_by_statement;
 use super::util::SourceSchemaCompatExt;
 use super::{RwPgResponse, RwPgResponseBuilderExt};
+use crate::OptimizerContextRef;
 use crate::error::{ErrorCode, Result};
-use crate::handler::create_table::handle_create_table_plan;
 use crate::handler::HandlerArgs;
+use crate::handler::create_table::handle_create_table_plan;
+use crate::optimizer::OptimizerContext;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{Convention, Explain};
-use crate::optimizer::OptimizerContext;
 use crate::scheduler::BatchPlanFragmenter;
 use crate::stream_fragmenter::build_graph;
 use crate::utils::{explain_stream_graph, explain_stream_graph_as_dot};
-use crate::OptimizerContextRef;
 
 async fn do_handle_explain(
     handler_args: HandlerArgs,

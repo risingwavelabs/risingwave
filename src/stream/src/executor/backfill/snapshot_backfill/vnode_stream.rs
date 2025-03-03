@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::mem::{replace, take};
 use std::pin::Pin;
-use std::task::{ready, Context, Poll};
+use std::task::{Context, Poll, ready};
 
 use futures::stream::{FuturesUnordered, Peekable, StreamFuture};
 use futures::{Stream, StreamExt, TryStreamExt};
@@ -96,6 +96,12 @@ impl<St: ChangeLogRowStream> VnodeStream<St> {
             data_chunk_builder,
             ops,
         }
+    }
+
+    pub(super) fn take_finished_vnodes(&mut self) -> HashMap<VirtualNode, usize> {
+        assert!(self.streams.is_empty());
+        assert!(self.data_chunk_builder.is_empty());
+        take(&mut self.finished_vnode)
     }
 }
 
@@ -218,10 +224,9 @@ impl<St: ChangeLogRowStream> Stream for VnodeStream<St> {
                         } => {
                             if this.data_chunk_builder.can_append_update() {
                                 this.ops.extend([Op::UpdateDelete, Op::UpdateInsert]);
-                                assert!(this
-                                    .data_chunk_builder
-                                    .append_one_row(old_value)
-                                    .is_none());
+                                assert!(
+                                    this.data_chunk_builder.append_one_row(old_value).is_none()
+                                );
                                 this.data_chunk_builder.append_one_row(new_value)
                             } else {
                                 let chunk = this
@@ -230,14 +235,12 @@ impl<St: ChangeLogRowStream> Stream for VnodeStream<St> {
                                     .expect("should be Some when not can_append");
                                 let ops = replace(&mut this.ops, Vec::with_capacity(capacity));
                                 this.ops.extend([Op::UpdateDelete, Op::UpdateInsert]);
-                                assert!(this
-                                    .data_chunk_builder
-                                    .append_one_row(old_value)
-                                    .is_none());
-                                assert!(this
-                                    .data_chunk_builder
-                                    .append_one_row(new_value)
-                                    .is_none());
+                                assert!(
+                                    this.data_chunk_builder.append_one_row(old_value).is_none()
+                                );
+                                assert!(
+                                    this.data_chunk_builder.append_one_row(new_value).is_none()
+                                );
                                 break Poll::Ready(Some(Ok(StreamChunk::from_parts(ops, chunk))));
                             }
                         }
@@ -271,15 +274,15 @@ mod tests {
     use std::task::Poll;
 
     use anyhow::anyhow;
-    use futures::{pin_mut, Future, FutureExt};
+    use futures::{Future, FutureExt, pin_mut};
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::row::OwnedRow;
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
     use risingwave_storage::table::ChangeLogRow;
     use tokio::sync::mpsc::unbounded_channel;
-    use tokio_stream::wrappers::UnboundedReceiverStream;
     use tokio_stream::StreamExt;
+    use tokio_stream::wrappers::UnboundedReceiverStream;
 
     use crate::executor::backfill::snapshot_backfill::vnode_stream::VnodeStream;
 
@@ -432,9 +435,11 @@ mod tests {
         {
             let fut = stream.assert_progress([(VirtualNode::ZERO, 0, Some(row.clone()))]);
             pin_mut!(fut);
-            assert!(poll_fn(|cx| Poll::Ready(fut.as_mut().poll(cx)))
-                .await
-                .is_pending());
+            assert!(
+                poll_fn(|cx| Poll::Ready(fut.as_mut().poll(cx)))
+                    .await
+                    .is_pending()
+            );
             tx.send(Ok(ChangeLogRow::Insert(row.clone()))).unwrap();
             drop(tx);
             fut.await;

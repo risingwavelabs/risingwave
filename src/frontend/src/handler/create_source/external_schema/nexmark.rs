@@ -32,7 +32,7 @@ pub fn check_nexmark_schema(
             return Err(RwError::from(ProtocolError(format!(
                 "unsupported table type for nexmark source: {}",
                 t
-            ))))
+            ))));
         }
     };
 

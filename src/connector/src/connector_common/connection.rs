@@ -16,10 +16,10 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use anyhow::Context;
-use opendal::services::{Gcs, S3};
 use opendal::Operator;
-use rdkafka::consumer::{BaseConsumer, Consumer};
+use opendal::services::{Gcs, S3};
 use rdkafka::ClientConfig;
+use rdkafka::consumer::{BaseConsumer, Consumer};
 use risingwave_common::bail;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_pb::catalog::PbConnection;
@@ -132,15 +132,14 @@ pub struct IcebergConnection {
     #[serde(rename = "gcs.credential")]
     pub gcs_credential: Option<String>,
 
-    /// Path of iceberg warehouse, only applicable in storage catalog.
+    /// Path of iceberg warehouse.
     #[serde(rename = "warehouse.path")]
     pub warehouse_path: Option<String>,
     /// Catalog id, can be omitted for storage catalog or when
     /// caller's AWS account ID matches glue id
     #[serde(rename = "glue.id")]
     pub glue_id: Option<String>,
-    /// Catalog name, can be omitted for storage catalog, but
-    /// must be set for other catalogs.
+    /// Catalog name, default value is risingwave.
     #[serde(rename = "catalog.name")]
     pub catalog_name: Option<String>,
     /// URI of iceberg catalog, only applicable in rest catalog.
@@ -184,8 +183,7 @@ impl Connection for IcebergConnection {
             Some(warehouse_path) => {
                 let url = Url::parse(warehouse_path);
                 if url.is_err()
-                    && let Some(catalog_type) = &self.catalog_type
-                    && catalog_type == "rest"
+                    && matches!(self.catalog_type.as_deref(), Some("rest" | "rest_rust"))
                 {
                     // If the warehouse path is not a valid URL, it could be a warehouse name in rest catalog,
                     // so we allow it to pass here.
@@ -204,9 +202,7 @@ impl Connection for IcebergConnection {
                 }
             }
             None => {
-                if let Some(catalog_type) = &self.catalog_type
-                    && catalog_type == "rest"
-                {
+                if matches!(self.catalog_type.as_deref(), Some("rest" | "rest_rust")) {
                     None
                 } else {
                     bail!("`warehouse.path` must be set");
@@ -214,7 +210,7 @@ impl Connection for IcebergConnection {
             }
         };
 
-        // test storage
+        // Test warehouse
         if let Some((scheme, bucket, root)) = info {
             match scheme.as_str() {
                 "s3" | "s3a" => {
@@ -250,7 +246,11 @@ impl Connection for IcebergConnection {
             }
         }
 
-        // test catalog
+        if self.catalog_type.is_none() {
+            bail!("`catalog.type` must be set");
+        }
+
+        // Test catalog
         let iceberg_common = IcebergCommon {
             catalog_type: self.catalog_type.clone(),
             region: self.region.clone(),

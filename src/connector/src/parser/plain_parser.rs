@@ -23,8 +23,8 @@ use super::{
 use crate::error::ConnectorResult;
 use crate::parser::bytes_parser::BytesAccessBuilder;
 use crate::parser::simd_json_parser::DebeziumJsonAccessBuilder;
-use crate::parser::unified::debezium::{parse_schema_change, parse_transaction_meta};
 use crate::parser::unified::AccessImpl;
+use crate::parser::unified::debezium::{parse_schema_change, parse_transaction_meta};
 use crate::parser::upsert_parser::get_key_column_name;
 use crate::parser::{BytesProperties, ParseResult, ParserFormat};
 use crate::source::cdc::CdcMessageType;
@@ -207,28 +207,21 @@ mod tests {
     use std::sync::Arc;
 
     use expect_test::expect;
-    use futures::executor::block_on;
     use futures::StreamExt;
+    use futures::executor::block_on;
     use futures_async_stream::try_stream;
     use itertools::Itertools;
-    use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId};
+    use risingwave_common::catalog::ColumnCatalog;
     use risingwave_pb::connector_service::cdc_message;
 
     use super::*;
     use crate::parser::{MessageMeta, SourceStreamChunkBuilder, TransactionControl};
     use crate::source::cdc::DebeziumCdcMeta;
-    use crate::source::{ConnectorProperties, DataType, SourceCtrlOpts, SourceMessage, SplitId};
+    use crate::source::{ConnectorProperties, SourceCtrlOpts, SourceMessage, SplitId};
 
     #[tokio::test]
     async fn test_emit_transactional_chunk() {
-        let schema = vec![
-            ColumnCatalog {
-                column_desc: ColumnDesc::named("payload", ColumnId::placeholder(), DataType::Jsonb),
-                is_hidden: false,
-            },
-            ColumnCatalog::offset_column(),
-            ColumnCatalog::cdc_table_name_column(),
-        ];
+        let schema = ColumnCatalog::debezium_cdc_source_cols();
 
         let columns = schema
             .iter()
@@ -388,14 +381,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_parse_transaction_metadata() {
-        let schema = vec![
-            ColumnCatalog {
-                column_desc: ColumnDesc::named("payload", ColumnId::placeholder(), DataType::Jsonb),
-                is_hidden: false,
-            },
-            ColumnCatalog::offset_column(),
-            ColumnCatalog::cdc_table_name_column(),
-        ];
+        let schema = ColumnCatalog::debezium_cdc_source_cols();
 
         let columns = schema
             .iter()
@@ -465,14 +451,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_parse_schema_change() {
-        let schema = vec![
-            ColumnCatalog {
-                column_desc: ColumnDesc::named("payload", ColumnId::placeholder(), DataType::Jsonb),
-                is_hidden: false,
-            },
-            ColumnCatalog::offset_column(),
-            ColumnCatalog::cdc_table_name_column(),
-        ];
+        let schema = ColumnCatalog::debezium_cdc_source_cols();
 
         let columns = schema
             .iter()
@@ -526,8 +505,6 @@ mod tests {
                                         data_type: Int32,
                                         column_id: #2147483646,
                                         name: "id",
-                                        field_descs: [],
-                                        type_name: "",
                                         generated_or_default_column: None,
                                         description: None,
                                         additional_column: AdditionalColumn {
@@ -543,8 +520,6 @@ mod tests {
                                         data_type: Timestamptz,
                                         column_id: #2147483646,
                                         name: "v1",
-                                        field_descs: [],
-                                        type_name: "",
                                         generated_or_default_column: None,
                                         description: None,
                                         additional_column: AdditionalColumn {
@@ -560,8 +535,6 @@ mod tests {
                                         data_type: Varchar,
                                         column_id: #2147483646,
                                         name: "v2",
-                                        field_descs: [],
-                                        type_name: "",
                                         generated_or_default_column: None,
                                         description: None,
                                         additional_column: AdditionalColumn {

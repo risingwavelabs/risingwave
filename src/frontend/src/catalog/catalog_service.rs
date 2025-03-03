@@ -27,9 +27,9 @@ use risingwave_pb::catalog::{
 };
 use risingwave_pb::ddl_service::replace_job_plan::{ReplaceJob, ReplaceSource, ReplaceTable};
 use risingwave_pb::ddl_service::{
+    PbReplaceJobPlan, PbTableJobType, ReplaceJobPlan, TableJobType, WaitVersion,
     alter_name_request, alter_owner_request, alter_set_schema_request, alter_swap_rename_request,
-    create_connection_request, PbReplaceJobPlan, PbTableJobType, ReplaceJobPlan, TableJobType,
-    WaitVersion,
+    create_connection_request,
 };
 use risingwave_pb::meta::PbTableParallelism;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
@@ -215,7 +215,7 @@ pub trait CatalogWriter: Send + Sync {
 
     async fn alter_parallelism(
         &self,
-        table_id: u32,
+        job_id: u32,
         parallelism: PbTableParallelism,
         deferred: bool,
     ) -> Result<()>;
@@ -560,12 +560,12 @@ impl CatalogWriter for CatalogWriterImpl {
 
     async fn alter_parallelism(
         &self,
-        table_id: u32,
+        job_id: u32,
         parallelism: PbTableParallelism,
         deferred: bool,
     ) -> Result<()> {
         self.meta_client
-            .alter_parallelism(table_id, parallelism, deferred)
+            .alter_parallelism(job_id, parallelism, deferred)
             .await
             .map_err(|e| anyhow!(e))?;
 

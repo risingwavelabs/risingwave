@@ -14,12 +14,12 @@
 
 #[cfg(test)]
 mod test {
+    use crate::hummock::BackwardSstableIterator;
     use crate::hummock::iterator::test_utils::{
-        default_builder_opt_for_test, gen_iterator_test_sstable_base, iterator_test_key_of,
-        iterator_test_value_of, mock_sstable_store, TEST_KEYS_COUNT,
+        TEST_KEYS_COUNT, default_builder_opt_for_test, gen_iterator_test_sstable_base,
+        iterator_test_key_of, iterator_test_value_of, mock_sstable_store,
     };
     use crate::hummock::iterator::{HummockIterator, MergeIterator};
-    use crate::hummock::BackwardSstableIterator;
 
     #[tokio::test]
     async fn test_backward_merge_basic() {

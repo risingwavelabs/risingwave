@@ -17,7 +17,7 @@
 
 mod json_common;
 
-use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
+use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use futures::executor::block_on;
 use json_common::*;
 use old_json_parser::JsonParser;

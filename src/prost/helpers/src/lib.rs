@@ -18,7 +18,7 @@
 use proc_macro::TokenStream;
 use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::{format_ident, quote};
-use syn::{parse_macro_input, Data, DataStruct, DeriveInput, Result};
+use syn::{Data, DataStruct, DeriveInput, Result, parse_macro_input};
 
 mod generate;
 

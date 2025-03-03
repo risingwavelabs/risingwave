@@ -13,13 +13,13 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use itertools::{enumerate, Itertools};
-use prometheus::core::{AtomicU64, GenericCounter};
+use itertools::{Itertools, enumerate};
 use prometheus::IntGauge;
+use prometheus::core::{AtomicU64, GenericCounter};
 use risingwave_hummock_sdk::compact_task::CompactTask;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::object_size_map;
 use risingwave_hummock_sdk::level::Levels;
@@ -32,7 +32,7 @@ use risingwave_pb::hummock::{
 };
 
 use super::compaction::selector::DynamicLevelSelectorCore;
-use super::compaction::{get_compression_algorithm, CompactionDeveloperConfig};
+use super::compaction::{CompactionDeveloperConfig, get_compression_algorithm};
 use crate::hummock::checkpoint::HummockVersionCheckpoint;
 use crate::hummock::compaction::CompactStatus;
 use crate::rpc::metrics::MetaMetrics;

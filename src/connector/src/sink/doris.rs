@@ -15,10 +15,10 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use async_trait::async_trait;
-use base64::engine::general_purpose;
 use base64::Engine;
+use base64::engine::general_purpose;
 use bytes::{BufMut, Bytes, BytesMut};
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bitmap::Bitmap;
@@ -32,11 +32,11 @@ use thiserror_ext::AsReport;
 use with_options::WithOptions;
 
 use super::doris_starrocks_connector::{
-    HeaderBuilder, InserterInner, InserterInnerBuilder, DORIS_DELETE_SIGN, DORIS_SUCCESS_STATUS,
+    DORIS_DELETE_SIGN, DORIS_SUCCESS_STATUS, HeaderBuilder, InserterInner, InserterInnerBuilder,
     POOL_IDLE_TIMEOUT,
 };
 use super::{
-    Result, SinkError, SinkWriterMetrics, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
+    Result, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, SinkError, SinkWriterMetrics,
 };
 use crate::sink::encoder::{JsonEncoder, RowEncoder};
 use crate::sink::writer::{LogSinkerOf, SinkWriterExt};
@@ -144,7 +144,8 @@ impl DorisSink {
             })?;
             if !Self::check_and_correct_column_type(&i.data_type, value.to_string())? {
                 return Err(SinkError::Doris(format!(
-                    "Column type don't match, column name is {:?}. doris type is {:?} risingwave type is {:?} ",i.name,value,i.data_type
+                    "Column type don't match, column name is {:?}. doris type is {:?} risingwave type is {:?} ",
+                    i.name, value, i.data_type
                 )));
             }
         }
@@ -216,7 +217,8 @@ impl Sink for DorisSink {
     async fn validate(&self) -> Result<()> {
         if !self.is_append_only && self.pk_indices.is_empty() {
             return Err(SinkError::Config(anyhow!(
-                "Primary key not defined for upsert doris sink (please define in `primary_key` field)")));
+                "Primary key not defined for upsert doris sink (please define in `primary_key` field)"
+            )));
         }
         // check reachability
         let client = self.config.common.build_get_client();

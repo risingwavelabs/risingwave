@@ -23,49 +23,22 @@ use risingwave_connector::match_sink_name_str;
 use risingwave_connector::sink::catalog::{SinkFormatDesc, SinkId, SinkType};
 use risingwave_connector::sink::file_sink::fs::FsSink;
 use risingwave_connector::sink::{
-    SinkError, SinkMetaClient, SinkParam, SinkWriterParam, CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION,
+    CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION, SinkError, SinkMetaClient, SinkParam, SinkWriterParam,
+    build_sink,
 };
 use risingwave_pb::catalog::Table;
 use risingwave_pb::plan_common::PbColumnCatalog;
 use risingwave_pb::stream_plan::{SinkLogStoreType, SinkNode};
-use risingwave_pb::telemetry::{PbTelemetryDatabaseObject, PbTelemetryEventStage};
 use url::Url;
 
 use super::*;
 use crate::common::log_store_impl::in_mem::BoundedInMemLogStoreFactory;
 use crate::common::log_store_impl::kv_log_store::{
-    KvLogStoreFactory, KvLogStoreMetrics, KvLogStorePkInfo, KV_LOG_STORE_V2_INFO,
+    KV_LOG_STORE_V2_INFO, KvLogStoreFactory, KvLogStoreMetrics, KvLogStorePkInfo,
 };
 use crate::executor::{SinkExecutor, StreamExecutorError};
-use crate::telemetry::report_event;
 
 pub struct SinkExecutorBuilder;
-
-fn telemetry_sink_build(
-    sink_id: &SinkId,
-    connector_name: &str,
-    sink_format_desc: &Option<SinkFormatDesc>,
-) {
-    let attr = sink_format_desc.as_ref().map(|f| {
-        let mut builder = jsonbb::Builder::<Vec<u8>>::new();
-        builder.begin_object();
-        builder.add_string("format");
-        builder.add_value(jsonbb::ValueRef::String(f.format.to_string().as_str()));
-        builder.add_string("encode");
-        builder.add_value(jsonbb::ValueRef::String(f.encode.to_string().as_str()));
-        builder.end_object();
-        builder.finish()
-    });
-
-    report_event(
-        PbTelemetryEventStage::CreateStreamJob,
-        "sink",
-        sink_id.sink_id() as i64,
-        Some(connector_name.to_owned()),
-        Some(PbTelemetryDatabaseObject::Sink),
-        attr,
-    )
-}
 
 fn resolve_pk_info(
     input_schema: &Schema,
@@ -259,7 +232,8 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             connector, sink_id.sink_id, params.executor_id
         );
 
-        telemetry_sink_build(&sink_id, connector, &sink_param.format_desc);
+        let sink = build_sink(sink_param.clone())
+            .map_err(|e| StreamExecutorError::from((e, sink_param.sink_id.sink_id)))?;
 
         let exec = match node.log_store_type() {
             // Default value is the normal in memory log store to be backward compatible with the
@@ -271,6 +245,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                     params.info.clone(),
                     input_executor,
                     sink_write_param,
+                    sink,
                     sink_param,
                     columns,
                     factory,
@@ -293,6 +268,8 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                 let input_schema = input_executor.schema();
                 let pk_info = resolve_pk_info(input_schema, &table)?;
 
+                let align_init_epoch = sink.is_coordinated_sink();
+
                 // TODO: support setting max row count in config
                 let factory = KvLogStoreFactory::new(
                     state_store,
@@ -302,6 +279,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                     metrics,
                     log_store_identity,
                     pk_info,
+                    align_init_epoch,
                 );
 
                 SinkExecutor::new(
@@ -309,6 +287,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                     params.info.clone(),
                     input_executor,
                     sink_write_param,
+                    sink,
                     sink_param,
                     columns,
                     factory,
@@ -335,7 +314,9 @@ struct JdbcUrl {
 
 fn parse_jdbc_url(url: &str) -> anyhow::Result<JdbcUrl> {
     if !url.starts_with("jdbc:postgresql") {
-        bail!("invalid jdbc url, to switch to postgres rust connector, we need to use the url jdbc:postgresql://...")
+        bail!(
+            "invalid jdbc url, to switch to postgres rust connector, we need to use the url jdbc:postgresql://..."
+        )
     }
 
     // trim the "jdbc:" prefix to make it a valid url

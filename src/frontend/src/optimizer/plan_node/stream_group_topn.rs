@@ -17,13 +17,13 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::generic::{DistillUnit, TopNLimit};
 use super::stream::prelude::*;
-use super::utils::{plan_node_name, watermark_pretty, Distill};
-use super::{generic, ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode};
+use super::utils::{Distill, plan_node_name, watermark_pretty};
+use super::{ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode, generic};
+use crate::PlanRef;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanNode;
 use crate::optimizer::property::{MonotonicityMap, Order};
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::PlanRef;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamGroupTopN {

@@ -15,7 +15,7 @@
 use risingwave_common::types::DataType;
 use risingwave_expr::aggregate::AggType;
 
-use super::{infer_type, Expr, ExprImpl, Literal, OrderBy};
+use super::{Expr, ExprImpl, Literal, OrderBy, infer_type};
 use crate::error::Result;
 use crate::utils::Condition;
 

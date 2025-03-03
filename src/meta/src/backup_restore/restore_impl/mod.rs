@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_backup::MetaSnapshotId;
 use risingwave_backup::error::BackupResult;
 use risingwave_backup::meta_snapshot::{MetaSnapshot, Metadata};
-use risingwave_backup::MetaSnapshotId;
 
 pub mod v2;
 

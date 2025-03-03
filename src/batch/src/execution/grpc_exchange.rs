@@ -17,11 +17,11 @@ use std::fmt::{Debug, Formatter};
 use futures::StreamExt;
 use risingwave_common::array::DataChunk;
 use risingwave_expr::expr_context::capture_expr_context;
-use risingwave_pb::batch_plan::exchange_source::LocalExecutePlan::{self, Plan};
 use risingwave_pb::batch_plan::TaskOutputId;
+use risingwave_pb::batch_plan::exchange_source::LocalExecutePlan::{self, Plan};
 use risingwave_pb::task_service::{ExecuteRequest, GetDataResponse};
-use risingwave_rpc_client::error::RpcError;
 use risingwave_rpc_client::ComputeClient;
+use risingwave_rpc_client::error::RpcError;
 use tonic::Streaming;
 
 use crate::error::Result;
@@ -86,8 +86,7 @@ impl ExchangeSource for GrpcExchangeSource {
         let data = DataChunk::from_protobuf(task_data.get_record_batch()?)?.compact();
         trace!(
             "Receiver taskOutput = {:?}, data = {:?}",
-            self.task_output_id,
-            data
+            self.task_output_id, data
         );
 
         Ok(Some(data))

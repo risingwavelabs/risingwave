@@ -19,10 +19,10 @@ use google_cloud_pubsub::subscription::SeekTo;
 use risingwave_common::bail;
 
 use crate::error::ConnectorResult;
-use crate::source::base::SplitEnumerator;
-use crate::source::google_pubsub::split::PubsubSplit;
-use crate::source::google_pubsub::PubsubProperties;
 use crate::source::SourceEnumeratorContextRef;
+use crate::source::base::SplitEnumerator;
+use crate::source::google_pubsub::PubsubProperties;
+use crate::source::google_pubsub::split::PubsubSplit;
 
 pub struct PubsubSplitEnumerator {
     subscription: String,

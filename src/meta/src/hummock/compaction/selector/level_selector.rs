@@ -18,13 +18,13 @@
 // (found in the LICENSE.Apache file in the root directory).
 use std::sync::Arc;
 
-use risingwave_hummock_sdk::level::Levels;
 use risingwave_hummock_sdk::HummockCompactionTaskId;
+use risingwave_hummock_sdk::level::Levels;
 use risingwave_pb::hummock::compact_task::PbTaskType;
 use risingwave_pb::hummock::{CompactionConfig, LevelType};
 
 use super::{
-    create_compaction_task, CompactionSelector, LevelCompactionPicker, TierCompactionPicker,
+    CompactionSelector, LevelCompactionPicker, TierCompactionPicker, create_compaction_task,
 };
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
 use crate::hummock::compaction::picker::{
@@ -33,7 +33,7 @@ use crate::hummock::compaction::picker::{
 };
 use crate::hummock::compaction::selector::CompactionSelectorContext;
 use crate::hummock::compaction::{
-    create_overlap_strategy, CompactionDeveloperConfig, CompactionTask,
+    CompactionDeveloperConfig, CompactionTask, create_overlap_strategy,
 };
 use crate::hummock::level_handler::LevelHandler;
 
@@ -219,7 +219,11 @@ impl DynamicLevelSelectorCore {
                 // that may be encountered some issue, we can work around it.
                 tracing::warn!(
                     "The number of files in L0 {} is less than the number of pending files {} group {} pending_tasks_ids {:?} compacting_files {:?}",
-                    l0_file_count, handlers[0].pending_file_count(), levels.group_id, handlers[0].pending_tasks_ids(), handlers[0].compacting_files()
+                    l0_file_count,
+                    handlers[0].pending_file_count(),
+                    levels.group_id,
+                    handlers[0].pending_tasks_ids(),
+                    handlers[0].compacting_files()
                 );
 
                 0
@@ -491,6 +495,7 @@ pub mod tests {
     use risingwave_hummock_sdk::version::HummockVersionStateTableInfo;
     use risingwave_pb::hummock::compaction_config::CompactionMode;
 
+    use crate::hummock::compaction::CompactionDeveloperConfig;
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use crate::hummock::compaction::selector::tests::{
         assert_compaction_task, generate_l0_nonoverlapping_sublevels, generate_level,
@@ -499,7 +504,6 @@ pub mod tests {
     use crate::hummock::compaction::selector::{
         CompactionSelector, DynamicLevelSelector, DynamicLevelSelectorCore, LocalSelectorStatistic,
     };
-    use crate::hummock::compaction::CompactionDeveloperConfig;
     use crate::hummock::level_handler::LevelHandler;
     use crate::hummock::model::CompactionGroup;
     use crate::hummock::test_utils::compaction_selector_context;

@@ -15,12 +15,12 @@
 use std::sync::Arc;
 
 use risingwave_common::catalog::TableId;
+use risingwave_connector::WithOptionsSecResolved;
+use risingwave_connector::source::ConnectorProperties;
 use risingwave_connector::source::filesystem::opendal_source::{
     OpendalAzblob, OpendalGcs, OpendalPosixFs, OpendalS3,
 };
 use risingwave_connector::source::reader::desc::SourceDescBuilder;
-use risingwave_connector::source::ConnectorProperties;
-use risingwave_connector::WithOptionsSecResolved;
 use risingwave_pb::stream_plan::StreamFsFetchNode;
 use risingwave_storage::StateStore;
 

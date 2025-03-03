@@ -20,7 +20,7 @@ use bytes::{Buf, BufMut};
 use itertools::Itertools;
 use risingwave_common::must_match;
 use risingwave_hummock_sdk::key::{FullKey, UserKeyRangeRef};
-use xorf::{Filter, Xor16, Xor8};
+use xorf::{Filter, Xor8, Xor16};
 
 use super::{FilterBuilder, Sstable};
 use crate::hummock::{BlockMeta, MemoryLimiter};
@@ -456,7 +456,7 @@ mod tests {
     };
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::sstable::{SstableBuilder, SstableBuilderOptions};
-    use crate::hummock::test_utils::{test_user_key_of, test_value_of, TEST_KEYS_COUNT};
+    use crate::hummock::test_utils::{TEST_KEYS_COUNT, test_user_key_of, test_value_of};
     use crate::hummock::value::HummockValue;
     use crate::hummock::{BlockIterator, CachePolicy, SstableWriterOptions};
     use crate::monitor::StoreLocalStatistic;

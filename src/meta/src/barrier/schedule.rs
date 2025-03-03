@@ -17,14 +17,13 @@ use std::iter::once;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use assert_matches::assert_matches;
 use itertools::Itertools;
 use parking_lot::Mutex;
 use prometheus::HistogramTimer;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_hummock_sdk::HummockVersionId;
-use risingwave_pb::meta::PausedReason;
 use tokio::select;
 use tokio::sync::{oneshot, watch};
 use tokio::time::Interval;
@@ -284,26 +283,6 @@ impl BarrierScheduler {
         }
 
         Ok(())
-    }
-
-    /// Run a command with a `Pause` command before and `Resume` command after it. Used for
-    /// configuration change.
-    ///
-    /// Returns the barrier info of the actual command.
-    pub async fn run_config_change_command_with_pause(
-        &self,
-        database_id: DatabaseId,
-        command: Command,
-    ) -> MetaResult<()> {
-        self.run_multiple_commands(
-            database_id,
-            vec![
-                Command::pause(PausedReason::ConfigChange),
-                command,
-                Command::resume(PausedReason::ConfigChange),
-            ],
-        )
-        .await
     }
 
     /// Run a command and return when it's completely finished (i.e., collected).

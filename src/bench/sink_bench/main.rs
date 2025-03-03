@@ -20,8 +20,8 @@
 use core::str::FromStr;
 use core::sync::atomic::Ordering;
 use std::collections::{BTreeMap, HashMap};
-use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
 
 use anyhow::anyhow;
 use clap::Parser;
@@ -52,8 +52,8 @@ use risingwave_connector::sink::log_store::{
 };
 use risingwave_connector::sink::mock_coordination_client::MockMetaClient;
 use risingwave_connector::sink::{
-    build_sink, LogSinker, Sink, SinkError, SinkMetaClient, SinkParam, SinkWriterParam,
-    SINK_TYPE_APPEND_ONLY, SINK_TYPE_UPSERT,
+    LogSinker, SINK_TYPE_APPEND_ONLY, SINK_TYPE_UPSERT, Sink, SinkError, SinkMetaClient, SinkParam,
+    SinkWriterParam, build_sink,
 };
 use risingwave_connector::source::datagen::{
     DatagenProperties, DatagenSplitEnumerator, DatagenSplitReader,
@@ -131,8 +131,8 @@ impl LogReader for MockRangeLogReader {
         Ok(())
     }
 
-    async fn rewind(&mut self) -> LogStoreResult<(bool, Option<Bitmap>)> {
-        Ok((false, None))
+    async fn rewind(&mut self) -> LogStoreResult<()> {
+        Err(anyhow!("should not call rewind"))
     }
 }
 
@@ -349,7 +349,7 @@ impl MockDatagenSource {
                 _ => {
                     return Err(StreamExecutorError::from(
                         "Can't assert message type".to_owned(),
-                    ))
+                    ));
                 }
             }
         }
@@ -469,8 +469,8 @@ fn mock_from_legacy_type(
     connector: &str,
     r#type: &str,
 ) -> Result<Option<SinkFormatDesc>, SinkError> {
-    use risingwave_connector::sink::redis::RedisSink;
     use risingwave_connector::sink::Sink as _;
+    use risingwave_connector::sink::redis::RedisSink;
     if connector.eq(RedisSink::SINK_NAME) {
         let format = match r#type {
             SINK_TYPE_APPEND_ONLY => SinkFormat::AppendOnly,
@@ -479,7 +479,7 @@ fn mock_from_legacy_type(
                 return Err(SinkError::Config(anyhow!(
                     "sink type unsupported: {}",
                     r#type
-                )))
+                )));
             }
         };
         Ok(Some(SinkFormatDesc {

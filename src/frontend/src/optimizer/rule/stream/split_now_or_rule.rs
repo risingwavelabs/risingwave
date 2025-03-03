@@ -15,9 +15,9 @@
 use risingwave_common::types::DataType;
 
 use crate::expr::{ExprImpl, ExprType, FunctionCall};
+use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::{LogicalFilter, LogicalShare, LogicalUnion, PlanTreeNodeUnary};
 use crate::optimizer::rule::{BoxedRule, Rule};
-use crate::optimizer::PlanRef;
 
 /// Convert `LogicalFilter` with now or others predicates to a `UNION ALL`
 ///

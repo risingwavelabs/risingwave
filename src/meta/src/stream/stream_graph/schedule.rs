@@ -36,11 +36,11 @@ use risingwave_pb::meta::table_fragments::fragment::{
 };
 use risingwave_pb::stream_plan::DispatcherType::{self, *};
 
-use crate::model::ActorId;
+use crate::MetaResult;
+use crate::model::{ActorId, Fragment};
 use crate::stream::schedule_units_for_slots;
 use crate::stream::stream_graph::fragment::CompleteStreamFragmentGraph;
 use crate::stream::stream_graph::id::GlobalFragmentId as Id;
-use crate::MetaResult;
 
 type HashMappingId = usize;
 
@@ -148,11 +148,8 @@ impl Distribution {
     }
 
     /// Create a distribution from a persisted protobuf `Fragment`.
-    pub fn from_fragment(
-        fragment: &risingwave_pb::meta::table_fragments::Fragment,
-        actor_location: &HashMap<ActorId, WorkerId>,
-    ) -> Self {
-        match fragment.get_distribution_type().unwrap() {
+    pub fn from_fragment(fragment: &Fragment, actor_location: &HashMap<ActorId, WorkerId>) -> Self {
+        match fragment.distribution_type {
             FragmentDistributionType::Unspecified => unreachable!(),
             FragmentDistributionType::Single => {
                 let actor_id = fragment.actors.iter().exactly_one().unwrap().actor_id;
@@ -480,7 +477,9 @@ mod tests {
             match (reqs.get(&id), expected) {
                 (None, Result::DefaultHash) => {}
                 (Some(actual), Result::Required(expected)) if *actual == expected => {}
-                (actual, expected) => panic!("unexpected result for fragment {id:?}\nactual: {actual:?}\nexpected: {expected:?}"),
+                (actual, expected) => panic!(
+                    "unexpected result for fragment {id:?}\nactual: {actual:?}\nexpected: {expected:?}"
+                ),
             }
         }
     }

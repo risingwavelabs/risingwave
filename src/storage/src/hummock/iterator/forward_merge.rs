@@ -19,21 +19,21 @@ mod test {
     use std::sync::Arc;
     use std::task::Poll;
 
-    use futures::{pin_mut, FutureExt};
-    use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
+    use futures::{FutureExt, pin_mut};
     use risingwave_hummock_sdk::EpochWithGap;
+    use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
 
+    use crate::hummock::HummockResult;
     use crate::hummock::iterator::test_utils::{
-        default_builder_opt_for_test, gen_iterator_test_sstable_info,
+        TEST_KEYS_COUNT, default_builder_opt_for_test, gen_iterator_test_sstable_info,
         gen_merge_iterator_interleave_test_sstable_iters, iterator_test_key_of,
-        iterator_test_value_of, mock_sstable_store, TEST_KEYS_COUNT,
+        iterator_test_value_of, mock_sstable_store,
     };
     use crate::hummock::iterator::{Forward, HummockIterator, MergeIterator, ValueMeta};
     use crate::hummock::sstable::{
         SstableIterator, SstableIteratorReadOptions, SstableIteratorType,
     };
     use crate::hummock::value::HummockValue;
-    use crate::hummock::HummockResult;
     use crate::monitor::StoreLocalStatistic;
 
     #[tokio::test]
@@ -216,9 +216,11 @@ mod test {
         pin_mut!(future);
 
         for _ in 0..10 {
-            assert!(poll_fn(|cx| { Poll::Ready(future.poll_unpin(cx)) })
-                .await
-                .is_pending());
+            assert!(
+                poll_fn(|cx| { Poll::Ready(future.poll_unpin(cx)) })
+                    .await
+                    .is_pending()
+            );
         }
 
         // Dropping the future will panic if the OrderedMergeIterator is not cancellation safe.

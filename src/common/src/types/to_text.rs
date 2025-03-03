@@ -225,8 +225,8 @@ impl ToText for DatumRef<'_> {
 
 #[cfg(test)]
 mod tests {
-    use crate::types::ordered_float::OrderedFloat;
     use crate::types::ToText;
+    use crate::types::ordered_float::OrderedFloat;
 
     #[test]
     fn test_float_to_text() {

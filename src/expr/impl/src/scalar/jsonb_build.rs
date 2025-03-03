@@ -18,7 +18,7 @@ use risingwave_common::row::Row;
 use risingwave_common::types::{JsonbVal, ScalarRefImpl};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::Context;
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_expr::{ExprError, Result, function};
 
 use super::{ToJsonb, ToTextDisplay};
 
@@ -98,7 +98,7 @@ fn jsonb_build_object(args: impl Row, ctx: &Context) -> Result<JsonbVal> {
                 return Err(ExprError::InvalidParam {
                     name: "args",
                     reason: "key value must be scalar, not array, composite, or json".into(),
-                })
+                });
             }
             // special treatment for bool, `false` & `true` rather than `f` & `t`.
             Some(ScalarRefImpl::Bool(b)) => builder.display(b),
@@ -107,7 +107,7 @@ fn jsonb_build_object(args: impl Row, ctx: &Context) -> Result<JsonbVal> {
                 return Err(ExprError::InvalidParam {
                     name: "args",
                     reason: format!("argument {}: key must not be null", i * 2 + 1).into(),
-                })
+                });
             }
         }
         value.add_to(value_type, &mut builder)?;

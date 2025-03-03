@@ -24,9 +24,9 @@ use anyhow::Context;
 use prost::Message;
 use prost_reflect::{DescriptorPool, DynamicMessage, MessageDescriptor};
 use risingwave_connector_codec::common::protobuf::compile_pb;
-use risingwave_connector_codec::decoder::protobuf::parser::*;
-use risingwave_connector_codec::decoder::protobuf::ProtobufAccess;
 use risingwave_connector_codec::decoder::Access;
+use risingwave_connector_codec::decoder::protobuf::ProtobufAccess;
+use risingwave_connector_codec::decoder::protobuf::parser::*;
 use thiserror_ext::AsReport;
 
 use crate::utils::*;
@@ -39,7 +39,7 @@ fn check(
     expected_risingwave_schema: expect_test::Expect,
     expected_risingwave_data: expect_test::Expect,
 ) {
-    let rw_schema = pb_schema_to_column_descs(
+    let rw_schema = pb_schema_to_fields(
         &pb_schema,
         &HashSet::from(["google.protobuf.Any".to_owned()]),
     );
@@ -50,14 +50,10 @@ fn check(
         return;
     }
 
-    let rw_schema = rw_schema
-        .unwrap()
-        .iter()
-        .map(ColumnDesc::from)
-        .collect_vec();
+    let rw_schema = rw_schema.unwrap();
     expected_risingwave_schema.assert_eq(&format!(
         "{:#?}",
-        rw_schema.iter().map(ColumnDescTestDisplay).collect_vec()
+        rw_schema.iter().map(FieldTestDisplay).collect_vec()
     ));
 
     let mut data_str = vec![];
@@ -157,12 +153,12 @@ fn test_simple_schema() -> anyhow::Result<()> {
         &[PRE_GEN_PROTO_DATA],
         expect![[r#"
             [
-                id(#1): Int32,
-                address(#2): Varchar,
-                city(#3): Varchar,
-                zipcode(#4): Int64,
-                rate(#5): Float32,
-                date(#6): Varchar,
+                id: Int32,
+                address: Varchar,
+                city: Varchar,
+                zipcode: Int64,
+                rate: Float32,
+                date: Varchar,
             ]"#]],
         expect![[r#"
             Owned(Int32(123))
@@ -185,21 +181,21 @@ fn test_complex_schema() -> anyhow::Result<()> {
         &[],
         expect![[r#"
             [
-                id(#1): Int32,
-                code(#2): Varchar,
-                timestamp(#3): Int64,
-                xfas(#4): List(
+                id: Int32,
+                code: Varchar,
+                timestamp: Int64,
+                xfas: List(
                     Struct {
                         device_model_id: Int32,
                         device_make_id: Int32,
                         ip: Varchar,
                     },
-                ), type_name: test.Xfa,
-                contacts(#7): Struct {
+                ),
+                contacts: Struct {
                     emails: List(Varchar),
                     phones: List(Varchar),
-                }, type_name: test.Contacts, field_descs: [emails(#5): List(Varchar), phones(#6): List(Varchar)],
-                sex(#8): Varchar,
+                },
+                sex: Varchar,
             ]"#]],
         expect![""],
     );
@@ -455,8 +451,8 @@ fn test_any_schema() -> anyhow::Result<()> {
         &[ANY_DATA_1, ANY_DATA_2, ANY_DATA_3, ANY_DATA_INVALID],
         expect![[r#"
             [
-                id(#1): Int32,
-                any_value(#2): Jsonb,
+                id: Int32,
+                any_value: Jsonb,
             ]"#]],
         expect![[r#"
             Owned(Int32(12345))
@@ -574,47 +570,44 @@ fn test_all_types() -> anyhow::Result<()> {
         &[&data_bytes],
         expect![[r#"
             [
-                double_field(#1): Float64,
-                float_field(#2): Float32,
-                int32_field(#3): Int32,
-                int64_field(#4): Int64,
-                uint32_field(#5): Int64,
-                uint64_field(#6): Decimal,
-                sint32_field(#7): Int32,
-                sint64_field(#8): Int64,
-                fixed32_field(#9): Int64,
-                fixed64_field(#10): Decimal,
-                sfixed32_field(#11): Int32,
-                sfixed64_field(#12): Int64,
-                bool_field(#13): Boolean,
-                string_field(#14): Varchar,
-                bytes_field(#15): Bytea,
-                enum_field(#16): Varchar,
-                nested_message_field(#19): Struct {
+                double_field: Float64,
+                float_field: Float32,
+                int32_field: Int32,
+                int64_field: Int64,
+                uint32_field: Int64,
+                uint64_field: Decimal,
+                sint32_field: Int32,
+                sint64_field: Int64,
+                fixed32_field: Int64,
+                fixed64_field: Decimal,
+                sfixed32_field: Int32,
+                sfixed64_field: Int64,
+                bool_field: Boolean,
+                string_field: Varchar,
+                bytes_field: Bytea,
+                enum_field: Varchar,
+                nested_message_field: Struct {
                     id: Int32,
                     name: Varchar,
-                }, type_name: all_types.AllTypes.NestedMessage, field_descs: [id(#17): Int32, name(#18): Varchar],
-                repeated_int_field(#20): List(Int32),
-                oneof_string(#21): Varchar,
-                oneof_int32(#22): Int32,
-                oneof_enum(#23): Varchar,
-                map_field(#26): Map(Varchar,Int32), type_name: all_types.AllTypes.MapFieldEntry, field_descs: [key(#24): Varchar, value(#25): Int32],
-                timestamp_field(#29): Struct {
+                },
+                repeated_int_field: List(Int32),
+                oneof_string: Varchar,
+                oneof_int32: Int32,
+                oneof_enum: Varchar,
+                map_field: Map(Varchar,Int32),
+                timestamp_field: Struct {
                     seconds: Int64,
                     nanos: Int32,
-                }, type_name: google.protobuf.Timestamp, field_descs: [seconds(#27): Int64, nanos(#28): Int32],
-                duration_field(#32): Struct {
+                },
+                duration_field: Struct {
                     seconds: Int64,
                     nanos: Int32,
-                }, type_name: google.protobuf.Duration, field_descs: [seconds(#30): Int64, nanos(#31): Int32],
-                any_field(#33): Jsonb,
-                int32_value_field(#35): Struct { value: Int32 }, type_name: google.protobuf.Int32Value, field_descs: [value(#34): Int32],
-                string_value_field(#37): Struct { value: Varchar }, type_name: google.protobuf.StringValue, field_descs: [value(#36): Varchar],
-                map_struct_field(#42): Map(Varchar,Struct { id: Int32, name: Varchar }), type_name: all_types.AllTypes.MapStructFieldEntry, field_descs: [key(#38): Varchar, value(#41): Struct {
-                    id: Int32,
-                    name: Varchar,
-                }, type_name: all_types.AllTypes.NestedMessage, field_descs: [id(#39): Int32, name(#40): Varchar]],
-                map_enum_field(#45): Map(Int32,Varchar), type_name: all_types.AllTypes.MapEnumFieldEntry, field_descs: [key(#43): Int32, value(#44): Varchar],
+                },
+                any_field: Jsonb,
+                int32_value_field: Struct { value: Int32 },
+                string_value_field: Struct { value: Varchar },
+                map_struct_field: Map(Varchar,Struct { id: Int32, name: Varchar }),
+                map_enum_field: Map(Int32,Varchar),
             ]"#]],
         expect![[r#"
             Owned(Float64(OrderedFloat(1.2345)))

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_expr::{capture_context, function, Result};
+use risingwave_expr::{Result, capture_context, function};
 
 use super::context::USER_INFO_READER;
 use crate::user::user_service::UserInfoReader;

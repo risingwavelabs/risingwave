@@ -18,7 +18,7 @@ use std::marker::PhantomData;
 
 use bytes::BufMut;
 use educe::Educe;
-use either::{for_both, Either};
+use either::{Either, for_both};
 use itertools::Itertools;
 use risingwave_common_estimate_size::EstimateSize;
 use tinyvec::ArrayVec;

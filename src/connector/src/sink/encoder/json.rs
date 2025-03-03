@@ -16,8 +16,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::Context;
-use base64::engine::general_purpose;
 use base64::Engine as _;
+use base64::engine::general_purpose;
 use chrono::{Datelike, NaiveDateTime, Timelike};
 use indexmap::IndexMap;
 use itertools::Itertools;
@@ -26,7 +26,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, DatumRef, JsonbVal, ScalarRefImpl, ToText};
 use risingwave_common::util::iter_util::ZipEqDebug;
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 use thiserror_ext::AsReport;
 
 use super::{
@@ -348,9 +348,10 @@ fn datum_to_json_object(
         }
         // TODO(map): support map
         (data_type, scalar_ref) => {
-            return Err(ArrayError::internal(
-                format!("datum_to_json_object: unsupported data type: field name: {:?}, logical type: {:?}, physical type: {:?}", field.name, data_type, scalar_ref),
-            ));
+            return Err(ArrayError::internal(format!(
+                "datum_to_json_object: unsupported data type: field name: {:?}, logical type: {:?}, physical type: {:?}",
+                field.name, data_type, scalar_ref
+            )));
         }
     };
 
@@ -445,8 +446,6 @@ mod tests {
         let mock_field = Field {
             data_type: DataType::Boolean,
             name: Default::default(),
-            sub_fields: Default::default(),
-            type_name: Default::default(),
         };
 
         let config = JsonEncoderConfig {
@@ -621,7 +620,6 @@ mod tests {
             &Field {
                 data_type: DataType::Decimal,
                 name: "aaa".to_owned(),
-                ..mock_field.clone()
             },
             Some(ScalarImpl::Decimal(Decimal::try_from(1.1111111).unwrap()).as_scalar_ref_impl()),
             &doris_config,
@@ -721,57 +719,42 @@ mod tests {
 
     #[test]
     fn test_generate_json_converter_schema() {
-        let mock_field = Field {
-            data_type: DataType::Boolean,
-            name: Default::default(),
-            sub_fields: Default::default(),
-            type_name: Default::default(),
-        };
         let fields = vec![
             Field {
                 data_type: DataType::Boolean,
                 name: "v1".into(),
-                ..mock_field.clone()
             },
             Field {
                 data_type: DataType::Int16,
                 name: "v2".into(),
-                ..mock_field.clone()
             },
             Field {
                 data_type: DataType::Int32,
                 name: "v3".into(),
-                ..mock_field.clone()
             },
             Field {
                 data_type: DataType::Float32,
                 name: "v4".into(),
-                ..mock_field.clone()
             },
             Field {
                 data_type: DataType::Decimal,
                 name: "v5".into(),
-                ..mock_field.clone()
             },
             Field {
                 data_type: DataType::Date,
                 name: "v6".into(),
-                ..mock_field.clone()
             },
             Field {
                 data_type: DataType::Varchar,
                 name: "v7".into(),
-                ..mock_field.clone()
             },
             Field {
                 data_type: DataType::Time,
                 name: "v8".into(),
-                ..mock_field.clone()
             },
             Field {
                 data_type: DataType::Interval,
                 name: "v9".into(),
-                ..mock_field.clone()
             },
             Field {
                 data_type: DataType::Struct(StructType::new(vec![
@@ -786,66 +769,29 @@ mod tests {
                     ),
                 ])),
                 name: "v10".into(),
-                sub_fields: vec![
-                    Field {
-                        data_type: DataType::Timestamp,
-                        name: "a".into(),
-                        ..mock_field.clone()
-                    },
-                    Field {
-                        data_type: DataType::Timestamptz,
-                        name: "b".into(),
-                        ..mock_field.clone()
-                    },
-                    Field {
-                        data_type: DataType::Struct(StructType::new(vec![
-                            ("aa", DataType::Int64),
-                            ("bb", DataType::Float64),
-                        ])),
-                        name: "c".into(),
-                        sub_fields: vec![
-                            Field {
-                                data_type: DataType::Int64,
-                                name: "aa".into(),
-                                ..mock_field.clone()
-                            },
-                            Field {
-                                data_type: DataType::Float64,
-                                name: "bb".into(),
-                                ..mock_field.clone()
-                            },
-                        ],
-                        ..mock_field.clone()
-                    },
-                ],
-                ..mock_field.clone()
             },
             Field {
                 data_type: DataType::List(Box::new(DataType::List(Box::new(DataType::Struct(
                     StructType::new(vec![("aa", DataType::Int64), ("bb", DataType::Float64)]),
                 ))))),
                 name: "v11".into(),
-                ..mock_field.clone()
             },
             Field {
                 data_type: DataType::Jsonb,
                 name: "12".into(),
-                ..mock_field.clone()
             },
             Field {
                 data_type: DataType::Serial,
                 name: "13".into(),
-                ..mock_field.clone()
             },
             Field {
                 data_type: DataType::Int256,
                 name: "14".into(),
-                ..mock_field.clone()
             },
         ];
-        let schema = json_converter_with_schema(json!({}), "test".to_owned(), fields.iter())
-            ["schema"]
-            .to_string();
+        let schema =
+            json_converter_with_schema(json!({}), "test".to_owned(), fields.iter())["schema"]
+                .to_string();
         let ans = r#"{"fields":[{"field":"v1","optional":true,"type":"boolean"},{"field":"v2","optional":true,"type":"int16"},{"field":"v3","optional":true,"type":"int32"},{"field":"v4","optional":true,"type":"float"},{"field":"v5","optional":true,"type":"string"},{"field":"v6","optional":true,"type":"int32"},{"field":"v7","optional":true,"type":"string"},{"field":"v8","optional":true,"type":"int64"},{"field":"v9","optional":true,"type":"string"},{"field":"v10","fields":[{"field":"a","optional":true,"type":"int64"},{"field":"b","optional":true,"type":"string"},{"field":"c","fields":[{"field":"aa","optional":true,"type":"int64"},{"field":"bb","optional":true,"type":"double"}],"optional":true,"type":"struct"}],"optional":true,"type":"struct"},{"field":"v11","items":{"items":{"fields":[{"field":"aa","optional":true,"type":"int64"},{"field":"bb","optional":true,"type":"double"}],"optional":true,"type":"struct"},"optional":true,"type":"array"},"optional":true,"type":"array"},{"field":"12","optional":true,"type":"string"},{"field":"13","optional":true,"type":"string"},{"field":"14","optional":true,"type":"string"}],"name":"test","optional":false,"type":"struct"}"#;
         assert_eq!(schema, ans);
     }
