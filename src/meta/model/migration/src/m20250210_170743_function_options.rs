@@ -12,7 +12,11 @@ impl MigrationTrait for Migration {
             .alter_table(
                 MigrationTable::alter()
                     .table(Function::Table)
-                    .add_column(ColumnDef::new(Function::Options).json_binary())
+                    .add_column(
+                        ColumnDef::new(Function::Options)
+                            .json_binary()
+                            .default("{}"),
+                    )
                     .to_owned(),
             )
             .await?;
