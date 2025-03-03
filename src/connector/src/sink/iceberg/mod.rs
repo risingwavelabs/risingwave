@@ -85,7 +85,6 @@ use super::{
 };
 use crate::connector_common::IcebergCommon;
 use crate::sink::coordinate::CoordinatedSinkWriter;
-use crate::sink::iceberg::compaction::spawn_compaction_client;
 use crate::sink::writer::SinkWriter;
 use crate::sink::{Result, SinkCommitCoordinator, SinkParam};
 use crate::{deserialize_bool_from_string, deserialize_optional_string_seq_from_string};
@@ -145,24 +144,16 @@ impl IcebergConfig {
             if let Some(primary_key) = &config.primary_key {
                 if primary_key.is_empty() {
                     return Err(SinkError::Config(anyhow!(
-                        "Primary_key must not be empty in {}",
+                        "`primary_key` must not be empty in {}",
                         SINK_TYPE_UPSERT
                     )));
                 }
             } else {
                 return Err(SinkError::Config(anyhow!(
-                    "Must set primary_key in {}",
+                    "Must set `primary_key` in {}",
                     SINK_TYPE_UPSERT
                 )));
             }
-        }
-
-        if config.common.catalog_name.is_none()
-            && config.common.catalog_type.as_deref() != Some("storage")
-        {
-            return Err(SinkError::Config(anyhow!(
-                "catalog.name must be set for non-storage catalog"
-            )));
         }
 
         // All configs start with "catalog." will be treated as java configs.
@@ -507,19 +498,12 @@ impl Sink for IcebergSink {
     async fn new_coordinator(&self) -> Result<Self::Coordinator> {
         let catalog = self.config.create_catalog().await?;
         let table = self.create_and_validate_table().await?;
-        // Only iceberg engine table will enable config load and need compaction.
-        let (commit_tx, finish_tx) = if self.config.common.enable_config_load.unwrap_or(false) {
-            let (commit_tx, finish_tx) = spawn_compaction_client(&self.config)?;
-            (Some(commit_tx), Some(finish_tx))
-        } else {
-            (None, None)
-        };
-
+        // FIXME(Dylan): Disable EMR serverless compaction for now.
         Ok(IcebergSinkCommitter {
             catalog,
             table,
-            commit_notifier: commit_tx,
-            _compact_task_guard: finish_tx,
+            commit_notifier: None,
+            _compact_task_guard: None,
         })
     }
 }

@@ -15,7 +15,7 @@
 use risingwave_common::catalog::{Field, SYS_CATALOG_START_ID};
 use risingwave_pb::catalog::PbView;
 
-use super::{OwnedByUserCatalog, ViewId};
+use super::{DatabaseId, OwnedByUserCatalog, SchemaId, ViewId};
 use crate::WithOptions;
 use crate::user::UserId;
 
@@ -23,6 +23,8 @@ use crate::user::UserId;
 pub struct ViewCatalog {
     pub id: ViewId,
     pub name: String,
+    pub schema_id: SchemaId,
+    pub database_id: DatabaseId,
 
     pub owner: UserId,
     pub properties: WithOptions,
@@ -35,6 +37,8 @@ impl From<&PbView> for ViewCatalog {
         ViewCatalog {
             id: view.id,
             name: view.name.clone(),
+            schema_id: view.schema_id,
+            database_id: view.database_id,
             owner: view.owner,
             properties: WithOptions::new_with_options(view.properties.clone()),
             sql: view.sql.clone(),

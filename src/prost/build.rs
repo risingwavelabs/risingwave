@@ -259,6 +259,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "hummock.CompatibilityVersion",
             "#[derive(prost_helpers::Version)]",
         )
+        .type_attribute("expr.UdfExprVersion", "#[derive(prost_helpers::Version)]")
         // end
         ;
 

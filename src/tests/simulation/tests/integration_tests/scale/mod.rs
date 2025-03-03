@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod adaptive_strategy;
 mod auto_parallelism;
 mod background_ddl;
 mod cascade_materialized_view;
