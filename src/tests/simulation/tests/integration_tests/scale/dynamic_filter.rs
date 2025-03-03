@@ -17,6 +17,8 @@ use std::time::Duration;
 
 use anyhow::Result;
 use itertools::Itertools;
+use risingwave_common::util::stream_graph_visitor::visit_stream_node;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_simulation::cluster::{Cluster, Configuration};
 use risingwave_simulation::ctl_ext::predicate::identity_contains;
 use risingwave_simulation::utils::AssertResult;
@@ -44,11 +46,15 @@ async fn test_dynamic_filter() -> Result<()> {
         .locate_fragments([identity_contains("materialize")])
         .await?;
 
-    let upstream_fragment_ids: HashSet<_> = dynamic_filter_fragment
-        .inner
-        .upstream_fragment_ids
-        .iter()
-        .collect();
+    let mut upstream_fragment_ids = HashSet::new();
+    visit_stream_node(
+        dynamic_filter_fragment.inner.nodes.as_ref().unwrap(),
+        |node| {
+            if let NodeBody::Merge(merge) = node {
+                upstream_fragment_ids.insert(merge.upstream_fragment_id);
+            }
+        },
+    );
 
     let fragment = materialize_fragments
         .iter()

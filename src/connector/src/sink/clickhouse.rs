@@ -1073,16 +1073,16 @@ impl Serialize for ClickHouseColumn {
 pub fn build_fields_name_type_from_schema(schema: &Schema) -> Result<Vec<(String, DataType)>> {
     let mut vec = vec![];
     for field in schema.fields() {
-        if matches!(field.data_type, DataType::Struct(_)) {
-            for i in &field.sub_fields() {
-                if matches!(i.data_type, DataType::Struct(_)) {
+        if let DataType::Struct(st) = &field.data_type {
+            for (name, data_type) in st.iter() {
+                if matches!(data_type, DataType::Struct(_)) {
                     return Err(SinkError::ClickHouse(
                         "Only one level of nesting is supported for struct".to_owned(),
                     ));
                 } else {
                     vec.push((
-                        format!("{}.{}", field.name, i.name),
-                        DataType::List(Box::new(i.data_type())),
+                        format!("{}.{}", field.name, name),
+                        DataType::List(Box::new(data_type.clone())),
                     ))
                 }
             }

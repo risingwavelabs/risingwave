@@ -17,13 +17,11 @@ use std::ops::DerefMut;
 use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
-use bytes::Bytes;
 use parking_lot::{Mutex, MutexGuard};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::util::epoch::EpochPair;
 use risingwave_connector::sink::log_store::{ChunkId, LogStoreResult, TruncateOffset};
-use tokio::sync::{Notify, oneshot};
+use tokio::sync::Notify;
 
 use crate::common::log_store_impl::kv_log_store::{
     KvLogStoreMetrics, ReaderTruncationOffsetType, SeqIdType,
@@ -50,8 +48,6 @@ pub(crate) enum LogStoreBufferItem {
         is_checkpoint: bool,
         next_epoch: u64,
     },
-
-    UpdateVnodes(Arc<Bitmap>),
 }
 
 struct LogStoreBufferInner {
@@ -88,7 +84,6 @@ impl LogStoreBufferInner {
                 LogStoreBufferItem::Barrier { .. } => {
                     epoch_count += 1;
                 }
-                LogStoreBufferItem::UpdateVnodes(_) => {}
             }
         }
         self.metrics.buffer_unconsumed_epoch_count.set(epoch_count);
@@ -217,6 +212,14 @@ impl LogStoreBufferInner {
         }
         self.update_unconsumed_buffer_metrics();
     }
+
+    fn clear(&mut self) {
+        self.consumed_queue.clear();
+        self.unconsumed_queue.clear();
+        self.next_chunk_id = 0;
+        self.truncation_list.clear();
+        self.row_count = 0;
+    }
 }
 
 struct SharedMutex<T>(Arc<Mutex<T>>);
@@ -243,27 +246,11 @@ impl<T> SharedMutex<T> {
 }
 
 pub(crate) struct LogStoreBufferSender {
-    init_epoch_tx: Option<oneshot::Sender<(EpochPair, Option<Option<Bytes>>)>>,
     buffer: SharedMutex<LogStoreBufferInner>,
     update_notify: Arc<Notify>,
 }
 
 impl LogStoreBufferSender {
-    pub(crate) fn init(
-        &mut self,
-        epoch: EpochPair,
-        aligned_init_range_start: Option<Option<Bytes>>,
-    ) {
-        if let Err(e) = self
-            .init_epoch_tx
-            .take()
-            .expect("should be Some in first init")
-            .send((epoch, aligned_init_range_start))
-        {
-            error!("unable to send init epoch: {:?}", e);
-        }
-    }
-
     pub(crate) fn add_flushed(
         &self,
         epoch: u64,
@@ -303,13 +290,6 @@ impl LogStoreBufferSender {
                 next_epoch,
             },
         );
-        self.update_notify.notify_waiters();
-    }
-
-    pub(crate) fn update_vnode(&self, epoch: u64, vnode: Arc<Bitmap>) {
-        self.buffer
-            .inner()
-            .add_item(epoch, LogStoreBufferItem::UpdateVnodes(vnode));
         self.update_notify.notify_waiters();
     }
 
@@ -354,23 +334,18 @@ impl LogStoreBufferSender {
         }
         Ok(())
     }
+
+    pub(crate) fn clear(&mut self) {
+        self.buffer.inner().clear();
+    }
 }
 
 pub(crate) struct LogStoreBufferReceiver {
-    init_epoch_rx: Option<oneshot::Receiver<(EpochPair, Option<Option<Bytes>>)>>,
     buffer: SharedMutex<LogStoreBufferInner>,
     update_notify: Arc<Notify>,
 }
 
 impl LogStoreBufferReceiver {
-    pub(crate) async fn init(&mut self) -> (EpochPair, Option<Option<Bytes>>) {
-        self.init_epoch_rx
-            .take()
-            .expect("should be Some in first init")
-            .await
-            .expect("should get the first epoch")
-    }
-
     pub(crate) async fn next_item(&self) -> (u64, LogStoreBufferItem) {
         let notified = self.update_notify.notified();
         if let Some(item) = {
@@ -442,9 +417,6 @@ impl LogStoreBufferReceiver {
                         break;
                     }
                 }
-                LogStoreBufferItem::UpdateVnodes(_) => {
-                    inner.consumed_queue.pop_back();
-                }
             }
         }
         if let Some(offset) = latest_offset {
@@ -476,15 +448,12 @@ pub(crate) fn new_log_store_buffer(
         metrics,
     });
     let update_notify = Arc::new(Notify::new());
-    let (init_epoch_tx, init_epoch_rx) = oneshot::channel();
     let tx = LogStoreBufferSender {
-        init_epoch_tx: Some(init_epoch_tx),
         buffer: buffer.clone(),
         update_notify: update_notify.clone(),
     };
 
     let rx = LogStoreBufferReceiver {
-        init_epoch_rx: Some(init_epoch_rx),
         buffer,
         update_notify,
     };
