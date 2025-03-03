@@ -41,8 +41,9 @@ use risingwave_pb::stream_plan::update_mutation::{DispatcherUpdate, MergeUpdate}
 use risingwave_pb::stream_plan::{
     BarrierMutation, CombinedMutation, Dispatchers, DropSubscriptionsMutation, PauseMutation,
     PbAddMutation, PbBarrier, PbBarrierMutation, PbDispatcher, PbStreamMessageBatch,
-    PbUpdateMutation, PbWatermark, ResumeMutation, SourceChangeSplitMutation, StopMutation,
-    SubscriptionUpstreamInfo, ThrottleMutation,
+    PbUpdateMutation, PbWatermark, ResumeMutation, SourceChangeSplitMutation,
+    StartProfilingMutation, StopMutation, StopProfilingMutation, SubscriptionUpstreamInfo,
+    ThrottleMutation,
 };
 use smallvec::SmallVec;
 
@@ -311,6 +312,8 @@ pub enum Mutation {
         /// `subscriber` -> `upstream_mv_table_id`
         subscriptions_to_drop: Vec<(u32, TableId)>,
     },
+    StartProfiling(Vec<u32>),
+    StopProfiling(Vec<u32>),
 }
 
 /// The generic type `M` is the mutation type of the barrier.
@@ -511,6 +514,8 @@ impl Barrier {
             | Mutation::Resume
             | Mutation::SourceChangeSplit(_)
             | Mutation::Throttle(_)
+            | Mutation::StartProfiling(_)
+            | Mutation::StopProfiling(_)
             | Mutation::DropSubscriptions { .. } => false,
         }
     }
@@ -736,6 +741,16 @@ impl Mutation {
                     )
                     .collect(),
             }),
+            Mutation::StartProfiling(fragment_ids) => {
+                PbMutation::StartProfiling(StartProfilingMutation {
+                    fragment_ids: fragment_ids.clone(),
+                })
+            }
+            Mutation::StopProfiling(fragment_ids) => {
+                PbMutation::StopProfiling(StopProfilingMutation {
+                    fragment_ids: fragment_ids.clone(),
+                })
+            }
         }
     }
 
@@ -852,6 +867,12 @@ impl Mutation {
                     .map(|info| (info.subscriber_id, TableId::new(info.upstream_mv_table_id)))
                     .collect(),
             },
+            PbMutation::StartProfiling(start_profiling) => {
+                Mutation::StartProfiling(start_profiling.fragment_ids.clone())
+            }
+            PbMutation::StopProfiling(stop_profiling) => {
+                Mutation::StopProfiling(stop_profiling.fragment_ids.clone())
+            }
             PbMutation::Combined(CombinedMutation { mutations }) => match &mutations[..] {
                 [
                     BarrierMutation {

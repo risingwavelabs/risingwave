@@ -1117,6 +1117,14 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     async fn get_meta_store_endpoint(&self) -> RpcResult<String> {
         unimplemented!()
     }
+
+    async fn start_profiling(
+        &self,
+        _database_id: DatabaseId,
+        _fragment_ids: Vec<u32>,
+    ) -> RpcResult<()> {
+        unimplemented!()
+    }
 }
 
 #[cfg(test)]
