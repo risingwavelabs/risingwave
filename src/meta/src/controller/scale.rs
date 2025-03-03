@@ -21,12 +21,10 @@ use risingwave_connector::source::{SplitImpl, SplitMetaData};
 use risingwave_meta_model::actor::ActorStatus;
 use risingwave_meta_model::actor_dispatcher::DispatcherType;
 use risingwave_meta_model::fragment::DistributionType;
-use risingwave_meta_model::prelude::{
-    Actor, Fragment, FragmentRelation, Sink, Source, StreamingJob, Table,
-};
+use risingwave_meta_model::prelude::{Actor, Fragment, FragmentRelation, StreamingJob};
 use risingwave_meta_model::{
-    ConnectorSplits, FragmentId, ObjectId, VnodeBitmap, actor, fragment, fragment_relation, sink,
-    source, streaming_job, table,
+    ConnectorSplits, FragmentId, ObjectId, VnodeBitmap, actor, fragment, fragment_relation,
+    streaming_job,
 };
 use risingwave_meta_model_migration::{
     Alias, CommonTableExpression, Expr, IntoColumnRef, QueryStatementBuilder, SelectStatement,
@@ -39,6 +37,7 @@ use sea_orm::{
 };
 
 use crate::controller::catalog::CatalogController;
+use crate::controller::utils;
 use crate::controller::utils::{get_existing_job_resource_group, get_fragment_actor_dispatchers};
 use crate::model::ActorId;
 use crate::{MetaError, MetaResult};
@@ -211,67 +210,6 @@ where
     Ok(result)
 }
 
-pub(crate) async fn resolve_streaming_job_definition<C>(
-    txn: &C,
-    job_ids: &HashSet<ObjectId>,
-) -> MetaResult<HashMap<ObjectId, String>>
-where
-    C: ConnectionTrait,
-{
-    let job_ids = job_ids.iter().cloned().collect_vec();
-
-    // including table, materialized view, index
-    let common_job_definitions: Vec<(ObjectId, String)> = Table::find()
-        .select_only()
-        .columns([
-            table::Column::TableId,
-            #[cfg(not(debug_assertions))]
-            table::Column::Name,
-            #[cfg(debug_assertions)]
-            table::Column::Definition,
-        ])
-        .filter(table::Column::TableId.is_in(job_ids.clone()))
-        .into_tuple()
-        .all(txn)
-        .await?;
-
-    let sink_definitions: Vec<(ObjectId, String)> = Sink::find()
-        .select_only()
-        .columns([
-            sink::Column::SinkId,
-            #[cfg(not(debug_assertions))]
-            sink::Column::Name,
-            #[cfg(debug_assertions)]
-            sink::Column::Definition,
-        ])
-        .filter(sink::Column::SinkId.is_in(job_ids.clone()))
-        .into_tuple()
-        .all(txn)
-        .await?;
-
-    let source_definitions: Vec<(ObjectId, String)> = Source::find()
-        .select_only()
-        .columns([
-            source::Column::SourceId,
-            #[cfg(not(debug_assertions))]
-            source::Column::Name,
-            #[cfg(debug_assertions)]
-            source::Column::Definition,
-        ])
-        .filter(source::Column::SourceId.is_in(job_ids.clone()))
-        .into_tuple()
-        .all(txn)
-        .await?;
-
-    let definitions: HashMap<ObjectId, String> = common_job_definitions
-        .into_iter()
-        .chain(sink_definitions.into_iter())
-        .chain(source_definitions.into_iter())
-        .collect();
-
-    Ok(definitions)
-}
-
 impl CatalogController {
     pub async fn resolve_working_set_for_reschedule_fragments(
         &self,
@@ -424,7 +362,7 @@ impl CatalogController {
         }
 
         let related_job_definitions =
-            resolve_streaming_job_definition(txn, &related_job_ids).await?;
+            utils::resolve_streaming_job_definitions(txn, &related_job_ids).await?;
 
         let related_jobs = StreamingJob::find()
             .filter(streaming_job::Column::JobId.is_in(related_job_ids))

@@ -90,6 +90,7 @@ impl CatalogController {
             parallelism: Set(streaming_parallelism),
             max_parallelism: Set(max_parallelism as _),
             specific_resource_group: Set(specific_resource_group),
+            expr_context: Set((&ctx.to_expr_context()).into()),
         };
         job.insert(txn).await?;
 
@@ -1744,6 +1745,15 @@ impl CatalogController {
                     _,
                 ),
                 worker_id,
+                // =======
+                //                 PbStreamActor {
+                //                     actor_id,
+                //                     fragment_id,
+                //                     vnode_bitmap,
+                //                     ..
+                //                 },
+                //                 actor_status,
+                // >>>>>>> 17175a023f (Migrate `ExprContext` to `StreamingJob`, streamline job info retrieval, and update tests/utilities.)
             ) in newly_created_actors
             {
                 let splits = actor_splits
@@ -1760,7 +1770,6 @@ impl CatalogController {
                     vnode_bitmap: Set(vnode_bitmap
                         .as_ref()
                         .map(|bitmap| (&bitmap.to_protobuf()).into())),
-                    expr_context: Set(expr_context.as_ref().unwrap().into()),
                 })
                 .exec(&txn)
                 .await?;

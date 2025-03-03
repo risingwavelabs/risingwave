@@ -15,7 +15,7 @@
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::{CreateType, JobStatus, StreamingParallelism};
+use crate::{CreateType, ExprContext, JobStatus, StreamingParallelism};
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
 #[sea_orm(table_name = "streaming_job")]
@@ -28,6 +28,7 @@ pub struct Model {
     pub parallelism: StreamingParallelism,
     pub max_parallelism: i32,
     pub specific_resource_group: Option<String>,
+    pub expr_context: ExprContext,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
