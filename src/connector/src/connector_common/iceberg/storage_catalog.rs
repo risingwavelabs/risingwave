@@ -18,7 +18,8 @@ use std::collections::HashMap;
 
 use async_trait::async_trait;
 use iceberg::io::{
-    FileIO, GCS_CREDENTIALS_JSON, S3_ACCESS_KEY_ID, S3_ENDPOINT, S3_REGION, S3_SECRET_ACCESS_KEY,
+    FileIO, GCS_CREDENTIALS_JSON, GCS_DISABLE_CONFIG_LOAD, S3_ACCESS_KEY_ID,
+    S3_DISABLE_CONFIG_LOAD, S3_ENDPOINT, S3_REGION, S3_SECRET_ACCESS_KEY,
 };
 use iceberg::spec::{TableMetadata, TableMetadataBuilder};
 use iceberg::table::Table;
@@ -38,16 +39,18 @@ pub enum StorageCatalogConfig {
 #[derive(Clone, Debug, TypedBuilder)]
 pub struct StorageCatalogS3Config {
     warehouse: String,
-    access_key: String,
-    secret_key: String,
+    access_key: Option<String>,
+    secret_key: Option<String>,
     endpoint: Option<String>,
     region: Option<String>,
+    enable_config_load: Option<bool>,
 }
 
 #[derive(Clone, Debug, TypedBuilder)]
 pub struct StorageCatalogGcsConfig {
     warehouse: String,
-    credential: String,
+    credential: Option<String>,
+    enable_config_load: Option<bool>,
 }
 
 /// File system catalog.
@@ -61,9 +64,17 @@ impl StorageCatalog {
     pub fn new(config: StorageCatalogConfig) -> Result<Self> {
         let (warehouse, file_io) = match config {
             StorageCatalogConfig::S3(config) => {
-                let mut file_io_builder = FileIO::from_path(&config.warehouse)?
-                    .with_prop(S3_ACCESS_KEY_ID, &config.access_key)
-                    .with_prop(S3_SECRET_ACCESS_KEY, &config.secret_key);
+                let mut file_io_builder = FileIO::from_path(&config.warehouse)?;
+                file_io_builder = if let Some(access_key) = &config.access_key {
+                    file_io_builder.with_prop(S3_ACCESS_KEY_ID, access_key)
+                } else {
+                    file_io_builder
+                };
+                file_io_builder = if let Some(secret_key) = &config.secret_key {
+                    file_io_builder.with_prop(S3_SECRET_ACCESS_KEY, secret_key)
+                } else {
+                    file_io_builder
+                };
                 file_io_builder = if let Some(endpoint) = &config.endpoint {
                     file_io_builder.with_prop(S3_ENDPOINT, endpoint)
                 } else {
@@ -74,11 +85,27 @@ impl StorageCatalog {
                 } else {
                     file_io_builder
                 };
+                file_io_builder = if let Some(enable_config_load) = config.enable_config_load {
+                    file_io_builder
+                        .with_prop(S3_DISABLE_CONFIG_LOAD, (!enable_config_load).to_string())
+                } else {
+                    file_io_builder.with_prop(S3_DISABLE_CONFIG_LOAD, true.to_string())
+                };
                 (config.warehouse.clone(), file_io_builder.build()?)
             }
             StorageCatalogConfig::Gcs(config) => {
-                let file_io_builder = FileIO::from_path(&config.warehouse)?
-                    .with_prop(GCS_CREDENTIALS_JSON, &config.credential);
+                let mut file_io_builder = FileIO::from_path(&config.warehouse)?;
+                file_io_builder = if let Some(credential) = &config.credential {
+                    file_io_builder.with_prop(GCS_CREDENTIALS_JSON, credential)
+                } else {
+                    file_io_builder
+                };
+                file_io_builder = if let Some(enable_config_load) = config.enable_config_load {
+                    file_io_builder
+                        .with_prop(GCS_DISABLE_CONFIG_LOAD, (!enable_config_load).to_string())
+                } else {
+                    file_io_builder.with_prop(S3_DISABLE_CONFIG_LOAD, true.to_string())
+                };
                 (config.warehouse.clone(), file_io_builder.build()?)
             }
         };
