@@ -71,6 +71,8 @@ use serde_json::from_value;
 use serde_with::{DisplayFromStr, serde_as};
 use thiserror_ext::AsReport;
 use tokio::sync::{mpsc, oneshot};
+use tokio_retry::Retry;
+use tokio_retry::strategy::{ExponentialBackoff, jitter};
 use tracing::warn;
 use url::Url;
 use uuid::Uuid;
@@ -90,6 +92,10 @@ use crate::sink::{Result, SinkCommitCoordinator, SinkParam};
 use crate::{deserialize_bool_from_string, deserialize_optional_string_seq_from_string};
 
 pub const ICEBERG_SINK: &str = "iceberg";
+
+fn default_commit_retry_num() -> u32 {
+    8
+}
 
 #[serde_as]
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, WithOptions)]
@@ -123,6 +129,9 @@ pub struct IcebergConfig {
 
     #[serde(default, deserialize_with = "deserialize_bool_from_string")]
     pub create_table_if_not_exists: bool,
+
+    #[serde(default = "default_commit_retry_num")]
+    pub commit_retry_num: u32,
 }
 
 impl IcebergConfig {
@@ -504,6 +513,7 @@ impl Sink for IcebergSink {
             table,
             commit_notifier: None,
             _compact_task_guard: None,
+            commit_retry_num: self.config.commit_retry_num,
         })
     }
 }
@@ -1264,7 +1274,39 @@ pub struct IcebergSinkCommitter {
     catalog: Arc<dyn Catalog>,
     table: Table,
     commit_notifier: Option<mpsc::UnboundedSender<()>>,
+    commit_retry_num: u32,
     _compact_task_guard: Option<oneshot::Sender<()>>,
+}
+
+impl IcebergSinkCommitter {
+    // Reload table and guarantee current schema_id and partition_spec_id matches
+    // given `schema_id` and `partition_spec_id`
+    async fn reload_table(
+        catalog: &dyn Catalog,
+        table_ident: &TableIdent,
+        schema_id: i32,
+        partition_spec_id: i32,
+    ) -> Result<Table> {
+        let table = catalog
+            .load_table(table_ident)
+            .await
+            .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
+        if table.metadata().current_schema_id() != schema_id {
+            return Err(SinkError::Iceberg(anyhow!(
+                "Schema evolution not supported, expect schema id {}, but got {}",
+                schema_id,
+                table.metadata().current_schema_id()
+            )));
+        }
+        if table.metadata().default_partition_spec_id() != partition_spec_id {
+            return Err(SinkError::Iceberg(anyhow!(
+                "Partition evolution not supported, expect partition spec id {}, but got {}",
+                partition_spec_id,
+                table.metadata().default_partition_spec_id()
+            )));
+        }
+        Ok(table)
+    }
 }
 
 #[async_trait::async_trait]
@@ -1299,31 +1341,31 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
             )));
         }
 
+        let expect_schema_id = write_results[0].schema_id;
+        let expect_partition_spec_id = write_results[0].partition_spec_id;
+
         // Load the latest table to avoid concurrent modification with the best effort.
-        self.table = self
-            .catalog
-            .clone()
-            .load_table(self.table.identifier())
-            .await
-            .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
-        let Some(schema) = self
-            .table
-            .metadata()
-            .schema_by_id(write_results[0].schema_id)
-        else {
+        self.table = Self::reload_table(
+            self.catalog.as_ref(),
+            &self.table.identifier(),
+            expect_schema_id,
+            expect_partition_spec_id,
+        )
+        .await?;
+        let Some(schema) = self.table.metadata().schema_by_id(expect_schema_id) else {
             return Err(SinkError::Iceberg(anyhow!(
                 "Can't find schema by id {}",
-                write_results[0].schema_id
+                expect_schema_id
             )));
         };
         let Some(partition_spec) = self
             .table
             .metadata()
-            .partition_spec_by_id(write_results[0].partition_spec_id)
+            .partition_spec_by_id(expect_partition_spec_id)
         else {
             return Err(SinkError::Iceberg(anyhow!(
                 "Can't find partition spec by id {}",
-                write_results[0].partition_spec_id
+                expect_partition_spec_id
             )));
         };
         let partition_type = partition_spec
@@ -1342,21 +1384,36 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
             })
             .collect::<Result<Vec<DataFile>>>()?;
 
-        let txn = Transaction::new(&self.table);
-        let mut append_action = txn
-            .fast_append(None, vec![])
-            .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
-        append_action
-            .add_data_files(data_files)
-            .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
-        let tx = append_action.apply().await.map_err(|err| {
-            tracing::error!(error = %err.as_report(), "Failed to commit iceberg table");
-            SinkError::Iceberg(anyhow!(err))
-        })?;
-        let table = tx
-            .commit_dyn(self.catalog.as_ref())
-            .await
-            .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
+        let retry_strategy = ExponentialBackoff::from_millis(100)
+            .map(jitter)
+            .take(self.commit_retry_num as usize);
+        let catalog = self.catalog.clone();
+        let table_ident = self.table.identifier().clone();
+        let table = Retry::spawn(retry_strategy, || async {
+            let table = Self::reload_table(
+                catalog.as_ref(),
+                &table_ident,
+                expect_schema_id,
+                expect_partition_spec_id,
+            )
+            .await?;
+            let txn = Transaction::new(&table);
+            let mut append_action = txn
+                .fast_append(None, vec![])
+                .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
+            append_action
+                .add_data_files(data_files.clone())
+                .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
+            let tx = append_action.apply().await.map_err(|err| {
+                tracing::error!(error = %err.as_report(), "Failed to apply iceberg table");
+                SinkError::Iceberg(anyhow!(err))
+            })?;
+            tx.commit_dyn(self.catalog.as_ref()).await.map_err(|err| {
+                tracing::error!(error = %err.as_report(), "Failed to commit iceberg table");
+                SinkError::Iceberg(anyhow!(err))
+            })
+        })
+        .await?;
         self.table = table;
 
         if let Some(commit_notifier) = &mut self.commit_notifier {
@@ -1364,7 +1421,6 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
                 warn!("failed to notify commit");
             }
         }
-
         tracing::info!("Succeeded to commit to iceberg table in epoch {epoch}.");
         Ok(())
     }
@@ -1734,6 +1790,7 @@ mod test {
                 .collect(),
             commit_checkpoint_interval: DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE,
             create_table_if_not_exists: false,
+            commit_retry_num: 8,
         };
 
         assert_eq!(iceberg_config, expected_iceberg_config);
