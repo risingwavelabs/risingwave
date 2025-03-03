@@ -513,9 +513,6 @@ impl ScaleController {
                 Vec<CustomActorInfo>,
             > = HashMap::new();
 
-            // todo
-            //let mut expr_contexts = HashMap::new();
-
             for (
                 _,
                 actor::Model {
@@ -587,11 +584,7 @@ impl ScaleController {
                         dispatcher,
                         vnode_bitmap: vnode_bitmap.map(|b| b.to_protobuf()),
                         mview_definition: job_definition.to_owned(),
-                        expr_context: None,// todo
-                        // expr_context: expr_contexts
-                        //     .get(&actor_id)
-                        //     .cloned()
-                        //     .map(|expr_context| expr_context.to_protobuf()),
+                        expr_context: Some(related_job.expr_context.to_protobuf())
                     },
                     actors,
                 };

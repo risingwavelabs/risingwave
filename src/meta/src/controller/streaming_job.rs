@@ -1654,7 +1654,6 @@ impl CatalogController {
                     actor_id,
                     fragment_id,
                     vnode_bitmap,
-                    expr_context,
                     ..
                 },
                 actor_status,
