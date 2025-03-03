@@ -30,9 +30,9 @@ RUN rustup install stable \
   && rustup self update \
   && rustup set profile minimal \
   && rustup show \
-  && rustup default `rustup show active-toolchain | awk '{print $1}'` \
   && rustup component add rustfmt \
   && rustup target add wasm32-wasip1
+
 
 RUN cargo install flamegraph
 RUN cargo install addr2line --features bin --bin addr2line
