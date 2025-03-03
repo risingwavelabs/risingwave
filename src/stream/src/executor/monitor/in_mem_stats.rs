@@ -21,7 +21,7 @@ use parking_lot::RwLock;
 pub type Count = Arc<AtomicU32>;
 
 #[derive(Clone)]
-pub struct CountMap(Arc<RwLock<HashMap<u32, Count>>>);
+pub struct CountMap(Arc<RwLock<HashMap<u64, Count>>>);
 
 impl CountMap {
     pub(crate) fn new() -> Self {
@@ -40,7 +40,7 @@ impl CountMap {
         CountMap(inner)
     }
 
-    pub(crate) fn new_or_get_counter(&self, id: u32) -> Count {
+    pub(crate) fn new_or_get_counter(&self, id: u64) -> Count {
         {
             let map = self.0.read();
             if let Some(counter) = map.get(&id) {
@@ -55,7 +55,7 @@ impl CountMap {
         counter
     }
 
-    pub fn collect(&self) -> HashMap<u32, u32> {
+    pub fn collect(&self) -> HashMap<u64, u32> {
         let map = self.0.read();
         map.iter()
             .map(|(&k, v)| (k, v.load(std::sync::atomic::Ordering::Relaxed)))
@@ -63,7 +63,7 @@ impl CountMap {
     }
 
     /// GC at 50% drop rate
-    pub fn should_gc(map: &HashMap<u32, Count>) -> bool {
+    pub fn should_gc(map: &HashMap<u64, Count>) -> bool {
         let total = map.len();
         let dropped = map
             .iter()
@@ -75,7 +75,7 @@ impl CountMap {
         false
     }
 
-    pub fn gc(map: &mut HashMap<u32, Count>) {
+    pub fn gc(map: &mut HashMap<u64, Count>) {
         map.retain(|_, v| Arc::strong_count(v) > 1);
     }
 }
