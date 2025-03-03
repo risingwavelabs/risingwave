@@ -1,5 +1,7 @@
 use sea_orm_migration::prelude::*;
 
+use crate::utils::ColumnDefExt;
+
 #[derive(DeriveMigrationName)]
 pub struct Migration;
 #[async_trait::async_trait]
@@ -27,7 +29,7 @@ impl MigrationTrait for Migration {
                     )
                     .col(
                         ColumnDef::new(ExactlyOnceIcebergSinkMetadata::Metadata)
-                            .blob()
+                            .rw_binary(manager)
                             .not_null(),
                     )
                     .to_owned(),

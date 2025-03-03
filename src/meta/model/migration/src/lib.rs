@@ -31,9 +31,9 @@ mod m20241120_182555_hummock_add_time_travel_sst_index;
 mod m20241121_101830_table_engine;
 mod m20241125_043732_connection_params;
 mod m20241202_071413_resource_group;
-mod m20241203_065636_exactly_once_iceberg_sink_metadata;
 mod m20241226_074013_clean_watermark_index_in_pk;
 mod m20250106_072104_fragment_relation;
+mod m20250303_081439_exactly_once_iceberg_sink_metadata;
 mod utils;
 
 pub struct Migrator;
@@ -101,12 +101,11 @@ impl MigratorTrait for Migrator {
             Box::new(m20241115_085007_remove_function_type::Migration),
             Box::new(m20241120_182555_hummock_add_time_travel_sst_index::Migration),
             Box::new(m20241121_101830_table_engine::Migration),
-            Box::new(m20241203_065636_exactly_once_iceberg_sink_metadata::Migration),
             Box::new(m20241125_043732_connection_params::Migration),
-            Box::new(m20241121_101830_table_engine::Migration),
             Box::new(m20241202_071413_resource_group::Migration),
             Box::new(m20241226_074013_clean_watermark_index_in_pk::Migration),
             Box::new(m20250106_072104_fragment_relation::Migration),
+            Box::new(m20250303_081439_exactly_once_iceberg_sink_metadata::Migration),
         ]
     }
 }

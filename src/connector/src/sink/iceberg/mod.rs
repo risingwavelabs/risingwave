@@ -1249,7 +1249,7 @@ impl IcebergCommitResult {
 
     fn try_from_sealized_bytes(value: &Vec<u8>) -> Result<Self> {
         let mut values = if let serde_json::Value::Object(value) =
-            serde_json::from_slice::<serde_json::Value>(&value)
+            serde_json::from_slice::<serde_json::Value>(value)
                 .context("Can't parse iceberg sink metadata")?
         {
             value
@@ -1677,7 +1677,7 @@ impl IcebergSinkCommitter {
                     .entries()
                     .iter()
                     .filter(|e| e.is_alive())
-                    .map(|e| e.data_file().file_path().to_string())
+                    .map(|e| e.data_file().file_path().to_owned())
                     .collect::<Vec<_>>();
 
                 files_in_snapshot.extend(manifest_entries);
@@ -1699,7 +1699,7 @@ impl IcebergSinkCommitter {
                     .entries()
                     .iter()
                     .filter(|e| e.is_alive())
-                    .map(|e| e.data_file().file_path().to_string())
+                    .map(|e| e.data_file().file_path().to_owned())
                     .collect::<Vec<_>>();
 
                 files_in_snapshot.extend(manifest_entries);
@@ -1737,7 +1737,7 @@ impl IcebergSinkCommitter {
                         .map_err(|err| SinkError::Iceberg(anyhow!(err)))
                         .unwrap()
                         .file_path()
-                        .to_string()
+                        .to_owned()
                 })
             });
 
