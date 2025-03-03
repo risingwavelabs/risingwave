@@ -668,7 +668,7 @@ description = "Start RiseCtl"
 dependencies = ["check-and-load-risedev-env-file"]
 script = '''
 #!/usr/bin/env bash
-cargo run -p risingwave_cmd_all --profile "${RISINGWAVE_b_PROFILE}" -- ctl "$@"
+cargo run -p risingwave_cmd_all --profile "${RISINGWAVE_BUILD_PROFILE}" -- ctl "$@"
 test $? -eq 0 || exit 1
 '''
 

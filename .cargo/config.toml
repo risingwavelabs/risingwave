@@ -4,10 +4,6 @@
 # For other targets, we need to enable the feature manually.
 # See `rustc --print=cfg --target=<triple>` for details.
 
-[net]
-git-fetch-with-cli = true
-
-
 [target.x86_64-unknown-linux-gnu]
 rustflags = ["-Ctarget-feature=+avx2"]
 
