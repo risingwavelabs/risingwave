@@ -97,13 +97,14 @@ impl DebeziumMongoJsonParser {
         payload: Option<Vec<u8>>,
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> ConnectorResult<()> {
+        let meta = writer.source_meta();
         let key_accessor = match key {
             None => None,
-            Some(data) => Some(self.key_builder.generate_accessor(data).await?),
+            Some(data) => Some(self.key_builder.generate_accessor(data, meta).await?),
         };
         let payload_accessor = match payload {
             None => None,
-            Some(data) => Some(self.payload_builder.generate_accessor(data).await?),
+            Some(data) => Some(self.payload_builder.generate_accessor(data, meta).await?),
         };
 
         let row_op = DebeziumChangeEvent::new_mongodb_event(key_accessor, payload_accessor);
