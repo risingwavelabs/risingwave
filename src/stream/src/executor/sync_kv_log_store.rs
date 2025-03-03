@@ -61,7 +61,6 @@
 
 use std::collections::VecDeque;
 use std::future::pending;
-use std::mem;
 use std::mem::replace;
 use std::pin::Pin;
 
@@ -81,6 +80,7 @@ use risingwave_storage::store::{
 };
 use rw_futures_util::drop_either_future;
 use tokio::time::{Duration, Sleep, sleep};
+use tokio_stream::adapters::Peekable;
 
 use crate::common::log_store_impl::kv_log_store::buffer::LogStoreBufferItem;
 use crate::common::log_store_impl::kv_log_store::reader::LogStoreReadStateStreamRangeStart;
@@ -312,7 +312,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                 flushed_count: 0,
             };
 
-            let mut log_store_stream = read_state
+            let log_store_stream = read_state
                 .read_persisted_log_store(
                     &self.metrics,
                     initial_write_epoch.prev,
@@ -320,27 +320,14 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                 )
                 .await?;
 
-            let mut read_future_state = if let Some((_, item)) = log_store_stream.try_next().await?
-            {
-                match item {
-                    KvLogStoreItem::Barrier { .. } => {
-                        continue;
-                    }
-                    KvLogStoreItem::StreamChunk(chunk) => {
-                        ReadFuture::ReadingInitialPersistedStream {
-                            chunk,
-                            stream: Some(log_store_stream),
-                        }
-                    }
-                }
-            } else {
-                ReadFuture::Idle
-            };
+            let mut log_store_stream = tokio_stream::StreamExt::peekable(log_store_stream);
+            let mut clean_state = log_store_stream.peek().await.is_none();
+
+            let mut read_future_state = ReadFuture::ReadingPersistedStream(log_store_stream);
 
             let mut write_future_state =
                 WriteFuture::receive_from_upstream(input, initial_write_state);
 
-            let mut clean_state = matches!(read_future_state, ReadFuture::Idle);
             loop {
                 let select_result = {
                     let read_future = async {
@@ -508,11 +495,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
 }
 
 enum ReadFuture<S: StateStoreRead> {
-    ReadingInitialPersistedStream {
-        chunk: StreamChunk,
-        stream: Option<Pin<Box<LogStoreItemMergeStream<TimeoutAutoRebuildIter<S>>>>>,
-    },
-    ReadingPersistedStream(Pin<Box<LogStoreItemMergeStream<TimeoutAutoRebuildIter<S>>>>),
+    ReadingPersistedStream(Peekable<Pin<Box<LogStoreItemMergeStream<TimeoutAutoRebuildIter<S>>>>>),
     ReadingFlushedChunk {
         future: ReadFlushedChunkFuture,
         truncate_offset: ReaderTruncationOffsetType,
@@ -530,15 +513,6 @@ impl<S: StateStoreRead> ReadFuture<S> {
         metrics: &KvLogStoreMetrics,
     ) -> StreamExecutorResult<(StreamChunk, Option<ReaderTruncationOffsetType>)> {
         match self {
-            ReadFuture::ReadingInitialPersistedStream { chunk, stream } => {
-                let mut current_chunk = StreamChunk::new([], vec![]);
-                mem::swap(chunk, &mut current_chunk);
-
-                let current_stream = mem::take(stream).expect("stream must be present");
-                *self = ReadFuture::ReadingPersistedStream(current_stream);
-
-                return Ok((current_chunk, None));
-            }
             ReadFuture::ReadingPersistedStream(stream) => {
                 while let Some((_, item)) = stream.try_next().await? {
                     match item {
@@ -556,8 +530,7 @@ impl<S: StateStoreRead> ReadFuture<S> {
             ReadFuture::ReadingFlushedChunk { .. } | ReadFuture::Idle => {}
         }
         match self {
-            ReadFuture::ReadingInitialPersistedStream { .. }
-            | ReadFuture::ReadingPersistedStream(_) => {
+            ReadFuture::ReadingPersistedStream(_) => {
                 unreachable!("must have finished read persisted stream when reaching here")
             }
             ReadFuture::ReadingFlushedChunk { .. } => {}
@@ -603,9 +576,7 @@ impl<S: StateStoreRead> ReadFuture<S> {
         }
 
         let (future, truncate_offset) = match self {
-            ReadFuture::ReadingInitialPersistedStream { .. }
-            | ReadFuture::ReadingPersistedStream(_)
-            | ReadFuture::Idle => {
+            ReadFuture::ReadingPersistedStream(_) | ReadFuture::Idle => {
                 unreachable!("should be at ReadingFlushedChunk")
             }
             ReadFuture::ReadingFlushedChunk {
