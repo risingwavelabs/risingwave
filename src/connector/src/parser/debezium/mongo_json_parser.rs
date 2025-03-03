@@ -510,7 +510,7 @@ mod tests {
             },
             "payload": {
                 "before": null,
-                "after": "{\"_id\": {\"$numberLong\": \"1004\"}, \"name\": \"John Doe\", \"age\": 30, \"birth_date\": {\"$date\": \"1990-01-01T00:00:00Z\"}, \"created_at\": {\"$timestamp\": {\"t\": 1735689600, \"i\": 0}}}",
+                "after": "{\"_id\": {\"$numberLong\": \"1004\"}, \"name\": \"John Doe\", \"age\": {\"$numberInt\": \"30\"}, \"birth_date\": {\"$date\": \"1990-01-01T00:00:00Z\"}, \"created_at\": {\"$timestamp\": {\"t\": 1735689600, \"i\": 0}}}",
                 "source": {
                     "version": "2.1.4.Final",
                     "connector": "mongodb",
