@@ -90,6 +90,18 @@ struct StreamNode {
     dependencies: Vec<u64>,
 }
 
+impl StreamNode {
+    fn new_for_dispatcher(fragment_id: u32) -> Self {
+        StreamNode {
+            operator_id: 0,
+            fragment_id,
+            identity: "Dispatcher".to_owned(),
+            actor_ids: vec![],
+            dependencies: vec![],
+        }
+    }
+}
+
 async fn list_stream_worker_nodes(env: &FrontendEnv) -> Result<Vec<WorkerNode>> {
     let worker_nodes = env.meta_client().list_all_nodes().await?;
     let stream_worker_nodes = worker_nodes
@@ -276,7 +288,10 @@ fn extract_stream_node_infos(
         let node = operator_id_to_stream_node.get_mut(&operator_id).unwrap();
         let fragment_id = node.fragment_id;
         if let Some(merge_operator_id) = fragment_id_to_merge_operator_id.get(&fragment_id) {
-            operator_id_to_stream_node.get_mut(merge_operator_id).unwrap().dependencies.push(operator_id);
+            let mut dispatcher = StreamNode::new_for_dispatcher(fragment_id);
+            dispatcher.dependencies.push(operator_id);
+            assert!(operator_id_to_stream_node.insert(fragment_id as _, dispatcher).is_none());
+            operator_id_to_stream_node.get_mut(merge_operator_id).unwrap().dependencies.push(fragment_id as _);
         } else {
             root_node = Some(operator_id);
         }
