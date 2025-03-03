@@ -693,6 +693,21 @@ impl MetadataManager {
             .collect())
     }
 
+    pub async fn update_sink_config_by_sink_id(
+        &self,
+        sink_id: SinkId,
+        config: HashMap<String, String>,
+    ) -> MetaResult<Vec<ActorId>> {
+        let fragment_actors = self
+            .catalog_controller
+            .update_sink_config_by_sink_id(sink_id, config)
+            .await?;
+        Ok(fragment_actors
+            .into_iter()
+            .flat_map(|(_, actor_id)| actor_id.into_iter().map(|id| id as _))
+            .collect())
+    }
+
     pub async fn update_actor_splits_by_split_assignment(
         &self,
         split_assignment: &SplitAssignment,

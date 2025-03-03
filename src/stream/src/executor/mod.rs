@@ -39,10 +39,11 @@ use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation as PbMutation;
 use risingwave_pb::stream_plan::update_mutation::{DispatcherUpdate, MergeUpdate};
 use risingwave_pb::stream_plan::{
-    BarrierMutation, CombinedMutation, Dispatchers, DropSubscriptionsMutation, PauseMutation,
-    PbAddMutation, PbBarrier, PbBarrierMutation, PbDispatcher, PbStreamMessageBatch,
-    PbUpdateMutation, PbWatermark, ResumeMutation, SourceChangeSplitMutation, StopMutation,
-    SubscriptionUpstreamInfo, ThrottleMutation,
+    AlterSinkConfigMutation, BarrierMutation, CombinedMutation, Dispatchers,
+    DropSubscriptionsMutation, PauseMutation, PbAddMutation, PbBarrier, PbBarrierMutation,
+    PbDispatcher, PbStreamMessageBatch, PbUpdateMutation, PbWatermark, ResumeMutation,
+    SinkConfigInfo, SourceChangeSplitMutation, StopMutation, SubscriptionUpstreamInfo,
+    ThrottleMutation,
 };
 use smallvec::SmallVec;
 
@@ -307,6 +308,7 @@ pub enum Mutation {
     Resume,
     Throttle(HashMap<ActorId, Option<u32>>),
     AddAndUpdate(AddMutation, UpdateMutation),
+    AlterSinkConfig(HashMap<ActorId, HashMap<String, String>>),
     DropSubscriptions {
         /// `subscriber` -> `upstream_mv_table_id`
         subscriptions_to_drop: Vec<(u32, TableId)>,
@@ -511,7 +513,8 @@ impl Barrier {
             | Mutation::Resume
             | Mutation::SourceChangeSplit(_)
             | Mutation::Throttle(_)
-            | Mutation::DropSubscriptions { .. } => false,
+            | Mutation::DropSubscriptions { .. }
+            | Mutation::AlterSinkConfig(_) => false,
         }
     }
 
@@ -742,6 +745,24 @@ impl Mutation {
                     )
                     .collect(),
             }),
+            Mutation::AlterSinkConfig(map) => {
+                PbMutation::AlterSinkConfig(AlterSinkConfigMutation {
+                    sink_actor_config_info: map
+                        .iter()
+                        .map(|(actor_id, options)| {
+                            (
+                                *actor_id,
+                                SinkConfigInfo {
+                                    sink_config_info: options
+                                        .iter()
+                                        .map(|(k, v)| (k.clone(), v.clone()))
+                                        .collect(),
+                                },
+                            )
+                        })
+                        .collect(),
+                })
+            }
         }
     }
 
@@ -858,6 +879,22 @@ impl Mutation {
                     .map(|info| (info.subscriber_id, TableId::new(info.upstream_mv_table_id)))
                     .collect(),
             },
+            PbMutation::AlterSinkConfig(alter_sink_option) => Mutation::AlterSinkConfig(
+                alter_sink_option
+                    .sink_actor_config_info
+                    .iter()
+                    .map(|(actor_id, options)| {
+                        (
+                            *actor_id,
+                            options
+                                .sink_config_info
+                                .iter()
+                                .map(|(k, v)| (k.clone(), v.clone()))
+                                .collect(),
+                        )
+                    })
+                    .collect(),
+            ),
             PbMutation::Combined(CombinedMutation { mutations }) => match &mutations[..] {
                 [
                     BarrierMutation {

@@ -45,7 +45,7 @@ pub mod trivial;
 pub mod utils;
 pub mod writer;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::future::Future;
 use std::sync::LazyLock;
 
@@ -595,6 +595,7 @@ fn is_sink_support_commit_checkpoint_interval(sink_name: &str) -> bool {
 }
 pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
     const SINK_NAME: &'static str;
+    const SINK_ALTER_CONFIG_LIST: &'static [&'static str] = &[];
     type LogSinker: LogSinker;
     type Coordinator: SinkCommitCoordinator;
 
@@ -643,12 +644,27 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
         }
     }
 
+    fn validate_alter_config(config: &HashMap<String, String>) -> Result<()> {
+        for (k, v) in config {
+            if !Self::SINK_ALTER_CONFIG_LIST.contains(&k.as_str()) {
+                return Err(SinkError::Config(anyhow!(
+                    "unsupported alter config: {}={}",
+                    k,
+                    v
+                )));
+            }
+        }
+        Ok(())
+    }
+
     async fn validate(&self) -> Result<()>;
     async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker>;
     #[expect(clippy::unused_async)]
     async fn new_coordinator(&self) -> Result<Self::Coordinator> {
         Err(SinkError::Coordinator(anyhow!("no coordinator")))
     }
+
+    fn update_config(&mut self, _config: BTreeMap<String, String>) -> Result<()>;
 }
 
 pub trait SinkLogReader: Send + Sized + 'static {

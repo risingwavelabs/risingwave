@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeMap;
+
 use anyhow::anyhow;
 use risingwave_common::catalog::Schema;
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
@@ -54,6 +56,11 @@ impl Sink for OpenSearchSink {
     type LogSinker = AsyncTruncateLogSinkerOf<ElasticSearchOpenSearchSinkWriter>;
 
     const SINK_NAME: &'static str = OPENSEARCH_SINK;
+
+    fn update_config(&mut self, config: BTreeMap<String, String>) -> Result<()> {
+        self.config = ElasticSearchOpenSearchConfig::from_btreemap(config)?;
+        Ok(())
+    }
 
     async fn validate(&self) -> Result<()> {
         risingwave_common::license::Feature::OpenSearchSink

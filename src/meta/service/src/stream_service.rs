@@ -461,4 +461,35 @@ impl StreamManagerService for StreamServiceImpl {
             .await?;
         Ok(Response::new(ListRateLimitsResponse { rate_limits }))
     }
+
+    async fn alter_sink_config(
+        &self,
+        request: Request<AlterSinkConfigRequest>,
+    ) -> Result<Response<AlterSinkConfigResponse>, Status> {
+        let request = request.into_inner();
+
+        let actor_to_apply = self
+            .metadata_manager
+            .update_sink_config_by_sink_id(request.sink_id as i32, request.config.clone())
+            .await?;
+
+        let database_id = self
+            .metadata_manager
+            .catalog_controller
+            .get_object_database_id(request.sink_id as ObjectId)
+            .await?;
+        let database_id = DatabaseId::new(database_id as _);
+
+        let mut mutation = HashMap::default();
+        for i in actor_to_apply {
+            mutation.insert(i, request.config.clone());
+        }
+
+        let _i = self
+            .barrier_scheduler
+            .run_command(database_id, Command::AlterSinkConfig(mutation))
+            .await?;
+
+        Ok(Response::new(AlterSinkConfigResponse {}))
+    }
 }

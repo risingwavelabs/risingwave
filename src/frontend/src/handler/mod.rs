@@ -46,6 +46,7 @@ mod alter_rename;
 mod alter_resource_group;
 mod alter_secret;
 mod alter_set_schema;
+mod alter_sink_config;
 mod alter_source_column;
 mod alter_source_with_sr;
 mod alter_streaming_rate_limit;
@@ -1021,6 +1022,10 @@ pub async fn handle(
             )
             .await
         }
+        Statement::AlterSink {
+            name,
+            operation: AlterSinkOperation::SetSinkConfig { config },
+        } => alter_sink_config::handle_alter_sink_config(handler_args, name, config).await,
         Statement::AlterSubscription {
             name,
             operation: AlterSubscriptionOperation::RenameSubscription { subscription_name },

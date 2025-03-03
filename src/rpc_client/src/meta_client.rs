@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::{Debug, Display};
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -1275,6 +1275,19 @@ impl MetaClient {
         Ok(resp.meta_store_endpoint)
     }
 
+    pub async fn alter_sink_config(
+        &self,
+        sink_id: u32,
+        config: BTreeMap<String, String>,
+    ) -> Result<()> {
+        let req = AlterSinkConfigRequest {
+            sink_id,
+            config: config.into_iter().collect(),
+        };
+        let _resp = self.inner.alter_sink_config(req).await?;
+        Ok(())
+    }
+
     pub async fn set_system_param(
         &self,
         param: String,
@@ -2104,6 +2117,7 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, list_object_dependencies, ListObjectDependenciesRequest, ListObjectDependenciesResponse }
             ,{ stream_client, recover, RecoverRequest, RecoverResponse }
             ,{ stream_client, list_rate_limits, ListRateLimitsRequest, ListRateLimitsResponse }
+            ,{ stream_client, alter_sink_config, AlterSinkConfigRequest, AlterSinkConfigResponse }
             ,{ ddl_client, create_table, CreateTableRequest, CreateTableResponse }
             ,{ ddl_client, alter_name, AlterNameRequest, AlterNameResponse }
             ,{ ddl_client, alter_owner, AlterOwnerRequest, AlterOwnerResponse }

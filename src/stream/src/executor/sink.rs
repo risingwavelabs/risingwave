@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::mem;
 
 use anyhow::anyhow;
@@ -246,6 +247,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             };
 
             let (rate_limit_tx, rate_limit_rx) = unbounded_channel();
+            let (update_config_tx, update_config_rx) = unbounded_channel();
             // Init the rate limit
             rate_limit_tx.send(self.rate_limit.into()).unwrap();
 
@@ -257,6 +259,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                         log_writer.monitored(log_writer_metrics),
                         actor_id,
                         rate_limit_tx,
+                        update_config_tx,
                     );
 
                     let consume_log_stream_future = dispatch_sink!(self.sink, sink, {
@@ -268,6 +271,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                             self.sink_writer_param,
                             self.actor_context,
                             rate_limit_rx,
+                            update_config_rx,
                         )
                         .instrument_await(format!("consume_log (sink_id {sink_id})"))
                         .map_ok(|never| match never {}); // unify return type to `Message`
@@ -288,6 +292,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         mut log_writer: impl LogWriter,
         actor_id: ActorId,
         rate_limit_tx: UnboundedSender<RateLimit>,
+        update_config_tx: UnboundedSender<HashMap<String, String>>,
     ) {
         pin_mut!(input);
         let barrier = expect_first_barrier(&mut input).await?;
@@ -342,6 +347,19 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                         error!(
                                             error = %e.as_report(),
                                             "fail to send sink ate limit update"
+                                        );
+                                        return Err(StreamExecutorError::from(
+                                            e.to_report_string(),
+                                        ));
+                                    }
+                                }
+                            }
+                            Mutation::AlterSinkConfig(config) => {
+                                if let Some(map) = config.get(&actor_id) {
+                                    if let Err(e) = update_config_tx.send(map.clone()) {
+                                        error!(
+                                            error = %e.as_report(),
+                                            "fail to send sink alter config"
                                         );
                                         return Err(StreamExecutorError::from(
                                             e.to_report_string(),
@@ -486,14 +504,16 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn execute_consume_log<S: Sink, R: LogReader>(
-        sink: S,
+        mut sink: S,
         log_reader: R,
         columns: Vec<ColumnCatalog>,
-        sink_param: SinkParam,
+        mut sink_param: SinkParam,
         mut sink_writer_param: SinkWriterParam,
         actor_context: ActorContextRef,
         rate_limit_rx: UnboundedReceiver<RateLimit>,
+        mut update_config_rx: UnboundedReceiver<HashMap<String, String>>,
     ) -> StreamExecutorResult<!> {
         let visible_columns = columns
             .iter()
@@ -541,53 +561,87 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
 
         log_reader.init().await?;
 
-        #[expect(irrefutable_let_patterns)] // false positive
-        while let Err(e) = sink
-            .new_log_sinker(sink_writer_param.clone())
-            .and_then(|log_sinker| log_sinker.consume_log_and_sink(&mut log_reader))
-            .await
-        {
-            GLOBAL_ERROR_METRICS.user_sink_error.report([
-                "sink_executor_error".to_owned(),
-                sink_param.sink_id.to_string(),
-                sink_param.sink_name.clone(),
-                actor_context.fragment_id.to_string(),
-            ]);
-
-            if let Some(meta_client) = sink_writer_param.meta_client.as_ref() {
-                meta_client
-                    .add_sink_fail_evet_log(
-                        sink_writer_param.sink_id.sink_id,
-                        sink_writer_param.sink_name.clone(),
-                        sink_writer_param.connector.clone(),
-                        e.to_report_string(),
-                    )
-                    .await;
-            }
-
-            match log_reader.rewind().await {
-                Ok((true, curr_vnode_bitmap)) => {
-                    warn!(
-                        error = %e.as_report(),
-                        executor_id = sink_writer_param.executor_id,
-                        sink_id = sink_param.sink_id.sink_id,
-                        "rewind successfully after sink error"
-                    );
-                    sink_writer_param.vnode_bitmap = curr_vnode_bitmap;
-                    Ok(())
+        loop {
+            let a = tokio::select! {
+                config = update_config_rx.recv() => {
+                    Ok(config)
+                },
+                result = sink
+                    .new_log_sinker(sink_writer_param.clone())
+                    .and_then(|log_sinker| log_sinker.consume_log_and_sink(&mut log_reader)) => {
+                    result.map(|_| None)
                 }
-                Ok((false, _)) => Err(e),
-                Err(rewind_err) => {
-                    error!(
-                        error = %rewind_err.as_report(),
-                        "fail to rewind log reader"
-                    );
-                    Err(e)
+            };
+            match a {
+                Ok(Some(config)) => {
+                    match log_reader.rewind().await {
+                        Ok((true, curr_vnode_bitmap)) => {
+                            sink_writer_param.vnode_bitmap = curr_vnode_bitmap;
+                            sink_param.properties.extend(config);
+                            sink.update_config(sink_param.properties.clone())
+                        }
+                        Ok((false, _)) => {
+                            sink_param.properties.extend(config);
+                            sink.update_config(sink_param.properties.clone())
+                                .map_err(|e| {
+                                    StreamExecutorError::from((e, sink_param.sink_id.sink_id))
+                                })?;
+                            Err(anyhow!("fail to rewind log readerm").into())
+                        }
+                        Err(rewind_err) => {
+                            error!(
+                                error = %rewind_err.as_report(),
+                                "fail to rewind log reader"
+                            );
+                            Err(anyhow!("fail to rewind log readerm").into())
+                        }
+                    }
+                    .map_err(|e| StreamExecutorError::from((e, sink_param.sink_id.sink_id)))?;
                 }
+                Err(e) => {
+                    GLOBAL_ERROR_METRICS.user_sink_error.report([
+                        "sink_executor_error".to_owned(),
+                        sink_param.sink_id.to_string(),
+                        sink_param.sink_name.clone(),
+                        actor_context.fragment_id.to_string(),
+                    ]);
+
+                    if let Some(meta_client) = sink_writer_param.meta_client.as_ref() {
+                        meta_client
+                            .add_sink_fail_evet_log(
+                                sink_writer_param.sink_id.sink_id,
+                                sink_writer_param.sink_name.clone(),
+                                sink_writer_param.connector.clone(),
+                                e.to_report_string(),
+                            )
+                            .await;
+                    }
+
+                    match log_reader.rewind().await {
+                        Ok((true, curr_vnode_bitmap)) => {
+                            warn!(
+                                error = %e.as_report(),
+                                executor_id = sink_writer_param.executor_id,
+                                sink_id = sink_param.sink_id.sink_id,
+                                "rewind successfully after sink error"
+                            );
+                            sink_writer_param.vnode_bitmap = curr_vnode_bitmap;
+                            Ok(())
+                        }
+                        Ok((false, _)) => Err(e),
+                        Err(rewind_err) => {
+                            error!(
+                                error = %rewind_err.as_report(),
+                                "fail to rewind log reader"
+                            );
+                            Err(e)
+                        }
+                    }
+                    .map_err(|e| StreamExecutorError::from((e, sink_param.sink_id.sink_id)))?;
+                }
+                _ => return Err(anyhow!("end of stream").into()),
             }
-            .map_err(|e| StreamExecutorError::from((e, sink_param.sink_id.sink_id)))?;
         }
-        Err(anyhow!("end of stream").into())
     }
 }
 

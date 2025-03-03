@@ -46,6 +46,10 @@ impl<W> DecoupleCheckpointLogSinkerOf<W> {
         sink_writer_metrics: SinkWriterMetrics,
         commit_checkpoint_interval: NonZeroU64,
     ) -> Self {
+        println!(
+            "DecoupleCheckpointLogSinkerOf::new {:?}",
+            commit_checkpoint_interval
+        );
         DecoupleCheckpointLogSinkerOf {
             writer,
             sink_writer_metrics,

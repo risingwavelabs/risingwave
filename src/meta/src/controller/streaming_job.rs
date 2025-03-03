@@ -22,7 +22,9 @@ use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::stream_graph_visitor::{visit_stream_node, visit_stream_node_mut};
 use risingwave_common::{bail, current_cluster_version};
-use risingwave_connector::WithPropertiesExt;
+use risingwave_connector::sink::file_sink::fs::FsSink;
+use risingwave_connector::sink::{CONNECTOR_TYPE_KEY, SinkError};
+use risingwave_connector::{WithPropertiesExt, match_sink_name_str};
 use risingwave_meta_model::actor::ActorStatus;
 use risingwave_meta_model::actor_dispatcher::DispatcherType;
 use risingwave_meta_model::object::ObjectType;
@@ -46,7 +48,8 @@ use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use risingwave_pb::stream_plan::{
-    PbDispatcher, PbDispatcherType, PbFragmentTypeFlag, PbStreamActor, PbStreamNode,
+    FragmentTypeFlag, PbDispatcher, PbDispatcherType, PbFragmentTypeFlag, PbStreamActor,
+    PbStreamNode,
 };
 use risingwave_pb::user::PbUserInfo;
 use sea_orm::ActiveValue::Set;
@@ -1634,6 +1637,112 @@ impl CatalogController {
 
         self.mutate_fragments_by_job_id(job_id, update_dml_rate_limit, "dml node not found")
             .await
+    }
+
+    pub async fn update_sink_config_by_sink_id(
+        &self,
+        sink_id: SinkId,
+        config: HashMap<String, String>,
+    ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
+        let inner = self.inner.read().await;
+        let txn = inner.db.begin().await?;
+
+        let (sink, obj) = Sink::find_by_id(sink_id)
+            .find_also_related(Object)
+            .one(&txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found(ObjectType::Sink.as_str(), sink_id))?;
+
+        // Validate that config can be altered
+        match sink.properties.inner_ref().get(CONNECTOR_TYPE_KEY) {
+            Some(connector) => match_sink_name_str!(
+                connector.to_lowercase().as_str(),
+                SinkType,
+                SinkType::validate_alter_config(&config),
+                |sink: &str| Err(SinkError::Config(anyhow!("unsupported sink type {}", sink)))
+            )?,
+            None => {
+                return Err(
+                    SinkError::Config(anyhow!("connector not specified when alter sink")).into(),
+                );
+            }
+        };
+
+        let mut new_config = sink.properties.clone().into_inner();
+        new_config.extend(config.clone());
+
+        {
+            let active_source = sink::ActiveModel {
+                sink_id: Set(sink_id),
+                properties: Set(risingwave_meta_model::Property(new_config)),
+                ..Default::default()
+            };
+            active_source.update(&txn).await?;
+        }
+
+        let fragments: Vec<(FragmentId, i32, StreamNode)> = Fragment::find()
+            .select_only()
+            .columns([
+                fragment::Column::FragmentId,
+                fragment::Column::FragmentTypeMask,
+                fragment::Column::StreamNode,
+            ])
+            .filter(fragment::Column::JobId.eq(sink_id))
+            .into_tuple()
+            .all(&txn)
+            .await?;
+        let mut fragments = fragments
+            .into_iter()
+            .map(|(id, mask, stream_node)| (id, mask, stream_node.to_protobuf()))
+            .collect_vec();
+
+        fragments.retain_mut(|(_, fragment_type_mask, stream_node)| {
+            let mut found = false;
+            if *fragment_type_mask & FragmentTypeFlag::Sink as i32 != 0 {
+                visit_stream_node_mut(stream_node, |node| {
+                    if let PbNodeBody::Sink(node) = node
+                        && let Some(sink_desc) = &mut node.sink_desc
+                        && sink_desc.id == sink_id as u32
+                    {
+                        sink_desc.properties.extend(config.clone());
+                        found = true;
+                    }
+                });
+            }
+            found
+        });
+        assert!(
+            !fragments.is_empty(),
+            "sink id should be used by at least one fragment"
+        );
+        let fragment_ids = fragments.iter().map(|(id, _, _)| *id).collect_vec();
+        for (id, fragment_type_mask, stream_node) in fragments {
+            fragment::ActiveModel {
+                fragment_id: Set(id),
+                fragment_type_mask: Set(fragment_type_mask),
+                stream_node: Set(StreamNode::from(&stream_node)),
+                ..Default::default()
+            }
+            .update(&txn)
+            .await?;
+        }
+        let fragment_actors = get_fragment_actor_ids(&txn, fragment_ids).await?;
+
+        txn.commit().await?;
+
+        let relation_info = PbObjectInfo::Sink(ObjectModel(sink, obj.unwrap()).into());
+        let _version = self
+            .notify_frontend(
+                NotificationOperation::Update,
+                NotificationInfo::ObjectGroup(PbObjectGroup {
+                    objects: vec![PbObject {
+                        object_info: Some(relation_info),
+                    }],
+                }),
+            )
+            .await;
+
+        Ok(fragment_actors)
     }
 
     pub async fn post_apply_reschedules(

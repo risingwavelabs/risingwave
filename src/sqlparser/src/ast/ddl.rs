@@ -16,6 +16,7 @@
 #[cfg(not(feature = "std"))]
 use alloc::{boxed::Box, string::ToString, vec::Vec};
 use core::fmt;
+use std::collections::BTreeMap;
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -193,6 +194,9 @@ pub enum AlterSinkOperation {
     },
     SetSinkRateLimit {
         rate_limit: i32,
+    },
+    SetSinkConfig {
+        config: BTreeMap<String, String>,
     },
 }
 
@@ -447,6 +451,13 @@ impl fmt::Display for AlterSinkOperation {
             }
             AlterSinkOperation::SetSinkRateLimit { rate_limit } => {
                 write!(f, "SET SINK_RATE_LIMIT TO {}", rate_limit)
+            }
+            AlterSinkOperation::SetSinkConfig { config } => {
+                let configs = config
+                    .iter()
+                    .map(|(k, v)| format!("{} TO {}", k, v))
+                    .collect::<Vec<String>>();
+                write!(f, "SET {}", configs.join(", "))
             }
         }
     }

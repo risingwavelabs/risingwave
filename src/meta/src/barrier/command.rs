@@ -35,9 +35,10 @@ use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
 use risingwave_pb::stream_plan::update_mutation::*;
 use risingwave_pb::stream_plan::{
-    AddMutation, BarrierMutation, CombinedMutation, Dispatcher, Dispatchers,
-    DropSubscriptionsMutation, PauseMutation, ResumeMutation, SourceChangeSplitMutation,
-    StopMutation, StreamActor, SubscriptionUpstreamInfo, ThrottleMutation, UpdateMutation,
+    AddMutation, AlterSinkConfigMutation, BarrierMutation, CombinedMutation, Dispatcher,
+    Dispatchers, DropSubscriptionsMutation, PauseMutation, ResumeMutation, SinkConfigInfo,
+    SourceChangeSplitMutation, StopMutation, StreamActor, SubscriptionUpstreamInfo,
+    ThrottleMutation, UpdateMutation,
 };
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::warn;
@@ -53,7 +54,8 @@ use crate::model::{
     ActorId, ActorUpstreams, DispatcherId, FragmentId, StreamJobActorsToCreate, StreamJobFragments,
 };
 use crate::stream::{
-    JobReschedulePostUpdates, SplitAssignment, ThrottleConfig, build_actor_connector_splits,
+    AlterSinkConfig, JobReschedulePostUpdates, SplitAssignment, ThrottleConfig,
+    build_actor_connector_splits,
 };
 
 /// [`Reschedule`] is for the [`Command::RescheduleFragment`], which is used for rescheduling actors
@@ -363,6 +365,8 @@ pub enum Command {
         subscription_id: u32,
         upstream_mv_table_id: TableId,
     },
+
+    AlterSinkConfig(AlterSinkConfig),
 }
 
 impl Command {
@@ -451,6 +455,7 @@ impl Command {
             Command::Throttle(_) => None,
             Command::CreateSubscription { .. } => None,
             Command::DropSubscription { .. } => None,
+            Command::AlterSinkConfig(_) => None,
         }
     }
 
@@ -974,6 +979,20 @@ impl Command {
                         upstream_mv_table_id: upstream_mv_table_id.table_id,
                     }],
                 })),
+                Command::AlterSinkConfig(config) => {
+                    let mut sink_actor_config_info = HashMap::default();
+                    for (k, v) in config {
+                        sink_actor_config_info.insert(
+                            *k,
+                            SinkConfigInfo {
+                                sink_config_info: v.clone(),
+                            },
+                        );
+                    }
+                    Some(Mutation::AlterSinkConfig(AlterSinkConfigMutation {
+                        sink_actor_config_info,
+                    }))
+                }
             };
 
         mutation

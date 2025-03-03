@@ -356,6 +356,7 @@ impl CommandContext {
             }
             Command::DropSubscription { .. } => {}
             Command::MergeSnapshotBackfillStreamingJobs(_) => {}
+            Command::AlterSinkConfig(_) => {}
         }
 
         Ok(())

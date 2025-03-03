@@ -332,6 +332,14 @@ message RecoverRequest {}
 
 message RecoverResponse {}
 
+message AlterSinkConfigRequest {
+  uint32 sink_id = 1;
+  map<string, string> config = 2;
+}
+
+message AlterSinkConfigResponse {
+}
+
 service StreamManagerService {
   rpc Flush(FlushRequest) returns (FlushResponse);
   rpc Pause(PauseRequest) returns (PauseResponse);
@@ -346,6 +354,7 @@ service StreamManagerService {
   rpc ApplyThrottle(ApplyThrottleRequest) returns (ApplyThrottleResponse);
   rpc Recover(RecoverRequest) returns (RecoverResponse);
   rpc ListRateLimits(ListRateLimitsRequest) returns (ListRateLimitsResponse);
+  rpc AlterSinkConfig(AlterSinkConfigRequest) returns (AlterSinkConfigResponse);
 }
 
 // Below for cluster service.

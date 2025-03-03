@@ -3502,6 +3502,15 @@ impl Parser<'_> {
         Ok(Some(rate_limit))
     }
 
+    pub fn parse_alter_sink_config(&mut self) -> PResult<(String, String)> {
+        let config_name = self.parse_identifier()?;
+        if self.expect_keyword(Keyword::TO).is_err() && self.expect_token(&Token::Eq).is_err() {
+            return self.expected("TO or = after ALTER SINK SET");
+        }
+        let config_value = self.parse_value_and_obj_ref::<false>()?;
+        Ok((config_name.to_string(), config_value.to_string()))
+    }
+
     pub fn parse_alter_sink(&mut self) -> PResult<Statement> {
         let sink_name = self.parse_object_name()?;
         let operation = if self.parse_keyword(Keyword::RENAME) {
@@ -3539,7 +3548,11 @@ impl Parser<'_> {
             } else if let Some(rate_limit) = self.parse_alter_sink_rate_limit()? {
                 AlterSinkOperation::SetSinkRateLimit { rate_limit }
             } else {
-                return self.expected("SCHEMA/PARALLELISM after SET");
+                let config = self
+                    .parse_comma_separated(Parser::parse_alter_sink_config)?
+                    .into_iter()
+                    .collect();
+                AlterSinkOperation::SetSinkConfig { config }
             }
         } else if self.parse_keywords(&[Keyword::SWAP, Keyword::WITH]) {
             let target_sink = self.parse_object_name()?;

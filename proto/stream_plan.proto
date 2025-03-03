@@ -110,6 +110,14 @@ message DropSubscriptionsMutation {
   repeated SubscriptionUpstreamInfo info = 1;
 }
 
+message SinkConfigInfo {
+  map<string,string> sink_config_info = 1;
+}
+
+message AlterSinkConfigMutation {
+  map<uint32, SinkConfigInfo> sink_actor_config_info = 1;
+}
+
 message BarrierMutation {
   oneof mutation {
     // Add new dispatchers to some actors, used for creating materialized views.
@@ -129,6 +137,8 @@ message BarrierMutation {
     ThrottleMutation throttle = 10;
     // Drop subscription on mv
     DropSubscriptionsMutation drop_subscriptions = 12;
+    // Alter sink with_option
+    AlterSinkConfigMutation alter_sink_config = 13;
     // Combined mutation.
     // Currently, it can only be Add & Update, which is for sink into table.
     CombinedMutation combined = 100;
