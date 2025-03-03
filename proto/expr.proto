@@ -602,13 +602,6 @@ enum UdfExprVersion {
   UDF_EXPR_VERSION_UNSPECIFIED = 0;
   // Begin from this version, we re-interpret `identifier` as `name_in_runtime`.
   UDF_EXPR_VERSION_NAME_IN_RUNTIME = 1;
-
-  // IMPORTANT:
-  // Don't forget to change `UdfExprVersion::LATEST` in `prost/src/lib.rs` to the latest version
-  // when adding new versions to this enum.
-
-  // Only used for tests.
-  UDF_EXPR_VERSION_MAX = 2147483647;
 }
 
 message UserDefinedFunction {
