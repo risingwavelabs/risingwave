@@ -94,7 +94,7 @@ pub struct IcebergCommon {
         deserialize_with = "deserialize_optional_bool_from_string"
     )]
     pub path_style_access: Option<bool>,
-    /// enable config load currently is used by iceberg engine.
+    /// enable config load.
     #[serde(default, deserialize_with = "deserialize_optional_bool_from_string")]
     pub enable_config_load: Option<bool>,
 }
@@ -318,22 +318,18 @@ impl IcebergCommon {
                     "s3" | "s3a" => StorageCatalogConfig::S3(
                         storage_catalog::StorageCatalogS3Config::builder()
                             .warehouse(warehouse)
-                            .access_key(self.access_key.clone().ok_or_else(|| {
-                                anyhow!("`s3.access.key` must be set in storage catalog")
-                            })?)
-                            .secret_key(self.secret_key.clone().ok_or_else(|| {
-                                anyhow!("`s3.secret.key` must be set in storage catalog")
-                            })?)
+                            .access_key(self.access_key.clone())
+                            .secret_key(self.secret_key.clone())
                             .region(self.region.clone())
                             .endpoint(self.endpoint.clone())
+                            .enable_config_load(self.enable_config_load)
                             .build(),
                     ),
                     "gs" | "gcs" => StorageCatalogConfig::Gcs(
                         storage_catalog::StorageCatalogGcsConfig::builder()
                             .warehouse(warehouse)
-                            .credential(self.gcs_credential.clone().ok_or_else(|| {
-                                anyhow!("`gcs.credential` must be set in storage catalog")
-                            })?)
+                            .credential(self.gcs_credential.clone())
+                            .enable_config_load(self.enable_config_load)
                             .build(),
                     ),
                     scheme => bail!("Unsupported warehouse scheme: {}", scheme),
