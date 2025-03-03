@@ -279,7 +279,6 @@ impl CatalogController {
                 worker_id,
                 upstream_actor_ids: Default::default(),
                 vnode_bitmap: pb_vnode_bitmap.as_ref().map(VnodeBitmap::from),
-                expr_context: ExprContext::from(pb_expr_context),
             });
             actor_dispatchers.insert(*actor_id as _, pb_dispatcher.clone());
         }
@@ -307,18 +306,20 @@ impl CatalogController {
 
     #[expect(clippy::type_complexity)]
     pub fn compose_table_fragments(
-        table_id: u32,
-        state: PbState,
-        ctx: Option<PbStreamContext>,
+        job_info: streaming_job::Model,
         fragments: Vec<(
             fragment::Model,
             Vec<actor::Model>,
             HashMap<ActorId, Vec<PbDispatcher>>,
         )>,
-        parallelism: StreamingParallelism,
-        max_parallelism: usize,
         job_definition: Option<String>,
     ) -> MetaResult<StreamJobFragments> {
+        let table_id = job_info.job_id as u32;
+        let state: PbState = job_info.job_status.into();
+        let ctx = job_info.timezone.map(|tz| PbStreamContext { timezone: tz });
+        let parallelism = job_info.parallelism.clone();
+        let max_parallelism = job_info.max_parallelism as usize;
+
         let mut pb_fragments = BTreeMap::new();
         let mut pb_actor_splits = HashMap::new();
         let mut pb_actor_status = BTreeMap::new();
@@ -408,12 +409,11 @@ impl CatalogController {
                 worker_id,
                 splits,
                 vnode_bitmap,
-                expr_context,
                 ..
             } = actor;
 
             let pb_vnode_bitmap = vnode_bitmap.map(|vnode_bitmap| vnode_bitmap.to_protobuf());
-            let pb_expr_context = Some(expr_context.to_protobuf());
+            //            let pb_expr_context = Some(expr_context.to_protobuf());
 
             let pb_dispatcher = actor_dispatcher.remove(&actor_id).unwrap_or_default();
 
@@ -597,15 +597,7 @@ impl CatalogController {
             .await?
             .remove(&job_id);
 
-        Self::compose_table_fragments(
-            job_id as _,
-            job_info.job_status.into(),
-            job_info.timezone.map(|tz| PbStreamContext { timezone: tz }),
-            fragment_info,
-            job_info.parallelism.clone(),
-            job_info.max_parallelism as _,
-            job_definition,
-        )
+        Self::compose_table_fragments(job_info, fragment_info, job_definition)
     }
 
     pub async fn get_job_fragment_backfill_scan_type(
