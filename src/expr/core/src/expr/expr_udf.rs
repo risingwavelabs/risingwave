@@ -26,7 +26,7 @@ use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_expr::expr_context::FRAGMENT_ID;
-use risingwave_pb::expr::{ExprNode, PbUdfExprVersion};
+use risingwave_pb::expr::ExprNode;
 
 use super::{BoxedExpression, Build};
 use crate::expr::Expression;
@@ -175,21 +175,9 @@ impl Build for UserDefinedFunction {
         let runtime = udf.runtime.as_deref();
         let link = udf.link.as_deref();
 
-        let name_in_runtime = if udf.version() < PbUdfExprVersion::NameInRuntime {
-            if language == "rust" || language == "wasm" {
-                // The `identifier` value of Rust and WASM UDF before `NameInRuntime`
-                // is not used any more. The real bound function name should be the same
-                // as `name`.
-                Some(name)
-            } else {
-                // `identifier`s of other UDFs already mean `name_in_runtime` before `NameInRuntime`.
-                udf.identifier.as_ref()
-            }
-        } else {
-            // after `PbUdfExprVersion::NameInRuntime`, `identifier` means `name_in_runtime`
-            udf.identifier.as_ref()
-        }
-        .expect("SQL UDF won't get here, other UDFs must have `name_in_runtime`");
+        let name_in_runtime = udf
+            .name_in_runtime()
+            .expect("SQL UDF won't get here, other UDFs must have `name_in_runtime`");
 
         // lookup UDF builder
         let build_fn = crate::sig::find_udf_impl(language, runtime, link)?.build_fn;

@@ -17,7 +17,6 @@ use std::sync::Arc;
 use itertools::Itertools;
 use risingwave_common::catalog::{FunctionId, Schema};
 use risingwave_common::types::DataType;
-use risingwave_pb::expr::PbUdfExprVersion;
 
 use super::{Expr, ExprDisplay, ExprImpl};
 use crate::catalog::function_catalog::{FunctionCatalog, FunctionKind};
@@ -57,20 +56,7 @@ impl UserDefinedFunction {
             return_type,
             language: udf.language.clone(),
             runtime: udf.runtime.clone(),
-            name_in_runtime: if udf.version() < PbUdfExprVersion::NameInRuntime {
-                if udf.language == "rust" || udf.language == "wasm" {
-                    // The `identifier` value of Rust and WASM UDF before `NameInRuntime`
-                    // is not used any more. The real bound function name should be the same
-                    // as `name`.
-                    Some(udf.name.clone())
-                } else {
-                    // `identifier`s of other UDFs already mean `name_in_runtime` before `NameInRuntime`.
-                    udf.identifier.clone()
-                }
-            } else {
-                // after `PbUdfExprVersion::NameInRuntime`, `identifier` means `name_in_runtime`
-                udf.identifier.clone()
-            },
+            name_in_runtime: udf.name_in_runtime().map(|x| x.to_owned()),
             body: udf.body.clone(),
             link: udf.link.clone(),
             compressed_binary: udf.compressed_binary.clone(),

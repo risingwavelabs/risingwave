@@ -19,7 +19,6 @@ use risingwave_common::array::I32Array;
 use risingwave_common::array::arrow::arrow_schema_udf::{Fields, Schema, SchemaRef};
 use risingwave_common::array::arrow::{UdfArrowConvert, UdfFromArrow, UdfToArrow};
 use risingwave_common::bail;
-use risingwave_pb::expr::PbUdfExprVersion;
 
 use super::*;
 use crate::sig::{BuildOptions, UdfImpl, UdfKind};
@@ -131,31 +130,9 @@ pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<Bo
     let runtime = udf.runtime.as_deref();
     let link = udf.link.as_deref();
 
-    let name_in_runtime = if udf.version() < PbUdfExprVersion::NameInRuntime {
-        if language == "rust" || language == "wasm" {
-            // The `identifier` value of Rust and WASM UDF before `NameInRuntime`
-            // is not used any more. And unfortunately, we don't have the original name
-            // in `PbUserDefinedFunctionMetadata`, so we need to extract the name from
-            // the old `identifier` value (e.g. `foo()->int32`).
-            let old_identifier = udf
-                .identifier
-                .as_ref()
-                .expect("Rust/WASM UDF must have identifier");
-            Some(
-                old_identifier
-                    .split_once("(")
-                    .expect("the old identifier must contain `(`")
-                    .0,
-            )
-        } else {
-            // `identifier`s of other UDFs already mean `name_in_runtime` before `NameInRuntime`.
-            udf.identifier.as_deref()
-        }
-    } else {
-        // after `PbUdfExprVersion::NameInRuntime`, `identifier` means `name_in_runtime`
-        udf.identifier.as_deref()
-    }
-    .expect("SQL UDF won't get here, other UDFs must have `name_in_runtime`");
+    let name_in_runtime = udf
+        .name_in_runtime()
+        .expect("SQL UDF won't get here, other UDFs must have `name_in_runtime`");
 
     let build_fn = crate::sig::find_udf_impl(language, runtime, link)?.build_fn;
     let runtime = build_fn(BuildOptions {
