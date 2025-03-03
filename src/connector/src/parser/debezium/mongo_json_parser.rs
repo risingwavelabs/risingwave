@@ -262,7 +262,7 @@ mod tests {
             assert_eq!(
             row.datum_at(1).to_owned_datum(),
             (Some(ScalarImpl::Jsonb(
-                serde_json::json!({"first_name": "Anne","last_name": "Kretchmar","email": "annek@noanswer.org"}).into()
+                serde_json::json!({"_id": {"$numberLong": "1004"}, "first_name": "Anne","last_name": "Kretchmar","email": "annek@noanswer.org"}).into()
             )))
             );
             assert_eq!(

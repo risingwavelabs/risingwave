@@ -738,7 +738,9 @@ pub fn extract_bson_field(
                 )
             } else {
                 let type_expected = type_expected.to_string();
-                unreachable!("DebeziumMongoJsonParser::new must ensure type of `{type_expected}` matches datum `{datum}`")
+                unreachable!(
+                    "DebeziumMongoJsonParser::new must ensure type of `{type_expected}` matches datum `{datum}`"
+                )
             }
         }
     };
@@ -917,10 +919,6 @@ where
 {
     fn access<'a>(&'a self, path: &[&str], type_expected: &DataType) -> AccessResult<DatumCow<'a>> {
         match path {
-            ["after" | "before", "payload"] if !self.strong_schema => {
-                self.access(&[path[0]], &DataType::Jsonb)
-            }
-
             ["after" | "before", "_id"] => {
                 let payload = self.access_owned(&[path[0]], &DataType::Jsonb)?;
                 if let Some(ScalarImpl::Jsonb(bson_doc)) = payload {
@@ -932,6 +930,10 @@ where
                         path: path[0].to_owned(),
                     })?
                 }
+            }
+
+            ["after" | "before", "payload"] if !self.strong_schema => {
+                self.access(&[path[0]], &DataType::Jsonb)
             }
 
             ["after" | "before", field] if self.strong_schema => {
