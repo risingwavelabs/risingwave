@@ -460,10 +460,12 @@ impl From<ObjectModel<function::Model>> for PbFunction {
             is_async: value
                 .0
                 .options
+                .as_ref()
                 .and_then(|o| o.0.get("async").map(|v| v == "true")),
             is_batched: value
                 .0
                 .options
+                .as_ref()
                 .and_then(|o| o.0.get("batch").map(|v| v == "true")),
         }
     }
