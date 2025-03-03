@@ -1384,6 +1384,10 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
             })
             .collect::<Result<Vec<DataFile>>>()?;
 
+        // # TODO:
+        // This retry behavior should be revert and do in iceberg-rust when it supports retry(Track in: https://github.com/apache/iceberg-rust/issues/964)
+        // because retry logic involved reapply the commit metadata.
+        // For now, we just retry the commit operation.
         let retry_strategy = ExponentialBackoff::from_millis(100)
             .map(jitter)
             .take(self.commit_retry_num as usize);
