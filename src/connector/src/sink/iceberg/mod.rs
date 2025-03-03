@@ -85,7 +85,6 @@ use super::{
 };
 use crate::connector_common::IcebergCommon;
 use crate::sink::coordinate::CoordinatedSinkWriter;
-use crate::sink::iceberg::compaction::spawn_compaction_client;
 use crate::sink::writer::SinkWriter;
 use crate::sink::{Result, SinkCommitCoordinator, SinkParam};
 use crate::{deserialize_bool_from_string, deserialize_optional_string_seq_from_string};
@@ -499,19 +498,12 @@ impl Sink for IcebergSink {
     async fn new_coordinator(&self) -> Result<Self::Coordinator> {
         let catalog = self.config.create_catalog().await?;
         let table = self.create_and_validate_table().await?;
-        // Only iceberg engine table will enable config load and need compaction.
-        let (commit_tx, finish_tx) = if self.config.common.enable_config_load.unwrap_or(false) {
-            let (commit_tx, finish_tx) = spawn_compaction_client(&self.config)?;
-            (Some(commit_tx), Some(finish_tx))
-        } else {
-            (None, None)
-        };
-
+        // FIXME(Dylan): Disable EMR serverless compaction for now.
         Ok(IcebergSinkCommitter {
             catalog,
             table,
-            commit_notifier: commit_tx,
-            _compact_task_guard: finish_tx,
+            commit_notifier: None,
+            _compact_task_guard: None,
         })
     }
 }
