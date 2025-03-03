@@ -53,15 +53,14 @@ pub struct IcebergCommon {
     #[serde(rename = "gcs.credential")]
     pub gcs_credential: Option<String>,
 
-    /// Path of iceberg warehouse, only applicable in storage catalog.
+    /// Path of iceberg warehouse.
     #[serde(rename = "warehouse.path")]
     pub warehouse_path: Option<String>,
     /// AWS Client id, can be omitted for storage catalog or when
     /// caller's AWS account ID matches glue id
     #[serde(rename = "glue.id")]
     pub glue_id: Option<String>,
-    /// Catalog name, can be omitted for storage catalog, but
-    /// must be set for other catalogs.
+    /// Catalog name, default value is risingwave.
     #[serde(rename = "catalog.name")]
     pub catalog_name: Option<String>,
     /// URI of iceberg catalog, only applicable in rest catalog.
@@ -147,7 +146,7 @@ impl IcebergCommon {
                 Some(warehouse_path) => {
                     let (bucket, _) = {
                         let url = Url::parse(warehouse_path);
-                        if url.is_err() && catalog_type == "rest" {
+                        if url.is_err() && (catalog_type == "rest" || catalog_type == "rest_rust") {
                             // If the warehouse path is not a valid URL, it could be a warehouse name in rest catalog
                             // so we allow it to pass here.
                             (None, None)
@@ -174,7 +173,7 @@ impl IcebergCommon {
                     }
                 }
                 None => {
-                    if catalog_type != "rest" {
+                    if catalog_type != "rest" && catalog_type != "rest_rust" {
                         bail!("`warehouse.path` must be set in {} catalog", &catalog_type);
                     }
                 }
@@ -462,7 +461,7 @@ impl IcebergCommon {
             "mock" => Ok(Arc::new(mock_catalog::MockCatalog {})),
             _ => {
                 bail!(
-                    "Unsupported catalog type: {}, only support `storage`, `rest`, `hive`, `jdbc`, `glue`",
+                    "Unsupported catalog type: {}, only support `storage`, `rest`, `hive`, `jdbc`, `glue`, `snowflake`",
                     self.catalog_type()
                 )
             }
