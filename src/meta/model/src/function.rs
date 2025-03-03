@@ -52,7 +52,7 @@ pub struct Model {
     pub kind: FunctionKind,
     // To keep compatible with legacy code, this is not included in `options`.
     pub always_retry_on_network_error: bool,
-    pub options: Property,
+    pub options: Option<Property>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -118,7 +118,7 @@ impl From<PbFunction> for ActiveModel {
             compressed_binary: Set(function.compressed_binary),
             kind: Set(function.kind.unwrap().into()),
             always_retry_on_network_error: Set(function.always_retry_on_network_error),
-            options: Set(options.into()),
+            options: Set(Some(options.into())),
         }
     }
 }
