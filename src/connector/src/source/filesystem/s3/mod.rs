@@ -90,6 +90,7 @@ impl From<&LegacyS3Properties> for AwsAuthProps {
             arn: Default::default(),
             external_id: Default::default(),
             profile: Default::default(),
+            msk_signer_timeout_sec: Default::default(),
         }
     }
 }

@@ -30,7 +30,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntCounter};
-use risingwave_common::util::epoch::EpochExt;
+use risingwave_common::util::epoch::{EpochExt, EpochPair};
 use risingwave_connector::sink::log_store::{
     ChunkId, LogReader, LogStoreReadItem, LogStoreResult, TruncateOffset,
 };
@@ -42,7 +42,8 @@ use risingwave_storage::hummock::CachePolicy;
 use risingwave_storage::store::{
     PrefetchOptions, ReadOptions, StateStoreKeyedRowRef, StateStoreRead,
 };
-use tokio::sync::watch;
+use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::{oneshot, watch};
 use tokio::time::sleep;
 use tokio_stream::StreamExt;
 
@@ -170,6 +171,8 @@ pub struct KvLogStoreReader<S: StateStoreRead> {
     state: LogStoreReadState<S>,
 
     rx: LogStoreBufferReceiver,
+    init_epoch_rx: Option<oneshot::Receiver<(EpochPair, Option<Option<Bytes>>)>>,
+    update_vnode_bitmap_rx: UnboundedReceiver<(Arc<Bitmap>, u64, Option<Option<Bytes>>)>,
 
     /// The first epoch that newly written by the log writer
     first_write_epoch: Option<u64>,
@@ -192,9 +195,12 @@ pub struct KvLogStoreReader<S: StateStoreRead> {
 }
 
 impl<S: StateStoreRead> KvLogStoreReader<S> {
+    #[expect(clippy::too_many_arguments)]
     pub(crate) fn new(
         state: LogStoreReadState<S>,
         rx: LogStoreBufferReceiver,
+        init_epoch_rx: oneshot::Receiver<(EpochPair, Option<Option<Bytes>>)>,
+        update_vnode_bitmap_rx: UnboundedReceiver<(Arc<Bitmap>, u64, Option<Option<Bytes>>)>,
         metrics: KvLogStoreMetrics,
         is_paused: watch::Receiver<bool>,
         identity: String,
@@ -204,6 +210,8 @@ impl<S: StateStoreRead> KvLogStoreReader<S> {
         Self {
             state,
             rx,
+            init_epoch_rx: Some(init_epoch_rx),
+            update_vnode_bitmap_rx,
             first_write_epoch: None,
             future_state: KvLogStoreReaderFutureState::Empty,
             latest_offset: None,
@@ -376,13 +384,28 @@ impl<S: StateStoreRead> KvLogStoreReader<S> {
 
 impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
     async fn init(&mut self) -> LogStoreResult<()> {
-        let (init_epoch, aligned_range_start) = self.rx.init().await;
-        let first_write_epoch = init_epoch.curr;
+        let aligned_range_start = if let Some(init_epoch_rx) = self.init_epoch_rx.take() {
+            let (init_epoch, aligned_range_start) = init_epoch_rx
+                .await
+                .map_err(|_| anyhow!("should get the first epoch"))?;
+            let first_write_epoch = init_epoch.curr;
 
-        assert!(
-            self.first_write_epoch.replace(first_write_epoch).is_none(),
-            "should not init twice"
-        );
+            assert_eq!(
+                self.first_write_epoch.replace(first_write_epoch),
+                None,
+                "should not init twice"
+            );
+            aligned_range_start
+        } else {
+            let (new_vnode_bitmap, write_epoch, aligned_range_start) = self
+                .update_vnode_bitmap_rx
+                .recv()
+                .await
+                .ok_or_else(|| anyhow!("failed to receive update vnode"))?;
+            self.state.serde.update_vnode_bitmap(new_vnode_bitmap);
+            self.first_write_epoch = Some(write_epoch);
+            aligned_range_start
+        };
 
         let range_start = if self.align_epoch_on_init
             && let Some(range_start) = aligned_range_start.expect("should have aligned range start")
@@ -395,6 +418,9 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
         self.future_state = KvLogStoreReaderFutureState::ReadStateStoreStream(
             self.read_persisted_log_store(range_start).await?,
         );
+        self.latest_offset = None;
+        self.truncate_offset = None;
+        self.rewind_delay = RewindDelay::new(&self.metrics);
 
         Ok(())
     }
@@ -540,10 +566,6 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
                 self.latest_offset = Some(TruncateOffset::Barrier { epoch: item_epoch });
                 (item_epoch, LogStoreReadItem::Barrier { is_checkpoint })
             }
-            LogStoreBufferItem::UpdateVnodes(bitmap) => {
-                self.state.serde.update_vnode_bitmap(bitmap.clone());
-                (item_epoch, LogStoreReadItem::UpdateVnodeBitmap(bitmap))
-            }
         })
     }
 
@@ -586,7 +608,7 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
         Ok(())
     }
 
-    async fn rewind(&mut self) -> LogStoreResult<(bool, Option<Bitmap>)> {
+    async fn rewind(&mut self) -> LogStoreResult<()> {
         self.rewind_delay.rewind_delay(self.truncate_offset).await;
         self.latest_offset = None;
         if self.truncate_offset.is_none()
@@ -612,7 +634,7 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
         }
         self.rx.rewind();
 
-        Ok((true, Some((**self.state.serde.vnodes()).clone())))
+        Ok(())
     }
 }
 

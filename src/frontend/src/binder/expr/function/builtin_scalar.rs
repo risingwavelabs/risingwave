@@ -681,6 +681,7 @@ impl Binder {
                 ("rw_epoch_to_ts", raw_call(ExprType::RwEpochToTs)),
                 // internal
                 ("rw_vnode", raw_call(ExprType::VnodeUser)),
+                ("rw_license", raw_call(ExprType::License)),
                 ("rw_test_paid_tier", raw_call(ExprType::TestPaidTier)), // for testing purposes
                 // TODO: choose which pg version we should return.
                 ("version", raw_literal(ExprImpl::literal_varchar(current_cluster_version()))),
