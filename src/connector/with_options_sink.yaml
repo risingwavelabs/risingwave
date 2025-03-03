@@ -455,7 +455,7 @@ IcebergConfig:
     required: false
   - name: warehouse.path
     field_type: String
-    comments: Path of iceberg warehouse, only applicable in storage catalog.
+    comments: Path of iceberg warehouse.
     required: false
   - name: glue.id
     field_type: String
@@ -465,9 +465,7 @@ IcebergConfig:
     required: false
   - name: catalog.name
     field_type: String
-    comments: |-
-      Catalog name, can be omitted for storage catalog, but
-      must be set for other catalogs.
+    comments: Catalog name, default value is risingwave.
     required: false
   - name: catalog.uri
     field_type: String
@@ -510,7 +508,7 @@ IcebergConfig:
     default: Default::default
   - name: enable_config_load
     field_type: bool
-    comments: enable config load currently is used by iceberg engine.
+    comments: enable config load.
     required: false
     default: Default::default
   - name: primary_key

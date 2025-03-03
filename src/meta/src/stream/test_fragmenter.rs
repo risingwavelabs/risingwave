@@ -485,16 +485,6 @@ async fn test_graph_builder() -> MetaResult<()> {
     assert_eq!(mview_actor_ids, vec![1]);
     assert_eq!(internal_tables.len(), 3);
 
-    let fragment_upstreams: HashMap<_, _> = stream_job_fragments
-        .fragments
-        .iter()
-        .map(|(fragment_id, fragment)| (*fragment_id, fragment.upstream_fragment_ids.clone()))
-        .collect();
-
-    assert_eq!(fragment_upstreams.get(&1).unwrap(), &vec![2]);
-    assert_eq!(fragment_upstreams.get(&2).unwrap(), &vec![3]);
-    assert!(fragment_upstreams.get(&3).unwrap().is_empty());
-
     let mut expected_downstream = HashMap::new();
     expected_downstream.insert(1, vec![]);
     expected_downstream.insert(2, vec![1]);
@@ -527,7 +517,7 @@ async fn test_graph_builder() -> MetaResult<()> {
         );
     }
     for fragment in stream_job_fragments.fragments() {
-        let mut node = fragment.get_nodes().unwrap();
+        let mut node = &fragment.nodes;
         while !node.get_input().is_empty() {
             node = node.get_input().first().unwrap();
         }
