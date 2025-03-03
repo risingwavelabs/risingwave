@@ -23,6 +23,33 @@
         │   └─StreamTableScan { table: t2, columns: [t2.v3, t2.v4, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
         └─StreamExchange { dist: HashShard(t3.v5) }
           └─StreamTableScan { table: t3, columns: [t3.v5, t3.v6, t3._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t3._row_id], pk: [_row_id], dist: UpstreamHashShard(t3._row_id) }
+- name: unaligned join
+  sql: |
+    set streaming_enable_unaligned_join=true;
+    create table t1 (v1 int, v2 int);
+    create table t2 (v3 int, v4 int);
+    create table t3 (v5 int, v6 int);
+    select * from t1, t2, t3 where t1.v1 = t2.v3 and t1.v1 = t3.v5;
+  logical_plan: |-
+    LogicalProject { exprs: [t1.v1, t1.v2, t2.v3, t2.v4, t3.v5, t3.v6] }
+    └─LogicalFilter { predicate: (t1.v1 = t2.v3) AND (t1.v1 = t3.v5) }
+      └─LogicalJoin { type: Inner, on: true, output: all }
+        ├─LogicalJoin { type: Inner, on: true, output: all }
+        │ ├─LogicalScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id, t1._rw_timestamp] }
+        │ └─LogicalScan { table: t2, columns: [t2.v3, t2.v4, t2._row_id, t2._rw_timestamp] }
+        └─LogicalScan { table: t3, columns: [t3.v5, t3.v6, t3._row_id, t3._rw_timestamp] }
+  stream_plan: |-
+    StreamMaterialize { columns: [v1, v2, v3, v4, v5, v6, t1._row_id(hidden), t2._row_id(hidden), t3._row_id(hidden)], stream_key: [t1._row_id, t2._row_id, v1, t3._row_id], pk_columns: [t1._row_id, t2._row_id, v1, t3._row_id], pk_conflict: NoCheck }
+    └─StreamSyncLogStore
+      └─StreamHashJoin { type: Inner, predicate: t1.v1 = t3.v5, output: [t1.v1, t1.v2, t2.v3, t2.v4, t3.v5, t3.v6, t1._row_id, t2._row_id, t3._row_id] }
+        ├─StreamSyncLogStore
+        │ └─StreamHashJoin { type: Inner, predicate: t1.v1 = t2.v3, output: [t1.v1, t1.v2, t2.v3, t2.v4, t1._row_id, t2._row_id] }
+        │   ├─StreamExchange { dist: HashShard(t1.v1) }
+        │   │ └─StreamTableScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+        │   └─StreamExchange { dist: HashShard(t2.v3) }
+        │     └─StreamTableScan { table: t2, columns: [t2.v3, t2.v4, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+        └─StreamExchange { dist: HashShard(t3.v5) }
+          └─StreamTableScan { table: t3, columns: [t3.v5, t3.v6, t3._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t3._row_id], pk: [_row_id], dist: UpstreamHashShard(t3._row_id) }
 - name: self join
   sql: |
     create table t (v1 int, v2 int);
@@ -530,7 +557,7 @@
                     └─BatchScan { table: b, columns: [b.x], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [y, z, $expr2(hidden), a._row_id(hidden), b._row_id(hidden), a.x(hidden), b.x(hidden)], stream_key: [a._row_id, b._row_id, a.x, b.x], pk_columns: [$expr2, a._row_id, b._row_id, a.x, b.x], pk_conflict: NoCheck }
-    └─StreamExchange { dist: HashShard(a._row_id, b._row_id, a.x, b.x) }
+    └─StreamExchange { dist: HashShard($expr2) }
       └─StreamProject { exprs: [(2:Int32 * $expr1) as $expr3, $expr2, $expr2, a._row_id, b._row_id, a.x, b.x] }
         └─StreamProject { exprs: [a.x, b.x, $expr1, ($expr1 + $expr1) as $expr2, a._row_id, b._row_id] }
           └─StreamProject { exprs: [a.x, b.x, Coalesce(a.x, b.x) as $expr1, a._row_id, b._row_id] }

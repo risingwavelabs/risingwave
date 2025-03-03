@@ -14,19 +14,18 @@
 
 use std::rc::Rc;
 
-use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{PbStreamSource, SourceNode};
 
 use super::stream::prelude::*;
-use super::utils::{childless_record, Distill};
-use super::{generic, ExprRewritable, PlanBase, StreamNode};
+use super::utils::{Distill, childless_record};
+use super::{ExprRewritable, PlanBase, StreamNode, generic};
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::column_names_pretty;
-use crate::optimizer::property::{Distribution, MonotonicityMap};
+use crate::optimizer::property::{Distribution, MonotonicityMap, WatermarkColumns};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// [`StreamSource`] represents a table/connector source at the very beginning of the graph.
@@ -43,7 +42,7 @@ impl StreamSource {
             Distribution::SomeShard,
             core.catalog.as_ref().map_or(true, |s| s.append_only),
             false,
-            FixedBitSet::with_capacity(core.column_catalog.len()),
+            WatermarkColumns::new(),
             MonotonicityMap::new(),
         );
         Self { base, core }

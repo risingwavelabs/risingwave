@@ -22,8 +22,8 @@ use risingwave_pb::connector_service::coordinate_request::{
 };
 use risingwave_pb::connector_service::coordinate_response::StartCoordinationResponse;
 use risingwave_pb::connector_service::{
-    coordinate_request, coordinate_response, CoordinateRequest, CoordinateResponse, PbSinkParam,
-    SinkMetadata,
+    CoordinateRequest, CoordinateResponse, PbSinkParam, SinkMetadata, coordinate_request,
+    coordinate_response,
 };
 use tokio::sync::mpsc::Receiver;
 use tokio_stream::wrappers::ReceiverStream;

@@ -15,10 +15,10 @@
 use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_common::catalog::FunctionId;
+use risingwave_common::catalog::{FunctionId, Schema};
 use risingwave_common::types::DataType;
 
-use super::{Expr, ExprImpl};
+use super::{Expr, ExprDisplay, ExprImpl};
 use crate::catalog::function_catalog::{FunctionCatalog, FunctionKind};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -100,5 +100,24 @@ impl Expr for UserDefinedFunction {
                 always_retry_on_network_error: self.catalog.always_retry_on_network_error,
             }))),
         }
+    }
+}
+
+pub struct UserDefinedFunctionDisplay<'a> {
+    pub func_call: &'a UserDefinedFunction,
+    pub input_schema: &'a Schema,
+}
+
+impl std::fmt::Debug for UserDefinedFunctionDisplay<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let that = self.func_call;
+        let mut builder = f.debug_tuple(&that.catalog.name);
+        that.args.iter().for_each(|arg| {
+            builder.field(&ExprDisplay {
+                expr: arg,
+                input_schema: self.input_schema,
+            });
+        });
+        builder.finish()
     }
 }

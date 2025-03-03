@@ -17,8 +17,8 @@ use home::home_dir;
 use risingwave_common::config::MetaBackend;
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
 use risingwave_compactor::CompactorOpts;
-use risingwave_compute::memory::config::gradient_reserve_memory_bytes;
 use risingwave_compute::ComputeNodeOpts;
+use risingwave_compute::memory::config::gradient_reserve_memory_bytes;
 use risingwave_frontend::FrontendOpts;
 use risingwave_meta_node::MetaNodeOpts;
 
@@ -194,14 +194,11 @@ pub fn map_single_node_opts_to_standalone_opts(opts: SingleNodeOpts) -> ParsedSt
     }
 
     // Set listen addresses (force to override)
-    meta_opts.listen_addr = "0.0.0.0:5690".to_owned();
+    meta_opts.listen_addr = "127.0.0.1:5690".to_owned();
     meta_opts.advertise_addr = "127.0.0.1:5690".to_owned();
     meta_opts.dashboard_host = Some("0.0.0.0:5691".to_owned());
-    compute_opts.listen_addr = "0.0.0.0:5688".to_owned();
-    compactor_opts.listen_addr = "0.0.0.0:6660".to_owned();
-    if let Some(frontend_addr) = &opts.node_opts.listen_addr {
-        frontend_opts.listen_addr.clone_from(frontend_addr);
-    }
+    compute_opts.listen_addr = "127.0.0.1:5688".to_owned();
+    compactor_opts.listen_addr = "127.0.0.1:6660".to_owned();
 
     // Set Meta addresses for all nodes (force to override)
     let meta_addr = "http://127.0.0.1:5690".to_owned();

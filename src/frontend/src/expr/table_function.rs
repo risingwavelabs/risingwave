@@ -19,19 +19,26 @@ use itertools::Itertools;
 use mysql_async::consts::ColumnType as MySqlColumnType;
 use mysql_async::prelude::*;
 use risingwave_common::array::arrow::IcebergArrowConvert;
+use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::{DataType, ScalarImpl, StructType};
 use risingwave_connector::source::iceberg::{
-    extract_bucket_and_file_name, get_parquet_fields, list_s3_directory, new_s3_operator,
+    FileScanBackend, extract_bucket_and_file_name, get_parquet_fields, list_data_directory,
+    new_azblob_operator, new_gcs_operator, new_s3_operator,
 };
-pub use risingwave_pb::expr::table_function::PbType as TableFunctionType;
 use risingwave_pb::expr::PbTableFunction;
+pub use risingwave_pb::expr::table_function::PbType as TableFunctionType;
 use thiserror_ext::AsReport;
 use tokio_postgres::types::Type as TokioPgType;
 
-use super::{infer_type, Expr, ExprImpl, ExprRewriter, Literal, RwResult};
+use super::{Expr, ExprImpl, ExprRewriter, Literal, RwResult, infer_type};
+use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::catalog::function_catalog::{FunctionCatalog, FunctionKind};
+use crate::catalog::root_catalog::SchemaPath;
 use crate::error::ErrorCode::BindError;
 use crate::utils::FRONTEND_RUNTIME;
+
+const INLINE_ARG_LEN: usize = 6;
+const CDC_SOURCE_ARG_LEN: usize = 2;
 
 /// A table function takes a row as input and returns a table. It is also known as Set-Returning
 /// Function.
@@ -79,14 +86,10 @@ impl TableFunction {
         let return_type = {
             // arguments:
             // file format e.g. parquet
-            // storage type e.g. s3
-            // s3 region
-            // s3 access key
-            // s3 secret key
-            // file location
-            if args.len() != 6 {
-                return Err(BindError("file_scan function only accepts 6 arguments: file_scan('parquet', 's3', s3 region, s3 access key, s3 secret key, file location)".to_owned()).into());
-            }
+            // storage type e.g. s3, gcs, azblob
+            // For s3: file_scan('parquet', 's3', s3_region, s3_access_key, s3_secret_key, file_location_or_directory)
+            // For gcs: file_scan('parquet', 'gcs', credential, file_location_or_directory)
+            // For azblob: file_scan('parquet', 'azblob', endpoint, account_name, account_key, file_location)
             let mut eval_args: Vec<String> = vec![];
             for arg in &args {
                 if arg.return_type() != DataType::Varchar {
@@ -111,7 +114,7 @@ impl TableFunction {
                                 return Err(BindError(
                                     "file_scan function only accepts string arguments".to_owned(),
                                 )
-                                .into())
+                                .into());
                             }
                         }
                     }
@@ -126,6 +129,22 @@ impl TableFunction {
                     }
                 }
             }
+
+            if (eval_args.len() != 4 && eval_args.len() != 6)
+                || (eval_args.len() == 4 && !"gcs".eq_ignore_ascii_case(&eval_args[1]))
+                || (eval_args.len() == 6
+                    && !"s3".eq_ignore_ascii_case(&eval_args[1])
+                    && !"azblob".eq_ignore_ascii_case(&eval_args[1]))
+            {
+                return Err(BindError(
+                "file_scan function supports three backends: s3, gcs, and azblob. Their formats are as follows: \n
+                    file_scan('parquet', 's3', s3_region, s3_access_key, s3_secret_key, file_location) \n
+                    file_scan('parquet', 'gcs', credential, service_account, file_location) \n
+                    file_scan('parquet', 'azblob', endpoint, account_name, account_key, file_location)"
+                        .to_owned(),
+                )
+                .into());
+            }
             if !"parquet".eq_ignore_ascii_case(&eval_args[0]) {
                 return Err(BindError(
                     "file_scan function only accepts 'parquet' as file format".to_owned(),
@@ -133,9 +152,13 @@ impl TableFunction {
                 .into());
             }
 
-            if !"s3".eq_ignore_ascii_case(&eval_args[1]) {
+            if !"s3".eq_ignore_ascii_case(&eval_args[1])
+                && !"gcs".eq_ignore_ascii_case(&eval_args[1])
+                && !"azblob".eq_ignore_ascii_case(&eval_args[1])
+            {
                 return Err(BindError(
-                    "file_scan function only accepts 's3' as storage type".to_owned(),
+                    "file_scan function only accepts 's3', 'gcs' or 'azblob' as storage type"
+                        .to_owned(),
                 )
                 .into());
             }
@@ -148,21 +171,69 @@ impl TableFunction {
 
             #[cfg(not(madsim))]
             {
-                let files = if eval_args[5].ends_with('/') {
+                let (file_scan_backend, input_file_location) =
+                    if "s3".eq_ignore_ascii_case(&eval_args[1]) {
+                        (FileScanBackend::S3, eval_args[5].clone())
+                    } else if "gcs".eq_ignore_ascii_case(&eval_args[1]) {
+                        (FileScanBackend::Gcs, eval_args[3].clone())
+                    } else if "azblob".eq_ignore_ascii_case(&eval_args[1]) {
+                        (FileScanBackend::Azblob, eval_args[5].clone())
+                    } else {
+                        unreachable!();
+                    };
+                let op = match file_scan_backend {
+                    FileScanBackend::S3 => {
+                        let (bucket, _) = extract_bucket_and_file_name(
+                            &eval_args[5].clone(),
+                            &file_scan_backend,
+                        )?;
+
+                        let (s3_region, s3_endpoint) = match eval_args[2].starts_with("http") {
+                            true => ("us-east-1".to_owned(), eval_args[2].clone()), /* for minio, hard code region as not used but needed. */
+                            false => (
+                                eval_args[2].clone(),
+                                format!("https://{}.s3.{}.amazonaws.com", bucket, eval_args[2],),
+                            ),
+                        };
+                        new_s3_operator(
+                            s3_region.clone(),
+                            eval_args[3].clone(),
+                            eval_args[4].clone(),
+                            bucket.clone(),
+                            s3_endpoint.clone(),
+                        )?
+                    }
+                    FileScanBackend::Gcs => {
+                        let (bucket, _) =
+                            extract_bucket_and_file_name(&input_file_location, &file_scan_backend)?;
+
+                        new_gcs_operator(eval_args[2].clone(), bucket.clone())?
+                    }
+                    FileScanBackend::Azblob => {
+                        let (bucket, _) =
+                            extract_bucket_and_file_name(&input_file_location, &file_scan_backend)?;
+
+                        new_azblob_operator(
+                            eval_args[2].clone(),
+                            eval_args[3].clone(),
+                            eval_args[4].clone(),
+                            bucket.clone(),
+                        )?
+                    }
+                };
+                let files = if input_file_location.ends_with('/') {
                     let files = tokio::task::block_in_place(|| {
                         FRONTEND_RUNTIME.block_on(async {
-                            let files = list_s3_directory(
-                                eval_args[2].clone(),
-                                eval_args[3].clone(),
-                                eval_args[4].clone(),
-                                eval_args[5].clone(),
+                            let files = list_data_directory(
+                                op.clone(),
+                                input_file_location.clone(),
+                                &file_scan_backend,
                             )
                             .await?;
 
                             Ok::<Vec<String>, anyhow::Error>(files)
                         })
                     })?;
-
                     if files.is_empty() {
                         return Err(BindError(
                             "file_scan function only accepts non-empty directory".to_owned(),
@@ -174,20 +245,14 @@ impl TableFunction {
                 } else {
                     None
                 };
-
                 let schema = tokio::task::block_in_place(|| {
                     FRONTEND_RUNTIME.block_on(async {
                         let location = match files.as_ref() {
                             Some(files) => files[0].clone(),
-                            None => eval_args[5].clone(),
+                            None => input_file_location.clone(),
                         };
-                        let (bucket, file_name) = extract_bucket_and_file_name(&location)?;
-                        let op = new_s3_operator(
-                            eval_args[2].clone(),
-                            eval_args[3].clone(),
-                            eval_args[4].clone(),
-                            bucket.clone(),
-                        )?;
+                        let (_, file_name) =
+                            extract_bucket_and_file_name(&location, &file_scan_backend)?;
 
                         let fields = get_parquet_fields(op, file_name).await?;
 
@@ -207,7 +272,11 @@ impl TableFunction {
 
                 if let Some(files) = files {
                     // if the file location is a directory, we need to remove the last argument and add all files in the directory as arguments
-                    args.remove(5);
+                    match file_scan_backend {
+                        FileScanBackend::S3 => args.remove(5),
+                        FileScanBackend::Gcs => args.remove(3),
+                        FileScanBackend::Azblob => args.remove(5),
+                    };
                     for file in files {
                         args.push(ExprImpl::Literal(Box::new(Literal::new(
                             Some(ScalarImpl::Utf8(file.into())),
@@ -228,44 +297,75 @@ impl TableFunction {
         })
     }
 
-    pub fn new_postgres_query(args: Vec<ExprImpl>) -> RwResult<Self> {
-        let args = {
-            if args.len() != 6 {
-                return Err(BindError("postgres_query function only accepts 6 arguments: postgres_query(hostname varchar, port varchar, username varchar, password varchar, database_name varchar, postgres_query varchar)".to_owned()).into());
-            }
-            let mut cast_args = Vec::with_capacity(6);
-            for arg in args {
-                let arg = arg.cast_implicit(DataType::Varchar)?;
-                cast_args.push(arg);
-            }
-            cast_args
-        };
-        let evaled_args = {
-            let mut evaled_args: Vec<String> = Vec::with_capacity(6);
-            for arg in &args {
-                match arg.try_fold_const() {
-                    Some(Ok(value)) => {
-                        let Some(scalar) = value else {
-                            return Err(BindError(
-                                "postgres_query function does not accept null arguments".to_owned(),
-                            )
-                            .into());
-                        };
-                        evaled_args.push(scalar.into_utf8().into());
-                    }
-                    Some(Err(err)) => {
-                        return Err(err);
-                    }
-                    None => {
-                        return Err(BindError(
-                            "postgres_query function only accepts constant arguments".to_owned(),
-                        )
-                        .into());
-                    }
+    fn handle_postgres_or_mysql_query_args(
+        catalog_reader: &CatalogReadGuard,
+        db_name: &str,
+        schema_path: SchemaPath<'_>,
+        args: Vec<ExprImpl>,
+        expect_connector_name: &str,
+    ) -> RwResult<Vec<ExprImpl>> {
+        let cast_args = match args.len() {
+            INLINE_ARG_LEN => {
+                let mut cast_args = Vec::with_capacity(INLINE_ARG_LEN);
+                for arg in args {
+                    let arg = arg.cast_implicit(DataType::Varchar)?;
+                    cast_args.push(arg);
                 }
+                cast_args
             }
-            evaled_args
+            CDC_SOURCE_ARG_LEN => {
+                let source_name = expr_impl_to_string_fn(&args[0])?;
+                let source_catalog = catalog_reader
+                    .get_source_by_name(db_name, schema_path, &source_name)?
+                    .0;
+                if !source_catalog
+                    .connector_name()
+                    .eq_ignore_ascii_case(expect_connector_name)
+                {
+                    return Err(BindError(format!("TVF function only accepts `mysql-cdc` and `postgres-cdc` source. Expected: {}, but got: {}", expect_connector_name, source_catalog.connector_name())).into());
+                }
+
+                let (props, secret_refs) = source_catalog.with_properties.clone().into_parts();
+                let secret_resolved =
+                    LocalSecretManager::global().fill_secrets(props, secret_refs)?;
+
+                vec![
+                    ExprImpl::literal_varchar(secret_resolved["hostname"].clone()),
+                    ExprImpl::literal_varchar(secret_resolved["port"].clone()),
+                    ExprImpl::literal_varchar(secret_resolved["username"].clone()),
+                    ExprImpl::literal_varchar(secret_resolved["password"].clone()),
+                    ExprImpl::literal_varchar(secret_resolved["database.name"].clone()),
+                    args.get(1)
+                        .unwrap()
+                        .clone()
+                        .cast_implicit(DataType::Varchar)?,
+                ]
+            }
+            _ => {
+                return Err(BindError("postgres_query function and mysql_query function accept either 2 arguments: (cdc_source_name varchar, query varchar) or 6 arguments: (hostname varchar, port varchar, username varchar, password varchar, database_name varchar, query varchar)".to_owned()).into());
+            }
         };
+
+        Ok(cast_args)
+    }
+
+    pub fn new_postgres_query(
+        catalog_reader: &CatalogReadGuard,
+        db_name: &str,
+        schema_path: SchemaPath<'_>,
+        args: Vec<ExprImpl>,
+    ) -> RwResult<Self> {
+        let args = Self::handle_postgres_or_mysql_query_args(
+            catalog_reader,
+            db_name,
+            schema_path,
+            args,
+            "postgres-cdc",
+        )?;
+        let evaled_args = args
+            .iter()
+            .map(expr_impl_to_string_fn)
+            .collect::<RwResult<Vec<_>>>()?;
 
         #[cfg(madsim)]
         {
@@ -348,45 +448,23 @@ impl TableFunction {
         }
     }
 
-    pub fn new_mysql_query(args: Vec<ExprImpl>) -> RwResult<Self> {
-        static MYSQL_ARGS_LEN: usize = 6;
-        let args = {
-            if args.len() != MYSQL_ARGS_LEN {
-                return Err(BindError("mysql_query function only accepts 6 arguments: mysql_query(hostname varchar, port varchar, username varchar, password varchar, database_name varchar, mysql_query varchar)".to_owned()).into());
-            }
-            let mut cast_args = Vec::with_capacity(MYSQL_ARGS_LEN);
-            for arg in args {
-                let arg = arg.cast_implicit(DataType::Varchar)?;
-                cast_args.push(arg);
-            }
-            cast_args
-        };
-        let evaled_args = {
-            let mut evaled_args: Vec<String> = Vec::with_capacity(MYSQL_ARGS_LEN);
-            for arg in &args {
-                match arg.try_fold_const() {
-                    Some(Ok(value)) => {
-                        let Some(scalar) = value else {
-                            return Err(BindError(
-                                "mysql_query function does not accept null arguments".to_owned(),
-                            )
-                            .into());
-                        };
-                        evaled_args.push(scalar.into_utf8().into());
-                    }
-                    Some(Err(err)) => {
-                        return Err(err);
-                    }
-                    None => {
-                        return Err(BindError(
-                            "mysql_query function only accepts constant arguments".to_owned(),
-                        )
-                        .into());
-                    }
-                }
-            }
-            evaled_args
-        };
+    pub fn new_mysql_query(
+        catalog_reader: &CatalogReadGuard,
+        db_name: &str,
+        schema_path: SchemaPath<'_>,
+        args: Vec<ExprImpl>,
+    ) -> RwResult<Self> {
+        let args = Self::handle_postgres_or_mysql_query_args(
+            catalog_reader,
+            db_name,
+            schema_path,
+            args,
+            "mysql-cdc",
+        )?;
+        let evaled_args = args
+            .iter()
+            .map(expr_impl_to_string_fn)
+            .collect::<RwResult<Vec<_>>>()?;
 
         #[cfg(madsim)]
         {
@@ -559,5 +637,26 @@ impl Expr for TableFunction {
 
     fn to_expr_proto(&self) -> risingwave_pb::expr::ExprNode {
         unreachable!("Table function should not be converted to ExprNode")
+    }
+}
+
+fn expr_impl_to_string_fn(arg: &ExprImpl) -> RwResult<String> {
+    match arg.try_fold_const() {
+        Some(Ok(value)) => {
+            let Some(scalar) = value else {
+                return Err(BindError(
+                    "postgres_query function and mysql_query function do not accept null arguments"
+                        .to_owned(),
+                )
+                .into());
+            };
+            Ok(scalar.into_utf8().to_string())
+        }
+        Some(Err(err)) => Err(err),
+        None => Err(BindError(
+            "postgres_query function and mysql_query function only accept constant arguments"
+                .to_owned(),
+        )
+        .into()),
     }
 }

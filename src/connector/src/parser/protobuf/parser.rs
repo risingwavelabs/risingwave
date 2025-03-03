@@ -16,17 +16,17 @@ use std::collections::HashSet;
 
 use anyhow::Context;
 use prost_reflect::{DescriptorPool, DynamicMessage, FileDescriptor, MessageDescriptor};
+use risingwave_common::catalog::Field;
 use risingwave_common::{bail, try_match_expand};
-pub use risingwave_connector_codec::decoder::protobuf::parser::{PROTOBUF_MESSAGES_AS_JSONB, *};
 use risingwave_connector_codec::decoder::protobuf::ProtobufAccess;
-use risingwave_pb::plan_common::ColumnDesc;
+pub use risingwave_connector_codec::decoder::protobuf::parser::{PROTOBUF_MESSAGES_AS_JSONB, *};
 
 use crate::error::ConnectorResult;
 use crate::parser::unified::AccessImpl;
 use crate::parser::utils::bytes_from_url;
 use crate::parser::{AccessBuilder, EncodingProperties};
-use crate::schema::schema_registry::{extract_schema_id, handle_sr_list, Client, WireFormatError};
-use crate::schema::SchemaLoader;
+use crate::schema::schema_registry::{Client, WireFormatError, extract_schema_id, handle_sr_list};
+use crate::schema::{ConfluentSchemaLoader, SchemaLoader};
 
 #[derive(Debug)]
 pub struct ProtobufAccessBuilder {
@@ -40,7 +40,11 @@ pub struct ProtobufAccessBuilder {
 
 impl AccessBuilder for ProtobufAccessBuilder {
     #[allow(clippy::unused_async)]
-    async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_>> {
+    async fn generate_accessor(
+        &mut self,
+        payload: Vec<u8>,
+        _: &crate::source::SourceMeta,
+    ) -> ConnectorResult<AccessImpl<'_>> {
         let payload = if self.confluent_wire_type {
             resolve_pb_header(&payload)?
         } else {
@@ -93,13 +97,13 @@ impl ProtobufParserConfig {
         }
         let pool = if protobuf_config.use_schema_registry {
             let client = Client::new(url, &protobuf_config.client_config)?;
-            let loader = SchemaLoader {
+            let loader = SchemaLoader::Confluent(ConfluentSchemaLoader {
                 client,
                 name_strategy: protobuf_config.name_strategy,
                 topic: protobuf_config.topic,
                 key_record_name: None,
                 val_record_name: Some(message_name.clone()),
-            };
+            });
             let (_schema_id, root_file_descriptor) = loader
                 .load_val_schema::<FileDescriptor>()
                 .await
@@ -127,9 +131,8 @@ impl ProtobufParserConfig {
     }
 
     /// Maps the protobuf schema to relational schema.
-    pub fn map_to_columns(&self) -> ConnectorResult<Vec<ColumnDesc>> {
-        pb_schema_to_column_descs(&self.message_descriptor, &self.messages_as_jsonb)
-            .map_err(|e| e.into())
+    pub fn map_to_columns(&self) -> ConnectorResult<Vec<Field>> {
+        pb_schema_to_fields(&self.message_descriptor, &self.messages_as_jsonb).map_err(|e| e.into())
     }
 }
 

@@ -435,7 +435,7 @@ pub fn secure_compare(left: &str, right: &str) -> bool {
 mod tests {
     use std::str::FromStr;
 
-    use risingwave_common::types::{Decimal, Timestamp, F32, F64};
+    use risingwave_common::types::{Decimal, F32, F64, Timestamp};
     use risingwave_expr::expr::build_from_pretty;
 
     use super::*;

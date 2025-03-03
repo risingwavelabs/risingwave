@@ -19,8 +19,8 @@ use std::time::Duration;
 
 use either::Either;
 use fastrace_opentelemetry::OpenTelemetryReporter;
-use opentelemetry::trace::{SpanKind, TracerProvider};
 use opentelemetry::InstrumentationLibrary;
+use opentelemetry::trace::{SpanKind, TracerProvider};
 use opentelemetry_sdk::Resource;
 use risingwave_common::metrics::MetricsLayer;
 use risingwave_common::util::deployment::Deployment;
@@ -30,12 +30,12 @@ use risingwave_common::util::tracing::layer::set_toggle_otel_layer_fn;
 use thiserror_ext::AsReport;
 use tracing::level_filters::LevelFilter as Level;
 use tracing_subscriber::filter::{FilterFn, Targets};
+use tracing_subscriber::fmt::FormatFields;
 use tracing_subscriber::fmt::format::DefaultFields;
 use tracing_subscriber::fmt::time::OffsetTime;
-use tracing_subscriber::fmt::FormatFields;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::prelude::*;
-use tracing_subscriber::{filter, reload, EnvFilter};
+use tracing_subscriber::{EnvFilter, filter, reload};
 
 pub struct LoggerSettings {
     /// The name of the service. Used to identify the service in distributed tracing.

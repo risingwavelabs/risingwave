@@ -18,25 +18,40 @@ use std::ops::Bound;
 use std::vec;
 
 use anyhow::anyhow;
+use chrono::{MappedLocalTime, TimeZone};
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, Str, StrAssocArr, XmlNode};
 use risingwave_common::catalog::{
-    ColumnCatalog, ColumnDesc, ConflictBehavior, CreateType, Engine, Field, FieldDisplay, Schema,
-    StreamJobStatus, OBJECT_ID_PLACEHOLDER,
+    ColumnCatalog, ColumnDesc, ConflictBehavior, CreateType, Engine, Field, FieldDisplay,
+    OBJECT_ID_PLACEHOLDER, Schema, StreamJobStatus,
 };
 use risingwave_common::constants::log_store::v2::{
     KV_LOG_STORE_PREDEFINED_COLUMNS, PK_ORDERING, VNODE_COLUMN_INDEX,
 };
 use risingwave_common::hash::VnodeCount;
-use risingwave_common::types::ScalarImpl;
-use risingwave_common::util::scan_range::{is_full_range, ScanRange};
+use risingwave_common::license::Feature;
+use risingwave_common::types::{DataType, Interval, ScalarImpl, Timestamptz};
+use risingwave_common::util::scan_range::{ScanRange, is_full_range};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
+use risingwave_connector::source::iceberg::IcebergTimeTravelInfo;
+use risingwave_expr::aggregate::PbAggKind;
+use risingwave_expr::bail;
+use risingwave_pb::plan_common::as_of::AsOfType;
+use risingwave_pb::plan_common::{PbAsOf, as_of};
+use risingwave_sqlparser::ast::AsOf;
 
+use super::generic::{self, GenericPlanRef, PhysicalPlanRef};
+use super::pretty_config;
+use crate::PlanRef;
 use crate::catalog::table_catalog::TableType;
 use crate::catalog::{ColumnId, TableCatalog, TableId};
-use crate::optimizer::property::{Cardinality, Order, RequiredDist};
+use crate::error::{ErrorCode, Result};
+use crate::expr::InputRef;
 use crate::optimizer::StreamScanType;
+use crate::optimizer::plan_node::generic::Agg;
+use crate::optimizer::plan_node::{BatchSimpleAgg, PlanAggCall};
+use crate::optimizer::property::{Cardinality, Order, RequiredDist, WatermarkColumns};
 use crate::utils::{Condition, IndexSet};
 
 #[derive(Default)]
@@ -158,6 +173,8 @@ impl TableCatalogBuilder {
 
         TableCatalog {
             id: TableId::placeholder(),
+            schema_id: 0,
+            database_id: 0,
             associated_source_id: None,
             name: String::new(),
             dependent_relations: vec![],
@@ -253,24 +270,25 @@ pub(crate) fn column_names_pretty<'a>(schema: &Schema) -> Pretty<'a> {
 }
 
 pub(crate) fn watermark_pretty<'a>(
-    watermark_columns: &FixedBitSet,
+    watermark_columns: &WatermarkColumns,
     schema: &Schema,
 ) -> Option<Pretty<'a>> {
-    iter_fields_pretty(watermark_columns.ones(), schema)
-}
-
-pub(crate) fn iter_fields_pretty<'a>(
-    columns: impl Iterator<Item = usize>,
-    schema: &Schema,
-) -> Option<Pretty<'a>> {
-    let arr = columns
-        .map(|idx| FieldDisplay(schema.fields.get(idx).unwrap()))
-        .map(|d| Pretty::display(&d))
-        .collect::<Vec<_>>();
-    if arr.is_empty() {
+    if watermark_columns.is_empty() {
         None
     } else {
-        Some(Pretty::Array(arr))
+        let groups = watermark_columns.grouped();
+        let pretty_groups = groups
+            .values()
+            .map(|cols| {
+                Pretty::Array(
+                    cols.indices()
+                        .map(|idx| FieldDisplay(schema.fields.get(idx).unwrap()))
+                        .map(|d| Pretty::display(&d))
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .collect();
+        Some(Pretty::Array(pretty_groups))
     }
 }
 
@@ -345,20 +363,6 @@ macro_rules! plan_node_name {
     };
 }
 pub(crate) use plan_node_name;
-use risingwave_common::license::Feature;
-use risingwave_common::types::{DataType, Interval};
-use risingwave_expr::aggregate::PbAggKind;
-use risingwave_pb::plan_common::as_of::AsOfType;
-use risingwave_pb::plan_common::{as_of, PbAsOf};
-use risingwave_sqlparser::ast::AsOf;
-
-use super::generic::{self, GenericPlanRef, PhysicalPlanRef};
-use super::pretty_config;
-use crate::error::{ErrorCode, Result};
-use crate::expr::InputRef;
-use crate::optimizer::plan_node::generic::Agg;
-use crate::optimizer::plan_node::{BatchSimpleAgg, PlanAggCall};
-use crate::PlanRef;
 
 pub fn infer_kv_log_store_table_catalog_inner(
     input: &PlanRef,
@@ -383,6 +387,51 @@ pub fn infer_kv_log_store_table_catalog_inner(
     let read_prefix_len_hint = table_catalog_builder.get_current_pk_len();
 
     let payload_indices = table_catalog_builder.extend_columns(columns);
+
+    value_indices.extend(payload_indices);
+    table_catalog_builder.set_value_indices(value_indices);
+
+    // Modify distribution key indices based on the pre-defined columns.
+    let dist_key = input
+        .distribution()
+        .dist_column_indices()
+        .iter()
+        .map(|idx| idx + KV_LOG_STORE_PREDEFINED_COLUMNS.len())
+        .collect_vec();
+
+    table_catalog_builder.build(dist_key, read_prefix_len_hint)
+}
+
+pub fn infer_synced_kv_log_store_table_catalog_inner(
+    input: &PlanRef,
+    columns: &[Field],
+) -> TableCatalog {
+    let mut table_catalog_builder = TableCatalogBuilder::default();
+
+    let mut value_indices =
+        Vec::with_capacity(KV_LOG_STORE_PREDEFINED_COLUMNS.len() + columns.len());
+
+    for (name, data_type) in KV_LOG_STORE_PREDEFINED_COLUMNS {
+        let indice = table_catalog_builder.add_column(&Field::with_name(data_type, name));
+        value_indices.push(indice);
+    }
+
+    table_catalog_builder.set_vnode_col_idx(VNODE_COLUMN_INDEX);
+
+    for (i, ordering) in PK_ORDERING.iter().enumerate() {
+        table_catalog_builder.add_order_column(i, *ordering);
+    }
+
+    let read_prefix_len_hint = table_catalog_builder.get_current_pk_len();
+
+    let payload_indices = {
+        let mut payload_indices = Vec::with_capacity(columns.len());
+        for column in columns {
+            let payload_index = table_catalog_builder.add_column(column);
+            payload_indices.push(payload_index);
+        }
+        payload_indices
+    };
 
     value_indices.extend(payload_indices);
     table_catalog_builder.set_value_indices(value_indices);
@@ -440,9 +489,31 @@ pub fn to_pb_time_travel_as_of(a: &Option<AsOf>) -> Result<Option<PbAsOf>> {
         AsOf::TimestampString(ts) => {
             let date_time = speedate::DateTime::parse_str_rfc3339(ts)
                 .map_err(|_e| anyhow!("fail to parse timestamp"))?;
-            AsOfType::Timestamp(as_of::Timestamp {
-                timestamp: date_time.timestamp_tz(),
-            })
+            let timestamp = if date_time.time.tz_offset.is_none() {
+                // If the input does not specify a time zone, use the time zone set by the "SET TIME ZONE" command.
+                risingwave_expr::expr_context::TIME_ZONE::try_with(|set_time_zone| {
+                    let tz =
+                        Timestamptz::lookup_time_zone(set_time_zone).map_err(|e| anyhow!(e))?;
+                    match tz.with_ymd_and_hms(
+                        date_time.date.year.into(),
+                        date_time.date.month.into(),
+                        date_time.date.day.into(),
+                        date_time.time.hour.into(),
+                        date_time.time.minute.into(),
+                        date_time.time.second.into(),
+                    ) {
+                        MappedLocalTime::Single(d) => Ok(d.timestamp()),
+                        MappedLocalTime::Ambiguous(_, _) | MappedLocalTime::None => {
+                            Err(anyhow!(format!(
+                                "failed to parse the timestamp {ts} with the specified time zone {tz}"
+                            )))
+                        }
+                    }
+                })??
+            } else {
+                date_time.timestamp_tz()
+            };
+            AsOfType::Timestamp(as_of::Timestamp { timestamp })
         }
         AsOf::VersionNum(_) | AsOf::VersionString(_) => {
             return Err(ErrorCode::NotSupported(
@@ -468,6 +539,52 @@ pub fn to_pb_time_travel_as_of(a: &Option<AsOf>) -> Result<Option<PbAsOf>> {
     Ok(Some(PbAsOf {
         as_of_type: Some(as_of_type),
     }))
+}
+
+pub fn to_iceberg_time_travel_as_of(
+    a: &Option<AsOf>,
+    timezone: &String,
+) -> Result<Option<IcebergTimeTravelInfo>> {
+    Ok(match a {
+        Some(AsOf::VersionNum(v)) => Some(IcebergTimeTravelInfo::Version(*v)),
+        Some(AsOf::TimestampNum(ts)) => Some(IcebergTimeTravelInfo::TimestampMs(ts * 1000)),
+        Some(AsOf::VersionString(_)) => {
+            bail!("Unsupported version string in iceberg time travel")
+        }
+        Some(AsOf::TimestampString(ts)) => {
+            let date_time = speedate::DateTime::parse_str_rfc3339(ts)
+                .map_err(|_e| anyhow!("fail to parse timestamp"))?;
+            let timestamp = if date_time.time.tz_offset.is_none() {
+                // If the input does not specify a time zone, use the time zone set by the "SET TIME ZONE" command.
+                let tz = Timestamptz::lookup_time_zone(timezone).map_err(|e| anyhow!(e))?;
+                match tz.with_ymd_and_hms(
+                    date_time.date.year.into(),
+                    date_time.date.month.into(),
+                    date_time.date.day.into(),
+                    date_time.time.hour.into(),
+                    date_time.time.minute.into(),
+                    date_time.time.second.into(),
+                ) {
+                    MappedLocalTime::Single(d) => Ok(d.timestamp()),
+                    MappedLocalTime::Ambiguous(_, _) | MappedLocalTime::None => {
+                        Err(anyhow!(format!(
+                            "failed to parse the timestamp {ts} with the specified time zone {tz}"
+                        )))
+                    }
+                }?
+            } else {
+                date_time.timestamp_tz()
+            };
+
+            Some(IcebergTimeTravelInfo::TimestampMs(
+                timestamp * 1000 + date_time.time.microsecond as i64 / 1000,
+            ))
+        }
+        Some(AsOf::ProcessTime) | Some(AsOf::ProcessTimeWithInterval(_)) => {
+            unreachable!()
+        }
+        None => None,
+    })
 }
 
 pub fn scan_ranges_as_strs(order_names: Vec<String>, scan_ranges: &Vec<ScanRange>) -> Vec<String> {

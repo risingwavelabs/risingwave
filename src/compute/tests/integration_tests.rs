@@ -15,8 +15,8 @@
 #![feature(coroutines)]
 #![feature(proc_macro_hygiene, stmt_expr_attributes)]
 
-use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
 
 use futures::stream::StreamExt;
 use futures_async_stream::try_stream;
@@ -30,15 +30,16 @@ use risingwave_batch_executors::{
 use risingwave_common::array::{Array, DataChunk, F64Array, SerialArray};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{
-    ColumnDesc, ColumnId, ConflictBehavior, Field, Schema, TableId, INITIAL_TABLE_VERSION_ID,
+    ColumnDesc, ColumnId, ConflictBehavior, Field, INITIAL_TABLE_VERSION_ID, Schema, TableId,
 };
 use risingwave_common::row::OwnedRow;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::test_prelude::DataChunkTestExt;
 use risingwave_common::types::{DataType, IntoOrdered};
-use risingwave_common::util::epoch::{test_epoch, EpochExt, EpochPair};
+use risingwave_common::util::epoch::{EpochExt, EpochPair, test_epoch};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
+use risingwave_common_rate_limit::RateLimit;
 use risingwave_connector::source::reader::desc::test_utils::create_source_desc_builder;
 use risingwave_dml::dml_manager::DmlManager;
 use risingwave_hummock_sdk::test_batch_query_epoch;
@@ -46,7 +47,7 @@ use risingwave_pb::catalog::StreamSourceInfo;
 use risingwave_pb::plan_common::PbRowFormatType;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::panic_store::PanicStateStore;
-use risingwave_storage::table::batch_table::storage_table::StorageTable;
+use risingwave_storage::table::batch_table::BatchTable;
 use risingwave_stream::common::table::state_table::StateTable;
 use risingwave_stream::common::table::test_utils::gen_pbtable;
 use risingwave_stream::error::StreamResult;
@@ -194,7 +195,7 @@ async fn test_table_materialize() -> StreamResult<()> {
             INITIAL_TABLE_VERSION_ID,
             column_descs.clone(),
             1024,
-            None,
+            RateLimit::Disabled,
         )
         .boxed(),
     );
@@ -252,7 +253,7 @@ async fn test_table_materialize() -> StreamResult<()> {
 
     let value_indices = (0..column_descs.len()).collect_vec();
     // Since we have not polled `Materialize`, we cannot scan anything from this table
-    let table = StorageTable::for_test(
+    let table = BatchTable::for_test(
         memory_state_store.clone(),
         table_id,
         column_descs.clone(),
@@ -463,7 +464,7 @@ async fn test_row_seq_scan() -> StreamResult<()> {
         None,
     )
     .await;
-    let table = StorageTable::for_test(
+    let table = BatchTable::for_test(
         memory_state_store.clone(),
         TableId::from(0x42),
         column_descs.clone(),
@@ -486,7 +487,10 @@ async fn test_row_seq_scan() -> StreamResult<()> {
     ]));
 
     epoch.inc_for_test();
-    state.commit(epoch).await.unwrap();
+    state
+        .commit_assert_no_update_vnode_bitmap(epoch)
+        .await
+        .unwrap();
 
     let executor = Box::new(RowSeqScanExecutor::new(
         table,

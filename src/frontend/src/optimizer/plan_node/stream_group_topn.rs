@@ -12,19 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use fixedbitset::FixedBitSet;
 use pretty_xmlish::XmlNode;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::generic::{DistillUnit, TopNLimit};
 use super::stream::prelude::*;
-use super::utils::{plan_node_name, watermark_pretty, Distill};
-use super::{generic, ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode};
+use super::utils::{Distill, plan_node_name, watermark_pretty};
+use super::{ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode, generic};
+use crate::PlanRef;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanNode;
 use crate::optimizer::property::{MonotonicityMap, Order};
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::PlanRef;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamGroupTopN {
@@ -40,20 +39,13 @@ impl StreamGroupTopN {
         assert!(!core.group_key.is_empty());
         assert!(core.limit_attr.limit() > 0);
         let input = &core.input;
-        let schema = input.schema().clone();
 
         // FIXME(rc): Actually only watermark messages on the first group-by column are propagated
         // acccoring to the current GroupTopN implementation. This should be fixed.
         let watermark_columns = if input.append_only() {
             input.watermark_columns().clone()
         } else {
-            let mut watermark_columns = FixedBitSet::with_capacity(schema.len());
-            for &idx in &core.group_key {
-                if input.watermark_columns().contains(idx) {
-                    watermark_columns.insert(idx);
-                }
-            }
-            watermark_columns
+            input.watermark_columns().retain_clone(&core.group_key)
         };
 
         let mut stream_key = core

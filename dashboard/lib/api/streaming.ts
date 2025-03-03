@@ -28,7 +28,7 @@ import {
   View,
 } from "../../proto/gen/catalog"
 import {
-  FragmentVertexToRelationMap,
+  FragmentToRelationMap,
   ListObjectDependenciesResponse_ObjectDependencies as ObjectDependencies,
   RelationIdInfos,
   TableFragments,
@@ -158,10 +158,10 @@ export async function getRelationDependencies() {
   return await getObjectDependencies()
 }
 
-export async function getFragmentVertexToRelationMap() {
-  let res = await api.get("/fragment_vertex_to_relation_id_map")
-  let fragmentVertexToRelationMap: FragmentVertexToRelationMap =
-    FragmentVertexToRelationMap.fromJSON(res)
+export async function getFragmentToRelationMap() {
+  let res = await api.get("/fragment_to_relation_map")
+  let fragmentVertexToRelationMap: FragmentToRelationMap =
+    FragmentToRelationMap.fromJSON(res)
   return fragmentVertexToRelationMap
 }
 

@@ -18,13 +18,13 @@ use risingwave_pb::compactor::{
 };
 use risingwave_pb::monitor_service::monitor_service_server::MonitorService;
 use risingwave_pb::monitor_service::{
-    AnalyzeHeapRequest, AnalyzeHeapResponse, GetBackPressureRequest, GetBackPressureResponse,
+    AnalyzeHeapRequest, AnalyzeHeapResponse, GetStreamingStatsRequest, GetStreamingStatsResponse,
     HeapProfilingRequest, HeapProfilingResponse, ListHeapProfilingRequest,
     ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse, StackTraceRequest,
     StackTraceResponse, TieredCacheTracingRequest, TieredCacheTracingResponse,
 };
-use risingwave_storage::hummock::compactor::await_tree_key::Compaction;
 use risingwave_storage::hummock::compactor::CompactionAwaitTreeRegRef;
+use risingwave_storage::hummock::compactor::await_tree_key::Compaction;
 use tokio::sync::mpsc;
 use tonic::{Request, Response, Status};
 
@@ -133,10 +133,10 @@ impl MonitorService for MonitorServiceImpl {
         ))
     }
 
-    async fn get_back_pressure(
+    async fn get_streaming_stats(
         &self,
-        _request: Request<GetBackPressureRequest>,
-    ) -> Result<Response<GetBackPressureResponse>, Status> {
+        _request: Request<GetStreamingStatsRequest>,
+    ) -> Result<Response<GetStreamingStatsResponse>, Status> {
         Err(Status::unimplemented(
             "Get Back Pressure unimplemented in compactor",
         ))

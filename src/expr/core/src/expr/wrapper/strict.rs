@@ -17,9 +17,9 @@ use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
 
+use crate::ExprError;
 use crate::error::Result;
 use crate::expr::{Expression, ValueImpl};
-use crate::ExprError;
 
 /// A wrapper of [`Expression`] that only keeps the first error if multiple errors are returned.
 pub(crate) struct Strict<E> {

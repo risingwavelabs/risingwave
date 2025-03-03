@@ -23,7 +23,6 @@
 // FIXME: This should be fixed!!! https://github.com/risingwavelabs/risingwave/issues/19906
 #![expect(clippy::large_enum_variant)]
 
-use std::collections::HashMap;
 use std::str::FromStr;
 
 use plan_common::AdditionalColumn;
@@ -32,6 +31,7 @@ use risingwave_error::tonic::ToTonicStatus;
 use thiserror::Error;
 
 use crate::common::WorkerType;
+use crate::stream_plan::PbStreamScanType;
 
 #[rustfmt::skip]
 #[cfg_attr(madsim, path = "sim/catalog.rs")]
@@ -243,6 +243,12 @@ impl common::WorkerNode {
             None
         }
     }
+
+    pub fn resource_group(&self) -> Option<String> {
+        self.property
+            .as_ref()
+            .and_then(|p| p.resource_group.clone())
+    }
 }
 
 impl stream_plan::SourceNode {
@@ -378,24 +384,23 @@ impl stream_plan::Dispatcher {
     }
 }
 
-impl meta::table_fragments::Fragment {
-    pub fn dispatches(&self) -> HashMap<i32, stream_plan::DispatchStrategy> {
-        self.actors[0]
-            .dispatcher
-            .iter()
-            .map(|d| {
-                let fragment_id = d.dispatcher_id as _;
-                let strategy = d.as_strategy();
-                (fragment_id, strategy)
-            })
-            .collect()
-    }
-}
-
 impl catalog::StreamSourceInfo {
     /// Refer to [`Self::cdc_source_job`] for details.
     pub fn is_shared(&self) -> bool {
         self.cdc_source_job
+    }
+}
+
+impl stream_plan::PbStreamScanType {
+    pub fn is_reschedulable(&self) -> bool {
+        match self {
+            // todo: should this be true?
+            PbStreamScanType::UpstreamOnly => false,
+            PbStreamScanType::ArrangementBackfill => true,
+            // todo: true when stable
+            PbStreamScanType::SnapshotBackfill => false,
+            _ => false,
+        }
     }
 }
 
@@ -429,6 +434,7 @@ impl std::fmt::Debug for data::DataType {
             interval_type,
             field_type,
             field_names,
+            field_ids,
             type_name,
             // currently all data types are nullable
             is_nullable: _,
@@ -454,6 +460,9 @@ impl std::fmt::Debug for data::DataType {
         if !self.field_names.is_empty() {
             s.field("field_names", field_names);
         }
+        if !self.field_ids.is_empty() {
+            s.field("field_ids", field_ids);
+        }
         s.finish()
     }
 }
@@ -474,8 +483,6 @@ impl std::fmt::Debug for plan_common::ColumnDesc {
             column_type,
             column_id,
             name,
-            field_descs,
-            type_name,
             description,
             additional_column_type,
             additional_column,
@@ -490,12 +497,6 @@ impl std::fmt::Debug for plan_common::ColumnDesc {
             s.field("column_type", &"Unknown");
         }
         s.field("column_id", column_id).field("name", name);
-        if !self.field_descs.is_empty() {
-            s.field("field_descs", field_descs);
-        }
-        if !self.type_name.is_empty() {
-            s.field("type_name", type_name);
-        }
         if let Some(description) = description {
             s.field("description", description);
         }
@@ -519,7 +520,7 @@ impl std::fmt::Debug for plan_common::ColumnDesc {
 
 #[cfg(test)]
 mod tests {
-    use crate::data::{data_type, DataType};
+    use crate::data::{DataType, data_type};
     use crate::plan_common::Field;
     use crate::stream_plan::stream_node::NodeBody;
 

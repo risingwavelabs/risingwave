@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use super::{BoxedRule, Rule};
-use crate::optimizer::plan_node::{LogicalUnion, PlanTreeNode};
 use crate::optimizer::PlanRef;
+use crate::optimizer::plan_node::{LogicalUnion, PlanTreeNode};
 
 pub struct UnionMergeRule {}
 impl Rule for UnionMergeRule {

@@ -18,21 +18,21 @@ use std::sync::Arc;
 use bytes::Bytes;
 use foyer::CacheHint;
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::util::epoch::{test_epoch, EpochExt};
-use risingwave_hummock_sdk::key::prefixed_range_with_vnode;
+use risingwave_common::util::epoch::{EpochExt, test_epoch};
 use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_hummock_sdk::key::prefixed_range_with_vnode;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
+use risingwave_storage::StateStore;
 use risingwave_storage::hummock::{CachePolicy, HummockStorage};
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{
     LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions, SealCurrentEpochOptions,
     StateStoreRead, TryWaitEpochOptions, WriteOptions,
 };
-use risingwave_storage::StateStore;
 
 use crate::local_state_store_test_utils::LocalStateStoreTestExt;
-use crate::test_utils::{gen_key_from_bytes, with_hummock_storage, TestIngestBatch};
+use crate::test_utils::{TestIngestBatch, gen_key_from_bytes, with_hummock_storage};
 
 macro_rules! assert_count_range_scan {
     (
@@ -153,7 +153,7 @@ async fn test_snapshot_inner(
             .unwrap();
         if enable_commit {
             mock_hummock_meta_client
-                .commit_epoch(epoch1, res, false)
+                .commit_epoch(epoch1, res)
                 .await
                 .unwrap();
             hummock_storage
@@ -200,7 +200,7 @@ async fn test_snapshot_inner(
             .unwrap();
         if enable_commit {
             mock_hummock_meta_client
-                .commit_epoch(epoch2, res, false)
+                .commit_epoch(epoch2, res)
                 .await
                 .unwrap();
             hummock_storage
@@ -253,7 +253,7 @@ async fn test_snapshot_inner(
             .unwrap();
         if enable_commit {
             mock_hummock_meta_client
-                .commit_epoch(epoch3, res, false)
+                .commit_epoch(epoch3, res)
                 .await
                 .unwrap();
             hummock_storage
@@ -339,7 +339,7 @@ async fn test_snapshot_range_scan_inner(
             .unwrap();
         if enable_commit {
             mock_hummock_meta_client
-                .commit_epoch(epoch, res, false)
+                .commit_epoch(epoch, res)
                 .await
                 .unwrap();
             hummock_storage

@@ -43,9 +43,13 @@ CREATE TABLE kafka_json_schema_plain with (
 query
 describe kafka_json_schema_plain;
 ----
-dimensions (empty) false NULL
+dimensions struct false NULL
+dimensions.height double precision false NULL
+dimensions.length double precision false NULL
+dimensions.width double precision false NULL
 map jsonb false NULL
-notMap (empty) false NULL
+notMap struct false NULL
+notMap.a character varying false NULL
 price double precision false NULL
 productId bigint false NULL
 productName character varying false NULL

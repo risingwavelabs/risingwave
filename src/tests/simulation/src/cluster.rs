@@ -14,6 +14,7 @@
 
 #![cfg_attr(not(madsim), allow(unused_imports))]
 
+use std::cmp::max;
 use std::collections::HashMap;
 use std::future::Future;
 use std::io::Write;
@@ -21,7 +22,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 use cfg_or_panic::cfg_or_panic;
 use clap::Parser;
 use futures::channel::{mpsc, oneshot};
@@ -30,9 +31,10 @@ use futures::{SinkExt, StreamExt};
 use itertools::Itertools;
 #[cfg(madsim)]
 use madsim::runtime::{Handle, NodeHandle};
-use rand::seq::IteratorRandom;
 use rand::Rng;
+use rand::seq::IteratorRandom;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
+use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 #[cfg(madsim)]
 use risingwave_object_store::object::sim::SimServer as ObjectStoreSimServer;
 use risingwave_pb::common::WorkerNode;
@@ -89,6 +91,9 @@ pub struct Configuration {
 
     /// Queries to run per session.
     pub per_session_queries: Arc<Vec<String>>,
+
+    /// Resource groups for compute nodes.
+    pub compute_resource_groups: HashMap<usize, String>,
 }
 
 impl Default for Configuration {
@@ -116,6 +121,7 @@ metrics_level = "Disabled"
             compactor_nodes: 1,
             compute_node_cores: 1,
             per_session_queries: vec![].into(),
+            compute_resource_groups: Default::default(),
         }
     }
 }
@@ -203,6 +209,39 @@ metrics_level = "Disabled"
                 "create view if not exists mview_parallelism as select m.name, tf.parallelism from rw_materialized_views m, rw_table_fragments tf where m.id = tf.table_id;".into(),
             ]
                 .into(),
+            ..Default::default()
+        }
+    }
+
+    pub fn for_default_parallelism(default_parallelism: usize) -> Self {
+        let config_path = {
+            let mut file =
+                tempfile::NamedTempFile::new().expect("failed to create temp config file");
+
+            let config_data = format!(
+                r#"
+[server]
+telemetry_enabled = false
+metrics_level = "Disabled"
+[meta]
+default_parallelism = {default_parallelism}
+"#
+            )
+            .to_owned();
+            file.write_all(config_data.as_bytes())
+                .expect("failed to write config file");
+            file.into_temp_path()
+        };
+
+        Configuration {
+            config_path: ConfigPath::Temp(config_path.into()),
+            frontend_nodes: 1,
+            compute_nodes: 1,
+            meta_nodes: 1,
+            compactor_nodes: 1,
+            compute_node_cores: default_parallelism * 2,
+            per_session_queries: vec![].into(),
+            compute_resource_groups: Default::default(),
         }
     }
 
@@ -249,6 +288,7 @@ metrics_level = "Disabled"
             compute_node_cores: 1,
             per_session_queries: vec!["SET STREAMING_USE_ARRANGEMENT_BACKFILL = true;".into()]
                 .into(),
+            ..Default::default()
         }
     }
 
@@ -295,6 +335,7 @@ metrics_level = "Disabled"
             compactor_nodes: 1,
             compute_node_cores: 1,
             per_session_queries: vec![].into(),
+            ..Default::default()
         }
     }
 }
@@ -478,6 +519,12 @@ impl Cluster {
                 &conf.compute_node_cores.to_string(),
                 "--temp-secret-file-dir",
                 &format!("./secrets/compute-{i}"),
+                "--resource-group",
+                &conf
+                    .compute_resource_groups
+                    .get(&i)
+                    .cloned()
+                    .unwrap_or(DEFAULT_RESOURCE_GROUP.to_string()),
             ]);
             handle
                 .create_node()

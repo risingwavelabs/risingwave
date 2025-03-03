@@ -17,9 +17,9 @@ use std::ops::Bound::{Excluded, Included};
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::Ordering;
 
+use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::object_size_map;
 use risingwave_hummock_sdk::version::{GroupDeltaCommon, HummockVersion};
-use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_pb::hummock::hummock_version_checkpoint::{PbStaleObjects, StaleObjects};
 use risingwave_pb::hummock::{
     PbHummockVersion, PbHummockVersionArchive, PbHummockVersionCheckpoint,
@@ -27,10 +27,10 @@ use risingwave_pb::hummock::{
 use thiserror_ext::AsReport;
 use tracing::warn;
 
+use crate::hummock::HummockManager;
 use crate::hummock::error::Result;
 use crate::hummock::manager::versioning::Versioning;
 use crate::hummock::metrics_utils::{trigger_gc_stat, trigger_split_stat};
-use crate::hummock::HummockManager;
 
 #[derive(Default)]
 pub struct HummockVersionCheckpoint {
@@ -179,7 +179,7 @@ impl HummockManager {
                                 .change_log_delta
                                 .values()
                                 .flat_map(|change_log| {
-                                    let new_log = change_log.new_log.as_ref().unwrap();
+                                    let new_log = &change_log.new_log;
                                     new_log
                                         .new_value
                                         .iter()

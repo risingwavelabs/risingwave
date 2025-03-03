@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use super::{AccessResult, ChangeEvent};
-use crate::parser::unified::ChangeEventOperation;
 use crate::parser::SourceStreamChunkRowWriter;
+use crate::parser::unified::ChangeEventOperation;
 use crate::source::SourceColumnDesc;
 
 pub fn apply_row_operation_on_stream_chunk_writer_with_op(

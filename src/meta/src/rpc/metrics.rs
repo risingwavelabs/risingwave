@@ -19,11 +19,11 @@ use std::time::Duration;
 
 use prometheus::core::{AtomicF64, GenericGaugeVec};
 use prometheus::{
+    Histogram, HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec, Registry,
     exponential_buckets, histogram_opts, register_gauge_vec_with_registry,
     register_histogram_vec_with_registry, register_histogram_with_registry,
     register_int_counter_vec_with_registry, register_int_counter_with_registry,
-    register_int_gauge_vec_with_registry, register_int_gauge_with_registry, Histogram,
-    HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec, Registry,
+    register_int_gauge_vec_with_registry, register_int_gauge_with_registry,
 };
 use risingwave_common::metrics::{
     LabelGuardedHistogramVec, LabelGuardedIntCounterVec, LabelGuardedIntGaugeVec,
@@ -36,7 +36,7 @@ use risingwave_common::{
 use risingwave_connector::source::monitor::EnumeratorMetrics as SourceEnumeratorMetrics;
 use risingwave_meta_model::WorkerId;
 use risingwave_object_store::object::object_metrics::{
-    ObjectStoreMetrics, GLOBAL_OBJECT_STORE_METRICS,
+    GLOBAL_OBJECT_STORE_METRICS, ObjectStoreMetrics,
 };
 use risingwave_pb::common::WorkerType;
 use thiserror_ext::AsReport;
@@ -169,6 +169,7 @@ pub struct MetaMetrics {
     pub split_compaction_group_count: IntCounterVec,
     pub state_table_count: IntGaugeVec,
     pub branched_sst_count: IntGaugeVec,
+    pub compact_task_trivial_move_sst_count: HistogramVec,
 
     pub compaction_event_consumed_latency: Histogram,
     pub compaction_event_loop_iteration_latency: Histogram,
@@ -772,6 +773,14 @@ impl MetaMetrics {
         )
         .unwrap();
 
+        let opts = histogram_opts!(
+            "storage_compact_task_trivial_move_sst_count",
+            "sst count of compact trivial-move task",
+            exponential_buckets(1.0, 2.0, 8).unwrap()
+        );
+        let compact_task_trivial_move_sst_count =
+            register_histogram_vec_with_registry!(opts, &["group"], registry).unwrap();
+
         Self {
             grpc_latency,
             barrier_latency,
@@ -834,6 +843,7 @@ impl MetaMetrics {
             compact_task_size,
             compact_task_file_count,
             compact_task_batch_count,
+            compact_task_trivial_move_sst_count,
             table_write_throughput,
             split_compaction_group_count,
             state_table_count,

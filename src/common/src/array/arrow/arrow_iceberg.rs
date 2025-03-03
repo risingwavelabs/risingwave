@@ -21,7 +21,7 @@ use arrow_array::ArrayRef;
 use num_traits::abs;
 
 pub use super::arrow_53::{
-    arrow_array, arrow_buffer, arrow_cast, arrow_schema, FromArrow, ToArrow,
+    FromArrow, ToArrow, arrow_array, arrow_buffer, arrow_cast, arrow_schema,
 };
 use crate::array::{Array, ArrayError, ArrayImpl, DataChunk, DataType, DecimalArray};
 use crate::types::StructType;

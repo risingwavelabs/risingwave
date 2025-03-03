@@ -27,22 +27,21 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use itertools::Itertools;
-use risingwave_common::catalog::{TableOption, DEFAULT_SCHEMA_NAME, SYSTEM_SCHEMAS};
+use risingwave_common::catalog::{DEFAULT_SCHEMA_NAME, SYSTEM_SCHEMAS, TableOption};
+use risingwave_common::current_cluster_version;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont_mut;
-use risingwave_common::{bail, current_cluster_version};
-use risingwave_connector::source::cdc::build_cdc_table_id;
 use risingwave_connector::source::UPSTREAM_SOURCE_KEY;
+use risingwave_connector::source::cdc::build_cdc_table_id;
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::*;
 use risingwave_meta_model::table::TableType;
 use risingwave_meta_model::{
-    actor, connection, database, fragment, function, index, object, object_dependency, schema,
-    secret, sink, source, streaming_job, subscription, table, user_privilege, view, ActorId,
-    ActorUpstreamActors, ColumnCatalogArray, ConnectionId, CreateType, DatabaseId, FragmentId,
-    FunctionId, I32Array, IndexId, JobStatus, ObjectId, Property, SchemaId, SecretId, SinkId,
-    SourceId, StreamNode, StreamSourceInfo, StreamingParallelism, SubscriptionId, TableId, UserId,
-    ViewId,
+    ActorId, ColumnCatalogArray, ConnectionId, CreateType, DatabaseId, FragmentId, I32Array,
+    IndexId, JobStatus, ObjectId, Property, SchemaId, SecretId, SinkFormatDesc, SinkId, SourceId,
+    StreamNode, StreamSourceInfo, StreamingParallelism, SubscriptionId, TableId, UserId, ViewId,
+    connection, database, fragment, function, index, object, object_dependency, schema, secret,
+    sink, source, streaming_job, subscription, table, user_privilege, view,
 };
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::subscription::SubscriptionState;
@@ -53,17 +52,17 @@ use risingwave_pb::catalog::{
 };
 use risingwave_pb::meta::cancel_creating_jobs_request::PbCreatingJobInfo;
 use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
-use risingwave_pb::meta::relation::PbRelationInfo;
+use risingwave_pb::meta::object::PbObjectInfo;
 use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Info, Operation as NotificationOperation, Operation,
 };
-use risingwave_pb::meta::{PbFragmentWorkerSlotMapping, PbRelation, PbRelationGroup};
-use risingwave_pb::stream_plan::stream_node::NodeBody;
+use risingwave_pb::meta::{PbFragmentWorkerSlotMapping, PbObject, PbObjectGroup};
 use risingwave_pb::stream_plan::FragmentTypeFlag;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::telemetry::PbTelemetryEventStage;
 use risingwave_pb::user::PbUserInfo;
-use sea_orm::sea_query::{Expr, Query, SimpleExpr};
 use sea_orm::ActiveValue::Set;
+use sea_orm::sea_query::{Expr, Query, SimpleExpr};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, DatabaseTransaction, EntityTrait,
     IntoActiveModel, JoinType, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait,
@@ -74,18 +73,18 @@ use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tracing::info;
 
 use super::utils::{
-    check_subscription_name_duplicate, get_fragment_ids_by_jobs, get_internal_tables_by_id,
-    rename_relation, rename_relation_refer,
+    check_subscription_name_duplicate, get_internal_tables_by_id, rename_relation,
+    rename_relation_refer,
 };
+use crate::controller::ObjectModel;
 use crate::controller::catalog::util::update_internal_tables;
 use crate::controller::utils::*;
-use crate::controller::ObjectModel;
 use crate::manager::{
-    get_referred_connection_ids_from_source, get_referred_secret_ids_from_source, MetaSrvEnv,
-    NotificationVersion, IGNORED_NOTIFICATION_VERSION,
+    IGNORED_NOTIFICATION_VERSION, MetaSrvEnv, NotificationVersion,
+    get_referred_connection_ids_from_source, get_referred_secret_ids_from_source,
 };
 use crate::rpc::ddl_controller::DropMode;
-use crate::telemetry::{report_event, MetaTelemetryJobDesc};
+use crate::telemetry::{MetaTelemetryJobDesc, report_event};
 use crate::{MetaError, MetaResult};
 
 pub type Catalog = (
@@ -110,13 +109,23 @@ pub struct CatalogController {
     pub(crate) inner: RwLock<CatalogControllerInner>,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
+pub struct DropTableConnectorContext {
+    // we only apply one drop connector action for one table each time, so no need to vector here
+    pub(crate) to_change_streaming_job_id: ObjectId,
+    pub(crate) to_remove_state_table_id: TableId,
+    pub(crate) to_remove_source_id: SourceId,
+}
+
+#[derive(Clone, Default, Debug)]
 pub struct ReleaseContext {
     pub(crate) database_id: DatabaseId,
     pub(crate) removed_streaming_job_ids: Vec<ObjectId>,
     /// Dropped state table list, need to unregister from hummock.
     pub(crate) removed_state_table_ids: Vec<TableId>,
 
+    /// Dropped secrets, need to remove from secret manager.
+    pub(crate) removed_secret_ids: Vec<SecretId>,
     /// Dropped sources (when `DROP SOURCE`), need to unregister from source manager.
     pub(crate) removed_source_ids: Vec<SourceId>,
     /// Dropped Source fragments (when `DROP MATERIALIZED VIEW` referencing sources),
@@ -178,11 +187,11 @@ impl CatalogController {
     pub(crate) async fn notify_frontend_relation_info(
         &self,
         operation: NotificationOperation,
-        relation_info: PbRelationInfo,
+        relation_info: PbObjectInfo,
     ) -> NotificationVersion {
         self.env
             .notification_manager()
-            .notify_frontend_relation_info(operation, relation_info)
+            .notify_frontend_object_info(operation, relation_info)
             .await
     }
 
@@ -227,22 +236,20 @@ impl CatalogController {
         &self,
         subscription_id: u32,
     ) -> MetaResult<NotificationVersion> {
-        let inner = self.inner.write().await;
-        let txn = inner.db.begin().await?;
+        let inner = self.inner.read().await;
         let job_id = subscription_id as i32;
         let (subscription, obj) = Subscription::find_by_id(job_id)
             .find_also_related(Object)
-            .one(&txn)
+            .one(&inner.db)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("subscription", job_id))?;
-        txn.commit().await?;
 
         let version = self
             .notify_frontend(
                 Operation::Add,
-                Info::RelationGroup(PbRelationGroup {
-                    relations: vec![PbRelation {
-                        relation_info: PbRelationInfo::Subscription(
+                Info::ObjectGroup(PbObjectGroup {
+                    objects: vec![PbObject {
+                        object_info: PbObjectInfo::Subscription(
                             ObjectModel(subscription, obj.unwrap()).into(),
                         )
                         .into(),
@@ -251,6 +258,102 @@ impl CatalogController {
             )
             .await;
         Ok(version)
+    }
+
+    // for telemetry
+    pub async fn get_connector_usage(&self) -> MetaResult<jsonbb::Value> {
+        // get connector usage by source/sink
+        // the expect format is like:
+        // {
+        //     "source": [{
+        //         "$source_id": {
+        //             "connector": "kafka",
+        //             "format": "plain",
+        //             "encode": "json"
+        //         },
+        //     }],
+        //     "sink": [{
+        //         "$sink_id": {
+        //             "connector": "pulsar",
+        //             "format": "upsert",
+        //             "encode": "avro"
+        //         },
+        //     }],
+        // }
+
+        let inner = self.inner.read().await;
+        let source_props_and_info: Vec<(i32, Property, Option<StreamSourceInfo>)> = Source::find()
+            .select_only()
+            .column(source::Column::SourceId)
+            .column(source::Column::WithProperties)
+            .column(source::Column::SourceInfo)
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+        let sink_props_and_info: Vec<(i32, Property, Option<SinkFormatDesc>)> = Sink::find()
+            .select_only()
+            .column(sink::Column::SinkId)
+            .column(sink::Column::Properties)
+            .column(sink::Column::SinkFormatDesc)
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+        drop(inner);
+
+        let get_connector_from_property = |property: &Property| -> String {
+            property
+                .0
+                .get(UPSTREAM_SOURCE_KEY)
+                .map(|v| v.to_string())
+                .unwrap_or_default()
+        };
+
+        let source_report: Vec<jsonbb::Value> = source_props_and_info
+            .iter()
+            .map(|(oid, property, info)| {
+                let connector_name = get_connector_from_property(property);
+                let mut format = None;
+                let mut encode = None;
+                if let Some(info) = info {
+                    let pb_info = info.to_protobuf();
+                    format = Some(pb_info.format().as_str_name());
+                    encode = Some(pb_info.row_encode().as_str_name());
+                }
+                jsonbb::json!({
+                    oid.to_string(): {
+                        "connector": connector_name,
+                        "format": format,
+                        "encode": encode,
+                    },
+                })
+            })
+            .collect_vec();
+
+        let sink_report: Vec<jsonbb::Value> = sink_props_and_info
+            .iter()
+            .map(|(oid, property, info)| {
+                let connector_name = get_connector_from_property(property);
+                let mut format = None;
+                let mut encode = None;
+                if let Some(info) = info {
+                    let pb_info = info.to_protobuf();
+                    format = Some(pb_info.format().as_str_name());
+                    encode = Some(pb_info.encode().as_str_name());
+                }
+                jsonbb::json!({
+                    oid.to_string(): {
+                        "connector": connector_name,
+                        "format": format,
+                        "encode": encode,
+                    },
+                })
+            })
+            .collect_vec();
+
+        Ok(jsonbb::json!({
+                "source": source_report,
+                "sink": sink_report,
+        }))
     }
 
     pub async fn clean_dirty_subscription(
@@ -415,7 +518,7 @@ impl CatalogController {
 
         txn.commit().await?;
 
-        let relation_group = build_relation_group_for_delete(
+        let object_group = build_object_group_for_delete(
             dirty_mview_objs
                 .into_iter()
                 .chain(dirty_mview_internal_table_objs.into_iter())
@@ -423,7 +526,7 @@ impl CatalogController {
         );
 
         let _version = self
-            .notify_frontend(NotificationOperation::Delete, relation_group)
+            .notify_frontend(NotificationOperation::Delete, object_group)
             .await;
 
         Ok(dirty_associated_source_ids)
@@ -481,7 +584,7 @@ impl CatalogController {
         let version = self
             .notify_frontend_relation_info(
                 NotificationOperation::Update,
-                PbRelationInfo::Table(ObjectModel(table, table_obj).into()),
+                PbObjectInfo::Table(ObjectModel(table, table_obj).into()),
             )
             .await;
 

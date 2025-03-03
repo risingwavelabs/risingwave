@@ -450,10 +450,88 @@ PGDATABASE=sink_test psql --tuples-only -c "select * from pg_types_table order b
 
 
 statement ok
+DELETE FROM rw_types_table;
+
+statement ok
+flush;
+
+system ok
+PGDATABASE=sink_test psql --tuples-only -c "select * from pg_types_table order by id;"
+----
+
+
+statement ok
 DROP SINK rw_types_to_pg_types;
 
 statement ok
 DROP TABLE rw_types_table;
+
+################### Test subset sink: rw table with a subset of columns of pg table (includes full pk)
+
+statement ok
+DROP TABLE IF EXISTS rw_types_subset_table;
+
+statement ok
+CREATE TABLE rw_types_bad_pk(
+    varchar_column VARCHAR,
+)
+
+statement error
+CREATE SINK rw_types_to_pg_types FROM rw_types_bad_pk WITH (
+    connector='postgres',
+    host='$PGHOST',
+    port='$PGPORT',
+    user='$PGUSER',
+    password='$PGPASSWORD',
+    database='sink_test',
+    table='pg_types_table',
+    type='upsert',
+    primary_key='id',
+);
+
+statement ok
+DROP TABLE rw_types_bad_pk;
+
+statement ok
+CREATE TABLE rw_types_subset_table (
+    id BIGINT PRIMARY KEY,
+    varchar_column VARCHAR,
+);
+
+statement ok
+INSERT INTO rw_types_subset_table (id, varchar_column) VALUES
+    (1, 'Varcharvalue1'),
+    (2, 'Varcharvalue2'),
+    (3, 'Varcharvalue3');
+
+statement ok
+flush;
+
+statement ok
+CREATE SINK rw_types_to_pg_types FROM rw_types_subset_table WITH (
+    connector='postgres',
+    host='$PGHOST',
+    port='$PGPORT',
+    user='$PGUSER',
+    password='$PGPASSWORD',
+    database='sink_test',
+    table='pg_types_table',
+    type='upsert',
+    primary_key='id',
+);
+
+query I
+select * from postgres_query('$PGHOST', '$PGPORT', '$PGUSER', '${PGPASSWORD:postgres}', 'sink_test', 'select id, varchar_column, text_column, smallint_column from pg_types_table order by id;');
+----
+  1 Varcharvalue1 NULL NULL
+  2 Varcharvalue2 NULL NULL
+  3 Varcharvalue3 NULL NULL
+
+statement ok
+DROP SINK rw_types_to_pg_types;
+
+statement ok
+DROP TABLE rw_types_subset_table;
 
 ################### Drop DB
 

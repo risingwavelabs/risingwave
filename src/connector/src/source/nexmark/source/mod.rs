@@ -13,6 +13,6 @@
 // limitations under the License.
 
 mod combined_event;
-pub use combined_event::{get_event_data_types_with_names, EventType};
+pub use combined_event::{EventType, get_event_data_types_with_names};
 pub mod message;
 pub mod reader;

@@ -33,9 +33,8 @@ use std::hash::Hash;
 use std::ops::Deref;
 use std::rc::Rc;
 
-use downcast_rs::{impl_downcast, Downcast};
+use downcast_rs::{Downcast, impl_downcast};
 use dyn_clone::DynClone;
-use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use paste::paste;
 use petgraph::dot::{Config, Dot};
@@ -52,11 +51,13 @@ use self::batch::BatchPlanRef;
 use self::generic::{GenericPlanRef, PhysicalPlanRef};
 use self::stream::StreamPlanRef;
 use self::utils::Distill;
-use super::property::{Distribution, FunctionalDependencySet, MonotonicityMap, Order};
+use super::property::{
+    Distribution, FunctionalDependencySet, MonotonicityMap, Order, WatermarkColumns,
+};
 use crate::error::{ErrorCode, Result};
 use crate::optimizer::ExpressionSimplifyRewriter;
 use crate::session::current::notice_to_user;
-use crate::utils::{build_graph_from_pretty, PrettySerde};
+use crate::utils::{PrettySerde, build_graph_from_pretty};
 
 /// A marker trait for different conventions, used for enforcing type safety.
 ///
@@ -610,7 +611,7 @@ impl StreamPlanRef for PlanRef {
         self.plan_base().emit_on_window_close()
     }
 
-    fn watermark_columns(&self) -> &FixedBitSet {
+    fn watermark_columns(&self) -> &WatermarkColumns {
         self.plan_base().watermark_columns()
     }
 
@@ -980,6 +981,7 @@ mod stream_sort;
 mod stream_source;
 mod stream_source_scan;
 mod stream_stateless_simple_agg;
+mod stream_sync_log_store;
 mod stream_table_scan;
 mod stream_topn;
 mod stream_values;
@@ -1105,6 +1107,7 @@ pub use stream_sort::StreamEowcSort;
 pub use stream_source::StreamSource;
 pub use stream_source_scan::StreamSourceScan;
 pub use stream_stateless_simple_agg::StreamStatelessSimpleAgg;
+pub use stream_sync_log_store::StreamSyncLogStore;
 pub use stream_table_scan::StreamTableScan;
 pub use stream_temporal_join::StreamTemporalJoin;
 pub use stream_topn::StreamTopN;
@@ -1244,6 +1247,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, LocalApproxPercentile }
             , { Stream, RowMerge }
             , { Stream, AsOfJoin }
+            , { Stream, SyncLogStore }
         }
     };
 }
@@ -1378,6 +1382,7 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, LocalApproxPercentile }
             , { Stream, RowMerge }
             , { Stream, AsOfJoin }
+            , { Stream, SyncLogStore }
         }
     };
 }

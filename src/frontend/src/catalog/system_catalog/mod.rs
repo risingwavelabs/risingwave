@@ -25,25 +25,25 @@ use parking_lot::RwLock;
 use risingwave_common::acl::AclMode;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{
-    ColumnCatalog, ColumnDesc, Field, SysCatalogReader, TableDesc, TableId, DEFAULT_SUPER_USER_ID,
-    MAX_SYS_CATALOG_NUM, SYS_CATALOG_START_ID,
+    ColumnCatalog, ColumnDesc, DEFAULT_SUPER_USER_ID, Field, MAX_SYS_CATALOG_NUM,
+    SYS_CATALOG_START_ID, SysCatalogReader, TableDesc, TableId,
 };
 use risingwave_common::error::BoxedError;
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::types::DataType;
-use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
+use risingwave_pb::meta::list_streaming_job_states_response::StreamingJobState;
 use risingwave_pb::meta::table_parallelism::{PbFixedParallelism, PbParallelism};
-use risingwave_pb::user::grant_privilege::Object;
+use risingwave_pb::user::grant_privilege::Object as GrantObject;
 
 use crate::catalog::catalog_service::CatalogReader;
 use crate::catalog::view_catalog::ViewCatalog;
 use crate::meta_client::FrontendMetaClient;
 use crate::session::AuthContext;
+use crate::user::UserId;
 use crate::user::user_catalog::UserCatalog;
 use crate::user::user_privilege::available_prost_privilege;
 use crate::user::user_service::UserInfoReader;
-use crate::user::UserId;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct SystemTableCatalog {
@@ -170,7 +170,7 @@ impl From<&BuiltinTable> for SystemTableCatalog {
                 .iter()
                 .enumerate()
                 .map(|(idx, (name, ty))| ColumnCatalog {
-                    column_desc: ColumnDesc::new_atomic(ty.clone(), name, idx as i32),
+                    column_desc: ColumnDesc::named(*name, (idx as i32).into(), ty.clone()),
                     is_hidden: false,
                 })
                 .collect(),
@@ -216,7 +216,7 @@ pub fn infer_dummy_view_sql(columns: &[SystemCatalogColumnsDef<'_>]) -> String {
     )
 }
 
-fn extract_parallelism_from_table_state(state: &TableFragmentState) -> String {
+fn extract_parallelism_from_table_state(state: &StreamingJobState) -> String {
     match state
         .parallelism
         .as_ref()
@@ -233,7 +233,7 @@ fn extract_parallelism_from_table_state(state: &TableFragmentState) -> String {
 
 /// get acl items of `object` in string, ignore public.
 fn get_acl_items(
-    object: &Object,
+    object: &GrantObject,
     for_dml_table: bool,
     users: &Vec<UserCatalog>,
     username_map: &HashMap<UserId, String>,
@@ -312,6 +312,10 @@ pub fn get_sys_views_in_schema(schema_name: &str) -> Vec<Arc<ViewCatalog>> {
             _ => None,
         })
         .collect()
+}
+
+pub fn is_system_catalog(oid: u32) -> bool {
+    oid >= SYS_CATALOG_START_ID as u32
 }
 
 /// The global registry of all builtin catalogs.

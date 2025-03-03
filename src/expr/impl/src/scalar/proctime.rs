@@ -14,7 +14,7 @@
 
 use risingwave_common::types::Timestamptz;
 use risingwave_common::util::epoch;
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_expr::{ExprError, Result, function};
 
 /// Get the processing time in Timestamptz scalar from the task-local epoch.
 #[function("proctime() -> timestamptz", volatile)]

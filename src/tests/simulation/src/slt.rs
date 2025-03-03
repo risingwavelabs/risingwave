@@ -17,10 +17,10 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use itertools::Itertools;
 use rand::seq::IteratorRandom;
-use rand::{thread_rng, Rng, SeedableRng};
+use rand::{Rng, SeedableRng, thread_rng};
 use rand_chacha::ChaChaRng;
 use sqllogictest::{Condition, ParallelTestError, QueryExpect, Record, StatementExpect};
 
@@ -307,6 +307,7 @@ pub async fn run_slt_task(
                         connection: connection.clone(),
                         sql,
                         expected: StatementExpect::Ok,
+                        retry: None,
                     };
                     tester.run_async(set_random_vnode_count).await.unwrap();
                     println!("[RANDOM VNODE COUNT] run: {record}");
@@ -347,6 +348,7 @@ pub async fn run_slt_task(
                         label: "madsim".to_owned(),
                     }
                 })
+                && background_ddl_rate > 0.0
             {
                 let background_ddl_setting = rng.gen_bool(background_ddl_rate);
                 let set_background_ddl = Record::Statement {
@@ -355,6 +357,7 @@ pub async fn run_slt_task(
                     connection: connection.clone(),
                     expected: StatementExpect::Ok,
                     sql: format!("SET BACKGROUND_DDL={background_ddl_setting};"),
+                    retry: None,
                 };
                 tester.run_async(set_background_ddl).await.unwrap();
                 background_ddl_enabled = background_ddl_setting;
@@ -456,7 +459,9 @@ pub async fn run_slt_task(
                                         "failed to wait for background mv to finish creating"
                                     );
                                     if i >= MAX_RETRY {
-                                        panic!("failed to run test after retry {i} times, error={err:#?}");
+                                        panic!(
+                                            "failed to run test after retry {i} times, error={err:#?}"
+                                        );
                                     }
                                     continue;
                                 }
@@ -481,7 +486,7 @@ pub async fn run_slt_task(
                                     && e.to_string().contains("exists")
                                     && e.to_string().contains("Catalog error") =>
                             {
-                                break
+                                break;
                             }
                             // allow 'not found' error when retry DROP statement
                             SqlCmd::Drop
@@ -489,7 +494,7 @@ pub async fn run_slt_task(
                                     && e.to_string().contains("not found")
                                     && e.to_string().contains("Catalog error") =>
                             {
-                                break
+                                break;
                             }
 
                             // Keep i >= MAX_RETRY for other errors. Since these errors indicate that the MV might not yet be created.
@@ -518,7 +523,9 @@ pub async fn run_slt_task(
                                             "failed to wait for background mv to finish creating"
                                         );
                                         if i >= MAX_RETRY {
-                                            panic!("failed to run test after retry {i} times, error={err:#?}");
+                                            panic!(
+                                                "failed to run test after retry {i} times, error={err:#?}"
+                                            );
                                         }
                                         continue;
                                     }
@@ -595,7 +602,7 @@ fn hack_kafka_test(path: &Path) -> tempfile::NamedTempFile {
 mod tests {
     use std::fmt::Debug;
 
-    use expect_test::{expect, Expect};
+    use expect_test::{Expect, expect};
 
     use super::*;
 

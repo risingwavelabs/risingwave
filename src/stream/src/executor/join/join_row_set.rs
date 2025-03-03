@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use std::borrow::Borrow;
-use std::collections::btree_map::OccupiedError as BTreeMapOccupiedError;
 use std::collections::BTreeMap;
+use std::collections::btree_map::OccupiedError as BTreeMapOccupiedError;
 use std::fmt::Debug;
 use std::mem;
 use std::ops::{Bound, RangeBounds};

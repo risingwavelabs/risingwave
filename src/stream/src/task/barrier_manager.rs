@@ -31,9 +31,10 @@ use risingwave_pb::stream_service::barrier_complete_response::{
     PbCreateMviewProgress, PbLocalSstableInfo,
 };
 use risingwave_rpc_client::error::{ToTonicStatus, TonicStatusWrapper};
+use risingwave_storage::store_impl::AsHummock;
 use thiserror_ext::AsReport;
 use tokio::select;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tonic::{Code, Status};
@@ -62,8 +63,8 @@ use risingwave_pb::stream_service::streaming_control_stream_response::{
     InitResponse, ReportDatabaseFailureResponse, ResetDatabaseResponse, Response, ShutdownResponse,
 };
 use risingwave_pb::stream_service::{
-    streaming_control_stream_response, BarrierCompleteResponse, InjectBarrierRequest,
-    PbScoredError, StreamingControlStreamRequest, StreamingControlStreamResponse,
+    BarrierCompleteResponse, InjectBarrierRequest, PbScoredError, StreamingControlStreamRequest,
+    StreamingControlStreamResponse, streaming_control_stream_response,
 };
 
 use crate::executor::exchange::permit::Receiver;
@@ -572,14 +573,14 @@ impl LocalBarrierWorker {
 mod await_epoch_completed_future {
     use std::future::Future;
 
-    use futures::future::BoxFuture;
     use futures::FutureExt;
+    use futures::future::BoxFuture;
     use risingwave_hummock_sdk::SyncResult;
     use risingwave_pb::stream_service::barrier_complete_response::PbCreateMviewProgress;
 
     use crate::error::StreamResult;
     use crate::executor::Barrier;
-    use crate::task::{await_tree_key, BarrierCompleteResult, PartialGraphId};
+    use crate::task::{BarrierCompleteResult, PartialGraphId, await_tree_key};
 
     pub(super) type AwaitEpochCompletedFuture = impl Future<Output = (PartialGraphId, Barrier, StreamResult<BarrierCompleteResult>)>
         + 'static;
@@ -625,7 +626,7 @@ mod await_epoch_completed_future {
 
 use await_epoch_completed_future::*;
 use risingwave_common::catalog::{DatabaseId, TableId};
-use risingwave_storage::StateStoreImpl;
+use risingwave_storage::{StateStoreImpl, dispatch_state_store};
 
 fn sync_epoch(
     state_store: &StateStoreImpl,
@@ -634,14 +635,14 @@ fn sync_epoch(
     table_ids: HashSet<TableId>,
 ) -> BoxFuture<'static, StreamResult<SyncResult>> {
     let timer = streaming_metrics.barrier_sync_latency.start_timer();
-    let hummock = state_store.as_hummock().cloned();
+
+    let state_store = state_store.clone();
     let future = async move {
-        if let Some(hummock) = hummock {
+        dispatch_state_store!(state_store, hummock, {
             hummock.sync(vec![(prev_epoch, table_ids)]).await
-        } else {
-            Ok(SyncResult::default())
-        }
+        })
     };
+
     future
         .instrument_await(format!("sync_epoch (epoch {})", prev_epoch))
         .inspect_ok(move |_| {
@@ -854,13 +855,15 @@ impl LocalBarrierWorker {
             ))
         });
         if let Some(state) = status.state_for_request() {
-            assert!(state
-                .graph_states
-                .insert(
-                    partial_graph_id,
-                    PartialGraphManagedBarrierState::new(&self.actor_manager)
-                )
-                .is_none());
+            assert!(
+                state
+                    .graph_states
+                    .insert(
+                        partial_graph_id,
+                        PartialGraphManagedBarrierState::new(&self.actor_manager)
+                    )
+                    .is_none()
+            );
         }
     }
 
@@ -1174,10 +1177,10 @@ pub(crate) mod barrier_test_utils {
         InitRequest, PbDatabaseInitialPartialGraph, PbInitialPartialGraph,
     };
     use risingwave_pb::stream_service::{
-        streaming_control_stream_request, streaming_control_stream_response, InjectBarrierRequest,
-        StreamingControlStreamRequest, StreamingControlStreamResponse,
+        InjectBarrierRequest, StreamingControlStreamRequest, StreamingControlStreamResponse,
+        streaming_control_stream_request, streaming_control_stream_response,
     };
-    use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+    use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
     use tokio::sync::oneshot;
     use tokio_stream::wrappers::UnboundedReceiverStream;
     use tonic::Status;

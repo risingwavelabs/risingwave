@@ -16,8 +16,8 @@ use prost::Message;
 use risingwave_common::telemetry::pb_compatible::TelemetryToProtobuf;
 use risingwave_common::telemetry::report::TelemetryReportCreator;
 use risingwave_common::telemetry::{
-    current_timestamp, report_event_common, SystemData, TelemetryNodeType, TelemetryReportBase,
-    TelemetryResult,
+    SystemData, TelemetryNodeType, TelemetryReportBase, TelemetryResult, current_timestamp,
+    report_event_common,
 };
 use risingwave_pb::telemetry::{PbTelemetryDatabaseObject, PbTelemetryEventStage};
 use serde::{Deserialize, Serialize};
@@ -119,7 +119,7 @@ mod tests {
         assert_eq!(report.base.node_type, TelemetryNodeType::Frontend);
     }
 
-    use risingwave_common::telemetry::{post_telemetry_report_pb, TELEMETRY_REPORT_URL};
+    use risingwave_common::telemetry::{TELEMETRY_REPORT_URL, post_telemetry_report_pb};
 
     // It is ok to
     // use `TELEMETRY_REPORT_URL` here because we mark it as test and will not write to the database.

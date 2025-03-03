@@ -32,8 +32,8 @@ use risingwave_common::types::{
 use rust_decimal::Decimal as RustDecimal;
 
 macro_rules! handle_data_type {
-    ($row:expr, $i:expr, $name:expr, $type:ty) => {{
-        match $row.take_opt::<Option<$type>, _>($i) {
+    ($row:expr, $i:expr, $name:expr, $typ:ty) => {{
+        match $row.take_opt::<Option<$typ>, _>($i) {
             None => bail!("no value found at column: {}, index: {}", $name, $i),
             Some(Ok(val)) => Ok(val.map(|v| ScalarImpl::from(v))),
             Some(Err(e)) => Err(anyhow::Error::new(e.clone())
@@ -42,21 +42,21 @@ macro_rules! handle_data_type {
                     "column: {}, index: {}, rust_type: {}",
                     $name,
                     $i,
-                    stringify!($type),
+                    stringify!($typ),
                 ))),
         }
     }};
-    ($row:expr, $i:expr, $name:expr, $type:ty, $rw_type:ty) => {{
-        match $row.take_opt::<Option<$type>, _>($i) {
+    ($row:expr, $i:expr, $name:expr, $typ:ty, $rw_type:ty) => {{
+        match $row.take_opt::<Option<$typ>, _>($i) {
             None => bail!("no value found at column: {}, index: {}", $name, $i),
             Some(Ok(val)) => Ok(val.map(|v| ScalarImpl::from(<$rw_type>::from(v)))),
             Some(Err(e)) => Err(anyhow::Error::new(e.clone())
-                .context("failed to deserialize MySQL value into rust value")
+                .context("failed to deserialize MySQL value into rw value")
                 .context(format!(
-                    "column: {}, index: {}, rust_type: {}",
+                    "column: {}, index: {}, rw_type: {}",
                     $name,
                     $i,
-                    stringify!($ty),
+                    stringify!($rw_type),
                 ))),
         }
     }};
@@ -228,8 +228,8 @@ pub fn mysql_row_to_owned_row(mysql_row: &mut MysqlRow, schema: &Schema) -> Owne
 mod tests {
 
     use futures::pin_mut;
-    use mysql_async::prelude::*;
     use mysql_async::Row as MySqlRow;
+    use mysql_async::prelude::*;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::row::Row;
     use risingwave_common::types::DataType;

@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use sea_orm::DatabaseTransaction;
+
 use super::*;
 
 impl CatalogController {
@@ -27,6 +29,7 @@ impl CatalogController {
         let active_model = database::ActiveModel {
             database_id: Set(database_id),
             name: Set(name.to_owned()),
+            ..Default::default()
         };
         let database = active_model.update(&txn).await?;
 
@@ -118,8 +121,8 @@ impl CatalogController {
         let version = self
             .notify_frontend(
                 NotificationOperation::Update,
-                NotificationInfo::RelationGroup(PbRelationGroup {
-                    relations: to_update_relations,
+                NotificationInfo::ObjectGroup(PbObjectGroup {
+                    objects: to_update_relations,
                 }),
             )
             .await;
@@ -208,8 +211,8 @@ impl CatalogController {
         let version = self
             .notify_frontend(
                 NotificationOperation::Update,
-                NotificationInfo::RelationGroup(PbRelationGroup {
-                    relations: to_update_relations,
+                NotificationInfo::ObjectGroup(PbObjectGroup {
+                    objects: to_update_relations,
                 }),
             )
             .await;
@@ -245,7 +248,7 @@ impl CatalogController {
         let version = self
             .notify_frontend_relation_info(
                 NotificationOperation::Update,
-                PbRelationInfo::Source(pb_source),
+                PbObjectInfo::Source(pb_source),
             )
             .await;
         Ok(version)
@@ -272,7 +275,7 @@ impl CatalogController {
         obj.owner_id = Set(new_owner);
         let obj = obj.update(&txn).await?;
 
-        let mut relations = vec![];
+        let mut objects = vec![];
         match object_type {
             ObjectType::Database => {
                 let db = Database::find_by_id(object_id)
@@ -327,25 +330,20 @@ impl CatalogController {
                         .ok_or_else(|| {
                             MetaError::catalog_id_not_found("source", associated_source_id)
                         })?;
-                    relations.push(PbRelationInfo::Source(ObjectModel(source, src_obj).into()));
+                    objects.push(PbObjectInfo::Source(ObjectModel(source, src_obj).into()));
                 }
 
                 // indexes.
-                let (index_ids, mut table_ids): (Vec<IndexId>, Vec<TableId>) =
-                    if table.table_type == TableType::Table {
-                        Index::find()
-                            .select_only()
-                            .columns([index::Column::IndexId, index::Column::IndexTableId])
-                            .filter(index::Column::PrimaryTableId.eq(object_id))
-                            .into_tuple::<(IndexId, TableId)>()
-                            .all(&txn)
-                            .await?
-                            .into_iter()
-                            .unzip()
-                    } else {
-                        (vec![], vec![])
-                    };
-                relations.push(PbRelationInfo::Table(ObjectModel(table, obj).into()));
+                let (index_ids, mut table_ids): (Vec<IndexId>, Vec<TableId>) = Index::find()
+                    .select_only()
+                    .columns([index::Column::IndexId, index::Column::IndexTableId])
+                    .filter(index::Column::PrimaryTableId.eq(object_id))
+                    .into_tuple::<(IndexId, TableId)>()
+                    .all(&txn)
+                    .await?
+                    .into_iter()
+                    .unzip();
+                objects.push(PbObjectInfo::Table(ObjectModel(table, obj).into()));
 
                 // internal tables.
                 let internal_tables: Vec<TableId> = Table::find()
@@ -381,7 +379,7 @@ impl CatalogController {
                         .all(&txn)
                         .await?;
                     for (table, table_obj) in table_objs {
-                        relations.push(PbRelationInfo::Table(
+                        objects.push(PbObjectInfo::Table(
                             ObjectModel(table, table_obj.unwrap()).into(),
                         ));
                     }
@@ -394,7 +392,7 @@ impl CatalogController {
                         .all(&txn)
                         .await?;
                     for (index, index_obj) in index_objs {
-                        relations.push(PbRelationInfo::Index(
+                        objects.push(PbObjectInfo::Index(
                             ObjectModel(index, index_obj.unwrap()).into(),
                         ));
                     }
@@ -406,7 +404,7 @@ impl CatalogController {
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("source", object_id))?;
                 let is_shared = source.is_shared();
-                relations.push(PbRelationInfo::Source(ObjectModel(source, obj).into()));
+                objects.push(PbObjectInfo::Source(ObjectModel(source, obj).into()));
 
                 // Note: For non-shared source, we don't update their state tables, which
                 // belongs to the MV.
@@ -416,7 +414,7 @@ impl CatalogController {
                         object_id,
                         object::Column::OwnerId,
                         Value::Int(Some(new_owner)),
-                        &mut relations,
+                        &mut objects,
                     )
                     .await?;
                 }
@@ -426,14 +424,14 @@ impl CatalogController {
                     .one(&txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("sink", object_id))?;
-                relations.push(PbRelationInfo::Sink(ObjectModel(sink, obj).into()));
+                objects.push(PbObjectInfo::Sink(ObjectModel(sink, obj).into()));
 
                 update_internal_tables(
                     &txn,
                     object_id,
                     object::Column::OwnerId,
                     Value::Int(Some(new_owner)),
-                    &mut relations,
+                    &mut objects,
                 )
                 .await?;
             }
@@ -442,7 +440,7 @@ impl CatalogController {
                     .one(&txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("subscription", object_id))?;
-                relations.push(PbRelationInfo::Subscription(
+                objects.push(PbObjectInfo::Subscription(
                     ObjectModel(subscription, obj).into(),
                 ));
             }
@@ -451,7 +449,7 @@ impl CatalogController {
                     .one(&txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("view", object_id))?;
-                relations.push(PbRelationInfo::View(ObjectModel(view, obj).into()));
+                objects.push(PbObjectInfo::View(ObjectModel(view, obj).into()));
             }
             _ => unreachable!("not supported object type: {:?}", object_type),
         };
@@ -461,11 +459,11 @@ impl CatalogController {
         let version = self
             .notify_frontend(
                 NotificationOperation::Update,
-                NotificationInfo::RelationGroup(PbRelationGroup {
-                    relations: relations
+                NotificationInfo::ObjectGroup(PbObjectGroup {
+                    objects: objects
                         .into_iter()
-                        .map(|relation| PbRelation {
-                            relation_info: Some(relation),
+                        .map(|object| PbObject {
+                            object_info: Some(object),
                         })
                         .collect(),
                 }),
@@ -493,7 +491,7 @@ impl CatalogController {
         }
         let database_id = obj.database_id.unwrap();
 
-        let mut relations = vec![];
+        let mut objects = vec![];
         match object_type {
             ObjectType::Table => {
                 let table = Table::find_by_id(object_id)
@@ -501,13 +499,12 @@ impl CatalogController {
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("table", object_id))?;
                 check_relation_name_duplicate(&table.name, database_id, new_schema, &txn).await?;
-                let (associated_src_id, table_type) =
-                    (table.optional_associated_source_id, table.table_type);
+                let associated_src_id = table.optional_associated_source_id;
 
                 let mut obj = obj.into_active_model();
                 obj.schema_id = Set(Some(new_schema));
                 let obj = obj.update(&txn).await?;
-                relations.push(PbRelationInfo::Table(ObjectModel(table, obj).into()));
+                objects.push(PbObjectInfo::Table(ObjectModel(table, obj).into()));
 
                 // associated source.
                 if let Some(associated_source_id) = associated_src_id {
@@ -524,31 +521,27 @@ impl CatalogController {
                         .ok_or_else(|| {
                             MetaError::catalog_id_not_found("source", associated_source_id)
                         })?;
-                    relations.push(PbRelationInfo::Source(ObjectModel(source, src_obj).into()));
+                    objects.push(PbObjectInfo::Source(ObjectModel(source, src_obj).into()));
                 }
 
                 // indexes.
                 let (index_ids, (index_names, mut table_ids)): (
                     Vec<IndexId>,
                     (Vec<String>, Vec<TableId>),
-                ) = if table_type == TableType::Table {
-                    Index::find()
-                        .select_only()
-                        .columns([
-                            index::Column::IndexId,
-                            index::Column::Name,
-                            index::Column::IndexTableId,
-                        ])
-                        .filter(index::Column::PrimaryTableId.eq(object_id))
-                        .into_tuple::<(IndexId, String, TableId)>()
-                        .all(&txn)
-                        .await?
-                        .into_iter()
-                        .map(|(id, name, t_id)| (id, (name, t_id)))
-                        .unzip()
-                } else {
-                    (vec![], (vec![], vec![]))
-                };
+                ) = Index::find()
+                    .select_only()
+                    .columns([
+                        index::Column::IndexId,
+                        index::Column::Name,
+                        index::Column::IndexTableId,
+                    ])
+                    .filter(index::Column::PrimaryTableId.eq(object_id))
+                    .into_tuple::<(IndexId, String, TableId)>()
+                    .all(&txn)
+                    .await?
+                    .into_iter()
+                    .map(|(id, name, t_id)| (id, (name, t_id)))
+                    .unzip();
 
                 // internal tables.
                 let internal_tables: Vec<TableId> = Table::find()
@@ -589,7 +582,7 @@ impl CatalogController {
                         .all(&txn)
                         .await?;
                     for (table, table_obj) in table_objs {
-                        relations.push(PbRelationInfo::Table(
+                        objects.push(PbObjectInfo::Table(
                             ObjectModel(table, table_obj.unwrap()).into(),
                         ));
                     }
@@ -601,7 +594,7 @@ impl CatalogController {
                         .all(&txn)
                         .await?;
                     for (index, index_obj) in index_objs {
-                        relations.push(PbRelationInfo::Index(
+                        objects.push(PbObjectInfo::Index(
                             ObjectModel(index, index_obj.unwrap()).into(),
                         ));
                     }
@@ -618,7 +611,7 @@ impl CatalogController {
                 let mut obj = obj.into_active_model();
                 obj.schema_id = Set(Some(new_schema));
                 let obj = obj.update(&txn).await?;
-                relations.push(PbRelationInfo::Source(ObjectModel(source, obj).into()));
+                objects.push(PbObjectInfo::Source(ObjectModel(source, obj).into()));
 
                 // Note: For non-shared source, we don't update their state tables, which
                 // belongs to the MV.
@@ -628,7 +621,7 @@ impl CatalogController {
                         object_id,
                         object::Column::SchemaId,
                         Value::Int(Some(new_schema)),
-                        &mut relations,
+                        &mut objects,
                     )
                     .await?;
                 }
@@ -643,14 +636,14 @@ impl CatalogController {
                 let mut obj = obj.into_active_model();
                 obj.schema_id = Set(Some(new_schema));
                 let obj = obj.update(&txn).await?;
-                relations.push(PbRelationInfo::Sink(ObjectModel(sink, obj).into()));
+                objects.push(PbObjectInfo::Sink(ObjectModel(sink, obj).into()));
 
                 update_internal_tables(
                     &txn,
                     object_id,
                     object::Column::SchemaId,
                     Value::Int(Some(new_schema)),
-                    &mut relations,
+                    &mut objects,
                 )
                 .await?;
             }
@@ -665,7 +658,7 @@ impl CatalogController {
                 let mut obj = obj.into_active_model();
                 obj.schema_id = Set(Some(new_schema));
                 let obj = obj.update(&txn).await?;
-                relations.push(PbRelationInfo::Subscription(
+                objects.push(PbObjectInfo::Subscription(
                     ObjectModel(subscription, obj).into(),
                 ));
             }
@@ -679,7 +672,7 @@ impl CatalogController {
                 let mut obj = obj.into_active_model();
                 obj.schema_id = Set(Some(new_schema));
                 let obj = obj.update(&txn).await?;
-                relations.push(PbRelationInfo::View(ObjectModel(view, obj).into()));
+                objects.push(PbObjectInfo::View(ObjectModel(view, obj).into()));
             }
             ObjectType::Function => {
                 let function = Function::find_by_id(object_id)
@@ -742,11 +735,11 @@ impl CatalogController {
         let version = self
             .notify_frontend(
                 Operation::Update,
-                Info::RelationGroup(PbRelationGroup {
-                    relations: relations
+                Info::ObjectGroup(PbObjectGroup {
+                    objects: objects
                         .into_iter()
-                        .map(|relation_info| PbRelation {
-                            relation_info: Some(relation_info),
+                        .map(|relation_info| PbObject {
+                            object_info: Some(relation_info),
                         })
                         .collect_vec(),
                 }),
@@ -790,5 +783,58 @@ impl CatalogController {
             .await;
 
         Ok(version)
+    }
+
+    // drop table associated source is a special case of drop relation, which just remove the source object and associated state table, keeping the streaming job and fragments.
+    pub async fn drop_table_associated_source(
+        txn: &DatabaseTransaction,
+        drop_table_connector_ctx: &DropTableConnectorContext,
+    ) -> MetaResult<(Vec<PbUserInfo>, Vec<PartialObject>)> {
+        let to_drop_source_objects: Vec<PartialObject> = Object::find()
+            .filter(object::Column::Oid.is_in(vec![drop_table_connector_ctx.to_remove_source_id]))
+            .into_partial_model()
+            .all(txn)
+            .await?;
+        let to_drop_internal_table_objs: Vec<PartialObject> = Object::find()
+            .select_only()
+            .filter(
+                object::Column::Oid.is_in(vec![drop_table_connector_ctx.to_remove_state_table_id]),
+            )
+            .into_partial_model()
+            .all(txn)
+            .await?;
+        let to_drop_objects = to_drop_source_objects
+            .into_iter()
+            .chain(to_drop_internal_table_objs.into_iter())
+            .collect_vec();
+        // Find affect users with privileges on all this objects.
+        let to_update_user_ids: Vec<UserId> = UserPrivilege::find()
+            .select_only()
+            .distinct()
+            .column(user_privilege::Column::UserId)
+            .filter(user_privilege::Column::Oid.is_in(to_drop_objects.iter().map(|obj| obj.oid)))
+            .into_tuple()
+            .all(txn)
+            .await?;
+
+        tracing::debug!(
+            "drop_table_associated_source: to_drop_objects: {:?}",
+            to_drop_objects
+        );
+
+        // delete all in to_drop_objects.
+        let res = Object::delete_many()
+            .filter(object::Column::Oid.is_in(to_drop_objects.iter().map(|obj| obj.oid)))
+            .exec(txn)
+            .await?;
+        if res.rows_affected == 0 {
+            return Err(MetaError::catalog_id_not_found(
+                ObjectType::Source.as_str(),
+                drop_table_connector_ctx.to_remove_source_id,
+            ));
+        }
+        let user_infos = list_user_info_by_ids(to_update_user_ids, txn).await?;
+
+        Ok((user_infos, to_drop_objects))
     }
 }

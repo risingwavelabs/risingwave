@@ -14,14 +14,11 @@
 
 use std::sync::Arc;
 
-use futures::future::try_join_all;
 use risingwave_common::catalog::DatabaseId;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
-use risingwave_pb::meta::PausedReason;
 use risingwave_pb::stream_plan::PbFragmentTypeFlag;
 use risingwave_pb::stream_service::streaming_control_stream_request::PbInitRequest;
-use risingwave_pb::stream_service::WaitEpochCommitRequest;
 use risingwave_rpc_client::StreamingControlHandle;
 
 use crate::barrier::command::CommandContext;
@@ -106,34 +103,6 @@ impl GlobalBarrierWorkerContextImpl {
 }
 
 impl CommandContext {
-    pub async fn wait_epoch_commit(
-        &self,
-        barrier_manager_context: &GlobalBarrierWorkerContextImpl,
-    ) -> MetaResult<()> {
-        let table_id = self.table_ids_to_commit.iter().next().cloned();
-        // try wait epoch on an existing random table id
-        let Some(table_id) = table_id else {
-            // no need to wait epoch when there is no table id
-            return Ok(());
-        };
-        let futures = self.node_map.values().map(|worker_node| async {
-            let client = barrier_manager_context
-                .env
-                .stream_client_pool()
-                .get(worker_node)
-                .await?;
-            let request = WaitEpochCommitRequest {
-                epoch: self.barrier_info.prev_epoch(),
-                table_id: table_id.table_id,
-            };
-            client.wait_epoch_commit(request).await
-        });
-
-        try_join_all(futures).await?;
-
-        Ok(())
-    }
-
     /// Do some stuffs after barriers are collected and the new storage version is committed, for
     /// the given command.
     pub async fn post_collect(
@@ -148,17 +117,9 @@ impl CommandContext {
 
             Command::Throttle(_) => {}
 
-            Command::Pause(reason) => {
-                if let PausedReason::ConfigChange = reason {
-                    // After the `Pause` barrier is collected and committed, we must ensure that the
-                    // storage version with this epoch is synced to all compute nodes before the
-                    // execution of the next command of `Update`, as some newly created operators
-                    // may immediately initialize their states on that barrier.
-                    self.wait_epoch_commit(barrier_manager_context).await?;
-                }
-            }
+            Command::Pause => {}
 
-            Command::Resume(_) => {}
+            Command::Resume => {}
 
             Command::SourceChangeSplit(split_assignment) => {
                 barrier_manager_context
@@ -180,7 +141,11 @@ impl CommandContext {
                     .unregister_table_ids(unregistered_state_table_ids.iter().cloned())
                     .await?;
             }
-            Command::CreateStreamingJob { info, job_type } => {
+            Command::CreateStreamingJob {
+                info,
+                job_type,
+                cross_db_snapshot_backfill_info,
+            } => {
                 let mut is_sink_into_table = false;
                 match job_type {
                     CreateStreamingJobType::SinkIntoTable(
@@ -199,7 +164,7 @@ impl CommandContext {
                             .post_collect_job_fragments(
                                 new_fragments.stream_job_id().table_id as _,
                                 new_fragments.actor_ids(),
-                                dispatchers.clone(),
+                                dispatchers,
                                 init_split_assignment,
                             )
                             .await?;
@@ -209,12 +174,11 @@ impl CommandContext {
                                 old_fragments,
                                 new_fragments.stream_source_fragments(),
                                 init_split_assignment.clone(),
-                                replace_plan.fragment_replacements(),
+                                replace_plan,
                             )
                             .await;
                     }
-                    CreateStreamingJobType::Normal => {}
-                    CreateStreamingJobType::SnapshotBackfill(snapshot_backfill_info) => {
+                    CreateStreamingJobType::Normal => {
                         barrier_manager_context
                             .metadata_manager
                             .catalog_controller
@@ -222,7 +186,7 @@ impl CommandContext {
                                 info.stream_job_fragments.fragments.iter().filter_map(
                                     |(fragment_id, fragment)| {
                                         if (fragment.fragment_type_mask
-                                            & PbFragmentTypeFlag::SnapshotBackfillStreamScan as u32)
+                                            & PbFragmentTypeFlag::CrossDbSnapshotBackfillStreamScan as u32)
                                             != 0
                                         {
                                             Some(*fragment_id as _)
@@ -231,7 +195,30 @@ impl CommandContext {
                                         }
                                     },
                                 ),
-                                &snapshot_backfill_info.upstream_mv_table_id_to_backfill_epoch,
+                                None,
+                                cross_db_snapshot_backfill_info,
+                            )
+                            .await?
+                    }
+                    CreateStreamingJobType::SnapshotBackfill(snapshot_backfill_info) => {
+                        barrier_manager_context
+                            .metadata_manager
+                            .catalog_controller
+                            .fill_snapshot_backfill_epoch(
+                                info.stream_job_fragments.fragments.iter().filter_map(
+                                    |(fragment_id, fragment)| {
+                                        if (fragment.fragment_type_mask
+                                            & (PbFragmentTypeFlag::SnapshotBackfillStreamScan as u32 | PbFragmentTypeFlag::CrossDbSnapshotBackfillStreamScan as u32))
+                                            != 0
+                                        {
+                                            Some(*fragment_id as _)
+                                        } else {
+                                            None
+                                        }
+                                    },
+                                ),
+                                Some(snapshot_backfill_info),
+                                cross_db_snapshot_backfill_info,
                             )
                             .await?
                     }
@@ -243,16 +230,18 @@ impl CommandContext {
                     stream_job_fragments,
                     dispatchers,
                     init_split_assignment,
+                    streaming_job,
                     ..
                 } = info;
                 barrier_manager_context
                     .metadata_manager
                     .catalog_controller
-                    .post_collect_job_fragments(
+                    .post_collect_job_fragments_inner(
                         stream_job_fragments.stream_job_id().table_id as _,
                         stream_job_fragments.actor_ids(),
-                        dispatchers.clone(),
+                        dispatchers,
                         init_split_assignment,
+                        streaming_job.is_materialized_view(),
                     )
                     .await?;
 
@@ -270,12 +259,12 @@ impl CommandContext {
             }
             Command::RescheduleFragment {
                 reschedules,
-                table_parallelism,
+                post_updates,
                 ..
             } => {
                 barrier_manager_context
                     .scale_controller
-                    .post_apply_reschedule(reschedules, table_parallelism)
+                    .post_apply_reschedule(reschedules, post_updates)
                     .await?;
             }
 
@@ -285,6 +274,7 @@ impl CommandContext {
                     new_fragments,
                     dispatchers,
                     init_split_assignment,
+                    to_drop_state_table_ids,
                     ..
                 },
             ) => {
@@ -295,7 +285,7 @@ impl CommandContext {
                     .post_collect_job_fragments(
                         new_fragments.stream_job_id().table_id as _,
                         new_fragments.actor_ids(),
-                        dispatchers.clone(),
+                        dispatchers,
                         init_split_assignment,
                     )
                     .await?;
@@ -307,9 +297,13 @@ impl CommandContext {
                         old_fragments,
                         new_fragments.stream_source_fragments(),
                         init_split_assignment.clone(),
-                        replace_plan.fragment_replacements(),
+                        replace_plan,
                     )
                     .await;
+                barrier_manager_context
+                    .hummock_manager
+                    .unregister_table_ids(to_drop_state_table_ids.iter().cloned())
+                    .await?;
             }
 
             Command::CreateSubscription {

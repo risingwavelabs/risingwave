@@ -18,8 +18,8 @@ use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use prometheus::{
-    exponential_buckets, histogram_opts, linear_buckets, register_histogram_with_registry,
-    Histogram, Registry,
+    Histogram, Registry, exponential_buckets, histogram_opts, linear_buckets,
+    register_histogram_with_registry,
 };
 use risingwave_common::config::MetricLevel;
 use risingwave_common::metrics::{

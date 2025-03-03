@@ -35,6 +35,7 @@ pub mod connection;
 pub mod database;
 pub mod exactly_once_iceberg_sink;
 pub mod fragment;
+pub mod fragment_relation;
 pub mod function;
 pub mod hummock_epoch_to_version;
 pub mod hummock_gc_history;

@@ -15,16 +15,16 @@ use core::fmt::Debug;
 use core::future::IntoFuture;
 use std::collections::BTreeMap;
 
-use anyhow::{anyhow, Context as _};
+use anyhow::{Context as _, anyhow};
 use async_nats::jetstream::context::Context;
-use futures::prelude::TryFuture;
 use futures::FutureExt;
+use futures::prelude::TryFuture;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use serde_derive::Deserialize;
 use serde_with::serde_as;
-use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tokio_retry::Retry;
+use tokio_retry::strategy::{ExponentialBackoff, jitter};
 use with_options::WithOptions;
 
 use super::encoder::{
@@ -38,7 +38,7 @@ use crate::sink::log_store::DeliveryFutureManagerAddFuture;
 use crate::sink::writer::{
     AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriter, AsyncTruncateSinkWriterExt,
 };
-use crate::sink::{Result, Sink, SinkError, SinkParam, SINK_TYPE_APPEND_ONLY};
+use crate::sink::{Result, SINK_TYPE_APPEND_ONLY, Sink, SinkError, SinkParam};
 
 pub const NATS_SINK: &str = "nats";
 const NATS_SEND_FUTURE_BUFFER_MAX_SIZE: usize = 65536;

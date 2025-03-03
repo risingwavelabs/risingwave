@@ -42,9 +42,7 @@ pub async fn update_check(info: Arc<ExecutorInfo>, input: impl MessageStream) {
                 {
                     panic!(
                         "update check failed on `{}`: expect U+ after  U-:\n first row: {:?}\nsecond row: {:?}",
-                        info.identity,
-                        row1,
-                        row2,
+                        info.identity, row1, row2,
                     )
                 }
             }
@@ -56,9 +54,9 @@ pub async fn update_check(info: Arc<ExecutorInfo>, input: impl MessageStream) {
 
 #[cfg(test)]
 mod tests {
-    use futures::{pin_mut, StreamExt};
-    use risingwave_common::array::stream_chunk::StreamChunkTestExt;
+    use futures::{StreamExt, pin_mut};
     use risingwave_common::array::StreamChunk;
+    use risingwave_common::array::stream_chunk::StreamChunkTestExt;
 
     use super::*;
     use crate::executor::test_utils::MockSource;

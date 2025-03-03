@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 
 use serde::Deserialize;
-use serde_with::{serde_as, DisplayFromStr};
+use serde_with::{DisplayFromStr, serde_as};
 
 use crate::connector_common::{AwsAuthProps, KafkaConnectionProps, KafkaPrivateLinkCommon};
 
@@ -180,6 +180,14 @@ impl KafkaProperties {
     pub fn set_client(&self, c: &mut rdkafka::ClientConfig) {
         self.rdkafka_properties_common.set_client(c);
         self.rdkafka_properties_consumer.set_client(c);
+    }
+
+    pub fn group_id(&self, fragment_id: u32) -> String {
+        format!(
+            "{}-{}",
+            self.group_id_prefix.as_deref().unwrap_or("rw-consumer"),
+            fragment_id
+        )
     }
 }
 

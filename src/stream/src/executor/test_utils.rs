@@ -17,7 +17,7 @@ use futures::{FutureExt, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::{DataType, ScalarImpl};
-use risingwave_common::util::epoch::{test_epoch, EpochExt};
+use risingwave_common::util::epoch::{EpochExt, test_epoch};
 use tokio::sync::mpsc;
 
 use super::error::StreamExecutorError;
@@ -27,16 +27,16 @@ use super::{
 };
 
 pub mod prelude {
-    pub use std::sync::atomic::AtomicU64;
     pub use std::sync::Arc;
+    pub use std::sync::atomic::AtomicU64;
 
     pub use risingwave_common::array::StreamChunk;
     pub use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
     pub use risingwave_common::test_prelude::StreamChunkTestExt;
     pub use risingwave_common::types::DataType;
     pub use risingwave_common::util::sort_util::OrderType;
-    pub use risingwave_storage::memory::MemoryStateStore;
     pub use risingwave_storage::StateStore;
+    pub use risingwave_storage::memory::MemoryStateStore;
 
     pub use crate::common::table::state_table::StateTable;
     pub use crate::executor::test_utils::expr::build_from_pretty;
@@ -269,8 +269,8 @@ pub mod expr {
 }
 
 pub mod agg_executor {
-    use std::sync::atomic::AtomicU64;
     use std::sync::Arc;
+    use std::sync::atomic::AtomicU64;
 
     use futures::future;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
@@ -281,9 +281,9 @@ pub mod agg_executor {
     use risingwave_pb::stream_plan::PbAggNodeVersion;
     use risingwave_storage::StateStore;
 
+    use crate::common::StateTableColumnMapping;
     use crate::common::table::state_table::StateTable;
     use crate::common::table::test_utils::gen_pbtable;
-    use crate::common::StateTableColumnMapping;
     use crate::executor::agg_common::{
         AggExecutorArgs, HashAggExecutorExtraArgs, SimpleAggExecutorExtraArgs,
     };
@@ -484,7 +484,7 @@ pub mod agg_executor {
         };
 
         let exec = HashAggExecutor::<SerializedKey, S>::new(AggExecutorArgs {
-            version: PbAggNodeVersion::Max,
+            version: PbAggNodeVersion::LATEST,
 
             input,
             actor_ctx: ActorContext::for_test(123),
@@ -552,7 +552,7 @@ pub mod agg_executor {
         };
 
         let exec = SimpleAggExecutor::new(AggExecutorArgs {
-            version: PbAggNodeVersion::Max,
+            version: PbAggNodeVersion::LATEST,
 
             input,
             actor_ctx,
@@ -626,8 +626,8 @@ pub mod top_n_executor {
 }
 
 pub mod hash_join_executor {
-    use std::sync::atomic::AtomicU64;
     use std::sync::Arc;
+    use std::sync::atomic::AtomicU64;
 
     use itertools::Itertools;
     use risingwave_common::array::{I64Array, Op};
@@ -756,10 +756,15 @@ pub mod hash_join_executor {
         let params_l = JoinParams::new(vec![0], vec![1]);
         let params_r = JoinParams::new(vec![0], vec![1]);
 
+        let cache_size = match workload {
+            HashJoinWorkload::InCache => Some(1_000_000),
+            HashJoinWorkload::NotInCache => None,
+        };
+
         match join_type {
             JoinType::Inner => {
                 let executor =
-                    HashJoinExecutor::<Key128, MemoryStateStore, { ConstJoinType::Inner }>::new(
+                    HashJoinExecutor::<Key128, MemoryStateStore, { ConstJoinType::Inner }>::new_with_cache_size(
                         ActorContext::for_test(123),
                         info,
                         source_l,
@@ -779,6 +784,7 @@ pub mod hash_join_executor {
                         Arc::new(StreamingMetrics::unused()),
                         1024, // chunk_size
                         2048, // high_join_amplification_threshold
+                        cache_size,
                     );
                 (tx_l, tx_r, executor.boxed().execute())
             }
@@ -787,7 +793,7 @@ pub mod hash_join_executor {
                     Key128,
                     MemoryStateStore,
                     { ConstJoinType::LeftOuter },
-                >::new(
+                >::new_with_cache_size(
                     ActorContext::for_test(123),
                     info,
                     source_l,
@@ -807,6 +813,7 @@ pub mod hash_join_executor {
                     Arc::new(StreamingMetrics::unused()),
                     1024, // chunk_size
                     2048, // high_join_amplification_threshold
+                    cache_size,
                 );
                 (tx_l, tx_r, executor.boxed().execute())
             }
@@ -852,10 +859,13 @@ pub mod hash_join_executor {
             // Push a single record into tx_r, so 100K records to be matched are cached.
             let chunk = build_chunk(amp, 200_000);
             tx_r.push_chunk(chunk);
-        }
 
-        tx_l.push_barrier(test_epoch(2), false);
-        tx_r.push_barrier(test_epoch(2), false);
+            // Ensure that the chunk on the rhs is processed, before inserting a chunk
+            // into the lhs. This is to ensure that the rhs chunk is cached,
+            // and we don't get interleaving of chunks between lhs and rhs.
+            tx_l.push_barrier(test_epoch(2), false);
+            tx_r.push_barrier(test_epoch(2), false);
+        }
 
         // Push a chunk of records into tx_l, matches 100K records in the build side.
         let chunk_size = match hash_join_workload {
@@ -880,12 +890,14 @@ pub mod hash_join_executor {
             }
         }
 
-        match stream.next().await {
-            Some(Ok(Message::Barrier(b))) => {
-                assert_eq!(b.epoch.curr, test_epoch(2));
-            }
-            other => {
-                panic!("Expected a barrier, got {:?}", other);
+        if matches!(hash_join_workload, HashJoinWorkload::InCache) {
+            match stream.next().await {
+                Some(Ok(Message::Barrier(b))) => {
+                    assert_eq!(b.epoch.curr, test_epoch(2));
+                }
+                other => {
+                    panic!("Expected a barrier, got {:?}", other);
+                }
             }
         }
 

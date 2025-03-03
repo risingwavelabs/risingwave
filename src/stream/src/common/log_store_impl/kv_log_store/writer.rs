@@ -15,34 +15,30 @@
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use itertools::Itertools;
+use bytes::Bytes;
+use futures::FutureExt;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
-use risingwave_common::catalog::TableId;
-use risingwave_common::hash::VnodeBitmapExt;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_common_estimate_size::EstimateSize;
-use risingwave_connector::sink::log_store::{LogStoreResult, LogWriter};
-use risingwave_hummock_sdk::table_watermark::{VnodeWatermark, WatermarkDirection};
-use risingwave_storage::store::{InitOptions, LocalStateStore, SealCurrentEpochOptions};
-use tokio::sync::watch;
+use risingwave_connector::sink::log_store::{
+    LogStoreResult, LogWriter, LogWriterPostFlushCurrentEpoch,
+};
+use risingwave_storage::store::LocalStateStore;
+use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::{oneshot, watch};
 
 use crate::common::log_store_impl::kv_log_store::buffer::LogStoreBufferSender;
-use crate::common::log_store_impl::kv_log_store::serde::LogStoreRowSerde;
-use crate::common::log_store_impl::kv_log_store::{
-    FlushInfo, KvLogStoreMetrics, SeqIdType, FIRST_SEQ_ID,
-};
+use crate::common::log_store_impl::kv_log_store::state::LogStoreWriteState;
+use crate::common::log_store_impl::kv_log_store::{FIRST_SEQ_ID, KvLogStoreMetrics, SeqIdType};
 
 pub struct KvLogStoreWriter<LS: LocalStateStore> {
-    _table_id: TableId,
-
     seq_id: SeqIdType,
 
-    state_store: LS,
-
-    serde: LogStoreRowSerde,
+    state: LogStoreWriteState<LS>,
 
     tx: LogStoreBufferSender,
+    init_epoch_tx: Option<oneshot::Sender<(EpochPair, Option<Option<Bytes>>)>>,
+    update_vnode_bitmap_tx: UnboundedSender<(Arc<Bitmap>, u64, Option<Option<Bytes>>)>,
 
     metrics: KvLogStoreMetrics,
 
@@ -51,28 +47,33 @@ pub struct KvLogStoreWriter<LS: LocalStateStore> {
     is_paused: bool,
 
     identity: String,
+
+    align_epoch_on_init: bool,
 }
 
 impl<LS: LocalStateStore> KvLogStoreWriter<LS> {
+    #[expect(clippy::too_many_arguments)]
     pub(crate) fn new(
-        table_id: TableId,
-        state_store: LS,
-        serde: LogStoreRowSerde,
+        state: LogStoreWriteState<LS>,
         tx: LogStoreBufferSender,
+        init_epoch_tx: oneshot::Sender<(EpochPair, Option<Option<Bytes>>)>,
+        update_vnode_bitmap_tx: UnboundedSender<(Arc<Bitmap>, u64, Option<Option<Bytes>>)>,
         metrics: KvLogStoreMetrics,
         paused_notifier: watch::Sender<bool>,
         identity: String,
+        align_epoch_on_init: bool,
     ) -> Self {
         Self {
-            _table_id: table_id,
             seq_id: FIRST_SEQ_ID,
-            state_store,
-            serde,
+            state,
             tx,
+            init_epoch_tx: Some(init_epoch_tx),
+            update_vnode_bitmap_tx,
             metrics,
             paused_notifier,
             identity,
             is_paused: false,
+            align_epoch_on_init,
         }
     }
 }
@@ -83,13 +84,25 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
         epoch: EpochPair,
         pause_read_on_bootstrap: bool,
     ) -> LogStoreResult<()> {
-        self.state_store.init(InitOptions::new(epoch)).await?;
+        self.state.init(epoch).await?;
         if pause_read_on_bootstrap {
             self.pause()?;
             info!("KvLogStore of {} paused on bootstrap", self.identity);
         }
         self.seq_id = FIRST_SEQ_ID;
-        self.tx.init(epoch.curr);
+        let init_offset_range_start = if self.align_epoch_on_init {
+            Some(self.state.aligned_init_range_start())
+        } else {
+            None
+        };
+        if let Err((e, _)) = self
+            .init_epoch_tx
+            .take()
+            .expect("should be Some in first init")
+            .send((epoch, init_offset_range_start))
+        {
+            error!("unable to send init epoch: {:?}", e);
+        }
         Ok(())
     }
 
@@ -100,7 +113,7 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
         if chunk.cardinality() == 0 {
             return Ok(());
         }
-        let epoch = self.state_store.epoch();
+        let epoch = self.state.epoch().curr;
         let start_seq_id = self.seq_id;
         self.seq_id += chunk.cardinality() as SeqIdType;
         let end_seq_id = self.seq_id - 1;
@@ -110,22 +123,18 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
         {
             // When enter this branch, the chunk cannot be added directly, and should be add to
             // state store and flush
-            let mut vnode_bitmap_builder = BitmapBuilder::zeroed(self.serde.vnodes().len());
-            let mut flush_info = FlushInfo::new();
-            for (i, (op, row)) in chunk.rows().enumerate() {
-                let seq_id = start_seq_id + (i as SeqIdType);
-                assert!(seq_id <= end_seq_id);
-                let (vnode, key, value) = self.serde.serialize_data_row(epoch, seq_id, op, row);
-                vnode_bitmap_builder.set(vnode.to_index(), true);
-                flush_info.flush_one(key.estimated_size() + value.estimated_size());
-                self.state_store.insert(key, value, None)?;
-            }
+            let mut writer = self.state.start_writer(true);
+            writer.write_chunk(&chunk, epoch, start_seq_id, end_seq_id)?;
+            let (flush_info, vnode_bitmap) = writer.finish().await?;
             flush_info.report(&self.metrics);
-            self.state_store.flush().await?;
 
-            let vnode_bitmap = vnode_bitmap_builder.finish();
-            self.tx
-                .add_flushed(epoch, start_seq_id, end_seq_id, vnode_bitmap);
+            self.tx.add_flushed(
+                epoch,
+                start_seq_id,
+                end_seq_id,
+                vnode_bitmap
+                    .expect("should exist since we set record_vnodes as true when start_writer"),
+            );
         }
         Ok(())
     }
@@ -134,65 +143,61 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
         &mut self,
         next_epoch: u64,
         is_checkpoint: bool,
-    ) -> LogStoreResult<()> {
-        let epoch = self.state_store.epoch();
-        let mut flush_info = FlushInfo::new();
+    ) -> LogStoreResult<LogWriterPostFlushCurrentEpoch<'_>> {
+        let epoch = self.state.epoch().curr;
+        let mut writer = self.state.start_writer(false);
 
         // When the stream is paused, donot flush barrier to ensure there is no dirty data in state store.
         // Besides, barrier on a paused stream is useless in log store because it won't change the log store state.
         if !self.is_paused {
-            for vnode in self.serde.vnodes().iter_vnodes() {
-                let (key, value) = self.serde.serialize_barrier(epoch, vnode, is_checkpoint);
-                flush_info.flush_one(key.estimated_size() + value.estimated_size());
-                self.state_store.insert(key, value, None)?;
-            }
+            writer.write_barrier(epoch, is_checkpoint)?;
         }
         self.tx
             .flush_all_unflushed(|chunk, epoch, start_seq_id, end_seq_id| {
-                for (i, (op, row)) in chunk.rows().enumerate() {
-                    let seq_id = start_seq_id + (i as SeqIdType);
-                    assert!(seq_id <= end_seq_id);
-                    let (_, key, value) = self.serde.serialize_data_row(epoch, seq_id, op, row);
-                    flush_info.flush_one(key.estimated_size() + value.estimated_size());
-                    self.state_store.insert(key, value, None)?;
-                }
+                writer.write_chunk(chunk, epoch, start_seq_id, end_seq_id)?;
+
                 Ok(())
             })?;
+
+        let (flush_info, _) = writer.finish().await?;
 
         // No data is expected when the stream is paused.
         if self.is_paused {
             assert_eq!(flush_info.flush_count, 0);
             assert_eq!(flush_info.flush_size, 0);
-            assert!(!self.state_store.is_dirty());
+            assert!(!self.state.is_dirty());
         }
         flush_info.report(&self.metrics);
 
-        let watermark = self.tx.pop_truncation(epoch).map(|truncation_offset| {
-            VnodeWatermark::new(
-                self.serde.vnodes().clone(),
-                self.serde
-                    .serialize_truncation_offset_watermark(truncation_offset),
-            )
-        });
-        self.state_store.flush().await?;
-        let watermark = watermark.into_iter().collect_vec();
-        self.state_store.seal_current_epoch(
-            next_epoch,
-            SealCurrentEpochOptions {
-                table_watermarks: Some((WatermarkDirection::Ascending, watermark)),
-                switch_op_consistency_level: None,
-            },
-        );
+        let truncate_offset = self.tx.pop_truncation(epoch);
+        let post_seal_epoch = self.state.seal_current_epoch(next_epoch, truncate_offset);
         self.tx.barrier(epoch, is_checkpoint, next_epoch);
+        let update_vnode_bitmap_tx = &mut self.update_vnode_bitmap_tx;
+        let tx = &mut self.tx;
+        let align_epoch_on_init = self.align_epoch_on_init;
         self.seq_id = FIRST_SEQ_ID;
-        Ok(())
-    }
-
-    async fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) -> LogStoreResult<()> {
-        self.serde.update_vnode_bitmap(new_vnodes.clone());
-        self.state_store.update_vnode_bitmap(new_vnodes.clone());
-        self.tx.update_vnode(self.state_store.epoch(), new_vnodes);
-        Ok(())
+        Ok(LogWriterPostFlushCurrentEpoch::new(
+            move |new_vnodes: Option<Arc<Bitmap>>| {
+                async move {
+                    let state = post_seal_epoch
+                        .post_yield_barrier(new_vnodes.clone())
+                        .await?;
+                    if let Some(new_vnodes) = new_vnodes {
+                        let aligned_range_start = if align_epoch_on_init {
+                            Some(state.aligned_init_range_start())
+                        } else {
+                            None
+                        };
+                        update_vnode_bitmap_tx
+                            .send((new_vnodes, next_epoch, aligned_range_start))
+                            .map_err(|_| anyhow!("fail to send update vnode bitmap to reader"))?;
+                        tx.clear();
+                    }
+                    Ok(())
+                }
+                .boxed()
+            },
+        ))
     }
 
     fn pause(&mut self) -> LogStoreResult<()> {

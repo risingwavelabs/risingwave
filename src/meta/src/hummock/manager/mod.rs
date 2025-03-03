@@ -12,19 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::ops::{Deref, DerefMut};
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use bytes::Bytes;
 use itertools::Itertools;
+use parking_lot::lock_api::RwLock;
+use risingwave_common::catalog::TableOption;
 use risingwave_common::monitor::MonitoredRwLock;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{
-    version_archive_dir, version_checkpoint_path, CompactionGroupId, HummockCompactionTaskId,
-    HummockContextId, HummockVersionId,
+    CompactionGroupId, HummockCompactionTaskId, HummockContextId, HummockVersionId,
+    version_archive_dir, version_checkpoint_path,
 };
 use risingwave_meta_model::{
     compaction_status, compaction_task, hummock_pinned_version, hummock_version_delta,
@@ -39,12 +41,12 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::{Mutex, Semaphore};
 use tonic::Streaming;
 
+use crate::hummock::CompactorManagerRef;
 use crate::hummock::compaction::CompactStatus;
 use crate::hummock::error::Result;
 use crate::hummock::manager::checkpoint::HummockVersionCheckpoint;
 use crate::hummock::manager::context::ContextInfo;
 use crate::hummock::manager::gc::{FullGcState, GcManager};
-use crate::hummock::CompactorManagerRef;
 use crate::manager::{MetaSrvEnv, MetadataManager};
 use crate::model::{ClusterId, MetadataModelError};
 use crate::rpc::metrics::MetaMetrics;
@@ -68,7 +70,7 @@ mod worker;
 
 pub use commit_epoch::{CommitEpochInfo, NewTableFragmentInfo};
 use compaction::*;
-pub use compaction::{check_cg_write_limit, WriteLimitType};
+pub use compaction::{EmergencyState, WriteLimitType, check_cg_write_limit, check_emergency_state};
 pub(crate) use utils::*;
 
 // Update to states are performed as follow:
@@ -112,11 +114,13 @@ pub struct HummockManager {
     now: Mutex<u64>,
     inflight_time_travel_query: Semaphore,
     gc_manager: GcManager,
+
+    table_id_to_table_option: parking_lot::RwLock<HashMap<u32, TableOption>>,
 }
 
 pub type HummockManagerRef = Arc<HummockManager>;
 
-use risingwave_object_store::object::{build_remote_object_store, ObjectError, ObjectStoreRef};
+use risingwave_object_store::object::{ObjectError, ObjectStoreRef, build_remote_object_store};
 use risingwave_pb::catalog::Table;
 
 macro_rules! start_measure_real_process_timer {
@@ -294,6 +298,7 @@ impl HummockManager {
             now: Mutex::new(0),
             inflight_time_travel_query: Semaphore::new(inflight_time_travel_query as usize),
             gc_manager,
+            table_id_to_table_option: RwLock::new(HashMap::new()),
         };
         let instance = Arc::new(instance);
         instance.init_time_travel_state().await?;
@@ -392,11 +397,29 @@ impl HummockManager {
             self.write_checkpoint(&versioning_guard.checkpoint).await?;
             checkpoint_version
         };
-        for version_delta in hummock_version_deltas.values() {
-            if version_delta.prev_id == redo_state.id {
-                redo_state.apply_version_delta(version_delta);
+        let mut applied_delta_count = 0;
+        let total_to_apply = hummock_version_deltas.range(redo_state.id + 1..).count();
+        tracing::info!(
+            total_delta = hummock_version_deltas.len(),
+            total_to_apply,
+            "Start redo Hummock version."
+        );
+        for version_delta in hummock_version_deltas
+            .range(redo_state.id + 1..)
+            .map(|(_, v)| v)
+        {
+            assert_eq!(
+                version_delta.prev_id, redo_state.id,
+                "delta prev_id {}, redo state id {}",
+                version_delta.prev_id, redo_state.id
+            );
+            redo_state.apply_version_delta(version_delta);
+            applied_delta_count += 1;
+            if applied_delta_count % 1000 == 0 {
+                tracing::info!("Redo progress {applied_delta_count}/{total_to_apply}.");
             }
         }
+        tracing::info!("Finish redo Hummock version.");
         versioning_guard.version_stats = hummock_version_stats::Entity::find()
             .one(&meta_store.conn)
             .await
@@ -469,6 +492,17 @@ impl HummockManager {
     pub fn object_store_media_type(&self) -> &'static str {
         self.object_store.media_type()
     }
+
+    pub fn update_table_id_to_table_option(
+        &self,
+        new_table_id_to_table_option: HashMap<u32, TableOption>,
+    ) {
+        *self.table_id_to_table_option.write() = new_table_id_to_table_option;
+    }
+
+    pub fn metadata_manager_ref(&self) -> &MetadataManager {
+        &self.metadata_manager
+    }
 }
 
 async fn write_exclusive_cluster_id(
@@ -480,6 +514,7 @@ async fn write_exclusive_cluster_id(
     const CLUSTER_ID_NAME: &str = "0";
     let cluster_id_dir = format!("{}/{}/", state_store_dir, CLUSTER_ID_DIR);
     let cluster_id_full_path = format!("{}{}", cluster_id_dir, CLUSTER_ID_NAME);
+    tracing::info!("try reading cluster_id");
     match object_store.read(&cluster_id_full_path, ..).await {
         Ok(stored_cluster_id) => {
             let stored_cluster_id = String::from_utf8(stored_cluster_id.to_vec()).unwrap();
@@ -495,6 +530,7 @@ async fn write_exclusive_cluster_id(
         }
         Err(e) => {
             if e.is_object_not_found_error() {
+                tracing::info!("cluster_id not found, writing cluster_id");
                 object_store
                     .upload(&cluster_id_full_path, Bytes::from(String::from(cluster_id)))
                     .await?;

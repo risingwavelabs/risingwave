@@ -65,7 +65,11 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
         var password = userProps.get(DbzConnectorConfig.PASSWORD);
         this.jdbcConnection = DriverManager.getConnection(jdbcUrl, user, password);
 
-        this.isAwsRds = dbHost.contains(AWS_RDS_HOST);
+        this.isAwsRds =
+                dbHost.contains(AWS_RDS_HOST)
+                        || userProps
+                                .getOrDefault(DbzConnectorConfig.PG_TEST_ONLY_FORCE_RDS, "false")
+                                .equalsIgnoreCase("true");
         this.dbName = dbName;
         this.user = user;
         this.schemaName = userProps.get(DbzConnectorConfig.PG_SCHEMA_NAME);
@@ -86,8 +90,12 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
     @Override
     public void validateDbConfig() {
         try {
-            if (pgVersion > 16) {
-                throw ValidatorUtils.failedPrecondition("Postgres version should be less than 16.");
+            // whenever a newer PG version is released, Debezium will take
+            // some time to support it. So even though 18 is not released yet, we put a version
+            // guard here.
+            if (pgVersion >= 18) {
+                throw ValidatorUtils.failedPrecondition(
+                        "Postgres major version should be less than or equal to 17.");
             }
 
             try (var stmt = jdbcConnection.createStatement()) {
@@ -254,24 +262,18 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
         boolean isSuperUser = false;
         if (this.isAwsRds) {
             // check privileges for aws rds postgres
-            boolean hasReplicationRole;
+            boolean hasReplicationRole = false;
             try (var stmt =
                     jdbcConnection.prepareStatement(
                             ValidatorUtils.getSql("postgres.rds.role.check"))) {
                 stmt.setString(1, this.user);
+                stmt.setString(2, this.user);
                 var res = stmt.executeQuery();
-                var hashSet = new HashSet<String>();
                 while (res.next()) {
                     // check rds_superuser role or rds_replication role is granted
-                    var memberof = res.getArray("memberof");
-                    if (memberof != null) {
-                        var members = (String[]) memberof.getArray();
-                        hashSet.addAll(Arrays.asList(members));
-                    }
-                    LOG.info("rds memberof: {}", hashSet);
+                    isSuperUser = res.getBoolean(1);
+                    hasReplicationRole = res.getBoolean(2);
                 }
-                isSuperUser = hashSet.contains("rds_superuser");
-                hasReplicationRole = hashSet.contains("rds_replication");
             }
 
             if (!isSuperUser && !hasReplicationRole) {
@@ -320,9 +322,8 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
         try (var stmt =
                 jdbcConnection.prepareStatement(
                         ValidatorUtils.getSql("postgres.table_read_privilege.check"))) {
-            stmt.setString(1, this.schemaName);
-            stmt.setString(2, this.tableName);
-            stmt.setString(3, this.user);
+            stmt.setString(1, this.user);
+            stmt.setString(2, String.format("\"%s\".\"%s\"", this.schemaName, this.tableName));
             var res = stmt.executeQuery();
             while (res.next()) {
                 if (!res.getBoolean(1)) {

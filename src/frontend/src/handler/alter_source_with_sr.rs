@@ -14,12 +14,11 @@
 
 use std::sync::Arc;
 
-use anyhow::Context;
 use either::Either;
 use itertools::Itertools;
 use pgwire::pg_response::StatementType;
 use risingwave_common::bail_not_implemented;
-use risingwave_common::catalog::{max_column_id, ColumnCatalog};
+use risingwave_common::catalog::{ColumnCatalog, max_column_id};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_connector::WithPropertiesExt;
 use risingwave_pb::catalog::StreamSourceInfo;
@@ -28,7 +27,6 @@ use risingwave_sqlparser::ast::{
     CompatibleFormatEncode, CreateSourceStatement, Encode, Format, FormatEncodeOptions, ObjectName,
     SqlOption, Statement,
 };
-use risingwave_sqlparser::parser::Parser;
 
 use super::create_source::{
     generate_stream_graph_for_source, schema_has_schema_registry, validate_compatibility,
@@ -37,9 +35,8 @@ use super::util::SourceSchemaCompatExt;
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
-use crate::catalog::{DatabaseId, SchemaId};
 use crate::error::{ErrorCode, Result};
-use crate::handler::create_source::{bind_columns_from_source, CreateSourceType};
+use crate::handler::create_source::{CreateSourceType, bind_columns_from_source};
 use crate::session::SessionImpl;
 use crate::utils::resolve_secret_ref_in_with_options;
 use crate::{Binder, WithOptions};
@@ -98,11 +95,11 @@ fn columns_minus(columns_a: &[ColumnCatalog], columns_b: &[ColumnCatalog]) -> Ve
         .collect()
 }
 
-/// Fetch the source catalog and the `database/schema_id` of the source.
+/// Fetch the source catalog.
 pub fn fetch_source_catalog_with_db_schema_id(
     session: &SessionImpl,
     name: &ObjectName,
-) -> Result<(Arc<SourceCatalog>, DatabaseId, SchemaId)> {
+) -> Result<Arc<SourceCatalog>> {
     let db_name = &session.database();
     let (schema_name, real_source_name) =
         Binder::resolve_schema_qualified_name(db_name, name.clone())?;
@@ -114,12 +111,10 @@ pub fn fetch_source_catalog_with_db_schema_id(
     let reader = session.env().catalog_reader().read_guard();
     let (source, schema_name) =
         reader.get_source_by_name(db_name, schema_path, &real_source_name)?;
-    let db = reader.get_database_by_name(db_name)?;
-    let schema = db.get_schema_by_name(schema_name).unwrap();
 
     session.check_privilege_for_drop_alter(schema_name, &**source)?;
 
-    Ok((Arc::clone(source), db.id(), schema.id()))
+    Ok(Arc::clone(source))
 }
 
 /// Check if the original source is created with `FORMAT .. ENCODE ..` clause,
@@ -198,10 +193,7 @@ pub async fn refresh_sr_and_get_columns_diff(
 }
 
 fn get_format_encode_from_source(source: &SourceCatalog) -> Result<FormatEncodeOptions> {
-    let [stmt]: [_; 1] = Parser::parse_sql(&source.definition)
-        .context("unable to parse original source definition")?
-        .try_into()
-        .unwrap();
+    let stmt = source.create_sql_ast()?;
     let Statement::CreateSource {
         stmt: CreateSourceStatement { format_encode, .. },
     } = stmt
@@ -215,7 +207,7 @@ pub async fn handler_refresh_schema(
     handler_args: HandlerArgs,
     name: ObjectName,
 ) -> Result<RwPgResponse> {
-    let (source, _, _) = fetch_source_catalog_with_db_schema_id(&handler_args.session, &name)?;
+    let source = fetch_source_catalog_with_db_schema_id(&handler_args.session, &name)?;
     let format_encode = get_format_encode_from_source(&source)?;
     handle_alter_source_with_sr(handler_args, name, format_encode).await
 }
@@ -226,7 +218,7 @@ pub async fn handle_alter_source_with_sr(
     format_encode: FormatEncodeOptions,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
-    let (source, database_id, schema_id) = fetch_source_catalog_with_db_schema_id(&session, &name)?;
+    let source = fetch_source_catalog_with_db_schema_id(&session, &name)?;
     let mut source = source.as_ref().clone();
     let old_columns = source.columns.clone();
 
@@ -263,8 +255,10 @@ pub async fn handle_alter_source_with_sr(
 
     source.info = source_info;
     source.columns.extend(added_columns);
-    source.definition =
-        alter_definition_format_encode(&source.definition, format_encode.row_options.clone())?;
+    source.definition = alter_definition_format_encode(
+        source.create_sql_ast_purified()?,
+        format_encode.row_options.clone(),
+    )?;
 
     let (format_encode_options, format_encode_secret_ref) = resolve_secret_ref_in_with_options(
         WithOptions::try_from(format_encode.row_options())?,
@@ -284,7 +278,7 @@ pub async fn handle_alter_source_with_sr(
     // update version
     source.version += 1;
 
-    let pb_source = source.to_prost(schema_id, database_id);
+    let pb_source = source.to_prost();
     let catalog_writer = session.catalog_writer()?;
     if source.info.is_shared() {
         let graph = generate_stream_graph_for_source(handler_args, source.clone())?;
@@ -313,15 +307,9 @@ pub async fn handle_alter_source_with_sr(
 
 /// Apply the new `format_encode_options` to the source/table definition.
 pub fn alter_definition_format_encode(
-    definition: &str,
+    mut stmt: Statement,
     format_encode_options: Vec<SqlOption>,
 ) -> Result<String> {
-    let ast = Parser::parse_sql(definition).expect("failed to parse relation definition");
-    let mut stmt = ast
-        .into_iter()
-        .exactly_one()
-        .expect("should contain only one statement");
-
     match &mut stmt {
         Statement::CreateSource {
             stmt: CreateSourceStatement { format_encode, .. },
@@ -351,7 +339,7 @@ pub mod tests {
     use risingwave_connector::source::DataType;
 
     use crate::catalog::root_catalog::SchemaPath;
-    use crate::test_utils::{create_proto_file, LocalFrontend, PROTO_FILE_DATA};
+    use crate::test_utils::{LocalFrontend, PROTO_FILE_DATA, create_proto_file};
 
     #[tokio::test]
     async fn test_alter_source_with_sr_handler() {
@@ -391,6 +379,9 @@ pub mod tests {
                 .clone()
         };
 
+        let source = get_source();
+        expect_test::expect!["CREATE SOURCE src (id INT, country STRUCT<address CHARACTER VARYING, city STRUCT<address CHARACTER VARYING, zipcode CHARACTER VARYING>, zipcode CHARACTER VARYING>, zipcode BIGINT, rate REAL) WITH (connector = 'kafka', topic = 'test-topic', properties.bootstrap.server = 'localhost:29092') FORMAT PLAIN ENCODE PROTOBUF (message = '.test.TestRecord', schema.location = 'file://')"].assert_eq(&source.create_sql_purified().replace(proto_file.path().to_str().unwrap(), ""));
+
         let sql = format!(
             r#"ALTER SOURCE src FORMAT UPSERT ENCODE PROTOBUF (
                 message = '.test.TestRecord',
@@ -398,12 +389,14 @@ pub mod tests {
             )"#,
             proto_file.path().to_str().unwrap()
         );
-        assert!(frontend
-            .run_sql(sql)
-            .await
-            .unwrap_err()
-            .to_string()
-            .contains("the original definition is FORMAT Plain ENCODE Protobuf"));
+        assert!(
+            frontend
+                .run_sql(sql)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("the original definition is FORMAT Plain ENCODE Protobuf")
+        );
 
         let sql = format!(
             r#"ALTER SOURCE src FORMAT PLAIN ENCODE PROTOBUF (
@@ -434,10 +427,6 @@ pub mod tests {
             .unwrap();
         assert_eq!(name_column.column_desc.data_type, DataType::Varchar);
 
-        let altered_sql = format!(
-            r#"CREATE SOURCE src WITH (connector = 'kafka', topic = 'test-topic', properties.bootstrap.server = 'localhost:29092') FORMAT PLAIN ENCODE PROTOBUF (message = '.test.TestRecordExt', schema.location = 'file://{}')"#,
-            proto_file.path().to_str().unwrap()
-        );
-        assert_eq!(altered_sql, altered_source.definition);
+        expect_test::expect!["CREATE SOURCE src (id INT, country STRUCT<address CHARACTER VARYING, city STRUCT<address CHARACTER VARYING, zipcode CHARACTER VARYING>, zipcode CHARACTER VARYING>, zipcode BIGINT, rate REAL, name CHARACTER VARYING) WITH (connector = 'kafka', topic = 'test-topic', properties.bootstrap.server = 'localhost:29092') FORMAT PLAIN ENCODE PROTOBUF (message = '.test.TestRecordExt', schema.location = 'file://')"].assert_eq(&altered_source.create_sql_purified().replace(proto_file.path().to_str().unwrap(), ""));
     }
 }

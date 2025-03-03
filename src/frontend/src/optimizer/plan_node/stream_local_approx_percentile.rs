@@ -12,24 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use fixedbitset::FixedBitSet;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
-use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::LocalApproxPercentileNode;
+use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
+use crate::PlanRef;
 use crate::expr::{ExprRewriter, ExprVisitor, InputRef, InputRefDisplay, Literal};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::{GenericPlanRef, PhysicalPlanRef};
 use crate::optimizer::plan_node::stream::StreamPlanRef;
-use crate::optimizer::plan_node::utils::{childless_record, watermark_pretty, Distill};
+use crate::optimizer::plan_node::utils::{Distill, childless_record, watermark_pretty};
 use crate::optimizer::plan_node::{
     ExprRewritable, PlanAggCall, PlanBase, PlanTreeNodeUnary, Stream, StreamNode,
 };
-use crate::optimizer::property::FunctionalDependencySet;
+use crate::optimizer::property::{FunctionalDependencySet, WatermarkColumns};
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::PlanRef;
 
 // Does not contain `core` because no other plan nodes share
 // common fields and schema, even GlobalApproxPercentile.
@@ -49,8 +48,8 @@ impl StreamLocalApproxPercentile {
             Field::with_name(DataType::Int32, "bucket_id"),
             Field::with_name(DataType::Int32, "count"),
         ]);
-        // FIXME(kwannoel): How does watermark work with FixedBitSet
-        let watermark_columns = FixedBitSet::with_capacity(3);
+        // TODO(kwannoel): derive watermark columns?
+        let watermark_columns = WatermarkColumns::new();
         let functional_dependency = FunctionalDependencySet::with_key(3, &[]);
         let base = PlanBase::new_stream(
             input.ctx(),

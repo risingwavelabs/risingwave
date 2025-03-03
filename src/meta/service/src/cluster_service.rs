@@ -15,8 +15,8 @@
 use risingwave_meta::barrier::BarrierManagerRef;
 use risingwave_meta::manager::MetadataManager;
 use risingwave_meta_model::WorkerId;
-use risingwave_pb::common::worker_node::State;
 use risingwave_pb::common::HostAddress;
+use risingwave_pb::common::worker_node::State;
 use risingwave_pb::meta::cluster_service_server::ClusterService;
 use risingwave_pb::meta::{
     ActivateWorkerNodeRequest, ActivateWorkerNodeResponse, AddWorkerNodeRequest,

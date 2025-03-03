@@ -22,8 +22,8 @@ use risingwave_connector_codec::common::protobuf::compile_pb;
 use super::loader::{LoadedSchema, SchemaLoader};
 use super::schema_registry::Subject;
 use super::{
-    invalid_option_error, InvalidOptionError, SchemaFetchError, MESSAGE_NAME_KEY,
-    SCHEMA_LOCATION_KEY, SCHEMA_REGISTRY_KEY,
+    InvalidOptionError, MESSAGE_NAME_KEY, SCHEMA_LOCATION_KEY, SCHEMA_REGISTRY_KEY,
+    SchemaFetchError, invalid_option_error,
 };
 use crate::connector_common::AwsAuthProps;
 use crate::parser::{EncodingProperties, ProtobufParserConfig, ProtobufProperties};
@@ -45,13 +45,13 @@ pub async fn fetch_descriptor(
             return Err(invalid_option_error!(
                 "cannot use {SCHEMA_LOCATION_KEY} and {SCHEMA_REGISTRY_KEY} together"
             )
-            .into())
+            .into());
         }
         (None, None) => {
             return Err(invalid_option_error!(
                 "requires one of {SCHEMA_LOCATION_KEY} or {SCHEMA_REGISTRY_KEY}"
             )
-            .into())
+            .into());
         }
         (None, Some(_)) => {
             let (md, sid) = fetch_from_registry(&message_name, format_options, topic).await?;
@@ -87,9 +87,17 @@ pub async fn fetch_from_registry(
     format_options: &BTreeMap<String, String>,
     topic: &str,
 ) -> Result<(MessageDescriptor, i32), SchemaFetchError> {
-    let loader = SchemaLoader::from_format_options(topic, format_options)?;
+    let loader = SchemaLoader::from_format_options(topic, format_options).await?;
 
     let (vid, vpb) = loader.load_val_schema::<FileDescriptor>().await?;
+    let vid = match vid {
+        super::SchemaVersion::Confluent(vid) => vid,
+        super::SchemaVersion::Glue(_) => {
+            return Err(
+                invalid_option_error!("Protobuf with Glue Schema Registry unsupported").into(),
+            );
+        }
+    };
 
     Ok((
         vpb.parent_pool().get_message_by_name(message_name).unwrap(),

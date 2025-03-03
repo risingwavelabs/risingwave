@@ -19,8 +19,8 @@ use risingwave_storage::StateStore;
 
 use super::ExecutorBuilder;
 use crate::error::StreamResult;
-use crate::executor::dml::DmlExecutor;
 use crate::executor::Executor;
+use crate::executor::dml::DmlExecutor;
 use crate::task::ExecutorParams;
 
 pub struct DmlExecutorBuilder;
@@ -45,7 +45,7 @@ impl ExecutorBuilder for DmlExecutorBuilder {
             node.table_version_id,
             column_descs,
             params.env.config().developer.chunk_size,
-            node.rate_limit,
+            node.rate_limit.into(),
         );
         Ok((params.info, exec).into())
     }

@@ -51,7 +51,11 @@ import {
 } from "../lib/api/streaming"
 import { FragmentBox } from "../lib/layout"
 import { TableFragments, TableFragments_Fragment } from "../proto/gen/meta"
-import { BackPressureInfo, FragmentStats } from "../proto/gen/monitor_service"
+import {
+  ChannelStats,
+  FragmentStats,
+  GetStreamingStatsResponse,
+} from "../proto/gen/monitor_service"
 import { Dispatcher, MergeNode, StreamNode } from "../proto/gen/stream_plan"
 
 interface DispatcherNode {
@@ -69,6 +73,17 @@ export interface PlanNodeDatum {
   operatorId: string | number
   node: StreamNode | DispatcherNode
   actorIds?: string[]
+}
+
+// Derived stats from ChannelStats, majorly by dividing the stats by duration.
+export interface ChannelStatsDerived {
+  actorCount: number
+  /** Rate of blocking duration of all actors */
+  backPressure: number
+  /** Rate of received row count of all actors */
+  recvThroughput: number
+  /** Rate of sent row count of all actors */
+  sendThroughput: number
 }
 
 function buildPlanNodeDependency(
@@ -120,7 +135,7 @@ function buildPlanNodeDependency(
   return d3.hierarchy({
     name: dispatcherName,
     actorIds: fragment.actors.map((a) => a.actorId.toString()),
-    children: firstActor.nodes ? [hierarchyActorNode(firstActor.nodes)] : [],
+    children: fragment.nodes ? [hierarchyActorNode(fragment.nodes)] : [],
     operatorId: "dispatcher",
     node: dispatcherNode,
   })
@@ -158,16 +173,11 @@ function buildFragmentDependencyAsEdges(
     const parentIds = new Set<number>()
     const externalParentIds = new Set<number>()
 
-    for (const actor of fragment.actors) {
-      for (const upstreamActorId of actor.upstreamActorId) {
-        const upstreamFragmentId = actorToFragmentMapping.get(upstreamActorId)
-        if (upstreamFragmentId) {
-          parentIds.add(upstreamFragmentId)
-        } else {
-          for (const m of findMergeNodes(actor.nodes!)) {
-            externalParentIds.add(m.upstreamFragmentId)
-          }
-        }
+    for (const upstreamFragmentId of fragment.upstreamFragmentIds) {
+      if (fragments.fragments[upstreamFragmentId]) {
+        parentIds.add(upstreamFragmentId)
+      } else {
+        externalParentIds.add(upstreamFragmentId)
       }
     }
     nodes.push({
@@ -186,39 +196,35 @@ function buildFragmentDependencyAsEdges(
 
 const SIDEBAR_WIDTH = 225
 
-export class BackPressureSnapshot {
+export class ChannelStatsSnapshot {
   // The first fetch result.
   // key: `<fragmentId>_<downstreamFragmentId>`
-  // value: output blocking duration in nanoseconds.
-  result: Map<string, number>
+  metrics: Map<string, ChannelStats>
 
   // The time of the current fetch in milliseconds. (`Date.now()`)
   time: number
 
-  constructor(result: Map<string, number>, time: number) {
-    this.result = result
+  constructor(metrics: Map<string, ChannelStats>, time: number) {
+    this.metrics = metrics
     this.time = time
   }
 
-  static fromResponse(channelStats: {
-    [key: string]: BackPressureInfo
-  }): BackPressureSnapshot {
-    const result = new Map<string, number>()
-    for (const [key, info] of Object.entries(channelStats)) {
-      result.set(key, info.value / info.actorCount)
-    }
-    return new BackPressureSnapshot(result, Date.now())
-  }
-
-  getRate(initial: BackPressureSnapshot): Map<string, number> {
-    const result = new Map<string, number>()
-    for (const [key, value] of this.result) {
-      const initialValue = initial.result.get(key)
-      if (initialValue) {
-        result.set(
-          key,
-          (value - initialValue) / (this.time - initial.time) / 1000000
-        )
+  getRate(initial: ChannelStatsSnapshot): Map<string, ChannelStatsDerived> {
+    const result = new Map<string, ChannelStatsDerived>()
+    for (const [key, s] of this.metrics) {
+      const init = initial.metrics.get(key)
+      if (init) {
+        const delta = this.time - initial.time // in microseconds
+        result.set(key, {
+          actorCount: s.actorCount,
+          backPressure:
+            (s.outputBlockingDuration - init.outputBlockingDuration) /
+            init.actorCount /
+            delta /
+            1000000,
+          recvThroughput: ((s.recvRowCount - init.recvRowCount) / delta) * 1000,
+          sendThroughput: ((s.sendRowCount - init.sendRowCount) / delta) * 1000,
+        })
       }
     }
     return result
@@ -335,8 +341,8 @@ export default function Streaming() {
   }
 
   // Keep the initial snapshot to calculate the rate of back pressure
-  const [backPressureRate, setBackPressureRate] =
-    useState<Map<string, number>>()
+  const [channelStats, setChannelStats] =
+    useState<Map<string, ChannelStatsDerived>>()
 
   const [fragmentStats, setFragmentStats] = useState<{
     [key: number]: FragmentStats
@@ -345,18 +351,20 @@ export default function Streaming() {
   useEffect(() => {
     // The initial snapshot is used to calculate the rate of back pressure
     // It's not used to render the page directly, so we don't need to set it in the state
-    let initialSnapshot: BackPressureSnapshot | undefined
+    let initialSnapshot: ChannelStatsSnapshot | undefined
 
     function refresh() {
-      api.get("/metrics/fragment/embedded_back_pressures").then(
-        (response) => {
-          let snapshot = BackPressureSnapshot.fromResponse(
-            response.channelStats
+      api.get("/metrics/streaming_stats").then(
+        (res) => {
+          let response = GetStreamingStatsResponse.fromJSON(res)
+          let snapshot = new ChannelStatsSnapshot(
+            new Map(Object.entries(response.channelStats)),
+            Date.now()
           )
           if (!initialSnapshot) {
             initialSnapshot = snapshot
           } else {
-            setBackPressureRate(snapshot.getRate(initialSnapshot!))
+            setChannelStats(snapshot.getRate(initialSnapshot))
           }
           setFragmentStats(response.fragmentStats)
         },
@@ -499,7 +507,7 @@ export default function Streaming() {
               selectedFragmentId={selectedFragmentId?.toString()}
               fragmentDependency={fragmentDependency}
               planNodeDependencies={planNodeDependencies}
-              backPressures={backPressureRate}
+              channelStats={channelStats}
               fragmentStats={fragmentStats}
             />
           )}

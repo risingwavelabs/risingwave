@@ -27,9 +27,9 @@ use risingwave_pb::catalog::{
 };
 use risingwave_pb::ddl_service::replace_job_plan::{ReplaceJob, ReplaceSource, ReplaceTable};
 use risingwave_pb::ddl_service::{
+    PbReplaceJobPlan, PbTableJobType, ReplaceJobPlan, TableJobType, WaitVersion,
     alter_name_request, alter_owner_request, alter_set_schema_request, alter_swap_rename_request,
-    create_connection_request, PbReplaceJobPlan, PbTableJobType, ReplaceJobPlan, TableJobType,
-    WaitVersion,
+    create_connection_request,
 };
 use risingwave_pb::meta::PbTableParallelism;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
@@ -65,7 +65,12 @@ impl CatalogReader {
 /// [observer](`crate::observer::FrontendObserverNode`).
 #[async_trait::async_trait]
 pub trait CatalogWriter: Send + Sync {
-    async fn create_database(&self, db_name: &str, owner: UserId) -> Result<()>;
+    async fn create_database(
+        &self,
+        db_name: &str,
+        owner: UserId,
+        resource_group: &str,
+    ) -> Result<()>;
 
     async fn create_schema(
         &self,
@@ -81,6 +86,7 @@ pub trait CatalogWriter: Send + Sync {
         table: PbTable,
         graph: StreamFragmentGraph,
         dependencies: HashSet<ObjectId>,
+        specific_resource_group: Option<String>,
     ) -> Result<()>;
 
     async fn create_table(
@@ -176,7 +182,7 @@ pub trait CatalogWriter: Send + Sync {
 
     async fn drop_database(&self, database_id: u32) -> Result<()>;
 
-    async fn drop_schema(&self, schema_id: u32) -> Result<()>;
+    async fn drop_schema(&self, schema_id: u32, cascade: bool) -> Result<()>;
 
     async fn drop_index(&self, index_id: IndexId, cascade: bool) -> Result<()>;
 
@@ -209,8 +215,15 @@ pub trait CatalogWriter: Send + Sync {
 
     async fn alter_parallelism(
         &self,
-        table_id: u32,
+        job_id: u32,
         parallelism: PbTableParallelism,
+        deferred: bool,
+    ) -> Result<()>;
+
+    async fn alter_resource_group(
+        &self,
+        table_id: u32,
+        resource_group: Option<String>,
         deferred: bool,
     ) -> Result<()>;
 
@@ -232,13 +245,19 @@ pub struct CatalogWriterImpl {
 
 #[async_trait::async_trait]
 impl CatalogWriter for CatalogWriterImpl {
-    async fn create_database(&self, db_name: &str, owner: UserId) -> Result<()> {
+    async fn create_database(
+        &self,
+        db_name: &str,
+        owner: UserId,
+        resource_group: &str,
+    ) -> Result<()> {
         let version = self
             .meta_client
             .create_database(PbDatabase {
                 name: db_name.to_owned(),
                 id: 0,
                 owner,
+                resource_group: resource_group.to_owned(),
             })
             .await?;
         self.wait_version(version).await
@@ -268,11 +287,12 @@ impl CatalogWriter for CatalogWriterImpl {
         table: PbTable,
         graph: StreamFragmentGraph,
         dependencies: HashSet<ObjectId>,
+        specific_resource_group: Option<String>,
     ) -> Result<()> {
         let create_type = table.get_create_type().unwrap_or(PbCreateType::Foreground);
         let version = self
             .meta_client
-            .create_materialized_view(table, graph, dependencies)
+            .create_materialized_view(table, graph, dependencies, specific_resource_group)
             .await?;
         if matches!(create_type, PbCreateType::Foreground) {
             self.wait_version(version).await?
@@ -487,8 +507,8 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
-    async fn drop_schema(&self, schema_id: u32) -> Result<()> {
-        let version = self.meta_client.drop_schema(schema_id).await?;
+    async fn drop_schema(&self, schema_id: u32, cascade: bool) -> Result<()> {
+        let version = self.meta_client.drop_schema(schema_id, cascade).await?;
         self.wait_version(version).await
     }
 
@@ -540,12 +560,12 @@ impl CatalogWriter for CatalogWriterImpl {
 
     async fn alter_parallelism(
         &self,
-        table_id: u32,
+        job_id: u32,
         parallelism: PbTableParallelism,
         deferred: bool,
     ) -> Result<()> {
         self.meta_client
-            .alter_parallelism(table_id, parallelism, deferred)
+            .alter_parallelism(job_id, parallelism, deferred)
             .await
             .map_err(|e| anyhow!(e))?;
 
@@ -578,6 +598,20 @@ impl CatalogWriter for CatalogWriterImpl {
             )
             .await?;
         self.wait_version(version).await
+    }
+
+    async fn alter_resource_group(
+        &self,
+        table_id: u32,
+        resource_group: Option<String>,
+        deferred: bool,
+    ) -> Result<()> {
+        self.meta_client
+            .alter_resource_group(table_id, resource_group, deferred)
+            .await
+            .map_err(|e| anyhow!(e))?;
+
+        Ok(())
     }
 }
 

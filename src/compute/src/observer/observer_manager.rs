@@ -12,11 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::license::LicenseManager;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManagerRef;
 use risingwave_common_service::ObserverState;
-use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::SubscribeResponse;
+use risingwave_pb::meta::subscribe_response::{Info, Operation};
 
 pub struct ComputeObserverNode {
     system_params_manager: LocalSystemParamsManagerRef,
@@ -45,6 +46,9 @@ impl ObserverState for ComputeObserverNode {
                         panic!("error type notification");
                     }
                 },
+                Info::ComputeNodeTotalCpuCount(count) => {
+                    LicenseManager::get().update_cpu_core_count(count as _);
+                }
                 _ => {
                     panic!("error type notification");
                 }
@@ -57,6 +61,7 @@ impl ObserverState for ComputeObserverNode {
             unreachable!();
         };
         LocalSecretManager::global().init_secrets(snapshot.secrets);
+        LicenseManager::get().update_cpu_core_count(snapshot.compute_node_total_cpu_count as _);
     }
 }
 

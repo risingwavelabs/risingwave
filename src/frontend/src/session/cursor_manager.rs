@@ -35,26 +35,24 @@ use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_sqlparser::ast::{Ident, ObjectName, Statement};
 
 use super::SessionImpl;
-use crate::catalog::subscription_catalog::SubscriptionCatalog;
 use crate::catalog::TableId;
+use crate::catalog::subscription_catalog::SubscriptionCatalog;
 use crate::error::{ErrorCode, Result, RwError};
+use crate::handler::HandlerArgs;
 use crate::handler::declare_cursor::create_chunk_stream_for_cursor;
 use crate::handler::query::{
-    gen_batch_plan_by_statement, gen_batch_plan_fragmenter, BatchQueryPlanResult,
+    BatchQueryPlanResult, gen_batch_plan_by_statement, gen_batch_plan_fragmenter,
 };
 use crate::handler::util::{
-    convert_logstore_u64_to_unix_millis, gen_query_from_table_name_order_by, pg_value_format,
-    to_pg_field, DataChunkToRowSetAdapter, StaticSessionData,
+    DataChunkToRowSetAdapter, StaticSessionData, convert_logstore_u64_to_unix_millis,
+    gen_query_from_table_name_order_by, pg_value_format, to_pg_field,
 };
-use crate::handler::HandlerArgs;
 use crate::monitor::{CursorMetrics, PeriodicCursorMetrics};
-use crate::optimizer::plan_node::{generic, BatchLogSeqScan};
-use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::PlanRoot;
+use crate::optimizer::plan_node::{BatchLogSeqScan, generic};
+use crate::optimizer::property::{Order, RequiredDist};
 use crate::scheduler::{DistributedQueryStream, LocalQueryStream};
-use crate::{
-    Binder, OptimizerContext, OptimizerContextRef, PgResponseStream, PlanRef, TableCatalog,
-};
+use crate::{OptimizerContext, OptimizerContextRef, PgResponseStream, PlanRef, TableCatalog};
 
 pub enum CursorDataChunkStream {
     LocalDataChunk(Option<LocalQueryStream>),
@@ -249,7 +247,11 @@ impl Display for State {
             } => write!(
                 f,
                 "Fetch {{ from_snapshot: {}, rw_timestamp: {}, expected_timestamp: {:?}, cached rows: {}, query init at {}ms before }}",
-                from_snapshot, rw_timestamp, expected_timestamp, remaining_rows.len(), init_query_timer.elapsed().as_millis()
+                from_snapshot,
+                rw_timestamp,
+                expected_timestamp,
+                remaining_rows.len(),
+                init_query_timer.elapsed().as_millis()
             ),
             State::Invalid => write!(f, "Invalid"),
         }
@@ -878,7 +880,7 @@ impl CursorManager {
         let create_cursor_timer = Instant::now();
         let subscription_name = subscription.name.clone();
         let cursor = SubscriptionCursor::new(
-            cursor_name.clone(),
+            cursor_name,
             start_timestamp,
             subscription,
             dependent_table_id,
@@ -904,15 +906,17 @@ impl CursorManager {
 
         cursor_map
             .try_insert(cursor.cursor_name.clone(), Cursor::Subscription(cursor))
-            .map_err(|_| {
-                ErrorCode::CatalogError(format!("cursor `{}` already exists", cursor_name).into())
+            .map_err(|error| {
+                ErrorCode::CatalogError(
+                    format!("cursor `{}` already exists", error.entry.key()).into(),
+                )
             })?;
         Ok(())
     }
 
     pub async fn add_query_cursor(
         &self,
-        cursor_name: ObjectName,
+        cursor_name: String,
         chunk_stream: CursorDataChunkStream,
         fields: Vec<Field>,
     ) -> Result<()> {
@@ -920,19 +924,21 @@ impl CursorManager {
         self.cursor_map
             .lock()
             .await
-            .try_insert(cursor_name.to_string(), Cursor::Query(cursor))
-            .map_err(|_| {
-                ErrorCode::CatalogError(format!("cursor `{}` already exists", cursor_name).into())
+            .try_insert(cursor_name, Cursor::Query(cursor))
+            .map_err(|error| {
+                ErrorCode::CatalogError(
+                    format!("cursor `{}` already exists", error.entry.key()).into(),
+                )
             })?;
 
         Ok(())
     }
 
-    pub async fn remove_cursor(&self, cursor_name: String) -> Result<()> {
+    pub async fn remove_cursor(&self, cursor_name: &str) -> Result<()> {
         self.cursor_map
             .lock()
             .await
-            .remove(&cursor_name)
+            .remove(cursor_name)
             .ok_or_else(|| {
                 ErrorCode::CatalogError(format!("cursor `{}` don't exists", cursor_name).into())
             })?;
@@ -952,13 +958,13 @@ impl CursorManager {
 
     pub async fn get_rows_with_cursor(
         &self,
-        cursor_name: String,
+        cursor_name: &str,
         count: u32,
         handler_args: HandlerArgs,
         formats: &Vec<Format>,
         timeout_seconds: Option<u64>,
     ) -> Result<(Vec<Row>, Vec<PgFieldDescriptor>)> {
-        if let Some(cursor) = self.cursor_map.lock().await.get_mut(&cursor_name) {
+        if let Some(cursor) = self.cursor_map.lock().await.get_mut(cursor_name) {
             cursor
                 .next(count, handler_args, formats, timeout_seconds)
                 .await
@@ -967,8 +973,8 @@ impl CursorManager {
         }
     }
 
-    pub async fn get_fields_with_cursor(&self, cursor_name: String) -> Result<Vec<Field>> {
-        if let Some(cursor) = self.cursor_map.lock().await.get_mut(&cursor_name) {
+    pub async fn get_fields_with_cursor(&self, cursor_name: &str) -> Result<Vec<Field>> {
+        if let Some(cursor) = self.cursor_map.lock().await.get_mut(cursor_name) {
             Ok(cursor.get_fields())
         } else {
             Err(ErrorCode::InternalError(format!("Cannot find cursor `{}`", cursor_name)).into())
@@ -1027,13 +1033,10 @@ impl CursorManager {
 
     pub async fn gen_batch_plan_with_subscription_cursor(
         &self,
-        cursor_name: ObjectName,
+        cursor_name: &str,
         handler_args: HandlerArgs,
     ) -> Result<BatchQueryPlanResult> {
-        let session = handler_args.session.clone();
-        let db_name = &session.database();
-        let (_, cursor_name) = Binder::resolve_schema_qualified_name(db_name, cursor_name.clone())?;
-        match self.cursor_map.lock().await.get(&cursor_name).ok_or_else(|| {
+        match self.cursor_map.lock().await.get(cursor_name).ok_or_else(|| {
             ErrorCode::InternalError(format!("Cannot find cursor `{}`", cursor_name))
         })? {
             Cursor::Subscription(cursor) => {

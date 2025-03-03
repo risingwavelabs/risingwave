@@ -51,28 +51,33 @@ message AnalyzeHeapResponse {
   bytes result = 1;
 }
 
-// Back pressure
-message GetBackPressureRequest {}
+// Streaming Runtime Stats
+message GetStreamingStatsRequest {}
 
-message BackPressureInfo {
-  uint32 actor_count = 3;
-  // Sum of output blocking duration of all actors
-  double value = 4;
+message ChannelStats {
+  // Total number of actors. This field is very important because the rest fields are `SUM` of all the actors.
+  uint32 actor_count = 1 [json_name = "n"]; /* Use shorter name in JSON to reduce message size. */
+  // Sum of output blocking duration of all actors in nanoseconds
+  double output_blocking_duration = 2 [json_name = "b"];
+  // Sum of input row count of all actors
+  uint64 recv_row_count = 3 [json_name = "i"];
+  // Sum of output row count of all actors
+  uint64 send_row_count = 4 [json_name = "o"];
 }
 
 message FragmentStats {
-  uint32 actor_count = 2;
-  uint64 current_epoch = 3;
+  uint32 actor_count = 2 [json_name = "n"];
+  uint64 current_epoch = 3 [json_name = "e"];
 }
 
 message RelationStats {
-  uint32 actor_count = 2;
-  uint64 current_epoch = 3;
+  uint32 actor_count = 2 [json_name = "n"];
+  uint64 current_epoch = 3 [json_name = "e"];
 }
 
-message GetBackPressureResponse {
+message GetStreamingStatsResponse {
   // Key: "<upstream_fragment_id>_<downstream_fragment_id>"
-  map<string, BackPressureInfo> channel_stats = 1;
+  map<string, ChannelStats> channel_stats = 1;
   map<uint32, FragmentStats> fragment_stats = 2;
   map<uint32, RelationStats> relation_stats = 3;
 }
@@ -94,6 +99,6 @@ service MonitorService {
   rpc HeapProfiling(HeapProfilingRequest) returns (HeapProfilingResponse);
   rpc ListHeapProfiling(ListHeapProfilingRequest) returns (ListHeapProfilingResponse);
   rpc AnalyzeHeap(AnalyzeHeapRequest) returns (AnalyzeHeapResponse);
-  rpc GetBackPressure(GetBackPressureRequest) returns (GetBackPressureResponse);
+  rpc GetStreamingStats(GetStreamingStatsRequest) returns (GetStreamingStatsResponse);
   rpc TieredCacheTracing(TieredCacheTracingRequest) returns (TieredCacheTracingResponse);
 }

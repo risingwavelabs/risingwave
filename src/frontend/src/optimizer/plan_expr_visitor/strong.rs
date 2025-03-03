@@ -308,6 +308,7 @@ impl Strong {
             | ExprType::Vnode
             | ExprType::VnodeUser
             | ExprType::TestPaidTier
+            | ExprType::License
             | ExprType::Proctime
             | ExprType::PgSleep
             | ExprType::PgSleepFor
@@ -322,6 +323,7 @@ impl Strong {
             | ExprType::PgGetSerialSequence
             | ExprType::PgIndexColumnHasProperty
             | ExprType::PgIsInRecovery
+            | ExprType::PgTableIsVisible
             | ExprType::RwRecoveryStatus
             | ExprType::IcebergTransform
             | ExprType::HasTablePrivilege

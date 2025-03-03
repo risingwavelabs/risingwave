@@ -17,8 +17,8 @@ use risingwave_common::config::MetaBackend;
 use risingwave_common::telemetry::pb_compatible::TelemetryToProtobuf;
 use risingwave_common::telemetry::report::{TelemetryInfoFetcher, TelemetryReportCreator};
 use risingwave_common::telemetry::{
-    current_timestamp, report_event_common, telemetry_cluster_type_from_env_var, SystemData,
-    TelemetryNodeType, TelemetryReportBase, TelemetryResult,
+    SystemData, TelemetryNodeType, TelemetryReportBase, TelemetryResult, current_timestamp,
+    report_event_common, telemetry_cluster_type_from_env_var,
 };
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_pb::common::WorkerType;
@@ -92,6 +92,7 @@ pub struct MetaTelemetryReport {
     // Get the ENV from key `TELEMETRY_CLUSTER_TYPE`
     cluster_type: PbTelemetryClusterType,
     object_store_media_type: &'static str,
+    connector_usage_json_str: String,
 }
 
 impl From<MetaTelemetryJobDesc> for risingwave_pb::telemetry::StreamJobDesc {
@@ -138,6 +139,7 @@ impl TelemetryToProtobuf for MetaTelemetryReport {
             stream_jobs: self.job_desc.into_iter().map(|job| job.into()).collect(),
             cluster_type: self.cluster_type as i32,
             object_store_media_type: self.object_store_media_type.to_owned(),
+            connector_usage_json_str: self.connector_usage_json_str,
         };
         pb_report.encode_to_vec()
     }
@@ -156,6 +158,10 @@ impl MetaTelemetryInfoFetcher {
 #[async_trait::async_trait]
 impl TelemetryInfoFetcher for MetaTelemetryInfoFetcher {
     async fn fetch_telemetry_info(&self) -> TelemetryResult<Option<String>> {
+        // the err here means building cluster on test env, so we don't need to report telemetry
+        if telemetry_cluster_type_from_env_var().is_err() {
+            return Ok(None);
+        }
         Ok(Some(self.tracking_id.clone().into()))
     }
 }
@@ -200,6 +206,13 @@ impl TelemetryReportCreator for MetaReportCreator {
             .list_stream_job_desc()
             .await
             .map_err(|err| err.as_report().to_string())?;
+        let connector_usage = self
+            .metadata_manager
+            .catalog_controller
+            .get_connector_usage()
+            .await
+            .map_err(|err| err.as_report().to_string())?
+            .to_string();
 
         Ok(MetaTelemetryReport {
             rw_version: RwVersion {
@@ -224,8 +237,10 @@ impl TelemetryReportCreator for MetaReportCreator {
             streaming_job_count,
             meta_backend: MetaBackend::Sql,
             job_desc: stream_job_desc,
-            cluster_type: telemetry_cluster_type_from_env_var(),
+            // it blocks the report if the cluster type is not valid or leak from test env
+            cluster_type: telemetry_cluster_type_from_env_var()?,
             object_store_media_type: self.object_store_media_type,
+            connector_usage_json_str: connector_usage,
         })
     }
 
@@ -238,7 +253,7 @@ impl TelemetryReportCreator for MetaReportCreator {
 mod test {
     use risingwave_common::config::MetaBackend;
     use risingwave_common::telemetry::{
-        current_timestamp, SystemData, TelemetryNodeType, TelemetryReportBase,
+        SystemData, TelemetryNodeType, TelemetryReportBase, current_timestamp,
     };
     use risingwave_pb::telemetry::PbTelemetryClusterType;
 
@@ -248,7 +263,7 @@ mod test {
     #[tokio::test]
     async fn test_meta_telemetry_report() {
         use risingwave_common::telemetry::pb_compatible::TelemetryToProtobuf;
-        use risingwave_common::telemetry::{post_telemetry_report_pb, TELEMETRY_REPORT_URL};
+        use risingwave_common::telemetry::{TELEMETRY_REPORT_URL, post_telemetry_report_pb};
 
         use crate::telemetry::TELEMETRY_META_REPORT_TYPE;
 
@@ -278,6 +293,7 @@ mod test {
             job_desc: vec![],
             cluster_type: PbTelemetryClusterType::Unspecified,
             object_store_media_type: "s3",
+            connector_usage_json_str: jsonbb::json!({}).to_string(),
         };
 
         let pb_bytes = report.to_pb_bytes();

@@ -484,7 +484,7 @@
       └─LogicalScan { table: t, columns: [t.v1, t._row_id, t._rw_timestamp] }
   stream_plan: |-
     StreamMaterialize { columns: [v1, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck, watermark_columns: [v1] }
-    └─StreamDynamicFilter { predicate: (t.v1 >= now), output_watermarks: [t.v1], output: [t.v1, t._row_id], cleaned_by_watermark: true }
+    └─StreamDynamicFilter { predicate: (t.v1 >= now), output_watermarks: [[t.v1]], output: [t.v1, t._row_id], cleaned_by_watermark: true }
       ├─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
       └─StreamExchange { dist: Broadcast }
         └─StreamNow { output: [now] }
@@ -498,10 +498,10 @@
       └─LogicalScan { table: t, columns: [t.v1, t._row_id, t._rw_timestamp] }
   stream_plan: |-
     StreamMaterialize { columns: [v1, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck, watermark_columns: [v1] }
-    └─StreamDynamicFilter { predicate: (t.v1 >= $expr1), output_watermarks: [t.v1], output: [t.v1, t._row_id], cleaned_by_watermark: true }
+    └─StreamDynamicFilter { predicate: (t.v1 >= $expr1), output_watermarks: [[t.v1]], output: [t.v1, t._row_id], cleaned_by_watermark: true }
       ├─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
       └─StreamExchange { dist: Broadcast }
-        └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:00:02':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [$expr1] }
+        └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:00:02':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [[$expr1]] }
           └─StreamNow { output: [now] }
 - name: and of two now expression condition
   sql: |
@@ -509,8 +509,8 @@
     select * from t where v1 >= now() and v2 >= now();
   stream_plan: |-
     StreamMaterialize { columns: [v1, v2, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck, watermark_columns: [v2] }
-    └─StreamDynamicFilter { predicate: (t.v2 >= now), output_watermarks: [t.v2], output: [t.v1, t.v2, t._row_id], cleaned_by_watermark: true }
-      ├─StreamDynamicFilter { predicate: (t.v1 >= now), output_watermarks: [t.v1], output: [t.v1, t.v2, t._row_id], cleaned_by_watermark: true }
+    └─StreamDynamicFilter { predicate: (t.v2 >= now), output_watermarks: [[t.v2]], output: [t.v1, t.v2, t._row_id], cleaned_by_watermark: true }
+      ├─StreamDynamicFilter { predicate: (t.v1 >= now), output_watermarks: [[t.v1]], output: [t.v1, t.v2, t._row_id], cleaned_by_watermark: true }
       │ ├─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
       │ └─StreamExchange { dist: Broadcast }
       │   └─StreamNow { output: [now] }
@@ -527,8 +527,8 @@
     select max(v1) as max_time from t group by v2 having max(v1) >= now();
   stream_plan: |-
     StreamMaterialize { columns: [max_time, t.v2(hidden)], stream_key: [t.v2], pk_columns: [t.v2], pk_conflict: NoCheck, watermark_columns: [max_time] }
-    └─StreamProject { exprs: [max(t.v1), t.v2], output_watermarks: [max(t.v1)] }
-      └─StreamDynamicFilter { predicate: (max(t.v1) >= now), output_watermarks: [max(t.v1)], output: [t.v2, max(t.v1)], cleaned_by_watermark: true }
+    └─StreamProject { exprs: [max(t.v1), t.v2], output_watermarks: [[max(t.v1)]] }
+      └─StreamDynamicFilter { predicate: (max(t.v1) >= now), output_watermarks: [[max(t.v1)]], output: [t.v2, max(t.v1)], cleaned_by_watermark: true }
         ├─StreamProject { exprs: [t.v2, max(t.v1)] }
         │ └─StreamHashAgg { group_key: [t.v2], aggs: [max(t.v1), count] }
         │   └─StreamExchange { dist: HashShard(t.v2) }
@@ -626,7 +626,7 @@
         ├─BatchExchange { order: [], dist: HashShard(t.j) }
         │ └─BatchScan { table: t, columns: [t.k, t.j], distribution: SomeShard }
         └─BatchExchange { order: [], dist: HashShard(t.j) }
-          └─BatchProject { exprs: [t.j, JsonbPopulateRecord(null:Struct(StructType { field_names: ["a", "b"], field_types: [Int32, Int32] }), t.j) as $expr1] }
+          └─BatchProject { exprs: [t.j, JsonbPopulateRecord(null:Struct(StructType { fields: [("a", Int32), ("b", Int32)] }), t.j) as $expr1] }
             └─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
               ├─BatchExchange { order: [], dist: Single }
               │ └─BatchHashAgg { group_key: [t.j], aggs: [] }

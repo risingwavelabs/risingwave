@@ -35,7 +35,7 @@ use std::iter::repeat;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use async_trait::async_trait;
 use futures::future::try_join_all;
 use futures::stream::{BoxStream, Peekable};
@@ -45,7 +45,7 @@ use rand::prelude::SliceRandom;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::{WorkerNode, WorkerType};
 use tokio::sync::mpsc::{
-    channel, unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender,
+    Receiver, Sender, UnboundedReceiver, UnboundedSender, channel, unbounded_channel,
 };
 
 pub mod error;
@@ -66,7 +66,9 @@ pub use compactor_client::{CompactorClient, GrpcCompactorProxyClient};
 pub use compute_client::{ComputeClient, ComputeClientPool, ComputeClientPoolRef};
 pub use connector_client::{SinkCoordinatorStreamHandle, SinkWriterStreamHandle};
 pub use frontend_client::{FrontendClientPool, FrontendClientPoolRef};
-pub use hummock_meta_client::{CompactionEventItem, HummockMetaClient};
+pub use hummock_meta_client::{
+    CompactionEventItem, HummockMetaClient, HummockMetaClientChangeLogInfo,
+};
 pub use meta_client::{MetaClient, SinkCoordinationRpcClient};
 use rw_futures_util::await_future_with_monitor_error_stream;
 pub use sink_coordinate_client::CoordinatorStreamHandle;

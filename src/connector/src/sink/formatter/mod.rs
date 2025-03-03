@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Field;
 
@@ -36,7 +36,10 @@ use super::encoder::{
     DateHandlingMode, JsonbHandlingMode, KafkaConnectParams, TimeHandlingMode,
     TimestamptzHandlingMode,
 };
-use super::redis::{KEY_FORMAT, VALUE_FORMAT};
+use super::redis::{
+    KEY_FORMAT, LAT_NAME, LON_NAME, MEMBER_NAME, REDIS_VALUE_TYPE, REDIS_VALUE_TYPE_GEO,
+    REDIS_VALUE_TYPE_STRING, VALUE_FORMAT,
+};
 use crate::sink::encoder::{
     AvroEncoder, AvroHeader, JsonEncoder, ProtoEncoder, ProtoHeader, TimestampHandlingMode,
 };
@@ -236,13 +239,11 @@ impl EncoderBuild for TextEncoder {
             | DataType::Serial => {}
             _ => {
                 // why we don't allow float as text for key encode: https://github.com/risingwavelabs/risingwave/pull/16377#discussion_r1591864960
-                return Err(SinkError::Config(
-                    anyhow!(
-                            "The key encode is TEXT, but the primary key column {} has type {}. The key encode TEXT requires the primary key column to be of type varchar, bool, small int, int, big int, serial or rw_int256.",
-                            schema_ref.name,
-                            schema_ref.data_type
-                        ),
-                ));
+                return Err(SinkError::Config(anyhow!(
+                    "The key encode is TEXT, but the primary key column {} has type {}. The key encode TEXT requires the primary key column to be of type varchar, bool, small int, int, big int, serial or rw_int256.",
+                    schema_ref.name,
+                    schema_ref.data_type
+                )));
             }
         }
 
@@ -252,11 +253,13 @@ impl EncoderBuild for TextEncoder {
 
 impl EncoderBuild for AvroEncoder {
     async fn build(b: EncoderParams<'_>, pk_indices: Option<Vec<usize>>) -> Result<Self> {
-        let loader =
-            crate::schema::SchemaLoader::from_format_options(b.topic, &b.format_desc.options)
-                .map_err(|e| SinkError::Config(anyhow!(e)))?;
+        use crate::schema::{SchemaLoader, SchemaVersion};
 
-        let (schema_id, avro) = match pk_indices {
+        let loader = SchemaLoader::from_format_options(b.topic, &b.format_desc.options)
+            .await
+            .map_err(|e| SinkError::Config(anyhow!(e)))?;
+
+        let (schema_version, avro) = match pk_indices {
             Some(_) => loader
                 .load_key_schema()
                 .await
@@ -270,23 +273,66 @@ impl EncoderBuild for AvroEncoder {
             b.schema,
             pk_indices,
             std::sync::Arc::new(avro),
-            AvroHeader::ConfluentSchemaRegistry(schema_id),
+            match schema_version {
+                SchemaVersion::Confluent(x) => AvroHeader::ConfluentSchemaRegistry(x),
+                SchemaVersion::Glue(x) => AvroHeader::GlueSchemaRegistry(x),
+            },
         )
     }
 }
 
 impl EncoderBuild for TemplateEncoder {
     async fn build(b: EncoderParams<'_>, pk_indices: Option<Vec<usize>>) -> Result<Self> {
-        let option_name = match pk_indices {
-            Some(_) => KEY_FORMAT,
-            None => VALUE_FORMAT,
-        };
-        let template = b.format_desc.options.get(option_name).ok_or_else(|| {
-            SinkError::Config(anyhow!(
-                "Cannot find '{option_name}',please set it or use JSON"
-            ))
-        })?;
-        Ok(TemplateEncoder::new(b.schema, pk_indices, template.clone()))
+        let redis_value_type = b
+            .format_desc
+            .options
+            .get(REDIS_VALUE_TYPE)
+            .map_or(REDIS_VALUE_TYPE_STRING, |s| s.as_str());
+        match redis_value_type {
+            REDIS_VALUE_TYPE_STRING => {
+                let option_name = match pk_indices {
+                    Some(_) => KEY_FORMAT,
+                    None => VALUE_FORMAT,
+                };
+                let template = b.format_desc.options.get(option_name).ok_or_else(|| {
+                    SinkError::Config(anyhow!("Cannot find '{option_name}',please set it."))
+                })?;
+                Ok(TemplateEncoder::new_string(
+                    b.schema,
+                    pk_indices,
+                    template.clone(),
+                ))
+            }
+            REDIS_VALUE_TYPE_GEO => match pk_indices {
+                Some(_) => {
+                    let member_name = b.format_desc.options.get(MEMBER_NAME).ok_or_else(|| {
+                        SinkError::Config(anyhow!("Cannot find `{MEMBER_NAME}`,please set it."))
+                    })?;
+                    let template = b.format_desc.options.get(KEY_FORMAT).ok_or_else(|| {
+                        SinkError::Config(anyhow!("Cannot find `{KEY_FORMAT}`,please set it."))
+                    })?;
+                    TemplateEncoder::new_geo_key(
+                        b.schema,
+                        pk_indices,
+                        member_name,
+                        template.clone(),
+                    )
+                }
+                None => {
+                    let lat_name = b.format_desc.options.get(LAT_NAME).ok_or_else(|| {
+                        SinkError::Config(anyhow!("Cannot find `{LAT_NAME}`, please set it."))
+                    })?;
+                    let lon_name = b.format_desc.options.get(LON_NAME).ok_or_else(|| {
+                        SinkError::Config(anyhow!("Cannot find `{LON_NAME}`,please set it."))
+                    })?;
+                    TemplateEncoder::new_geo_value(b.schema, pk_indices, lat_name, lon_name)
+                }
+            },
+            _ => Err(SinkError::Config(anyhow!(
+                "The value type {} is not supported",
+                redis_value_type
+            ))),
+        }
     }
 }
 

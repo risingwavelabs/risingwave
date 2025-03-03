@@ -14,10 +14,10 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::sync::Arc;
 #[cfg(all(debug_assertions, not(any(madsim, test, feature = "test"))))]
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
 
 use prometheus::local::{LocalHistogram, LocalIntCounter};
 use risingwave_common::catalog::TableId;

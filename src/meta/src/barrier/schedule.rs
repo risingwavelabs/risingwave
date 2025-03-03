@@ -17,14 +17,13 @@ use std::iter::once;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use assert_matches::assert_matches;
 use itertools::Itertools;
 use parking_lot::Mutex;
 use prometheus::HistogramTimer;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_hummock_sdk::HummockVersionId;
-use risingwave_pb::meta::PausedReason;
 use tokio::select;
 use tokio::sync::{oneshot, watch};
 use tokio::time::Interval;
@@ -64,6 +63,12 @@ enum QueueStatus {
     Blocked(String),
 }
 
+impl QueueStatus {
+    fn is_blocked(&self) -> bool {
+        matches!(self, Self::Blocked(_))
+    }
+}
+
 struct ScheduledQueueItem {
     command: Command,
     notifiers: Vec<Notifier>,
@@ -94,8 +99,10 @@ impl<T> StatusQueue<T> {
         self.status = QueueStatus::Blocked(reason);
     }
 
-    fn mark_ready(&mut self) {
+    fn mark_ready(&mut self) -> bool {
+        let prev_blocked = self.status.is_blocked();
         self.status = QueueStatus::Ready;
+        prev_blocked
     }
 
     fn validate_item(&mut self, scheduled: &ScheduledQueueItem) -> MetaResult<()> {
@@ -229,7 +236,7 @@ impl BarrierScheduler {
         }
     }
 
-    /// Run multiple commands and return when they're all completely finished. It's ensured that
+    /// Run multiple commands and return when they're all completely finished (i.e., collected). It's ensured that
     /// multiple commands are executed continuously.
     ///
     /// Returns the barrier info of each command.
@@ -278,27 +285,7 @@ impl BarrierScheduler {
         Ok(())
     }
 
-    /// Run a command with a `Pause` command before and `Resume` command after it. Used for
-    /// configuration change.
-    ///
-    /// Returns the barrier info of the actual command.
-    pub async fn run_config_change_command_with_pause(
-        &self,
-        database_id: DatabaseId,
-        command: Command,
-    ) -> MetaResult<()> {
-        self.run_multiple_commands(
-            database_id,
-            vec![
-                Command::pause(PausedReason::ConfigChange),
-                command,
-                Command::resume(PausedReason::ConfigChange),
-            ],
-        )
-        .await
-    }
-
-    /// Run a command and return when it's completely finished.
+    /// Run a command and return when it's completely finished (i.e., collected).
     ///
     /// Returns the barrier info of the actual command.
     pub async fn run_command(&self, database_id: DatabaseId, command: Command) -> MetaResult<()> {
@@ -395,7 +382,13 @@ impl ScheduledBarriers {
             let mut rx = self.inner.changed_tx.subscribe();
             {
                 let mut queue = self.inner.queue.lock();
+                if queue.status.is_blocked() {
+                    continue;
+                }
                 for (database_id, queue) in &mut queue.queue {
+                    if queue.status.is_blocked() {
+                        continue;
+                    }
                     if let Some(item) = queue.queue.pop_front() {
                         item.send_latency_timer.observe_duration();
                         break 'outer Scheduled {
@@ -452,15 +445,25 @@ impl ScheduledBarriers {
     pub(super) fn mark_ready(&self, database_id: Option<DatabaseId>) {
         let mut queue = self.inner.queue.lock();
         if let Some(database_id) = database_id {
-            queue
+            let database_queue = queue
                 .queue
                 .entry(database_id)
-                .or_insert_with(DatabaseScheduledQueue::new)
-                .mark_ready();
+                .or_insert_with(DatabaseScheduledQueue::new);
+            if database_queue.mark_ready() && !database_queue.queue.is_empty() {
+                self.inner.changed_tx.send(()).ok();
+            }
         } else {
-            queue.mark_ready();
+            let prev_blocked = queue.mark_ready();
             for queue in queue.queue.values_mut() {
                 queue.mark_ready();
+            }
+            if prev_blocked
+                && queue
+                    .queue
+                    .values()
+                    .any(|database_queue| !database_queue.queue.is_empty())
+            {
+                self.inner.changed_tx.send(()).ok();
             }
         }
     }

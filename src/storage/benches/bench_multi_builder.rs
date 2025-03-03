@@ -15,12 +15,12 @@
 use std::collections::HashMap;
 use std::env;
 use std::ops::Range;
+use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::SeqCst;
-use std::sync::Arc;
 use std::time::Duration;
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use foyer::{Engine, HybridCacheBuilder};
 use rand::random;
 use risingwave_common::catalog::TableId;
@@ -41,7 +41,7 @@ use risingwave_storage::hummock::{
     SstableStoreConfig, SstableWriterFactory, SstableWriterOptions, StreamingSstableWriterFactory,
     Xor16FilterBuilder,
 };
-use risingwave_storage::monitor::{global_hummock_state_store_metrics, ObjectStoreMetrics};
+use risingwave_storage::monitor::{ObjectStoreMetrics, global_hummock_state_store_metrics};
 
 const RANGE: Range<u64> = 0..1500000;
 const VALUE: &[u8] = &[0; 400];
@@ -90,7 +90,16 @@ impl<F: SstableWriterFactory> TableBuilderFactory for LocalTableBuilderFactory<F
             TableId::default().into(),
             VirtualNode::COUNT_FOR_TEST,
         )]);
-        let builder = SstableBuilder::for_test(id, writer, self.options.clone(), table_id_to_vnode);
+
+        let table_id_to_watermark_serde = HashMap::from_iter(vec![(0, None)]);
+
+        let builder = SstableBuilder::for_test(
+            id,
+            writer,
+            self.options.clone(),
+            table_id_to_vnode,
+            table_id_to_watermark_serde,
+        );
 
         Ok(builder)
     }

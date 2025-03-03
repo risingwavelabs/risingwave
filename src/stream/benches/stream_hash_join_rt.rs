@@ -24,7 +24,7 @@
 //!  sudo cargo flamegraph --bench stream_hash_join_rt -- hash_join_rt_40000_InCache_Inner
 //! ```
 
-use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
+use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use futures::executor::block_on;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_stream::executor::test_utils::hash_join_executor::*;
@@ -34,7 +34,7 @@ risingwave_expr_impl::enable!();
 
 fn bench_hash_join(c: &mut Criterion) {
     let mut group = c.benchmark_group("benchmark_hash_join");
-    group.sample_size(10);
+    group.sample_size(100);
 
     let rt = Runtime::new().unwrap();
     for amp in [10_000, 20_000, 30_000, 40_000, 100_000, 200_000, 400_000] {

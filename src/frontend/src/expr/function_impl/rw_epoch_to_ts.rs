@@ -14,7 +14,7 @@
 
 use risingwave_common::types::Timestamptz;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_expr::{function, Result};
+use risingwave_expr::{Result, function};
 
 #[function("rw_epoch_to_ts(int8) -> timestamptz")]
 fn rw_epoch_to_ts(epoch: i64) -> Result<Timestamptz> {

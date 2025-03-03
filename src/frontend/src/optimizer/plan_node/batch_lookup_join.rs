@@ -19,10 +19,11 @@ use risingwave_pb::batch_plan::{DistributedLookupJoinNode, LocalLookupJoinNode};
 use risingwave_sqlparser::ast::AsOf;
 
 use super::batch::prelude::*;
-use super::utils::{childless_record, to_pb_time_travel_as_of, Distill};
-use super::{generic, ExprRewritable};
+use super::utils::{Distill, childless_record, to_pb_time_travel_as_of};
+use super::{ExprRewritable, generic};
 use crate::error::Result;
 use crate::expr::{Expr, ExprRewriter, ExprVisitor};
+use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{
@@ -30,7 +31,6 @@ use crate::optimizer::plan_node::{
     ToDistributedBatch, ToLocalBatch, TryToBatchPb,
 };
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
-use crate::optimizer::PlanRef;
 use crate::scheduler::SchedulerResult;
 use crate::utils::ColIndexMappingRewriteExt;
 

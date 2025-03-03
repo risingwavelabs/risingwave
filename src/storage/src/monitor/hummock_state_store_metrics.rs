@@ -16,9 +16,9 @@ use std::sync::{Arc, OnceLock};
 
 use prometheus::core::{AtomicU64, Collector, Desc, GenericCounter};
 use prometheus::{
-    exponential_buckets, histogram_opts, proto, register_histogram_vec_with_registry,
-    register_histogram_with_registry, register_int_counter_vec_with_registry,
-    register_int_gauge_with_registry, Gauge, Histogram, HistogramVec, IntGauge, Opts, Registry,
+    Gauge, Histogram, HistogramVec, IntGauge, Opts, Registry, exponential_buckets, histogram_opts,
+    proto, register_histogram_vec_with_registry, register_histogram_with_registry,
+    register_int_counter_vec_with_registry, register_int_gauge_with_registry,
 };
 use risingwave_common::config::MetricLevel;
 use risingwave_common::metrics::{
@@ -245,10 +245,10 @@ impl HummockStateStoreMetrics {
         );
 
         let opts = histogram_opts!(
-                "state_store_write_batch_duration",
-                "Total time of batched write that have been issued to state store. With shared buffer on, this is the latency writing to the shared buffer",
-                time_buckets.clone()
-            );
+            "state_store_write_batch_duration",
+            "Total time of batched write that have been issued to state store. With shared buffer on, this is the latency writing to the shared buffer",
+            time_buckets.clone()
+        );
         let write_batch_duration =
             register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
         let write_batch_duration = RelabeledHistogramVec::with_metric_level(

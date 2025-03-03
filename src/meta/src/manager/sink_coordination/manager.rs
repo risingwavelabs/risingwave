@@ -15,28 +15,28 @@
 use std::collections::HashMap;
 use std::pin::pin;
 
-use futures::future::{select, BoxFuture, Either};
+use futures::future::{BoxFuture, Either, select};
 use futures::stream::FuturesUnordered;
 use futures::{FutureExt, Stream, StreamExt, TryStreamExt};
 use risingwave_common::bitmap::Bitmap;
-use risingwave_connector::sink::catalog::SinkId;
 use risingwave_connector::sink::SinkParam;
+use risingwave_connector::sink::catalog::SinkId;
 use risingwave_pb::connector_service::coordinate_request::Msg;
-use risingwave_pb::connector_service::{coordinate_request, CoordinateRequest, CoordinateResponse};
+use risingwave_pb::connector_service::{CoordinateRequest, CoordinateResponse, coordinate_request};
 use rw_futures_util::pending_on_none;
 use sea_orm::DatabaseConnection;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
-use tokio::sync::oneshot::{channel, Receiver, Sender};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
+use tokio::sync::oneshot::{Receiver, Sender, channel};
 use tokio::task::{JoinError, JoinHandle};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tonic::Status;
 use tracing::{debug, error, info, warn};
 
+use crate::manager::sink_coordination::SinkWriterRequestStream;
 use crate::manager::sink_coordination::coordinator_worker::CoordinatorWorker;
 use crate::manager::sink_coordination::handle::SinkWriterCoordinationHandle;
-use crate::manager::sink_coordination::SinkWriterRequestStream;
 
 macro_rules! send_with_err_check {
     ($tx:expr, $msg:expr) => {
@@ -342,7 +342,7 @@ impl ManagerWorker {
 
 #[cfg(test)]
 mod tests {
-    use std::future::{poll_fn, Future};
+    use std::future::{Future, poll_fn};
     use std::pin::pin;
     use std::task::Poll;
 
@@ -356,13 +356,13 @@ mod tests {
     use risingwave_common::hash::VirtualNode;
     use risingwave_connector::sink::catalog::{SinkId, SinkType};
     use risingwave_connector::sink::{SinkCommitCoordinator, SinkError, SinkParam};
-    use risingwave_pb::connector_service::sink_metadata::{Metadata, SerializedMetadata};
     use risingwave_pb::connector_service::SinkMetadata;
+    use risingwave_pb::connector_service::sink_metadata::{Metadata, SerializedMetadata};
     use risingwave_rpc_client::CoordinatorStreamHandle;
     use tokio_stream::wrappers::ReceiverStream;
 
-    use crate::manager::sink_coordination::coordinator_worker::CoordinatorWorker;
     use crate::manager::sink_coordination::SinkCoordinatorManager;
+    use crate::manager::sink_coordination::coordinator_worker::CoordinatorWorker;
 
     struct MockCoordinator<C, F: FnMut(u64, Vec<SinkMetadata>, &mut C) -> Result<(), SinkError>> {
         context: C,
@@ -497,19 +497,23 @@ mod tests {
 
         {
             // commit epoch1
-            let mut commit_future = pin!(client2
-                .commit(
-                    epoch1,
-                    SinkMetadata {
-                        metadata: Some(Metadata::Serialized(SerializedMetadata {
-                            metadata: metadata[0][1].clone(),
-                        })),
-                    },
-                )
-                .map(|result| result.unwrap()));
-            assert!(poll_fn(|cx| Poll::Ready(commit_future.as_mut().poll(cx)))
-                .await
-                .is_pending());
+            let mut commit_future = pin!(
+                client2
+                    .commit(
+                        epoch1,
+                        SinkMetadata {
+                            metadata: Some(Metadata::Serialized(SerializedMetadata {
+                                metadata: metadata[0][1].clone(),
+                            })),
+                        },
+                    )
+                    .map(|result| result.unwrap())
+            );
+            assert!(
+                poll_fn(|cx| Poll::Ready(commit_future.as_mut().poll(cx)))
+                    .await
+                    .is_pending()
+            );
             join(
                 commit_future,
                 client1
@@ -527,19 +531,23 @@ mod tests {
         }
 
         // commit epoch2
-        let mut commit_future = pin!(client1
-            .commit(
-                epoch2,
-                SinkMetadata {
-                    metadata: Some(Metadata::Serialized(SerializedMetadata {
-                        metadata: metadata[1][0].clone(),
-                    })),
-                },
-            )
-            .map(|result| result.unwrap()));
-        assert!(poll_fn(|cx| Poll::Ready(commit_future.as_mut().poll(cx)))
-            .await
-            .is_pending());
+        let mut commit_future = pin!(
+            client1
+                .commit(
+                    epoch2,
+                    SinkMetadata {
+                        metadata: Some(Metadata::Serialized(SerializedMetadata {
+                            metadata: metadata[1][0].clone(),
+                        })),
+                    },
+                )
+                .map(|result| result.unwrap())
+        );
+        assert!(
+            poll_fn(|cx| Poll::Ready(commit_future.as_mut().poll(cx)))
+                .await
+                .is_pending()
+        );
         join(
             commit_future,
             client2
@@ -747,9 +755,11 @@ mod tests {
                 })),
             },
         ));
-        assert!(poll_fn(|cx| Poll::Ready(commit_future.as_mut().poll(cx)))
-            .await
-            .is_pending());
+        assert!(
+            poll_fn(|cx| Poll::Ready(commit_future.as_mut().poll(cx)))
+                .await
+                .is_pending()
+        );
         drop(client2);
         assert!(commit_future.await.is_err());
     }
@@ -828,9 +838,11 @@ mod tests {
                 })),
             },
         ));
-        assert!(poll_fn(|cx| Poll::Ready(commit_future.as_mut().poll(cx)))
-            .await
-            .is_pending());
+        assert!(
+            poll_fn(|cx| Poll::Ready(commit_future.as_mut().poll(cx)))
+                .await
+                .is_pending()
+        );
         let (result1, result2) = join(
             commit_future,
             client2.commit(
@@ -955,19 +967,23 @@ mod tests {
 
         {
             // commit epoch1
-            let mut commit_future = pin!(client2
-                .commit(
-                    epoch1,
-                    SinkMetadata {
-                        metadata: Some(Metadata::Serialized(SerializedMetadata {
-                            metadata: metadata[0][1].clone(),
-                        })),
-                    },
-                )
-                .map(|result| result.unwrap()));
-            assert!(poll_fn(|cx| Poll::Ready(commit_future.as_mut().poll(cx)))
-                .await
-                .is_pending());
+            let mut commit_future = pin!(
+                client2
+                    .commit(
+                        epoch1,
+                        SinkMetadata {
+                            metadata: Some(Metadata::Serialized(SerializedMetadata {
+                                metadata: metadata[0][1].clone(),
+                            })),
+                        },
+                    )
+                    .map(|result| result.unwrap())
+            );
+            assert!(
+                poll_fn(|cx| Poll::Ready(commit_future.as_mut().poll(cx)))
+                    .await
+                    .is_pending()
+            );
             join(
                 commit_future,
                 client1
@@ -996,35 +1012,43 @@ mod tests {
 
         let mut client3 = build_client(vnode3).await;
         {
-            let mut commit_future3 = pin!(client3
-                .commit(
-                    epoch3,
-                    SinkMetadata {
-                        metadata: Some(Metadata::Serialized(SerializedMetadata {
-                            metadata: metadata_scale_out[2].clone(),
-                        })),
-                    },
-                )
-                .map(|result| result.unwrap()));
-            assert!(poll_fn(|cx| Poll::Ready(commit_future3.as_mut().poll(cx)))
-                .await
-                .is_pending());
-
-            {
-                // commit epoch2
-                let mut commit_future = pin!(client1
+            let mut commit_future3 = pin!(
+                client3
                     .commit(
-                        epoch2,
+                        epoch3,
                         SinkMetadata {
                             metadata: Some(Metadata::Serialized(SerializedMetadata {
-                                metadata: metadata[1][0].clone(),
+                                metadata: metadata_scale_out[2].clone(),
                             })),
                         },
                     )
-                    .map(|result| result.unwrap()));
-                assert!(poll_fn(|cx| Poll::Ready(commit_future.as_mut().poll(cx)))
+                    .map(|result| result.unwrap())
+            );
+            assert!(
+                poll_fn(|cx| Poll::Ready(commit_future3.as_mut().poll(cx)))
                     .await
-                    .is_pending());
+                    .is_pending()
+            );
+
+            {
+                // commit epoch2
+                let mut commit_future = pin!(
+                    client1
+                        .commit(
+                            epoch2,
+                            SinkMetadata {
+                                metadata: Some(Metadata::Serialized(SerializedMetadata {
+                                    metadata: metadata[1][0].clone(),
+                                })),
+                            },
+                        )
+                        .map(|result| result.unwrap())
+                );
+                assert!(
+                    poll_fn(|cx| Poll::Ready(commit_future.as_mut().poll(cx)))
+                        .await
+                        .is_pending()
+                );
                 join(
                     commit_future,
                     client2
@@ -1043,22 +1067,28 @@ mod tests {
 
             client1.update_vnode_bitmap(&vnode1).await.unwrap();
             client2.update_vnode_bitmap(&vnode2).await.unwrap();
-            let mut commit_future1 = pin!(client1
-                .commit(
-                    epoch3,
-                    SinkMetadata {
-                        metadata: Some(Metadata::Serialized(SerializedMetadata {
-                            metadata: metadata_scale_out[0].clone(),
-                        })),
-                    },
-                )
-                .map(|result| result.unwrap()));
-            assert!(poll_fn(|cx| Poll::Ready(commit_future1.as_mut().poll(cx)))
-                .await
-                .is_pending());
-            assert!(poll_fn(|cx| Poll::Ready(commit_future3.as_mut().poll(cx)))
-                .await
-                .is_pending());
+            let mut commit_future1 = pin!(
+                client1
+                    .commit(
+                        epoch3,
+                        SinkMetadata {
+                            metadata: Some(Metadata::Serialized(SerializedMetadata {
+                                metadata: metadata_scale_out[0].clone(),
+                            })),
+                        },
+                    )
+                    .map(|result| result.unwrap())
+            );
+            assert!(
+                poll_fn(|cx| Poll::Ready(commit_future1.as_mut().poll(cx)))
+                    .await
+                    .is_pending()
+            );
+            assert!(
+                poll_fn(|cx| Poll::Ready(commit_future3.as_mut().poll(cx)))
+                    .await
+                    .is_pending()
+            );
             client2
                 .commit(
                     epoch3,
@@ -1082,19 +1112,23 @@ mod tests {
         client3.update_vnode_bitmap(&vnode3).await.unwrap();
 
         {
-            let mut commit_future = pin!(client2
-                .commit(
-                    epoch4,
-                    SinkMetadata {
-                        metadata: Some(Metadata::Serialized(SerializedMetadata {
-                            metadata: metadata_scale_in[0].clone(),
-                        })),
-                    },
-                )
-                .map(|result| result.unwrap()));
-            assert!(poll_fn(|cx| Poll::Ready(commit_future.as_mut().poll(cx)))
-                .await
-                .is_pending());
+            let mut commit_future = pin!(
+                client2
+                    .commit(
+                        epoch4,
+                        SinkMetadata {
+                            metadata: Some(Metadata::Serialized(SerializedMetadata {
+                                metadata: metadata_scale_in[0].clone(),
+                            })),
+                        },
+                    )
+                    .map(|result| result.unwrap())
+            );
+            assert!(
+                poll_fn(|cx| Poll::Ready(commit_future.as_mut().poll(cx)))
+                    .await
+                    .is_pending()
+            );
             join(
                 commit_future,
                 client3

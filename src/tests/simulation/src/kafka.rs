@@ -16,10 +16,10 @@ use std::collections::HashMap;
 use std::time::SystemTime;
 
 use itertools::Either;
+use rdkafka::ClientConfig;
 use rdkafka::admin::{AdminClient, AdminOptions, NewTopic, TopicReplication};
 use rdkafka::error::{KafkaError, RDKafkaErrorCode};
 use rdkafka::producer::{BaseProducer, BaseRecord, Producer};
-use rdkafka::ClientConfig;
 
 /// Create a kafka topic
 pub async fn create_topics(broker_addr: &str, topics: HashMap<String, i32>) {

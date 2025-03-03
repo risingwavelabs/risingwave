@@ -13,18 +13,16 @@
 // limitations under the License.
 
 use std::future::Future;
-use std::num::NonZeroU32;
 
-use futures::{pin_mut, Stream};
+use futures::{Stream, pin_mut};
 use futures_async_stream::try_stream;
-use governor::clock::MonotonicClock;
-use governor::{Quota, RateLimiter};
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{Scalar, ScalarImpl, Timestamptz};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+use risingwave_common_rate_limit::RateLimiter;
 use risingwave_connector::source::cdc::external::{
     CdcOffset, ExternalTableReader, ExternalTableReaderImpl, SchemaTableName,
 };
@@ -156,13 +154,12 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
             future.await;
             unreachable!();
         }
-        let limiter = args.rate_limit_rps.map(|limit| {
-            tracing::info!(rate_limit = limit, "rate limit applied");
-            RateLimiter::direct_with_clock(
-                Quota::per_second(NonZeroU32::new(limit).unwrap()),
-                &MonotonicClock,
-            )
-        });
+
+        let rate_limiter = RateLimiter::new(
+            args.rate_limit_rps
+                .inspect(|limit| tracing::info!(rate_limit = limit, "rate limit applied"))
+                .into(),
+        );
 
         let mut read_args = args;
         let schema_table_name = read_args.schema_table_name.clone();
@@ -210,7 +207,6 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
                 } else {
                     // Apply rate limit, see `risingwave_stream::executor::source::apply_rate_limit` for more.
                     // May be should be refactored to a common function later.
-                    let limiter = limiter.as_ref().unwrap();
                     let limit = read_args.rate_limit_rps.unwrap() as usize;
 
                     // Because we produce chunks with limited-sized data chunk builder and all rows
@@ -218,10 +214,7 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
                     assert!(chunk_size <= limit);
 
                     // `InsufficientCapacity` should never happen because we have check the cardinality
-                    limiter
-                        .until_n_ready(NonZeroU32::new(chunk_size as u32).unwrap())
-                        .await
-                        .unwrap();
+                    rate_limiter.wait(chunk_size as _).await;
                     yield Some(with_additional_columns(
                         chunk,
                         &read_args.additional_columns,

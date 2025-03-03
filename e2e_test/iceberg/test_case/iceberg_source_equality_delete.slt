@@ -26,6 +26,7 @@ CREATE SINK sink1 AS select * from mv1 WITH (
     s3.secret.key = 'hummockadmin',
     create_table_if_not_exists = 'true',
     primary_key = 'i1,i2',
+    partition_by = 'i1'
 );
 
 statement ok
@@ -105,6 +106,59 @@ select i3 from iceberg_t1_source order by i3;
 6
 
 statement ok
+CREATE TABLE s2 (i1 int, i2 int);
+
+statement ok
+CREATE SINK sink2 AS select * from s2 WITH (
+    connector = 'iceberg',
+    type = 'upsert',
+    database.name = 'demo_db',
+    table.name = 'test_equality_delete2',
+    catalog.name = 'demo',
+    catalog.type = 'storage',
+    warehouse.path = 's3a://icebergdata/demo',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    create_table_if_not_exists = 'true',
+    primary_key = 'i2,i1',
+    partition_by = 'i1'
+);
+
+statement ok
+insert into s2 values(1,2);
+
+statement ok
+flush;
+
+statement ok
+delete from s2;
+
+statement ok
+flush;
+
+sleep 5s
+
+statement ok
+CREATE SOURCE iceberg_s2_source
+WITH (
+    connector = 'iceberg',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    catalog.type = 'storage',
+    warehouse.path = 's3a://icebergdata/demo',
+    database.name = 'demo_db',
+    table.name = 'test_equality_delete2',
+);
+
+query I
+select * from iceberg_s2_source;
+----
+
+statement ok
 DROP SINK sink1;
 
 statement ok
@@ -112,3 +166,12 @@ DROP SOURCE iceberg_t1_source;
 
 statement ok
 DROP TABLE s1 cascade;
+
+statement ok
+DROP SINK sink2;
+
+statement ok
+DROP SOURCE iceberg_s2_source;
+
+statement ok
+DROP TABLE s2 cascade;

@@ -19,22 +19,22 @@ use std::task::{Context, Poll};
 use futures::FutureExt;
 use risingwave_common::catalog::DatabaseId;
 use risingwave_meta_model::WorkerId;
+use risingwave_pb::stream_service::BarrierCompleteResponse;
 use risingwave_pb::stream_service::streaming_control_stream_response::{
     ReportDatabaseFailureResponse, ResetDatabaseResponse,
 };
-use risingwave_pb::stream_service::BarrierCompleteResponse;
 use thiserror_ext::AsReport;
 use tracing::{info, warn};
 
+use crate::MetaResult;
+use crate::barrier::DatabaseRuntimeInfoSnapshot;
 use crate::barrier::checkpoint::control::DatabaseCheckpointControlStatus;
 use crate::barrier::checkpoint::{CheckpointControl, DatabaseCheckpointControl};
 use crate::barrier::complete_task::BarrierCompleteOutput;
 use crate::barrier::rpc::ControlStreamManager;
 use crate::barrier::worker::{
-    get_retry_backoff_strategy, RetryBackoffFuture, RetryBackoffStrategy,
+    RetryBackoffFuture, RetryBackoffStrategy, get_retry_backoff_strategy,
 };
-use crate::barrier::DatabaseRuntimeInfoSnapshot;
-use crate::MetaResult;
 
 /// We can treat each database as a state machine of 3 states: `Running`, `Resetting` and `Initializing`.
 /// The state transition can be triggered when receiving 3 variants of response: `ReportDatabaseFailure`, `BarrierComplete`, `DatabaseReset`.
@@ -360,7 +360,7 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
                 &mut source_splits,
                 &mut background_jobs,
                 subscription_info,
-                None,
+                false,
                 &self.control.hummock_version_stats,
             )?
         };

@@ -45,6 +45,16 @@ impl Order {
     pub fn len(&self) -> usize {
         self.column_orders.len()
     }
+
+    pub fn concat(self, other: Self) -> Self {
+        Self {
+            column_orders: self
+                .column_orders
+                .into_iter()
+                .chain(other.column_orders)
+                .collect(),
+        }
+    }
 }
 
 impl fmt::Display for Order {

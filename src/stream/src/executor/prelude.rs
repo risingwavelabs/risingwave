@@ -19,7 +19,7 @@ pub use std::pin::pin;
 pub use std::sync::Arc;
 
 pub use await_tree::InstrumentAwait;
-pub use futures::{pin_mut, Stream, StreamExt};
+pub use futures::{Stream, StreamExt, pin_mut};
 pub use futures_async_stream::{for_await, try_stream};
 pub use risingwave_common::array::{RowRef, StreamChunk, StreamChunkBuilder};
 pub use risingwave_common::catalog::Schema;
@@ -33,8 +33,8 @@ pub use crate::executor::actor::{ActorContext, ActorContextRef};
 pub use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 pub use crate::executor::monitor::streaming_stats::StreamingMetrics;
 pub use crate::executor::{
-    expect_first_barrier, expect_first_barrier_from_aligned_stream, Barrier, BoxedMessageStream,
-    Execute, Executor, ExecutorInfo, Message, MessageStream, MessageStreamItem, Mutation,
-    PkDataTypes, PkIndices, PkIndicesRef, Watermark,
+    Barrier, BoxedMessageStream, Execute, Executor, ExecutorInfo, Message, MessageStream,
+    MessageStreamItem, Mutation, PkDataTypes, PkIndices, PkIndicesRef, Watermark,
+    expect_first_barrier, expect_first_barrier_from_aligned_stream,
 };
 pub use crate::task::{ActorId, AtomicU64Ref};

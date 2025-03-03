@@ -12,23 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use fixedbitset::FixedBitSet;
 use pretty_xmlish::{Pretty, XmlNode};
 pub use risingwave_pb::expr::expr_node::Type as ExprType;
-use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::DynamicFilterNode;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 
-use super::generic::DynamicFilter;
+use super::generic::{DynamicFilter, GenericPlanNode};
 use super::stream::prelude::*;
 use super::utils::{
-    childless_record, column_names_pretty, plan_node_name, watermark_pretty, Distill,
+    Distill, childless_record, column_names_pretty, plan_node_name, watermark_pretty,
 };
-use super::{generic, ExprRewritable};
+use super::{ExprRewritable, generic};
 use crate::expr::Expr;
+use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{PlanBase, PlanTreeNodeBinary, StreamNode};
-use crate::optimizer::property::MonotonicityMap;
-use crate::optimizer::PlanRef;
+use crate::optimizer::property::{MonotonicityMap, WatermarkColumns};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -69,8 +68,8 @@ impl StreamDynamicFilter {
         }
     }
 
-    fn derive_watermark_columns(core: &DynamicFilter<PlanRef>) -> FixedBitSet {
-        let mut res = FixedBitSet::with_capacity(core.left().schema().len());
+    fn derive_watermark_columns(core: &DynamicFilter<PlanRef>) -> WatermarkColumns {
+        let mut res = WatermarkColumns::new();
         let rhs_watermark_columns = core.right().watermark_columns();
         if rhs_watermark_columns.contains(0) {
             match core.comparator() {
@@ -79,7 +78,9 @@ impl StreamDynamicFilter {
                 // the right input must be delayed until `Update`/`Delete`s are sent to downstream,
                 // otherwise, we will have watermark messages sent before the `Delete` of old rows.
                 ExprType::GreaterThan | ExprType::GreaterThanOrEqual => {
-                    res.set(core.left_index(), true)
+                    // The watermark is generated for the left column according to the right side, but
+                    // not directly derived from the right side. So, let's assign a new group for it.
+                    res.insert(core.left_index(), core.ctx().next_watermark_group_id());
                 }
                 _ => {}
             }

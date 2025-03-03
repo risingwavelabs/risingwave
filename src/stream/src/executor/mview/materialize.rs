@@ -208,7 +208,9 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                             if self.state_table.value_indices().is_some() {
                                 // TODO(st1page): when materialize partial columns(), we should
                                 // construct some columns in the pk
-                                panic!("materialize executor with data check can not handle only materialize partial columns")
+                                panic!(
+                                    "materialize executor with data check can not handle only materialize partial columns"
+                                )
                             };
                             let values = data_chunk.serialize();
 
@@ -281,18 +283,22 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                         self.may_have_downstream,
                         &self.depended_subscription_ids,
                     );
-                    self.state_table
+                    let post_commit = self
+                        .state_table
                         .commit_may_switch_consistent_op(b.epoch, op_consistency_level)
                         .await?;
-                    if !self.state_table.is_consistent_op() {
+                    if !post_commit.inner().is_consistent_op() {
                         assert_eq!(self.conflict_behavior, ConflictBehavior::Overwrite);
                     }
 
-                    // Update the vnode bitmap for the state table if asked.
-                    if let Some(vnode_bitmap) = b.as_update_vnode_bitmap(self.actor_context.id) {
-                        let (_, cache_may_stale) =
-                            self.state_table.update_vnode_bitmap(vnode_bitmap);
+                    let update_vnode_bitmap = b.as_update_vnode_bitmap(self.actor_context.id);
+                    let b_epoch = b.epoch;
+                    yield Message::Barrier(b);
 
+                    // Update the vnode bitmap for the state table if asked.
+                    if let Some((_, cache_may_stale)) =
+                        post_commit.post_yield_barrier(update_vnode_bitmap).await?
+                    {
                         if cache_may_stale {
                             self.materialize_cache.data.clear();
                         }
@@ -300,9 +306,9 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
 
                     self.metrics
                         .materialize_current_epoch
-                        .set(b.epoch.curr as i64);
+                        .set(b_epoch.curr as i64);
 
-                    Message::Barrier(b)
+                    continue;
                 }
             }
         }
@@ -741,18 +747,19 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
             }
             futures.push(async {
                 let key_row = table.pk_serde().deserialize(key).unwrap();
-                (key.to_vec(), table.get_compacted_row(&key_row).await)
+                let row = table.get_row(key_row).await?.map(CompactedRow::from);
+                StreamExecutorResult::Ok((key.to_vec(), row))
             });
         }
 
         let mut buffered = stream::iter(futures).buffer_unordered(10).fuse();
         while let Some(result) = buffered.next().await {
-            let (key, value) = result;
+            let (key, value) = result?;
             match conflict_behavior {
                 ConflictBehavior::Overwrite | ConflictBehavior::DoUpdateIfNotNull => {
-                    self.data.push(key, value?)
+                    self.data.push(key, value)
                 }
-                ConflictBehavior::IgnoreConflict => self.data.push(key, value?),
+                ConflictBehavior::IgnoreConflict => self.data.push(key, value),
                 _ => unreachable!(),
             };
         }
@@ -843,7 +850,7 @@ mod tests {
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_hummock_sdk::HummockReadEpoch;
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::table::batch_table::storage_table::StorageTable;
+    use risingwave_storage::table::batch_table::BatchTable;
 
     use super::*;
     use crate::executor::test_utils::*;
@@ -889,7 +896,7 @@ mod tests {
             ColumnDesc::unnamed(column_ids[1], DataType::Int32),
         ];
 
-        let table = StorageTable::for_test(
+        let table = BatchTable::for_test(
             memory_state_store.clone(),
             table_id,
             column_descs,
@@ -992,7 +999,7 @@ mod tests {
             ColumnDesc::unnamed(column_ids[1], DataType::Int32),
         ];
 
-        let table = StorageTable::for_test(
+        let table = BatchTable::for_test(
             memory_state_store.clone(),
             table_id,
             column_descs,
@@ -1084,7 +1091,7 @@ mod tests {
             ColumnDesc::unnamed(column_ids[1], DataType::Int32),
         ];
 
-        let table = StorageTable::for_test(
+        let table = BatchTable::for_test(
             memory_state_store.clone(),
             table_id,
             column_descs,
@@ -1212,7 +1219,7 @@ mod tests {
             ColumnDesc::unnamed(column_ids[1], DataType::Int32),
         ];
 
-        let table = StorageTable::for_test(
+        let table = BatchTable::for_test(
             memory_state_store.clone(),
             table_id,
             column_descs,
@@ -1390,7 +1397,7 @@ mod tests {
             ColumnDesc::unnamed(column_ids[1], DataType::Int32),
         ];
 
-        let table = StorageTable::for_test(
+        let table = BatchTable::for_test(
             memory_state_store.clone(),
             table_id,
             column_descs,
@@ -1493,7 +1500,7 @@ mod tests {
             ColumnDesc::unnamed(column_ids[1], DataType::Int32),
         ];
 
-        let table = StorageTable::for_test(
+        let table = BatchTable::for_test(
             memory_state_store.clone(),
             table_id,
             column_descs,
@@ -1611,7 +1618,7 @@ mod tests {
             ColumnDesc::unnamed(column_ids[1], DataType::Int32),
         ];
 
-        let table = StorageTable::for_test(
+        let table = BatchTable::for_test(
             memory_state_store.clone(),
             table_id,
             column_descs,
@@ -1800,7 +1807,7 @@ mod tests {
             ColumnDesc::unnamed(column_ids[1], DataType::Int32),
         ];
 
-        let table = StorageTable::for_test(
+        let table = BatchTable::for_test(
             memory_state_store.clone(),
             table_id,
             column_descs,

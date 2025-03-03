@@ -15,14 +15,14 @@
 use std::cell::LazyCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt::{Debug, Display, Formatter};
-use std::future::{pending, poll_fn, Future};
+use std::future::{Future, pending, poll_fn};
 use std::mem::replace;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Instant;
 
-use futures::stream::FuturesOrdered;
 use futures::FutureExt;
+use futures::stream::FuturesOrdered;
 use prometheus::HistogramTimer;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::util::epoch::EpochPair;
@@ -34,8 +34,8 @@ use tokio::task::JoinHandle;
 
 use super::progress::BackfillState;
 use crate::error::{StreamError, StreamResult};
-use crate::executor::monitor::StreamingMetrics;
 use crate::executor::Barrier;
+use crate::executor::monitor::StreamingMetrics;
 use crate::task::{
     ActorId, LocalBarrierManager, PartialGraphId, SharedContext, StreamActorManager,
 };
@@ -75,11 +75,11 @@ struct BarrierState {
 
 use risingwave_common::must_match;
 use risingwave_pb::stream_plan::SubscriptionUpstreamInfo;
+use risingwave_pb::stream_service::InjectBarrierRequest;
 use risingwave_pb::stream_service::barrier_complete_response::PbCreateMviewProgress;
 use risingwave_pb::stream_service::streaming_control_stream_request::{
     DatabaseInitialPartialGraph, InitialPartialGraph,
 };
-use risingwave_pb::stream_service::InjectBarrierRequest;
 
 use crate::task::barrier_manager::await_epoch_completed_future::AwaitEpochCompletedFuture;
 use crate::task::barrier_manager::{LocalBarrierEvent, ScoredStreamError};
@@ -238,10 +238,11 @@ impl InflightActorState {
             })?;
         }
 
-        assert!(self
-            .inflight_barriers
-            .insert(barrier.epoch.prev, partial_graph_id)
-            .is_none());
+        assert!(
+            self.inflight_barriers
+                .insert(barrier.epoch.prev, partial_graph_id)
+                .is_none()
+        );
 
         match &mut self.status {
             InflightActorStatus::IssuedFirst(pending_barriers) => {
@@ -761,30 +762,45 @@ impl DatabaseManagedBarrierState {
         let mut new_actors = HashSet::new();
         let subscriptions =
             LazyCell::new(|| Arc::new(graph_state.mv_depended_subscriptions.clone()));
-        for actor in request.actors_to_build {
+        for (node, actor) in request
+            .actors_to_build
+            .into_iter()
+            .flat_map(|fragment_actors| {
+                let node = Arc::new(fragment_actors.node.unwrap());
+                fragment_actors
+                    .actors
+                    .into_iter()
+                    .map(move |actor| (node.clone(), actor))
+            })
+        {
+            let upstream = actor.fragment_upstreams;
+            let actor = actor.actor.unwrap();
             let actor_id = actor.actor_id;
             assert!(!is_stop_actor(actor_id));
             assert!(new_actors.insert(actor_id));
             assert!(request.actor_ids_to_collect.contains(&actor_id));
             let (join_handle, monitor_join_handle) = self.actor_manager.spawn_actor(
                 actor,
+                node,
                 (*subscriptions).clone(),
+                upstream,
                 self.current_shared_context.clone(),
                 self.local_barrier_manager.clone(),
             );
-            assert!(self
-                .actor_states
-                .try_insert(
-                    actor_id,
-                    InflightActorState::start(
+            assert!(
+                self.actor_states
+                    .try_insert(
                         actor_id,
-                        partial_graph_id,
-                        barrier,
-                        join_handle,
-                        monitor_join_handle
+                        InflightActorState::start(
+                            actor_id,
+                            partial_graph_id,
+                            barrier,
+                            join_handle,
+                            monitor_join_handle
+                        )
                     )
-                )
-                .is_ok());
+                    .is_ok()
+            );
         }
 
         // Spawn a trivial join handle to be compatible with the unit test
@@ -792,19 +808,20 @@ impl DatabaseManagedBarrierState {
             for actor_id in &request.actor_ids_to_collect {
                 if !self.actor_states.contains_key(actor_id) {
                     let join_handle = self.actor_manager.runtime.spawn(async { pending().await });
-                    assert!(self
-                        .actor_states
-                        .try_insert(
-                            *actor_id,
-                            InflightActorState::start(
+                    assert!(
+                        self.actor_states
+                            .try_insert(
                                 *actor_id,
-                                partial_graph_id,
-                                barrier,
-                                join_handle,
-                                None,
+                                InflightActorState::start(
+                                    *actor_id,
+                                    partial_graph_id,
+                                    barrier,
+                                    join_handle,
+                                    None,
+                                )
                             )
-                        )
-                        .is_ok());
+                            .is_ok()
+                    );
                     new_actors.insert(*actor_id);
                 }
             }
@@ -838,10 +855,30 @@ impl DatabaseManagedBarrierState {
             let (actor_id, err) = option.expect("non-empty when tx in local_barrier_manager");
             return Poll::Ready(ManagedBarrierStateEvent::ActorError { actor_id, err });
         }
+        // yield some pending collected epochs
+        for (partial_graph_id, graph_state) in &mut self.graph_states {
+            if let Some(barrier) = graph_state.may_have_collected_all() {
+                if let Some(actors_to_stop) = barrier.all_stop_actors() {
+                    self.current_shared_context.drop_actors(actors_to_stop);
+                }
+                return Poll::Ready(ManagedBarrierStateEvent::BarrierCollected {
+                    partial_graph_id: *partial_graph_id,
+                    barrier,
+                });
+            }
+        }
         while let Poll::Ready(event) = self.barrier_event_rx.poll_recv(cx) {
             match event.expect("non-empty when tx in local_barrier_manager") {
                 LocalBarrierEvent::ReportActorCollected { actor_id, epoch } => {
-                    self.collect(actor_id, epoch);
+                    if let Some((partial_graph_id, barrier)) = self.collect(actor_id, epoch) {
+                        if let Some(actors_to_stop) = barrier.all_stop_actors() {
+                            self.current_shared_context.drop_actors(actors_to_stop);
+                        }
+                        return Poll::Ready(ManagedBarrierStateEvent::BarrierCollected {
+                            partial_graph_id,
+                            barrier,
+                        });
+                    }
                 }
                 LocalBarrierEvent::ReportCreateProgress {
                     epoch,
@@ -860,34 +897,23 @@ impl DatabaseManagedBarrierState {
                 }
             }
         }
-        if let Some((partial_graph_id, barrier)) = self.next_collected_epoch() {
-            return Poll::Ready(ManagedBarrierStateEvent::BarrierCollected {
-                partial_graph_id,
-                barrier,
-            });
-        }
-        Poll::Pending
-    }
 
-    pub(super) fn next_collected_epoch(&mut self) -> Option<(PartialGraphId, Barrier)> {
-        {
-            let mut output = None;
-            for (partial_graph_id, graph_state) in &mut self.graph_states {
-                if let Some(barrier) = graph_state.may_have_collected_all() {
-                    if let Some(actors_to_stop) = barrier.all_stop_actors() {
-                        self.current_shared_context.drop_actors(actors_to_stop);
-                    }
-                    output = Some((*partial_graph_id, barrier));
-                    break;
-                }
-            }
-            output
-        }
+        debug_assert!(
+            self.graph_states
+                .values_mut()
+                .all(|graph_state| graph_state.may_have_collected_all().is_none())
+        );
+        Poll::Pending
     }
 }
 
 impl DatabaseManagedBarrierState {
-    pub(super) fn collect(&mut self, actor_id: ActorId, epoch: EpochPair) {
+    #[must_use]
+    pub(super) fn collect(
+        &mut self,
+        actor_id: ActorId,
+        epoch: EpochPair,
+    ) -> Option<(PartialGraphId, Barrier)> {
         let (prev_partial_graph_id, is_finished) = self
             .actor_states
             .get_mut(&actor_id)
@@ -904,6 +930,9 @@ impl DatabaseManagedBarrierState {
             .get_mut(&prev_partial_graph_id)
             .expect("should exist");
         prev_graph_state.collect(actor_id, epoch);
+        prev_graph_state
+            .may_have_collected_all()
+            .map(|barrier| (prev_partial_graph_id, barrier))
     }
 
     pub(super) fn pop_barrier_to_complete(

@@ -101,7 +101,7 @@ impl CsvParser {
             _ => {
                 return Err(AccessError::UnsupportedType {
                     ty: dtype.to_string(),
-                })
+                });
             }
         };
         Ok(Some(v))

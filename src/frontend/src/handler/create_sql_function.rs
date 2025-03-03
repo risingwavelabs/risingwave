@@ -14,18 +14,18 @@
 
 use std::collections::HashMap;
 
+use either::Either;
 use fancy_regex::Regex;
 use risingwave_common::catalog::FunctionId;
 use risingwave_common::types::{DataType, StructType};
-use risingwave_pb::catalog::function::{Kind, ScalarFunction, TableFunction};
 use risingwave_pb::catalog::Function;
+use risingwave_pb::catalog::function::{Kind, ScalarFunction, TableFunction};
 use risingwave_sqlparser::parser::{Parser, ParserError};
 
 use super::*;
 use crate::binder::UdfContext;
-use crate::catalog::CatalogError;
 use crate::expr::{Expr, ExprImpl, Literal};
-use crate::{bind_data_type, Binder};
+use crate::{Binder, bind_data_type};
 
 /// The error type for hint display
 /// Currently we will try invalid parameter first
@@ -122,6 +122,7 @@ pub async fn handle_create_sql_function(
     handler_args: HandlerArgs,
     or_replace: bool,
     temporary: bool,
+    if_not_exists: bool,
     name: ObjectName,
     args: Option<Vec<OperateFunctionArg>>,
     returns: Option<CreateFunctionReturns>,
@@ -151,7 +152,7 @@ pub async fn handle_create_sql_function(
         Some(FunctionDefinition::SingleQuotedDef(s)) => s.clone(),
         Some(FunctionDefinition::DoubleDollarDef(s)) => s.clone(),
         Some(FunctionDefinition::Identifier(_)) => {
-            return Err(ErrorCode::InvalidParameterValue("expect quoted string".to_owned()).into())
+            return Err(ErrorCode::InvalidParameterValue("expect quoted string".to_owned()).into());
         }
         None => {
             if params.return_.is_none() {
@@ -200,7 +201,7 @@ pub async fn handle_create_sql_function(
             return Err(ErrorCode::InvalidParameterValue(
                 "return type must be specified".to_owned(),
             )
-            .into())
+            .into());
         }
     };
 
@@ -214,20 +215,18 @@ pub async fn handle_create_sql_function(
     // resolve database and schema id
     let session = &handler_args.session;
     let db_name = &session.database();
-    let (schema_name, function_name) = Binder::resolve_schema_qualified_name(db_name, name)?;
+    let (schema_name, function_name) =
+        Binder::resolve_schema_qualified_name(db_name, name.clone())?;
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
 
     // check if function exists
-    if (session.env().catalog_reader().read_guard())
-        .get_schema_by_id(&database_id, &schema_id)?
-        .get_function_by_name_args(&function_name, &arg_types)
-        .is_some()
-    {
-        let name = format!(
-            "{function_name}({})",
-            arg_types.iter().map(|t| t.to_string()).join(",")
-        );
-        return Err(CatalogError::Duplicated("function", name).into());
+    if let Either::Right(resp) = session.check_function_name_duplicated(
+        StatementType::CREATE_FUNCTION,
+        name,
+        &arg_types,
+        if_not_exists,
+    )? {
+        return Ok(resp);
     }
 
     // Parse function body here

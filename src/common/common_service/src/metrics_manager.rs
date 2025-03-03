@@ -16,10 +16,10 @@ use std::collections::HashSet;
 use std::ops::Deref;
 use std::sync::OnceLock;
 
+use axum::Extension;
 use axum::body::Body;
 use axum::handler::{Handler, HandlerWithoutStateExt};
 use axum::response::{IntoResponse, Response};
-use axum::Extension;
 use axum_extra::extract::Query as ExtraQuery;
 use prometheus::{Encoder, Registry, TextEncoder};
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;

@@ -18,9 +18,9 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
 use serde_json::{Map, Value};
 
+use super::super::SinkError;
 use super::super::encoder::template::TemplateEncoder;
 use super::super::encoder::{JsonEncoder, RowEncoder};
-use super::super::SinkError;
 use crate::sink::Result;
 
 pub struct ElasticSearchOpenSearchFormatter {
@@ -102,7 +102,8 @@ impl ElasticSearchOpenSearchFormatter {
         } else {
             None
         };
-        let key_encoder = TemplateEncoder::new(schema.clone(), col_indices.clone(), key_format);
+        let key_encoder =
+            TemplateEncoder::new_string(schema.clone(), col_indices.clone(), key_format);
         let value_encoder = JsonEncoder::new_with_es(schema.clone(), col_indices.clone());
         Ok(Self {
             key_encoder,
@@ -113,7 +114,11 @@ impl ElasticSearchOpenSearchFormatter {
         })
     }
 
-    pub fn convert_chunk(&self, chunk: StreamChunk) -> Result<Vec<BuildBulkPara>> {
+    pub fn convert_chunk(
+        &self,
+        chunk: StreamChunk,
+        is_append_only: bool,
+    ) -> Result<Vec<BuildBulkPara>> {
         let mut result_vec = Vec::with_capacity(chunk.capacity());
         for (op, rows) in chunk.rows() {
             let index = if let Some(index_column) = self.index_column {
@@ -146,7 +151,7 @@ impl ElasticSearchOpenSearchFormatter {
                 .transpose()?;
             match op {
                 Op::Insert | Op::UpdateInsert => {
-                    let key = self.key_encoder.encode(rows)?;
+                    let key = self.key_encoder.encode(rows)?.into_string()?;
                     let value = self.value_encoder.encode(rows)?;
                     result_vec.push(BuildBulkPara {
                         index: index.to_owned(),
@@ -157,7 +162,12 @@ impl ElasticSearchOpenSearchFormatter {
                     });
                 }
                 Op::Delete => {
-                    let key = self.key_encoder.encode(rows)?;
+                    if is_append_only {
+                        return Err(SinkError::ElasticSearchOpenSearch(anyhow!(
+                            "`Delete` operation is not supported in `append_only` mode"
+                        )));
+                    }
+                    let key = self.key_encoder.encode(rows)?.into_string()?;
                     let mem_size_b = std::mem::size_of_val(&key);
                     result_vec.push(BuildBulkPara {
                         index: index.to_owned(),
@@ -167,7 +177,15 @@ impl ElasticSearchOpenSearchFormatter {
                         routing_column,
                     });
                 }
-                Op::UpdateDelete => continue,
+                Op::UpdateDelete => {
+                    if is_append_only {
+                        return Err(SinkError::ElasticSearchOpenSearch(anyhow!(
+                            "`UpdateDelete` operation is not supported in `append_only` mode"
+                        )));
+                    } else {
+                        continue;
+                    }
+                }
             }
         }
         Ok(result_vec)

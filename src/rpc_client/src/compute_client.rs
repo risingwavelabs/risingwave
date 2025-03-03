@@ -30,7 +30,7 @@ use risingwave_pb::compute::{
 };
 use risingwave_pb::monitor_service::monitor_service_client::MonitorServiceClient;
 use risingwave_pb::monitor_service::{
-    AnalyzeHeapRequest, AnalyzeHeapResponse, GetBackPressureRequest, GetBackPressureResponse,
+    AnalyzeHeapRequest, AnalyzeHeapResponse, GetStreamingStatsRequest, GetStreamingStatsResponse,
     HeapProfilingRequest, HeapProfilingResponse, ListHeapProfilingRequest,
     ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse, StackTraceRequest,
     StackTraceResponse,
@@ -39,14 +39,14 @@ use risingwave_pb::plan_common::ExprContext;
 use risingwave_pb::task_service::exchange_service_client::ExchangeServiceClient;
 use risingwave_pb::task_service::task_service_client::TaskServiceClient;
 use risingwave_pb::task_service::{
-    permits, CancelTaskRequest, CancelTaskResponse, CreateTaskRequest, ExecuteRequest,
-    GetDataRequest, GetDataResponse, GetStreamRequest, GetStreamResponse, PbPermits,
-    TaskInfoResponse,
+    CancelTaskRequest, CancelTaskResponse, CreateTaskRequest, ExecuteRequest, FastInsertRequest,
+    FastInsertResponse, GetDataRequest, GetDataResponse, GetStreamRequest, GetStreamResponse,
+    PbPermits, TaskInfoResponse, permits,
 };
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tonic::transport::{Channel, Endpoint};
 use tonic::Streaming;
+use tonic::transport::{Channel, Endpoint};
 
 use crate::error::{Result, RpcError};
 use crate::{RpcClient, RpcClientPool};
@@ -210,6 +210,16 @@ impl ComputeClient {
             .into_inner())
     }
 
+    pub async fn fast_insert(&self, req: FastInsertRequest) -> Result<FastInsertResponse> {
+        Ok(self
+            .task_client
+            .to_owned()
+            .fast_insert(req)
+            .await
+            .map_err(RpcError::from_compute_status)?
+            .into_inner())
+    }
+
     pub async fn stack_trace(&self) -> Result<StackTraceResponse> {
         Ok(self
             .monitor_client
@@ -220,11 +230,11 @@ impl ComputeClient {
             .into_inner())
     }
 
-    pub async fn get_back_pressure(&self) -> Result<GetBackPressureResponse> {
+    pub async fn get_streaming_stats(&self) -> Result<GetStreamingStatsResponse> {
         Ok(self
             .monitor_client
             .to_owned()
-            .get_back_pressure(GetBackPressureRequest::default())
+            .get_streaming_stats(GetStreamingStatsRequest::default())
             .await
             .map_err(RpcError::from_compute_status)?
             .into_inner())

@@ -19,33 +19,33 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use bytes::Bytes;
-use mysql_async::prelude::Queryable;
 use mysql_async::Opts;
+use mysql_async::prelude::Queryable;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
+use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
-use risingwave_pb::connector_service::SinkMetadata;
 use sea_orm::DatabaseConnection;
 use serde::Deserialize;
 use serde_derive::Serialize;
 use serde_json::Value;
-use serde_with::{serde_as, DisplayFromStr};
+use serde_with::{DisplayFromStr, serde_as};
 use thiserror_ext::AsReport;
 use url::form_urlencoded;
 use with_options::WithOptions;
 
 use super::decouple_checkpoint_log_sink::DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE;
 use super::doris_starrocks_connector::{
-    HeaderBuilder, InserterInner, StarrocksTxnRequestBuilder, STARROCKS_DELETE_SIGN,
-    STARROCKS_SUCCESS_STATUS,
+    HeaderBuilder, InserterInner, STARROCKS_DELETE_SIGN, STARROCKS_SUCCESS_STATUS,
+    StarrocksTxnRequestBuilder,
 };
 use super::encoder::{JsonEncoder, RowEncoder};
 use super::{
-    SinkCommitCoordinator, SinkError, SinkParam, SinkWriterMetrics, SINK_TYPE_APPEND_ONLY,
-    SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
+    SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, SinkCommitCoordinator, SinkError,
+    SinkParam, SinkWriterMetrics,
 };
 use crate::sink::coordinate::CoordinatedSinkWriter;
 use crate::sink::decouple_checkpoint_log_sink::DecoupleCheckpointLogSinkerOf;
@@ -183,7 +183,8 @@ impl StarrocksSink {
             })?;
             if !Self::check_and_correct_column_type(&i.data_type, value)? {
                 return Err(SinkError::Starrocks(format!(
-                    "Column type don't match, column name is {:?}. starrocks type is {:?} risingwave type is {:?} ",i.name,value,i.data_type
+                    "Column type don't match, column name is {:?}. starrocks type is {:?} risingwave type is {:?} ",
+                    i.name, value, i.data_type
                 )));
             }
         }
@@ -265,7 +266,8 @@ impl Sink for StarrocksSink {
     async fn validate(&self) -> Result<()> {
         if !self.is_append_only && self.pk_indices.is_empty() {
             return Err(SinkError::Config(anyhow!(
-                "Primary key not defined for upsert starrocks sink (please define in `primary_key` field)")));
+                "Primary key not defined for upsert starrocks sink (please define in `primary_key` field)"
+            )));
         }
         // check reachability
         let mut client = StarrocksSchemaClient::new(
@@ -338,6 +340,10 @@ impl Sink for StarrocksSink {
             DecoupleCheckpointLogSinkerOf::new(writer, metrics, commit_checkpoint_interval),
             None,
         ))
+    }
+
+    fn is_coordinated_sink(&self) -> bool {
+        true
     }
 
     async fn new_coordinator(&self, _db: DatabaseConnection) -> Result<Self::Coordinator> {
@@ -672,7 +678,10 @@ impl StarrocksSchemaClient {
     }
 
     pub async fn get_columns_from_starrocks(&mut self) -> Result<HashMap<String, String>> {
-        let query = format!("select column_name, column_type from information_schema.columns where table_name = {:?} and table_schema = {:?};",self.table,self.db);
+        let query = format!(
+            "select column_name, column_type from information_schema.columns where table_name = {:?} and table_schema = {:?};",
+            self.table, self.db
+        );
         let mut query_map: HashMap<String, String> = HashMap::default();
         self.conn
             .query_map(query, |(column_name, column_type)| {
@@ -684,7 +693,10 @@ impl StarrocksSchemaClient {
     }
 
     pub async fn get_pk_from_starrocks(&mut self) -> Result<(String, String)> {
-        let query = format!("select table_model, primary_key from information_schema.tables_config where table_name = {:?} and table_schema = {:?};",self.table,self.db);
+        let query = format!(
+            "select table_model, primary_key from information_schema.tables_config where table_name = {:?} and table_schema = {:?};",
+            self.table, self.db
+        );
         let table_mode_pk: (String, String) = self
             .conn
             .query_map(query, |(table_model, primary_key)| {

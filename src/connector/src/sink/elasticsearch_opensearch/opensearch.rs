@@ -15,7 +15,6 @@
 use anyhow::anyhow;
 use risingwave_common::catalog::Schema;
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
-use sea_orm::DatabaseConnection;
 use tonic::async_trait;
 
 use super::super::writer::{AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriterExt};
@@ -31,6 +30,7 @@ pub struct OpenSearchSink {
     config: ElasticSearchOpenSearchConfig,
     schema: Schema,
     pk_indices: Vec<usize>,
+    is_append_only: bool,
 }
 
 #[async_trait]
@@ -44,6 +44,7 @@ impl TryFrom<SinkParam> for OpenSearchSink {
             config,
             schema,
             pk_indices: param.downstream_pk,
+            is_append_only: param.sink_type.is_append_only(),
         })
     }
 }
@@ -74,6 +75,7 @@ impl Sink for OpenSearchSink {
                 self.schema.clone(),
                 self.pk_indices.clone(),
                 Self::SINK_NAME,
+                self.is_append_only,
             )?
             .into_log_sinker(self.config.concurrent_requests),
             None,
@@ -96,7 +98,9 @@ impl Sink for OpenSearchSink {
                     if std::matches!(user_specified, SinkDecouple::Disable)
                         && commit_checkpoint_interval > 1
                     {
-                        return Err(SinkError::Config(anyhow!("config conflict: `commit_checkpoint_interval` larger than 1 means that sink decouple must be enabled, but session config sink_decouple is disabled")));
+                        return Err(SinkError::Config(anyhow!(
+                            "config conflict: `commit_checkpoint_interval` larger than 1 means that sink decouple must be enabled, but session config sink_decouple is disabled"
+                        )));
                     }
                 }
                 None => match user_specified {
@@ -127,9 +131,5 @@ impl Sink for OpenSearchSink {
             | risingwave_common::session_config::sink_decouple::SinkDecouple::Enable => Ok(true),
             risingwave_common::session_config::sink_decouple::SinkDecouple::Disable => Ok(false),
         }
-    }
-
-    async fn new_coordinator(&self, _db: DatabaseConnection) -> Result<Self::Coordinator> {
-        Err(SinkError::Coordinator(anyhow!("no coordinator")))
     }
 }

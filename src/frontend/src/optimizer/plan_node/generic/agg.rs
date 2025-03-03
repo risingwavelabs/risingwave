@@ -15,7 +15,6 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::{fmt, vec};
 
-use fixedbitset::FixedBitSet;
 use itertools::{Either, Itertools};
 use pretty_xmlish::{Pretty, StrAssocArr};
 use risingwave_common::catalog::{Field, FieldDisplay, Schema};
@@ -23,23 +22,26 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, ColumnOrderDisplay, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
-use risingwave_expr::aggregate::{agg_types, AggType, PbAggKind};
-use risingwave_expr::sig::{FuncBuilder, FUNCTION_REGISTRY};
+use risingwave_expr::aggregate::{AggType, PbAggKind, agg_types};
+use risingwave_expr::sig::{FUNCTION_REGISTRY, FuncBuilder};
 use risingwave_pb::expr::{PbAggCall, PbConstant};
-use risingwave_pb::stream_plan::{agg_call_state, AggCallState as PbAggCallState};
+use risingwave_pb::stream_plan::{AggCallState as PbAggCallState, agg_call_state};
 
 use super::super::utils::TableCatalogBuilder;
-use super::{impl_distill_unit_from_fields, stream, GenericPlanNode, GenericPlanRef};
+use super::{GenericPlanNode, GenericPlanRef, impl_distill_unit_from_fields, stream};
+use crate::TableCatalog;
+use crate::error::{ErrorCode, Result};
 use crate::expr::{Expr, ExprRewriter, ExprVisitor, InputRef, InputRefDisplay, Literal};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::batch::BatchPlanRef;
-use crate::optimizer::property::{Distribution, FunctionalDependencySet, RequiredDist};
+use crate::optimizer::property::{
+    Distribution, FunctionalDependencySet, RequiredDist, WatermarkColumns,
+};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::{
     ColIndexMapping, ColIndexMappingRewriteExt, Condition, ConditionDisplay, IndexRewriter,
     IndexSet,
 };
-use crate::TableCatalog;
 
 /// [`Agg`] groups input data by their group key and computes aggregation functions.
 ///
@@ -139,11 +141,42 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
         })
     }
 
-    pub(crate) fn watermark_group_key(&self, input_watermark_columns: &FixedBitSet) -> Vec<usize> {
-        self.group_key
+    pub(crate) fn eowc_window_column(
+        &self,
+        input_watermark_columns: &WatermarkColumns,
+    ) -> Result<usize> {
+        let group_key_with_wtmk = self
+            .group_key
             .indices()
-            .filter(|&idx| input_watermark_columns.contains(idx))
-            .collect()
+            .filter_map(|idx| {
+                input_watermark_columns
+                    .get_group(idx)
+                    .map(|group| (idx, group))
+            })
+            .collect::<Vec<_>>();
+
+        if group_key_with_wtmk.is_empty() {
+            return Err(ErrorCode::NotSupported(
+                "Emit-On-Window-Close mode requires a watermark column in GROUP BY.".to_owned(),
+                "Please try to GROUP BY a watermark column".to_owned(),
+            )
+            .into());
+        }
+        if group_key_with_wtmk.len() == 1
+            || group_key_with_wtmk
+                .iter()
+                .map(|(_, group)| group)
+                .all_equal()
+        {
+            // 1. only one watermark column, should be the window column
+            // 2. all watermark columns belong to the same group, choose the first one as the window column
+            return Ok(group_key_with_wtmk[0].0);
+        }
+        Err(ErrorCode::NotSupported(
+            "Emit-On-Window-Close mode requires that watermark columns in GROUP BY are derived from the same upstream column.".to_owned(),
+            "Please try to remove undesired columns from GROUP BY".to_owned(),
+        )
+        .into())
     }
 
     pub fn new(agg_calls: Vec<PlanAggCall>, group_key: IndexSet, input: PlanRef) -> Self {
@@ -643,8 +676,6 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                     table_builder.add_column(&Field {
                         data_type: DataType::Int64,
                         name: format!("count_for_agg_call_{}", call_index),
-                        sub_fields: vec![],
-                        type_name: String::default(),
                     });
                 }
                 table_builder

@@ -19,8 +19,8 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{
-    ColumnCatalog, ConflictBehavior, CreateType, Engine, StreamJobStatus, TableId,
-    OBJECT_ID_PLACEHOLDER,
+    ColumnCatalog, ConflictBehavior, CreateType, Engine, OBJECT_ID_PLACEHOLDER, StreamJobStatus,
+    TableId,
 };
 use risingwave_common::hash::VnodeCount;
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -30,9 +30,10 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::derive::derive_columns;
 use super::stream::prelude::*;
-use super::utils::{childless_record, Distill};
-use super::{reorganize_elements_id, ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode};
+use super::utils::{Distill, childless_record};
+use super::{ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode, reorganize_elements_id};
 use crate::catalog::table_catalog::{TableCatalog, TableType, TableVersion};
+use crate::catalog::{DatabaseId, SchemaId};
 use crate::error::Result;
 use crate::optimizer::plan_node::derive::derive_pk;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
@@ -75,6 +76,8 @@ impl StreamMaterialize {
     pub fn create(
         input: PlanRef,
         name: String,
+        database_id: DatabaseId,
+        schema_id: SchemaId,
         user_distributed_by: RequiredDist,
         user_order_by: Order,
         user_cols: FixedBitSet,
@@ -101,6 +104,8 @@ impl StreamMaterialize {
         let table = Self::derive_table_catalog(
             input.clone(),
             name,
+            database_id,
+            schema_id,
             user_order_by,
             columns,
             definition,
@@ -129,6 +134,8 @@ impl StreamMaterialize {
     pub fn create_for_table(
         input: PlanRef,
         name: String,
+        database_id: DatabaseId,
+        schema_id: SchemaId,
         user_distributed_by: RequiredDist,
         user_order_by: Order,
         columns: Vec<ColumnCatalog>,
@@ -147,6 +154,8 @@ impl StreamMaterialize {
         let table = Self::derive_table_catalog(
             input.clone(),
             name,
+            database_id,
+            schema_id,
             user_order_by,
             columns,
             definition,
@@ -180,24 +189,33 @@ impl StreamMaterialize {
                     user_distributed_by
                 }
                 TableType::MaterializedView => {
-                    assert_matches!(user_distributed_by, RequiredDist::Any);
-                    // ensure the same pk will not shuffle to different node
-                    let required_dist =
-                        RequiredDist::shard_by_key(input.schema().len(), input.expect_stream_key());
+                    match user_distributed_by {
+                        RequiredDist::PhysicalDist(Distribution::HashShard(_)) => {
+                            user_distributed_by
+                        }
+                        RequiredDist::Any => {
+                            // ensure the same pk will not shuffle to different node
+                            let required_dist = RequiredDist::shard_by_key(
+                                input.schema().len(),
+                                input.expect_stream_key(),
+                            );
 
-                    // If the input is a stream join, enforce the stream key as the materialized
-                    // view distribution key to avoid slow backfilling caused by
-                    // data skew of the dimension table join key.
-                    // See <https://github.com/risingwavelabs/risingwave/issues/12824> for more information.
-                    let is_stream_join = matches!(input.as_stream_hash_join(), Some(_join))
-                        || matches!(input.as_stream_temporal_join(), Some(_join))
-                        || matches!(input.as_stream_delta_join(), Some(_join));
+                            // If the input is a stream join, enforce the stream key as the materialized
+                            // view distribution key to avoid slow backfilling caused by
+                            // data skew of the dimension table join key.
+                            // See <https://github.com/risingwavelabs/risingwave/issues/12824> for more information.
+                            let is_stream_join = matches!(input.as_stream_hash_join(), Some(_join))
+                                || matches!(input.as_stream_temporal_join(), Some(_join))
+                                || matches!(input.as_stream_delta_join(), Some(_join));
 
-                    if is_stream_join {
-                        return Ok(required_dist.enforce(input, &Order::any()));
+                            if is_stream_join {
+                                return Ok(required_dist.enforce(input, &Order::any()));
+                            }
+
+                            required_dist
+                        }
+                        _ => unreachable!("{:?}", user_distributed_by),
                     }
-
-                    required_dist
                 }
                 TableType::Index => {
                     assert_matches!(
@@ -221,6 +239,8 @@ impl StreamMaterialize {
     fn derive_table_catalog(
         rewritten_input: PlanRef,
         name: String,
+        database_id: DatabaseId,
+        schema_id: SchemaId,
         user_order_by: Order,
         columns: Vec<ColumnCatalog>,
         definition: String,
@@ -241,7 +261,9 @@ impl StreamMaterialize {
         let value_indices = (0..columns.len()).collect_vec();
         let distribution_key = input.distribution().dist_column_indices().to_vec();
         let append_only = input.append_only();
-        let watermark_columns = input.watermark_columns().clone();
+        // TODO(rc): In `TableCatalog` we still use `FixedBitSet` for watermark columns, ignoring the watermark group information.
+        // We will record the watermark group information in `TableCatalog` in the future. For now, let's flatten the watermark columns.
+        let watermark_columns = input.watermark_columns().indices().collect();
 
         let (table_pk, stream_key) = if let Some(pk_column_indices) = pk_column_indices {
             let table_pk = pk_column_indices
@@ -258,6 +280,8 @@ impl StreamMaterialize {
         let read_prefix_len_hint = table_pk.len();
         Ok(TableCatalog {
             id: TableId::placeholder(),
+            schema_id,
+            database_id,
             associated_source_id: None,
             name,
             dependent_relations: vec![],
@@ -344,9 +368,10 @@ impl Distill for StreamMaterialize {
         vec.push(("pk_conflict", Pretty::from(pk_conflict_behavior)));
 
         let watermark_columns = &self.base.watermark_columns();
-        if self.base.watermark_columns().count_ones(..) > 0 {
+        if self.base.watermark_columns().n_indices() > 0 {
+            // TODO(rc): we ignore the watermark group info here, will be fixed it later
             let watermark_column_names = watermark_columns
-                .ones()
+                .indices()
                 .map(|i| table.columns()[i].name_with_hidden().to_string())
                 .map(Pretty::from)
                 .collect();
@@ -370,8 +395,6 @@ impl PlanTreeNodeUnary for StreamMaterialize {
             .zip_eq_fast(self.base.schema().fields.iter())
             .for_each(|(a, b)| {
                 assert_eq!(a.data_type, b.data_type);
-                assert_eq!(a.type_name, b.type_name);
-                assert_eq!(a.sub_fields, b.sub_fields);
             });
         assert_eq!(new.plan_base().stream_key(), self.plan_base().stream_key());
         new

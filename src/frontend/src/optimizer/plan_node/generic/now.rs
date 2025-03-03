@@ -19,9 +19,9 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::{DataType, Interval, Timestamptz};
 
 use super::{DistillUnit, GenericPlanNode};
+use crate::OptimizerContextRef;
 use crate::optimizer::plan_node::utils::childless_record;
 use crate::optimizer::property::FunctionalDependencySet;
-use crate::OptimizerContextRef;
 
 #[derive(Debug, Clone, Educe)]
 #[educe(PartialEq, Eq, Hash)]
@@ -58,8 +58,6 @@ impl GenericPlanNode for Now {
             } else {
                 "ts"
             }),
-            sub_fields: vec![],
-            type_name: String::default(),
         }])
     }
 
