@@ -25,7 +25,9 @@ ENV PATH /root/.cargo/bin:$PATH
 ENV CARGO_INCREMENTAL=0
 
 # We need to add the `rustfmt` dependency, otherwise `risingwave_pb` will not compile
-RUN rustup self update \
+RUN rustup install stable \
+  && rustup default stable \
+  && rustup self update \
   && rustup set profile minimal \
   && rustup show \
   && rustup default `rustup show active-toolchain | awk '{print $1}'` \
