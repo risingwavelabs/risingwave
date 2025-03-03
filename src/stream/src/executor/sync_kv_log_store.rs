@@ -368,7 +368,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                                 match msg {
                                     Message::Barrier(barrier) => {
                                         if clean_state
-                                            && buffer.no_flushed_items()
+                                            && buffer.no_flushed_items_and_some_unflushed_items()
                                             && barrier.kind.is_checkpoint()
                                         {
                                             write_future_state = WriteFuture::paused(
@@ -434,7 +434,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                                             chunk,
                                             epoch,
                                         ) {
-                                            if clean_state && buffer.no_flushed_items() {
+                                            if clean_state {
                                                 write_future_state = WriteFuture::paused(
                                                     self.pause_duration_ms,
                                                     Message::Chunk(chunk_to_flush),
@@ -489,8 +489,9 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                         }
                     }
                     Either::Right(result) => {
-                        if matches!(read_future_state, ReadFuture::Idle)
-                            && buffer.no_flushed_items()
+                        if !clean_state
+                            && matches!(read_future_state, ReadFuture::Idle)
+                            && buffer.no_flushed_items_and_some_unflushed_items()
                         {
                             clean_state = true;
                         }
@@ -688,8 +689,8 @@ struct SyncedLogStoreBuffer {
 
 impl SyncedLogStoreBuffer {
     /// Returns true if there are flushed items in the buffer.
-    fn no_flushed_items(&self) -> bool {
-        self.flushed_count == 0
+    fn no_flushed_items_and_some_unflushed_items(&self) -> bool {
+        self.flushed_count == 0 && self.current_size > 0
     }
 
     fn add_or_flush_chunk(
