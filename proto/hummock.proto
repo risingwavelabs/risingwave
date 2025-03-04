@@ -753,10 +753,12 @@ message GetCompactionScoreRequest {
 
 message GetCompactionScoreResponse {
   message PickerInfo {
-    uint64 score = 1;
+    double score = 1;
     uint64 select_level = 2;
     uint64 target_level = 3;
     string picker_type = 4;
+    double score_ratio = 5;
+
   }
   uint64 compaction_group_id = 1;
   repeated PickerInfo scores = 2;

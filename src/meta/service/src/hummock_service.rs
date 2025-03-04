@@ -543,6 +543,7 @@ impl HummockManagerService for HummockServiceImpl {
                 select_level: s.select_level as _,
                 target_level: s.target_level as _,
                 picker_type: s.picker_type.to_string(),
+                score_ratio: s.score_ratio,
             })
             .collect();
         Ok(Response::new(GetCompactionScoreResponse {
