@@ -51,7 +51,7 @@ impl AccessBuilder for DebeziumAvroAccessBuilder {
         self.value = Some(from_avro_datum(
             writer_schema.as_ref(),
             &mut raw_payload,
-            None,
+            Some(&self.reader_schema.original_schema),
         )?);
         Ok(AccessImpl::Avro(AvroAccess::new(
             self.value.as_ref().unwrap(),
