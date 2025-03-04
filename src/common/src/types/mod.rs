@@ -299,9 +299,11 @@ impl From<DataTypeName> for PbTypeName {
     }
 }
 
-/// Convenient macros to generate match arms for [`DataType`](crate::types::DataType).
+/// Convenient macros to generate match arms for [`DataType`].
 pub mod data_types {
-    /// Numeric [`DataType`](crate::types::DataType)s supported to be `offset` of `RANGE` frame.
+    use super::DataType;
+
+    /// Numeric [`DataType`]s supported to be `offset` of `RANGE` frame.
     #[macro_export]
     macro_rules! range_frame_numeric {
         () => {
@@ -315,7 +317,7 @@ pub mod data_types {
     }
     pub use range_frame_numeric;
 
-    /// Date/time [`DataType`](crate::types::DataType)s supported to be `offset` of `RANGE` frame.
+    /// Date/time [`DataType`]s supported to be `offset` of `RANGE` frame.
     #[macro_export]
     macro_rules! range_frame_datetime {
         () => {
@@ -327,6 +329,48 @@ pub mod data_types {
         };
     }
     pub use range_frame_datetime;
+
+    /// Data types that do not have inner fields.
+    #[macro_export]
+    macro_rules! _simple_data_types {
+        () => {
+            DataType::Boolean
+                | DataType::Int16
+                | DataType::Int32
+                | DataType::Int64
+                | DataType::Float32
+                | DataType::Float64
+                | DataType::Decimal
+                | DataType::Date
+                | DataType::Varchar
+                | DataType::Time
+                | DataType::Timestamp
+                | DataType::Timestamptz
+                | DataType::Interval
+                | DataType::Bytea
+                | DataType::Jsonb
+                | DataType::Serial
+                | DataType::Int256
+        };
+    }
+    pub use _simple_data_types as simple;
+
+    /// Data types that have inner fields.
+    #[macro_export]
+    macro_rules! _composite_data_types {
+        () => {
+            DataType::Struct { .. } | DataType::List { .. } | DataType::Map { .. }
+        };
+    }
+    pub use _composite_data_types as composite;
+
+    /// Test that all data types are covered either by `simple!()` or `composite!()`.
+    fn _simple_composite_data_types_exhausted(dt: DataType) {
+        match dt {
+            simple!() => {}
+            composite!() => {}
+        }
+    }
 }
 
 impl DataType {
