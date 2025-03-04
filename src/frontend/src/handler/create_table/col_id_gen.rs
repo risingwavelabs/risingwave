@@ -17,13 +17,14 @@ use std::collections::{HashMap, HashSet};
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnCatalog, INITIAL_TABLE_VERSION_ID, TableVersionId};
-use risingwave_common::types::{DataType, MapType, StructType};
+use risingwave_common::types::{DataType, MapType, StructType, data_types};
 
 use crate::TableCatalog;
 use crate::catalog::ColumnId;
 use crate::catalog::table_catalog::TableVersion;
 use crate::error::Result;
 
+/// A segment in a [`Path`].
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 enum Segment {
     Field(String), // for both top-level columns and struct fields
@@ -43,6 +44,7 @@ impl std::fmt::Display for Segment {
     }
 }
 
+/// The path to a nested field in a column with composite data type.
 type Path = Vec<Segment>;
 
 type Existing = HashMap<Path, (ColumnId, DataType)>;
@@ -90,11 +92,13 @@ impl ColumnIdGenerator {
                 };
             }
 
+            // For `List` and `Map` types, there's no id for the element as its own structure won't change.
             const P: ColumnId = ColumnId::placeholder();
 
             match &data_type {
                 DataType::Struct(fields) => {
-                    // Mark this column as unalterable if field_ids are unset, i.e., legacy encoding.
+                    // Mark this column as unalterable if we encounter any nested fields with unset IDs,
+                    // i.e., it was persisted with legacy encoding that's not column-aware.
                     if fields.ids().is_none() {
                         *alterable = false;
                     }
@@ -120,7 +124,8 @@ impl ColumnIdGenerator {
                         handle(existing, alterable, path, P, map.value().clone());
                     });
                 }
-                _ => {}
+
+                data_types::simple!() => {}
             }
 
             existing
@@ -131,6 +136,7 @@ impl ColumnIdGenerator {
         let mut existing = Existing::new();
         let mut unalterable_columns = HashSet::new();
 
+        // Collect all existing fields into `existing`.
         for col in original.columns() {
             let mut path = vec![Segment::Field(col.name().to_owned())];
             let mut alterable = true;
@@ -176,6 +182,7 @@ impl ColumnIdGenerator {
         if self.unalterable_columns.contains(col.name()) {
             let (original_column_id, original_data_type) = self.existing.get(&path).unwrap();
 
+            // For column with legacy encoding, ensure the data type is not changed.
             if original_data_type != col.data_type() {
                 bail!(
                     "column \"{}\" was persisted with legacy encoding thus cannot be altered, \
@@ -183,6 +190,7 @@ impl ColumnIdGenerator {
                     col.name()
                 );
             } else {
+                // Only update the top-level column ID, without traversing nested fields.
                 col.column_desc.column_id = *original_column_id;
                 return Ok(());
             }
@@ -204,6 +212,8 @@ impl ColumnIdGenerator {
 
             let original_column_id = match this.existing.get(&*path) {
                 Some((original_column_id, original_data_type)) => {
+                    // Only check the type name (discriminant) for compatibility check here.
+                    // For nested fields, we will check them recursively later.
                     if original_data_type.type_name() != data_type.type_name() {
                         let path = path.iter().join(".");
                         bail!(
@@ -233,22 +243,23 @@ impl ColumnIdGenerator {
                     DataType::Struct(StructType::new(new_fields).with_ids(ids))
                 }
                 DataType::List(inner) => {
-                    let (_id, new_inner) =
+                    let (_, new_inner) =
                         with_segment!(Segment::ListElement, { handle(this, path, *inner)? });
                     DataType::List(Box::new(new_inner))
                 }
                 DataType::Map(map) => {
-                    let (_key_id, new_key) =
+                    let (_, new_key) =
                         with_segment!(Segment::MapKey, { handle(this, path, map.key().clone())? });
-                    let (_value_id, new_value) = with_segment!(Segment::MapValue, {
+                    let (_, new_value) = with_segment!(Segment::MapValue, {
                         handle(this, path, map.value().clone())?
                     });
                     DataType::Map(MapType::from_kv(new_key, new_value))
                 }
 
-                _ => data_type,
+                data_types::simple!() => data_type,
             };
 
+            // Only top-level column and struct fields need an ID.
             let need_gen_id = matches!(path.last().unwrap(), Segment::Field(_));
 
             let new_id = if need_gen_id {
@@ -312,6 +323,11 @@ mod tests {
 
     #[easy_ext::ext(ColumnIdGeneratorTestExt)]
     impl ColumnIdGenerator {
+        /// Generate a column ID for the given field.
+        ///
+        /// This helper function checks that the data type of the field has not changed after
+        /// generating the column ID, i.e., it is called on simple types or composite types
+        /// with `field_ids` unset and legacy encoding.
         fn generate_simple(&mut self, field: impl FieldLike) -> Result<ColumnId> {
             let original_data_type = field.data_type().clone();
 
@@ -329,17 +345,6 @@ mod tests {
             );
 
             Ok(col.column_desc.column_id)
-        }
-
-        fn generate_composite(&mut self, field: impl FieldLike) -> Result<(ColumnId, DataType)> {
-            let field = Field::new(field.name(), field.data_type().clone());
-            let mut col = ColumnCatalog {
-                column_desc: ColumnDesc::from_field_without_column_id(&field),
-                is_hidden: false,
-            };
-            self.generate(&mut col)?;
-
-            Ok((col.column_desc.column_id, col.column_desc.data_type))
         }
     }
 
@@ -403,6 +408,7 @@ mod tests {
         let err = gen
             .generate_simple(Field::new(
                 "nested",
+                // NOTE: field ids are unset, legacy encoding, thus cannot be altered
                 StructType::new([("f1", DataType::Int32), ("f2", DataType::Int64)]).into(),
             ))
             .unwrap_err();
