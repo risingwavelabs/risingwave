@@ -24,10 +24,13 @@ import java.util.Objects;
 import org.apache.iceberg.CatalogUtil;
 import org.apache.iceberg.catalog.Catalog;
 import org.apache.iceberg.catalog.Namespace;
+import org.apache.iceberg.catalog.SupportsNamespaces;
 import org.apache.iceberg.catalog.TableIdentifier;
 import org.apache.iceberg.rest.CatalogHandlers;
 import org.apache.iceberg.rest.requests.CreateTableRequest;
 import org.apache.iceberg.rest.requests.UpdateTableRequest;
+import org.apache.iceberg.rest.responses.ListNamespacesResponse;
+import org.apache.iceberg.rest.responses.ListTablesResponse;
 import org.apache.iceberg.rest.responses.LoadTableResponse;
 
 /** This class provide jni interface to iceberg catalog. */
@@ -143,6 +146,41 @@ public class JniCatalogWrapper {
     public boolean dropTable(String tableIdentifier) {
         TableIdentifier id = TableIdentifier.parse(tableIdentifier);
         return catalog.dropTable(id);
+    }
+
+    /**
+     * List all namespaces in the catalog.
+     *
+     * @return Response serialized using json.
+     * @throws Exception
+     */
+    public String listNamespaces() throws Exception {
+        if (catalog instanceof SupportsNamespaces) {
+            ListNamespacesResponse resp =
+                    CatalogHandlers.listNamespaces((SupportsNamespaces) catalog, Namespace.empty());
+            return RESTObjectMapper.mapper().writer().writeValueAsString(resp);
+        } else {
+            ListNamespacesResponse resp = new ListNamespacesResponse();
+            return RESTObjectMapper.mapper().writer().writeValueAsString(resp);
+        }
+    }
+
+    /**
+     * List all tables in the catalog.
+     *
+     * @param namespaceStr String.
+     * @return Response serialized using json.
+     * @throws Exception
+     */
+    public String listTables(String namespaceStr) throws Exception {
+        Namespace namespace;
+        if (namespaceStr == null) {
+            namespace = Namespace.empty();
+        } else {
+            namespace = Namespace.of(namespaceStr);
+        }
+        ListTablesResponse resp = CatalogHandlers.listTables(catalog, namespace);
+        return RESTObjectMapper.mapper().writer().writeValueAsString(resp);
     }
 
     /**
