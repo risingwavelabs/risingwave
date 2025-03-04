@@ -4365,9 +4365,6 @@ impl Parser<'_> {
                 } else if parser.parse_keywords(&[Keyword::MATERIALIZED, Keyword::VIEW]) {
                     let view_name = parser.parse_object_name()?;
                     Ok(AnalyzeTarget::MaterializedView(view_name))
-                } else if parser.parse_keywords(&[Keyword::VIEW]) {
-                    let view_name = parser.parse_object_name()?;
-                    Ok(AnalyzeTarget::View(view_name))
                 } else if parser.parse_keyword(Keyword::INDEX) {
                     let index_name = parser.parse_object_name()?;
                     Ok(AnalyzeTarget::Index(index_name))

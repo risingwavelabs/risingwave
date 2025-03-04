@@ -8,7 +8,6 @@ pub enum AnalyzeTarget {
     Table(ObjectName),
     MaterializedView(ObjectName),
     Index(ObjectName),
-    View(ObjectName),
     Sink(ObjectName),
 }
 
@@ -19,7 +18,6 @@ impl Display for AnalyzeTarget {
             AnalyzeTarget::Table(name) => write!(f, "TABLE {}", name),
             AnalyzeTarget::MaterializedView(name) => write!(f, "MATERIALIZED VIEW {}", name),
             AnalyzeTarget::Index(name) => write!(f, "INDEX {}", name),
-            AnalyzeTarget::View(name) => write!(f, "VIEW {}", name),
             AnalyzeTarget::Sink(name) => write!(f, "SINK {}", name),
         }
     }

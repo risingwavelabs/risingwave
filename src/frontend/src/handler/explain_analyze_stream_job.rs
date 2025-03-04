@@ -11,6 +11,8 @@ use risingwave_pb::stream_plan::{MergeNode, StreamNode as PbStreamNode};
 use risingwave_sqlparser::ast::AnalyzeTarget;
 use tokio::time::sleep;
 
+use crate::Binder;
+use crate::catalog::root_catalog::SchemaPath;
 use crate::error::Result;
 use crate::handler::{HandlerArgs, RwPgResponse, RwPgResponseBuilder, RwPgResponseBuilderExt};
 use crate::session::FrontendEnv;
@@ -28,9 +30,47 @@ pub async fn handle_explain_analyze_stream_job(
     handler_args: HandlerArgs,
     target: AnalyzeTarget,
 ) -> Result<RwPgResponse> {
-    let job_id = match target {
-        AnalyzeTarget::Id(id) => id,
-        _ => unreachable!(),
+    let job_id = match &target {
+        AnalyzeTarget::Id(id) => *id,
+        AnalyzeTarget::Index(name)
+        | AnalyzeTarget::Table(name)
+        | AnalyzeTarget::Sink(name)
+        | AnalyzeTarget::MaterializedView(name) => {
+            let session = &handler_args.session;
+            let db_name = session.database();
+            let (schema_name, name) =
+                Binder::resolve_schema_qualified_name(&db_name, name.clone())?;
+            let search_path = session.config().search_path();
+            let user_name = &session.user_name();
+            let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
+
+            let catalog_reader = handler_args.session.env().catalog_reader();
+            let catalog = catalog_reader.read_guard();
+
+            match target {
+                AnalyzeTarget::Index(_) => {
+                    let (catalog, _schema_name) =
+                        catalog.get_index_by_name(&db_name, schema_path, &name)?;
+                    catalog.id.index_id
+                }
+                AnalyzeTarget::Table(_) => {
+                    let (catalog, _schema_name) =
+                        catalog.get_any_table_by_name(&db_name, schema_path, &name)?;
+                    catalog.id.table_id
+                }
+                AnalyzeTarget::Sink(_) => {
+                    let (catalog, _schema_name) =
+                        catalog.get_sink_by_name(&db_name, schema_path, &name)?;
+                    catalog.id.sink_id
+                }
+                AnalyzeTarget::MaterializedView(_) => {
+                    let (catalog, _schema_name) =
+                        catalog.get_any_table_by_name(&db_name, schema_path, &name)?;
+                    catalog.id.table_id
+                }
+                AnalyzeTarget::Id(_) => unreachable!(),
+            }
+        }
     };
     let profiling_duration = Duration::from_secs(10);
     // query meta for fragment graph (names only)
