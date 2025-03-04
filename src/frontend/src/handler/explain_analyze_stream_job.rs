@@ -19,14 +19,15 @@ struct ExplainAnalyzeStreamJobOutput {
     operator_id: String,
     identity: String,
     actor_ids: String,
-    output_throughput: String,
-    output_latency: String,
+    output_rps: String,
+    avg_output_pending_ratio: String,
 }
 
 pub async fn handle_explain_analyze_stream_job(
     handler_args: HandlerArgs,
     job_id: u32,
 ) -> Result<RwPgResponse> {
+    let profiling_duration = Duration::from_secs(10);
     // query meta for fragment graph (names only)
     let meta_client = handler_args.session.env().meta_client();
     // TODO(kwannoel): Only fetch the names, actor_ids and graph of the fragments
@@ -56,7 +57,7 @@ pub async fn handle_explain_analyze_stream_job(
             aggregated_stats.start_record(adjacency_list.keys(), &stats.into_inner());
         }
 
-        sleep(Duration::from_secs(10)).await;
+        sleep(profiling_duration).await;
 
         for node in &worker_nodes {
             let mut compute_client = handler_args.session.env().client_pool().get(node).await?;
@@ -72,7 +73,7 @@ pub async fn handle_explain_analyze_stream_job(
     };
 
     // Render graph with metrics
-    let rows = render_graph_with_metrics(&adjacency_list, root_node, &aggregated_stats);
+    let rows = render_graph_with_metrics(&adjacency_list, root_node, &aggregated_stats, &profiling_duration);
     let builder = RwPgResponseBuilder::empty(StatementType::EXPLAIN);
     let builder = builder.rows(rows);
     Ok(builder.into())
@@ -121,7 +122,7 @@ struct StreamNodeMetrics {
     operator_id: OperatorId,
     epoch: u32,
     total_output_throughput: u32,
-    total_output_latency: u32,
+    total_output_pending_ns: u32,
 }
 
 struct StreamNodeStats {
@@ -150,7 +151,7 @@ impl StreamNodeStats {
                 .get(operator_id)
                 .cloned()
                 .unwrap_or(0);
-            stats.total_output_latency += metrics
+            stats.total_output_pending_ns += metrics
                 .stream_node_output_blocking_duration_ns
                 .get(operator_id)
                 .cloned()
@@ -172,12 +173,12 @@ impl StreamNodeStats {
                     .cloned()
                     .unwrap_or(0)
                     - stats.total_output_throughput;
-                stats.total_output_latency = metrics
+                stats.total_output_pending_ns = metrics
                     .stream_node_output_blocking_duration_ns
                     .get(operator_id)
                     .cloned()
                     .unwrap_or(0)
-                    - stats.total_output_latency;
+                    - stats.total_output_pending_ns;
             } else {
                 // TODO: warn missing metrics!
             }
@@ -300,6 +301,7 @@ fn render_graph_with_metrics(
     adjacency_list: &HashMap<u64, StreamNode>,
     root_node: u64,
     stats: &StreamNodeStats,
+    profiling_duration: &Duration,
 ) -> Vec<ExplainAnalyzeStreamJobOutput> {
     let mut rows = vec![];
     let mut stack = vec![(String::new(), true, root_node)];
@@ -327,7 +329,12 @@ fn render_graph_with_metrics(
 
         let stats = stats.inner.get(&node_id);
         let (output_throughput, output_latency) = stats
-            .map(|stats| (stats.total_output_throughput, stats.total_output_latency))
+            .map(|stats| {
+                (
+                    stats.total_output_throughput,
+                    stats.total_output_pending_ns,
+                )
+            })
             .unwrap_or((0, 0));
         let row = ExplainAnalyzeStreamJobOutput {
             operator_id: node.operator_id.to_string(),
@@ -338,8 +345,8 @@ fn render_graph_with_metrics(
                 .map(|id| id.to_string())
                 .collect::<Vec<_>>()
                 .join(","),
-            output_throughput: output_throughput.to_string(),
-            output_latency: output_latency.to_string(),
+            output_rps: output_throughput.to_string(),
+            avg_output_pending_ratio: output_latency.to_string(),
         };
         rows.push(row);
         for (position, dependency) in node.dependencies.iter().enumerate() {
