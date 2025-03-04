@@ -27,21 +27,19 @@ pub async fn stream_node_metrics(
 ) {
     let stats = actor_ctx.streaming_metrics.new_profile_metrics(operator_id);
 
-    let mut blocking_duration = Instant::now();
-
     #[for_await]
     for message in input {
-        stats.stream_node_output_blocking_duration_ms.fetch_add(
-            blocking_duration.elapsed().as_millis() as u64,
-            Ordering::Relaxed,
-        );
         let message = message?;
         if let Message::Chunk(ref c) = message {
             stats
                 .stream_node_output_row_count
                 .fetch_add(c.cardinality() as u64, Ordering::Relaxed);
         }
+        let blocking_duration = Instant::now();
         yield message;
-        blocking_duration = Instant::now();
+        stats.stream_node_output_blocking_duration_ms.fetch_add(
+            blocking_duration.elapsed().as_millis() as u64,
+            Ordering::Relaxed,
+        );
     }
 }
