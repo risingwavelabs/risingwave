@@ -548,6 +548,7 @@ impl StreamActorManager {
             executor,
             actor_context.clone(),
             env.config().developer.enable_executor_row_count,
+            env.config().developer.enable_explain_analyze_stats,
         );
         let executor = (info, wrapped).into();
 

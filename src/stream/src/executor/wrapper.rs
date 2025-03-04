@@ -30,6 +30,8 @@ pub struct WrapperExecutor {
     actor_ctx: ActorContextRef,
 
     enable_executor_row_count: bool,
+
+    enable_explain_analyze_stats: bool,
 }
 
 impl WrapperExecutor {
@@ -38,12 +40,14 @@ impl WrapperExecutor {
         input: Executor,
         actor_ctx: ActorContextRef,
         enable_executor_row_count: bool,
+        enable_explain_analyze_stats: bool,
     ) -> Self {
         Self {
             operator_id,
             input,
             actor_ctx,
             enable_executor_row_count,
+            enable_explain_analyze_stats,
         }
     }
 
@@ -61,6 +65,7 @@ impl WrapperExecutor {
     fn wrap(
         operator_id: u64,
         enable_executor_row_count: bool,
+        enable_explain_analyze_stats: bool,
         info: Arc<ExecutorInfo>,
         actor_ctx: ActorContextRef,
         stream: impl MessageStream + 'static,
@@ -87,8 +92,12 @@ impl WrapperExecutor {
         );
 
         // operator-level metrics
-        let stream =
-            stream_node_metrics::stream_node_metrics(operator_id, stream, actor_ctx.clone());
+        let stream = stream_node_metrics::stream_node_metrics(
+            enable_explain_analyze_stats,
+            operator_id,
+            stream,
+            actor_ctx.clone(),
+        );
 
         if cfg!(debug_assertions) {
             Self::wrap_debug(info, stream).boxed()
@@ -104,6 +113,7 @@ impl Execute for WrapperExecutor {
         Self::wrap(
             self.operator_id,
             self.enable_executor_row_count,
+            self.enable_explain_analyze_stats,
             info,
             self.actor_ctx,
             self.input.execute(),
@@ -116,6 +126,7 @@ impl Execute for WrapperExecutor {
         Self::wrap(
             self.operator_id,
             self.enable_executor_row_count,
+            self.enable_explain_analyze_stats,
             info,
             self.actor_ctx,
             self.input.execute_with_epoch(epoch),

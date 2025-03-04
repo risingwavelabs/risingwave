@@ -1191,6 +1191,10 @@ pub struct StreamingDeveloperConfig {
     /// For example, if this is set to 1000, it means we can have at most 1000 rows in cache.
     #[serde(default = "default::developer::streaming_hash_join_entry_state_max_rows")]
     pub hash_join_entry_state_max_rows: usize,
+
+    /// Enable / Disable profiling stats used by `EXPLAIN ANALYZE`
+    #[serde(default = "default::developer::enable_explain_analyze_stats")]
+    pub enable_explain_analyze_stats: bool,
 }
 
 /// The subsections `[batch.developer]`.
@@ -2191,6 +2195,10 @@ pub mod default {
         pub fn streaming_hash_join_entry_state_max_rows() -> usize {
             // NOTE(kwannoel): This is just an arbitrary number.
             30000
+        }
+
+        pub fn enable_explain_analyze_stats() -> bool {
+            true
         }
     }
 
