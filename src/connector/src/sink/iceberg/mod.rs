@@ -130,6 +130,10 @@ pub struct IcebergConfig {
     #[serde(default, deserialize_with = "deserialize_bool_from_string")]
     pub create_table_if_not_exists: bool,
 
+    // Retry commit num when iceberg commit fail. default is 8.
+    // # TODO
+    // Iceberg table may store the retry commit num in table meta.
+    // We should try to find and use that as default commit retry num first.
     #[serde(default = "default_commit_retry_num")]
     pub commit_retry_num: u32,
 }
