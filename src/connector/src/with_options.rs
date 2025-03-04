@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap};
+use std::marker::PhantomData;
 
 use risingwave_pb::secret::PbSecretRef;
 
@@ -73,6 +74,7 @@ impl WithOptions for crate::sink::kafka::CompressionCodec {}
 impl WithOptions for crate::source::filesystem::file_common::CompressionFormat {}
 impl WithOptions for nexmark::config::RateShape {}
 impl WithOptions for nexmark::event::EventType {}
+impl<T> WithOptions for PhantomData<T> {}
 
 pub trait Get {
     fn get(&self, key: &str) -> Option<&String>;

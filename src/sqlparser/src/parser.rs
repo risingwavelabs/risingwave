@@ -3017,6 +3017,13 @@ impl Parser<'_> {
             const CONNECTION_REF_KEY: &str = "connection";
             if name.real_value().eq_ignore_ascii_case(CONNECTION_REF_KEY) {
                 let connection_name = self.parse_object_name()?;
+                // tolerate previous buggy Display that outputs `connection = connection foo`
+                let connection_name = match connection_name.0.as_slice() {
+                    [ident] if ident.real_value() == CONNECTION_REF_KEY => {
+                        self.parse_object_name()?
+                    }
+                    _ => connection_name,
+                };
                 SqlOptionValue::ConnectionRef(ConnectionRefValue { connection_name })
             } else {
                 self.parse_value_and_obj_ref::<false>()?
@@ -3619,8 +3626,22 @@ impl Parser<'_> {
                 }
             } else if let Some(rate_limit) = self.parse_alter_source_rate_limit(false)? {
                 AlterSourceOperation::SetSourceRateLimit { rate_limit }
+            } else if self.parse_keyword(Keyword::PARALLELISM) {
+                if self.expect_keyword(Keyword::TO).is_err()
+                    && self.expect_token(&Token::Eq).is_err()
+                {
+                    return self.expected("TO or = after ALTER SOURCE SET PARALLELISM");
+                }
+
+                let value = self.parse_set_variable()?;
+                let deferred = self.parse_keyword(Keyword::DEFERRED);
+
+                AlterSourceOperation::SetParallelism {
+                    parallelism: value,
+                    deferred,
+                }
             } else {
-                return self.expected("SCHEMA or SOURCE_RATE_LIMIT after SET");
+                return self.expected("SCHEMA, SOURCE_RATE_LIMIT or PARALLELISM after SET");
             }
         } else if self.peek_nth_any_of_keywords(0, &[Keyword::FORMAT]) {
             let format_encode = self.parse_schema()?.unwrap();
@@ -3634,9 +3655,7 @@ impl Parser<'_> {
             let target_source = self.parse_object_name()?;
             AlterSourceOperation::SwapRenameSource { target_source }
         } else {
-            return self.expected(
-                "RENAME, ADD COLUMN, OWNER TO, SET or SOURCE_RATE_LIMIT after ALTER SOURCE",
-            );
+            return self.expected("RENAME, ADD COLUMN, OWNER TO or SET after ALTER SOURCE");
         };
 
         Ok(Statement::AlterSource {
@@ -5154,6 +5173,11 @@ impl Parser<'_> {
             GrantObjects::AllSourcesInSchema {
                 schemas: self.parse_comma_separated(Parser::parse_object_name)?,
             }
+        } else if self.parse_keywords(&[Keyword::ALL, Keyword::SINKS, Keyword::IN, Keyword::SCHEMA])
+        {
+            GrantObjects::AllSinksInSchema {
+                schemas: self.parse_comma_separated(Parser::parse_object_name)?,
+            }
         } else if self.parse_keywords(&[
             Keyword::ALL,
             Keyword::MATERIALIZED,
@@ -5162,6 +5186,11 @@ impl Parser<'_> {
             Keyword::SCHEMA,
         ]) {
             GrantObjects::AllMviewsInSchema {
+                schemas: self.parse_comma_separated(Parser::parse_object_name)?,
+            }
+        } else if self.parse_keywords(&[Keyword::ALL, Keyword::VIEWS, Keyword::IN, Keyword::SCHEMA])
+        {
+            GrantObjects::AllViewsInSchema {
                 schemas: self.parse_comma_separated(Parser::parse_object_name)?,
             }
         } else if self.parse_keywords(&[Keyword::MATERIALIZED, Keyword::VIEW]) {
@@ -5174,6 +5203,7 @@ impl Parser<'_> {
                 Keyword::TABLE,
                 Keyword::SOURCE,
                 Keyword::SINK,
+                Keyword::VIEWS,
             ]);
             let objects = self.parse_comma_separated(Parser::parse_object_name);
             match object_type {
@@ -5182,6 +5212,7 @@ impl Parser<'_> {
                 Some(Keyword::SEQUENCE) => GrantObjects::Sequences(objects?),
                 Some(Keyword::SOURCE) => GrantObjects::Sources(objects?),
                 Some(Keyword::SINK) => GrantObjects::Sinks(objects?),
+                Some(Keyword::VIEW) => GrantObjects::Views(objects?),
                 Some(Keyword::TABLE) | None => GrantObjects::Tables(objects?),
                 _ => unreachable!(),
             }
