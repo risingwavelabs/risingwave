@@ -113,6 +113,9 @@ pub struct BuildOptions<'a> {
     pub arg_types: &'a [DataType],
     pub return_type: &'a DataType,
     pub always_retry_on_network_error: bool,
+    pub language: &'a str,
+    pub is_async: Option<bool>,
+    pub is_batched: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumAsInner)]
@@ -135,12 +138,12 @@ pub trait UdfImpl: std::fmt::Debug + Send + Sync {
     ) -> Result<BoxStream<'a, Result<RecordBatch>>>;
 
     /// For aggregate function, create the initial state.
-    fn call_agg_create_state(&self) -> Result<ArrayRef> {
+    async fn call_agg_create_state(&self) -> Result<ArrayRef> {
         bail!("aggregate function is not supported");
     }
 
     /// For aggregate function, accumulate or retract the state.
-    fn call_agg_accumulate_or_retract(
+    async fn call_agg_accumulate_or_retract(
         &self,
         _state: &ArrayRef,
         _ops: &BooleanArray,
@@ -150,7 +153,7 @@ pub trait UdfImpl: std::fmt::Debug + Send + Sync {
     }
 
     /// For aggregate function, get aggregate result from the state.
-    fn call_agg_finish(&self, _state: &ArrayRef) -> Result<ArrayRef> {
+    async fn call_agg_finish(&self, _state: &ArrayRef) -> Result<ArrayRef> {
         bail!("aggregate function is not supported");
     }
 
