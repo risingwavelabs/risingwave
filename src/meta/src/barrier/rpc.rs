@@ -56,6 +56,7 @@ use uuid::Uuid;
 use super::{BarrierKind, Command, InflightSubscriptionInfo, TracedEpoch};
 use crate::barrier::checkpoint::{BarrierWorkerState, DatabaseCheckpointControl};
 use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl};
+use crate::barrier::edge_builder::FragmentEdgeBuildResult;
 use crate::barrier::info::{BarrierInfo, InflightDatabaseInfo};
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::controller::fragment::InflightFragmentInfo;
@@ -291,10 +292,10 @@ impl ControlStreamManager {
                             actor_infos: inflight_info
                                 .fragment_infos()
                                 .flat_map(|fragment| {
-                                    fragment.actors.iter().map(|(actor_id, worker_id)| {
+                                    fragment.actors.iter().map(|(actor_id, actor)| {
                                         let host_addr = self
                                             .nodes
-                                            .get(worker_id)
+                                            .get(&actor.worker_id)
                                             .expect("worker should exist for inflight actor")
                                             .worker
                                             .host
@@ -400,8 +401,8 @@ impl ControlStreamManager {
             HashMap<FragmentId, (StreamNode, Vec<StreamActorWithUpDownstreams>)>,
         > = HashMap::new();
         for fragment_info in info.fragment_infos() {
-            for (actor_id, worker_id) in &fragment_info.actors {
-                let worker_id = *worker_id as WorkerId;
+            for (actor_id, actor) in &fragment_info.actors {
+                let worker_id = actor.worker_id;
                 let actor_id = *actor_id as ActorId;
                 let (stream_actor, dispatchers) =
                     stream_actors.remove(&actor_id).expect("should exist");
@@ -461,8 +462,9 @@ impl ControlStreamManager {
         is_paused: bool,
         pre_applied_graph_info: &InflightDatabaseInfo,
         applied_graph_info: &InflightDatabaseInfo,
+        edges: &mut Option<FragmentEdgeBuildResult>,
     ) -> MetaResult<HashSet<WorkerId>> {
-        let mutation = command.and_then(|c| c.to_mutation(is_paused));
+        let mutation = command.and_then(|c| c.to_mutation(is_paused, edges));
         let subscriptions_to_add = if let Some(Mutation::Add(add)) = &mutation {
             add.subscriptions_to_add.clone()
         } else {
@@ -482,7 +484,7 @@ impl ControlStreamManager {
             applied_graph_info.fragment_infos(),
             command
                 .as_ref()
-                .map(|command| command.actors_to_create(pre_applied_graph_info))
+                .map(|command| command.actors_to_create(pre_applied_graph_info, edges))
                 .unwrap_or_default(),
             subscriptions_to_add,
             subscriptions_to_remove,
