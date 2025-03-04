@@ -29,10 +29,10 @@ use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::*;
 use risingwave_meta_model::table::TableType;
 use risingwave_meta_model::{
-    ActorId, ConnectorSplits, DataTypeArray, DatabaseId, FragmentId, I32Array, ObjectId,
-    PrivilegeId, SchemaId, SourceId, StreamNode, TableId, UserId, VnodeBitmap, WorkerId, actor,
-    connection, database, fragment, fragment_relation, function, index, object, object_dependency,
-    schema, secret, sink, source, streaming_job, subscription, table, user, user_privilege, view,
+    ActorId, DataTypeArray, DatabaseId, FragmentId, I32Array, ObjectId, PrivilegeId, SchemaId,
+    SourceId, StreamNode, TableId, UserId, VnodeBitmap, WorkerId, actor, connection, database,
+    fragment, fragment_relation, function, index, object, object_dependency, schema, secret, sink,
+    source, streaming_job, subscription, table, user, user_privilege, view,
 };
 use risingwave_meta_model_migration::WithQuery;
 use risingwave_pb::catalog::{
@@ -282,14 +282,6 @@ pub struct PartialActorLocation {
     pub status: ActorStatus,
 }
 
-#[derive(Clone, DerivePartialModel, FromQueryResult)]
-#[sea_orm(entity = "Actor")]
-pub struct PartialActorSplits {
-    pub actor_id: ActorId,
-    pub fragment_id: FragmentId,
-    pub splits: Option<ConnectorSplits>,
-}
-
 #[derive(FromQueryResult)]
 pub struct FragmentDesc {
     pub fragment_id: FragmentId,
@@ -297,7 +289,6 @@ pub struct FragmentDesc {
     pub fragment_type_mask: i32,
     pub distribution_type: DistributionType,
     pub state_table_ids: I32Array,
-    pub upstream_fragment_id: I32Array,
     pub parallelism: i64,
     pub vnode_count: i32,
     pub stream_node: StreamNode,
@@ -906,7 +897,6 @@ pub fn extract_grant_obj_id(object: &PbGrantObject) -> ObjectId {
         | PbGrantObject::ViewId(id)
         | PbGrantObject::FunctionId(id)
         | PbGrantObject::SubscriptionId(id) => *id as _,
-        _ => unreachable!("invalid object type: {:?}", object),
     }
 }
 
