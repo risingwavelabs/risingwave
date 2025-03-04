@@ -15,7 +15,7 @@
 use itertools::Itertools;
 
 use super::*;
-use crate::model::{FragmentNewNoShuffle, StreamJobFragments};
+use crate::model::{FragmentNewNoShuffle, FragmentReplaceUpstream, StreamJobFragments};
 
 impl SourceManager {
     /// Migrates splits from previous actors to the new actors for a rescheduled fragment.
@@ -147,7 +147,7 @@ impl SourceManager {
     pub async fn allocate_splits_for_replace_source(
         &self,
         table_fragments: &StreamJobFragments,
-        upstream_updates: &HashMap<FragmentId, HashMap<FragmentId, FragmentId>>,
+        upstream_updates: &FragmentReplaceUpstream,
         new_no_shuffle: &FragmentNewNoShuffle,
     ) -> MetaResult<SplitAssignment> {
         tracing::debug!(?upstream_updates, "allocate_splits_for_replace_source");
@@ -209,7 +209,7 @@ impl SourceManager {
         let aligned_actors: HashMap<ActorId, ActorId> = new_no_shuffle
             .iter()
             .filter_map(|(upstream_fragment_id, new_no_shuffle)| {
-                if !upstream_fragment_id == fragment_id {
+                if *upstream_fragment_id == fragment_id {
                     Some(new_no_shuffle.values())
                 } else {
                     None
