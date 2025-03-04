@@ -21,25 +21,33 @@ use crate::executor::prelude::*;
 
 #[try_stream(ok = Message, error = StreamExecutorError)]
 pub async fn stream_node_metrics(
+    enable_explain_analyze_stats: bool,
     operator_id: u64,
     input: impl MessageStream,
     actor_ctx: ActorContextRef,
 ) {
-    let stats = actor_ctx.streaming_metrics.new_profile_metrics(operator_id);
-
-    #[for_await]
-    for message in input {
-        let message = message?;
-        if let Message::Chunk(ref c) = message {
-            stats
-                .stream_node_output_row_count
-                .fetch_add(c.cardinality() as u64, Ordering::Relaxed);
+    if !enable_explain_analyze_stats {
+        #[for_await]
+        for message in input {
+            yield message?;
         }
-        let blocking_duration = Instant::now();
-        yield message;
-        stats.stream_node_output_blocking_duration_ms.fetch_add(
-            blocking_duration.elapsed().as_millis() as u64,
-            Ordering::Relaxed,
-        );
+    } else {
+        let stats = actor_ctx.streaming_metrics.new_profile_metrics(operator_id);
+
+        #[for_await]
+        for message in input {
+            let message = message?;
+            if let Message::Chunk(ref c) = message {
+                stats
+                    .stream_node_output_row_count
+                    .fetch_add(c.cardinality() as u64, Ordering::Relaxed);
+            }
+            let blocking_duration = Instant::now();
+            yield message;
+            stats.stream_node_output_blocking_duration_ms.fetch_add(
+                blocking_duration.elapsed().as_millis() as u64,
+                Ordering::Relaxed,
+            );
+        }
     }
 }
