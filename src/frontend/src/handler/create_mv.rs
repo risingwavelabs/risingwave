@@ -190,14 +190,16 @@ pub async fn provision_serverless_backfill(sbc_addr: String) -> Result<String> {
     // , Box<dyn std::error::Error>
     let request = tonic::Request::new(ProvisionRequest {});
     let mut client =
-        node_group_controller_service_client::NodeGroupControllerServiceClient::connect(sbc_addr)
-            .await
-            .map_err(|e| {
-                RwError::from(ErrorCode::InternalError(format!(
-                    "unable to reach serverless backfill controller at addr {}: {}",
-                    sbc_addr, e
-                )))
-            })?;
+        node_group_controller_service_client::NodeGroupControllerServiceClient::connect(
+            sbc_addr.clone(),
+        )
+        .await
+        .map_err(|e| {
+            RwError::from(ErrorCode::InternalError(format!(
+                "unable to reach serverless backfill controller at addr {}: {}",
+                sbc_addr, e
+            )))
+        })?;
 
     match client.provision(request).await {
         Ok(resp) => return Ok(resp.into_inner().resource_group),
