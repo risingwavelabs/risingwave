@@ -300,7 +300,7 @@ mod tests {
 
         cdc_props
             .properties
-            .insert(CDC_STRONG_SCHEMA_KEY.to_string(), "true".to_string());
+            .insert(CDC_STRONG_SCHEMA_KEY.to_owned(), "true".to_owned());
         let source_ctx: Arc<_> = SourceContext {
             connector_props: ConnectorProperties::MongodbCdc(cdc_props),
             ..SourceContext::dummy()
@@ -326,7 +326,7 @@ mod tests {
 
             assert_eq!(op, Op::Insert);
 
-            let data = vec![
+            let data = [
                 ScalarImpl::Int64(1004),
                 ScalarImpl::Utf8("Anne".into()),
                 ScalarImpl::Utf8("Kretchmar".into()),
@@ -438,7 +438,7 @@ mod tests {
 
         cdc_props
             .properties
-            .insert(CDC_STRONG_SCHEMA_KEY.to_string(), "true".to_string());
+            .insert(CDC_STRONG_SCHEMA_KEY.to_owned(), "true".to_owned());
         let source_ctx: Arc<_> = SourceContext {
             connector_props: ConnectorProperties::MongodbCdc(cdc_props),
             ..SourceContext::dummy()
@@ -466,7 +466,7 @@ mod tests {
             let mut rows = chunk.rows();
             let (op, row) = rows.next().unwrap();
             assert_eq!(op, Op::Insert);
-            let data = vec![
+            let data = [
                 ScalarImpl::Int64(1004),
                 ScalarImpl::Utf8("Starblazer X-2000".into()),
                 ScalarImpl::Date(expected_date.clone().into()),
@@ -538,7 +538,7 @@ mod tests {
 
         cdc_props
             .properties
-            .insert(CDC_STRONG_SCHEMA_KEY.to_string(), "true".to_string());
+            .insert(CDC_STRONG_SCHEMA_KEY.to_owned(), "true".to_owned());
         let source_ctx: Arc<_> = SourceContext {
             connector_props: ConnectorProperties::MongodbCdc(cdc_props),
             ..SourceContext::dummy()
@@ -564,7 +564,7 @@ mod tests {
             let (op, row) = rows.next().unwrap();
             assert_eq!(op, Op::Insert);
 
-            let data = vec![
+            let data = [
                 ScalarImpl::Int64(1004),
                 ScalarImpl::Utf8("John Doe".into()),
                 ScalarImpl::Int32(30),
@@ -585,8 +585,8 @@ mod tests {
                 "struct_data",
                 ColumnId::new(1),
                 DataType::Struct(StructType::new([
-                    ("struct_field1".to_string(), DataType::Int64),
-                    ("struct_field2".to_string(), DataType::Varchar),
+                    ("struct_field1".to_owned(), DataType::Int64),
+                    ("struct_field2".to_owned(), DataType::Varchar),
                 ])),
             ),
         ];
@@ -646,7 +646,7 @@ mod tests {
 
         cdc_props
             .properties
-            .insert(CDC_STRONG_SCHEMA_KEY.to_string(), "true".to_string());
+            .insert(CDC_STRONG_SCHEMA_KEY.to_owned(), "true".to_owned());
         let source_ctx: Arc<_> = SourceContext {
             connector_props: ConnectorProperties::MongodbCdc(cdc_props),
             ..SourceContext::dummy()
@@ -751,7 +751,7 @@ mod tests {
 
         cdc_props
             .properties
-            .insert(CDC_STRONG_SCHEMA_KEY.to_string(), "true".to_string());
+            .insert(CDC_STRONG_SCHEMA_KEY.to_owned(), "true".to_owned());
         let source_ctx: Arc<_> = SourceContext {
             connector_props: ConnectorProperties::MongodbCdc(cdc_props),
             ..SourceContext::dummy()
