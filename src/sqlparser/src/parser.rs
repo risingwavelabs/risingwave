@@ -4355,8 +4355,31 @@ impl Parser<'_> {
         }
 
         if analyze {
-            let job_id = self.parse_literal_uint()? as u32;
-            let statement = Statement::ExplainAnalyzeStreamJob { job_id };
+            fn parse_analyze_target(parser: &mut Parser<'_>) -> PResult<AnalyzeTarget> {
+                if parser.parse_keyword(Keyword::TABLE) {
+                    let table_name = parser.parse_object_name()?;
+                    Ok(AnalyzeTarget::Table(table_name))
+                } else if parser.parse_keyword(Keyword::INDEX) {
+                    let index_name = parser.parse_object_name()?;
+                    Ok(AnalyzeTarget::Index(index_name))
+                } else if parser.parse_keywords(&[Keyword::MATERIALIZED, Keyword::VIEW]) {
+                    let view_name = parser.parse_object_name()?;
+                    Ok(AnalyzeTarget::MaterializedView(view_name))
+                } else if parser.parse_keywords(&[Keyword::VIEW]) {
+                    let view_name = parser.parse_object_name()?;
+                    Ok(AnalyzeTarget::View(view_name))
+                } else if parser.parse_keyword(Keyword::INDEX) {
+                    let index_name = parser.parse_object_name()?;
+                    Ok(AnalyzeTarget::Index(index_name))
+                } else if parser.parse_word("ID") {
+                    let job_id = parser.parse_literal_uint()? as u32;
+                    Ok(AnalyzeTarget::Id(job_id))
+                } else {
+                    parser.expected("TABLE, INDEX, VIEW, MATERIALIZED VIEW or SYSTEM after ANALYZE")
+                }
+            }
+            let target = parse_analyze_target(self)?;
+            let statement = Statement::ExplainAnalyzeStreamJob { target };
             return Ok(statement);
         }
 
