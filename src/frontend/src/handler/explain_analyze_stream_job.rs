@@ -97,7 +97,7 @@ struct StreamNode {
 impl StreamNode {
     fn new_for_dispatcher(fragment_id: u32) -> Self {
         StreamNode {
-            operator_id: 0,
+            operator_id: fragment_id as u64,
             fragment_id,
             identity: "Dispatcher".to_owned(),
             actor_ids: vec![],
@@ -126,8 +126,8 @@ type OperatorId = u64;
 struct StreamNodeMetrics {
     operator_id: OperatorId,
     epoch: u32,
-    total_output_throughput: u32,
-    total_output_pending_ns: u32,
+    total_output_throughput: u64,
+    total_output_pending_ms: u64,
 }
 
 struct StreamNodeStats {
@@ -156,8 +156,8 @@ impl StreamNodeStats {
                 .get(operator_id)
                 .cloned()
                 .unwrap_or(0);
-            stats.total_output_pending_ns += metrics
-                .stream_node_output_blocking_duration_ns
+            stats.total_output_pending_ms += metrics
+                .stream_node_output_blocking_duration_ms
                 .get(operator_id)
                 .cloned()
                 .unwrap_or(0);
@@ -178,12 +178,12 @@ impl StreamNodeStats {
                     .cloned()
                     .unwrap_or(0)
                     - stats.total_output_throughput;
-                stats.total_output_pending_ns = metrics
-                    .stream_node_output_blocking_duration_ns
+                stats.total_output_pending_ms = metrics
+                    .stream_node_output_blocking_duration_ms
                     .get(operator_id)
                     .cloned()
                     .unwrap_or(0)
-                    - stats.total_output_pending_ns;
+                    - stats.total_output_pending_ms;
             } else {
                 // TODO: warn missing metrics!
             }
@@ -335,7 +335,7 @@ fn render_graph_with_metrics(
 
         let stats = stats.inner.get(&node_id);
         let (output_throughput, output_latency) = stats
-            .map(|stats| (stats.total_output_throughput, stats.total_output_pending_ns))
+            .map(|stats| (stats.total_output_throughput, stats.total_output_pending_ms))
             .unwrap_or((0, 0));
         let row = ExplainAnalyzeStreamJobOutput {
             operator_id: node.operator_id.to_string(),
@@ -347,8 +347,7 @@ fn render_graph_with_metrics(
                 .collect::<Vec<_>>()
                 .join(","),
             output_rps: (output_throughput as f64 / profiling_duration_secs).to_string(),
-            avg_output_pending_ratio: (output_latency as f64
-                / 10_u32.pow(9) as f64
+            avg_output_pending_ratio: (Duration::from_millis(output_latency).as_secs_f64()
                 / node.actor_ids.len() as f64
                 / profiling_duration_secs)
                 .to_string(),
