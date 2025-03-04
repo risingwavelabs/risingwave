@@ -436,7 +436,8 @@ pub fn is_parquet_schema_match_source_schema(
     if !is_match {
         tracing::info!(
             "Type mismatch when reading parquet files: Parquet DataType: {:?}, User defined DataType: {:?}",
-            arrow_data_type, rw_data_type
+            arrow_data_type,
+            rw_data_type
         );
     }
 
