@@ -158,7 +158,6 @@ pub async fn gen_sink_plan(
             bound,
         )
     };
-    session.check_privileges_for_query(&bound)?;
 
     let col_names = if sink_into_table_name.is_some() {
         parse_column_names(&stmt.columns)

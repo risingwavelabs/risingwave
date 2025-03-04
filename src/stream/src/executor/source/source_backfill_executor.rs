@@ -649,25 +649,32 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                         .await?;
                                     }
 
-                                    if !state_table_initialized && is_checkpoint {
-                                        // This is for self.backfill_finished() to be safe: wait until this actor can read all actors' written data.
-                                        // We wait for 2nd epoch
-                                        let epoch = barrier_epoch.prev;
-                                        tracing::info!("waiting for epoch: {}", epoch);
-                                        state_store
-                                            .try_wait_epoch(
-                                                HummockReadEpoch::Committed(epoch),
-                                                TryWaitEpochOptions { table_id },
-                                            )
-                                            .await?;
-                                        tracing::info!("finished waiting for epoch: {}", epoch);
-                                        state_table_initialized = true;
-                                    }
-                                    // After we reported finished, we still don't exit the loop.
-                                    // Because we need to handle split migration.
-                                    if self.backfill_finished(&backfill_stage.states).await? {
-                                        tracing::info!("source backfill finished");
-                                        break 'backfill_loop;
+                                    if !state_table_initialized {
+                                        if is_checkpoint {
+                                            // This is for self.backfill_finished() to be safe: wait until this actor can read all actors' written data.
+                                            // We wait for 2nd epoch
+                                            let epoch = barrier_epoch.prev;
+                                            tracing::info!("waiting for epoch: {}", epoch);
+                                            state_store
+                                                .try_wait_epoch(
+                                                    HummockReadEpoch::Committed(epoch),
+                                                    TryWaitEpochOptions { table_id },
+                                                )
+                                                .await?;
+                                            tracing::info!("finished waiting for epoch: {}", epoch);
+                                            state_table_initialized = true;
+                                        }
+                                    } else {
+                                        // After we reported finished, we still don't exit the loop.
+                                        // Because we need to handle split migration.
+                                        assert!(
+                                            state_table_initialized,
+                                            "state table should be initialized before checking backfill finished"
+                                        );
+                                        if self.backfill_finished(&backfill_stage.states).await? {
+                                            tracing::info!("source backfill finished");
+                                            break 'backfill_loop;
+                                        }
                                     }
                                 } else {
                                     self.progress.update_for_source_backfill(

@@ -110,7 +110,7 @@ f
 query I
 SELECT has_table_privilege('test_user', 'foo_view', 'SELECT');
 ----
-t
+f
 
 query I
 SELECT has_table_privilege('test_user', 'foo_view'::regclass, 'INSERT');

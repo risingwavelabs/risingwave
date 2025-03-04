@@ -186,6 +186,8 @@ impl From<&BuiltinView> for ViewCatalog {
         ViewCatalog {
             id: 0,
             name: val.name.to_owned(),
+            schema_id: 0,
+            database_id: 0,
             columns: val
                 .columns
                 .iter()
@@ -300,15 +302,15 @@ pub fn get_sys_tables_in_schema(schema_name: &str) -> Vec<Arc<SystemTableCatalog
         .collect()
 }
 
-pub fn get_sys_views_in_schema(schema_name: &str) -> Vec<Arc<ViewCatalog>> {
+pub fn get_sys_views_in_schema(schema_name: &str) -> Vec<ViewCatalog> {
     SYS_CATALOGS
         .catalogs
         .iter()
         .enumerate()
         .filter_map(|(idx, c)| match c {
-            BuiltinCatalog::View(v) if v.schema == schema_name => Some(Arc::new(
-                ViewCatalog::from(v).with_id(idx as u32 + SYS_CATALOG_START_ID as u32),
-            )),
+            BuiltinCatalog::View(v) if v.schema == schema_name => {
+                Some(ViewCatalog::from(v).with_id(idx as u32 + SYS_CATALOG_START_ID as u32))
+            }
             _ => None,
         })
         .collect()

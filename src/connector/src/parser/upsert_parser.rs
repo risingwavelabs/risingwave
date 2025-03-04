@@ -90,16 +90,17 @@ impl UpsertParser {
         payload: Option<Vec<u8>>,
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> ConnectorResult<()> {
+        let meta = writer.source_meta();
         let mut row_op: KvEvent<AccessImpl<'_>, AccessImpl<'_>> = KvEvent::default();
         if let Some(data) = key {
-            row_op.with_key(self.key_builder.generate_accessor(data).await?);
+            row_op.with_key(self.key_builder.generate_accessor(data, meta).await?);
         }
         // Empty payload of kafka is Some(vec![])
         let change_event_op;
         if let Some(data) = payload
             && !data.is_empty()
         {
-            row_op.with_value(self.payload_builder.generate_accessor(data).await?);
+            row_op.with_value(self.payload_builder.generate_accessor(data, meta).await?);
             change_event_op = ChangeEventOperation::Upsert;
         } else {
             change_event_op = ChangeEventOperation::Delete;

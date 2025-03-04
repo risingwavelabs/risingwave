@@ -508,7 +508,7 @@ IcebergConfig:
     default: Default::default
   - name: enable_config_load
     field_type: bool
-    comments: enable config load currently is used by iceberg engine.
+    comments: enable config load.
     required: false
     default: Default::default
   - name: primary_key

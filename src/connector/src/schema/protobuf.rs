@@ -65,10 +65,11 @@ pub async fn fetch_descriptor(
     }
 
     let enc = EncodingProperties::Protobuf(ProtobufProperties {
-        use_schema_registry: false,
-        row_schema_location,
+        schema_location: crate::parser::SchemaLocation::File {
+            url: row_schema_location,
+            aws_auth_props: aws_auth_props.cloned(),
+        },
         message_name,
-        aws_auth_props: aws_auth_props.cloned(),
         // name_strategy, topic, key_message_name, enable_upsert, client_config
         ..Default::default()
     });

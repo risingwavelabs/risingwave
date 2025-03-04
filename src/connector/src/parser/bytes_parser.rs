@@ -26,7 +26,11 @@ pub struct BytesAccessBuilder {
 
 impl AccessBuilder for BytesAccessBuilder {
     #[allow(clippy::unused_async)]
-    async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_>> {
+    async fn generate_accessor(
+        &mut self,
+        payload: Vec<u8>,
+        _: &crate::source::SourceMeta,
+    ) -> ConnectorResult<AccessImpl<'_>> {
         Ok(AccessImpl::Bytes(BytesAccess::new(
             &self.column_name,
             payload,

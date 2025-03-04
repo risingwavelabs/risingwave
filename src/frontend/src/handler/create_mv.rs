@@ -107,7 +107,6 @@ pub fn gen_create_mv_plan_bound(
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
 
     let definition = context.normalized_sql().to_owned();
-    session.check_privileges_for_query(&query)?;
 
     let col_names = get_column_names(&query, columns)?;
 

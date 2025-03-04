@@ -38,7 +38,7 @@ pub fn check_schema_create_privilege(
         return Ok(());
     }
     if !new_owner.is_super
-        && !new_owner.check_privilege(
+        && !new_owner.has_privilege(
             &grant_privilege::Object::SchemaId(schema_id),
             AclMode::Create,
         )

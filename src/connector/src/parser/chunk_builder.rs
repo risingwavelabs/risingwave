@@ -252,6 +252,12 @@ impl<'a> SourceStreamChunkRowWriter<'a> {
         self.row_meta
     }
 
+    pub fn source_meta(&self) -> &'a SourceMeta {
+        self.row_meta
+            .map(|m| m.source_meta)
+            .unwrap_or(&SourceMeta::Empty)
+    }
+
     /// Convert the row writer to invisible row writer.
     pub fn invisible(mut self) -> Self {
         self.visible = false;

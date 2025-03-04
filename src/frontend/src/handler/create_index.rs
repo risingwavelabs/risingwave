@@ -88,7 +88,7 @@ pub(crate) fn gen_create_index_plan(
     }
 
     let mut binder = Binder::new_for_stream(session);
-    binder.bind_table(Some(&schema_name), &table_name, None)?;
+    binder.bind_table(Some(&schema_name), &table_name)?;
 
     let mut index_columns_ordered_expr = vec![];
     let mut include_columns_expr = vec![];

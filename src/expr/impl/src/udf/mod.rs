@@ -19,7 +19,7 @@ use anyhow::{Context as _, Result};
 use futures_util::stream::BoxStream;
 use risingwave_common::array::arrow::arrow_array_udf::{ArrayRef, BooleanArray, RecordBatch};
 use risingwave_expr::sig::{
-    CreateFunctionOptions, CreateFunctionOutput, UDF_IMPLS, UdfImpl, UdfImplDescriptor,
+    CreateFunctionOutput, CreateOptions, UDF_IMPLS, UdfImpl, UdfImplDescriptor,
 };
 
 #[cfg(feature = "external-udf")]
