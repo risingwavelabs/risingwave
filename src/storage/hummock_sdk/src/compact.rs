@@ -79,27 +79,51 @@ pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
                         input_sst_table_ids.insert(*tid);
                     }
                 }
+                let key_range = &table.key_range;
+                let left_str = if key_range.left.is_empty() {
+                    "-inf".to_owned()
+                } else {
+                    hex::encode(&key_range.left)
+                };
+                let right_str = if key_range.right.is_empty() {
+                    "+inf".to_owned()
+                } else {
+                    hex::encode(&key_range.right)
+                };
                 if table.total_key_count != 0 {
                     format!(
-                        "[id: {}, obj_id: {} object_size {}KB sst_size {}KB stale_ratio {}]",
+                        "[id: {}, obj_id: {} object_size {}KB sst_size {}KB stale_ratio {} key_range: [{},{}] max_epoch: {} min_epoch: {}]",
                         table.sst_id,
                         table.object_id,
                         table.file_size / 1024,
                         table.sst_size / 1024,
                         (table.stale_key_count * 100 / table.total_key_count),
+                        left_str,
+                        right_str,
+                        table.max_epoch,
+                        table.min_epoch,
                     )
                 } else {
                     format!(
-                        "[id: {}, obj_id: {} object_size {}KB sst_size {}KB]",
+                        "[id: {}, obj_id: {} object_size {}KB sst_size {}KB key_range: [{},{}] max_epoch: {} min_epoch: {}]",
                         table.sst_id,
                         table.object_id,
                         table.file_size / 1024,
                         table.sst_size / 1024,
+                        left_str,
+                        right_str,
+                        table.max_epoch,
+                        table.min_epoch,
                     )
                 }
             })
             .collect();
-        writeln!(s, "Level {:?} {:?} ", level_entry.level_idx, tables).unwrap();
+        writeln!(
+            s,
+            "Level {:?} {:?} {:?}",
+            level_entry.level_idx, level_entry.level_type, tables
+        )
+        .unwrap();
     }
     if !compact_task.table_vnode_partition.is_empty() {
         writeln!(s, "Table vnode partition info:").unwrap();
