@@ -73,7 +73,12 @@ pub async fn handle_explain_analyze_stream_job(
     };
 
     // Render graph with metrics
-    let rows = render_graph_with_metrics(&adjacency_list, root_node, &aggregated_stats, &profiling_duration);
+    let rows = render_graph_with_metrics(
+        &adjacency_list,
+        root_node,
+        &aggregated_stats,
+        &profiling_duration,
+    );
     let builder = RwPgResponseBuilder::empty(StatementType::EXPLAIN);
     let builder = builder.rows(rows);
     Ok(builder.into())
@@ -303,6 +308,7 @@ fn render_graph_with_metrics(
     stats: &StreamNodeStats,
     profiling_duration: &Duration,
 ) -> Vec<ExplainAnalyzeStreamJobOutput> {
+    let profiling_duration_secs = profiling_duration.as_secs_f64();
     let mut rows = vec![];
     let mut stack = vec![(String::new(), true, root_node)];
     while let Some((prefix, last_child, node_id)) = stack.pop() {
@@ -329,12 +335,7 @@ fn render_graph_with_metrics(
 
         let stats = stats.inner.get(&node_id);
         let (output_throughput, output_latency) = stats
-            .map(|stats| {
-                (
-                    stats.total_output_throughput,
-                    stats.total_output_pending_ns,
-                )
-            })
+            .map(|stats| (stats.total_output_throughput, stats.total_output_pending_ns))
             .unwrap_or((0, 0));
         let row = ExplainAnalyzeStreamJobOutput {
             operator_id: node.operator_id.to_string(),
@@ -345,8 +346,12 @@ fn render_graph_with_metrics(
                 .map(|id| id.to_string())
                 .collect::<Vec<_>>()
                 .join(","),
-            output_rps: output_throughput.to_string(),
-            avg_output_pending_ratio: output_latency.to_string(),
+            output_rps: (output_throughput as f64 / profiling_duration_secs).to_string(),
+            avg_output_pending_ratio: (output_latency as f64
+                / 10_u32.pow(9) as f64
+                / node.actor_ids.len() as f64
+                / profiling_duration_secs)
+                .to_string(),
         };
         rows.push(row);
         for (position, dependency) in node.dependencies.iter().enumerate() {
