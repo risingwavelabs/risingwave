@@ -194,8 +194,8 @@ pub async fn provision_serverless_backfill(sbc_addr: String) -> Result<String> {
             .await
             .map_err(|e| {
                 RwError::from(ErrorCode::InternalError(format!(
-                    "unable to reach serverless backfill controller: {}",
-                    e
+                    "unable to reach serverless backfill controller at addr {}: {}",
+                    sbc_addr, e
                 )))
             })?;
 
