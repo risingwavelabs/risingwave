@@ -252,6 +252,7 @@ pub async fn handle(
     sql: Arc<str>,
     formats: Vec<Format>,
 ) -> Result<RwPgResponse> {
+    let sbc_addr = session.get_sbc_addr();
     session.clear_cancel_query_flag();
     let _guard = session.txn_begin_implicit();
     let handler_args = HandlerArgs::new(session, &stmt, sql)?;
@@ -585,6 +586,7 @@ pub async fn handle(
                     *query,
                     columns,
                     emit_mode,
+                    sbc_addr,
                 )
                 .await
             } else {

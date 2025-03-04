@@ -85,6 +85,7 @@ pub fn handle_parse(
 pub async fn handle_execute(
     handler_args: HandlerArgs,
     portal: PortalResult,
+    sbc_addr: String,
 ) -> Result<RwPgResponse> {
     let PortalResult {
         bound_result,
@@ -153,6 +154,7 @@ pub async fn handle_execute(
                 dependent_udfs,
                 columns,
                 emit_mode,
+                sbc_addr,
             )
             .await
         }

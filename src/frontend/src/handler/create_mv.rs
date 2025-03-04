@@ -159,6 +159,7 @@ pub async fn handle_create_mv(
     query: Query,
     columns: Vec<Ident>,
     emit_mode: Option<EmitMode>,
+    sbc_addr: String,
 ) -> Result<RwPgResponse> {
     let (dependent_relations, dependent_udfs, bound) = {
         let mut binder = Binder::new_for_stream(handler_args.session.as_ref());
@@ -178,26 +179,25 @@ pub async fn handle_create_mv(
         dependent_udfs,
         columns,
         emit_mode,
+        sbc_addr,
     )
     .await
 }
 
 /// Send a provision request to the serverless backfill controller
 #[tokio::main]
-pub async fn provision_serverless_backfill() -> Result<String> {
+pub async fn provision_serverless_backfill(sbc_addr: String) -> Result<String> {
     // , Box<dyn std::error::Error>
     let request = tonic::Request::new(ProvisionRequest {});
     let mut client =
-        node_group_controller_service_client::NodeGroupControllerServiceClient::connect(
-            "http://[::1]:1298",
-        )
-        .await
-        .map_err(|e| {
-            RwError::from(ErrorCode::InternalError(format!(
-                "unable to reach serverless backfill controller: {}",
-                e
-            )))
-        })?;
+        node_group_controller_service_client::NodeGroupControllerServiceClient::connect(sbc_addr)
+            .await
+            .map_err(|e| {
+                RwError::from(ErrorCode::InternalError(format!(
+                    "unable to reach serverless backfill controller: {}",
+                    e
+                )))
+            })?;
 
     match client.provision(request).await {
         Ok(resp) => return Ok(resp.into_inner().resource_group),
@@ -219,6 +219,7 @@ pub async fn handle_create_mv_bound(
     dependent_udfs: HashSet<FunctionId>, // TODO(rc): merge with `dependent_relations`
     columns: Vec<Ident>,
     emit_mode: Option<EmitMode>,
+    sbc_addr: String,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
 
@@ -274,9 +275,10 @@ It only indicates the physical clustering of the data, which may improve the per
 
         tracing::debug!("before calling SBC");
 
-        let x: std::result::Result<String, _> = thread::spawn(|| provision_serverless_backfill())
-            .join()
-            .expect("Thread panicked"); // TODO: Do not panic
+        let x: std::result::Result<String, _> =
+            thread::spawn(|| provision_serverless_backfill(sbc_addr))
+                .join()
+                .expect("Thread panicked"); // TODO: Do not panic
         tracing::debug!("after calling SBC");
 
         let resource_group = if is_serverless_backfill {
