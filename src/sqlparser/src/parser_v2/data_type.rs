@@ -22,8 +22,10 @@ use winnow::combinator::{
     alt, cut_err, delimited, dispatch, empty, fail, opt, preceded, repeat, separated, seq,
     terminated, trace,
 };
-use winnow::error::{ContextError, ErrMode, ErrorKind, FromExternalError, StrContext};
-use winnow::{PResult, Parser, Stateful};
+use winnow::error::{
+    AddContext, ContextError, ErrMode, ErrorKind, FromExternalError, ParserError, StrContext,
+};
+use winnow::{ModalResult, Parser, Stateful};
 
 use super::{
     TokenStream, identifier_non_reserved, keyword, literal_uint, object_name, precision_in_range,
@@ -44,7 +46,7 @@ struct DataTypeParsingState {
 type StatefulStream<S> = Stateful<S, DataTypeParsingState>;
 
 /// Consume struct type definitions
-fn struct_data_type<S>(input: &mut StatefulStream<S>) -> PResult<Vec<StructField>>
+fn struct_data_type<S>(input: &mut StatefulStream<S>) -> ModalResult<Vec<StructField>>
 where
     S: TokenStream,
 {
@@ -57,7 +59,7 @@ where
         alt((
             trace(
                 "consume_remaining_close",
-                move |input: &mut StatefulStream<S>| -> PResult<()> {
+                move |input: &mut StatefulStream<S>| -> ModalResult<()> {
                     if *remaining_close1.borrow() {
                         *remaining_close1.borrow_mut() = false;
                         Ok(())
@@ -71,7 +73,7 @@ where
                 "produce_remaining_close",
                 (
                     Token::ShiftRight,
-                    move |_input: &mut StatefulStream<S>| -> PResult<()> {
+                    move |_input: &mut StatefulStream<S>| -> ModalResult<()> {
                         *remaining_close2.borrow_mut() = true;
                         Ok(())
                     },
@@ -83,7 +85,7 @@ where
     );
 
     // If there is an `over-consumed' `>`, we shouldn't handle `,`.
-    let sep = |input: &mut StatefulStream<S>| -> PResult<()> {
+    let sep = |input: &mut StatefulStream<S>| -> ModalResult<()> {
         if *input.state.remaining_close.borrow() {
             fail(input)
         } else {
@@ -120,7 +122,7 @@ where
 /// otherwise the type parameter will recurse like `Stateful<Stateful<Stateful<...>>>`.
 /// Also note that we cannot use `Parser<'_>` directly to avoid misuse, because we need
 /// generics `<S>` to parameterize over `Parser<'_>` and `Stateful<Parser<'_>>`.
-pub fn data_type<S>(input: &mut S) -> PResult<DataType>
+pub fn data_type<S>(input: &mut S) -> ModalResult<DataType>
 where
     S: TokenStream,
 {
@@ -148,7 +150,7 @@ where
 }
 
 /// Data type parsing with stateful stream.
-fn data_type_stateful<S>(input: &mut StatefulStream<S>) -> PResult<DataType>
+fn data_type_stateful<S>(input: &mut StatefulStream<S>) -> ModalResult<DataType>
 where
     S: TokenStream,
 {
@@ -172,7 +174,7 @@ where
 }
 
 /// Consume a data type except [`DataType::Array`].
-fn data_type_stateful_inner<S>(input: &mut StatefulStream<S>) -> PResult<DataType>
+fn data_type_stateful_inner<S>(input: &mut StatefulStream<S>) -> ModalResult<DataType>
 where
     S: TokenStream,
 {
@@ -183,7 +185,7 @@ where
     .parse_next(input)
 }
 
-fn keyword_datatype<S: TokenStream>(input: &mut StatefulStream<S>) -> PResult<DataType> {
+fn keyword_datatype<S: TokenStream>(input: &mut StatefulStream<S>) -> ModalResult<DataType> {
     let with_time_zone = || {
         opt(alt((
             (Keyword::WITH, Keyword::TIME, Keyword::ZONE).value(true),
@@ -235,7 +237,7 @@ fn keyword_datatype<S: TokenStream>(input: &mut StatefulStream<S>) -> PResult<Da
     ty.parse_next(input)
 }
 
-fn non_keyword_datatype<S: TokenStream>(input: &mut StatefulStream<S>) -> PResult<DataType> {
+fn non_keyword_datatype<S: TokenStream>(input: &mut StatefulStream<S>) -> ModalResult<DataType> {
     let type_name = object_name.parse_next(input)?;
     match type_name.to_string().to_ascii_lowercase().as_str() {
         // PostgreSQL built-in data types that are not keywords.
@@ -247,7 +249,7 @@ fn non_keyword_datatype<S: TokenStream>(input: &mut StatefulStream<S>) -> PResul
     }
 }
 
-fn map_type_arguments<S: TokenStream>(input: &mut StatefulStream<S>) -> PResult<DataType> {
+fn map_type_arguments<S: TokenStream>(input: &mut StatefulStream<S>) -> ModalResult<DataType> {
     delimited(
         Token::LParen,
         // key is string or integral type. value is arbitrary type.

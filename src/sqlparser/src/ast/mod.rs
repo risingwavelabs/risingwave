@@ -33,7 +33,7 @@ use std::sync::Arc;
 use itertools::Itertools;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-use winnow::PResult;
+use winnow::ModalResult;
 
 pub use self::data_type::{DataType, StructField};
 pub use self::ddl::{
@@ -192,7 +192,7 @@ impl From<&str> for Ident {
 }
 
 impl ParseTo for Ident {
-    fn parse_to(parser: &mut Parser<'_>) -> PResult<Self> {
+    fn parse_to(parser: &mut Parser<'_>) -> ModalResult<Self> {
         parser.parse_identifier()
     }
 }
@@ -236,7 +236,7 @@ impl fmt::Display for ObjectName {
 }
 
 impl ParseTo for ObjectName {
-    fn parse_to(p: &mut Parser<'_>) -> PResult<Self> {
+    fn parse_to(p: &mut Parser<'_>) -> ModalResult<Self> {
         p.parse_object_name()
     }
 }
@@ -2788,7 +2788,7 @@ impl fmt::Display for ObjectType {
 }
 
 impl ParseTo for ObjectType {
-    fn parse_to(parser: &mut Parser<'_>) -> PResult<Self> {
+    fn parse_to(parser: &mut Parser<'_>) -> ModalResult<Self> {
         let object_type = if parser.parse_keyword(Keyword::TABLE) {
             ObjectType::Table
         } else if parser.parse_keyword(Keyword::VIEW) {
