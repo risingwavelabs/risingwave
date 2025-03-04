@@ -47,7 +47,7 @@ use std::process::{Command, Output};
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use indicatif::ProgressBar;
 use reqwest::blocking::{Client, Response};
 use tempfile::TempDir;

@@ -14,19 +14,19 @@
 
 use std::fmt::Display;
 
+use FrameBound::{CurrentRow, Following, Preceding, UnboundedFollowing, UnboundedPreceding};
 use enum_as_inner::EnumAsInner;
 use parse_display::Display;
 use risingwave_common::types::DataType;
 use risingwave_common::{bail, must_match};
 use risingwave_pb::expr::window_frame::{PbBounds, PbExclusion};
 use risingwave_pb::expr::{PbWindowFrame, PbWindowFunction};
-use FrameBound::{CurrentRow, Following, Preceding, UnboundedFollowing, UnboundedPreceding};
 
 use super::{
     RangeFrameBounds, RowsFrameBound, RowsFrameBounds, SessionFrameBounds, WindowFuncKind,
 };
-use crate::aggregate::AggArgs;
 use crate::Result;
+use crate::aggregate::AggArgs;
 
 #[derive(Debug, Clone)]
 pub struct WindowFuncCall {

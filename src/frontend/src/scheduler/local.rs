@@ -14,8 +14,8 @@
 
 //! Local execution for batch query.
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use anyhow::anyhow;
@@ -120,6 +120,7 @@ impl LocalQueryExecution {
         // The following loop can be slow.
         // Release potential large object in Query and PlanNode early.
         drop(self);
+        drop(plan_node);
 
         #[for_await]
         for chunk in executor.execute() {
@@ -288,7 +289,9 @@ impl LocalQueryExecution {
                     .source_stage_id
                     .expect("We expect stage id for Exchange Operator");
                 let Some(second_stages) = second_stages.as_mut() else {
-                    bail!("Unexpected exchange detected. We are either converting a single stage plan or converting the second stage of the plan.")
+                    bail!(
+                        "Unexpected exchange detected. We are either converting a single stage plan or converting the second stage of the plan."
+                    )
                 };
                 let second_stage = second_stages.remove(&exchange_source_stage_id).expect(
                     "We expect child stage fragment for Exchange Operator running in the frontend",

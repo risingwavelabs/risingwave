@@ -27,11 +27,13 @@
     └─StreamNow { output: [ts] }
 - sql: |
     select * from generate_series(
-      '2024-06-21 17:36:00'::timestamp, -- `timestamp` type is not supported
+      '2024-06-21 17:36:00'::timestamp, -- `timestamp` is implicitly casted to `timestamptz`
       now(),
       interval '1 hour'
     );
-  binder_error: function generate_series(timestamp without time zone, timestamp with time zone, interval) does not exist
+  stream_plan: |-
+    StreamMaterialize { columns: [generate_series], stream_key: [generate_series], pk_columns: [generate_series], pk_conflict: NoCheck, watermark_columns: [generate_series] }
+    └─StreamNow { output: [ts] }
 - sql: |
     select * from generate_series(
       now() - interval '1 hour',

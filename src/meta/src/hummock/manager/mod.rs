@@ -14,8 +14,8 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::ops::{Deref, DerefMut};
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use bytes::Bytes;
 use itertools::Itertools;
@@ -25,8 +25,8 @@ use risingwave_common::monitor::MonitoredRwLock;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{
-    version_archive_dir, version_checkpoint_path, CompactionGroupId, HummockCompactionTaskId,
-    HummockContextId, HummockVersionId,
+    CompactionGroupId, HummockCompactionTaskId, HummockContextId, HummockVersionId,
+    version_archive_dir, version_checkpoint_path,
 };
 use risingwave_meta_model::{
     compaction_status, compaction_task, hummock_pinned_version, hummock_version_delta,
@@ -41,12 +41,12 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::{Mutex, Semaphore};
 use tonic::Streaming;
 
+use crate::hummock::CompactorManagerRef;
 use crate::hummock::compaction::CompactStatus;
 use crate::hummock::error::Result;
 use crate::hummock::manager::checkpoint::HummockVersionCheckpoint;
 use crate::hummock::manager::context::ContextInfo;
 use crate::hummock::manager::gc::{FullGcState, GcManager};
-use crate::hummock::CompactorManagerRef;
 use crate::manager::{MetaSrvEnv, MetadataManager};
 use crate::model::{ClusterId, MetadataModelError};
 use crate::rpc::metrics::MetaMetrics;
@@ -70,7 +70,7 @@ mod worker;
 
 pub use commit_epoch::{CommitEpochInfo, NewTableFragmentInfo};
 use compaction::*;
-pub use compaction::{check_cg_write_limit, check_emergency_state, EmergencyState, WriteLimitType};
+pub use compaction::{EmergencyState, WriteLimitType, check_cg_write_limit, check_emergency_state};
 pub(crate) use utils::*;
 
 // Update to states are performed as follow:
@@ -120,7 +120,7 @@ pub struct HummockManager {
 
 pub type HummockManagerRef = Arc<HummockManager>;
 
-use risingwave_object_store::object::{build_remote_object_store, ObjectError, ObjectStoreRef};
+use risingwave_object_store::object::{ObjectError, ObjectStoreRef, build_remote_object_store};
 use risingwave_pb::catalog::Table;
 
 macro_rules! start_measure_real_process_timer {

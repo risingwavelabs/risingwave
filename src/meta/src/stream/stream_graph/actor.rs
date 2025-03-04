@@ -24,7 +24,6 @@ use risingwave_common::hash::{ActorId, ActorMapping, IsSingleton, VnodeCount, Wo
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::stream_graph_visitor::visit_tables;
 use risingwave_meta_model::WorkerId;
-use risingwave_pb::meta::table_fragments::Fragment;
 use risingwave_pb::plan_common::ExprContext;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
@@ -33,11 +32,12 @@ use risingwave_pb::stream_plan::{
     StreamScanType,
 };
 
-use super::id::GlobalFragmentIdsExt;
 use super::Locations;
+use super::id::GlobalFragmentIdsExt;
+use crate::MetaResult;
 use crate::controller::cluster::StreamingClusterInfo;
 use crate::manager::{MetaSrvEnv, StreamingJob};
-use crate::model::{DispatcherId, FragmentActorUpstreams, FragmentId};
+use crate::model::{DispatcherId, Fragment, FragmentActorUpstreams, FragmentId};
 use crate::stream::stream_graph::fragment::{
     CompleteStreamFragmentGraph, DownstreamExternalEdgeId, EdgeId, EitherFragment,
     StreamFragmentEdge,
@@ -45,7 +45,6 @@ use crate::stream::stream_graph::fragment::{
 use crate::stream::stream_graph::id::{GlobalActorId, GlobalActorIdGen, GlobalFragmentId};
 use crate::stream::stream_graph::schedule;
 use crate::stream::stream_graph::schedule::Distribution;
-use crate::MetaResult;
 
 /// The upstream information of an actor during the building process. This will eventually be used
 /// to create the `MergeNode`s as the leaf executor of each actor.

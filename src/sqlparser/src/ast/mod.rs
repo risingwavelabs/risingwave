@@ -42,7 +42,7 @@ pub use self::ddl::{
     ColumnOptionDef, ReferentialAction, SourceWatermark, TableConstraint, WebhookSourceInfo,
 };
 pub use self::legacy_source::{
-    get_delimiter, AvroSchema, CompatibleFormatEncode, DebeziumAvroSchema, ProtobufSchema,
+    AvroSchema, CompatibleFormatEncode, DebeziumAvroSchema, ProtobufSchema, get_delimiter,
 };
 pub use self::operator::{BinaryOperator, QualifiedOperator, UnaryOperator};
 pub use self::query::{
@@ -1355,7 +1355,7 @@ pub enum Statement {
         returns: Option<CreateFunctionReturns>,
         /// Optional parameters.
         params: CreateFunctionBody,
-        with_options: CreateFunctionWithOptions,
+        with_options: CreateFunctionWithOptions, // FIXME(eric): use Option<>
     },
     /// CREATE AGGREGATE
     ///
@@ -1664,14 +1664,20 @@ impl fmt::Display for Statement {
                 write!(f, "DESCRIBE {}", name)?;
                 Ok(())
             }
-            Statement::ShowObjects { object: show_object, filter } => {
+            Statement::ShowObjects {
+                object: show_object,
+                filter,
+            } => {
                 write!(f, "SHOW {}", show_object)?;
                 if let Some(filter) = filter {
                     write!(f, " {}", filter)?;
                 }
                 Ok(())
             }
-            Statement::ShowCreateObject { create_type: show_type, name } => {
+            Statement::ShowCreateObject {
+                create_type: show_type,
+                name,
+            } => {
                 write!(f, "SHOW CREATE {} {}", show_type, name)?;
                 Ok(())
             }
@@ -1685,7 +1691,7 @@ impl fmt::Display for Statement {
                 source,
                 returning,
             } => {
-                write!(f, "INSERT INTO {table_name} ", table_name = table_name, )?;
+                write!(f, "INSERT INTO {table_name} ", table_name = table_name,)?;
                 if !columns.is_empty() {
                     write!(f, "({}) ", display_comma_separated(columns))?;
                 }
@@ -1883,7 +1889,11 @@ impl fmt::Display for Statement {
                     name = name,
                 )?;
                 if !columns.is_empty() || !constraints.is_empty() {
-                    write!(f, " {}", fmt_create_items(columns, constraints, source_watermarks, *wildcard_idx)?)?;
+                    write!(
+                        f,
+                        " {}",
+                        fmt_create_items(columns, constraints, source_watermarks, *wildcard_idx)?
+                    )?;
                 } else if query.is_none() {
                     // PostgreSQL allows `CREATE TABLE t ();`, but requires empty parens
                     write!(f, " ()")?;
@@ -1891,7 +1901,6 @@ impl fmt::Display for Statement {
                 if *append_only {
                     write!(f, " APPEND ONLY")?;
                 }
-
 
                 if let Some(on_conflict_behavior) = on_conflict {
                     write!(f, " ON CONFLICT {}", on_conflict_behavior)?;
@@ -1915,7 +1924,7 @@ impl fmt::Display for Statement {
                     write!(f, " FROM {}", info.source_name)?;
                     write!(f, " TABLE '{}'", info.external_table_name)?;
                 }
-                if let Some(info)= webhook_info {
+                if let Some(info) = webhook_info {
                     if let Some(secret) = &info.secret_ref {
                         write!(f, " VALIDATE SECRET {}", secret.secret_name)?;
                     } else {
@@ -1924,10 +1933,10 @@ impl fmt::Display for Statement {
                     write!(f, " AS {}", info.signature_expr)?;
                 }
                 match engine {
-                    Engine::Hummock => {},
+                    Engine::Hummock => {}
                     Engine::Iceberg => {
                         write!(f, " ENGINE = {}", engine)?;
-                    },
+                    }
                 }
                 Ok(())
             }
@@ -1955,16 +1964,13 @@ impl fmt::Display for Statement {
                 distributed_by = if distributed_by.is_empty() {
                     "".to_owned()
                 } else {
-                    format!(" DISTRIBUTED BY({})", display_separated(distributed_by, ","))
+                    format!(
+                        " DISTRIBUTED BY({})",
+                        display_separated(distributed_by, ",")
+                    )
                 }
             ),
-            Statement::CreateSource {
-                stmt,
-            } => write!(
-                f,
-                "CREATE SOURCE {}",
-                stmt,
-            ),
+            Statement::CreateSource { stmt } => write!(f, "CREATE SOURCE {}", stmt,),
             Statement::CreateSink { stmt } => write!(f, "CREATE SINK {}", stmt,),
             Statement::CreateSubscription { stmt } => write!(f, "CREATE SUBSCRIPTION {}", stmt,),
             Statement::CreateConnection { stmt } => write!(f, "CREATE CONNECTION {}", stmt,),
@@ -1984,8 +1990,18 @@ impl fmt::Display for Statement {
             Statement::AlterIndex { name, operation } => {
                 write!(f, "ALTER INDEX {} {}", name, operation)
             }
-            Statement::AlterView { materialized, name, operation } => {
-                write!(f, "ALTER {}VIEW {} {}", if *materialized { "MATERIALIZED " } else { "" }, name, operation)
+            Statement::AlterView {
+                materialized,
+                name,
+                operation,
+            } => {
+                write!(
+                    f,
+                    "ALTER {}VIEW {} {}",
+                    if *materialized { "MATERIALIZED " } else { "" },
+                    name,
+                    operation
+                )
             }
             Statement::AlterSink { name, operation } => {
                 write!(f, "ALTER SINK {} {}", name, operation)
@@ -1996,7 +2012,11 @@ impl fmt::Display for Statement {
             Statement::AlterSource { name, operation } => {
                 write!(f, "ALTER SOURCE {} {}", name, operation)
             }
-            Statement::AlterFunction { name, args, operation } => {
+            Statement::AlterFunction {
+                name,
+                args,
+                operation,
+            } => {
                 write!(f, "ALTER FUNCTION {}", name)?;
                 if let Some(args) = args {
                     write!(f, "({})", display_comma_separated(args))?;
@@ -2006,7 +2026,11 @@ impl fmt::Display for Statement {
             Statement::AlterConnection { name, operation } => {
                 write!(f, "ALTER CONNECTION {} {}", name, operation)
             }
-            Statement::AlterSecret { name, with_options, operation } => {
+            Statement::AlterSecret {
+                name,
+                with_options,
+                operation,
+            } => {
                 write!(f, "ALTER SECRET {}", name)?;
                 if !with_options.is_empty() {
                     write!(f, " WITH ({})", display_comma_separated(with_options))?;
@@ -2056,11 +2080,7 @@ impl fmt::Display for Statement {
                 if *local {
                     f.write_str("LOCAL ")?;
                 }
-                write!(
-                    f,
-                    "{name} = {value}",
-                    name = variable,
-                )
+                write!(f, "{name} = {value}", name = variable,)
             }
             Statement::ShowVariable { variable } => {
                 write!(f, "SHOW")?;
@@ -2107,10 +2127,10 @@ impl fmt::Display for Statement {
                 Ok(())
             }
             Statement::Commit { chain } => {
-                write!(f, "COMMIT{}", if *chain { " AND CHAIN" } else { "" }, )
+                write!(f, "COMMIT{}", if *chain { " AND CHAIN" } else { "" },)
             }
             Statement::Rollback { chain } => {
-                write!(f, "ROLLBACK{}", if *chain { " AND CHAIN" } else { "" }, )
+                write!(f, "ROLLBACK{}", if *chain { " AND CHAIN" } else { "" },)
             }
             Statement::CreateSchema {
                 schema_name,
@@ -2127,7 +2147,7 @@ impl fmt::Display for Statement {
                     write!(f, " AUTHORIZATION {}", user)?;
                 }
                 Ok(())
-            },
+            }
             Statement::Grant {
                 privileges,
                 objects,
@@ -2216,10 +2236,7 @@ impl fmt::Display for Statement {
             }
             Statement::AlterSystem { param, value } => {
                 f.write_str("ALTER SYSTEM SET ")?;
-                write!(
-                    f,
-                    "{param} = {value}",
-                )
+                write!(f, "{param} = {value}",)
             }
             Statement::Flush => {
                 write!(f, "FLUSH")
@@ -2391,8 +2408,12 @@ pub enum GrantObjects {
     AllTablesInSchema { schemas: Vec<ObjectName> },
     /// Grant privileges on `ALL SOURCES IN SCHEMA <schema_name> [, ...]`
     AllSourcesInSchema { schemas: Vec<ObjectName> },
+    /// Grant privileges on `ALL SINKS IN SCHEMA <schema_name> [, ...]`
+    AllSinksInSchema { schemas: Vec<ObjectName> },
     /// Grant privileges on `ALL MATERIALIZED VIEWS IN SCHEMA <schema_name> [, ...]`
     AllMviewsInSchema { schemas: Vec<ObjectName> },
+    /// Grant privileges on `ALL VIEWS IN SCHEMA <schema_name> [, ...]`
+    AllViewsInSchema { schemas: Vec<ObjectName> },
     /// Grant privileges on specific databases
     Databases(Vec<ObjectName>),
     /// Grant privileges on specific schemas
@@ -2407,6 +2428,8 @@ pub enum GrantObjects {
     Tables(Vec<ObjectName>),
     /// Grant privileges on specific sinks
     Sinks(Vec<ObjectName>),
+    /// Grant privileges on specific views
+    Views(Vec<ObjectName>),
 }
 
 impl fmt::Display for GrantObjects {
@@ -2449,6 +2472,20 @@ impl fmt::Display for GrantObjects {
                     display_comma_separated(schemas)
                 )
             }
+            GrantObjects::AllSinksInSchema { schemas } => {
+                write!(
+                    f,
+                    "ALL SINKS IN SCHEMA {}",
+                    display_comma_separated(schemas)
+                )
+            }
+            GrantObjects::AllViewsInSchema { schemas } => {
+                write!(
+                    f,
+                    "ALL VIEWS IN SCHEMA {}",
+                    display_comma_separated(schemas)
+                )
+            }
             GrantObjects::Databases(databases) => {
                 write!(f, "DATABASE {}", display_comma_separated(databases))
             }
@@ -2460,6 +2497,9 @@ impl fmt::Display for GrantObjects {
             }
             GrantObjects::Sinks(sinks) => {
                 write!(f, "SINK {}", display_comma_separated(sinks))
+            }
+            GrantObjects::Views(views) => {
+                write!(f, "VIEW {}", display_comma_separated(views))
             }
         }
     }
@@ -2805,24 +2845,12 @@ impl fmt::Display for SqlOption {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum SqlOptionValue {
     Value(Value),
     SecretRef(SecretRefValue),
     ConnectionRef(ConnectionRefValue),
-}
-
-impl fmt::Debug for SqlOptionValue {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            SqlOptionValue::Value(value) => write!(f, "{:?}", value),
-            SqlOptionValue::SecretRef(secret_ref) => write!(f, "secret {:?}", secret_ref),
-            SqlOptionValue::ConnectionRef(connection_ref) => {
-                write!(f, "connection {:?}", connection_ref)
-            }
-        }
-    }
 }
 
 impl fmt::Display for SqlOptionValue {
@@ -2831,7 +2859,7 @@ impl fmt::Display for SqlOptionValue {
             SqlOptionValue::Value(value) => write!(f, "{}", value),
             SqlOptionValue::SecretRef(secret_ref) => write!(f, "secret {}", secret_ref),
             SqlOptionValue::ConnectionRef(connection_ref) => {
-                write!(f, "connection {}", connection_ref)
+                write!(f, "{}", connection_ref)
             }
         }
     }
@@ -3235,13 +3263,10 @@ impl fmt::Display for CreateFunctionBody {
 pub struct CreateFunctionWithOptions {
     /// Always retry on network errors.
     pub always_retry_on_network_error: Option<bool>,
-}
-
-/// TODO(kwannoel): Generate from the struct definition instead.
-impl CreateFunctionWithOptions {
-    fn is_empty(&self) -> bool {
-        self.always_retry_on_network_error.is_none()
-    }
+    /// Use async functions (only available for JS UDF)
+    pub r#async: Option<bool>,
+    /// Call in batch mode (only available for JS UDF)
+    pub batch: Option<bool>,
 }
 
 /// TODO(kwannoel): Generate from the struct definition instead.
@@ -3249,34 +3274,50 @@ impl TryFrom<Vec<SqlOption>> for CreateFunctionWithOptions {
     type Error = StrError;
 
     fn try_from(with_options: Vec<SqlOption>) -> Result<Self, Self::Error> {
-        let mut always_retry_on_network_error = None;
+        let mut options = Self::default();
         for option in with_options {
-            if option.name.to_string().to_lowercase() == "always_retry_on_network_error" {
-                always_retry_on_network_error = Some(matches!(
-                    option.value,
-                    SqlOptionValue::Value(Value::Boolean(true))
-                ));
-            } else {
-                return Err(StrError(format!("Unsupported option: {}", option.name)));
+            match option.name.to_string().to_lowercase().as_str() {
+                "always_retry_on_network_error" => {
+                    options.always_retry_on_network_error = Some(matches!(
+                        option.value,
+                        SqlOptionValue::Value(Value::Boolean(true))
+                    ));
+                }
+                "async" => {
+                    options.r#async = Some(matches!(
+                        option.value,
+                        SqlOptionValue::Value(Value::Boolean(true))
+                    ))
+                }
+                "batch" => {
+                    options.batch = Some(matches!(
+                        option.value,
+                        SqlOptionValue::Value(Value::Boolean(true))
+                    ))
+                }
+                _ => {
+                    return Err(StrError(format!("unknown option: {}", option.name)));
+                }
             }
         }
-        Ok(Self {
-            always_retry_on_network_error,
-        })
+        Ok(options)
     }
 }
 
 impl Display for CreateFunctionWithOptions {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.is_empty() {
+        if self == &Self::default() {
             return Ok(());
         }
         let mut options = vec![];
-        if let Some(always_retry_on_network_error) = self.always_retry_on_network_error {
-            options.push(format!(
-                "ALWAYS_RETRY_NETWORK_ERRORS = {}",
-                always_retry_on_network_error
-            ));
+        if let Some(v) = self.always_retry_on_network_error {
+            options.push(format!("always_retry_on_network_error = {}", v));
+        }
+        if let Some(v) = self.r#async {
+            options.push(format!("async = {}", v));
+        }
+        if let Some(v) = self.batch {
+            options.push(format!("batch = {}", v));
         }
         write!(f, " WITH ( {} )", display_comma_separated(&options))
     }
@@ -3577,6 +3618,8 @@ mod tests {
             },
             with_options: CreateFunctionWithOptions {
                 always_retry_on_network_error: None,
+                r#async: None,
+                batch: None,
             },
         };
         assert_eq!(
@@ -3600,10 +3643,12 @@ mod tests {
             },
             with_options: CreateFunctionWithOptions {
                 always_retry_on_network_error: Some(true),
+                r#async: None,
+                batch: None,
             },
         };
         assert_eq!(
-            "CREATE FUNCTION foo(INT) RETURNS INT LANGUAGE python IMMUTABLE AS 'SELECT 1' WITH ( ALWAYS_RETRY_NETWORK_ERRORS = true )",
+            "CREATE FUNCTION foo(INT) RETURNS INT LANGUAGE python IMMUTABLE AS 'SELECT 1' WITH ( always_retry_on_network_error = true )",
             format!("{}", create_function)
         );
     }

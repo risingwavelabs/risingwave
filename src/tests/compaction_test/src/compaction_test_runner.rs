@@ -26,14 +26,14 @@ use clap::Parser;
 use foyer::CacheHint;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::{
-    extract_storage_memory_config, load_config, MetaConfig, NoOverride,
+    MetaConfig, NoOverride, extract_storage_memory_config, load_config,
 };
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_hummock_sdk::key::TableKey;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
-use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, HummockVersionId, FIRST_VERSION_ID};
+use risingwave_hummock_sdk::{CompactionGroupId, FIRST_VERSION_ID, HummockEpoch, HummockVersionId};
 use risingwave_pb::common::WorkerType;
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;

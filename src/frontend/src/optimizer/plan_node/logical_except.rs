@@ -23,8 +23,8 @@ use crate::error::Result;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
-    generic, ColumnPruningContext, PlanTreeNode, PredicatePushdownContext, RewriteStreamContext,
-    ToStreamContext,
+    ColumnPruningContext, PlanTreeNode, PredicatePushdownContext, RewriteStreamContext,
+    ToStreamContext, generic,
 };
 use crate::utils::{ColIndexMapping, Condition};
 

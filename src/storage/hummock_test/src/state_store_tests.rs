@@ -20,16 +20,16 @@ use std::sync::Arc;
 use bytes::Bytes;
 use expect_test::expect;
 use foyer::CacheHint;
-use futures::{pin_mut, FutureExt, StreamExt};
+use futures::{FutureExt, StreamExt, pin_mut};
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::util::epoch::{test_epoch, EpochExt, INVALID_EPOCH, MAX_EPOCH};
-use risingwave_hummock_sdk::key::{prefixed_range_with_vnode, FullKey, TableKeyRange};
+use risingwave_common::util::epoch::{EpochExt, INVALID_EPOCH, MAX_EPOCH, test_epoch};
+use risingwave_hummock_sdk::key::{FullKey, TableKeyRange, prefixed_range_with_vnode};
 use risingwave_hummock_sdk::{HummockReadEpoch, LocalSstableInfo, SyncResult};
-use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::CommitEpochInfo;
+use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::iterator::change_log::test_utils::{
     apply_test_log_data, gen_test_data,
@@ -44,24 +44,26 @@ use risingwave_storage::store_impl::verify::VerifyStateStore;
 
 use crate::get_notification_client_for_test;
 use crate::local_state_store_test_utils::LocalStateStoreTestExt;
-use crate::test_utils::{gen_key_from_str, with_hummock_storage, TestIngestBatch};
+use crate::test_utils::{TestIngestBatch, gen_key_from_str, with_hummock_storage};
 
 #[tokio::test]
 async fn test_empty_read() {
     let (hummock_storage, _meta_client) = with_hummock_storage(Default::default()).await;
-    assert!(hummock_storage
-        .get(
-            gen_key_from_str(VirtualNode::ZERO, "test_key"),
-            u64::MAX,
-            ReadOptions {
-                table_id: TableId { table_id: 2333 },
-                cache_policy: CachePolicy::Fill(CacheHint::Normal),
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap()
-        .is_none());
+    assert!(
+        hummock_storage
+            .get(
+                gen_key_from_str(VirtualNode::ZERO, "test_key"),
+                u64::MAX,
+                ReadOptions {
+                    table_id: TableId { table_id: 2333 },
+                    cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap()
+            .is_none()
+    );
     let stream = hummock_storage
         .iter(
             prefixed_range_with_vnode(
@@ -1096,18 +1098,20 @@ async fn test_delete_get() {
         )
         .await
         .unwrap();
-    assert!(hummock_storage
-        .get(
-            gen_key_from_str(VirtualNode::ZERO, "bb"),
-            epoch2,
-            ReadOptions {
-                cache_policy: CachePolicy::Fill(CacheHint::Normal),
-                ..Default::default()
-            }
-        )
-        .await
-        .unwrap()
-        .is_none());
+    assert!(
+        hummock_storage
+            .get(
+                gen_key_from_str(VirtualNode::ZERO, "bb"),
+                epoch2,
+                ReadOptions {
+                    cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                    ..Default::default()
+                }
+            )
+            .await
+            .unwrap()
+            .is_none()
+    );
 }
 
 #[tokio::test]
@@ -1205,19 +1209,21 @@ async fn test_multiple_epoch_sync() {
                     .unwrap(),
                 "222".as_bytes()
             );
-            assert!(hummock_storage_clone
-                .get(
-                    gen_key_from_str(VirtualNode::ZERO, "bb"),
-                    epoch2,
-                    ReadOptions {
-                        read_committed,
-                        cache_policy: CachePolicy::Fill(CacheHint::Normal),
-                        ..Default::default()
-                    }
-                )
-                .await
-                .unwrap()
-                .is_none());
+            assert!(
+                hummock_storage_clone
+                    .get(
+                        gen_key_from_str(VirtualNode::ZERO, "bb"),
+                        epoch2,
+                        ReadOptions {
+                            read_committed,
+                            cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                            ..Default::default()
+                        }
+                    )
+                    .await
+                    .unwrap()
+                    .is_none()
+            );
             assert_eq!(
                 hummock_storage_clone
                     .get(
@@ -1766,10 +1772,12 @@ async fn test_read_log_next_epoch() {
     let first_commit_epoch_next_epoch_future =
         hummock_storage.next_epoch(first_latest_commit_epoch, NextEpochOptions { table_id });
     pin_mut!(first_commit_epoch_next_epoch_future);
-    assert!(first_commit_epoch_next_epoch_future
-        .as_mut()
-        .now_or_never()
-        .is_none());
+    assert!(
+        first_commit_epoch_next_epoch_future
+            .as_mut()
+            .now_or_never()
+            .is_none()
+    );
     let second_commit_log_data = &test_log_data[test_log_data.len() - later_commit_epoch_count..];
     let commit_epoch = second_commit_log_data.last().unwrap().0;
     let res = hummock_storage

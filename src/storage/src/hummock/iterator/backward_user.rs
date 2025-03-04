@@ -19,10 +19,10 @@ use more_asserts::debug_assert_le;
 use risingwave_hummock_sdk::key::{FullKey, UserKey, UserKeyRange};
 use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch};
 
+use crate::hummock::HummockResult;
 use crate::hummock::iterator::{Backward, HummockIterator};
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::value::HummockValue;
-use crate::hummock::HummockResult;
 use crate::monitor::StoreLocalStatistic;
 
 /// [`BackwardUserIterator`] can be used by user directly.
@@ -310,21 +310,21 @@ mod tests {
     use std::ops::Bound::{self, *};
 
     use rand::distributions::Alphanumeric;
-    use rand::{thread_rng, Rng};
+    use rand::{Rng, thread_rng};
     use risingwave_common::catalog::TableId;
-    use risingwave_common::util::epoch::{test_epoch, EpochExt};
+    use risingwave_common::util::epoch::{EpochExt, test_epoch};
     use risingwave_hummock_sdk::key::prev_key;
     use risingwave_hummock_sdk::sstable_info::SstableInfo;
 
     use super::*;
+    use crate::hummock::iterator::MergeIterator;
     use crate::hummock::iterator::test_utils::{
-        default_builder_opt_for_test, gen_iterator_test_sstable_base,
+        TEST_KEYS_COUNT, default_builder_opt_for_test, gen_iterator_test_sstable_base,
         gen_iterator_test_sstable_from_kv_pair, gen_iterator_test_sstable_with_incr_epoch,
         iterator_test_bytes_key_of, iterator_test_bytes_key_of_epoch,
         iterator_test_bytes_user_key_of, iterator_test_user_key_of, iterator_test_value_of,
-        mock_sstable_store, TEST_KEYS_COUNT,
+        mock_sstable_store,
     };
-    use crate::hummock::iterator::MergeIterator;
     use crate::hummock::test_utils::gen_test_sstable;
     use crate::hummock::{BackwardSstableIterator, SstableStoreRef, TableHolder};
 

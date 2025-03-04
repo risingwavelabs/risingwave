@@ -15,19 +15,19 @@
 mod upstream_table_ext {
     use std::collections::HashMap;
 
-    use futures::future::{try_join_all, BoxFuture};
+    use futures::future::{BoxFuture, try_join_all};
     use futures::{TryFutureExt, TryStreamExt};
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::row::OwnedRow;
     use risingwave_common_rate_limit::RateLimit;
     use risingwave_storage::table::ChangeLogRow;
 
+    use crate::executor::StreamExecutorResult;
     use crate::executor::backfill::snapshot_backfill::consume_upstream::upstream_table_trait::UpstreamTable;
     use crate::executor::backfill::snapshot_backfill::vnode_stream::{
         ChangeLogRowStream, VnodeStream,
     };
     use crate::executor::backfill::utils::create_builder;
-    use crate::executor::StreamExecutorResult;
 
     pub(super) type UpstreamTableSnapshotStream<T: UpstreamTable> =
         VnodeStream<impl ChangeLogRowStream>;
@@ -100,7 +100,7 @@ mod upstream_table_ext {
 use std::collections::{BTreeMap, HashMap};
 use std::mem::take;
 use std::pin::Pin;
-use std::task::{ready, Context, Poll};
+use std::task::{Context, Poll, ready};
 
 use risingwave_common::array::StreamChunk;
 use risingwave_common::hash::VirtualNode;

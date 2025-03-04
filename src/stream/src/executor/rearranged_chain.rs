@@ -121,11 +121,10 @@ impl RearrangedChainExecutor {
 
             {
                 // 3. Rearrange stream, will yield the barriers polled from upstream to rearrange.
-                let rearranged_barrier =
-                    pin!(
-                        Self::rearrange_barrier(&mut upstream, upstream_tx, stop_rearrange_rx)
-                            .map(|result| result.map(RearrangedMessage::RearrangedBarrier)),
-                    );
+                let rearranged_barrier = pin!(
+                    Self::rearrange_barrier(&mut upstream, upstream_tx, stop_rearrange_rx)
+                        .map(|result| result.map(RearrangedMessage::RearrangedBarrier)),
+                );
 
                 // 4. Init the snapshot with reading epoch.
                 let snapshot = self.snapshot.execute_with_epoch(create_epoch.prev);
@@ -246,13 +245,13 @@ impl RearrangedChainExecutor {
         U: MessageStream + std::marker::Unpin,
     {
         loop {
-            use futures::future::{select, Either};
+            use futures::future::{Either, select};
 
             // Stop when `stop_rearrange_rx` is received.
             match select(&mut stop_rearrange_rx, upstream.next()).await {
                 Either::Left((Ok(_), _)) => break,
                 Either::Left((Err(_e), _)) => {
-                    return Err(StreamExecutorError::channel_closed("stop rearrange"))
+                    return Err(StreamExecutorError::channel_closed("stop rearrange"));
                 }
 
                 Either::Right((Some(msg), _)) => {

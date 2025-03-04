@@ -1163,7 +1163,7 @@ mod tests {
     }
 
     mod range_frame_tests {
-        use risingwave_common::types::{data_types, DataType, Interval};
+        use risingwave_common::types::{DataType, Interval, data_types};
         use risingwave_common::util::sort_util::OrderType;
         use risingwave_expr::window_function::RangeFrameOffset;
 

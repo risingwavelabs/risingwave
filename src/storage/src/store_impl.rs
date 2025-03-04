@@ -21,8 +21,8 @@ use enum_as_inner::EnumAsInner;
 use foyer::{
     DirectFsDeviceOptions, Engine, HybridCacheBuilder, LargeEngineOptions, RateLimitPicker,
 };
-use futures::future::BoxFuture;
 use futures::FutureExt;
+use futures::future::BoxFuture;
 use mixtrics::registry::prometheus::PrometheusMetricsRegistry;
 use risingwave_common::catalog::TableId;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
@@ -30,6 +30,7 @@ use risingwave_common_service::RpcNotificationClient;
 use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId, SyncResult};
 use risingwave_object_store::object::build_remote_object_store;
 
+use crate::StateStore;
 use crate::compaction_catalog_manager::{CompactionCatalogManager, RemoteTableAccessor};
 use crate::error::StorageResult;
 use crate::hummock::hummock_meta_client::MonitoredHummockMetaClient;
@@ -37,14 +38,13 @@ use crate::hummock::{
     Block, BlockCacheEventListener, HummockError, HummockStorage, RecentFilter, Sstable,
     SstableBlockIndex, SstableStore, SstableStoreConfig,
 };
-use crate::memory::sled::SledStateStore;
 use crate::memory::MemoryStateStore;
+use crate::memory::sled::SledStateStore;
 use crate::monitor::{
     CompactorMetrics, HummockStateStoreMetrics, MonitoredStateStore as Monitored,
     MonitoredStorageMetrics, ObjectStoreMetrics,
 };
 use crate::opts::StorageOpts;
-use crate::StateStore;
 
 static FOYER_METRICS_REGISTRY: LazyLock<Box<PrometheusMetricsRegistry>> = LazyLock::new(|| {
     Box::new(PrometheusMetricsRegistry::new(
@@ -71,8 +71,8 @@ mod opaque_type {
         may_dynamic_dispatch(state_store)
     }
 }
-use opaque_type::{hummock, in_memory, sled};
 pub use opaque_type::{HummockStorageType, MemoryStateStoreType, SledStateStoreType};
+use opaque_type::{hummock, in_memory, sled};
 
 /// The type erased [`StateStore`].
 #[derive(Clone, EnumAsInner)]
@@ -241,8 +241,8 @@ pub mod verify {
     use bytes::Bytes;
     use risingwave_common::bitmap::Bitmap;
     use risingwave_common::hash::VirtualNode;
-    use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
     use risingwave_hummock_sdk::HummockReadEpoch;
+    use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
     use tracing::log::warn;
 
     use crate::error::StorageResult;
@@ -539,12 +539,12 @@ pub mod verify {
             ret
         }
 
-        fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
-            let ret = self.actual.update_vnode_bitmap(vnodes.clone());
+        async fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> StorageResult<Arc<Bitmap>> {
+            let ret = self.actual.update_vnode_bitmap(vnodes.clone()).await?;
             if let Some(expected) = &mut self.expected {
-                assert_eq!(ret, expected.update_vnode_bitmap(vnodes));
+                assert_eq!(ret, expected.update_vnode_bitmap(vnodes).await?);
             }
-            ret
+            Ok(ret)
         }
 
         fn get_table_watermark(&self, vnode: VirtualNode) -> Option<Bytes> {
@@ -765,12 +765,16 @@ impl StateStoreImpl {
             }
 
             "in_memory" | "in-memory" => {
-                tracing::warn!("In-memory state store should never be used in end-to-end benchmarks or production environment. Scaling and recovery are not supported.");
+                tracing::warn!(
+                    "In-memory state store should never be used in end-to-end benchmarks or production environment. Scaling and recovery are not supported."
+                );
                 StateStoreImpl::shared_in_memory_store(storage_metrics.clone())
             }
 
             sled if sled.starts_with("sled://") => {
-                tracing::warn!("sled state store should never be used in end-to-end benchmarks or production environment. Scaling and recovery are not supported.");
+                tracing::warn!(
+                    "sled state store should never be used in end-to-end benchmarks or production environment. Scaling and recovery are not supported."
+                );
                 let path = sled.strip_prefix("sled://").unwrap();
                 StateStoreImpl::sled(SledStateStore::new(path), storage_metrics.clone())
             }
@@ -827,8 +831,8 @@ mod dyn_state_store {
     use bytes::Bytes;
     use risingwave_common::bitmap::Bitmap;
     use risingwave_common::hash::VirtualNode;
-    use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
     use risingwave_hummock_sdk::HummockReadEpoch;
+    use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
 
     use crate::error::StorageResult;
     use crate::hummock::HummockStorage;
@@ -997,7 +1001,7 @@ mod dyn_state_store {
 
         fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions);
 
-        fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap>;
+        async fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> StorageResult<Arc<Bitmap>>;
 
         fn get_table_watermark(&self, vnode: VirtualNode) -> Option<Bytes>;
     }
@@ -1071,8 +1075,8 @@ mod dyn_state_store {
             self.seal_current_epoch(next_epoch, opts)
         }
 
-        fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
-            self.update_vnode_bitmap(vnodes)
+        async fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> StorageResult<Arc<Bitmap>> {
+            self.update_vnode_bitmap(vnodes).await
         }
 
         fn get_table_watermark(&self, vnode: VirtualNode) -> Option<Bytes> {
@@ -1159,8 +1163,8 @@ mod dyn_state_store {
             (*self.0).seal_current_epoch(next_epoch, opts)
         }
 
-        fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
-            (*self.0).update_vnode_bitmap(vnodes)
+        async fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> StorageResult<Arc<Bitmap>> {
+            (*self.0).update_vnode_bitmap(vnodes).await
         }
     }
 

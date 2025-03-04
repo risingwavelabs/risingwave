@@ -18,9 +18,9 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
 use serde_json::{Map, Value};
 
+use super::super::SinkError;
 use super::super::encoder::template::TemplateEncoder;
 use super::super::encoder::{JsonEncoder, RowEncoder};
-use super::super::SinkError;
 use crate::sink::Result;
 
 pub struct ElasticSearchOpenSearchFormatter {

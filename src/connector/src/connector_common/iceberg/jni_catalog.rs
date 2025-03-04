@@ -28,11 +28,11 @@ use iceberg::{
     TableUpdate,
 };
 use itertools::Itertools;
-use jni::objects::{GlobalRef, JObject};
 use jni::JavaVM;
+use jni::objects::{GlobalRef, JObject};
 use risingwave_common::bail;
 use risingwave_jni_core::call_method;
-use risingwave_jni_core::jvm_runtime::{execute_with_jni_env, jobj_to_str, JVM};
+use risingwave_jni_core::jvm_runtime::{JVM, execute_with_jni_env, jobj_to_str};
 use serde::{Deserialize, Serialize};
 use thiserror_ext::AsReport;
 

@@ -18,10 +18,10 @@ use std::time::Duration;
 use compact_task::PbTaskStatus;
 use futures::StreamExt;
 use itertools::Itertools;
-use risingwave_common::catalog::{TableId, SYS_CATALOG_START_ID};
+use risingwave_common::catalog::{SYS_CATALOG_START_ID, TableId};
+use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::version::HummockVersionDelta;
-use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_meta::backup_restore::BackupManagerRef;
 use risingwave_meta::manager::MetadataManager;
 use risingwave_pb::hummock::get_compaction_score_response::PickerInfo;
@@ -30,9 +30,9 @@ use risingwave_pb::hummock::subscribe_compaction_event_request::Event as Request
 use risingwave_pb::hummock::*;
 use tonic::{Request, Response, Status, Streaming};
 
-use crate::hummock::compaction::selector::ManualCompactionOption;
-use crate::hummock::HummockManagerRef;
 use crate::RwReceiverStream;
+use crate::hummock::HummockManagerRef;
+use crate::hummock::compaction::selector::ManualCompactionOption;
 
 pub struct HummockServiceImpl {
     hummock_manager: HummockManagerRef,
@@ -214,10 +214,12 @@ impl HummockManagerService for HummockServiceImpl {
             }
         }
 
-        assert!(option
-            .internal_table_id
-            .iter()
-            .all(|table_id| *table_id < SYS_CATALOG_START_ID as u32),);
+        assert!(
+            option
+                .internal_table_id
+                .iter()
+                .all(|table_id| *table_id < SYS_CATALOG_START_ID as u32),
+        );
 
         tracing::info!(
             "Try trigger_manual_compaction compaction_group_id {} option {:?}",
@@ -417,7 +419,7 @@ impl HummockManagerService for HummockServiceImpl {
                 _ => {
                     return Err(Status::invalid_argument(
                         "the first message must be `Register`",
-                    ))
+                    ));
                 }
             }
         };

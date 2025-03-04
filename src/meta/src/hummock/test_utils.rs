@@ -34,14 +34,14 @@ use risingwave_hummock_sdk::{
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::common::worker_node::Property;
 use risingwave_pb::common::{HostAddress, WorkerType};
-use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::CompactionConfig;
+use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_rpc_client::HummockMetaClient;
 
 use crate::controller::catalog::CatalogController;
 use crate::controller::cluster::{ClusterController, ClusterControllerRef};
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
-use crate::hummock::compaction::selector::{default_compaction_selector, LocalSelectorStatistic};
+use crate::hummock::compaction::selector::{LocalSelectorStatistic, default_compaction_selector};
 use crate::hummock::compaction::{CompactionDeveloperConfig, CompactionSelectorContext};
 use crate::hummock::level_handler::LevelHandler;
 pub use crate::hummock::manager::CommitEpochInfo;

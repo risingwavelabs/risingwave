@@ -18,7 +18,7 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::config::DefaultParallelism;
@@ -30,11 +30,11 @@ use risingwave_common::util::stream_graph_visitor::{
     visit_stream_node, visit_stream_node_cont_mut,
 };
 use risingwave_common::{bail, bail_not_implemented, hash, must_match};
+use risingwave_connector::WithOptionsSecResolved;
 use risingwave_connector::connector_common::validate_connection;
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, UPSTREAM_SOURCE_KEY,
 };
-use risingwave_connector::WithOptionsSecResolved;
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::{
     ConnectionId, DatabaseId, FunctionId, IndexId, ObjectId, SchemaId, SecretId, SinkId, SourceId,
@@ -46,11 +46,10 @@ use risingwave_pb::catalog::{
 };
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::{
-    alter_name_request, alter_set_schema_request, alter_swap_rename_request, DdlProgress,
-    TableJobType, WaitVersion,
+    DdlProgress, TableJobType, WaitVersion, alter_name_request, alter_set_schema_request,
+    alter_swap_rename_request,
 };
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
-use risingwave_pb::meta::table_fragments::{Fragment, PbFragment};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     Dispatcher, DispatcherType, FragmentTypeFlag, MergeNode, PbStreamFragmentGraph,
@@ -68,15 +67,15 @@ use crate::controller::cluster::StreamingClusterInfo;
 use crate::controller::streaming_job::SinkIntoTableContext;
 use crate::error::{bail_invalid_parameter, bail_unavailable};
 use crate::manager::{
-    LocalNotification, MetaSrvEnv, MetadataManager, NotificationVersion, StreamingJob,
-    StreamingJobType, IGNORED_NOTIFICATION_VERSION,
+    IGNORED_NOTIFICATION_VERSION, LocalNotification, MetaSrvEnv, MetadataManager,
+    NotificationVersion, StreamingJob, StreamingJobType,
 };
-use crate::model::{StreamContext, StreamJobFragments, TableParallelism};
+use crate::model::{Fragment, StreamContext, StreamJobFragments, TableParallelism};
 use crate::stream::{
-    create_source_worker, validate_sink, ActorGraphBuildResult, ActorGraphBuilder,
-    CompleteStreamFragmentGraph, CreateStreamingJobContext, CreateStreamingJobOption,
-    GlobalStreamManagerRef, JobRescheduleTarget, ReplaceStreamJobContext, SourceChange,
-    SourceManagerRef, StreamFragmentGraph,
+    ActorGraphBuildResult, ActorGraphBuilder, CompleteStreamFragmentGraph,
+    CreateStreamingJobContext, CreateStreamingJobOption, GlobalStreamManagerRef,
+    JobRescheduleTarget, ReplaceStreamJobContext, SourceChange, SourceManagerRef,
+    StreamFragmentGraph, create_source_worker, validate_sink,
 };
 use crate::telemetry::report_event;
 use crate::{MetaError, MetaResult};
@@ -394,7 +393,7 @@ impl DdlController {
     #[tracing::instrument(skip(self), level = "debug")]
     pub async fn reschedule_streaming_job(
         &self,
-        table_id: u32,
+        job_id: u32,
         target: JobRescheduleTarget,
         mut deferred: bool,
     ) -> MetaResult<()> {
@@ -407,7 +406,7 @@ impl DdlController {
         }
 
         self.stream_manager
-            .reschedule_streaming_job(table_id, target, deferred)
+            .reschedule_streaming_job(job_id, target, deferred)
             .await
     }
 
@@ -656,20 +655,17 @@ impl DdlController {
             "Stream scan fragment should have only one actor"
         );
         let mut found_cdc_scan = false;
-        match &stream_scan_fragment.nodes.as_ref().unwrap().node_body {
+        match &stream_scan_fragment.nodes.node_body {
             Some(NodeBody::StreamCdcScan(_)) => {
-                if Self::validate_cdc_table_inner(
-                    &stream_scan_fragment.nodes.as_ref().unwrap().node_body,
-                    table.id,
-                )
-                .await?
+                if Self::validate_cdc_table_inner(&stream_scan_fragment.nodes.node_body, table.id)
+                    .await?
                 {
                     found_cdc_scan = true;
                 }
             }
             // When there's generated columns, the cdc scan node is wrapped in a project node
             Some(NodeBody::Project(_)) => {
-                for input in &stream_scan_fragment.nodes.as_ref().unwrap().input {
+                for input in &stream_scan_fragment.nodes.input {
                     if Self::validate_cdc_table_inner(&input.node_body, table.id).await? {
                         found_cdc_scan = true;
                     }
@@ -786,9 +782,9 @@ impl DdlController {
 
         // check if the union fragment is fully assigned.
         for fragment in stream_job_fragments.fragments.values() {
-            if let Some(node) = &fragment.nodes {
+            {
                 for actor in &fragment.actors {
-                    visit_stream_node(node, |node| {
+                    visit_stream_node(&fragment.nodes, |node| {
                         if let NodeBody::Merge(merge_node) = node {
                             let upstream_fragment_id = merge_node.upstream_fragment_id;
                             if let Some(external_upstream_fragment_dispatchers) =
@@ -801,7 +797,10 @@ impl DdlController {
                                         .filter(|dispatcher| {
                                             dispatcher.downstream_actor_id.contains(&actor.actor_id)
                                         });
-                                assert!(upstream_dispatchers_to_actor.next().is_some(), "All the mergers for the union should have been fully assigned beforehand.");
+                                assert!(
+                                    upstream_dispatchers_to_actor.next().is_some(),
+                                    "All the mergers for the union should have been fully assigned beforehand."
+                                );
                             } else {
                                 let mut upstream_dispatchers_to_actor = stream_job_fragments
                                     .fragments
@@ -813,7 +812,10 @@ impl DdlController {
                                     .filter(|dispatcher| {
                                         dispatcher.downstream_actor_id.contains(&actor.actor_id)
                                     });
-                                assert!(upstream_dispatchers_to_actor.next().is_some(), "All the mergers for the union should have been fully assigned beforehand.");
+                                assert!(
+                                    upstream_dispatchers_to_actor.next().is_some(),
+                                    "All the mergers for the union should have been fully assigned beforehand."
+                                );
                             }
                         }
                     });
@@ -826,7 +828,7 @@ impl DdlController {
 
     pub(crate) fn inject_replace_table_plan_for_sink(
         sink_id: u32,
-        sink_fragment: &PbFragment,
+        sink_fragment: &Fragment,
         table: &Table,
         replace_table_ctx: &mut ReplaceStreamJobContext,
         union_fragment: &mut Fragment,
@@ -838,7 +840,7 @@ impl DdlController {
             .map(|actor| actor.actor_id)
             .collect_vec();
 
-        let sink_fields = sink_fragment.nodes.as_ref().unwrap().fields.clone();
+        let sink_fields = sink_fragment.nodes.fields.clone();
 
         let output_indices = sink_fields
             .iter()
@@ -848,7 +850,7 @@ impl DdlController {
 
         let dist_key_indices = table.distribution_key.iter().map(|i| *i as _).collect_vec();
 
-        let mapping = match union_fragment.get_distribution_type().unwrap() {
+        let mapping = match union_fragment.distribution_type {
             FragmentDistributionType::Unspecified => unreachable!(),
             FragmentDistributionType::Single => None,
             FragmentDistributionType::Hash => {
@@ -892,9 +894,9 @@ impl DdlController {
 
         let upstream_fragment_id = sink_fragment.fragment_id;
 
-        if let Some(node) = &mut union_fragment.nodes {
+        {
             {
-                visit_stream_node_cont_mut(node, |node| {
+                visit_stream_node_cont_mut(&mut union_fragment.nodes, |node| {
                     if let Some(NodeBody::Union(_)) = &mut node.node_body {
                         for input_project_node in &mut node.input {
                             if let Some(NodeBody::Project(_)) = &mut input_project_node.node_body {
@@ -941,10 +943,6 @@ impl DdlController {
                 });
             }
         }
-
-        union_fragment
-            .upstream_fragment_ids
-            .push(upstream_fragment_id);
     }
 
     /// For [`CreateType::Foreground`], the function will only return after backfilling finishes
@@ -1062,7 +1060,10 @@ impl DdlController {
 
         let affected_table_replace_info = match affected_table_replace_info {
             Some(replace_table_info) => {
-                assert!(specific_resource_group.is_none(), "specific_resource_group is not supported for replace table (alter column or sink into table)");
+                assert!(
+                    specific_resource_group.is_none(),
+                    "specific_resource_group is not supported for replace table (alter column or sink into table)"
+                );
 
                 let ReplaceStreamJobInfo {
                     mut streaming_job,
@@ -1698,6 +1699,14 @@ impl DdlController {
             resource_group.clone(),
         )?;
 
+        let parallelism = self
+            .env
+            .system_params_reader()
+            .await
+            .adaptive_parallelism_strategy()
+            .compute_target_parallelism(parallelism.get());
+
+        let parallelism = NonZeroUsize::new(parallelism).expect("parallelism must be positive");
         let actor_graph_builder = ActorGraphBuilder::new(
             id,
             resource_group,

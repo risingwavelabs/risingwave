@@ -16,38 +16,38 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::LazyLock;
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use either::Either;
 use external_schema::debezium::extract_debezium_avro_table_pk_columns;
-use external_schema::iceberg::check_iceberg_source;
 use external_schema::nexmark::check_nexmark_schema;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap, hashset};
 use pgwire::pg_response::{PgResponse, StatementType};
 use rand::Rng;
-use risingwave_common::array::arrow::{arrow_schema_iceberg, IcebergArrowConvert};
+use risingwave_common::array::arrow::{IcebergArrowConvert, arrow_schema_iceberg};
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{
-    debug_assert_column_ids_distinct, ColumnCatalog, ColumnDesc, ColumnId, Schema, TableId,
-    INITIAL_SOURCE_VERSION_ID, KAFKA_TIMESTAMP_COLUMN_NAME, ROW_ID_COLUMN_NAME,
+    ColumnCatalog, ColumnDesc, ColumnId, INITIAL_SOURCE_VERSION_ID, KAFKA_TIMESTAMP_COLUMN_NAME,
+    ROW_ID_COLUMN_NAME, TableId, debug_assert_column_ids_distinct,
 };
 use risingwave_common::license::Feature;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_connector::WithPropertiesExt;
 use risingwave_connector::parser::additional_columns::{
     build_additional_column_desc, get_supported_additional_columns,
     source_add_partition_offset_cols,
 };
 use risingwave_connector::parser::{
-    fetch_json_schema_and_map_to_columns, AvroParserConfig, DebeziumAvroParserConfig,
-    ProtobufParserConfig, SchemaLocation, SpecificParserConfig, TimestamptzHandling,
-    DEBEZIUM_IGNORE_KEY,
-};
-use risingwave_connector::schema::schema_registry::{
-    name_strategy_from_str, SchemaRegistryAuth, SCHEMA_REGISTRY_PASSWORD, SCHEMA_REGISTRY_USERNAME,
+    AvroParserConfig, DEBEZIUM_IGNORE_KEY, DebeziumAvroParserConfig, ProtobufParserConfig,
+    SchemaLocation, SpecificParserConfig, TimestamptzHandling,
+    fetch_json_schema_and_map_to_columns,
 };
 use risingwave_connector::schema::AWS_GLUE_SCHEMA_ARN_KEY;
+use risingwave_connector::schema::schema_registry::{
+    SCHEMA_REGISTRY_PASSWORD, SCHEMA_REGISTRY_USERNAME, SchemaRegistryAuth, name_strategy_from_str,
+};
 use risingwave_connector::source::cdc::{
     CDC_AUTO_SCHEMA_CHANGE_KEY, CDC_SHARING_MODE_KEY, CDC_SNAPSHOT_BACKFILL, CDC_SNAPSHOT_MODE_KEY,
     CDC_TRANSACTIONAL_KEY, CDC_WAIT_FOR_STREAMING_START_TIMEOUT, CITUS_CDC_CONNECTOR,
@@ -55,15 +55,14 @@ use risingwave_connector::source::cdc::{
 };
 use risingwave_connector::source::datagen::DATAGEN_CONNECTOR;
 use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
-use risingwave_connector::source::nexmark::source::{get_event_data_types_with_names, EventType};
+use risingwave_connector::source::nexmark::source::{EventType, get_event_data_types_with_names};
 use risingwave_connector::source::test_source::TEST_CONNECTOR;
 use risingwave_connector::source::{
-    ConnectorProperties, AZBLOB_CONNECTOR, GCS_CONNECTOR, GOOGLE_PUBSUB_CONNECTOR, KAFKA_CONNECTOR,
+    AZBLOB_CONNECTOR, ConnectorProperties, GCS_CONNECTOR, GOOGLE_PUBSUB_CONNECTOR, KAFKA_CONNECTOR,
     KINESIS_CONNECTOR, LEGACY_S3_CONNECTOR, MQTT_CONNECTOR, NATS_CONNECTOR, NEXMARK_CONNECTOR,
     OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR, PULSAR_CONNECTOR,
 };
 pub use risingwave_connector::source::{UPSTREAM_SOURCE_KEY, WEBHOOK_CONNECTOR};
-use risingwave_connector::WithPropertiesExt;
 use risingwave_pb::catalog::connection_params::PbConnectionType;
 use risingwave_pb::catalog::{PbSchemaRegistryNameStrategy, StreamSourceInfo, WatermarkDesc};
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
@@ -71,36 +70,36 @@ use risingwave_pb::plan_common::{EncodeType, FormatType};
 use risingwave_pb::stream_plan::PbStreamFragmentGraph;
 use risingwave_pb::telemetry::TelemetryDatabaseObject;
 use risingwave_sqlparser::ast::{
-    get_delimiter, AstString, ColumnDef, CreateSourceStatement, Encode, Format,
-    FormatEncodeOptions, ObjectName, ProtobufSchema, SourceWatermark, TableConstraint,
+    AstString, ColumnDef, CreateSourceStatement, Encode, Format, FormatEncodeOptions, ObjectName,
+    ProtobufSchema, SourceWatermark, TableConstraint, get_delimiter,
 };
 use risingwave_sqlparser::parser::{IncludeOption, IncludeOptionItem};
 use thiserror_ext::AsReport;
 
 use super::RwPgResponse;
 use crate::binder::Binder;
-use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::CatalogError;
+use crate::catalog::source_catalog::SourceCatalog;
 use crate::error::ErrorCode::{self, Deprecated, InvalidInputSyntax, NotSupported, ProtocolError};
 use crate::error::{Result, RwError};
 use crate::expr::Expr;
+use crate::handler::HandlerArgs;
 use crate::handler::create_table::{
-    bind_pk_and_row_id_on_relation, bind_sql_column_constraints, bind_sql_columns,
-    bind_sql_pk_names, bind_table_constraints, ColumnIdGenerator,
+    ColumnIdGenerator, bind_pk_and_row_id_on_relation, bind_sql_column_constraints,
+    bind_sql_columns, bind_sql_pk_names, bind_table_constraints,
 };
 use crate::handler::util::{
-    check_connector_match_connection_type, ensure_connection_type_allowed, SourceSchemaCompatExt,
+    SourceSchemaCompatExt, check_connector_match_connection_type, ensure_connection_type_allowed,
 };
-use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::generic::SourceNodeKind;
 use crate::optimizer::plan_node::{LogicalSource, ToStream, ToStreamContext};
-use crate::session::current::notice_to_user;
 use crate::session::SessionImpl;
+use crate::session::current::notice_to_user;
 use crate::utils::{
-    resolve_connection_ref_and_secret_ref, resolve_privatelink_in_with_option,
-    resolve_secret_ref_in_with_options, OverwriteOptions,
+    OverwriteOptions, resolve_connection_ref_and_secret_ref, resolve_privatelink_in_with_option,
+    resolve_secret_ref_in_with_options,
 };
-use crate::{bind_data_type, build_graph, OptimizerContext, WithOptions, WithOptionsSecResolved};
+use crate::{OptimizerContext, WithOptions, WithOptionsSecResolved, bind_data_type, build_graph};
 
 mod external_schema;
 pub use external_schema::{
@@ -400,15 +399,22 @@ pub(crate) fn bind_all_columns(
 }
 
 /// TODO: perhaps put the hint in notice is better. The error message format might be not that reliable.
-fn hint_upsert(encode: &Encode) -> String {
+fn hint_format_encode(format_encode: &FormatEncodeOptions) -> String {
     format!(
-        r#"Hint: For FORMAT UPSERT ENCODE {encode:}, INCLUDE KEY must be specified and the key column must be used as primary key.
+        r#"Hint: For FORMAT {0} ENCODE {1}, INCLUDE KEY must be specified and the key column must be used as primary key.
 example:
     CREATE TABLE <table_name> ( PRIMARY KEY ([rw_key | <key_name>]) )
     INCLUDE KEY [AS <key_name>]
     WITH (...)
-    FORMAT UPSERT ENCODE {encode:} (...)
-"#
+    FORMAT {0} ENCODE {1}{2}
+"#,
+        format_encode.format,
+        format_encode.row_encode,
+        if format_encode.row_encode == Encode::Json || format_encode.row_encode == Encode::Bytes {
+            "".to_owned()
+        } else {
+            " (...)".to_owned()
+        }
     )
 }
 
@@ -454,10 +460,7 @@ pub(crate) async fn bind_source_pk(
 
         // For all Upsert formats, we only accept one and only key column as primary key.
         // Additional KEY columns must be set in this case and must be primary key.
-        (
-            Format::Upsert,
-            encode @ Encode::Json | encode @ Encode::Avro | encode @ Encode::Protobuf,
-        ) => {
+        (Format::Upsert, Encode::Json | Encode::Avro | Encode::Protobuf) => {
             if let Some(ref key_column_name) = include_key_column_name
                 && sql_defined_pk
             {
@@ -471,7 +474,7 @@ pub(crate) async fn bind_source_pk(
                     return Err(RwError::from(ProtocolError(format!(
                         "Only \"{}\" can be used as primary key\n\n{}",
                         key_column_name,
-                        hint_upsert(encode)
+                        hint_format_encode(format_encode)
                     ))));
                 }
                 sql_defined_pk_names
@@ -481,12 +484,12 @@ pub(crate) async fn bind_source_pk(
                     Err(RwError::from(ProtocolError(format!(
                         "Primary key must be specified to {}\n\n{}",
                         include_key_column_name,
-                        hint_upsert(encode)
+                        hint_format_encode(format_encode)
                     ))))
                 } else {
                     Err(RwError::from(ProtocolError(format!(
                         "INCLUDE KEY clause not set\n\n{}",
-                        hint_upsert(encode)
+                        hint_format_encode(format_encode)
                     ))))
                 };
             }
@@ -620,7 +623,7 @@ pub(super) fn bind_source_watermark(
 ///
 /// One should only call this function after all properties of all columns are resolved, like
 /// generated column descriptors.
-pub(super) async fn check_format_encode(
+pub(super) fn check_format_encode(
     props: &WithOptionsSecResolved,
     row_id_index: Option<usize>,
     columns: &[ColumnCatalog],
@@ -631,10 +634,6 @@ pub(super) async fn check_format_encode(
 
     if connector == NEXMARK_CONNECTOR {
         check_nexmark_schema(props, row_id_index, columns)
-    } else if connector == ICEBERG_CONNECTOR {
-        Ok(check_iceberg_source(props, columns)
-            .await
-            .map_err(|err| ProtocolError(err.to_report_string()))?)
     } else {
         Ok(())
     }
@@ -752,10 +751,15 @@ pub async fn bind_create_source_or_table_with_connector(
     }
     if is_create_source {
         match format_encode.format {
-            Format::Upsert => {
+            Format::Upsert
+            | Format::Debezium
+            | Format::DebeziumMongo
+            | Format::Maxwell
+            | Format::Canal => {
                 return Err(ErrorCode::BindError(format!(
-                    "can't CREATE SOURCE with FORMAT UPSERT\n\nHint: use CREATE TABLE instead\n\n{}",
-                    hint_upsert(&format_encode.row_encode)
+                    "can't CREATE SOURCE with FORMAT {}.\n\nHint: use CREATE TABLE instead\n\n{}",
+                    format_encode.format,
+                    hint_format_encode(&format_encode)
                 ))
                 .into());
             }
@@ -892,7 +896,7 @@ pub async fn bind_create_source_or_table_with_connector(
         sql_columns_defs.to_vec(),
         &pk_col_ids,
     )?;
-    check_format_encode(&with_properties, row_id_index, &columns).await?;
+    check_format_encode(&with_properties, row_id_index, &columns)?;
 
     let definition = handler_args.normalized_sql.clone();
 
@@ -1033,7 +1037,7 @@ pub mod tests {
 
     use crate::catalog::root_catalog::SchemaPath;
     use crate::catalog::source_catalog::SourceCatalog;
-    use crate::test_utils::{create_proto_file, LocalFrontend, PROTO_FILE_DATA};
+    use crate::test_utils::{LocalFrontend, PROTO_FILE_DATA, create_proto_file};
 
     const GET_COLUMN_FROM_CATALOG: fn(&Arc<SourceCatalog>) -> HashMap<&str, DataType> =
         |catalog: &Arc<SourceCatalog>| -> HashMap<&str, DataType> {

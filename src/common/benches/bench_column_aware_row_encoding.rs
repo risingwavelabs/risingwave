@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use rand::{Rng, SeedableRng};
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::row::OwnedRow;

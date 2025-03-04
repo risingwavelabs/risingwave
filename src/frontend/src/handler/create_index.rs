@@ -28,6 +28,7 @@ use risingwave_sqlparser::ast;
 use risingwave_sqlparser::ast::{Ident, ObjectName, OrderByExpr};
 
 use super::RwPgResponse;
+use crate::TableCatalog;
 use crate::binder::Binder;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::{DatabaseId, SchemaId};
@@ -41,7 +42,6 @@ use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot}
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
-use crate::TableCatalog;
 
 pub(crate) fn resolve_index_schema(
     session: &SessionImpl,
@@ -88,7 +88,7 @@ pub(crate) fn gen_create_index_plan(
     }
 
     let mut binder = Binder::new_for_stream(session);
-    binder.bind_table(Some(&schema_name), &table_name, None)?;
+    binder.bind_table(Some(&schema_name), &table_name)?;
 
     let mut index_columns_ordered_expr = vec![];
     let mut include_columns_expr = vec![];
@@ -116,7 +116,7 @@ pub(crate) fn gen_create_index_plan(
                     "index columns should be columns or expressions".into(),
                     "use columns or expressions instead".into(),
                 )
-                .into())
+                .into());
             }
         }
         index_columns_ordered_expr.push((expr_impl, order_type));

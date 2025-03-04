@@ -353,7 +353,7 @@ impl Sink for RedisSink {
                 _ => {
                     return Err(SinkError::Config(anyhow!(
                         "`{REDIS_VALUE_TYPE}` must be set to `{REDIS_VALUE_TYPE_STRING}` or `{REDIS_VALUE_TYPE_GEO}`"
-                    )))
+                    )));
                 }
             }
         }

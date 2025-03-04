@@ -16,11 +16,11 @@ use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
+use futures::TryFutureExt;
 use futures::future::{FusedFuture, IntoFuture, TryFuture};
 use futures::stream::{
     Fuse, FuturesOrdered, IntoStream, Stream, StreamExt, TryStream, TryStreamExt,
 };
-use futures::TryFutureExt;
 use pin_project_lite::pin_project;
 
 pub trait MaybeFence {

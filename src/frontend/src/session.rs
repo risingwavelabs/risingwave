@@ -47,7 +47,7 @@ use risingwave_common::catalog::{
     DEFAULT_DATABASE_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID,
 };
 use risingwave_common::config::{
-    load_config, BatchConfig, MetaConfig, MetricLevel, StreamingConfig,
+    BatchConfig, MetaConfig, MetricLevel, StreamingConfig, load_config,
 };
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::secret::LocalSecretManager;
@@ -67,9 +67,9 @@ use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_heap_profiling::HeapProfiler;
 use risingwave_common_service::{MetricsManager, ObserverManager};
-use risingwave_connector::source::monitor::{SourceMetrics, GLOBAL_SOURCE_METRICS};
-use risingwave_pb::common::worker_node::Property as AddWorkerNodeProperty;
+use risingwave_connector::source::monitor::{GLOBAL_SOURCE_METRICS, SourceMetrics};
 use risingwave_pb::common::WorkerType;
+use risingwave_pb::common::worker_node::Property as AddWorkerNodeProperty;
 use risingwave_pb::frontend_service::frontend_service_server::FrontendServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::user::auth_info::EncryptionType;
@@ -95,18 +95,18 @@ use crate::catalog::secret_catalog::SecretCatalog;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::subscription_catalog::SubscriptionCatalog;
 use crate::catalog::{
-    check_schema_writable, CatalogError, DatabaseId, OwnedByUserCatalog, SchemaId, TableId,
+    CatalogError, DatabaseId, OwnedByUserCatalog, SchemaId, TableId, check_schema_writable,
 };
 use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::describe::infer_describe;
 use crate::handler::extended_handle::{
-    handle_bind, handle_execute, handle_parse, Portal, PrepareStatement,
+    Portal, PrepareStatement, handle_bind, handle_execute, handle_parse,
 };
 use crate::handler::privilege::ObjectCheckItem;
 use crate::handler::show::{infer_show_create_object, infer_show_object};
 use crate::handler::util::to_pg_field;
 use crate::handler::variable::infer_show_variable;
-use crate::handler::{handle, RwPgResponse};
+use crate::handler::{RwPgResponse, handle};
 use crate::health_service::HealthServiceImpl;
 use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
 use crate::monitor::{CursorMetrics, FrontendMetrics, GLOBAL_FRONTEND_METRICS};
@@ -114,14 +114,14 @@ use crate::observer::FrontendObserverNode;
 use crate::rpc::FrontendServiceImpl;
 use crate::scheduler::streaming_manager::{StreamingJobTracker, StreamingJobTrackerRef};
 use crate::scheduler::{
-    DistributedQueryMetrics, HummockSnapshotManager, HummockSnapshotManagerRef, QueryManager,
-    GLOBAL_DISTRIBUTED_QUERY_METRICS,
+    DistributedQueryMetrics, GLOBAL_DISTRIBUTED_QUERY_METRICS, HummockSnapshotManager,
+    HummockSnapshotManagerRef, QueryManager,
 };
 use crate::telemetry::FrontendTelemetryCreator;
+use crate::user::UserId;
 use crate::user::user_authentication::md5_hash_with_salt;
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterImpl};
-use crate::user::UserId;
 use crate::{FrontendOpts, PgResponseStream, TableCatalog};
 
 pub(crate) mod current;
@@ -1444,7 +1444,7 @@ impl SessionManagerImpl {
                 )));
             }
             let has_privilege =
-                user.check_privilege(&Object::DatabaseId(database_id), AclMode::Connect);
+                user.has_privilege(&Object::DatabaseId(database_id), AclMode::Connect);
             if !user.is_super && !has_privilege {
                 return Err(Box::new(Error::new(
                     ErrorKind::PermissionDenied,

@@ -24,7 +24,7 @@ use risingwave_common::util::epoch::Epoch;
 use tokio::sync::oneshot;
 
 use crate::error::{DmlError, Result};
-use crate::txn_channel::{txn_channel, Receiver, Sender};
+use crate::txn_channel::{Receiver, Sender, txn_channel};
 
 pub type TableDmlHandleRef = Arc<TableDmlHandle>;
 

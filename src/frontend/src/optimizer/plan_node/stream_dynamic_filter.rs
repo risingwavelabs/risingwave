@@ -14,20 +14,20 @@
 
 use pretty_xmlish::{Pretty, XmlNode};
 pub use risingwave_pb::expr::expr_node::Type as ExprType;
-use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::DynamicFilterNode;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 
 use super::generic::{DynamicFilter, GenericPlanNode};
 use super::stream::prelude::*;
 use super::utils::{
-    childless_record, column_names_pretty, plan_node_name, watermark_pretty, Distill,
+    Distill, childless_record, column_names_pretty, plan_node_name, watermark_pretty,
 };
-use super::{generic, ExprRewritable};
+use super::{ExprRewritable, generic};
 use crate::expr::Expr;
+use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{PlanBase, PlanTreeNodeBinary, StreamNode};
 use crate::optimizer::property::{MonotonicityMap, WatermarkColumns};
-use crate::optimizer::PlanRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

@@ -25,8 +25,8 @@ use risingwave_pb::common::worker_node::Property;
 use risingwave_pb::common::{
     PbColumnOrder, PbDirection, PbNullsAre, PbOrderType, WorkerNode, WorkerType,
 };
-use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
+use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::expr::agg_call::PbKind as PbAggKind;
 use risingwave_pb::expr::expr_node::RexNode;
@@ -36,18 +36,18 @@ use risingwave_pb::plan_common::{ColumnCatalog, ColumnDesc, ExprContext, Field};
 use risingwave_pb::stream_plan::stream_fragment_graph::{StreamFragment, StreamFragmentEdge};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    agg_call_state, AggCallState, DispatchStrategy, DispatcherType, ExchangeNode, FilterNode,
-    FragmentTypeFlag, MaterializeNode, ProjectNode, SimpleAggNode, SourceNode, StreamContext,
-    StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamSource,
+    AggCallState, DispatchStrategy, DispatcherType, ExchangeNode, FilterNode, FragmentTypeFlag,
+    MaterializeNode, ProjectNode, SimpleAggNode, SourceNode, StreamContext,
+    StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamSource, agg_call_state,
 };
 
+use crate::MetaResult;
 use crate::controller::cluster::StreamingClusterInfo;
 use crate::manager::{MetaSrvEnv, StreamingJob};
 use crate::model::StreamJobFragments;
 use crate::stream::{
     ActorGraphBuildResult, ActorGraphBuilder, CompleteStreamFragmentGraph, StreamFragmentGraph,
 };
-use crate::MetaResult;
 
 fn make_inputref(idx: u32) -> ExprNode {
     ExprNode {
@@ -485,16 +485,6 @@ async fn test_graph_builder() -> MetaResult<()> {
     assert_eq!(mview_actor_ids, vec![1]);
     assert_eq!(internal_tables.len(), 3);
 
-    let fragment_upstreams: HashMap<_, _> = stream_job_fragments
-        .fragments
-        .iter()
-        .map(|(fragment_id, fragment)| (*fragment_id, fragment.upstream_fragment_ids.clone()))
-        .collect();
-
-    assert_eq!(fragment_upstreams.get(&1).unwrap(), &vec![2]);
-    assert_eq!(fragment_upstreams.get(&2).unwrap(), &vec![3]);
-    assert!(fragment_upstreams.get(&3).unwrap().is_empty());
-
     let mut expected_downstream = HashMap::new();
     expected_downstream.insert(1, vec![]);
     expected_downstream.insert(2, vec![1]);
@@ -527,7 +517,7 @@ async fn test_graph_builder() -> MetaResult<()> {
         );
     }
     for fragment in stream_job_fragments.fragments() {
-        let mut node = fragment.get_nodes().unwrap();
+        let mut node = &fragment.nodes;
         while !node.get_input().is_empty() {
             node = node.get_input().first().unwrap();
         }

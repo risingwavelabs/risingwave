@@ -17,8 +17,8 @@ use std::collections::{HashMap, HashSet};
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_mut;
 use risingwave_meta_model::WorkerId;
-use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::PbSubscriptionUpstreamInfo;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 use tracing::warn;
 
 use crate::barrier::{BarrierKind, Command, TracedEpoch};
@@ -359,10 +359,11 @@ impl InflightFragmentInfo {
     ) -> HashMap<WorkerId, HashSet<ActorId>> {
         let mut ret: HashMap<_, HashSet<_>> = HashMap::new();
         for (actor_id, worker_id) in infos.into_iter().flat_map(|info| info.actors.iter()) {
-            assert!(ret
-                .entry(*worker_id as WorkerId)
-                .or_default()
-                .insert(*actor_id as _))
+            assert!(
+                ret.entry(*worker_id as WorkerId)
+                    .or_default()
+                    .insert(*actor_id as _)
+            )
         }
         ret
     }

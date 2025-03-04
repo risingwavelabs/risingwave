@@ -18,11 +18,11 @@ use futures::stream;
 use risingwave_common::array::{Array, ArrayImpl, Op};
 use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::hash::VnodeBitmapExt;
-use risingwave_common::row::{self, once, OwnedRow as RowData};
+use risingwave_common::row::{self, OwnedRow as RowData, once};
 use risingwave_common::types::{DefaultOrd, ToDatumRef, ToOwnedDatum};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::{
-    build_func_non_strict, InputRefExpression, LiteralExpression, NonStrictExpression,
+    InputRefExpression, LiteralExpression, NonStrictExpression, build_func_non_strict,
 };
 use risingwave_pb::expr::expr_node::Type as PbExprNodeType;
 use risingwave_pb::expr::expr_node::Type::{

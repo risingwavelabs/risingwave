@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::{LogicalFilter, PlanTreeNodeUnary};
 use crate::optimizer::rule::{BoxedRule, Rule};
-use crate::optimizer::PlanRef;
 use crate::utils::Condition;
 
 /// Split `LogicalFilter` with many AND conjunctions with now into multiple `LogicalFilter`, prepared for `SplitNowOrRule`
@@ -57,11 +57,10 @@ impl Rule for SplitNowAndRule {
             return None;
         }
 
-        let [with_now, others] =
-            filter
-                .predicate()
-                .clone()
-                .group_by::<_, 2>(|e| if e.count_nows() > 0 { 0 } else { 1 });
+        let [with_now, others] = filter
+            .predicate()
+            .clone()
+            .group_by::<_, 2>(|e| if e.count_nows() > 0 { 0 } else { 1 });
 
         let mut plan = LogicalFilter::create(input, others);
         for e in with_now {

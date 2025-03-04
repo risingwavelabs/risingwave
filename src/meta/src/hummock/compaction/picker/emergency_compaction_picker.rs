@@ -21,8 +21,8 @@ use super::{
     CompactionInput, CompactionPicker, CompactionTaskValidator, LevelCompactionPicker,
     LocalPickerStatistic, TierCompactionPicker,
 };
-use crate::hummock::compaction::picker::intra_compaction_picker::WholeLevelCompactionPicker;
 use crate::hummock::compaction::CompactionDeveloperConfig;
+use crate::hummock::compaction::picker::intra_compaction_picker::WholeLevelCompactionPicker;
 use crate::hummock::level_handler::LevelHandler;
 
 pub struct EmergencyCompactionPicker {

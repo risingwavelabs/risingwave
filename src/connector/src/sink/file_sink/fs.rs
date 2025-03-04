@@ -14,16 +14,16 @@
 use std::collections::{BTreeMap, HashMap};
 
 use anyhow::anyhow;
+use opendal::Operator;
 use opendal::layers::{LoggingLayer, RetryLayer};
 use opendal::services::Fs;
-use opendal::Operator;
 use serde::Deserialize;
 use serde_with::serde_as;
 use with_options::WithOptions;
 
 use super::opendal_sink::BatchingStrategy;
 use crate::sink::file_sink::opendal_sink::{FileSink, OpendalSinkBackend};
-use crate::sink::{Result, SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT};
+use crate::sink::{Result, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, SinkError};
 use crate::source::UnknownFields;
 
 #[derive(Deserialize, Debug, Clone, WithOptions)]

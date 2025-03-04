@@ -17,7 +17,7 @@
 use std::alloc::Allocator;
 use std::ops::Deref;
 use std::sync::atomic::AtomicUsize;
-use std::sync::{atomic, Arc};
+use std::sync::{Arc, atomic};
 
 pub struct StatsAlloc<T> {
     bytes_in_use: AtomicUsize,

@@ -79,8 +79,8 @@ mod tests {
     use risingwave_common::catalog::TableId;
     use risingwave_common::util::epoch::test_epoch;
 
-    use crate::key::{FullKey, UserKey};
     use crate::KeyComparator;
+    use crate::key::{FullKey, UserKey};
 
     #[test]
     fn test_cmp_encoded_full_key() {

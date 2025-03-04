@@ -62,11 +62,7 @@ impl SomeAllExpression {
                         None => any_none = true,
                     }
                 }
-                if any_none {
-                    None
-                } else {
-                    Some(false)
-                }
+                if any_none { None } else { Some(false) }
             }
             Type::All => {
                 let mut all_true = true;
@@ -78,11 +74,7 @@ impl SomeAllExpression {
                         all_true = false;
                     }
                 }
-                if all_true {
-                    Some(true)
-                } else {
-                    None
-                }
+                if all_true { Some(true) } else { None }
             }
             _ => unreachable!(),
         }

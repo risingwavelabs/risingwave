@@ -21,16 +21,16 @@ use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_common_estimate_size::collections::EstimatedVec;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::PrefetchOptions;
-use risingwave_storage::table::batch_table::BatchTable;
 use risingwave_storage::table::TableIter;
+use risingwave_storage::table::batch_table::BatchTable;
 
 use super::sides::{stream_lookup_arrange_prev_epoch, stream_lookup_arrange_this_epoch};
 use crate::cache::cache_may_stale;
 use crate::common::metrics::MetricsInfo;
 use crate::executor::join::builder::JoinStreamChunkBuilder;
+use crate::executor::lookup::LookupExecutor;
 use crate::executor::lookup::cache::LookupCache;
 use crate::executor::lookup::sides::{ArrangeJoinSide, ArrangeMessage, StreamJoinSide};
-use crate::executor::lookup::LookupExecutor;
 use crate::executor::monitor::LookupExecutorMetrics;
 use crate::executor::prelude::*;
 

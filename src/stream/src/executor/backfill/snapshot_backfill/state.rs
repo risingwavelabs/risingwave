@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::mem::replace;
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use futures::future::try_join_all;
 use futures::TryFutureExt;
+use futures::future::try_join_all;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::must_match;
@@ -202,8 +202,8 @@ use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::StateTablePostCommit;
-use crate::executor::prelude::StateTable;
 use crate::executor::StreamExecutorResult;
+use crate::executor::prelude::StateTable;
 
 pub(super) struct BackfillState<S: StateStore> {
     vnode_state: HashMap<VirtualNode, VnodeBackfillState>,
@@ -230,9 +230,11 @@ impl<S: StateStore> BackfillState<S> {
                 continue;
             };
             let progress = VnodeBackfillProgress::from_row(&progress_row, &pk_serde);
-            assert!(vnode_state
-                .insert(vnode, VnodeBackfillState::Committed(progress))
-                .is_none());
+            assert!(
+                vnode_state
+                    .insert(vnode, VnodeBackfillState::Committed(progress))
+                    .is_none()
+            );
         }
         let consumed_pk_rows = OwnedRow::new(vec![None; pk_serde.get_data_types().len()]);
         Ok(Self {
@@ -419,9 +421,11 @@ impl<S: StateStore> BackfillStatePostCommit<'_, S> {
         for (vnode, progress_row) in committed_progress_rows {
             if let Some(progress_row) = progress_row {
                 let progress = VnodeBackfillProgress::from_row(&progress_row, pk_serde);
-                assert!(new_state
-                    .insert(vnode, VnodeBackfillState::Committed(progress))
-                    .is_none());
+                assert!(
+                    new_state
+                        .insert(vnode, VnodeBackfillState::Committed(progress))
+                        .is_none()
+                );
             }
 
             if prev_vnode_bitmap.is_set(vnode.to_index()) {

@@ -15,15 +15,15 @@
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::max_column_id;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
-use risingwave_connector::source::{extract_source_struct, SourceEncode, SourceStruct};
+use risingwave_connector::source::{SourceEncode, SourceStruct, extract_source_struct};
 use risingwave_sqlparser::ast::{AlterSourceOperation, ObjectName};
 
 use super::create_source::generate_stream_graph_for_source;
 use super::create_table::bind_sql_columns;
 use super::{HandlerArgs, RwPgResponse};
+use crate::Binder;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::error::{ErrorCode, Result, RwError};
-use crate::Binder;
 
 // Note for future drop column:
 // 1. Dependencies of generated columns

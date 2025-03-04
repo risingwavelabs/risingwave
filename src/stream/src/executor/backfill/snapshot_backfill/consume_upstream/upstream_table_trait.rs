@@ -23,13 +23,13 @@ use risingwave_common::row::OwnedRow;
 use risingwave_common::types::DataType;
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_hummock_sdk::HummockReadEpoch;
-use risingwave_storage::store::PrefetchOptions;
-use risingwave_storage::table::batch_table::BatchTable;
-use risingwave_storage::table::ChangeLogRow;
 use risingwave_storage::StateStore;
+use risingwave_storage::store::PrefetchOptions;
+use risingwave_storage::table::ChangeLogRow;
+use risingwave_storage::table::batch_table::BatchTable;
 
-use crate::executor::prelude::Stream;
 use crate::executor::StreamExecutorResult;
+use crate::executor::prelude::Stream;
 
 pub trait UpstreamTable: Send + Sync + 'static {
     type SnapshotStream: Stream<Item = StreamExecutorResult<OwnedRow>> + Send + 'static;
@@ -39,7 +39,7 @@ pub trait UpstreamTable: Send + Sync + 'static {
     fn output_data_types(&self) -> Vec<DataType>;
     fn pk_in_output_indices(&self) -> Vec<usize>;
     fn next_epoch(&self, epoch: u64)
-        -> impl Future<Output = StreamExecutorResult<u64>> + Send + '_;
+    -> impl Future<Output = StreamExecutorResult<u64>> + Send + '_;
     fn snapshot_stream(
         &self,
         vnode: VirtualNode,

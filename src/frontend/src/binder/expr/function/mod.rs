@@ -132,7 +132,10 @@ impl Binder {
                 scalar_as_agg,
                 "`AGGREGATE:` prefix is not allowed for `array_transform`"
             );
-            reject_syntax!(!arg_list.is_args_only(), "keywords like `DISTINCT`, `ORDER BY` are not allowed in `array_transform` argument list");
+            reject_syntax!(
+                !arg_list.is_args_only(),
+                "keywords like `DISTINCT`, `ORDER BY` are not allowed in `array_transform` argument list"
+            );
             reject_syntax!(
                 within_group.is_some(),
                 "`WITHIN GROUP` is not allowed in `array_transform` call"
@@ -400,13 +403,11 @@ impl Binder {
 
         let inner_ty = match bound_array.return_type() {
             DataType::List(ty) => *ty,
-            real_type => {
-                return Err(ErrorCode::BindError(format!(
+            real_type => return Err(ErrorCode::BindError(format!(
                 "The `array` argument for `array_transform` should be an array, but {} were got",
                 real_type
             ))
-                .into())
-            }
+            .into()),
         };
 
         let ast::FunctionArgExpr::Expr(ast::Expr::LambdaFunction {

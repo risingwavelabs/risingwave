@@ -29,8 +29,8 @@ use risingwave_pb::catalog::table::{
     OptionalAssociatedSourceId, PbEngine, PbTableType, PbTableVersion,
 };
 use risingwave_pb::catalog::{PbCreateType, PbStreamJobStatus, PbTable, PbWebhookSourceInfo};
-use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::DefaultColumnDesc;
+use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_sqlparser::ast;
 use risingwave_sqlparser::parser::Parser;
 use thiserror_ext::AsReport as _;
@@ -837,14 +837,14 @@ mod tests {
             columns: vec![
                 ColumnCatalog::row_id_column().to_protobuf(),
                 PbColumnCatalog {
-                    column_desc: Some(PbColumnDesc::new_struct(
+                    column_desc: Some(PbColumnDesc::new(
+                        DataType::from(StructType::new([
+                            ("address", DataType::Varchar),
+                            ("zipcode", DataType::Varchar),
+                        ]))
+                        .to_protobuf(),
                         "country",
                         1,
-                        ".test.Country",
-                        vec![
-                            PbColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "address", 2),
-                            PbColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "zipcode", 3),
-                        ],
                     )),
                     is_hidden: false,
                 },

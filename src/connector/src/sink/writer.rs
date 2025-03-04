@@ -18,8 +18,8 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use async_trait::async_trait;
-use futures::future::{select, Either};
 use futures::TryFuture;
+use futures::future::{Either, select};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bitmap::Bitmap;
 use rw_futures_util::drop_either_future;

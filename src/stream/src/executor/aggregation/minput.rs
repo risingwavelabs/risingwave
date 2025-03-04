@@ -14,7 +14,7 @@
 
 use std::ops::Bound::{self};
 
-use futures::{pin_mut, StreamExt};
+use futures::{StreamExt, pin_mut};
 use futures_async_stream::for_await;
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
@@ -26,14 +26,14 @@ use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_expr::aggregate::{AggCall, AggType, BoxedAggregateFunction, PbAggKind};
 use risingwave_pb::stream_plan::PbAggNodeVersion;
-use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
+use risingwave_storage::store::PrefetchOptions;
 
 use super::agg_state_cache::{AggStateCache, GenericAggStateCache};
 use super::{AggStateCacheStats, GroupKey};
+use crate::common::StateTableColumnMapping;
 use crate::common::state_cache::{OrderedStateCache, TopNStateCache};
 use crate::common::table::state_table::StateTable;
-use crate::common::StateTableColumnMapping;
 use crate::executor::{PkIndices, StreamExecutorResult};
 
 /// Aggregation state as a materialization of input chunks.
@@ -314,24 +314,24 @@ mod tests {
     use std::collections::HashSet;
 
     use itertools::Itertools;
-    use rand::seq::IteratorRandom;
     use rand::Rng;
+    use rand::seq::IteratorRandom;
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
     use risingwave_common::row::OwnedRow;
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::{DataType, ListValue};
-    use risingwave_common::util::epoch::{test_epoch, EpochPair};
+    use risingwave_common::util::epoch::{EpochPair, test_epoch};
     use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-    use risingwave_expr::aggregate::{build_append_only, AggCall};
+    use risingwave_expr::aggregate::{AggCall, build_append_only};
     use risingwave_pb::stream_plan::PbAggNodeVersion;
-    use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::StateStore;
+    use risingwave_storage::memory::MemoryStateStore;
 
     use super::MaterializedInputState;
+    use crate::common::StateTableColumnMapping;
     use crate::common::table::state_table::StateTable;
     use crate::common::table::test_utils::gen_pbtable;
-    use crate::common::StateTableColumnMapping;
     use crate::executor::aggregation::GroupKey;
     use crate::executor::{PkIndices, StreamExecutorResult};
 

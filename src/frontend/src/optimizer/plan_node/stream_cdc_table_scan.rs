@@ -17,12 +17,12 @@ use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnCatalog, Field};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::PbStreamNode;
+use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::stream::prelude::*;
-use super::utils::{childless_record, Distill};
-use super::{generic, ExprRewritable, PlanBase, PlanRef, StreamNode};
+use super::utils::{Distill, childless_record};
+use super::{ExprRewritable, PlanBase, PlanRef, StreamNode, generic};
 use crate::catalog::ColumnId;
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
@@ -126,7 +126,9 @@ impl Distill for StreamCdcTableScan {
 
 impl StreamNode for StreamCdcTableScan {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
-        unreachable!("stream scan cannot be converted into a prost body -- call `adhoc_to_stream_prost` instead.")
+        unreachable!(
+            "stream scan cannot be converted into a prost body -- call `adhoc_to_stream_prost` instead."
+        )
     }
 }
 

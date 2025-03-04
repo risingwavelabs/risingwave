@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
-use std::collections::vec_deque::VecDeque;
 use std::collections::HashMap;
+use std::collections::vec_deque::VecDeque;
 use std::ops::Bound::Included;
 use std::sync::Arc;
 use std::time::Instant;
@@ -28,7 +28,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::MAX_SPILL_TIMES;
 use risingwave_hummock_sdk::key::{
-    bound_table_key_range, FullKey, TableKey, TableKeyRange, UserKey,
+    FullKey, TableKey, TableKeyRange, UserKey, bound_table_key_range,
 };
 use risingwave_hummock_sdk::key_range::KeyRangeCommon;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
@@ -54,10 +54,10 @@ use crate::hummock::utils::{
     search_sst_idx,
 };
 use crate::hummock::{
-    get_from_batch, get_from_sstable_info, hit_sstable_bloom_filter, BackwardIteratorFactory,
-    ForwardIteratorFactory, HummockError, HummockResult, HummockStorageIterator,
-    HummockStorageIteratorInner, HummockStorageRevIteratorInner, ReadVersionTuple, Sstable,
-    SstableIterator,
+    BackwardIteratorFactory, ForwardIteratorFactory, HummockError, HummockResult,
+    HummockStorageIterator, HummockStorageIteratorInner, HummockStorageRevIteratorInner,
+    ReadVersionTuple, Sstable, SstableIterator, get_from_batch, get_from_sstable_info,
+    hit_sstable_bloom_filter,
 };
 use crate::mem_table::{
     ImmId, ImmutableMemtable, MemTableHummockIterator, MemTableHummockRevIterator,
@@ -65,7 +65,7 @@ use crate::mem_table::{
 use crate::monitor::{
     GetLocalMetricsGuard, HummockStateStoreMetrics, IterLocalMetricsGuard, StoreLocalStatistic,
 };
-use crate::store::{gen_min_epoch, ReadLogOptions, ReadOptions, StateStoreKeyedRow};
+use crate::store::{ReadLogOptions, ReadOptions, StateStoreKeyedRow, gen_min_epoch};
 
 pub type CommittedVersion = PinnedVersion;
 
@@ -984,8 +984,13 @@ impl HummockVersionReader {
         let fetch_meta_duration_sec = timer.elapsed().as_secs_f64();
         if fetch_meta_duration_sec > SLOW_ITER_FETCH_META_DURATION_SECOND {
             let table_id_string = read_options.table_id.to_string();
-            tracing::warn!("Fetching meta while creating an iter to read table_id {:?} at epoch {:?} is slow: duration = {:?}s, cache unhits = {:?}.",
-                table_id_string, epoch, fetch_meta_duration_sec, local_stats.cache_meta_block_miss);
+            tracing::warn!(
+                "Fetching meta while creating an iter to read table_id {:?} at epoch {:?} is slow: duration = {:?}s, cache unhits = {:?}.",
+                table_id_string,
+                epoch,
+                fetch_meta_duration_sec,
+                local_stats.cache_meta_block_miss
+            );
             self.state_store_metrics
                 .iter_slow_fetch_meta_cache_unhits
                 .set(local_stats.cache_meta_block_miss as i64);

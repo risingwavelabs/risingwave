@@ -16,13 +16,15 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use anyhow::Context;
 use itertools::Itertools;
+use risingwave_common::acl::AclMode;
 use risingwave_common::catalog::{ColumnCatalog, Schema, TableVersionId};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_pb::user::grant_privilege::PbObject;
 use risingwave_sqlparser::ast::{Ident, ObjectName, Query, SelectItem};
 
-use super::statement::RewriteExprsRecursive;
 use super::BoundQuery;
+use super::statement::RewriteExprsRecursive;
 use crate::binder::{Binder, Clause};
 use crate::catalog::TableId;
 use crate::error::{ErrorCode, Result, RwError};
@@ -106,9 +108,16 @@ impl Binder {
         let (schema_name, table_name) = Self::resolve_schema_qualified_name(&self.db_name, name)?;
         // bind insert table
         self.context.clause = Some(Clause::Insert);
-        self.bind_table(schema_name.as_deref(), &table_name, None)?;
+        let bound_table = self.bind_table(schema_name.as_deref(), &table_name)?;
+        let table_catalog = &bound_table.table_catalog;
+        Self::check_for_dml(table_catalog, true)?;
+        self.check_privilege(
+            PbObject::TableId(table_catalog.id.table_id),
+            table_catalog.database_id,
+            AclMode::Insert,
+            table_catalog.owner,
+        )?;
 
-        let table_catalog = self.resolve_dml_table(schema_name.as_deref(), &table_name, true)?;
         let default_columns_from_catalog =
             table_catalog.default_columns().collect::<BTreeMap<_, _>>();
         let table_id = table_catalog.id;
@@ -368,7 +377,7 @@ fn get_col_indices_to_insert(
                 }
                 col_indices_to_insert.push(*value_ref);
                 *value_ref = usize::MAX; // mark this column name, for duplicate
-                                         // detection
+                // detection
             }
             None => {
                 // Invalid column name found

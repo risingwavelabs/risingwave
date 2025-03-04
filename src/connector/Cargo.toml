@@ -25,7 +25,6 @@ aws-sdk-emrserverless = "1.50.0"
 aws-sdk-glue = { workspace = true }
 aws-sdk-kinesis = { workspace = true }
 aws-sdk-s3 = { workspace = true }
-aws-smithy-http = { workspace = true }
 aws-smithy-runtime-api = { workspace = true }
 aws-smithy-types = { workspace = true }
 aws-smithy-types-convert = { version = "0.60.1", features = ["convert-chrono"] }
@@ -121,6 +120,7 @@ rustls-native-certs = "0.8"
 rustls-pemfile = "2"
 rustls-pki-types = "1"
 rw_futures_util = { workspace = true }
+scopeguard = "1"
 sea-schema = { version = "0.16", default-features = false, features = [
     "discovery",
     "sqlx-postgres",
@@ -137,7 +137,6 @@ strum = "0.26"
 strum_macros = "0.26"
 tempfile = "3"
 thiserror = "1"
-
 thiserror-ext = { workspace = true }
 # To easiy get the type_name and impl IntoSql for rust_decimal, we fork the crate.
 # Another reason is that we are planning to refactor their IntoSql trait to allow specifying the type to convert.

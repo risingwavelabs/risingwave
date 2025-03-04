@@ -20,7 +20,7 @@ use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::Schema;
 use risingwave_pb::plan_common::JoinType;
 
-use super::utils::{childless_record, Distill};
+use super::utils::{Distill, childless_record};
 use super::{
     ColPrunable, ExprRewritable, Logical, LogicalFilter, LogicalJoin, LogicalProject, PlanBase,
     PlanNodeType, PlanRef, PlanTreeNodeBinary, PlanTreeNodeUnary, PredicatePushdown, ToBatch,
@@ -771,7 +771,7 @@ impl LogicalMultiJoin {
             (_, _) => {
                 return Err(RwError::from(ErrorCode::InternalError(
                     "only leaf node can have None subtree".into(),
-                )))
+                )));
             }
         })
     }
@@ -873,8 +873,8 @@ mod test {
     use super::*;
     use crate::expr::InputRef;
     use crate::optimizer::optimizer_context::OptimizerContext;
-    use crate::optimizer::plan_node::generic::GenericPlanRef;
     use crate::optimizer::plan_node::LogicalValues;
+    use crate::optimizer::plan_node::generic::GenericPlanRef;
     use crate::optimizer::property::FunctionalDependency;
     #[tokio::test]
     async fn fd_derivation_multi_join() {

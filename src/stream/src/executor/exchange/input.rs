@@ -19,7 +19,7 @@ use anyhow::anyhow;
 use either::Either;
 use local_input::LocalInputStreamInner;
 use pin_project::pin_project;
-use risingwave_common::util::addr::{is_local_address, HostAddr};
+use risingwave_common::util::addr::{HostAddr, is_local_address};
 use risingwave_rpc_client::ComputeClientPool;
 use tokio::sync::mpsc;
 
@@ -211,12 +211,12 @@ mod remote_input {
     use either::Either;
     use risingwave_common::catalog::DatabaseId;
     use risingwave_common::util::addr::HostAddr;
-    use risingwave_pb::task_service::{permits, GetStreamResponse};
+    use risingwave_pb::task_service::{GetStreamResponse, permits};
     use risingwave_rpc_client::ComputeClientPool;
 
     use crate::executor::exchange::error::ExchangeChannelClosed;
     use crate::executor::monitor::StreamingMetrics;
-    use crate::executor::prelude::{pin_mut, try_stream, StreamExt};
+    use crate::executor::prelude::{StreamExt, pin_mut, try_stream};
     use crate::executor::{DispatcherMessage, StreamExecutorError};
     use crate::task::{UpDownActorIds, UpDownFragmentIds};
 

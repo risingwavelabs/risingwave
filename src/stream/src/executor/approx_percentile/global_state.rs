@@ -20,11 +20,11 @@ use risingwave_common::bail;
 use risingwave_common::row::Row;
 use risingwave_common::types::{Datum, ToOwnedDatum};
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
+use risingwave_storage::store::PrefetchOptions;
 
-use crate::executor::prelude::*;
 use crate::executor::StreamExecutorResult;
+use crate::executor::prelude::*;
 
 /// The global approx percentile state.
 pub struct GlobalApproxPercentileState<S: StateStore> {

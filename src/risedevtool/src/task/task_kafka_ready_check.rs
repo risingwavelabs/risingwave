@@ -15,9 +15,9 @@
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use rdkafka::ClientConfig;
 use rdkafka::config::FromClientConfig;
 use rdkafka::consumer::{BaseConsumer, Consumer};
-use rdkafka::ClientConfig;
 
 use crate::{ExecuteContext, KafkaConfig, Task};
 

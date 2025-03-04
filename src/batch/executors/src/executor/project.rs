@@ -18,7 +18,7 @@ use futures::{Stream, StreamExt};
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_expr::expr::{build_batch_expr_from_prost, BoxedExpression, Expression};
+use risingwave_expr::expr::{BoxedExpression, Expression, build_batch_expr_from_prost};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::error::{BatchError, Result};
@@ -112,8 +112,8 @@ mod tests {
     use risingwave_expr::expr::{InputRefExpression, LiteralExpression};
 
     use super::*;
-    use crate::executor::test_utils::MockExecutor;
     use crate::executor::ValuesExecutor;
+    use crate::executor::test_utils::MockExecutor;
     use crate::*;
 
     const CHUNK_SIZE: usize = 1024;

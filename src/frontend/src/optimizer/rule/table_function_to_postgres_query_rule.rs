@@ -18,9 +18,9 @@ use risingwave_common::types::{DataType, ScalarImpl};
 
 use super::{BoxedRule, Rule};
 use crate::expr::{Expr, TableFunctionType};
+use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{LogicalPostgresQuery, LogicalTableFunction};
-use crate::optimizer::PlanRef;
 
 /// Transform a special `TableFunction` (with `POSTGRES_QUERY` table function type) into a `LogicalPostgresQuery`
 pub struct TableFunctionToPostgresQueryRule {}

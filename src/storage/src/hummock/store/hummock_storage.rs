@@ -24,7 +24,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::is_max_epoch;
 use risingwave_common_service::{NotificationClient, ObserverManager};
 use risingwave_hummock_sdk::key::{
-    is_empty_key_range, vnode, vnode_range, TableKey, TableKeyRange,
+    TableKey, TableKeyRange, is_empty_key_range, vnode, vnode_range,
 };
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_watermark::TableWatermarksIndex;
@@ -32,25 +32,25 @@ use risingwave_hummock_sdk::version::{HummockVersion, LocalHummockVersion};
 use risingwave_hummock_sdk::{HummockReadEpoch, HummockSstableObjectId, SyncResult};
 use risingwave_rpc_client::HummockMetaClient;
 use thiserror_ext::AsReport;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
+use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use tokio::sync::oneshot;
 
 use super::local_hummock_storage::LocalHummockStorage;
-use super::version::{read_filter_for_version, CommittedVersion, HummockVersionReader};
+use super::version::{CommittedVersion, HummockVersionReader, read_filter_for_version};
 use crate::compaction_catalog_manager::CompactionCatalogManagerRef;
 #[cfg(any(test, feature = "test"))]
 use crate::compaction_catalog_manager::{CompactionCatalogManager, FakeRemoteTableAccessor};
 use crate::error::StorageResult;
 use crate::hummock::backup_reader::{BackupReader, BackupReaderRef};
 use crate::hummock::compactor::{
-    new_compaction_await_tree_reg_ref, CompactionAwaitTreeRegRef, CompactorContext,
+    CompactionAwaitTreeRegRef, CompactorContext, new_compaction_await_tree_reg_ref,
 };
 use crate::hummock::event_handler::hummock_event_handler::{BufferTracker, HummockEventSender};
 use crate::hummock::event_handler::{
     HummockEvent, HummockEventHandler, HummockVersionUpdate, ReadOnlyReadVersionMapping,
 };
 use crate::hummock::iterator::change_log::ChangeLogIterator;
-use crate::hummock::local_version::pinned_version::{start_pinned_version_worker, PinnedVersion};
+use crate::hummock::local_version::pinned_version::{PinnedVersion, start_pinned_version_worker};
 use crate::hummock::local_version::recent_versions::RecentVersions;
 use crate::hummock::observer_manager::HummockObserverNode;
 use crate::hummock::time_travel_version_cache::SimpleTimeTravelVersionCache;
@@ -182,7 +182,9 @@ impl HummockStorage {
 
         let hummock_version = match version_update_rx.recv().await {
             Some(HummockVersionUpdate::PinnedVersion(version)) => *version,
-            _ => unreachable!("the hummock observer manager is the first one to take the event tx. Should be full hummock version")
+            _ => unreachable!(
+                "the hummock observer manager is the first one to take the event tx. Should be full hummock version"
+            ),
         };
 
         let (pin_version_tx, pin_version_rx) = unbounded_channel();

@@ -21,12 +21,12 @@ use byteorder::{BigEndian, ReadBytesExt};
 use bytes::BytesMut;
 use chrono::{DateTime, Datelike, TimeZone, Utc};
 use chrono_tz::Tz;
-use postgres_types::{accepts, to_sql_checked, FromSql, IsNull, ToSql, Type};
+use postgres_types::{FromSql, IsNull, ToSql, Type, accepts, to_sql_checked};
 use risingwave_common_estimate_size::ZeroHeapSize;
 use serde::{Deserialize, Serialize};
 
-use super::to_text::ToText;
 use super::DataType;
+use super::to_text::ToText;
 use crate::array::ArrayResult;
 
 /// Timestamp with timezone.
@@ -176,8 +176,8 @@ impl FromStr for Timestamptz {
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         pub const ERROR_MSG: &str = concat!(
-            "Can't cast string to timestamp with time zone (expected format is YYYY-MM-DD HH:MM:SS[.D+{up to 6 digits}] followed by +hh:mm or literal Z)"
-            , "\nFor example: '2021-04-01 00:00:00+00:00'"
+            "Can't cast string to timestamp with time zone (expected format is YYYY-MM-DD HH:MM:SS[.D+{up to 6 digits}] followed by +hh:mm or literal Z)",
+            "\nFor example: '2021-04-01 00:00:00+00:00'"
         );
         // Try `speedate` first
         // * It is also used by `str_to_{date,time,timestamp}`

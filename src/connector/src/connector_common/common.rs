@@ -17,7 +17,7 @@ use std::hash::Hash;
 use std::io::Write;
 use std::time::Duration;
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use async_nats::jetstream::consumer::DeliverPolicy;
 use async_nats::jetstream::{self};
 use aws_sdk_kinesis::Client as KinesisClient;
@@ -27,7 +27,7 @@ use rdkafka::ClientConfig;
 use risingwave_common::bail;
 use serde_derive::Deserialize;
 use serde_with::json::JsonString;
-use serde_with::{serde_as, DisplayFromStr};
+use serde_with::{DisplayFromStr, serde_as};
 use tempfile::NamedTempFile;
 use time::OffsetDateTime;
 use url::Url;
@@ -57,8 +57,8 @@ pub struct AwsPrivateLinkItem {
 use aws_config::default_provider::region::DefaultRegionChain;
 use aws_config::sts::AssumeRoleProvider;
 use aws_credential_types::provider::SharedCredentialsProvider;
-use aws_types::region::Region;
 use aws_types::SdkConfig;
+use aws_types::region::Region;
 use risingwave_common::util::env_var::env_var_is_true;
 
 /// A flatten config map for aws auth.
@@ -96,6 +96,8 @@ pub struct AwsAuthProps {
     pub external_id: Option<String>,
     #[serde(rename = "aws.profile", alias = "profile")]
     pub profile: Option<String>,
+    #[serde(rename = "aws.msk.signer_timeout_sec")]
+    pub msk_signer_timeout_sec: Option<u64>,
 }
 
 impl AwsAuthProps {
@@ -591,6 +593,7 @@ impl KinesisCommon {
             arn: self.assume_role_arn.clone(),
             external_id: self.assume_role_external_id.clone(),
             profile: Default::default(),
+            msk_signer_timeout_sec: Default::default(),
         };
         let aws_config = config.build_config().await?;
         let mut builder = aws_sdk_kinesis::config::Builder::from(&aws_config);

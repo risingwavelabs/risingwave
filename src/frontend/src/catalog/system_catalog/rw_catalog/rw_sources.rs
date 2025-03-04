@@ -16,13 +16,13 @@ use risingwave_common::catalog::SecretId;
 use risingwave_common::types::{Fields, JsonbVal, Timestamptz};
 use risingwave_frontend_macro::system_catalog;
 use risingwave_pb::user::grant_privilege::Object;
-use serde_json::{json, Map as JsonMap};
+use serde_json::{Map as JsonMap, json};
 
+use crate::WithOptionsSecResolved;
 use crate::catalog::catalog_service::CatalogReadGuard;
-use crate::catalog::system_catalog::{get_acl_items, SysCatalogReaderImpl};
+use crate::catalog::system_catalog::{SysCatalogReaderImpl, get_acl_items};
 use crate::error::Result;
 use crate::handler::create_source::UPSTREAM_SOURCE_KEY;
-use crate::WithOptionsSecResolved;
 
 #[derive(Fields)]
 struct RwSource {

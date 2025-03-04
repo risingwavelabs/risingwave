@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use rand::prelude::SliceRandom;
 use rand::Rng;
+use rand::prelude::SliceRandom;
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{
     DataType as AstDataType, FunctionArg, ObjectName, TableAlias, TableFactor,

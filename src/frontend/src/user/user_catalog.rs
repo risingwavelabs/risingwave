@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 
 use risingwave_common::acl::{AclMode, AclModeSet};
 use risingwave_pb::user::grant_privilege::{Action, Object as GrantObject, Object};
@@ -164,7 +164,7 @@ impl UserCatalog {
         self.refresh_acl_modes();
     }
 
-    pub fn check_privilege(&self, object: &GrantObject, mode: AclMode) -> bool {
+    pub fn has_privilege(&self, object: &GrantObject, mode: AclMode) -> bool {
         self.get_acl(object)
             .map_or(false, |acl_set| acl_set.has_mode(mode))
     }

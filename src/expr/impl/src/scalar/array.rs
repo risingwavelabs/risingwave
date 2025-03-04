@@ -18,7 +18,7 @@ use risingwave_common::types::{
     DataType, ListRef, MapRef, MapType, MapValue, ScalarRef, ScalarRefImpl, ToOwnedDatum,
 };
 use risingwave_expr::expr::Context;
-use risingwave_expr::{function, ExprError};
+use risingwave_expr::{ExprError, function};
 
 use super::array_positions::array_position;
 

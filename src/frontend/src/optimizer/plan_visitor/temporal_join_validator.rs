@@ -15,12 +15,12 @@
 use risingwave_sqlparser::ast::AsOf;
 
 use super::{DefaultBehavior, Merge};
+use crate::PlanRef;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
     BatchSeqScan, LogicalScan, PlanTreeNodeBinary, StreamTableScan, StreamTemporalJoin,
 };
 use crate::optimizer::plan_visitor::PlanVisitor;
-use crate::PlanRef;
 
 #[derive(Debug, Clone, Default)]
 pub struct TemporalJoinValidator {
