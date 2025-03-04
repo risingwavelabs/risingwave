@@ -379,7 +379,7 @@ impl SourceManager {
         let dropped_actors = dropped_source_fragments
             .values()
             .flatten()
-            .flat_map(|fragment_id| fragments.get(fragment_id).unwrap().get_actors())
+            .flat_map(|fragment_id| fragments.get(fragment_id).unwrap().actors.iter())
             .map(|actor| actor.get_actor_id())
             .collect::<HashSet<_>>();
 

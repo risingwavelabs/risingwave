@@ -501,15 +501,15 @@ pub mod tests {
     use crate::types::{DataType, StructType};
 
     pub fn build_prost_desc() -> PbColumnDesc {
-        let city = vec![
-            PbColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "country.city.address", 2),
-            PbColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "country.city.zipcode", 3),
-        ];
-        let country = vec![
-            PbColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "country.address", 1),
-            PbColumnDesc::new_struct("country.city", 4, ".test.City", city),
-        ];
-        PbColumnDesc::new_struct("country", 5, ".test.Country", country)
+        let city = DataType::from(StructType::new([
+            ("country.city.address", DataType::Varchar),
+            ("country.city.zipcode", DataType::Varchar),
+        ]));
+        let country = DataType::from(StructType::new([
+            ("country.address", DataType::Varchar),
+            ("country.city", city),
+        ]));
+        PbColumnDesc::new(country.to_protobuf(), "country", 5)
     }
 
     pub fn build_desc() -> ColumnDesc {

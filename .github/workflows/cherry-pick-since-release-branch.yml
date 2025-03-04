@@ -1,0 +1,71 @@
+name: PR for release branch
+on:
+  pull_request:
+    branches:
+      - main
+    types: ["closed", "labeled"]
+
+jobs:
+  get-target-release-branches:
+    if: |
+      github.event.pull_request.merged &&
+      ((github.event.action == 'labeled' && startsWith(github.event.label.name, 'need-cherry-pick-since')) ||
+      (github.event.action == 'closed' && contains(toJson(github.event.pull_request.labels), 'need-cherry-pick-since')))
+    runs-on: ubuntu-latest
+    outputs:
+      branches: ${{ steps.filter-release-branches.outputs.branches }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Get all release branches including label version and higher
+        id: filter-release-branches
+        run: |
+          label="${{ github.event.label.name }}"
+          base_version=$(echo "$label" | cut -d '-' -f 5-)
+
+          echo "Base version from label: $base_version"
+
+          # Get all release branches, extract their versions, and filter those with base or higher versions
+          branches=$(git branch -r | grep "origin/release-" | sed 's|origin/||' | sed 's/release-//' | sort -V)
+
+          target_branches=()
+
+          for version in $branches; do
+            if [[ $(printf "%s\\n%s" "$base_version" "$version" | sort -V | head -n1) == "$base_version" ]]; then
+              target_branches+=("release-$version")
+            fi
+          done
+
+          if [ ${#target_branches[@]} -eq 0 ]; then
+            echo "No matching release branches found."
+            echo "branches=[]" >> "$GITHUB_OUTPUT"
+          else
+            echo "Matching release branches found: ${target_branches[@]}"
+            echo "branches=$(printf '%s\\n' "${target_branches[@]}" | jq -R . | jq -s .)" >> "$GITHUB_OUTPUT"
+          fi
+
+  release_pull_request:
+    needs: get-target-release-branches
+    if: needs.get-target-release-branches.outputs.branches != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        branch: ${{ fromJson(needs.get-target-release-branches.outputs.branches) }}
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: Create PR to branch
+        uses: risingwavelabs/github-action-cherry-pick@master
+        with:
+          pr_branch: ${{ matrix.branch }}
+          pr_labels: 'cherry-pick'
+          pr_body: ${{ format('Cherry picking #{0} onto branch {1}', github.event.number, matrix.branch) }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+permissions:
+  issues: write
+  pull-requests: write
+  contents: write

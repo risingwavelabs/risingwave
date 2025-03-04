@@ -153,12 +153,14 @@ impl Catalog {
                 .unwrap()
                 .create_sys_table(sys_table);
         }
-        for sys_view in get_sys_views_in_schema(proto.name.as_str()) {
+        for mut sys_view in get_sys_views_in_schema(proto.name.as_str()) {
+            sys_view.database_id = proto.database_id;
+            sys_view.schema_id = proto.id;
             self.get_database_mut(proto.database_id)
                 .unwrap()
                 .get_schema_mut(proto.id)
                 .unwrap()
-                .create_sys_view(sys_view);
+                .create_sys_view(Arc::new(sys_view));
         }
     }
 
@@ -940,7 +942,7 @@ impl Catalog {
     ) -> CatalogResult<()> {
         let schema = self.get_schema_by_name(db_name, schema_name)?;
 
-        if let Some(table) = schema.get_created_table_by_name(relation_name) {
+        if let Some(table) = schema.get_table_by_name(relation_name) {
             if table.is_index() {
                 Err(CatalogError::Duplicated("index", relation_name.to_owned()))
             } else if table.is_mview() {

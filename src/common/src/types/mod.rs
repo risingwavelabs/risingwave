@@ -41,6 +41,7 @@ use crate::array::{
 // Complex type's value is based on the array
 pub use crate::array::{ListRef, ListValue, MapRef, MapValue, StructRef, StructValue};
 use crate::cast::{str_to_bool, str_to_bytea};
+use crate::catalog::ColumnId;
 use crate::error::BoxedError;
 use crate::{
     dispatch_data_types, dispatch_scalar_ref_variants, dispatch_scalar_variants, for_all_variants,
@@ -242,11 +243,19 @@ impl From<&PbDataType> for DataType {
             PbTypeName::Struct => {
                 let fields: Vec<DataType> = proto.field_type.iter().map(|f| f.into()).collect_vec();
                 let field_names: Vec<String> = proto.field_names.iter().cloned().collect_vec();
-                if proto.field_names.is_empty() {
-                    StructType::unnamed(fields).into()
+                let field_ids = (proto.field_ids.iter().copied())
+                    .map(ColumnId::new)
+                    .collect_vec();
+
+                let mut struct_type = if proto.field_names.is_empty() {
+                    StructType::unnamed(fields)
                 } else {
-                    StructType::new(field_names.into_iter().zip_eq_fast(fields)).into()
+                    StructType::new(field_names.into_iter().zip_eq_fast(fields))
+                };
+                if !field_ids.is_empty() {
+                    struct_type = struct_type.with_ids(field_ids);
                 }
+                struct_type.into()
             }
             PbTypeName::List => DataType::List(
                 // The first (and only) item is the list element type.
@@ -347,6 +356,9 @@ impl DataType {
                     pb.field_names = t.names().map(|s| s.into()).collect();
                 }
                 pb.field_type = t.types().map(|f| f.to_protobuf()).collect();
+                if let Some(ids) = t.ids() {
+                    pb.field_ids = ids.map(|id| id.get_id()).collect();
+                }
             }
             DataType::List(datatype) => {
                 pb.field_type = vec![datatype.to_protobuf()];
