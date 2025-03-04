@@ -19,9 +19,7 @@ struct ExplainAnalyzeStreamJobOutput {
     operator_id: String,
     identity: String,
     actor_ids: String,
-    input_throughput: String,
     output_throughput: String,
-    input_latency: String,
     output_latency: String,
 }
 
@@ -122,9 +120,7 @@ type OperatorId = u64;
 struct StreamNodeMetrics {
     operator_id: OperatorId,
     epoch: u32,
-    total_input_throughput: u32,
     total_output_throughput: u32,
-    total_input_latency: u32,
     total_output_latency: u32,
 }
 
@@ -149,23 +145,13 @@ impl StreamNodeStats {
             let stats = self.inner.entry(*operator_id).or_default();
             stats.operator_id = *operator_id;
             stats.epoch = 0;
-            stats.total_input_throughput += metrics
-                .stream_node_input_row_count
-                .get(operator_id)
-                .cloned()
-                .unwrap_or(0);
             stats.total_output_throughput += metrics
                 .stream_node_output_row_count
                 .get(operator_id)
                 .cloned()
                 .unwrap_or(0);
-            stats.total_input_latency += metrics
-                .stream_node_input_blocking_duration_ns
-                .get(operator_id)
-                .cloned()
-                .unwrap_or(0);
             stats.total_output_latency += metrics
-                .stream_node_input_row_count
+                .stream_node_output_blocking_duration_ns
                 .get(operator_id)
                 .cloned()
                 .unwrap_or(0);
@@ -180,24 +166,12 @@ impl StreamNodeStats {
     ) {
         for operator_id in operator_ids {
             if let Some(stats) = self.inner.get_mut(operator_id) {
-                stats.total_input_throughput = metrics
-                    .stream_node_input_row_count
-                    .get(operator_id)
-                    .cloned()
-                    .unwrap_or(0)
-                    - stats.total_input_throughput;
                 stats.total_output_throughput = metrics
                     .stream_node_output_row_count
                     .get(operator_id)
                     .cloned()
                     .unwrap_or(0)
                     - stats.total_output_throughput;
-                stats.total_input_latency = metrics
-                    .stream_node_input_blocking_duration_ns
-                    .get(operator_id)
-                    .cloned()
-                    .unwrap_or(0)
-                    - stats.total_input_latency;
                 stats.total_output_latency = metrics
                     .stream_node_output_blocking_duration_ns
                     .get(operator_id)
@@ -290,8 +264,16 @@ fn extract_stream_node_infos(
         if let Some(merge_operator_id) = fragment_id_to_merge_operator_id.get(&fragment_id) {
             let mut dispatcher = StreamNode::new_for_dispatcher(fragment_id);
             dispatcher.dependencies.push(operator_id);
-            assert!(operator_id_to_stream_node.insert(fragment_id as _, dispatcher).is_none());
-            operator_id_to_stream_node.get_mut(merge_operator_id).unwrap().dependencies.push(fragment_id as _);
+            assert!(
+                operator_id_to_stream_node
+                    .insert(fragment_id as _, dispatcher)
+                    .is_none()
+            );
+            operator_id_to_stream_node
+                .get_mut(merge_operator_id)
+                .unwrap()
+                .dependencies
+                .push(fragment_id as _);
         } else {
             root_node = Some(operator_id);
         }
@@ -344,16 +326,9 @@ fn render_graph_with_metrics(
         let child_prefix = format!("{}{}", prefix, child_prefix);
 
         let stats = stats.inner.get(&node_id);
-        let (input_throughput, output_throughput, input_latency, output_latency) = stats
-            .map(|stats| {
-                (
-                    stats.total_input_throughput,
-                    stats.total_output_throughput,
-                    stats.total_input_latency,
-                    stats.total_output_latency,
-                )
-            })
-            .unwrap_or((0, 0, 0, 0));
+        let (output_throughput, output_latency) = stats
+            .map(|stats| (stats.total_output_throughput, stats.total_output_latency))
+            .unwrap_or((0, 0));
         let row = ExplainAnalyzeStreamJobOutput {
             operator_id: node.operator_id.to_string(),
             identity: identity_rendered,
@@ -363,9 +338,7 @@ fn render_graph_with_metrics(
                 .map(|id| id.to_string())
                 .collect::<Vec<_>>()
                 .join(","),
-            input_throughput: input_throughput.to_string(),
             output_throughput: output_throughput.to_string(),
-            input_latency: input_latency.to_string(),
             output_latency: output_latency.to_string(),
         };
         rows.push(row);

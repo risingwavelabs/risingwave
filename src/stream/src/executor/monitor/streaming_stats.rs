@@ -50,9 +50,7 @@ pub struct StreamingMetrics {
     // Profiling Metrics:
     // Aggregated per stream node (e.g. hash agg, join, project, etc...)
     // Only active when profiling, should be dropped otherwise.
-    pub stream_node_input_row_count: CountMap,
     pub stream_node_output_row_count: CountMap,
-    pub stream_node_input_blocking_duration_ns: CountMap,
     pub stream_node_output_blocking_duration_ns: CountMap,
 
     // Streaming actor metrics from tokio (disabled by default)
@@ -223,9 +221,7 @@ impl StreamingMetrics {
         .unwrap()
         .relabel_debug_1(level);
 
-        let stream_node_input_row_count = CountMap::new();
         let stream_node_output_row_count = CountMap::new();
-        let stream_node_input_blocking_duration_ns = CountMap::new();
         let stream_node_output_blocking_duration_ns = CountMap::new();
 
         let source_output_row_count = register_guarded_int_counter_vec_with_registry!(
@@ -1077,9 +1073,7 @@ impl StreamingMetrics {
         Self {
             level,
             executor_row_count,
-            stream_node_input_row_count,
             stream_node_output_row_count,
-            stream_node_input_blocking_duration_ns,
             stream_node_output_blocking_duration_ns,
             actor_execution_time,
             actor_scheduled_duration,
@@ -1550,14 +1544,8 @@ impl StreamingMetrics {
 
     pub fn new_profile_metrics(&self, operator_id: u64) -> ProfileMetrics {
         ProfileMetrics {
-            stream_node_input_row_count: self
-                .stream_node_input_row_count
-                .new_or_get_counter(operator_id),
             stream_node_output_row_count: self
                 .stream_node_output_row_count
-                .new_or_get_counter(operator_id),
-            stream_node_input_blocking_duration_ns: self
-                .stream_node_input_blocking_duration_ns
                 .new_or_get_counter(operator_id),
             stream_node_output_blocking_duration_ns: self
                 .stream_node_output_blocking_duration_ns
@@ -1659,8 +1647,6 @@ pub struct OverWindowMetrics {
 }
 
 pub struct ProfileMetrics {
-    pub stream_node_input_row_count: Count,
     pub stream_node_output_row_count: Count,
-    pub stream_node_input_blocking_duration_ns: Count,
     pub stream_node_output_blocking_duration_ns: Count,
 }
