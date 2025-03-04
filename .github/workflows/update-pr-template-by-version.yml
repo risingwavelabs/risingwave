@@ -45,10 +45,23 @@ jobs:
 
           highest = max(release_versions)
           highest_version = f"{highest[0]}.{highest[1]}"
-          print(f"Highest release version found: {highest_version}")
           echo "version=${highest_version}" >> $GITHUB_ENV
 
+      - name: Check if update is needed
+        id: check_update
+        run: |
+          VERSION=${{ env.version }}
+          if grep -q "^.*Highest Release Version:.*$" .github/pull_request_template.md; then
+            CURRENT_VERSION=$(grep "^.*Highest Release Version:.*$" .github/pull_request_template.md | awk '{print $NF}')
+            if [ "$CURRENT_VERSION" = "$VERSION" ]; then
+              echo "No update needed." >> $GITHUB_STEP_SUMMARY
+              exit 0
+            fi
+          fi
+          echo "update_needed=true" >> $GITHUB_ENV
+
       - name: Update PR template with highest version
+        if: env.update_needed == 'true'
         run: |
           VERSION=${{ env.version }}
           if grep -q "^.*Highest Release Version:.*$" .github/pull_request_template.md; then
@@ -58,6 +71,7 @@ jobs:
           fi
 
       - name: Commit and push changes
+        if: env.update_needed == 'true'
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
@@ -67,6 +81,7 @@ jobs:
           git push origin update-pr-template-${{ env.version }}
 
       - name: Create pull request
+        if: env.update_needed == 'true'
         uses: peter-evans/create-pull-request@v5
         with:
           title: "Update PR Template for Highest Release Version"
