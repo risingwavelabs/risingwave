@@ -294,11 +294,11 @@ impl MonitorService for MonitorServiceImpl {
     ) -> Result<Response<GetProfileStatsResponse>, Status> {
         let metrics = global_streaming_metrics(MetricLevel::Info);
         let stream_node_output_row_count = metrics.stream_node_output_row_count.collect();
-        let stream_node_output_blocking_duration_ns =
-            metrics.stream_node_output_blocking_duration_ns.collect();
+        let stream_node_output_blocking_duration_ms =
+            metrics.stream_node_output_blocking_duration_ms.collect();
         Ok(Response::new(GetProfileStatsResponse {
             stream_node_output_row_count,
-            stream_node_output_blocking_duration_ns,
+            stream_node_output_blocking_duration_ms,
         }))
     }
 

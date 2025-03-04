@@ -14,11 +14,11 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::AtomicU32;
+use std::sync::atomic::AtomicU64;
 
 use parking_lot::RwLock;
 
-pub type Count = Arc<AtomicU32>;
+pub type Count = Arc<AtomicU64>;
 
 #[derive(Clone)]
 pub struct CountMap(Arc<RwLock<HashMap<u64, Count>>>);
@@ -50,12 +50,12 @@ impl CountMap {
         let mut map = self.0.write();
         let counter = map
             .entry(id)
-            .or_insert_with(|| Arc::new(AtomicU32::new(0)))
+            .or_insert_with(|| Arc::new(AtomicU64::new(0)))
             .clone();
         counter
     }
 
-    pub fn collect(&self) -> HashMap<u64, u32> {
+    pub fn collect(&self) -> HashMap<u64, u64> {
         let map = self.0.read();
         map.iter()
             .map(|(&k, v)| (k, v.load(std::sync::atomic::Ordering::Relaxed)))
