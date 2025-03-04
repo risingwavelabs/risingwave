@@ -327,8 +327,7 @@ message AlterSinkConfigRequest {
   map<string, string> config = 2;
 }
 
-message AlterSinkConfigResponse {
-}
+message AlterSinkConfigResponse {}
 
 service StreamManagerService {
   rpc Flush(FlushRequest) returns (FlushResponse);

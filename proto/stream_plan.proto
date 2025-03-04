@@ -111,7 +111,7 @@ message DropSubscriptionsMutation {
 }
 
 message SinkConfigInfo {
-  map<string,string> sink_config_info = 1;
+  map<string, string> sink_config_info = 1;
 }
 
 message AlterSinkConfigMutation {
