@@ -277,8 +277,20 @@ pub async fn run_slt_task(
             }
 
             let cmd = match &record {
-                sqllogictest::Record::Statement { sql, .. }
-                | sqllogictest::Record::Query { sql, .. } => extract_sql_command(sql),
+                sqllogictest::Record::Statement {
+                    sql, conditions, ..
+                }
+                | sqllogictest::Record::Query {
+                    sql, conditions, ..
+                } if conditions
+                    .iter()
+                    .all(|c| !matches!(c, Condition::SkipIf{ label } if label == "madsim"))
+                    && !conditions
+                        .iter()
+                        .any(|c| matches!(c, Condition::OnlyIf{ label} if label != "madsim" )) =>
+                {
+                    extract_sql_command(sql)
+                }
                 _ => SqlCmd::Others,
             };
 
