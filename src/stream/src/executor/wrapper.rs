@@ -49,10 +49,8 @@ impl WrapperExecutor {
 
     #[allow(clippy::let_and_return)]
     fn wrap_debug(
-        operator_id: u64,
         info: Arc<ExecutorInfo>,
         stream: impl MessageStream + 'static,
-        actor_context: ActorContextRef,
     ) -> impl MessageStream + 'static {
         // Update check
         let stream = update_check::update_check(info, stream);
@@ -93,7 +91,7 @@ impl WrapperExecutor {
             stream_node_metrics::stream_node_metrics(operator_id, stream, actor_ctx.clone());
 
         if cfg!(debug_assertions) {
-            Self::wrap_debug(operator_id, info, stream, actor_ctx).boxed()
+            Self::wrap_debug(info, stream).boxed()
         } else {
             stream.boxed()
         }
