@@ -328,8 +328,7 @@ pub async fn run_slt_task(
             // For kill enabled.
             tracing::debug!(?cmd, "Running");
 
-            if let SqlCmd::SetBackgroundDdl { enable } = cmd
-            {
+            if let SqlCmd::SetBackgroundDdl { enable } = cmd {
                 manual_background_ddl_enabled = enable;
                 background_ddl_enabled = enable;
             }
