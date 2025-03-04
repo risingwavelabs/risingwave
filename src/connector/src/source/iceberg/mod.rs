@@ -165,6 +165,18 @@ impl IcebergFileScanTask {
             IcebergFileScanTask::CountStar(_) => false,
         }
     }
+
+    pub fn files(&self) -> Vec<String> {
+        match self {
+            IcebergFileScanTask::Data(file_scan_tasks)
+            | IcebergFileScanTask::EqualityDelete(file_scan_tasks)
+            | IcebergFileScanTask::PositionDelete(file_scan_tasks) => file_scan_tasks
+                .iter()
+                .map(|task| task.data_file_path.clone())
+                .collect(),
+            IcebergFileScanTask::CountStar(_) => vec![],
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -234,7 +246,9 @@ impl SplitEnumerator for IcebergSplitEnumerator {
     }
 
     async fn list_splits(&mut self) -> ConnectorResult<Vec<Self::Split>> {
-        // Iceberg source does not support streaming queries
+        // Like file source, iceberg streaming source has a List Executor and a Fetch Executor,
+        // instead of relying on SplitEnumerator on meta.
+        // TODO: add some validation logic here.
         Ok(vec![])
     }
 }
@@ -349,18 +363,30 @@ impl IcebergSplitEnumerator {
         let table_schema = table.metadata().current_schema();
         tracing::debug!("iceberg_table_schema: {:?}", table_schema);
 
-        let mut position_delete_files = vec![];
-        let mut data_files = vec![];
-        let mut equality_delete_files = vec![];
         let scan = table
             .scan()
             .with_filter(predicate)
             .snapshot_id(snapshot_id)
             .select(require_names)
             .build()
-            .map_err(|e| anyhow!(e))?;
+            .context("failed to build iceberg scan")?;
+        Self::scan_to_splits(snapshot_id, scan, iceberg_scan_type, batch_parallelism).await
+    }
 
-        let file_scan_stream = scan.plan_files().await.map_err(|e| anyhow!(e))?;
+    pub async fn scan_to_splits(
+        snapshot_id: i64,
+        scan: TableScan,
+        iceberg_scan_type: IcebergScanType,
+        batch_parallelism: usize,
+    ) -> ConnectorResult<Vec<IcebergSplit>> {
+        let mut position_delete_files = vec![];
+        let mut data_files = vec![];
+        let mut equality_delete_files = vec![];
+
+        let file_scan_stream = scan
+            .plan_files()
+            .await
+            .context("failed to plan iceberg FileScanTask")?;
 
         #[for_await]
         for task in file_scan_stream {
