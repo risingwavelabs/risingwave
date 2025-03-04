@@ -482,6 +482,14 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                             && buffer.no_flushed_items()
                         {
                             clean_state = true;
+
+                            // Let write future resume immediately
+                            if let WriteFuture::Paused { sleep_future, .. } =
+                                &mut write_future_state
+                            {
+                                assert!(buffer.current_size < self.max_buffer_size);
+                                *sleep_future = Box::pin(sleep(Duration::ZERO));
+                            }
                         }
                         let (chunk, new_truncate_offset) = result?;
                         if let Some(new_truncate_offset) = new_truncate_offset {
