@@ -311,7 +311,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
         let mut available = self.bound_columns.clone();
         if !available.is_empty() {
             available.shuffle(self.rng);
-            let upper_bound = (available.len() + 1) / 2;
+            let upper_bound = available.len().div_ceil(2);
             let n = self.rng.gen_range(1..=upper_bound);
             available.drain(..n).collect_vec()
         } else {

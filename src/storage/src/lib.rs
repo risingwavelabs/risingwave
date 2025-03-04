@@ -20,7 +20,6 @@
 #![feature(hash_extract_if)]
 #![feature(proc_macro_hygiene)]
 #![feature(stmt_expr_attributes)]
-#![feature(strict_provenance)]
 #![feature(test)]
 #![feature(trait_alias)]
 #![feature(type_alias_impl_trait)]
@@ -37,7 +36,6 @@
 #![feature(maybe_uninit_uninit_array)]
 #![feature(maybe_uninit_array_assume_init)]
 #![feature(iter_from_coroutine)]
-#![feature(trait_upcasting)]
 
 pub mod hummock;
 pub mod memory;

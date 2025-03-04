@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(async_closure)]
 #![allow(clippy::derive_partial_eq_without_eq)]
 #![feature(map_try_insert)]
 #![feature(negative_impls)]

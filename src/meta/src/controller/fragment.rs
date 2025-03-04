@@ -1998,7 +1998,6 @@ mod tests {
                 .remove(&actor_id)
                 .unwrap()
                 .into_iter()
-                .map(Into::into)
                 .collect();
 
             assert_eq!(actor_dispatcher, pb_dispatcher);

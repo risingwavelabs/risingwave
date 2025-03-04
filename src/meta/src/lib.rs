@@ -27,7 +27,6 @@
 #![feature(custom_test_frameworks)]
 #![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
 #![feature(impl_trait_in_assoc_type)]
-#![feature(const_option)]
 #![feature(anonymous_lifetime_in_impl_trait)]
 #![feature(duration_millis_float)]
 #![feature(iterator_try_reduce)]
