@@ -2084,6 +2084,7 @@ impl DdlController {
             Object::SchemaId(id) => (ObjectType::Schema, id as ObjectId),
             Object::DatabaseId(id) => (ObjectType::Database, id as ObjectId),
             Object::SubscriptionId(id) => (ObjectType::Subscription, id as ObjectId),
+            Object::ConnectionId(id) => (ObjectType::Connection, id as ObjectId),
         };
         self.metadata_manager
             .catalog_controller

@@ -1077,6 +1077,15 @@ pub async fn handle(
                 )
                 .await
             }
+            AlterConnectionOperation::ChangeOwner { new_owner_name } => {
+                alter_owner::handle_alter_owner(
+                    handler_args,
+                    name,
+                    new_owner_name,
+                    StatementType::ALTER_CONNECTION,
+                )
+                .await
+            }
         },
         Statement::AlterSystem { param, value } => {
             alter_system::handle_alter_system(handler_args, param, value).await

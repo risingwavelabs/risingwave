@@ -163,6 +163,18 @@ pub async fn handle_alter_owner(
                     }
                     Object::SchemaId(schema.id())
                 }
+                StatementType::ALTER_CONNECTION => {
+                    let (connection, schema_name) = catalog_reader.get_connection_by_name(
+                        db_name,
+                        schema_path,
+                        &real_obj_name,
+                    )?;
+                    session.check_privilege_for_drop_alter(schema_name, &**connection)?;
+                    if connection.owner() == owner_id {
+                        return Ok(RwPgResponse::empty_result(stmt_type));
+                    }
+                    Object::ConnectionId(connection.id)
+                }
                 _ => unreachable!(),
             },
             owner_id,
