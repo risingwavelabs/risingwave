@@ -1,6 +1,9 @@
 name: Update PR Template on Release Branch Creation
 
 on:
+  push:
+    branches:
+      - 'release-*'
   create:
     branches:
       - 'release-*'
@@ -13,6 +16,11 @@ jobs:
         uses: actions/checkout@v3
         with:
           fetch-depth: 0
+          fetch-tags: true
+          ref: main
+
+      - name: Fetch all branches
+        run: git fetch --prune --all
 
       - name: Set up Python (for version comparison)
         uses: actions/setup-python@v4
@@ -27,7 +35,7 @@ jobs:
 
           branches = subprocess.check_output(['git', 'branch', '-r'], text=True)
           release_versions = []
-          pattern = re.compile(r'origin/release-(\\d+)\\.(\\d+)')
+          pattern = re.compile(r'origin/release-(\d+)\.(\d+)')
 
           for line in branches.splitlines():
               match = pattern.search(line)
@@ -37,30 +45,31 @@ jobs:
 
           highest = max(release_versions)
           highest_version = f"{highest[0]}.{highest[1]}"
-          print(f"::set-output name=version::{highest_version}")
+          print(f"Highest release version found: {highest_version}")
+          echo "version=${highest_version}" >> $GITHUB_ENV
 
       - name: Update PR template with highest version
         run: |
-          VERSION=${{ steps.highest_version.outputs.version }}
+          VERSION=${{ env.version }}
           if grep -q "^.*Highest Release Version:.*$" .github/pull_request_template.md; then
             sed -i "s/^.*Highest Release Version:.*$/Highest Release Version: ${VERSION}/" .github/pull_request_template.md
           else
-            awk -v version="Highest Release Version: ${VERSION}" '1;/I hereby agree/{print "\\n" version}' .github/pull_request_template.md > tmpfile && mv tmpfile .github/pull_request_template.md
+            awk -v version="Highest Release Version: ${VERSION}" '1;/I hereby agree/{print "\n" version}' .github/pull_request_template.md > tmpfile && mv tmpfile .github/pull_request_template.md
           fi
 
       - name: Commit and push changes
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
-          git checkout -b update-pr-template-${{ steps.highest_version.outputs.version }}
+          git checkout -b update-pr-template-${{ env.version }}
           git add .github/pull_request_template.md
-          git commit -m "chore: update PR template with highest release version ${{ steps.highest_version.outputs.version }}"
-          git push origin update-pr-template-${{ steps.highest_version.outputs.version }}
+          git commit -m "chore: update PR template with highest release version ${{ env.version }}"
+          git push origin update-pr-template-${{ env.version }}
 
       - name: Create pull request
         uses: peter-evans/create-pull-request@v5
         with:
           title: "Update PR Template for Highest Release Version"
-          body: "This PR updates the pull request template to reflect the highest release version: ${{ steps.highest_version.outputs.version }}."
+          body: "This PR updates the pull request template to reflect the highest release version: ${{ env.version }}."
           base: main
-          branch: update-pr-template-${{ steps.highest_version.outputs.version }}
+          branch: update-pr-template-${{ env.version }}
