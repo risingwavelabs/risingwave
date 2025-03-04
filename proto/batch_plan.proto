@@ -390,7 +390,6 @@ message DistributedLookupJoinNode {
   repeated bool null_safe = 9;
   optional plan_common.AsOf as_of = 10;
   optional plan_common.AsOfJoinDesc asof_desc = 11;
-
 }
 
 message UnionNode {}
