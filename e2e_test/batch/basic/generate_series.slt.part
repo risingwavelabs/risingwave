@@ -149,21 +149,65 @@ SELECT * FROM generate_series(0::numeric,10::numeric,'nan'::numeric);
 statement error start value cannot be infinity
 SELECT * FROM generate_series('-infinity'::numeric,'infinity'::numeric,'nan'::numeric);
 
-# ------
-# generate_series(timestamptz, timestamptz, interval) is not supported in batch mode
+statement ok
+set timezone = 'PST8PDT';
 
-statement error Unsupported function
+query T
 select * from generate_series(
   '2024-06-21 17:36:00'::timestamptz,
-  now(),
-  interval '1 hour'
-);
-
-statement error Unsupported function
-select * from generate_series(
-  '2024-06-21 17:36:00',
-  now(),
+  '2024-06-21 22:36:00',
   '1 hour'
 );
+----
+2024-06-21 17:36:00-07:00
+2024-06-21 18:36:00-07:00
+2024-06-21 19:36:00-07:00
+2024-06-21 20:36:00-07:00
+2024-06-21 21:36:00-07:00
+2024-06-21 22:36:00-07:00
 
-# ------
+query T
+select * from generate_series(
+  '2024-06-21 17:36:00',
+  '2024-06-21 22:36:00',
+  interval '1 hour'
+);
+----
+2024-06-21 17:36:00-07:00
+2024-06-21 18:36:00-07:00
+2024-06-21 19:36:00-07:00
+2024-06-21 20:36:00-07:00
+2024-06-21 21:36:00-07:00
+2024-06-21 22:36:00-07:00
+
+query TTTIII
+with cfg as (
+  select 1705348800 as start, 1734292800 as stop
+), t as (
+  select
+    generate_series(to_timestamp(start)::timestamp, to_timestamp(stop)::timestamp, interval '1' month) as naive,
+    generate_series(to_timestamp(start), to_timestamp(stop), interval '1' month) as pst8pdt,
+    generate_series(to_timestamp(start), to_timestamp(stop), interval '1' month, 'UTC') as utc
+  from cfg
+) select
+  naive, pst8pdt, utc,
+  extract(epoch from naive)::int as naive_epoch,
+  extract(epoch from pst8pdt)::int as pst8pdt_epoch,
+  extract(epoch from utc)::int as utc_epoch
+from t;
+----
+2024-01-15 12:00:00 2024-01-15 12:00:00-08:00 2024-01-15 12:00:00-08:00 1705320000 1705348800 1705348800
+2024-02-15 12:00:00 2024-02-15 12:00:00-08:00 2024-02-15 12:00:00-08:00 1707998400 1708027200 1708027200
+2024-03-15 12:00:00 2024-03-15 12:00:00-07:00 2024-03-15 13:00:00-07:00 1710504000 1710529200 1710532800
+2024-04-15 12:00:00 2024-04-15 12:00:00-07:00 2024-04-15 13:00:00-07:00 1713182400 1713207600 1713211200
+2024-05-15 12:00:00 2024-05-15 12:00:00-07:00 2024-05-15 13:00:00-07:00 1715774400 1715799600 1715803200
+2024-06-15 12:00:00 2024-06-15 12:00:00-07:00 2024-06-15 13:00:00-07:00 1718452800 1718478000 1718481600
+2024-07-15 12:00:00 2024-07-15 12:00:00-07:00 2024-07-15 13:00:00-07:00 1721044800 1721070000 1721073600
+2024-08-15 12:00:00 2024-08-15 12:00:00-07:00 2024-08-15 13:00:00-07:00 1723723200 1723748400 1723752000
+2024-09-15 12:00:00 2024-09-15 12:00:00-07:00 2024-09-15 13:00:00-07:00 1726401600 1726426800 1726430400
+2024-10-15 12:00:00 2024-10-15 12:00:00-07:00 2024-10-15 13:00:00-07:00 1728993600 1729018800 1729022400
+2024-11-15 12:00:00 2024-11-15 12:00:00-08:00 2024-11-15 12:00:00-08:00 1731672000 1731700800 1731700800
+2024-12-15 12:00:00 2024-12-15 12:00:00-08:00 2024-12-15 12:00:00-08:00 1734264000 1734292800 1734292800
+
+statement ok
+set timezone = 'UTC';

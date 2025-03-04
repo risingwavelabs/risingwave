@@ -23,7 +23,6 @@
 // FIXME: This should be fixed!!! https://github.com/risingwavelabs/risingwave/issues/19906
 #![expect(clippy::large_enum_variant)]
 
-use std::collections::HashMap;
 use std::str::FromStr;
 
 use plan_common::AdditionalColumn;
@@ -385,20 +384,6 @@ impl stream_plan::Dispatcher {
     }
 }
 
-impl meta::table_fragments::Fragment {
-    pub fn dispatches(&self) -> HashMap<i32, stream_plan::DispatchStrategy> {
-        self.actors[0]
-            .dispatcher
-            .iter()
-            .map(|d| {
-                let fragment_id = d.dispatcher_id as _;
-                let strategy = d.as_strategy();
-                (fragment_id, strategy)
-            })
-            .collect()
-    }
-}
-
 impl catalog::StreamSourceInfo {
     /// Refer to [`Self::cdc_source_job`] for details.
     pub fn is_shared(&self) -> bool {
@@ -449,6 +434,7 @@ impl std::fmt::Debug for data::DataType {
             interval_type,
             field_type,
             field_names,
+            field_ids,
             type_name,
             // currently all data types are nullable
             is_nullable: _,
@@ -473,6 +459,9 @@ impl std::fmt::Debug for data::DataType {
         }
         if !self.field_names.is_empty() {
             s.field("field_names", field_names);
+        }
+        if !self.field_ids.is_empty() {
+            s.field("field_ids", field_ids);
         }
         s.finish()
     }

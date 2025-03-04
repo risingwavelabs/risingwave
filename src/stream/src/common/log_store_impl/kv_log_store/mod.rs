@@ -24,7 +24,8 @@ use risingwave_connector::sink::log_store::LogStoreFactory;
 use risingwave_pb::catalog::Table;
 use risingwave_storage::StateStore;
 use risingwave_storage::store::{LocalStateStore, NewLocalOptions, OpConsistencyLevel};
-use tokio::sync::watch;
+use tokio::sync::mpsc::unbounded_channel;
+use tokio::sync::{oneshot, watch};
 
 use crate::common::log_store_impl::kv_log_store::buffer::new_log_store_buffer;
 use crate::common::log_store_impl::kv_log_store::reader::KvLogStoreReader;
@@ -376,9 +377,12 @@ pub struct KvLogStoreFactory<S: StateStore> {
     identity: String,
 
     pk_info: &'static KvLogStorePkInfo,
+
+    align_epoch_on_init: bool,
 }
 
 impl<S: StateStore> KvLogStoreFactory<S> {
+    #[expect(clippy::too_many_arguments)]
     pub(crate) fn new(
         state_store: S,
         table_catalog: Table,
@@ -387,6 +391,7 @@ impl<S: StateStore> KvLogStoreFactory<S> {
         metrics: KvLogStoreMetrics,
         identity: impl Into<String>,
         pk_info: &'static KvLogStorePkInfo,
+        align_epoch_on_init: bool,
     ) -> Self {
         Self {
             state_store,
@@ -396,6 +401,7 @@ impl<S: StateStore> KvLogStoreFactory<S> {
             metrics,
             identity: identity.into(),
             pk_info,
+            align_epoch_on_init,
         }
     }
 }
@@ -404,6 +410,9 @@ impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
     type Reader = KvLogStoreReader<<S::Local as LocalStateStore>::FlushedSnapshotReader>;
     type Writer = KvLogStoreWriter<S::Local>;
 
+    const ALLOW_REWIND: bool = true;
+    const REBUILD_SINK_ON_UPDATE_VNODE_BITMAP: bool = true;
+
     async fn build(self) -> (Self::Reader, Self::Writer) {
         let table_id = TableId::new(self.table_catalog.id);
         let (pause_tx, pause_rx) = watch::channel(false);
@@ -411,9 +420,7 @@ impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
         let local_state_store = self
             .state_store
             .new_local(NewLocalOptions {
-                table_id: TableId {
-                    table_id: self.table_catalog.id,
-                },
+                table_id,
                 op_consistency_level: OpConsistencyLevel::Inconsistent,
                 table_option: TableOption {
                     retention_seconds: None,
@@ -427,15 +434,30 @@ impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
 
         let (read_state, write_state) = new_log_store_state(table_id, local_state_store, serde);
 
+        let (init_epoch_tx, init_epoch_rx) = oneshot::channel();
+        let (update_vnode_bitmap_tx, update_vnode_bitmap_rx) = unbounded_channel();
+
         let reader = KvLogStoreReader::new(
             read_state,
             rx,
+            init_epoch_rx,
+            update_vnode_bitmap_rx,
             self.metrics.clone(),
             pause_rx,
             self.identity.clone(),
+            self.align_epoch_on_init,
         );
 
-        let writer = KvLogStoreWriter::new(write_state, tx, self.metrics, pause_tx, self.identity);
+        let writer = KvLogStoreWriter::new(
+            write_state,
+            tx,
+            init_epoch_tx,
+            update_vnode_bitmap_tx,
+            self.metrics,
+            pause_tx,
+            self.identity,
+            self.align_epoch_on_init,
+        );
 
         (reader, writer)
     }
@@ -459,10 +481,7 @@ mod tests {
     use risingwave_connector::sink::log_store::{
         ChunkId, LogReader, LogStoreFactory, LogStoreReadItem, LogWriter, TruncateOffset,
     };
-    use risingwave_hummock_sdk::HummockReadEpoch;
     use risingwave_hummock_test::test_utils::prepare_hummock_test_env;
-    use risingwave_storage::StateStore;
-    use risingwave_storage::store::TryWaitEpochOptions;
 
     use crate::common::log_store_impl::kv_log_store::test_utils::{
         LogWriterTestExt, TEST_DATA_SIZE, calculate_vnode_bitmap, check_rows_eq,
@@ -506,6 +525,7 @@ mod tests {
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
+            false,
         );
         let (mut reader, mut writer) = factory.build().await;
 
@@ -622,6 +642,7 @@ mod tests {
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
+            false,
         );
         let (mut reader, mut writer) = factory.build().await;
 
@@ -669,7 +690,7 @@ mod tests {
             _ => unreachable!(),
         }
         match reader.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+            (epoch, LogStoreReadItem::Barrier { is_checkpoint, .. }) => {
                 assert_eq!(epoch, epoch1);
                 assert!(!is_checkpoint)
             }
@@ -689,7 +710,7 @@ mod tests {
             _ => unreachable!(),
         }
         match reader.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+            (epoch, LogStoreReadItem::Barrier { is_checkpoint, .. }) => {
                 assert_eq!(epoch, epoch2);
                 assert!(is_checkpoint)
             }
@@ -700,14 +721,6 @@ mod tests {
         // The truncate does not work because it is after the sync
         reader
             .truncate(TruncateOffset::Barrier { epoch: epoch2 })
-            .unwrap();
-        test_env
-            .storage
-            .try_wait_epoch(
-                HummockReadEpoch::Committed(epoch2),
-                TryWaitEpochOptions::for_test(table.id.into()),
-            )
-            .await
             .unwrap();
 
         drop(writer);
@@ -724,6 +737,7 @@ mod tests {
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
+            false,
         );
         let (mut reader, mut writer) = factory.build().await;
         test_env
@@ -748,7 +762,7 @@ mod tests {
             _ => unreachable!(),
         }
         match reader.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+            (epoch, LogStoreReadItem::Barrier { is_checkpoint, .. }) => {
                 assert_eq!(epoch, epoch1);
                 assert!(!is_checkpoint)
             }
@@ -768,7 +782,7 @@ mod tests {
             _ => unreachable!(),
         }
         match reader.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+            (epoch, LogStoreReadItem::Barrier { is_checkpoint, .. }) => {
                 assert_eq!(epoch, epoch2);
                 assert!(is_checkpoint)
             }
@@ -818,6 +832,7 @@ mod tests {
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
+            false,
         );
         let (mut reader, mut writer) = factory.build().await;
 
@@ -879,7 +894,7 @@ mod tests {
         };
         assert!(chunk_id2 > chunk_id1);
         match reader.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+            (epoch, LogStoreReadItem::Barrier { is_checkpoint, .. }) => {
                 assert_eq!(epoch, epoch1);
                 assert!(is_checkpoint)
             }
@@ -914,7 +929,7 @@ mod tests {
             .unwrap();
 
         match reader.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+            (epoch, LogStoreReadItem::Barrier { is_checkpoint, .. }) => {
                 assert_eq!(epoch, epoch2);
                 assert!(is_checkpoint)
             }
@@ -923,14 +938,6 @@ mod tests {
 
         // Truncation on epoch1 should work because it is before this sync
         test_env.commit_epoch(epoch2).await;
-        test_env
-            .storage
-            .try_wait_epoch(
-                HummockReadEpoch::Committed(epoch2),
-                TryWaitEpochOptions::for_test(table.id.into()),
-            )
-            .await
-            .unwrap();
 
         drop(writer);
 
@@ -946,6 +953,7 @@ mod tests {
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
+            false,
         );
         let (mut reader, mut writer) = factory.build().await;
 
@@ -974,7 +982,7 @@ mod tests {
             _ => unreachable!(),
         }
         match reader.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+            (epoch, LogStoreReadItem::Barrier { is_checkpoint, .. }) => {
                 assert_eq!(epoch, epoch1);
                 assert!(is_checkpoint)
             }
@@ -994,7 +1002,7 @@ mod tests {
             _ => unreachable!(),
         }
         match reader.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+            (epoch, LogStoreReadItem::Barrier { is_checkpoint, .. }) => {
                 assert_eq!(epoch, epoch2);
                 assert!(is_checkpoint)
             }
@@ -1017,6 +1025,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_vnode_recover() {
+        test_update_vnode_recover_inner(false).await
+    }
+
+    #[tokio::test]
+    async fn test_update_vnode_recover_with_align_init_epoch() {
+        test_update_vnode_recover_inner(true).await
+    }
+
+    async fn test_update_vnode_recover_inner(align_init_epoch: bool) {
         let pk_info: &'static KvLogStorePkInfo = &KV_LOG_STORE_V2_INFO;
         let test_env = prepare_hummock_test_env().await;
 
@@ -1043,6 +1060,7 @@ mod tests {
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
+            false,
         );
         let factory2 = KvLogStoreFactory::new(
             test_env.storage.clone(),
@@ -1052,6 +1070,7 @@ mod tests {
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
+            align_init_epoch,
         );
         let (mut reader1, mut writer1) = factory1.build().await;
         let (mut reader2, mut writer2) = factory2.build().await;
@@ -1102,7 +1121,7 @@ mod tests {
             _ => unreachable!(),
         };
         match reader1.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+            (epoch, LogStoreReadItem::Barrier { is_checkpoint, .. }) => {
                 assert_eq!(epoch, epoch1);
                 assert!(!is_checkpoint);
             }
@@ -1117,7 +1136,7 @@ mod tests {
             _ => unreachable!(),
         }
         match reader2.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+            (epoch, LogStoreReadItem::Barrier { is_checkpoint, .. }) => {
                 assert_eq!(epoch, epoch1);
                 assert!(!is_checkpoint);
             }
@@ -1155,14 +1174,14 @@ mod tests {
             .unwrap();
 
         match reader1.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+            (epoch, LogStoreReadItem::Barrier { is_checkpoint, .. }) => {
                 assert_eq!(epoch, epoch2);
                 assert!(is_checkpoint);
             }
             _ => unreachable!(),
         }
         match reader2.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+            (epoch, LogStoreReadItem::Barrier { is_checkpoint, .. }) => {
                 assert_eq!(epoch, epoch2);
                 assert!(is_checkpoint);
             }
@@ -1171,14 +1190,6 @@ mod tests {
 
         // Truncation of reader1 on epoch1 should work because it is before this sync
         test_env.commit_epoch(epoch2).await;
-        test_env
-            .storage
-            .try_wait_epoch(
-                HummockReadEpoch::Committed(epoch2),
-                TryWaitEpochOptions::for_test(table.id.into()),
-            )
-            .await
-            .unwrap();
 
         drop(writer1);
         drop(writer2);
@@ -1195,6 +1206,7 @@ mod tests {
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
+            align_init_epoch,
         );
         let (mut reader, mut writer) = factory.build().await;
         test_env
@@ -1205,19 +1217,23 @@ mod tests {
             .await
             .unwrap();
         reader.init().await.unwrap();
-        match reader.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::StreamChunk { chunk, .. }) => {
-                assert_eq!(epoch, epoch1);
-                assert!(check_stream_chunk_eq(&chunk1_2, &chunk));
+        if !align_init_epoch {
+            // Though we don't truncate reader2 with epoch1, we have truncated reader1 with epoch1, and with align_init_epoch
+            // set to true, we won't receive the following commented items.
+            match reader.next_item().await.unwrap() {
+                (epoch, LogStoreReadItem::StreamChunk { chunk, .. }) => {
+                    assert_eq!(epoch, epoch1);
+                    assert!(check_stream_chunk_eq(&chunk1_2, &chunk));
+                }
+                _ => unreachable!(),
             }
-            _ => unreachable!(),
-        }
-        match reader.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
-                assert_eq!(epoch, epoch1);
-                assert!(!is_checkpoint);
+            match reader.next_item().await.unwrap() {
+                (epoch, LogStoreReadItem::Barrier { is_checkpoint, .. }) => {
+                    assert_eq!(epoch, epoch1);
+                    assert!(!is_checkpoint);
+                }
+                _ => unreachable!(),
             }
-            _ => unreachable!(),
         }
         match reader.next_item().await.unwrap() {
             (epoch, LogStoreReadItem::StreamChunk { chunk, .. }) => {
@@ -1230,7 +1246,7 @@ mod tests {
             _ => unreachable!(),
         }
         match reader.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+            (epoch, LogStoreReadItem::Barrier { is_checkpoint, .. }) => {
                 assert_eq!(epoch, epoch2);
                 assert!(is_checkpoint);
             }
@@ -1260,6 +1276,7 @@ mod tests {
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
+            false,
         );
         let (mut reader, mut writer) = factory.build().await;
 
@@ -1305,10 +1322,10 @@ mod tests {
                 assert_eq!(epoch, epoch1);
                 assert!(check_stream_chunk_eq(&stream_chunk1, &read_stream_chunk));
             }
-            _ => unreachable!(),
+            item => unreachable!("{:?}", item),
         }
         match reader.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+            (epoch, LogStoreReadItem::Barrier { is_checkpoint, .. }) => {
                 assert_eq!(epoch, epoch1);
                 assert!(is_checkpoint)
             }
@@ -1382,7 +1399,7 @@ mod tests {
                 }
                 if last_sealed || i != size - 1 {
                     match reader.next_item().await.unwrap() {
-                        (item_epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+                        (item_epoch, LogStoreReadItem::Barrier { is_checkpoint, .. }) => {
                             assert_eq!(item_epoch, *epoch);
                             assert!(is_checkpoint)
                         }
@@ -1407,6 +1424,7 @@ mod tests {
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
+            false,
         );
         let (mut reader, mut writer) = factory.build().await;
 
@@ -1450,15 +1468,6 @@ mod tests {
         test_env.commit_epoch(epoch1).await;
         test_env.commit_epoch(epoch2).await;
         test_env.commit_epoch(epoch3).await;
-
-        test_env
-            .storage
-            .try_wait_epoch(
-                HummockReadEpoch::Committed(epoch3),
-                TryWaitEpochOptions::for_test(table.id.into()),
-            )
-            .await
-            .unwrap();
 
         reader.init().await.unwrap();
 
@@ -1530,6 +1539,7 @@ mod tests {
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
+            false,
         );
         let (mut reader, mut writer) = factory.build().await;
 
@@ -1595,6 +1605,7 @@ mod tests {
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
+            false,
         );
         let (mut reader, mut writer) = factory.build().await;
 
@@ -1714,8 +1725,9 @@ mod tests {
                 (
                     LogStoreReadItem::Barrier {
                         is_checkpoint: expected_is_checkpoint,
+                        ..
                     },
-                    LogStoreReadItem::Barrier { is_checkpoint },
+                    LogStoreReadItem::Barrier { is_checkpoint, .. },
                 ) => {
                     assert_eq!(expected_is_checkpoint, is_checkpoint);
                 }
@@ -1759,6 +1771,7 @@ mod tests {
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
+            false,
         );
         let (mut reader, mut writer) = factory.build().await;
 
@@ -1841,6 +1854,7 @@ mod tests {
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
+            false,
         );
         let (mut reader, mut writer) = factory.build().await;
         test_env
@@ -1908,6 +1922,7 @@ mod tests {
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
+            false,
         );
         let (mut reader, mut writer) = factory.build().await;
         test_env
@@ -1937,5 +1952,235 @@ mod tests {
             ],
         )
         .await;
+    }
+
+    #[tokio::test]
+    async fn test_align_init_epoch() {
+        let pk_info: &'static KvLogStorePkInfo = &KV_LOG_STORE_V2_INFO;
+        let test_env = prepare_hummock_test_env().await;
+
+        let table = gen_test_log_store_table(pk_info);
+
+        test_env.register_table(table.clone()).await;
+
+        fn build_bitmap(indexes: impl Iterator<Item = usize>) -> Arc<Bitmap> {
+            let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT_FOR_TEST);
+            for i in indexes {
+                builder.set(i, true);
+            }
+            Arc::new(builder.finish())
+        }
+
+        let vnodes1 = build_bitmap((0..VirtualNode::COUNT_FOR_TEST).filter(|i| i % 2 == 0));
+        let vnodes2 = build_bitmap((0..VirtualNode::COUNT_FOR_TEST).filter(|i| i % 2 == 1));
+
+        let factory1 = KvLogStoreFactory::new(
+            test_env.storage.clone(),
+            table.clone(),
+            Some(vnodes1.clone()),
+            10 * TEST_DATA_SIZE,
+            KvLogStoreMetrics::for_test(),
+            "test",
+            pk_info,
+            true,
+        );
+        let factory2 = KvLogStoreFactory::new(
+            test_env.storage.clone(),
+            table.clone(),
+            Some(vnodes2.clone()),
+            10 * TEST_DATA_SIZE,
+            KvLogStoreMetrics::for_test(),
+            "test",
+            pk_info,
+            true,
+        );
+        let (mut reader1, mut writer1) = factory1.build().await;
+        let (mut reader2, mut writer2) = factory2.build().await;
+
+        let epoch1 = test_env
+            .storage
+            .get_pinned_version()
+            .table_committed_epoch(TableId::new(table.id))
+            .unwrap()
+            .next_epoch();
+        test_env
+            .storage
+            .start_epoch(epoch1, HashSet::from_iter([TableId::new(table.id)]));
+        writer1
+            .init(EpochPair::new_test_epoch(epoch1), false)
+            .await
+            .unwrap();
+        writer2
+            .init(EpochPair::new_test_epoch(epoch1), false)
+            .await
+            .unwrap();
+        reader1.init().await.unwrap();
+        reader2.init().await.unwrap();
+        let [chunk1_1, chunk1_2] = gen_multi_vnode_stream_chunks::<2>(0, 100, pk_info);
+        writer1.write_chunk(chunk1_1.clone()).await.unwrap();
+        writer2.write_chunk(chunk1_2.clone()).await.unwrap();
+        let epoch2 = epoch1.next_epoch();
+        test_env
+            .storage
+            .start_epoch(epoch2, HashSet::from_iter([TableId::new(table.id)]));
+        writer1
+            .flush_current_epoch_for_test(epoch2, false)
+            .await
+            .unwrap();
+        writer2
+            .flush_current_epoch_for_test(epoch2, false)
+            .await
+            .unwrap();
+        let [chunk2_1, chunk2_2] = gen_multi_vnode_stream_chunks::<2>(200, 100, pk_info);
+        writer1.write_chunk(chunk2_1.clone()).await.unwrap();
+        writer2.write_chunk(chunk2_2.clone()).await.unwrap();
+
+        match reader1.next_item().await.unwrap() {
+            (epoch, LogStoreReadItem::StreamChunk { chunk, .. }) => {
+                assert_eq!(epoch, epoch1);
+                assert!(check_stream_chunk_eq(&chunk1_1, &chunk));
+            }
+            _ => unreachable!(),
+        };
+        match reader1.next_item().await.unwrap() {
+            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+                assert_eq!(epoch, epoch1);
+                assert!(!is_checkpoint);
+            }
+            _ => unreachable!(),
+        }
+
+        match reader2.next_item().await.unwrap() {
+            (epoch, LogStoreReadItem::StreamChunk { chunk, .. }) => {
+                assert_eq!(epoch, epoch1);
+                assert!(check_stream_chunk_eq(&chunk1_2, &chunk));
+            }
+            _ => unreachable!(),
+        }
+        match reader2.next_item().await.unwrap() {
+            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+                assert_eq!(epoch, epoch1);
+                assert!(!is_checkpoint);
+            }
+            _ => unreachable!(),
+        }
+
+        // Only reader1 will truncate
+        reader1
+            .truncate(TruncateOffset::Barrier { epoch: epoch1 })
+            .unwrap();
+
+        match reader1.next_item().await.unwrap() {
+            (epoch, LogStoreReadItem::StreamChunk { chunk, .. }) => {
+                assert_eq!(epoch, epoch2);
+                assert!(check_stream_chunk_eq(&chunk2_1, &chunk));
+            }
+            _ => unreachable!(),
+        }
+        match reader2.next_item().await.unwrap() {
+            (epoch, LogStoreReadItem::StreamChunk { chunk, .. }) => {
+                assert_eq!(epoch, epoch2);
+                assert!(check_stream_chunk_eq(&chunk2_2, &chunk));
+            }
+            _ => unreachable!(),
+        }
+
+        let epoch3 = epoch2.next_epoch();
+        writer1
+            .flush_current_epoch_for_test(epoch3, true)
+            .await
+            .unwrap();
+        writer2
+            .flush_current_epoch_for_test(epoch3, true)
+            .await
+            .unwrap();
+
+        match reader1.next_item().await.unwrap() {
+            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+                assert_eq!(epoch, epoch2);
+                assert!(is_checkpoint);
+            }
+            _ => unreachable!(),
+        }
+        match reader2.next_item().await.unwrap() {
+            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+                assert_eq!(epoch, epoch2);
+                assert!(is_checkpoint);
+            }
+            _ => unreachable!(),
+        }
+
+        // Truncation of reader1 on epoch1 should work because it is before this sync
+        test_env.commit_epoch(epoch2).await;
+
+        drop(writer1);
+        drop(writer2);
+
+        // Recovery
+        test_env.storage.clear_shared_buffer().await;
+
+        let factory1 = KvLogStoreFactory::new(
+            test_env.storage.clone(),
+            table.clone(),
+            Some(vnodes1.clone()),
+            10 * TEST_DATA_SIZE,
+            KvLogStoreMetrics::for_test(),
+            "test",
+            pk_info,
+            true,
+        );
+        let factory2 = KvLogStoreFactory::new(
+            test_env.storage.clone(),
+            table.clone(),
+            Some(vnodes2.clone()),
+            10 * TEST_DATA_SIZE,
+            KvLogStoreMetrics::for_test(),
+            "test",
+            pk_info,
+            true,
+        );
+        let (mut reader1, mut writer1) = factory1.build().await;
+        let (mut reader2, mut writer2) = factory2.build().await;
+        test_env
+            .storage
+            .start_epoch(epoch3, HashSet::from_iter([TableId::new(table.id)]));
+        writer1
+            .init(EpochPair::new(epoch3, epoch2), false)
+            .await
+            .unwrap();
+        writer2
+            .init(EpochPair::new(epoch3, epoch2), false)
+            .await
+            .unwrap();
+        reader1.init().await.unwrap();
+        match reader1.next_item().await.unwrap() {
+            (epoch, LogStoreReadItem::StreamChunk { chunk, .. }) => {
+                assert_eq!(epoch, epoch2);
+                assert!(check_rows_eq(chunk2_1.rows(), chunk.rows()));
+            }
+            _ => unreachable!(),
+        }
+        match reader1.next_item().await.unwrap() {
+            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+                assert_eq!(epoch, epoch2);
+                assert!(is_checkpoint);
+            }
+            _ => unreachable!(),
+        }
+        reader2.init().await.unwrap();
+        match reader2.next_item().await.unwrap() {
+            (epoch, LogStoreReadItem::StreamChunk { chunk, .. }) => {
+                assert_eq!(epoch, epoch2);
+                assert!(check_rows_eq(chunk2_2.rows(), chunk.rows()));
+            }
+            _ => unreachable!(),
+        }
+        match reader2.next_item().await.unwrap() {
+            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+                assert_eq!(epoch, epoch2);
+                assert!(is_checkpoint);
+            }
+            _ => unreachable!(),
+        }
     }
 }

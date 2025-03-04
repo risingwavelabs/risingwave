@@ -25,44 +25,43 @@ download_and_prepare_rw "$profile" common
 
 echo "--- Download artifacts"
 # preparing for embedded udf tests
-mkdir -p e2e_test/udf/wasm/target/wasm32-wasi/release/
-buildkite-agent artifact download udf.wasm e2e_test/udf/wasm/target/wasm32-wasi/release/
+mkdir -p e2e_test/udf/wasm/target/wasm32-wasip1/release/
+buildkite-agent artifact download udf.wasm e2e_test/udf/wasm/target/wasm32-wasip1/release/
 # preparing for generated tests
 download-and-decompress-artifact e2e_test_generated ./
 
+mode=ci-3streaming-2serving-3fe
 start_cluster() {
-    echo "--- Start cluster"
-    risedev ci-start ci-3streaming-2serving-3fe
+    risedev ci-start $mode
 }
 
 kill_cluster() {
-    echo "--- Kill cluster"
     risedev ci-kill
 }
 
 host_args=(-h localhost -p 4565 -h localhost -p 4566 -h localhost -p 4567)
 
-echo "--- e2e, parallel, streaming"
+echo "--- e2e, $mode, streaming"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info,risingwave_storage::hummock::compactor::compactor_runner=warn" \
 start_cluster
 risedev slt "${host_args[@]}" -d dev './e2e_test/streaming/**/*.slt' -j 16 --junit "parallel-streaming-${profile}" --label "parallel"
 kill_cluster
 
-echo "--- e2e, parallel, batch"
+echo "--- e2e, $mode, batch"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info,risingwave_storage::hummock::compactor::compactor_runner=warn" \
 start_cluster
 # Exclude files that contain ALTER SYSTEM commands
-find ./e2e_test/ddl -name "*.slt" -type f -exec grep -L "ALTER SYSTEM" {} \; | xargs -r sqllogictest "${host_args[@]}" -d dev --junit "parallel-batch-ddl-${profile}" --label "parallel"
+find ./e2e_test/ddl -name "*.slt" -type f -exec grep -L "ALTER SYSTEM" {} \; | xargs -r risedev slt "${host_args[@]}" -d dev --junit "parallel-batch-ddl-${profile}" --label "parallel"
 risedev slt "${host_args[@]}" -d dev './e2e_test/visibility_mode/*.slt' -j 16 --junit "parallel-batch-${profile}" --label "parallel"
 kill_cluster
 
-echo "--- e2e, parallel, udf"
+echo "--- e2e, $mode, udf"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info,risingwave_storage::hummock::compactor::compactor_runner=warn" \
 start_cluster
 risedev slt "${host_args[@]}" -d dev './e2e_test/udf/general/**/*.slt' './e2e_test/udf/embedded/**/*.slt' -j 16 --junit "parallel-udf-${profile}" --label "parallel"
 kill_cluster
 
-echo "--- e2e, parallel, generated"
+echo "--- e2e, $mode, generated"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info,risingwave_storage::hummock::compactor::compactor_runner=warn" \
 start_cluster
 risedev slt "${host_args[@]}" -d dev './e2e_test/generated/**/*.slt' -j 16 --junit "parallel-generated-${profile}" --label "parallel"

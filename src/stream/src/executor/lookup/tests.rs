@@ -37,8 +37,8 @@ use crate::executor::{
 
 fn arrangement_col_descs() -> Vec<ColumnDesc> {
     vec![
-        ColumnDesc::new_atomic(DataType::Int64, "rowid_column", 0),
-        ColumnDesc::new_atomic(DataType::Int64, "join_column", 1),
+        ColumnDesc::named("rowid_column", 0.into(), DataType::Int64),
+        ColumnDesc::named("join_column", 1.into(), DataType::Int64),
     ]
 }
 
@@ -141,8 +141,8 @@ async fn create_arrangement(table_id: TableId, memory_state_store: MemoryStateSt
 /// | b  |       |      | 3 -> 4  |
 fn create_source() -> Executor {
     let columns = vec![
-        ColumnDesc::new_atomic(DataType::Int64, "join_column", 1),
-        ColumnDesc::new_atomic(DataType::Int64, "rowid_column", 2),
+        ColumnDesc::named("join_column", 1.into(), DataType::Int64),
+        ColumnDesc::named("rowid_column", 2.into(), DataType::Int64),
     ];
 
     // Prepare source chunks.

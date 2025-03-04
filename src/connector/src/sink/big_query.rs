@@ -384,11 +384,11 @@ impl BigQuerySink {
                     "Bigquery cannot support Interval"
                 )));
             }
-            DataType::Struct(_) => {
-                let rw_sub_fields = rw_field.sub_fields();
-                let mut sub_fields = Vec::with_capacity(rw_sub_fields.len());
-                for rw_field in &rw_sub_fields {
-                    let field = Self::map_field(rw_field)?;
+            DataType::Struct(st) => {
+                let mut sub_fields = Vec::with_capacity(st.len());
+                for (name, dt) in st.iter() {
+                    let rw_field = Field::with_name(dt.clone(), name);
+                    let field = Self::map_field(&rw_field)?;
                     sub_fields.push(field);
                 }
                 TableFieldSchema::record(&rw_field.name, sub_fields)

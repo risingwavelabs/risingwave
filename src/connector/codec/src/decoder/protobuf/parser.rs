@@ -18,11 +18,11 @@ use anyhow::Context;
 use itertools::Itertools;
 use prost_reflect::{Cardinality, FieldDescriptor, Kind, MessageDescriptor, ReflectMessage, Value};
 use risingwave_common::array::{ListValue, StructValue};
+use risingwave_common::catalog::Field;
 use risingwave_common::types::{
     DataType, DatumCow, Decimal, F32, F64, JsonbVal, MapType, MapValue, ScalarImpl, StructType,
     ToOwnedDatum,
 };
-use risingwave_pb::plan_common::{AdditionalColumn, ColumnDesc, ColumnDescVersion};
 use thiserror::Error;
 use thiserror_ext::Macro;
 
@@ -30,72 +30,20 @@ use crate::decoder::{AccessError, AccessResult, uncategorized};
 
 pub const PROTOBUF_MESSAGES_AS_JSONB: &str = "messages_as_jsonb";
 
-pub fn pb_schema_to_column_descs(
+pub fn pb_schema_to_fields(
     message_descriptor: &MessageDescriptor,
     messages_as_jsonb: &HashSet<String>,
-) -> anyhow::Result<Vec<ColumnDesc>> {
-    let mut columns = Vec::with_capacity(message_descriptor.fields().len());
-    let mut index = 0;
+) -> anyhow::Result<Vec<Field>> {
     let mut parse_trace: Vec<String> = vec![];
-    for field in message_descriptor.fields() {
-        columns.push(pb_field_to_col_desc(
-            &field,
-            &mut index,
-            &mut parse_trace,
-            messages_as_jsonb,
-        )?);
-    }
-
-    Ok(columns)
-}
-
-/// Maps a protobuf field to a RW column.
-fn pb_field_to_col_desc(
-    field_descriptor: &FieldDescriptor,
-    index: &mut i32,
-    parse_trace: &mut Vec<String>,
-    messages_as_jsonb: &HashSet<String>,
-) -> anyhow::Result<ColumnDesc> {
-    let field_type = protobuf_type_mapping(field_descriptor, parse_trace, messages_as_jsonb)
-        .context("failed to map protobuf type")?;
-    if let Kind::Message(m) = field_descriptor.kind()
-        && !messages_as_jsonb.contains(m.full_name())
-    {
-        // TODO(struct): assign type name once supported.
-        let _type_name = m.full_name().to_owned();
-        // TODO(struct): since we deprecated `field_descs` in `ColumnDesc`, there's no need to
-        // traverse the fields here except for maintaining the same column id (index) as the
-        // original implementation.
-        let _field_descs = if let DataType::List { .. } = field_type {
-            vec![]
-        } else {
-            m.fields()
-                .map(|f| pb_field_to_col_desc(&f, index, parse_trace, messages_as_jsonb))
-                .try_collect()?
-        };
-        *index += 1;
-
-        Ok(ColumnDesc {
-            column_id: *index,
-            name: field_descriptor.name().to_owned(),
-            column_type: Some(field_type.to_protobuf()),
-            generated_or_default_column: None,
-            description: None,
-            additional_column_type: 0, // deprecated
-            additional_column: Some(AdditionalColumn { column_type: None }),
-            version: ColumnDescVersion::LATEST as _,
+    message_descriptor
+        .fields()
+        .map(|field| {
+            let field_type = protobuf_type_mapping(&field, &mut parse_trace, messages_as_jsonb)
+                .context("failed to map protobuf type")?;
+            let column = Field::new(field.name(), field_type);
+            Ok(column)
         })
-    } else {
-        *index += 1;
-        Ok(ColumnDesc {
-            column_id: *index,
-            name: field_descriptor.name().to_owned(),
-            column_type: Some(field_type.to_protobuf()),
-            additional_column: Some(AdditionalColumn { column_type: None }),
-            version: ColumnDescVersion::LATEST as _,
-            ..Default::default()
-        })
-    }
+        .collect()
 }
 
 #[derive(Error, Debug, Macro)]

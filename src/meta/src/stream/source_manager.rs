@@ -22,7 +22,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context;
-use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_common::catalog::DatabaseId;
 use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_common::panic_if_debug;
 use risingwave_connector::WithOptionsSecResolved;
@@ -380,7 +380,7 @@ impl SourceManager {
         let dropped_actors = dropped_source_fragments
             .values()
             .flatten()
-            .flat_map(|fragment_id| fragments.get(fragment_id).unwrap().get_actors())
+            .flat_map(|fragment_id| fragments.get(fragment_id).unwrap().actors.iter())
             .map(|actor| actor.get_actor_id())
             .collect::<HashSet<_>>();
 
