@@ -32,9 +32,7 @@ use risingwave_meta_model::WorkerId;
 use risingwave_pb::common::{ActorInfo, WorkerNode};
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
-use risingwave_pb::stream_plan::{
-    AddMutation, Barrier, BarrierMutation, StreamNode, SubscriptionUpstreamInfo,
-};
+use risingwave_pb::stream_plan::{AddMutation, Barrier, BarrierMutation, SubscriptionUpstreamInfo};
 use risingwave_pb::stream_service::inject_barrier_request::build_actor_info::UpstreamActors;
 use risingwave_pb::stream_service::inject_barrier_request::{
     BuildActorInfo, FragmentBuildActorInfo,
@@ -57,15 +55,13 @@ use uuid::Uuid;
 use super::{BarrierKind, Command, InflightSubscriptionInfo, TracedEpoch};
 use crate::barrier::checkpoint::{BarrierWorkerState, DatabaseCheckpointControl};
 use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl};
+use crate::barrier::edge_builder::FragmentEdgeBuildResult;
 use crate::barrier::info::{BarrierInfo, InflightDatabaseInfo, InflightStreamingJobInfo};
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::utils::{NodeToCollect, is_valid_after_worker_err};
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::manager::MetaSrvEnv;
-use crate::model::{
-    ActorId, FragmentId, StreamActorWithDispatchers, StreamActorWithUpDownstreams,
-    StreamJobActorsToCreate, StreamJobFragments,
-};
+use crate::model::{ActorId, StreamActor, StreamJobActorsToCreate, StreamJobFragments};
 use crate::stream::build_actor_connector_splits;
 use crate::{MetaError, MetaResult};
 
@@ -450,12 +446,14 @@ impl DatabaseInitialBarrierCollector {
 
 impl ControlStreamManager {
     /// Extract information from the loaded runtime barrier worker snapshot info, and inject the initial barrier.
+    #[expect(clippy::too_many_arguments)]
     pub(super) fn inject_database_initial_barrier(
         &mut self,
         database_id: DatabaseId,
         info: InflightDatabaseInfo,
         state_table_committed_epochs: &mut HashMap<TableId, u64>,
-        stream_actors: &mut HashMap<ActorId, StreamActorWithDispatchers>,
+        edges: &mut FragmentEdgeBuildResult,
+        stream_actors: &HashMap<ActorId, StreamActor>,
         source_splits: &mut HashMap<ActorId, Vec<SplitImpl>>,
         background_jobs: &mut HashMap<TableId, (String, StreamJobFragments)>,
         subscription_info: InflightSubscriptionInfo,
@@ -507,43 +505,19 @@ impl ControlStreamManager {
             kind: BarrierKind::Initial,
         };
 
-        let mut stream_actors: HashMap<_, _> = info
-            .fragment_infos()
-            .flat_map(|fragment_info| fragment_info.actors.keys())
-            .map(|actor_id| {
-                let (stream_actor, dispatchers) =
-                    stream_actors.remove(actor_id).expect("should exist");
-                (stream_actor.actor_id, (stream_actor, dispatchers))
-            })
-            .collect();
-
-        let mut actor_upstreams = Command::collect_actor_upstreams(
-            stream_actors.values().map(|(actor, dispatchers)| {
-                (actor.actor_id, actor.fragment_id, dispatchers.as_slice())
-            }),
-            None,
-        );
-
-        let mut node_actors: HashMap<
-            _,
-            HashMap<FragmentId, (StreamNode, Vec<StreamActorWithUpDownstreams>)>,
-        > = HashMap::new();
-        for fragment_info in info.fragment_infos() {
-            for (actor_id, actor) in &fragment_info.actors {
-                let worker_id = actor.worker_id as WorkerId;
-                let actor_id = *actor_id as ActorId;
-                let (stream_actor, dispatchers) =
-                    stream_actors.remove(&actor_id).expect("should exist");
-                let upstream = actor_upstreams.remove(&actor_id).unwrap_or_default();
-                node_actors
-                    .entry(worker_id)
-                    .or_default()
-                    .entry(fragment_info.fragment_id)
-                    .or_insert_with(|| (fragment_info.nodes.clone(), vec![]))
-                    .1
-                    .push((stream_actor, upstream, dispatchers));
-            }
-        }
+        let node_actors =
+            edges.collect_actors_to_create(info.fragment_infos().map(move |fragment_info| {
+                (
+                    fragment_info.fragment_id,
+                    &fragment_info.nodes,
+                    fragment_info.actors.iter().map(move |(actor_id, actor)| {
+                        (
+                            stream_actors.get(actor_id).expect("should exist"),
+                            actor.worker_id,
+                        )
+                    }),
+                )
+            }));
 
         let background_mviews = info.job_ids().filter_map(|job_id| {
             background_jobs
@@ -592,8 +566,9 @@ impl ControlStreamManager {
         is_paused: bool,
         pre_applied_graph_info: &InflightDatabaseInfo,
         applied_graph_info: &InflightDatabaseInfo,
+        edges: &mut Option<FragmentEdgeBuildResult>,
     ) -> MetaResult<NodeToCollect> {
-        let mutation = command.and_then(|c| c.to_mutation(is_paused));
+        let mutation = command.and_then(|c| c.to_mutation(is_paused, edges));
         let subscriptions_to_add = if let Some(Mutation::Add(add)) = &mutation {
             add.subscriptions_to_add.clone()
         } else {
@@ -613,7 +588,7 @@ impl ControlStreamManager {
             applied_graph_info.fragment_infos(),
             command
                 .as_ref()
-                .map(|command| command.actors_to_create(pre_applied_graph_info))
+                .map(|command| command.actors_to_create(pre_applied_graph_info, edges))
                 .unwrap_or_default(),
             subscriptions_to_add,
             subscriptions_to_remove,
