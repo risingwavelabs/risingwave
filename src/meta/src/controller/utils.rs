@@ -1166,7 +1166,7 @@ pub fn resolve_no_shuffle_actor_dispatcher(
             vec![(*source_actor_id, *target_actor_id)]
         }
         DistributionType::Hash => {
-            let target_fragment_actors: HashMap<_, _> = target_fragment_actors
+            let mut target_fragment_actor_index: HashMap<_, _> = target_fragment_actors
                 .iter()
                 .map(|(actor_id, bitmap)| {
                     let bitmap = bitmap
@@ -1184,7 +1184,7 @@ pub fn resolve_no_shuffle_actor_dispatcher(
                         .expect("hash distribution should have bitmap");
                     let first_vnode = bitmap.iter_vnodes().next().expect("non-empty bitmap");
                     let (target_actor_id, target_bitmap) =
-                        target_fragment_actors.get(&first_vnode).unwrap_or_else(|| {
+                        target_fragment_actor_index.remove(&first_vnode).unwrap_or_else(|| {
                             panic!(
                                 "cannot find matched target actor: {} {:?} {:?} {:?}",
                                 source_actor_id,
@@ -1195,14 +1195,14 @@ pub fn resolve_no_shuffle_actor_dispatcher(
                         });
                     assert_eq!(
                         bitmap,
-                        *target_bitmap,
+                        target_bitmap,
                         "cannot find matched target actor due to bitmap mismatch: {} {:?} {:?} {:?}",
                         source_actor_id,
                         first_vnode,
                         source_fragment_actors,
                         target_fragment_actors
                     );
-                    (*source_actor_id, *target_actor_id)
+                    (*source_actor_id, target_actor_id)
                 }).collect()
         }
     }
