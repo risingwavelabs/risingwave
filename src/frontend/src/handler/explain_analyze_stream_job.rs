@@ -8,6 +8,7 @@ use risingwave_pb::meta::list_table_fragments_response::FragmentInfo;
 use risingwave_pb::monitor_service::{GetProfileStatsRequest, GetProfileStatsResponse};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{MergeNode, StreamNode as PbStreamNode};
+use risingwave_sqlparser::ast::AnalyzeTarget;
 use tokio::time::sleep;
 
 use crate::error::Result;
@@ -25,8 +26,12 @@ struct ExplainAnalyzeStreamJobOutput {
 
 pub async fn handle_explain_analyze_stream_job(
     handler_args: HandlerArgs,
-    job_id: u32,
+    target: AnalyzeTarget,
 ) -> Result<RwPgResponse> {
+    let job_id = match target {
+        AnalyzeTarget::Id(id) => id,
+        _ => unreachable!(),
+    };
     let profiling_duration = Duration::from_secs(10);
     // query meta for fragment graph (names only)
     let meta_client = handler_args.session.env().meta_client();
