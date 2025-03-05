@@ -16,6 +16,7 @@ use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use pgwire::pg_response::StatementType;
+use risingwave_common::operator::unique_operator_id;
 use risingwave_common::types::Fields;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::list_table_fragments_response::FragmentInfo;
@@ -416,10 +417,4 @@ fn render_graph_with_metrics(
         }
     }
     rows
-}
-
-/// Generate a globally unique operator id.
-fn unique_operator_id(fragment_id: u32, operator_id: u64) -> u64 {
-    assert!(operator_id <= u32::MAX as u64);
-    ((fragment_id as u64) << 32) + operator_id
 }
