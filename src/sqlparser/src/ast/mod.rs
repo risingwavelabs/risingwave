@@ -1617,7 +1617,6 @@ pub enum Statement {
     /// EXPLAIN ANALYZE for stream job
     /// We introduce a new statement rather than reuse `EXPLAIN` because
     /// the body of the statement is not an SQL query.
-    /// FIXME(kwannoel): Support SINK s, MATERIALIZED VIEW s, etc...
     /// TODO(kwannoel): Make profiling duration configurable: EXPLAIN ANALYZE (DURATION 1s) ...
     ExplainAnalyzeStreamJob {
         target: AnalyzeTarget,
