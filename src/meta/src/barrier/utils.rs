@@ -22,6 +22,7 @@ use risingwave_hummock_sdk::table_watermark::{
     TableWatermarks, merge_multiple_new_table_watermarks,
 };
 use risingwave_hummock_sdk::{HummockSstableObjectId, LocalSstableInfo};
+use risingwave_meta_model::WorkerId;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 
 use crate::hummock::{CommitEpochInfo, NewTableFragmentInfo};
@@ -103,4 +104,12 @@ pub(super) fn collect_creating_job_commit_epoch_info(
                 table_ids: tables_to_commit,
             });
     };
+}
+
+pub(super) type NodeToCollect = HashMap<WorkerId, bool>;
+pub(super) fn is_valid_after_worker_err(
+    node_to_collect: &mut NodeToCollect,
+    worker_id: WorkerId,
+) -> bool {
+    node_to_collect.remove(&worker_id).unwrap_or(true)
 }
