@@ -4355,7 +4355,7 @@ impl Parser<'_> {
         }
 
         if analyze {
-            fn parse_analyze_target(parser: &mut Parser<'_>) -> PResult<Option<AnalyzeTarget>> {
+            fn parse_analyze_target(parser: &mut Parser<'_>) -> ModalResult<Option<AnalyzeTarget>> {
                 if parser.parse_keyword(Keyword::TABLE) {
                     let table_name = parser.parse_object_name()?;
                     Ok(Some(AnalyzeTarget::Table(table_name)))
