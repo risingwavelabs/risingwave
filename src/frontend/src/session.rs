@@ -681,9 +681,6 @@ pub struct SessionImpl {
 
     /// temporary sources for the current session
     temporary_source_manager: Arc<Mutex<TemporarySourceManager>>,
-
-    /// Address of the serverless backfill controller
-    sbc_addr: String,
 }
 
 /// If TEMPORARY or TEMP is specified, the source is created as a temporary source.
@@ -748,7 +745,6 @@ impl SessionImpl {
         id: SessionId,
         peer_addr: AddressRef,
         session_config: SessionConfig,
-        sbc_addr: String, // TODO: Use AddressRef
     ) -> Self {
         let cursor_metrics = env.cursor_metrics.clone();
         let (notice_tx, notice_rx) = mpsc::unbounded_channel();
@@ -768,7 +764,6 @@ impl SessionImpl {
             last_idle_instant: Default::default(),
             cursor_manager: Arc::new(CursorManager::new(cursor_metrics)),
             temporary_source_manager: Default::default(),
-            sbc_addr: sbc_addr,
         }
     }
 
@@ -801,7 +796,6 @@ impl SessionImpl {
             last_idle_instant: Default::default(),
             cursor_manager: Arc::new(CursorManager::new(env.cursor_metrics.clone())),
             temporary_source_manager: Default::default(),
-            sbc_addr: "sbc_addr".to_owned(), // TODO: How to Default?
         }
     }
 
@@ -1052,10 +1046,6 @@ impl SessionImpl {
 
         let db_id = catalog_reader.get_database_by_name(db_name)?.id();
         Ok((db_id, schema.id()))
-    }
-
-    pub fn get_sbc_addr(&self) -> String {
-        self.sbc_addr.clone()
     }
 
     pub fn get_connection_by_name(
@@ -1515,7 +1505,6 @@ impl SessionManagerImpl {
                 id,
                 peer_addr,
                 session_config,
-                self.sbc_addr.clone(), // TODO: Do I need clone all the time?
             )
             .into();
             self.insert_session(session_impl.clone());

@@ -214,7 +214,6 @@ impl LocalFrontend {
             ))
             .into(),
             Default::default(),
-            "TODO: pass default addr".to_owned(),
         ))
     }
 }

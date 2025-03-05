@@ -238,13 +238,8 @@ pub async fn handle_create_mv_bound(
 
     let (table, graph, dependencies, resource_group) = {
         let mut with_options = get_with_options(handler_args.clone());
-        // what is resource_group?
-        // create materialized view m with ( resource_group = 'test' ) as select * from t;
-        // Is this 'test'?
         let resource_group = with_options.remove(&RESOURCE_GROUP_KEY.to_owned());
 
-        // syntax is
-        // CREATE MATERIALIZED VIEW ... WITH ( cloud.serverless_backfill_enabled=true )
         let is_serverless_backfill = with_options
             .remove(&CLOUD_SERVERLESS_BACKFILL_ENABLED.to_owned())
             .unwrap_or_default()
@@ -272,7 +267,6 @@ pub async fn handle_create_mv_bound(
             .env()
             .sbc_address();
 
-        tracing::debug!("before calling SBC");
         let resource_group = if is_serverless_backfill {
             match provision_serverless_backfill(sbc_addr).await {
                 Err(e) => {
@@ -286,7 +280,6 @@ pub async fn handle_create_mv_bound(
         } else {
             resource_group
         };
-        tracing::debug!("after calling SBC");
 
         let context = OptimizerContext::from_handler_args(handler_args);
         let has_order_by = !query.order.is_empty();
