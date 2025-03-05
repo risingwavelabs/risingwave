@@ -23,7 +23,7 @@ And don't forget to include the generated `risingwave-<xxx>-dashboard.json` in t
 ./generate.sh
 ```
 
-## Update without Restarting Grafana
+## Update without Restarting Grafana (to localhost:3001)
 
 ```bash
 ./update.sh

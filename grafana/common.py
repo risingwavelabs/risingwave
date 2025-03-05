@@ -484,6 +484,16 @@ class Panels:
             transformations=transformations,
         )
 
+    def subheader(self, title="", content="", height=1):
+        gridPos = self.layout.next_row()
+        gridPos.h = height
+        return Text(
+            title=title,
+            gridPos=gridPos,
+            content=content,
+            transparent=True,
+        )
+
     def sub_panel(self):
         return Panels(self.datasource)
 
