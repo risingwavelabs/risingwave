@@ -11,7 +11,7 @@
 // limitations under the License.
 use winnow::combinator::{alt, cut_err, opt, preceded, repeat, seq, trace};
 use winnow::error::ContextError;
-use winnow::{ModalResult, Parser};
+use winnow::{ModalParser, ModalResult, Parser};
 
 use super::{ParserExt, TokenStream, data_type, token};
 use crate::ast::Expr;
@@ -30,7 +30,7 @@ where
     .parse_next(input)
 }
 
-fn subexpr<S>(precedence: Precedence) -> impl Parser<S, Expr, ContextError>
+fn subexpr<S>(precedence: Precedence) -> impl ModalParser<S, Expr, ContextError>
 where
     S: TokenStream,
 {

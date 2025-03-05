@@ -14,7 +14,7 @@ use core::ops::RangeBounds;
 
 use winnow::combinator::{cut_err, delimited};
 use winnow::error::{ContextError, StrContext};
-use winnow::{ModalResult, Parser};
+use winnow::{ModalParser, ModalResult, Parser};
 
 use super::{TokenStream, token};
 use crate::tokenizer::Token;
@@ -74,7 +74,7 @@ where
 /// The precision must be in the given range.
 pub fn precision_in_range<S>(
     range: impl RangeBounds<u64> + std::fmt::Debug,
-) -> impl Parser<S, u64, ContextError>
+) -> impl ModalParser<S, u64, ContextError>
 where
     S: TokenStream,
 {

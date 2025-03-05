@@ -14,7 +14,7 @@ use winnow::combinator::{Context, separated, trace};
 use winnow::error::{AddContext, ContextError, StrContext};
 use winnow::stream::{Stream, StreamIsPartial};
 use winnow::token::any;
-use winnow::{ModalResult, Parser, Stateful};
+use winnow::{ModalParser, ModalResult, Parser, Stateful};
 
 use crate::ast::{Ident, ObjectName};
 use crate::keywords::{self, Keyword};
@@ -157,7 +157,9 @@ where
 /// Accept a subparser contains a given state.
 ///
 /// The state will be constructed using [`Default::default()`].
-fn with_state<S, State, O, ParseNext>(mut parse_next: ParseNext) -> impl Parser<S, O, ContextError>
+fn with_state<S, State, O, ParseNext>(
+    mut parse_next: ParseNext,
+) -> impl ModalParser<S, O, ContextError>
 where
     S: TokenStream,
     State: Default,
