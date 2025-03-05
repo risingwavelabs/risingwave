@@ -581,6 +581,7 @@ where
                 }
             }
             ["op" | "after" | "before"] => self.accessor.access(path, type_expected),
+            ["source", _] => self.accessor.access(path, type_expected),
             _ => unreachable!("{path:?}"), // self.accessor.access(path, type_expected),
         }
     }
