@@ -72,7 +72,6 @@ ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
 RUN curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
 RUN cargo binstall -y --locked cargo-llvm-cov cargo-nextest cargo-sort cargo-cache cargo-machete \
     cargo-make@0.37.9 \
-    sqllogictest-bin@0.27.1 \
     sccache@0.7.4 \
     && cargo cache -a \
     && rm -rf "/root/.cargo/registry/index" \
@@ -80,6 +79,8 @@ RUN cargo binstall -y --locked cargo-llvm-cov cargo-nextest cargo-sort cargo-cac
     && rm -rf "/root/.cargo/git/db" \
     && cargo uninstall cargo-cache
 RUN cargo install cargo-dylint@3.2.1 dylint-link@3.2.1
+
+RUN cargo install sqllogictest-bin --git https://github.com/risinglightdb/sqllogictest-rs --rev ca87c545fc7c44d460702ab342513d708dd5732d
 
 # install risedev
 COPY <<EOF /root/.cargo/bin/risedev

@@ -147,7 +147,7 @@ steps:
     timeout_in_minutes: 45
     retry: *auto-retry
 
-  - label: "end-to-end test (parallel)"
+  - label: "end-to-end test (parallel, part %n)"
     command: "ci/scripts/e2e-test-parallel.sh -p ci-dev"
     if: |
       !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
@@ -161,6 +161,7 @@ steps:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 38
+    parallelism: 4
     retry: *auto-retry
 
   - label: "end-to-end test for opendal (parallel)"
