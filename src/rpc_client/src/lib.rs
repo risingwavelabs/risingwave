@@ -20,7 +20,6 @@
 #![feature(associated_type_defaults)]
 #![feature(coroutines)]
 #![feature(iterator_try_collect)]
-#![feature(hash_extract_if)]
 #![feature(try_blocks)]
 #![feature(let_chains)]
 #![feature(impl_trait_in_assoc_type)]

@@ -166,7 +166,7 @@ impl UserCatalog {
 
     pub fn has_privilege(&self, object: &GrantObject, mode: AclMode) -> bool {
         self.get_acl(object)
-            .map_or(false, |acl_set| acl_set.has_mode(mode))
+            .is_some_and(|acl_set| acl_set.has_mode(mode))
     }
 
     pub fn check_privilege_with_grant_option(
@@ -205,7 +205,7 @@ impl UserCatalog {
 
         // `Select` and `Execute` are the minimum required privileges for object visibility.
         // `Execute` is required for functions.
-        self.object_acls.get(&obj_id).map_or(false, |acl_set| {
+        self.object_acls.get(&obj_id).is_some_and(|acl_set| {
             acl_set.has_mode(AclMode::Select) || acl_set.has_mode(AclMode::Execute)
         })
     }

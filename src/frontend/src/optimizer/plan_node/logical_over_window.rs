@@ -501,7 +501,6 @@ impl PlanTreeNodeUnary for LogicalOverWindow {
         Self::new(self.core.window_functions.clone(), input)
     }
 
-    #[must_use]
     fn rewrite_with_input(
         &self,
         input: PlanRef,

@@ -226,10 +226,8 @@ impl Binder {
         {
             assert_ne!(udf.language, "sql", "SQL UDAF is not supported yet");
             Some(AggType::UserDefined(udf.as_ref().into()))
-        } else if let Ok(agg_type) = AggType::from_str(&func_name) {
-            Some(agg_type)
         } else {
-            None
+            AggType::from_str(&func_name).ok()
         };
 
         // try to bind it as a window function call
