@@ -3,53 +3,50 @@
 import subprocess
 
 CASES_MAP = {
-    "ad-click": ["json"],
-    "ad-ctr": ["json"],
-    "cdn-metrics": ["json"],
-    "clickstream": ["json"],
-    "livestream": ["json", "protobuf"],
-    "prometheus": ["json"],
-    "schema-registry": ["json"],
-    "mysql-cdc": ["json"],
-    "postgres-cdc": ["json"],
-    "mongodb-cdc": ["json"],
-    "mysql-sink": ["json"],
-    "postgres-sink": ["json"],
-    "iceberg-cdc": ["json"],
-    "iceberg-sink": ["none"],
-    "iceberg-source": ["none"],
-    "twitter": ["json", "protobuf"],
-    "twitter-pulsar": ["json"],
-    "debezium-mysql": ["json"],
-    "debezium-postgres": ["json"],
-    "debezium-sqlserver": ["json"],
-    "debezium-mongo": ["json"],
-    "debezium-mongo-strong-schema": ["json"],
-    "tidb-cdc-sink": ["json"],
-    "citus-cdc": ["json"],
-    "kinesis-s3-source": ["json"],
-    "clickhouse-sink": ["json"],
-    "cockroach-sink": ["json"],
-    "kafka-cdc-sink": ["json"],
-    "cassandra-and-scylladb-sink": ["json"],
-    "elasticsearch-sink": ["json"],
-    "redis-sink": ["json"],
-    "big-query-sink": ["json"],
-    "mindsdb": ["json"],
-    "vector": ["json"],
-    "nats": ["json", "protobuf"],
-    "mqtt": ["json"],
-    "doris-sink": ["json"],
-    "starrocks-sink": ["json"],
-    "deltalake-sink": ["json"],
-    "pinot-sink": ["json"],
-    "presto-trino": ["json"],
-    "client-library": ["none"],
-    "kafka-cdc": ["json"],
-    "pubsub": ["json"],
-    "dynamodb": ["json"],
+    'ad-click': ['json'],
+    'ad-ctr': ['json'],
+    'cdn-metrics': ['json'],
+    'clickstream': ['json'],
+    'livestream': ['json', 'protobuf'],
+    'prometheus': ['json'],
+    'schema-registry': ['json'],
+    'mysql-cdc': ['json'],
+    'postgres-cdc': ['json'],
+    'mongodb-cdc': ['json'],
+    'mysql-sink': ['json'],
+    'postgres-sink': ['json'],
+    'iceberg-cdc': ['json'],
+    'iceberg-sink': ['none'],
+    'iceberg-source': ['none'],
+    'twitter': ['json', 'protobuf'],
+    'twitter-pulsar': ['json'],
+    'debezium-mysql': ['json'],
+    'debezium-postgres': ['json'],
+    'debezium-sqlserver': ['json'],
+    'tidb-cdc-sink': ['json'],
+    'citus-cdc': ['json'],
+    'kinesis-s3-source': ['json'],
+    'clickhouse-sink': ['json'],
+    'cockroach-sink': ['json'],
+    'kafka-cdc-sink': ['json'],
+    'cassandra-and-scylladb-sink': ['json'],
+    'elasticsearch-sink': ['json'],
+    'redis-sink': ['json'],
+    'big-query-sink': ['json'],
+    'mindsdb': ['json'],
+    'vector': ['json'],
+    'nats': ['json', 'protobuf'],
+    'mqtt': ['json'],
+    'doris-sink': ['json'],
+    'starrocks-sink': ['json'],
+    'deltalake-sink': ['json'],
+    'pinot-sink': ['json'],
+    'presto-trino': ['json'],
+    'client-library': ['none'],
+    'kafka-cdc': ['json'],
+    'pubsub': ['json'],
+    'dynamodb': ['json'],
 }
-
 
 def gen_pipeline_steps():
     pipeline_steps = ""
@@ -73,9 +70,8 @@ def gen_pipeline_steps():
 """
     return pipeline_steps
 
-
 def format_pipeline_yaml_cmd(pipeline_steps):
-    pipeline_yaml = f"""
+    pipeline_yaml=f"""
 cat <<- YAML | buildkite-agent pipeline upload
 auto-retry: &auto-retry
   automatic:
@@ -88,14 +84,12 @@ YAML
 """
     return pipeline_yaml
 
-
 def main():
     pipeline_steps = gen_pipeline_steps()
     cmd = format_pipeline_yaml_cmd(pipeline_steps)
     print(cmd)
     subprocess.run(cmd, shell=True)
     print("upload pipeline yaml")
-
 
 if __name__ == "__main__":
     main()

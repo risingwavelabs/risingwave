@@ -29,10 +29,7 @@ MAIN_CRON_TEST_MAP = {
     "integration-test-deterministic-sink": ["ziqi", "Eric"],
     "e2e-test-deterministic": ["runji", "noelkwan"],
     "recovery-test-deterministic": ["runji", "noelkwan"],
-    "background-ddl-arrangement-backfill-recovery-test-deterministic": [
-        "runji",
-        "noelkwan",
-    ],
+    "background-ddl-arrangement-backfill-recovery-test-deterministic": ["runji", "noelkwan"],
     "background-ddl-recovery-test-deterministic": ["runji", "noelkwan"],
     "e2e-iceberg-sink-test": ["zilin", "xinhao"],
     "e2e-iceberg-sink-v2-test": ["zilin", "xinhao"],
@@ -81,13 +78,11 @@ INTEGRATION_TEST_MAP = {
     "postgres-sink-json": ["siyuan"],
     "iceberg-cdc-json": ["zilin"],
     "iceberg-sink-none": ["zilin"],
-    "iceberg-source-none": ["zilin"],
+    'iceberg-source-none': ["zilin"],
     "twitter-json": ["bohan"],
     "twitter-protobuf": ["bohan"],
     "twitter-pulsar-json": ["bohan"],
     "debezium-mysql-json": ["bohan"],
-    "debezium-mongo-json": ["cailue"],
-    "debezium-mongo-strong-schema-json": ["cailue"],
     "debezium-postgres-json": ["bohan"],
     "debezium-sqlserver-json": ["bohan"],
     "tidb-cdc-sink-json": ["eric"],
@@ -113,16 +108,11 @@ INTEGRATION_TEST_MAP = {
     "kafka-cdc-json": ["bohan"],
 }
 
-
 def get_failed_tests(get_test_status, test_map):
     failed_test_map = {}
     for test in test_map.keys():
         test_status = get_test_status(test)
-        if (
-            test_status == "hard_failed"
-            or test_status == "soft_failed"
-            or test_status == "errored"
-        ):
+        if test_status == "hard_failed" or test_status == "soft_failed" or test_status == "errored":
             print(f"{test} failed with outcome: {test_status}")
             failed_test_map[test] = test_map[test]
         elif test_status == "passed":
@@ -134,7 +124,6 @@ def get_failed_tests(get_test_status, test_map):
             failed_test_map[test] = test_map[test]
     return failed_test_map
 
-
 def generate_test_status_message(failed_test_map):
     messages = []
     for test, users in failed_test_map.items():
@@ -143,17 +132,10 @@ def generate_test_status_message(failed_test_map):
     message = "\n            ".join(messages)
     return message
 
-
 def get_buildkite_test_status(test):
-    result = subprocess.run(
-        f'buildkite-agent step get "outcome" --step "{test}"',
-        capture_output=True,
-        text=True,
-        shell=True,
-    )
+    result = subprocess.run(f"buildkite-agent step get \"outcome\" --step \"{test}\"", capture_output = True, text = True, shell=True)
     outcome = result.stdout.strip()
     return outcome
-
 
 def get_mock_test_status(test):
     mock_test_map = {
@@ -170,13 +152,12 @@ def get_mock_test_status(test):
         "s3-source-test-for-opendal-fs-engine": "",
         "s3-source-tests": "",
         "pulsar-source-tests": "",
-        "connector-node-integration-test": "",
+        "connector-node-integration-test": ""
     }
     return mock_test_map[test]
 
-
 def format_cmd(messages):
-    cmd = f"""
+    cmd=f"""
 cat <<- YAML | buildkite-agent pipeline upload
 steps:
   - label: "trigger failed test notification"
@@ -191,18 +172,16 @@ YAML
         """
     return cmd
 
-
 def get_test_map():
-    pipeline_name = os.environ["BUILDKITE_PIPELINE_NAME"]
+    pipeline_name = os.environ['BUILDKITE_PIPELINE_NAME']
     if pipeline_name == "main-cron":
-        test_map = MAIN_CRON_TEST_MAP
+        test_map=MAIN_CRON_TEST_MAP
     elif pipeline_name == "integration-tests":
-        test_map = INTEGRATION_TEST_MAP
+        test_map=INTEGRATION_TEST_MAP
     else:
         print("Invaild pipeline name!")
         sys.exit(1)
     return test_map
-
 
 def run_test_1():
     test_map = get_test_map()
@@ -216,7 +195,6 @@ def run_test_1():
         print(message)
         cmd = format_cmd(message)
         print(cmd)
-
 
 def main():
     test_map = get_test_map()
@@ -232,6 +210,5 @@ def main():
         print(cmd)
         subprocess.run(cmd, shell=True)
         print("notification sent")
-
 
 main()
