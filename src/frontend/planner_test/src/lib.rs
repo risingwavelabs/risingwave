@@ -511,7 +511,6 @@ impl TestCase {
                         *query,
                         columns,
                         emit_mode,
-                        "TODO: add default here".to_owned(),
                     )
                     .await?;
                 }

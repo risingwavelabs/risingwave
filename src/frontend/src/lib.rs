@@ -186,7 +186,7 @@ pub struct FrontendOpts {
     #[clap(
         long,
         env = "RW_SBC_ADDR",
-        default_value = "serverless-backfill-controller:1298"
+        default_value = "http://serverless-backfill-controller:1298"
     )]
     pub sbc_addr: String,
 }

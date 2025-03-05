@@ -197,7 +197,6 @@ pub fn handle_bind(
 }
 
 pub async fn handle_execute(session: Arc<SessionImpl>, portal: Portal) -> Result<RwPgResponse> {
-    let sbc_addr = session.get_sbc_addr();
     match portal {
         Portal::Empty => Ok(RwPgResponse::empty_result(
             pgwire::pg_response::StatementType::EMPTY,
@@ -210,7 +209,7 @@ pub async fn handle_execute(session: Arc<SessionImpl>, portal: Portal) -> Result
             if let Statement::FetchCursor { .. } = &portal.statement {
                 fetch_cursor::handle_fetch_cursor_execute(handler_args, portal).await
             } else {
-                query::handle_execute(handler_args, portal, sbc_addr).await
+                query::handle_execute(handler_args, portal).await
             }
         }
         Portal::PureStatement(stmt) => {

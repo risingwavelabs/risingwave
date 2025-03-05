@@ -35,7 +35,7 @@ use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, RelationCollectorVisitor};
 use crate::planner::Planner;
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
-use crate::session::SessionImpl;
+use crate::session::{SESSION_MANAGER, SessionImpl};
 use crate::stream_fragmenter::build_graph;
 use crate::utils::ordinal;
 
@@ -154,12 +154,10 @@ pub fn gen_create_mv_plan_bound(
 pub async fn handle_create_mv(
     handler_args: HandlerArgs,
     if_not_exists: bool,
-    // is_serverless_backfill: bool, // TODO: maybe here?
     name: ObjectName,
     query: Query,
     columns: Vec<Ident>,
     emit_mode: Option<EmitMode>,
-    sbc_addr: String,
 ) -> Result<RwPgResponse> {
     let (dependent_relations, dependent_udfs, bound) = {
         let mut binder = Binder::new_for_stream(handler_args.session.as_ref());
@@ -179,13 +177,12 @@ pub async fn handle_create_mv(
         dependent_udfs,
         columns,
         emit_mode,
-        sbc_addr,
     )
     .await
 }
 
 /// Send a provision request to the serverless backfill controller
-pub async fn provision_serverless_backfill(sbc_addr: String) -> Result<String> {
+pub async fn provision_serverless_backfill(sbc_addr: &String) -> Result<String> {
     // , Box<dyn std::error::Error>
     let request = tonic::Request::new(ProvisionRequest {});
     let mut client =
@@ -225,7 +222,6 @@ pub async fn handle_create_mv_bound(
     dependent_udfs: HashSet<FunctionId>, // TODO(rc): merge with `dependent_relations`
     columns: Vec<Ident>,
     emit_mode: Option<EmitMode>,
-    sbc_addr: String,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
 
@@ -269,6 +265,12 @@ pub async fn handle_create_mv_bound(
                 with_options.keys()
             ))));
         }
+
+        let sbc_addr = SESSION_MANAGER
+            .get()
+            .expect("session manager has been initialized")
+            .env()
+            .sbc_address();
 
         tracing::debug!("before calling SBC");
         let resource_group = if is_serverless_backfill {
