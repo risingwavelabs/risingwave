@@ -250,9 +250,12 @@ impl StreamNodeStats {
     }
 }
 
+/// Extracts the root node of the plan, as well as the adjacency list
 fn extract_stream_node_infos(
     fragments: Vec<FragmentInfo>,
 ) -> (OperatorId, HashMap<OperatorId, StreamNode>) {
+    // Recursively extracts stream node info, and builds an adjacency list between stream nodes
+    // and their dependencies
     fn extract_stream_node_info(
         fragment_id: u32,
         fragment_id_to_merge_operator_id: &mut HashMap<u32, OperatorId>,
@@ -303,6 +306,8 @@ fn extract_stream_node_infos(
         }
     }
 
+    // build adjacency list and hanging merge edges.
+    // hanging merge edges will be filled in the following section.
     let mut operator_id_to_stream_node = HashMap::new();
     let mut fragment_id_to_merge_operator_id = HashMap::new();
     for fragment in fragments {
@@ -320,8 +325,8 @@ fn extract_stream_node_infos(
         }
     }
 
+    // find root node, and fill in dispatcher edges + nodes.
     let root_or_dispatch_nodes = find_root_nodes(&operator_id_to_stream_node);
-
     let mut root_node = None;
     for operator_id in root_or_dispatch_nodes {
         let node = operator_id_to_stream_node.get_mut(&operator_id).unwrap();
