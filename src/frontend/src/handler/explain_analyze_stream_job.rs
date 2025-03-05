@@ -99,7 +99,6 @@ pub async fn handle_explain_analyze_stream_job(
         table_fragment_info.fragments
     };
     let (root_node, adjacency_list) = extract_stream_node_infos(fragments);
-    println!("adjacency_list: {:?}", adjacency_list);
 
     // Get the worker nodes
     let worker_nodes = list_stream_worker_nodes(handler_args.session.env()).await?;
