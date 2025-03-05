@@ -35,6 +35,7 @@ use risingwave_storage::table::TableIter;
 use risingwave_storage::table::batch_table::BatchTable;
 use risingwave_storage::{StateStore, dispatch_state_store};
 
+use super::AsOfDesc;
 use crate::error::Result;
 use crate::executor::join::JoinType;
 use crate::executor::{
@@ -187,6 +188,11 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
 
         let chunk_size = source.context().get_config().developer.chunk_size;
 
+        let asof_desc = distributed_lookup_join_node
+            .asof_desc
+            .map(|desc| AsOfDesc::from_protobuf(&desc))
+            .transpose()?;
+
         let column_ids = inner_side_column_ids
             .iter()
             .copied()
@@ -225,6 +231,7 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
                 schema: actual_schema,
                 output_indices,
                 chunk_size,
+                asof_desc,
                 identity: identity.clone(),
                 shutdown_rx: source.shutdown_rx().clone(),
                 mem_ctx: source.context().create_executor_mem_context(&identity),
@@ -249,6 +256,7 @@ struct DistributedLookupJoinExecutorArgs {
     schema: Schema,
     output_indices: Vec<usize>,
     chunk_size: usize,
+    asof_desc: Option<AsOfDesc>,
     identity: String,
     shutdown_rx: ShutdownToken,
     mem_ctx: MemoryContext,
@@ -274,6 +282,7 @@ impl HashKeyDispatcher for DistributedLookupJoinExecutorArgs {
                 schema: self.schema,
                 output_indices: self.output_indices,
                 chunk_size: self.chunk_size,
+                asof_desc: self.asof_desc,
                 identity: self.identity,
                 shutdown_rx: self.shutdown_rx,
                 mem_ctx: self.mem_ctx,
