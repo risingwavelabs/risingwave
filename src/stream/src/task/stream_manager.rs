@@ -29,6 +29,7 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnId, DatabaseId, Field, Schema, TableId};
 use risingwave_common::config::MetricLevel;
 use risingwave_common::must_match;
+use risingwave_common::operator::{unique_executor_id, unique_operator_id};
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_pb::stream_plan;
@@ -47,7 +48,6 @@ use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use tokio::task::JoinHandle;
 use tonic::Status;
 
-use super::{unique_executor_id, unique_operator_id};
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::exchange::permit::Receiver;
