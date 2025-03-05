@@ -42,9 +42,6 @@ impl CountMap {
     }
 
     pub(crate) fn new_or_get_counter(&self, id: u64) -> Count {
-        #[cfg(any(test, madsim))]
-        return Arc::new(AtomicU64::new(0));
-
         {
             let map = self.0.read();
             if let Some(counter) = map.get(&id) {
