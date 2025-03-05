@@ -137,10 +137,10 @@ impl CreatingStreamingJobControl {
         }
     }
 
-    pub(crate) fn is_wait_on_worker(&self, worker_id: WorkerId) -> bool {
-        self.barrier_control.is_wait_on_worker(worker_id)
-            || (self.status.is_finishing()
-                && InflightFragmentInfo::contains_worker(
+    pub(crate) fn is_valid_after_worker_err(&mut self, worker_id: WorkerId) -> bool {
+        self.barrier_control.is_valid_after_worker_err(worker_id)
+            && (!self.status.is_finishing()
+                || InflightFragmentInfo::contains_worker(
                     self.graph_info.fragment_infos(),
                     worker_id,
                 ))

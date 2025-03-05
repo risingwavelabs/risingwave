@@ -357,21 +357,32 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     }
                 }
                 (worker_id, resp_result) = self.control_stream_manager.next_response() => {
-                     let resp = match resp_result {
-                        Err(e) => {
-                            if self.checkpoint_control.is_failed_at_worker_err(worker_id) {
-                                let errors = self.control_stream_manager.collect_errors(worker_id, e).await;
-                                let err = merge_node_rpc_errors("get error from control stream", errors);
-                                Self::report_collect_failure(&self.env, &err);
-                                self.failure_recovery(err).await;
-                            }  else {
-                                warn!(worker_id, "no barrier to collect from worker, ignore err");
-                            }
-                            continue;
-                        }
-                        Ok(resp) => resp,
-                    };
                     let result: MetaResult<()> = try {
+                        let resp = match resp_result {
+                            Err(err) => {
+                                let failed_databases = self.checkpoint_control.databases_failed_at_worker_err(worker_id);
+                                if !failed_databases.is_empty() {
+                                    if !self.enable_recovery {
+                                        panic!("control stream to worker {} failed but recovery not enabled: {:?}", worker_id, err.as_report());
+                                    }
+                                    Self::report_collect_failure(&self.env, &err);
+                                    for database_id in failed_databases {
+                                        if let Some(entering_recovery) = self.checkpoint_control.on_report_failure(database_id, &mut self.control_stream_manager) {
+                                            warn!(worker_id, database_id = database_id.database_id, "database entering recovery on node failure");
+                                            self.context.abort_and_mark_blocked(Some(database_id), RecoveryReason::Failover(anyhow!("reset database: {}", database_id).into()));
+                                            self.context.notify_creating_job_failed(Some(database_id), format!("database {} reset due to node {} failure: {}", database_id, worker_id, err.as_report())).await;
+                                            // TODO: add log on blocking time
+                                            let output = self.completing_task.wait_completing_task().await?;
+                                            entering_recovery.enter(output, &mut self.control_stream_manager);
+                                        }
+                                    }
+                                }  else {
+                                    warn!(worker_id, "no barrier to collect from worker, ignore err");
+                                }
+                                continue;
+                            }
+                            Ok(resp) => resp,
+                        };
                         match resp {
                             Response::CompleteBarrier(resp) => {
                                 self.checkpoint_control.barrier_collected(resp, &mut self.control_stream_manager, &mut self.periodic_barriers)?;
@@ -380,8 +391,8 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                 if !self.enable_recovery {
                                     panic!("database failure reported but recovery not enabled: {:?}", resp)
                                 }
-                                if let Some(entering_recovery) = self.checkpoint_control.on_report_failure(resp, &mut self.control_stream_manager) {
-                                    let database_id = entering_recovery.database_id();
+                                let database_id = DatabaseId::new(resp.database_id);
+                                if let Some(entering_recovery) = self.checkpoint_control.on_report_failure(database_id, &mut self.control_stream_manager) {
                                     warn!(database_id = database_id.database_id, "database entering recovery");
                                     self.context.abort_and_mark_blocked(Some(database_id), RecoveryReason::Failover(anyhow!("reset database: {}", database_id).into()));
                                     // TODO: add log on blocking time
@@ -712,7 +723,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     let database_id = DatabaseId::new(resp.database_id);
                     let (node_to_collect, _, prev_epoch) = collecting_databases.get_mut(&database_id).expect("should exist");
                     assert_eq!(resp.epoch, *prev_epoch);
-                    assert!(node_to_collect.remove(&worker_id));
+                    assert!(node_to_collect.remove(&worker_id).is_some());
                     if node_to_collect.is_empty() {
                         let (_, database, _) = collecting_databases.remove(&database_id).expect("should exist");
                         assert!(collected_databases.insert(database_id, database).is_none());
