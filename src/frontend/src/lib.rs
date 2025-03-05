@@ -182,7 +182,7 @@ pub struct FrontendOpts {
 
     /// Address of the serverless backfill controller.
     /// Needed if frontend receives a query like
-    /// CREATE MATERIALIZED VIEW ... WITH ( cloud.serverless_backfill_enabled=true )
+    /// CREATE MATERIALIZED VIEW ... WITH ( `cloud.serverless_backfill_enabled=true` )
     #[clap(
         long,
         env = "RW_SBC_ADDR",

@@ -198,14 +198,12 @@ pub async fn provision_serverless_backfill(sbc_addr: &String) -> Result<String> 
         })?;
 
     match client.provision(request).await {
-        Ok(resp) => return Ok(resp.into_inner().resource_group),
-        Err(e) => {
-            return Err(RwError::from(ErrorCode::InternalError(format!(
-                "serverless backfill controller returned error :{}",
-                e
-            ))));
-        }
-    };
+        Ok(resp) => Ok(resp.into_inner().resource_group),
+        Err(e) => Err(RwError::from(ErrorCode::InternalError(format!(
+            "serverless backfill controller returned error :{}",
+            e
+        )))),
+    }
 }
 
 fn get_with_options(handler_args: HandlerArgs) -> WithOptions {

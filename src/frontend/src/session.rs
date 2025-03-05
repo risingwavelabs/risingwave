@@ -1317,7 +1317,6 @@ pub struct SessionManagerImpl {
     _join_handles: Vec<JoinHandle<()>>,
     _shutdown_senders: Vec<Sender<()>>,
     number: AtomicI32,
-    sbc_addr: String,
 }
 
 impl SessionManager for SessionManagerImpl {
@@ -1389,7 +1388,6 @@ impl SessionManager for SessionManagerImpl {
 impl SessionManagerImpl {
     pub async fn new(opts: FrontendOpts) -> Result<Self> {
         // TODO(shutdown): only save join handles that **need** to be shutdown
-        let sbc_addr = opts.sbc_addr.clone();
         let (env, join_handles, shutdown_senders) = FrontendEnv::init(opts).await?;
         // TODO: add sbc_add to frontend env?
         Ok(Self {
@@ -1397,7 +1395,6 @@ impl SessionManagerImpl {
             _join_handles: join_handles,
             _shutdown_senders: shutdown_senders,
             number: AtomicI32::new(0),
-            sbc_addr: sbc_addr,
         })
     }
 
