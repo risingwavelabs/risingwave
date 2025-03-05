@@ -32,6 +32,21 @@ impl MigrationTrait for Migration {
                             .rw_binary(manager)
                             .not_null(),
                     )
+                    .col(
+                        ColumnDef::new(ExactlyOnceIcebergSinkMetadata::SnapshotId)
+                            .big_integer()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(ExactlyOnceIcebergSinkMetadata::Committed)
+                            .boolean()
+                            .not_null(),
+                    )
+                    .primary_key(
+                        Index::create()
+                            .col(ExactlyOnceIcebergSinkMetadata::SinkId)
+                            .col(ExactlyOnceIcebergSinkMetadata::EndEpoch),
+                    )
                     .to_owned(),
             )
             .await?;
@@ -52,4 +67,6 @@ enum ExactlyOnceIcebergSinkMetadata {
     EndEpoch,
     StartEpoch,
     Metadata,
+    SnapshotId,
+    Committed,
 }

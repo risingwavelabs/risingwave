@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,6 +24,8 @@ pub struct Model {
     pub end_epoch: u64,
     pub start_epoch: u64,
     pub metadata: ::prost::alloc::vec::Vec<u8>,
+    pub snapshot_id: i64,
+    pub committed: bool,
 }
 
 impl ActiveModelBehavior for ActiveModel {}
