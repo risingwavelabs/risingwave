@@ -14,6 +14,7 @@
 
 use std::time::Duration;
 
+use risingwave_common::RW_VERSION;
 use risingwave_pb::backup_service::BackupJobStatus;
 
 use crate::CtlContext;
@@ -30,6 +31,7 @@ pub async fn backup_meta(context: &CtlContext, remarks: Option<String>) -> anyho
             }
             BackupJobStatus::Succeeded => {
                 tracing::info!("backup job succeeded: job {}, {}", job_id, message);
+                tracing::info!("rw version: {}", RW_VERSION);
                 break;
             }
             BackupJobStatus::NotFound => {
