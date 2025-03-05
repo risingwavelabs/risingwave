@@ -25,7 +25,7 @@ use crate::controller::fragment::InflightFragmentInfo;
 use crate::controller::utils::compose_dispatchers;
 use crate::model::{
     ActorId, DownstreamFragmentRelation, FragmentActorDispatchers, FragmentActorUpstreams,
-    FragmentId, StreamActor, StreamJobActorsToCreate,
+    FragmentDownstreamRelation, FragmentId, StreamActor, StreamJobActorsToCreate,
 };
 
 #[derive(Debug)]
@@ -110,11 +110,15 @@ impl FragmentEdgeBuilder {
         }
     }
 
-    pub(super) fn add_edge(
-        &mut self,
-        fragment_id: FragmentId,
-        downstream: &DownstreamFragmentRelation,
-    ) {
+    pub(super) fn add_relations(&mut self, relations: &FragmentDownstreamRelation) {
+        for (fragment_id, relations) in relations {
+            for relation in relations {
+                self.add_edge(*fragment_id, relation);
+            }
+        }
+    }
+
+    fn add_edge(&mut self, fragment_id: FragmentId, downstream: &DownstreamFragmentRelation) {
         let fragment = &self
             .fragments
             .get(&fragment_id)

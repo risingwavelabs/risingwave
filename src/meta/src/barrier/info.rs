@@ -322,27 +322,13 @@ impl InflightDatabaseInfo {
                 .map(|fragment_id| self.fragment(fragment_id))
                 .chain(new_fragment_infos.iter().map(|(_, info)| info)),
         );
-        for (fragment_id, downstreams) in info
-            .into_iter()
-            .flat_map(|info| {
-                [
-                    &info.upstream_fragment_downstreams,
-                    &info.stream_job_fragments.downstreams,
-                ]
-                .into_iter()
-            })
-            .chain(replace_job.into_iter().flat_map(|replace_job| {
-                [
-                    &replace_job.upstream_fragment_downstreams,
-                    &replace_job.new_fragments.downstreams,
-                ]
-                .into_iter()
-            }))
-            .flatten()
-        {
-            for downstream in downstreams {
-                builder.add_edge(*fragment_id, downstream);
-            }
+        if let Some(info) = info {
+            builder.add_relations(&info.upstream_fragment_downstreams);
+            builder.add_relations(&info.stream_job_fragments.downstreams);
+        }
+        if let Some(replace_job) = replace_job {
+            builder.add_relations(&replace_job.upstream_fragment_downstreams);
+            builder.add_relations(&replace_job.new_fragments.downstreams);
         }
         if let Some(replace_job) = replace_job {
             for (fragment_id, fragment_replacement) in &replace_job.replace_upstream {

@@ -583,6 +583,8 @@ mod retry_strategy {
 pub(crate) use retry_strategy::*;
 use risingwave_common::error::tonic::extra::{Score, ScoredError};
 
+use crate::barrier::edge_builder::FragmentEdgeBuilder;
+
 impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
     /// Recovery the whole cluster from the latest epoch.
     ///
@@ -629,7 +631,8 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 database_fragment_infos,
                 mut state_table_committed_epochs,
                 mut subscription_infos,
-                mut stream_actors,
+                stream_actors,
+                fragment_relations,
                 mut source_splits,
                 mut background_jobs,
                 hummock_version_stats,
@@ -651,6 +654,10 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
             info!(elapsed=?reset_start_time.elapsed(), "control stream reset");
 
             let recovery_result: MetaResult<_> = try {
+                let mut builder = FragmentEdgeBuilder::new(database_fragment_infos.values().flat_map(|info| info.fragment_infos()));
+                builder.add_relations(&fragment_relations);
+                let mut edges = builder.build();
+
                 let mut collected_databases = HashMap::new();
                 let mut collecting_databases = HashMap::new();
                 for (database_id, info) in database_fragment_infos {
@@ -659,7 +666,8 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         database_id,
                         info,
                         &mut state_table_committed_epochs,
-                        &mut stream_actors,
+                        &mut edges,
+                        &stream_actors,
                         &mut source_splits,
                         &mut background_jobs,
                         subscription_infos.remove(&database_id).unwrap_or_default(),
