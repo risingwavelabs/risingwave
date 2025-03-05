@@ -15,7 +15,9 @@
 use std::collections::HashMap;
 
 use risingwave_common::bitmap::Bitmap;
+use risingwave_meta_model::WorkerId;
 use risingwave_meta_model::fragment::DistributionType;
+use risingwave_pb::stream_plan::StreamNode;
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use tracing::warn;
 
@@ -23,7 +25,7 @@ use crate::controller::fragment::InflightFragmentInfo;
 use crate::controller::utils::compose_dispatchers;
 use crate::model::{
     ActorId, DownstreamFragmentRelation, FragmentActorDispatchers, FragmentActorUpstreams,
-    FragmentId,
+    FragmentId, StreamActor, StreamJobActorsToCreate,
 };
 
 #[derive(Debug)]
@@ -36,6 +38,43 @@ pub(super) struct FragmentEdgeBuildResult {
     pub(super) upstreams: HashMap<FragmentId, FragmentActorUpstreams>,
     pub(super) dispatchers: FragmentActorDispatchers,
     pub(super) merge_updates: HashMap<FragmentId, Vec<MergeUpdate>>,
+}
+
+impl FragmentEdgeBuildResult {
+    pub(super) fn collect_actors_to_create(
+        &mut self,
+        actors: impl Iterator<
+            Item = (
+                FragmentId,
+                &StreamNode,
+                impl Iterator<Item = (&StreamActor, WorkerId)> + '_,
+            ),
+        >,
+    ) -> StreamJobActorsToCreate {
+        let mut actors_to_create = StreamJobActorsToCreate::default();
+        for (fragment_id, node, actors) in actors {
+            for (actor, worker_id) in actors {
+                let upstreams = self
+                    .upstreams
+                    .get_mut(&fragment_id)
+                    .and_then(|upstreams| upstreams.remove(&actor.actor_id))
+                    .unwrap_or_default();
+                let dispatchers = self
+                    .dispatchers
+                    .get_mut(&fragment_id)
+                    .and_then(|upstreams| upstreams.remove(&actor.actor_id))
+                    .unwrap_or_default();
+                actors_to_create
+                    .entry(worker_id)
+                    .or_default()
+                    .entry(fragment_id)
+                    .or_insert_with(|| (node.clone(), vec![]))
+                    .1
+                    .push((actor.clone(), upstreams, dispatchers))
+            }
+        }
+        actors_to_create
+    }
 }
 
 pub(super) struct FragmentEdgeBuilder {

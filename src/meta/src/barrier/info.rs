@@ -209,14 +209,10 @@ impl InflightDatabaseInfo {
                         let info = self.fragment_mut(fragment_id);
                         let actors = &mut info.actors;
                         for (actor_id, new_vnodes) in actor_update_vnode_bitmap {
-                            if let Some(new_actor) = new_actors.get(&actor_id) {
-                                assert_eq!(new_actor.vnode_bitmap.as_ref(), Some(&new_vnodes));
-                            } else {
-                                actors
-                                    .get_mut(&actor_id)
-                                    .expect("should exist")
-                                    .vnode_bitmap = Some(new_vnodes);
-                            }
+                            actors
+                                .get_mut(&actor_id)
+                                .expect("should exist")
+                                .vnode_bitmap = Some(new_vnodes);
                         }
                         for (actor_id, actor) in new_actors {
                             actors

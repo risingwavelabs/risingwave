@@ -418,7 +418,15 @@ impl Command {
                                         })
                                     })
                                     .collect(),
-                                actor_update_vnode_bitmap: reschedule.vnode_bitmap_updates.clone(),
+                                actor_update_vnode_bitmap: reschedule
+                                    .vnode_bitmap_updates
+                                    .iter()
+                                    .filter(|(actor_id, _)| {
+                                        // only keep the existing actors
+                                        !reschedule.newly_created_actors.contains_key(actor_id)
+                                    })
+                                    .map(|(actor_id, bitmap)| (*actor_id, bitmap.clone()))
+                                    .collect(),
                                 to_remove: reschedule.removed_actors.iter().cloned().collect(),
                             },
                         )
@@ -989,29 +997,8 @@ impl Command {
                         .flatten()
                         .chain(info.stream_job_fragments.actors_to_create())
                 };
-                let mut map = StreamJobActorsToCreate::default();
                 let edges = edges.as_mut().expect("should exist");
-                for (fragment_id, node, actors) in get_actors_to_create() {
-                    for (actor, worker_id) in actors {
-                        let upstreams = edges
-                            .upstreams
-                            .get_mut(&fragment_id)
-                            .and_then(|upstreams| upstreams.remove(&actor.actor_id))
-                            .unwrap_or_default();
-                        let dispatchers = edges
-                            .dispatchers
-                            .get_mut(&fragment_id)
-                            .and_then(|upstreams| upstreams.remove(&actor.actor_id))
-                            .unwrap_or_default();
-                        map.entry(worker_id)
-                            .or_default()
-                            .entry(fragment_id)
-                            .or_insert_with(|| (node.clone(), vec![]))
-                            .1
-                            .push((actor.clone(), upstreams, dispatchers))
-                    }
-                }
-                Some(map)
+                Some(edges.collect_actors_to_create(get_actors_to_create()))
             }
             Command::RescheduleFragment {
                 reschedules,
@@ -1052,29 +1039,8 @@ impl Command {
                 Some(map)
             }
             Command::ReplaceStreamJob(replace_table) => {
-                let mut map = StreamJobActorsToCreate::default();
                 let edges = edges.as_mut().expect("should exist");
-                for (fragment_id, node, actors) in replace_table.new_fragments.actors_to_create() {
-                    for (actor, worker_id) in actors {
-                        let upstreams = edges
-                            .upstreams
-                            .get_mut(&fragment_id)
-                            .and_then(|upstreams| upstreams.remove(&actor.actor_id))
-                            .unwrap_or_default();
-                        let dispatchers = edges
-                            .dispatchers
-                            .get_mut(&fragment_id)
-                            .and_then(|upstreams| upstreams.remove(&actor.actor_id))
-                            .unwrap_or_default();
-                        map.entry(worker_id)
-                            .or_default()
-                            .entry(fragment_id)
-                            .or_insert_with(|| (node.clone(), vec![]))
-                            .1
-                            .push((actor.clone(), upstreams, dispatchers))
-                    }
-                }
-                Some(map)
+                Some(edges.collect_actors_to_create(replace_table.new_fragments.actors_to_create()))
             }
             _ => None,
         }
