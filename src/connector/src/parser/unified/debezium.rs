@@ -580,7 +580,8 @@ where
                     ret
                 }
             }
-            _ => unreachable!(), // self.accessor.access(path, type_expected),
+            ["op" | "after" | "before"] => self.accessor.access(path, type_expected),
+            _ => unreachable!("{path:?}"), // self.accessor.access(path, type_expected),
         }
     }
 }
