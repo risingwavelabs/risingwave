@@ -546,7 +546,15 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
         }
     });
     tables.retain(|t| {
-        if t.table_type() != PbTableType::Internal && !streaming_job_ids.contains(&t.id) {
+        if t.table_type() == PbTableType::Internal {
+            if !table_fragment_map.contains_key(&t.id) {
+                tracing::warn!(
+                    "table {} is internal but don't have a related streaming job.",
+                    t.name
+                );
+                return false;
+            }
+        } else if !streaming_job_ids.contains(&t.id) {
             tracing::warn!(
                 "{} {} don't have a related streaming job.",
                 t.table_type().as_str_name(),
