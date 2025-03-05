@@ -290,12 +290,15 @@ impl MonitorService for MonitorServiceImpl {
 
     async fn get_profile_stats(
         &self,
-        _request: Request<GetProfileStatsRequest>,
+        request: Request<GetProfileStatsRequest>,
     ) -> Result<Response<GetProfileStatsResponse>, Status> {
         let metrics = global_streaming_metrics(MetricLevel::Info);
-        let stream_node_output_row_count = metrics.stream_node_output_row_count.collect();
-        let stream_node_output_blocking_duration_ms =
-            metrics.stream_node_output_blocking_duration_ms.collect();
+        let operator_ids = &request.into_inner().operator_ids;
+        let stream_node_output_row_count =
+            metrics.stream_node_output_row_count.collect(operator_ids);
+        let stream_node_output_blocking_duration_ms = metrics
+            .stream_node_output_blocking_duration_ms
+            .collect(operator_ids);
         Ok(Response::new(GetProfileStatsResponse {
             stream_node_output_row_count,
             stream_node_output_blocking_duration_ms,
