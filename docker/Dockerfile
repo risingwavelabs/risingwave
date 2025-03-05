@@ -28,7 +28,7 @@ COPY rust-toolchain rust-toolchain
 
 # We need to add the `rustfmt` dependency, otherwise `risingwave_pb` will not compile
 RUN rustup self update \
-  && rustup set profile minimal \
+  && rustup toolchain install --profile minimal \
   && rustup show \
   && rustup component add rustfmt \
   && rustup target add wasm32-wasip1
