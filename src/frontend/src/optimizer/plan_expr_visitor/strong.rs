@@ -192,6 +192,7 @@ impl Strong {
             | ExprType::Atan
             | ExprType::Atan2
             | ExprType::Atand
+            | ExprType::Atan2d
             | ExprType::Sind
             | ExprType::Cosd
             | ExprType::Cotd

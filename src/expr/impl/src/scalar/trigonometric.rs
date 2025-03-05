@@ -98,7 +98,6 @@ pub fn atanh_f64(input: F64) -> F64 {
 static DEGREE_THIRTY: f64 = 30.0;
 static DEGREE_FORTY_FIVE: f64 = 45.0;
 static DEGREE_SIXTY: f64 = 60.0;
-static DEGREE_NINETY: f64 = 90.0;
 static DEGREE_ONE_HALF: f64 = 0.5;
 static DEGREE_ONE: f64 = 1.0;
 static RADIANS_PER_DEGREE: f64 = 0.017_453_292_519_943_295;
@@ -438,30 +437,37 @@ pub fn acosd_f64(input: F64) -> F64 {
     result.into()
 }
 
-// return the invert tangent of x in degrees, the inverse tangent function maps all inputs to
+// return the inverse tangent of x in degrees, the inverse tangent function maps all inputs to
 // values in the range [-90, 90]. For the 5 special case inputs (0, 1, -1, +INF and -INF), this
 // function will return exact values (0, 45, -45, 90 and -90 degrees respectively).
 #[function("atand(float8) -> float8")]
 pub fn atand_f64(input: F64) -> F64 {
-    if input.0.is_nan() {
+    let arg1 = input.0;
+    if arg1.is_nan() {
         return F64::from(f64::NAN);
     }
-
-    if input.0.is_infinite() {
-        if input.0.is_sign_positive() {
-            return DEGREE_NINETY.into();
-        } else {
-            return (-DEGREE_NINETY).into();
-        }
-    }
-
-    let atan_arg1 = atan_f64(input);
-    let result = (atan_arg1 / atan_f64(DEGREE_ONE.into())) * DEGREE_FORTY_FIVE;
-
-    if result.0.is_infinite() {
+    let atan_arg1 = f64::atan(arg1);
+    let result = (atan_arg1 / f64::atan(DEGREE_ONE)) * 45.0;
+    if result.is_infinite() {
         return F64::from(f64::NAN);
     }
-    result
+    result.into()
+}
+
+/// Inverse tangent of y/x, result in degrees, the inverse tangent of y/x maps all inputs to
+/// values in the range [-180, 180].
+#[function("atan2d(float8, float8) -> float8")]
+pub fn atan2d_f64(input_x: F64, input_y: F64) -> F64 {
+    let (arg1, arg2) = (input_x.0, input_y.0);
+    if arg1.is_nan() || arg2.is_nan() {
+        return F64::from(f64::NAN);
+    }
+    let atan2_arg1_arg2 = f64::atan2(arg1, arg2);
+    let result = (atan2_arg1_arg2 / f64::atan(DEGREE_ONE)) * 45.0;
+    if result.is_infinite() {
+        return F64::from(f64::NAN);
+    }
+    result.into()
 }
 
 #[function("degrees(float8) -> float8")]

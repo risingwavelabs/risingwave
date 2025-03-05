@@ -156,7 +156,7 @@ message ExprNode {
     SINH = 267;
     ACOSD = 268;
     ATAND = 269;
-    // skips 270 so that atan2d are close to others
+    ATAN2D = 270;
     TRUNC = 271;
     LN = 272;
     LOG10 = 273;
