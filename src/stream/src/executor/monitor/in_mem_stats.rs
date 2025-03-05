@@ -55,10 +55,14 @@ impl CountMap {
         counter
     }
 
-    pub fn collect(&self) -> HashMap<u64, u64> {
+    pub fn collect(&self, operator_ids: &[u64]) -> HashMap<u64, u64> {
         let map = self.0.read();
-        map.iter()
-            .map(|(&k, v)| (k, v.load(std::sync::atomic::Ordering::Relaxed)))
+        operator_ids
+            .iter()
+            .filter_map(|id| {
+                map.get(id)
+                    .map(|v| (*id, v.load(std::sync::atomic::Ordering::Relaxed)))
+            })
             .collect()
     }
 

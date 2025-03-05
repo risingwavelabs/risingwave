@@ -45,6 +45,7 @@ pub async fn handle_explain_analyze_stream_job(
     handler_args: HandlerArgs,
     target: AnalyzeTarget,
 ) -> Result<RwPgResponse> {
+    let profiling_duration = Duration::from_secs(10);
     let job_id = match &target {
         AnalyzeTarget::Id(id) => *id,
         AnalyzeTarget::Index(name)
@@ -87,11 +88,10 @@ pub async fn handle_explain_analyze_stream_job(
             }
         }
     };
-    let profiling_duration = Duration::from_secs(10);
-    // query meta for fragment graph (names only)
+
     let meta_client = handler_args.session.env().meta_client();
+
     // TODO(kwannoel): Only fetch the names, actor_ids and graph of the fragments
-    // Otherwise memory utilization can be high
     let fragments = {
         let mut fragment_map = meta_client.list_table_fragments(&[job_id]).await?;
         assert_eq!(fragment_map.len(), 1, "expected only one fragment");
@@ -100,6 +100,7 @@ pub async fn handle_explain_analyze_stream_job(
         table_fragment_info.fragments
     };
     let (root_node, adjacency_list) = extract_stream_node_infos(fragments);
+    let operator_ids = adjacency_list.keys().copied().collect::<Vec<_>>();
 
     // Get the worker nodes
     let worker_nodes = list_stream_worker_nodes(handler_args.session.env()).await?;
@@ -110,7 +111,9 @@ pub async fn handle_explain_analyze_stream_job(
             let mut compute_client = handler_args.session.env().client_pool().get(node).await?;
             let stats = compute_client
                 .monitor_client
-                .get_profile_stats(GetProfileStatsRequest {})
+                .get_profile_stats(GetProfileStatsRequest {
+                    operator_ids: operator_ids.clone(),
+                })
                 .await
                 .expect("get profiling stats failed");
             aggregated_stats.start_record(adjacency_list.keys(), &stats.into_inner());
@@ -122,7 +125,9 @@ pub async fn handle_explain_analyze_stream_job(
             let mut compute_client = handler_args.session.env().client_pool().get(node).await?;
             let stats = compute_client
                 .monitor_client
-                .get_profile_stats(GetProfileStatsRequest {})
+                .get_profile_stats(GetProfileStatsRequest {
+                    operator_ids: operator_ids.clone(),
+                })
                 .await
                 .expect("get profiling stats failed");
             aggregated_stats.finish_record(adjacency_list.keys(), &stats.into_inner());
