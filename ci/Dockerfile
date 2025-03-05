@@ -42,7 +42,7 @@ ENV PATH /root/.cargo/bin/:$PATH
 
 RUN rustup toolchain install --profile minimal && \
     rustup show && \
-    rustup default `rustup show active-toolchain | awk '{print $1}'` && \
+    rustup default `rustup show active-toolchain | head -n1 | awk '{print $1}'` && \
     rustup component add rustfmt llvm-tools-preview clippy && \
     rustup target add wasm32-wasip1
 
