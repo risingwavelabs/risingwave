@@ -636,20 +636,21 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
         {
             // rewrite inconsistent fragment id, dml fragment id, and incoming sinks for tables.
             // see: https://github.com/risingwavelabs/risingwave/issues/19265
-            let fragment_id = *table_fragment_map.get(&table.id).expect(&format!(
-                "table {} not exist in any fragment info",
-                table.name
-            ));
+            let fragment_id = *table_fragment_map
+                .get(&table.id)
+                .unwrap_or_else(|| panic!("table {} not exist in any fragment info", table.name));
             if table.fragment_id != fragment_id {
                 tracing::warn!(?table.name, from=table.fragment_id, to=fragment_id, "update mismatch fragment id");
                 table.fragment_id = fragment_id;
             }
 
             if let Some(old_dml_fragment_id) = table.dml_fragment_id {
-                let dml_fragment_id = *table_dml_fragment_map.get(&table.id).expect(&format!(
-                    "dml executor for table {} not exist in any fragment info",
-                    table.name
-                ));
+                let dml_fragment_id = *table_dml_fragment_map.get(&table.id).unwrap_or_else(|| {
+                    panic!(
+                        "dml executor for table {} not exist in any fragment info",
+                        table.name
+                    )
+                });
                 if old_dml_fragment_id != dml_fragment_id {
                     tracing::warn!(?table.name, from=old_dml_fragment_id, to=dml_fragment_id, "update mismatch dml fragment id");
                     table.dml_fragment_id = Some(dml_fragment_id);
