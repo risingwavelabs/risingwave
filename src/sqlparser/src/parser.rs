@@ -4368,11 +4368,14 @@ impl Parser<'_> {
                 } else if parser.parse_keyword(Keyword::INDEX) {
                     let index_name = parser.parse_object_name()?;
                     Ok(AnalyzeTarget::Index(index_name))
+                } else if parser.parse_keyword(Keyword::SINK) {
+                    let sink_name = parser.parse_object_name()?;
+                    Ok(AnalyzeTarget::Sink(sink_name))
                 } else if parser.parse_word("ID") {
                     let job_id = parser.parse_literal_uint()? as u32;
                     Ok(AnalyzeTarget::Id(job_id))
                 } else {
-                    parser.expected("TABLE, INDEX, VIEW, MATERIALIZED VIEW or SYSTEM after ANALYZE")
+                    parser.expected("TABLE, INDEX, MATERIALIZED VIEW, SINK or ID after ANALYZE")
                 }
             }
             let target = parse_analyze_target(self)?;
