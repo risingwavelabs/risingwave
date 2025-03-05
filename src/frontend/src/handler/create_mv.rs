@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::HashSet;
-use std::thread;
 
 use either::Either;
 use pgwire::pg_response::{PgResponse, StatementType};
@@ -25,6 +24,7 @@ use risingwave_pb::serverless_backfill_controller::{
 use risingwave_sqlparser::ast::{EmitMode, Ident, ObjectName, Query};
 
 use super::RwPgResponse;
+use crate::WithOptions;
 use crate::binder::{Binder, BoundQuery, BoundSetExpr};
 use crate::catalog::check_column_name_not_reserved;
 use crate::error::ErrorCode::{InvalidInputSyntax, ProtocolError};
@@ -185,7 +185,6 @@ pub async fn handle_create_mv(
 }
 
 /// Send a provision request to the serverless backfill controller
-#[tokio::main]
 pub async fn provision_serverless_backfill(sbc_addr: String) -> Result<String> {
     // , Box<dyn std::error::Error>
     let request = tonic::Request::new(ProvisionRequest {});
@@ -210,6 +209,11 @@ pub async fn provision_serverless_backfill(sbc_addr: String) -> Result<String> {
             ))));
         }
     };
+}
+
+fn get_with_options(handler_args: HandlerArgs) -> WithOptions {
+    let context = OptimizerContext::from_handler_args(handler_args);
+    context.with_options().clone()
 }
 
 pub async fn handle_create_mv_bound(
@@ -237,9 +241,7 @@ pub async fn handle_create_mv_bound(
     }
 
     let (table, graph, dependencies, resource_group) = {
-        let context = OptimizerContext::from_handler_args(handler_args);
-        let mut with_options = context.with_options().clone();
-
+        let mut with_options = get_with_options(handler_args.clone());
         // what is resource_group?
         // create materialized view m with ( resource_group = 'test' ) as select * from t;
         // Is this 'test'?
@@ -264,27 +266,13 @@ pub async fn handle_create_mv_bound(
             // get other useful fields by `remove`, the logic here is to reject unknown options.
             return Err(RwError::from(ProtocolError(format!(
                 "unexpected options in WITH clause: {:?}",
-                context.with_options().keys()
+                with_options.keys()
             ))));
         }
 
-        let has_order_by = !query.order.is_empty();
-        if has_order_by {
-            context.warn_to_user(r#"The ORDER BY clause in the CREATE MATERIALIZED VIEW statement does not guarantee that the rows selected out of this materialized view is returned in this order.
-It only indicates the physical clustering of the data, which may improve the performance of queries issued against this materialized view.
-"#.to_owned());
-        }
-
         tracing::debug!("before calling SBC");
-
-        let x: std::result::Result<String, _> =
-            thread::spawn(|| provision_serverless_backfill(sbc_addr))
-                .join()
-                .expect("Thread panicked"); // TODO: Do not panic
-        tracing::debug!("after calling SBC");
-
         let resource_group = if is_serverless_backfill {
-            match x {
+            match provision_serverless_backfill(sbc_addr).await {
                 Err(e) => {
                     return Err(RwError::from(ProtocolError(format!(
                         "failed to provision serverless backfill nodes: {}",
@@ -296,6 +284,16 @@ It only indicates the physical clustering of the data, which may improve the per
         } else {
             resource_group
         };
+        tracing::debug!("after calling SBC");
+
+        let context = OptimizerContext::from_handler_args(handler_args);
+        let has_order_by = !query.order.is_empty();
+        if has_order_by {
+            context.warn_to_user(r#"The ORDER BY clause in the CREATE MATERIALIZED VIEW statement does not guarantee that the rows selected out of this materialized view is returned in this order.
+It only indicates the physical clustering of the data, which may improve the performance of queries issued against this materialized view.
+"#.to_owned());
+        }
+
         tracing::debug!(resource_group = resource_group, "after calling SBC");
 
         if resource_group.is_some()
