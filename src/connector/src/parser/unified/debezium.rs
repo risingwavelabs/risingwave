@@ -24,7 +24,6 @@ use risingwave_common::types::{
 use risingwave_connector_codec::decoder::AccessExt;
 use risingwave_pb::plan_common::additional_column::ColumnType;
 use thiserror_ext::AsReport;
-use time::serde::iso8601;
 
 use super::{Access, AccessError, AccessResult, ChangeEvent, ChangeEventOperation};
 use crate::parser::TransactionControl;
@@ -768,6 +767,28 @@ fn bson_extract_number(bson_doc: &serde_json::Value, type_expected: &DataType) -
         };
         // parse to float
         if [DataType::Float32, DataType::Float64].contains(type_expected) {
+            match (num_str, type_expected) {
+                ("Infinity", DataType::Float64) => {
+                    return Ok(Some(ScalarImpl::Float64(f64::INFINITY.into())));
+                }
+                ("Infinity", DataType::Float32) => {
+                    return Ok(Some(ScalarImpl::Float32(f32::INFINITY.into())));
+                }
+                ("-Infinity", DataType::Float64) => {
+                    return Ok(Some(ScalarImpl::Float64(f64::NEG_INFINITY.into())));
+                }
+                ("-Infinity", DataType::Float32) => {
+                    return Ok(Some(ScalarImpl::Float32(f32::NEG_INFINITY.into())));
+                }
+                ("NaN", DataType::Float64) => {
+                    return Ok(Some(ScalarImpl::Float64(f64::NAN.into())));
+                }
+                ("NaN", DataType::Float32) => {
+                    return Ok(Some(ScalarImpl::Float32(f32::NAN.into())));
+                }
+                _ => {}
+            }
+
             let parsed_num: f64 = match num_str.parse() {
                 Ok(n) => n,
                 Err(_e) => {
@@ -917,45 +938,9 @@ fn bson_extract_date(bson_doc: &serde_json::Value, type_expected: &DataType) -> 
         value: datum.to_string(),
     };
 
+    // deal with the Canonical format only
     let res =
-        if let serde_json::Value::String(ref _iso8601_str) = datum {
-            // relaxed format
-            let Ok(parsed) = iso8601::deserialize(datum) else {
-                return Err(type_error());
-            };
-
-            let (millis, nanos) = (parsed.unix_timestamp(), parsed.nanosecond());
-            let chrono_datetime =
-                chrono::DateTime::from_timestamp(millis, nanos).ok_or_else(|| {
-                    AccessError::TypeError {
-                        expected: "timestamp".into(),
-                        got: "string".into(),
-                        value: datum.to_string(),
-                    }
-                })?;
-            match type_expected {
-                DataType::Date => {
-                    let naive = chrono_datetime.naive_local();
-                    let dt = naive.date();
-                    Some(ScalarImpl::Date(dt.into()))
-                }
-                DataType::Time => {
-                    let naive = chrono_datetime.naive_local();
-                    let dt = naive.time();
-                    Some(ScalarImpl::Time(dt.into()))
-                }
-                DataType::Timestamp => {
-                    let naive = chrono_datetime.naive_local();
-                    let dt = Timestamp::from(naive);
-                    Some(ScalarImpl::Timestamp(dt))
-                }
-                DataType::Timestamptz => {
-                    let dt = chrono_datetime.into();
-                    Some(ScalarImpl::Timestamptz(dt))
-                }
-                _ => unreachable!("DebeziumMongoJsonParser::new must ensure column datatypes."),
-            }
-        } else if let serde_json::Value::Object(ref obj) = datum
+        if let serde_json::Value::Object(ref obj) = datum
             && obj.contains_key("$numberLong")
             && obj["$numberLong"].is_string()
         {
@@ -1029,24 +1014,26 @@ fn bson_extract_timestamp(bson_doc: &serde_json::Value, type_expected: &DataType
         });
     };
 
+    if !obj.contains_key("t") || !obj["t"].is_u64() || !obj.contains_key("i") || !obj["i"].is_u64()
+    {
+        return Err(AccessError::TypeError {
+            expected: "timestamp with valid seconds since epoch".into(),
+            got: "object".into(),
+            value: bson_doc.to_string(),
+        });
+    }
+
     let since_epoch = obj["t"].as_i64().ok_or_else(|| AccessError::TypeError {
-        expected: "timestamp".into(),
+        expected: "timestamp with valid seconds since epoch".into(),
         got: "object".into(),
         value: bson_doc.to_string(),
     })?;
-    let nanos = obj["i"].as_i64().ok_or_else(|| AccessError::TypeError {
-        expected: "timestamp".to_owned(),
-        got: "object".to_owned(),
-        value: bson_doc.to_string(),
-    })? as u32;
 
     let chrono_datetime =
-        chrono::DateTime::from_timestamp(since_epoch, nanos).ok_or_else(|| {
-            AccessError::TypeError {
-                expected: type_expected.to_string(),
-                got: "object".to_owned(),
-                value: bson_doc.to_string(),
-            }
+        chrono::DateTime::from_timestamp(since_epoch, 0).ok_or_else(|| AccessError::TypeError {
+            expected: type_expected.to_string(),
+            got: "object".to_owned(),
+            value: bson_doc.to_string(),
         })?;
 
     let res = match type_expected {
