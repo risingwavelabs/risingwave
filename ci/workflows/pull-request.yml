@@ -25,6 +25,7 @@ anchors:
         run: rw-build-env
         config: ci/docker-compose.yml
         mount-buildkite-agent: true
+        propagate-environment: true
 
 other-sql-backend: &other-sql-backend
   matrix:
