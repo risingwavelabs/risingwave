@@ -278,9 +278,9 @@ dependencies = [
 
 [[package]]
 name = "dylint"
-version = "4.0.0"
+version = "4.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "33b5bed63d0bb066456015cda94ca8f3675f0eea1b25024591c124a3e5a274e0"
+checksum = "d5fea2e5a898d3ea9be3505281d52ae2058d704d5f47fea742a87511da0a1abc"
 dependencies = [
  "ansi_term",
  "anyhow",
@@ -298,9 +298,9 @@ dependencies = [
 
 [[package]]
 name = "dylint_internal"
-version = "4.0.0"
+version = "4.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e89499236f169dc57ad3c6c8e85eea213efcf743c5a9856ab82522e62512bcff"
+checksum = "be48281a00c2a156f23a19699cb375fd6421ba9ad25f76eca6f8abac05f24b8e"
 dependencies = [
  "ansi_term",
  "anyhow",
@@ -321,9 +321,9 @@ dependencies = [
 
 [[package]]
 name = "dylint_linting"
-version = "4.0.0"
+version = "4.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5b29cae692caaa724b2462872ac9ccd15d5639f19f36e10bfcb8a8dd00456e86"
+checksum = "ee26289a3a13858d9f63ce4fb171a671dfd79f0aea83af0c069d6c5845bc8bc8"
 dependencies = [
  "cargo_metadata",
  "dylint_internal",
@@ -336,9 +336,9 @@ dependencies = [
 
 [[package]]
 name = "dylint_testing"
-version = "4.0.0"
+version = "4.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "297ddd66325e2ac6735539863658bfe6798c5d7e163eba6ad06514ea6960ed9a"
+checksum = "2c886366f0dc5d872d3054f630a6d04aaf8975f1241f7ed784c0138651661677"
 dependencies = [
  "anyhow",
  "cargo_metadata",
