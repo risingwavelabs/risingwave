@@ -62,7 +62,7 @@ impl CountMap {
             .collect()
     }
 
-    /// GC at 50% drop rate
+    /// GC policy: if more than half of the counters are dropped, then do GC.
     pub fn should_gc(map: &HashMap<u64, Count>) -> bool {
         let total = map.len();
         let dropped = map
