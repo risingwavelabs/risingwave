@@ -26,6 +26,7 @@ pub struct CountMap(Arc<RwLock<HashMap<u64, Count>>>);
 impl CountMap {
     pub(crate) fn new() -> Self {
         let inner = Arc::new(RwLock::new(HashMap::new()));
+        #[cfg(not(madsim))]
         {
             let inner = inner.clone();
             tokio::spawn(async move {
@@ -41,6 +42,9 @@ impl CountMap {
     }
 
     pub(crate) fn new_or_get_counter(&self, id: u64) -> Count {
+        #[cfg(madsim)]
+        return Arc::new(AtomicU64::new(0));
+
         {
             let map = self.0.read();
             if let Some(counter) = map.get(&id) {
