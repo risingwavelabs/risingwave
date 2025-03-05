@@ -66,7 +66,6 @@ macro_rules! parser_err {
     ($($arg:tt)*) => {
         return Err(winnow::error::ErrMode::Backtrack(<winnow::error::ContextError as winnow::error::FromExternalError<_, _>>::from_external_error(
             &Parser::default(),
-            winnow::error::ErrorKind::Fail,
             $crate::parser::StrError(format!($($arg)*)),
         )))
     };
@@ -76,7 +75,6 @@ impl From<StrError> for winnow::error::ErrMode<winnow::error::ContextError> {
     fn from(e: StrError) -> Self {
         winnow::error::ErrMode::Backtrack(<winnow::error::ContextError as winnow::error::FromExternalError<_, _>>::from_external_error(
             &Parser::default(),
-            winnow::error::ErrorKind::Fail,
             e,
         ))
     }

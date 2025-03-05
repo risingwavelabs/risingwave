@@ -22,9 +22,7 @@ use winnow::combinator::{
     alt, cut_err, delimited, dispatch, empty, fail, opt, preceded, repeat, separated, seq,
     terminated, trace,
 };
-use winnow::error::{
-    AddContext, ContextError, ErrMode, ErrorKind, FromExternalError, ParserError, StrContext,
-};
+use winnow::error::{ContextError, ErrMode, FromExternalError, StrContext};
 use winnow::{ModalResult, Parser, Stateful};
 
 use super::{
@@ -130,14 +128,13 @@ where
     #[error("unconsumed `>>`")]
     struct UnconsumedShiftRight;
 
-    with_state::<S, DataTypeParsingState, _, _>(terminated(
+    with_state::<S, DataTypeParsingState, _, _, _>(terminated(
         data_type_stateful,
         trace("data_type_verify_state", |input: &mut StatefulStream<S>| {
             // If there is remaining `>`, we should fail.
             if *input.state.remaining_close.borrow() {
                 Err(ErrMode::Cut(ContextError::from_external_error(
                     input,
-                    ErrorKind::Fail,
                     UnconsumedShiftRight,
                 )))
             } else {
@@ -231,7 +228,7 @@ fn keyword_datatype<S: TokenStream>(input: &mut StatefulStream<S>) -> ModalResul
         Keyword::NUMERIC | Keyword::DECIMAL | Keyword::DEC => cut_err(precision_and_scale()).map(|(precision, scale)| {
             DataType::Decimal(precision, scale)
         }),
-        _ =>  fail
+        _ => fail
     };
 
     ty.parse_next(input)

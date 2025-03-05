@@ -10,11 +10,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use winnow::combinator::{Context, separated, trace};
-use winnow::error::{AddContext, ContextError, StrContext};
+use winnow::combinator::impls::Context;
+use winnow::combinator::{separated, trace};
+use winnow::error::{AddContext, ContextError, ErrMode, ParserError, StrContext};
 use winnow::stream::{Stream, StreamIsPartial};
 use winnow::token::any;
-use winnow::{ModalParser, ModalResult, Parser, Stateful};
+use winnow::{ModalResult, Parser, Stateful};
 
 use crate::ast::{Ident, ObjectName};
 use crate::keywords::{self, Keyword};
@@ -71,7 +72,7 @@ where
     .parse_next(input)
 }
 
-impl<I> Parser<I, TokenWithLocation, ContextError> for Token
+impl<I> Parser<I, TokenWithLocation, ErrMode<ContextError>> for Token
 where
     I: TokenStream,
 {
@@ -84,7 +85,7 @@ where
     }
 }
 
-impl<I> Parser<I, Keyword, ContextError> for Keyword
+impl<I> Parser<I, Keyword, ErrMode<ContextError>> for Keyword
 where
     I: TokenStream,
 {
@@ -157,15 +158,14 @@ where
 /// Accept a subparser contains a given state.
 ///
 /// The state will be constructed using [`Default::default()`].
-fn with_state<S, State, O, ParseNext>(
-    mut parse_next: ParseNext,
-) -> impl ModalParser<S, O, ContextError>
+fn with_state<S, State, O, ParseNext, E>(mut parse_next: ParseNext) -> impl Parser<S, O, E>
 where
     S: TokenStream,
     State: Default,
-    ParseNext: Parser<Stateful<S, State>, O, ContextError>,
+    ParseNext: Parser<Stateful<S, State>, O, E>,
+    E: ParserError<S>,
 {
-    move |input: &mut S| -> ModalResult<O> {
+    move |input: &mut S| -> winnow::Result<O, E> {
         let state = State::default();
         let input2 = std::mem::take(input);
         let mut stateful = Stateful {
@@ -187,6 +187,7 @@ pub trait ParserExt<I, O, E>: Parser<I, O, E> {
         Self: Sized,
         I: Stream,
         E: AddContext<I, StrContext>,
+        E: ParserError<I>,
     {
         self.context(StrContext::Expected(
             winnow::error::StrContextValue::Description(expected),
