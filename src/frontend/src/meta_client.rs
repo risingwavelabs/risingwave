@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use anyhow::Context;
 use risingwave_common::session_config::SessionConfig;
@@ -130,6 +130,9 @@ pub trait FrontendMetaClient: Send + Sync {
     async fn list_rate_limits(&self) -> Result<Vec<RateLimitInfo>>;
 
     async fn get_meta_store_endpoint(&self) -> Result<String>;
+
+    async fn alter_sink_config(&self, sink_id: u32, config: BTreeMap<String, String>)
+    -> Result<()>;
 }
 
 pub struct FrontendMetaClientImpl(pub MetaClient);
@@ -312,5 +315,13 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn get_meta_store_endpoint(&self) -> Result<String> {
         self.0.get_meta_store_endpoint().await
+    }
+
+    async fn alter_sink_config(
+        &self,
+        sink_id: u32,
+        config: BTreeMap<String, String>,
+    ) -> Result<()> {
+        self.0.alter_sink_config(sink_id, config).await
     }
 }

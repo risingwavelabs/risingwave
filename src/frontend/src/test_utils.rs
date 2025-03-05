@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::Write;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
@@ -1115,6 +1115,14 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     }
 
     async fn get_meta_store_endpoint(&self) -> RpcResult<String> {
+        unimplemented!()
+    }
+
+    async fn alter_sink_config(
+        &self,
+        _sink_id: u32,
+        _config: BTreeMap<String, String>,
+    ) -> RpcResult<()> {
         unimplemented!()
     }
 }

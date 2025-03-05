@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeMap;
 use std::marker::PhantomData;
 
 use async_trait::async_trait;
@@ -64,6 +65,10 @@ impl<T: TrivialSinkName> Sink for TrivialSink<T> {
     type LogSinker = Self;
 
     const SINK_NAME: &'static str = T::SINK_NAME;
+
+    fn update_config(&mut self, _config: BTreeMap<String, String>) -> Result<()> {
+        Ok(())
+    }
 
     // Disable sink decoupling for all trivial sinks because it introduces overhead without any benefit
     fn is_sink_decouple(_user_specified: &SinkDecouple) -> Result<bool> {
