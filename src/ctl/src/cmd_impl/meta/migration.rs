@@ -428,6 +428,9 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
         .map(|tf| tf.table_id().table_id)
         .collect_vec();
     let mut fragment_job_map = HashMap::new();
+    let mut table_fragment_map = HashMap::new();
+    let mut table_dml_fragment_map = HashMap::new();
+    let mut incoming_sink_map = HashMap::new();
     let mut fragments = vec![];
     let mut actors = vec![];
     let mut actor_dispatchers = vec![];
@@ -463,6 +466,19 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
                 fragment.fragment_id as u32,
                 table_fragment.table_id().table_id as ObjectId,
             );
+            for table_id in fragment.state_table_ids.clone().into_u32_array() {
+                table_fragment_map.insert(table_id, fragment.fragment_id as u32);
+            }
+            if fragment.fragment_type_mask
+                & risingwave_pb::stream_plan::PbFragmentTypeFlag::Dml as i32
+                != 0
+            {
+                table_dml_fragment_map.insert(
+                    table_fragment.table_id().table_id,
+                    fragment.fragment_id as u32,
+                );
+            }
+
             fragments.push(fragment);
             actors.extend(a);
             actor_dispatchers.extend(ad);
@@ -530,15 +546,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
         }
     });
     tables.retain(|t| {
-        if t.table_type() == PbTableType::Internal {
-            if !fragment_job_map.contains_key(&t.fragment_id) {
-                tracing::warn!(
-                    "table {} is internal but don't have a related streaming job.",
-                    t.name
-                );
-                return false;
-            }
-        } else if !streaming_job_ids.contains(&t.id) {
+        if t.table_type() != PbTableType::Internal && !streaming_job_ids.contains(&t.id) {
             tracing::warn!(
                 "{} {} don't have a related streaming job.",
                 t.table_type().as_str_name(),
@@ -562,6 +570,15 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
             false
         } else {
             true
+        }
+    });
+
+    sinks.iter().for_each(|s| {
+        if let Some(target_table) = s.target_table {
+            incoming_sink_map
+                .entry(target_table)
+                .or_insert_with(BTreeSet::new)
+                .insert(s.id);
         }
     });
 
@@ -607,7 +624,44 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
     tracing::info!("sources migrated");
 
     // table
-    for table in tables {
+    for mut table in tables {
+        {
+            // rewrite inconsistent fragment id, dml fragment id, and incoming sinks for tables.
+            // see: https://github.com/risingwavelabs/risingwave/issues/19265
+            let fragment_id = *table_fragment_map.get(&table.id).expect(&format!(
+                "table {} not exist in any fragment info",
+                table.name
+            ));
+            if table.fragment_id != fragment_id {
+                tracing::warn!(?table.name, from=table.fragment_id, to=fragment_id, "update mismatch fragment id");
+                table.fragment_id = fragment_id;
+            }
+
+            if let Some(old_dml_fragment_id) = table.dml_fragment_id {
+                let dml_fragment_id = *table_dml_fragment_map.get(&table.id).expect(&format!(
+                    "dml executor for table {} not exist in any fragment info",
+                    table.name
+                ));
+                if old_dml_fragment_id != dml_fragment_id {
+                    tracing::warn!(?table.name, from=old_dml_fragment_id, to=dml_fragment_id, "update mismatch dml fragment id");
+                    table.dml_fragment_id = Some(dml_fragment_id);
+                }
+            }
+
+            if let Some(incoming_sinks) = incoming_sink_map.get(&table.id) {
+                if table.incoming_sinks.len() != incoming_sinks.len()
+                    || table
+                        .incoming_sinks
+                        .iter()
+                        .any(|s| !incoming_sinks.contains(s))
+                {
+                    let new_incoming_sinks = incoming_sinks.iter().copied().collect();
+                    tracing::warn!(?table.name, ?table.incoming_sinks, ?new_incoming_sinks, "update mismatch incoming sinks");
+                    table.incoming_sinks = new_incoming_sinks;
+                }
+            }
+        }
+
         let job_id = if table.table_type() == PbTableType::Internal {
             Set(Some(*fragment_job_map.get(&table.fragment_id).unwrap()))
         } else {
