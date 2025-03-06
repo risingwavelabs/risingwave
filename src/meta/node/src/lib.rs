@@ -500,4 +500,10 @@ fn validate_config(config: &RwConfig) {
         tracing::error!(error_msg);
         panic!("{}", error_msg);
     }
+
+    if config.meta.parallelism_control_batch_size == 0 {
+        let error_msg = "parallelism control batch size should be larger than 0";
+        tracing::error!(error_msg);
+        panic!("{}", error_msg);
+    }
 }
