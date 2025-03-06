@@ -491,6 +491,7 @@ impl Sink for IcebergSink {
             inner,
         )
         .await?;
+        let log_store_rewind_start_epoch = writer.log_store_rewind_start_epoch;
 
         let commit_checkpoint_interval =
             NonZeroU64::new(self.config.commit_checkpoint_interval).expect(
@@ -501,6 +502,7 @@ impl Sink for IcebergSink {
             writer,
             metrics,
             commit_checkpoint_interval,
+            log_store_rewind_start_epoch,
         ))
     }
 
@@ -1315,9 +1317,9 @@ impl IcebergSinkCommitter {
 
 #[async_trait::async_trait]
 impl SinkCommitCoordinator for IcebergSinkCommitter {
-    async fn init(&mut self) -> Result<()> {
+    async fn init(&mut self) -> crate::sink::Result<Option<u64>> {
         tracing::info!("Iceberg commit coordinator inited.");
-        Ok(())
+        Ok(None)
     }
 
     async fn commit(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()> {

@@ -20,6 +20,7 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_pb::connector_service::coordinate_request::{
     CommitRequest, StartCoordinationRequest, UpdateVnodeBitmapRequest,
 };
+use risingwave_pb::connector_service::coordinate_response::StartCoordinationResponse;
 use risingwave_pb::connector_service::{
     CoordinateRequest, CoordinateResponse, PbSinkParam, SinkMetadata, coordinate_request,
     coordinate_response,
@@ -38,18 +39,21 @@ impl CoordinatorStreamHandle {
         mut client: SinkCoordinationRpcClient,
         param: PbSinkParam,
         vnode_bitmap: Bitmap,
-    ) -> Result<Self, RpcError> {
-        Self::new_with_init_stream(param, vnode_bitmap, |rx| async move {
-            client.coordinate(ReceiverStream::new(rx)).await
-        })
-        .await
+    ) -> Result<(Self, Option<u64>), RpcError> {
+        let (instance, log_store_rewind_start_epoch) =
+            Self::new_with_init_stream(param, vnode_bitmap, |rx| async move {
+                client.coordinate(ReceiverStream::new(rx)).await
+            })
+            .await?;
+
+        Ok((instance, log_store_rewind_start_epoch))
     }
 
     pub async fn new_with_init_stream<F, St, Fut>(
         param: PbSinkParam,
         vnode_bitmap: Bitmap,
         init_stream: F,
-    ) -> Result<Self, RpcError>
+    ) -> Result<(Self, Option<u64>), RpcError>
     where
         F: FnOnce(Receiver<CoordinateRequest>) -> Fut + Send,
         St: Stream<Item = Result<CoordinateResponse, Status>> + Send + Unpin + 'static,
@@ -76,10 +80,14 @@ impl CoordinatorStreamHandle {
             },
         )
         .await?;
+
         match first_response {
             CoordinateResponse {
-                msg: Some(coordinate_response::Msg::StartResponse(_)),
-            } => Ok(stream_handle),
+                msg:
+                    Some(coordinate_response::Msg::StartResponse(StartCoordinationResponse {
+                        log_store_rewind_start_epoch,
+                    })),
+            } => Ok((stream_handle, log_store_rewind_start_epoch)),
             msg => Err(anyhow!("should get start response but get {:?}", msg).into()),
         }
     }

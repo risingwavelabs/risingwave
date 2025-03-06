@@ -684,12 +684,16 @@ impl<R: LogReader> SinkLogReader for R {
 #[async_trait]
 pub trait LogSinker: 'static {
     async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<!>;
+
+    fn get_rewind_start_offset(&self) -> Option<u64> {
+        None
+    }
 }
 
 #[async_trait]
 pub trait SinkCommitCoordinator {
     /// Initialize the sink committer coordinator
-    async fn init(&mut self) -> Result<()>;
+    async fn init(&mut self) -> Result<Option<u64>>;
     /// After collecting the metadata from each sink writer, a coordinator will call `commit` with
     /// the set of metadata. The metadata is serialized into bytes, because the metadata is expected
     /// to be passed between different gRPC node, so in this general trait, the metadata is
@@ -701,8 +705,8 @@ pub struct DummySinkCommitCoordinator;
 
 #[async_trait]
 impl SinkCommitCoordinator for DummySinkCommitCoordinator {
-    async fn init(&mut self) -> Result<()> {
-        Ok(())
+    async fn init(&mut self) -> Result<Option<u64>> {
+        Ok(None)
     }
 
     async fn commit(&mut self, _epoch: u64, _metadata: Vec<SinkMetadata>) -> Result<()> {
