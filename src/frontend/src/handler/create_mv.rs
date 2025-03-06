@@ -183,7 +183,7 @@ pub async fn handle_create_mv(
 }
 
 /// Send a provision request to the serverless backfill controller
-pub async fn provision_serverless_backfill(sbc_addr: String) -> Result<String> {
+pub async fn provision_resource_group(sbc_addr: String) -> Result<String> {
     let request = tonic::Request::new(ProvisionRequest {});
     let mut client =
         node_group_controller_service_client::NodeGroupControllerServiceClient::connect(
@@ -273,7 +273,7 @@ pub async fn handle_create_mv_bound(
         }
 
         let resource_group = if is_serverless_backfill {
-            match provision_serverless_backfill(sbc_addr).await {
+            match provision_resource_group(sbc_addr).await {
                 Err(e) => {
                     return Err(RwError::from(ProtocolError(format!(
                         "failed to provision serverless backfill nodes: {}",
@@ -285,6 +285,7 @@ pub async fn handle_create_mv_bound(
         } else {
             resource_group
         };
+        tracing::debug!(resource_group = resource_group, "provisioning on resource group");
 
         let context = OptimizerContext::from_handler_args(handler_args);
         let has_order_by = !query.order.is_empty();
@@ -293,8 +294,6 @@ pub async fn handle_create_mv_bound(
 It only indicates the physical clustering of the data, which may improve the performance of queries issued against this materialized view.
 "#.to_owned());
         }
-
-        tracing::debug!(resource_group = resource_group, "after calling SBC");
 
         if resource_group.is_some()
             && !context
