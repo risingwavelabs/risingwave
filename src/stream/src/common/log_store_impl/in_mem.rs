@@ -244,7 +244,7 @@ impl LogReader for BoundedInMemLogStoreReader {
         Ok(())
     }
 
-    async fn rewind(&mut self, _log_store_rewind_start_epoch: Option<u64>) -> LogStoreResult<()> {
+    async fn rewind(&mut self) -> LogStoreResult<()> {
         Err(anyhow!("should not call rewind on it"))
     }
 }

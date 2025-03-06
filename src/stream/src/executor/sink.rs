@@ -566,7 +566,8 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                     let res = sink.new_log_sinker(sink_writer_param.clone()).await;
                     let Err(e) = match res {
                         Ok((log_sinker, log_store_rewind_start_offset)) => {
-                            log_reader.rewind(log_store_rewind_start_offset).await?;
+                            log_reader.start_offset(log_store_rewind_start_offset)?;
+                            log_reader.rewind().await?;
 
                             log_sinker.consume_log_and_sink(&mut log_reader).await
                         }
@@ -592,7 +593,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                     }
 
                     if F::ALLOW_REWIND {
-                        match log_reader.rewind(None).await {
+                        match log_reader.rewind().await {
                             Ok(()) => {
                                 warn!(
                                     error = %e.as_report(),
