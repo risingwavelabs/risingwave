@@ -19,7 +19,7 @@ use std::fmt::Write;
 use itertools::Itertools;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-use winnow::PResult;
+use winnow::ModalResult;
 
 use super::ddl::SourceWatermark;
 use super::legacy_source::{CompatibleFormatEncode, parse_format_encode};
@@ -35,7 +35,7 @@ use crate::tokenizer::Token;
 
 /// Consumes token from the parser into an AST node.
 pub trait ParseTo: Sized {
-    fn parse_to(parser: &mut Parser<'_>) -> PResult<Self>;
+    fn parse_to(parser: &mut Parser<'_>) -> ModalResult<Self>;
 }
 
 #[macro_export]
@@ -141,7 +141,7 @@ impl fmt::Display for Format {
 }
 
 impl Format {
-    pub fn from_keyword(s: &str) -> PResult<Self> {
+    pub fn from_keyword(s: &str) -> ModalResult<Self> {
         Ok(match s {
             "DEBEZIUM" => Format::Debezium,
             "DEBEZIUM_MONGO" => Format::DebeziumMongo,
@@ -200,7 +200,7 @@ impl fmt::Display for Encode {
 }
 
 impl Encode {
-    pub fn from_keyword(s: &str) -> PResult<Self> {
+    pub fn from_keyword(s: &str) -> ModalResult<Self> {
         Ok(match s {
             "AVRO" => Encode::Avro,
             "TEXT" => Encode::Text,
@@ -243,7 +243,7 @@ impl Parser<'_> {
         &mut self,
         connector: &str,
         cdc_source_job: bool,
-    ) -> PResult<CompatibleFormatEncode> {
+    ) -> ModalResult<CompatibleFormatEncode> {
         // row format for cdc source must be debezium json
         // row format for nexmark source must be native
         // default row format for datagen source is native
@@ -308,7 +308,7 @@ impl Parser<'_> {
     }
 
     /// Parse `FORMAT ... ENCODE ... (...)`.
-    pub fn parse_schema(&mut self) -> PResult<Option<FormatEncodeOptions>> {
+    pub fn parse_schema(&mut self) -> ModalResult<Option<FormatEncodeOptions>> {
         if !self.parse_keyword(Keyword::FORMAT) {
             return Ok(None);
         }
@@ -513,7 +513,7 @@ pub struct CreateSinkStatement {
 }
 
 impl ParseTo for CreateSinkStatement {
-    fn parse_to(p: &mut Parser<'_>) -> PResult<Self> {
+    fn parse_to(p: &mut Parser<'_>) -> ModalResult<Self> {
         impl_parse_to!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], p);
         impl_parse_to!(sink_name: ObjectName, p);
 
@@ -603,7 +603,7 @@ pub struct CreateSubscriptionStatement {
 }
 
 impl ParseTo for CreateSubscriptionStatement {
-    fn parse_to(p: &mut Parser<'_>) -> PResult<Self> {
+    fn parse_to(p: &mut Parser<'_>) -> ModalResult<Self> {
         impl_parse_to!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], p);
         impl_parse_to!(subscription_name: ObjectName, p);
 
@@ -685,7 +685,7 @@ pub struct DeclareCursorStatement {
 }
 
 impl ParseTo for DeclareCursorStatement {
-    fn parse_to(p: &mut Parser<'_>) -> PResult<Self> {
+    fn parse_to(p: &mut Parser<'_>) -> ModalResult<Self> {
         let cursor_name = p.parse_identifier_non_reserved()?;
 
         let declare_cursor = if !p.parse_keyword(Keyword::SUBSCRIPTION) {
@@ -736,7 +736,7 @@ pub struct FetchCursorStatement {
 }
 
 impl ParseTo for FetchCursorStatement {
-    fn parse_to(p: &mut Parser<'_>) -> PResult<Self> {
+    fn parse_to(p: &mut Parser<'_>) -> ModalResult<Self> {
         let count = if p.parse_keyword(Keyword::NEXT) {
             1
         } else {
@@ -778,7 +778,7 @@ pub struct CloseCursorStatement {
 }
 
 impl ParseTo for CloseCursorStatement {
-    fn parse_to(p: &mut Parser<'_>) -> PResult<Self> {
+    fn parse_to(p: &mut Parser<'_>) -> ModalResult<Self> {
         let cursor_name = if p.parse_keyword(Keyword::ALL) {
             None
         } else {
@@ -815,7 +815,7 @@ pub struct CreateConnectionStatement {
 }
 
 impl ParseTo for CreateConnectionStatement {
-    fn parse_to(p: &mut Parser<'_>) -> PResult<Self> {
+    fn parse_to(p: &mut Parser<'_>) -> ModalResult<Self> {
         impl_parse_to!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], p);
         impl_parse_to!(connection_name: ObjectName, p);
         impl_parse_to!(with_properties: WithProperties, p);
@@ -851,7 +851,7 @@ pub struct CreateSecretStatement {
 }
 
 impl ParseTo for CreateSecretStatement {
-    fn parse_to(parser: &mut Parser<'_>) -> PResult<Self> {
+    fn parse_to(parser: &mut Parser<'_>) -> ModalResult<Self> {
         impl_parse_to!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], parser);
         impl_parse_to!(secret_name: ObjectName, parser);
         impl_parse_to!(with_properties: WithProperties, parser);
@@ -887,7 +887,7 @@ impl fmt::Display for CreateSecretStatement {
 pub struct WithProperties(pub Vec<SqlOption>);
 
 impl ParseTo for WithProperties {
-    fn parse_to(parser: &mut Parser<'_>) -> PResult<Self> {
+    fn parse_to(parser: &mut Parser<'_>) -> ModalResult<Self> {
         Ok(Self(
             parser.parse_options_with_preceding_keyword(Keyword::WITH)?,
         ))
@@ -932,7 +932,7 @@ pub struct RowSchemaLocation {
 }
 
 impl ParseTo for RowSchemaLocation {
-    fn parse_to(p: &mut Parser<'_>) -> PResult<Self> {
+    fn parse_to(p: &mut Parser<'_>) -> ModalResult<Self> {
         impl_parse_to!([Keyword::ROW, Keyword::SCHEMA, Keyword::LOCATION], p);
         impl_parse_to!(value: AstString, p);
         Ok(Self { value })
@@ -955,7 +955,7 @@ impl fmt::Display for RowSchemaLocation {
 pub struct AstString(pub String);
 
 impl ParseTo for AstString {
-    fn parse_to(parser: &mut Parser<'_>) -> PResult<Self> {
+    fn parse_to(parser: &mut Parser<'_>) -> ModalResult<Self> {
         Ok(Self(parser.parse_literal_string()?))
     }
 }
@@ -978,7 +978,7 @@ pub enum AstOption<T> {
 }
 
 impl<T: ParseTo> ParseTo for AstOption<T> {
-    fn parse_to(parser: &mut Parser<'_>) -> PResult<Self> {
+    fn parse_to(parser: &mut Parser<'_>) -> ModalResult<Self> {
         match T::parse_to(parser) {
             Ok(t) => Ok(AstOption::Some(t)),
             Err(_) => Ok(AstOption::None),
@@ -1098,7 +1098,7 @@ impl UserOptionsBuilder {
 }
 
 impl ParseTo for UserOptions {
-    fn parse_to(parser: &mut Parser<'_>) -> PResult<Self> {
+    fn parse_to(parser: &mut Parser<'_>) -> ModalResult<Self> {
         let mut builder = UserOptionsBuilder::default();
         let add_option = |item: &mut Option<UserOption>, user_option| {
             let old_value = item.replace(user_option);
@@ -1179,7 +1179,7 @@ impl fmt::Display for UserOptions {
 }
 
 impl ParseTo for CreateUserStatement {
-    fn parse_to(p: &mut Parser<'_>) -> PResult<Self> {
+    fn parse_to(p: &mut Parser<'_>) -> ModalResult<Self> {
         impl_parse_to!(user_name: ObjectName, p);
         impl_parse_to!(with_options: UserOptions, p);
 
@@ -1222,7 +1222,7 @@ impl fmt::Display for AlterUserStatement {
 }
 
 impl ParseTo for AlterUserStatement {
-    fn parse_to(p: &mut Parser<'_>) -> PResult<Self> {
+    fn parse_to(p: &mut Parser<'_>) -> ModalResult<Self> {
         impl_parse_to!(user_name: ObjectName, p);
         impl_parse_to!(mode: AlterUserMode, p);
 
@@ -1231,7 +1231,7 @@ impl ParseTo for AlterUserStatement {
 }
 
 impl ParseTo for AlterUserMode {
-    fn parse_to(p: &mut Parser<'_>) -> PResult<Self> {
+    fn parse_to(p: &mut Parser<'_>) -> ModalResult<Self> {
         if p.parse_keyword(Keyword::RENAME) {
             p.expect_keyword(Keyword::TO)?;
             impl_parse_to!(new_name: ObjectName, p);
@@ -1264,7 +1264,7 @@ pub struct DropStatement {
 //     drop_mode: AstOption<DropMode>,
 // });
 impl ParseTo for DropStatement {
-    fn parse_to(p: &mut Parser<'_>) -> PResult<Self> {
+    fn parse_to(p: &mut Parser<'_>) -> ModalResult<Self> {
         impl_parse_to!(object_type: ObjectType, p);
         impl_parse_to!(if_exists => [Keyword::IF, Keyword::EXISTS], p);
         let object_name = p.parse_object_name()?;
@@ -1297,7 +1297,7 @@ pub enum DropMode {
 }
 
 impl ParseTo for DropMode {
-    fn parse_to(parser: &mut Parser<'_>) -> PResult<Self> {
+    fn parse_to(parser: &mut Parser<'_>) -> ModalResult<Self> {
         let drop_mode = if parser.parse_keyword(Keyword::CASCADE) {
             DropMode::Cascade
         } else if parser.parse_keyword(Keyword::RESTRICT) {
