@@ -33,9 +33,8 @@ use risingwave_pb::meta::subscribe_response::{Info, Operation as RespOperation};
 use risingwave_pb::meta::{SubscribeResponse, SubscribeType};
 use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::hummock::store::LocalHummockStorage;
-use risingwave_storage::store::{
-    LocalStateStore, StateStoreIterExt, StateStoreRead, to_owned_item,
-};
+use risingwave_storage::hummock::test_utils::*;
+use risingwave_storage::store::{LocalStateStore, StateStoreIterExt, to_owned_item};
 use risingwave_storage::{StateStore, StateStoreIter, StateStoreReadIter};
 use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 
