@@ -22,6 +22,7 @@ use risingwave_pb::serverless_backfill_controller::{
     ProvisionRequest, node_group_controller_service_client,
 };
 use risingwave_sqlparser::ast::{EmitMode, Ident, ObjectName, Query};
+use thiserror_ext::AsReport;
 
 use super::RwPgResponse;
 use crate::WithOptions;
@@ -192,7 +193,8 @@ pub async fn provision_serverless_backfill(sbc_addr: &String) -> Result<String> 
         .map_err(|e| {
             RwError::from(ErrorCode::InternalError(format!(
                 "unable to reach serverless backfill controller at addr {}: {}",
-                sbc_addr, e
+                sbc_addr,
+                e.as_report()
             )))
         })?;
 
@@ -200,7 +202,7 @@ pub async fn provision_serverless_backfill(sbc_addr: &String) -> Result<String> 
         Ok(resp) => Ok(resp.into_inner().resource_group),
         Err(e) => Err(RwError::from(ErrorCode::InternalError(format!(
             "serverless backfill controller returned error :{}",
-            e
+            e.as_report()
         )))),
     }
 }
