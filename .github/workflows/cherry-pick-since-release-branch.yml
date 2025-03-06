@@ -61,7 +61,7 @@ jobs:
         with:
           pr_branch: ${{ matrix.branch }}
           pr_labels: 'cherry-pick'
-          pr_body: ${{ format('Cherry picking #{0} onto branch {1}', github.event.number, matrix.branch) }}
+          pr_body: ${{ format('Cherry picking \#{0} onto branch {1}', github.event.number, matrix.branch) }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
