@@ -17,6 +17,7 @@ use std::collections::HashSet;
 use either::Either;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{FunctionId, ObjectId, TableId};
+use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::catalog::PbTable;
 use risingwave_pb::serverless_backfill_controller::{
     ProvisionRequest, node_group_controller_service_client,
@@ -182,20 +183,21 @@ pub async fn handle_create_mv(
 }
 
 /// Send a provision request to the serverless backfill controller
-pub async fn provision_serverless_backfill(sbc_addr: &String) -> Result<String> {
-    let request = tonic::Request::new(ProvisionRequest {});
+pub async fn provision_serverless_backfill(sbc_addr: &HostAddr) -> Result<String> {
+    let full_addr = format!("{}:{}", sbc_addr.host, sbc_addr.port);
     let mut client =
         node_group_controller_service_client::NodeGroupControllerServiceClient::connect(
-            sbc_addr.clone(),
+            full_addr.clone(),
         )
         .await
         .map_err(|e| {
             RwError::from(ErrorCode::InternalError(format!(
                 "unable to reach serverless backfill controller at addr {}: {}",
-                sbc_addr, e
+                full_addr, e
             )))
         })?;
 
+    let request = tonic::Request::new(ProvisionRequest {});
     match client.provision(request).await {
         Ok(resp) => Ok(resp.into_inner().resource_group),
         Err(e) => Err(RwError::from(ErrorCode::InternalError(format!(

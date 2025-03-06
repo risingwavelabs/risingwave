@@ -178,7 +178,7 @@ pub(crate) struct FrontendEnv {
     mem_context: MemoryContext,
 
     /// address of the serverless backfill controller.
-    sbc_addr: String,
+    sbc_addr: HostAddr,
 }
 
 /// Session map identified by `(process_id, secret_key)`
@@ -253,7 +253,7 @@ impl FrontendEnv {
             creating_streaming_job_tracker: Arc::new(creating_streaming_tracker),
             compute_runtime,
             mem_context: MemoryContext::none(),
-            sbc_addr: "http://serverless-backfill-controller:1298".to_owned(),
+            sbc_addr: HostAddr::try_from("http://serverless-backfill-controller:1298").unwrap(),
         }
     }
 
@@ -555,7 +555,7 @@ impl FrontendEnv {
         self.session_params.read_recursive().clone()
     }
 
-    pub fn sbc_address(&self) -> &String {
+    pub fn sbc_address(&self) -> &HostAddr {
         &self.sbc_addr
     }
 

@@ -64,6 +64,7 @@ mod scheduler;
 pub mod session;
 mod stream_fragmenter;
 use risingwave_common::config::{MetricLevel, OverrideConfig};
+use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::meta_addr::MetaAddressStrategy;
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
@@ -188,7 +189,7 @@ pub struct FrontendOpts {
         env = "RW_SBC_ADDR",
         default_value = "http://serverless-backfill-controller:1298"
     )]
-    pub sbc_addr: String,
+    pub sbc_addr: HostAddr,
 }
 
 impl risingwave_common::opts::Opts for FrontendOpts {
