@@ -1398,6 +1398,8 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
                     tracing::debug!(
                         "All pre-commit files have been successfully committed into iceberg and do not need to be committed again."
                     );
+                    self.delete_row_by_sink_id_and_end_epoch(&self.db, self.sink_id, end_epoch)
+                        .await?;
                 } else {
                     // recommit
                     tracing::debug!(
@@ -1582,10 +1584,13 @@ impl IcebergSinkCommitter {
             committed: Set(false),
             snapshot_id: Set(snapshot_id),
         };
-        exactly_once_iceberg_sink::Entity::insert(m)
-            .exec(&db)
-            .await?;
-        Ok(())
+        match exactly_once_iceberg_sink::Entity::insert(m).exec(&db).await {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                tracing::error!("Error inserting into system table: {:?}", e);
+                Err(e.into())
+            }
+        }
     }
 
     async fn delete_row_by_sink_id_and_end_epoch(
@@ -1594,26 +1599,36 @@ impl IcebergSinkCommitter {
         sink_id: u32,
         end_epoch: u64,
     ) -> Result<()> {
-        let deleted_count = Entity::delete_many()
+        match Entity::delete_many()
             .filter(Column::SinkId.eq(sink_id))
             .filter(Column::EndEpoch.eq(end_epoch))
             .exec(db)
-            .await?
-            .rows_affected;
+            .await
+        {
+            Ok(result) => {
+                let deleted_count = result.rows_affected;
 
-        if deleted_count == 0 {
-            tracing::info!(
-                "No item deleted in iceberg exactly once system table, end_epoch = {}.",
-                end_epoch
-            );
-        } else {
-            tracing::info!(
-                "Deleted item in iceberg exactly once system table, end_epoch = {}.",
-                end_epoch
-            );
+                if deleted_count == 0 {
+                    tracing::info!(
+                        "No item deleted in iceberg exactly once system table, end_epoch = {}.",
+                        end_epoch
+                    );
+                } else {
+                    tracing::info!(
+                        "Deleted item in iceberg exactly once system table, end_epoch = {}.",
+                        end_epoch
+                    );
+                }
+                Ok(())
+            }
+            Err(e) => {
+                tracing::error!(
+                    "Error deleting from iceberg exactly once system table: {:?}",
+                    e
+                );
+                Err(e.into())
+            }
         }
-
-        Ok(())
     }
 
     async fn iceberg_sink_has_pre_commit_metadata(
@@ -1621,11 +1636,20 @@ impl IcebergSinkCommitter {
         db: &DatabaseConnection,
         sink_id: u32,
     ) -> Result<bool> {
-        let count = exactly_once_iceberg_sink::Entity::find()
+        match exactly_once_iceberg_sink::Entity::find()
             .filter(exactly_once_iceberg_sink::Column::SinkId.eq(sink_id))
             .count(db)
-            .await?;
-        Ok(count > 0)
+            .await
+        {
+            Ok(count) => Ok(count > 0),
+            Err(e) => {
+                tracing::error!(
+                    "Error querying pre-commit metadata from system table: {:?}",
+                    e
+                );
+                Err(e.into())
+            }
+        }
     }
 
     async fn get_pre_commit_info_by_sink_id(
