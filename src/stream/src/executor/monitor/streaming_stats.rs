@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::sync::OnceLock;
+use std::sync::atomic::Ordering;
 
 use prometheus::{
     Histogram, IntCounter, IntGauge, Registry, exponential_buckets, histogram_opts,
@@ -1542,14 +1543,22 @@ impl StreamingMetrics {
         }
     }
 
-    pub fn new_profile_metrics(&self, operator_id: u64) -> ProfileMetrics {
-        ProfileMetrics {
-            stream_node_output_row_count: self
-                .stream_node_output_row_count
-                .new_or_get_counter(operator_id),
-            stream_node_output_blocking_duration_ms: self
-                .stream_node_output_blocking_duration_ms
-                .new_or_get_counter(operator_id),
+    pub fn new_profile_metrics(
+        &self,
+        operator_id: u64,
+        enable_profiling: bool,
+    ) -> ProfileMetricsImpl {
+        if enable_profiling {
+            ProfileMetricsImpl::ProfileMetrics(ProfileMetrics {
+                stream_node_output_row_count: self
+                    .stream_node_output_row_count
+                    .new_or_get_counter(operator_id),
+                stream_node_output_blocking_duration_ms: self
+                    .stream_node_output_blocking_duration_ms
+                    .new_or_get_counter(operator_id),
+            })
+        } else {
+            ProfileMetricsImpl::NoopProfileMetrics
         }
     }
 }
@@ -1646,7 +1655,47 @@ pub struct OverWindowMetrics {
     pub over_window_same_output_count: LabelGuardedIntCounter<3>,
 }
 
+pub enum ProfileMetricsImpl {
+    NoopProfileMetrics,
+    ProfileMetrics(ProfileMetrics),
+}
+
 pub struct ProfileMetrics {
     pub stream_node_output_row_count: Count,
     pub stream_node_output_blocking_duration_ms: Count,
+}
+
+pub trait ProfileMetricsExt {
+    fn inc_row_count(&self, count: u64);
+    fn inc_blocking_duration_ms(&self, duration: u64);
+}
+
+impl ProfileMetricsExt for ProfileMetrics {
+    fn inc_row_count(&self, count: u64) {
+        self.stream_node_output_row_count
+            .fetch_add(count, Ordering::Relaxed);
+    }
+
+    fn inc_blocking_duration_ms(&self, duration_ms: u64) {
+        self.stream_node_output_blocking_duration_ms
+            .fetch_add(duration_ms, Ordering::Relaxed);
+    }
+}
+
+impl ProfileMetricsExt for ProfileMetricsImpl {
+    fn inc_row_count(&self, count: u64) {
+        match self {
+            ProfileMetricsImpl::NoopProfileMetrics => {}
+            ProfileMetricsImpl::ProfileMetrics(metrics) => metrics.inc_row_count(count),
+        }
+    }
+
+    fn inc_blocking_duration_ms(&self, duration: u64) {
+        match self {
+            ProfileMetricsImpl::NoopProfileMetrics => {}
+            ProfileMetricsImpl::ProfileMetrics(metrics) => {
+                metrics.inc_blocking_duration_ms(duration)
+            }
+        }
+    }
 }
