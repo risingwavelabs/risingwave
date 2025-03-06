@@ -24,14 +24,19 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-mo
 ENV PATH /root/.cargo/bin:$PATH
 ENV CARGO_INCREMENTAL=0
 
-COPY rust-toolchain rust-toolchain
-
 # We need to add the `rustfmt` dependency, otherwise `risingwave_pb` will not compile
-RUN rustup self update \
-  && rustup toolchain install --profile minimal \
+RUN rustup install stable \
+  && rustup default stable \
+  && rustup self update \
+  && rustup set profile minimal \
   && rustup show \
   && rustup component add rustfmt \
   && rustup target add wasm32-wasip1
+
+RUN RUST_NIGHTLY=$(date -d "yesterday" '+%Y-%m-%d') && \
+  rustup install nightly-$RUST_NIGHTLY && \
+  rustup default nightly-$RUST_NIGHTLY
+
 
 RUN cargo install flamegraph
 RUN cargo install addr2line --features bin --bin addr2line
@@ -119,7 +124,7 @@ RUN mvn -B package -Dmaven.test.skip=true -Dno-build-rust && \
 
 FROM base AS risingwave
 
-LABEL org.opencontainers.image.source https://github.com/risingwavelabs/risingwave
+LABEL org.opencontainers.image.source=https://github.com/risingwavelabs/risingwave
 
 RUN apt-get update && apt-get -y install linux-tools-generic \
   && ln -s "$(find /usr/lib/linux-tools/*/perf | head -1)" /usr/local/bin/perf
@@ -142,9 +147,9 @@ COPY --from=rust-base /root/.cargo/bin/flamegraph /usr/local/bin/flamegraph
 COPY --from=rust-base /root/.cargo/bin/addr2line /usr/local/bin/addr2line
 
 # Set default playground mode to docker-playground profile
-ENV PLAYGROUND_PROFILE docker-playground
+ENV PLAYGROUND_PROFILE=docker-playground
 # Set default connector libs path
-ENV CONNECTOR_LIBS_PATH /risingwave/bin/connector-node/libs
+ENV CONNECTOR_LIBS_PATH=/risingwave/bin/connector-node/libs
 ENV IN_CONTAINER=1
 
 ENTRYPOINT [ "/risingwave/bin/risingwave" ]
