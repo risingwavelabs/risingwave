@@ -2077,10 +2077,18 @@ impl Parser<'_> {
         {
             match keyword {
                 Keyword::OWNER => {
+                    if owner.is_some() {
+                        parser_err!("duplicate OWNER clause in CREATE DATABASE");
+                    }
+
                     let _ = self.consume_token(&Token::Eq);
                     owner = Some(self.parse_object_name()?);
                 }
                 Keyword::RESOURCE_GROUP => {
+                    if resource_group.is_some() {
+                        parser_err!("duplicate RESOURCE_GROUP clause in CREATE DATABASE");
+                    }
+
                     let _ = self.consume_token(&Token::Eq);
                     resource_group = Some(self.parse_set_variable()?);
                 }
