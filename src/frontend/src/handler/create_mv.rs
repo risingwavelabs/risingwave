@@ -183,7 +183,6 @@ pub async fn handle_create_mv(
 
 /// Send a provision request to the serverless backfill controller
 pub async fn provision_serverless_backfill(sbc_addr: &String) -> Result<String> {
-    // , Box<dyn std::error::Error>
     let request = tonic::Request::new(ProvisionRequest {});
     let mut client =
         node_group_controller_service_client::NodeGroupControllerServiceClient::connect(
