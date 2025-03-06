@@ -687,7 +687,7 @@ impl GlobalBarrierWorkerContextImpl {
         let reschedule_targets = reschedule_targets.into_iter().collect_vec();
 
         for chunk in reschedule_targets
-            .chunks(self.env.opts.parallelism_control_batch_size)
+            .chunks(self.env.opts.parallelism_control_batch_size.max(1))
             .map(|c| c.to_vec())
         {
             let local_reschedule_targets: HashMap<u32, _> = chunk.into_iter().collect();
