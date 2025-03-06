@@ -1647,77 +1647,6 @@ def section_streaming_actors(outer_panels: Panels):
                         ),
                     ],
                 ),
-                panels.subheader("Over Window"),
-                panels.timeseries_actor_ops(
-                    "Over Window Executor Cache",
-                    "",
-                    [
-                        panels.target(
-                            f"sum(rate({table_metric('stream_over_window_cache_lookup_count')}[$__rate_interval])) by (table_id, fragment_id)",
-                            "cache lookup count - table {{table_id}} fragment {{fragment_id}}",
-                        ),
-                        panels.target(
-                            f"sum(rate({table_metric('stream_over_window_cache_miss_count')}[$__rate_interval])) by (table_id, fragment_id)",
-                            "cache miss count - table {{table_id}} fragment {{fragment_id}}",
-                        ),
-                        panels.target_hidden(
-                            f"rate({table_metric('stream_over_window_cache_lookup_count')}[$__rate_interval])",
-                            "cache lookup count - table {{table_id}} actor {{actor_id}}",
-                        ),
-                        panels.target_hidden(
-                            f"rate({table_metric('stream_over_window_cache_miss_count')}[$__rate_interval])",
-                            "cache miss count - table {{table_id}} actor {{actor_id}}",
-                        ),
-                        panels.target(
-                            f"sum(rate({table_metric('stream_over_window_range_cache_lookup_count')}[$__rate_interval])) by (table_id, fragment_id)",
-                            "partition range cache lookup count - table {{table_id}} fragment {{fragment_id}}",
-                        ),
-                        panels.target(
-                            f"sum(rate({table_metric('stream_over_window_range_cache_left_miss_count')}[$__rate_interval])) by (table_id, fragment_id)",
-                            "partition range cache left miss count - table {{table_id}} fragment {{fragment_id}}",
-                        ),
-                        panels.target(
-                            f"sum(rate({table_metric('stream_over_window_range_cache_right_miss_count')}[$__rate_interval])) by (table_id, fragment_id)",
-                            "partition range cache right miss count - table {{table_id}} fragment {{fragment_id}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_actor_ops(
-                    "Over Window Executor State Computation",
-                    "",
-                    [
-                        panels.target(
-                            f"sum(rate({table_metric('stream_over_window_accessed_entry_count')}[$__rate_interval])) by (table_id, fragment_id)",
-                            "accessed entry count - table {{table_id}} fragment {{fragment_id}}",
-                        ),
-                        panels.target(
-                            f"sum(rate({table_metric('stream_over_window_compute_count')}[$__rate_interval])) by (table_id, fragment_id)",
-                            "compute count - table {{table_id}} fragment {{fragment_id}}",
-                        ),
-                        panels.target(
-                            f"sum(rate({table_metric('stream_over_window_same_output_count')}[$__rate_interval])) by (table_id, fragment_id)",
-                            "same output count - table {{table_id}} fragment {{fragment_id}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_count(
-                    "Over Window Cached Keys",
-                    "The number of keys cached in over window executor's executor cache.",
-                    [
-                        panels.target(
-                            f"sum({metric('stream_over_window_cached_entry_count')}) by (table_id, fragment_id)",
-                            "over window cached count | table {{table_id}} fragment {{fragment_id}}",
-                        ),
-                        panels.target_hidden(
-                            f"{metric('stream_over_window_cached_entry_count')}",
-                            "over window cached count | table {{table_id}} actor {{actor_id}}",
-                        ),
-                        panels.target(
-                            f"sum({metric('stream_over_window_range_cache_entry_count')}) by (table_id, fragment_id)",
-                            "over window partition range cache entry count | table {{table_id}} fragment {{fragment_id}}",
-                        ),
-                    ],
-                ),
                 panels.subheader("Join"),
                 panels.timeseries_percentage(
                     "Join Actor Input Blocking Time Ratio",
@@ -1873,6 +1802,77 @@ def section_streaming_actors(outer_panels: Panels):
                         panels.target_hidden(
                             f"{metric('stream_group_top_n_appendonly_cached_entry_count')}",
                             "group top_n appendonly cached count | table {{table_id}} actor {{actor_id}}",
+                        ),
+                    ],
+                ),
+                panels.subheader("Over Window"),
+                panels.timeseries_actor_ops(
+                    "Over Window Executor Cache",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({table_metric('stream_over_window_cache_lookup_count')}[$__rate_interval])) by (table_id, fragment_id)",
+                            "cache lookup count - table {{table_id}} fragment {{fragment_id}}",
+                        ),
+                        panels.target(
+                            f"sum(rate({table_metric('stream_over_window_cache_miss_count')}[$__rate_interval])) by (table_id, fragment_id)",
+                            "cache miss count - table {{table_id}} fragment {{fragment_id}}",
+                        ),
+                        panels.target_hidden(
+                            f"rate({table_metric('stream_over_window_cache_lookup_count')}[$__rate_interval])",
+                            "cache lookup count - table {{table_id}} actor {{actor_id}}",
+                        ),
+                        panels.target_hidden(
+                            f"rate({table_metric('stream_over_window_cache_miss_count')}[$__rate_interval])",
+                            "cache miss count - table {{table_id}} actor {{actor_id}}",
+                        ),
+                        panels.target(
+                            f"sum(rate({table_metric('stream_over_window_range_cache_lookup_count')}[$__rate_interval])) by (table_id, fragment_id)",
+                            "partition range cache lookup count - table {{table_id}} fragment {{fragment_id}}",
+                        ),
+                        panels.target(
+                            f"sum(rate({table_metric('stream_over_window_range_cache_left_miss_count')}[$__rate_interval])) by (table_id, fragment_id)",
+                            "partition range cache left miss count - table {{table_id}} fragment {{fragment_id}}",
+                        ),
+                        panels.target(
+                            f"sum(rate({table_metric('stream_over_window_range_cache_right_miss_count')}[$__rate_interval])) by (table_id, fragment_id)",
+                            "partition range cache right miss count - table {{table_id}} fragment {{fragment_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_actor_ops(
+                    "Over Window Executor State Computation",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({table_metric('stream_over_window_accessed_entry_count')}[$__rate_interval])) by (table_id, fragment_id)",
+                            "accessed entry count - table {{table_id}} fragment {{fragment_id}}",
+                        ),
+                        panels.target(
+                            f"sum(rate({table_metric('stream_over_window_compute_count')}[$__rate_interval])) by (table_id, fragment_id)",
+                            "compute count - table {{table_id}} fragment {{fragment_id}}",
+                        ),
+                        panels.target(
+                            f"sum(rate({table_metric('stream_over_window_same_output_count')}[$__rate_interval])) by (table_id, fragment_id)",
+                            "same output count - table {{table_id}} fragment {{fragment_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "Over Window Cached Keys",
+                    "The number of keys cached in over window executor's executor cache.",
+                    [
+                        panels.target(
+                            f"sum({metric('stream_over_window_cached_entry_count')}) by (table_id, fragment_id)",
+                            "over window cached count | table {{table_id}} fragment {{fragment_id}}",
+                        ),
+                        panels.target_hidden(
+                            f"{metric('stream_over_window_cached_entry_count')}",
+                            "over window cached count | table {{table_id}} actor {{actor_id}}",
+                        ),
+                        panels.target(
+                            f"sum({metric('stream_over_window_range_cache_entry_count')}) by (table_id, fragment_id)",
+                            "over window partition range cache entry count | table {{table_id}} fragment {{fragment_id}}",
                         ),
                     ],
                 ),
