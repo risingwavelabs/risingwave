@@ -548,7 +548,7 @@ steps:
     timeout_in_minutes: 22
     retry: *auto-retry
 
-  - label: "end-to-end test (deterministic simulation)"
+  - label: "end-to-end test (deterministic simulation, part %n)"
     command: "TEST_NUM=4 ci/scripts/deterministic-e2e-test.sh"
     if: |
       !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
@@ -565,10 +565,11 @@ steps:
           - GITHUB_TOKEN
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 35
+    parallelism: 4
     cancel_on_build_failing: true
     retry: *auto-retry
 
-  - label: "recovery test (deterministic simulation)"
+  - label: "recovery test (deterministic simulation, part %n)"
     command: "TEST_NUM=4 KILL_RATE=1.0 BACKGROUND_DDL_RATE=0.0 ci/scripts/deterministic-recovery-test.sh"
     if: |
       !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
@@ -586,6 +587,7 @@ steps:
       #     files: "*-junit.xml"
       #     format: "junit"
     timeout_in_minutes: 40
+    parallelism: 4
     cancel_on_build_failing: true
     retry: *auto-retry
 
