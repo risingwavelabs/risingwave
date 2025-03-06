@@ -408,9 +408,16 @@ pub async fn handle(
             db_name,
             if_not_exists,
             owner,
+            resource_group,
         } => {
-            create_database::handle_create_database(handler_args, db_name, if_not_exists, owner)
-                .await
+            create_database::handle_create_database(
+                handler_args,
+                db_name,
+                if_not_exists,
+                owner,
+                resource_group,
+            )
+            .await
         }
         Statement::CreateSchema {
             schema_name,
