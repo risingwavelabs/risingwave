@@ -96,6 +96,8 @@ fn ensure_column_options_supported(c: &ColumnDef) -> Result<()> {
             ColumnOption::DefaultValue(_) => {}
             ColumnOption::DefaultValueInternal { .. } => {}
             ColumnOption::Unique { is_primary: true } => {}
+            ColumnOption::Null {} => {}
+            ColumnOption::NotNull {} => {}
             _ => bail_not_implemented!("column constraints \"{}\"", option_def),
         }
     }
@@ -120,6 +122,7 @@ pub fn bind_sql_columns(
             name,
             data_type,
             collation,
+            options,
             ..
         } = column;
 
@@ -156,6 +159,13 @@ pub fn bind_sql_columns(
             check_column_name_not_reserved(&name.real_value())?;
         }
 
+        let mut nullable: bool = true;
+        for option in options {
+            if option.option == ColumnOption::NotNull {
+                nullable = false;
+            }
+        }
+
         columns.push(ColumnCatalog {
             column_desc: ColumnDesc {
                 data_type: bind_data_type(&data_type)?,
@@ -166,6 +176,7 @@ pub fn bind_sql_columns(
                 additional_column: AdditionalColumn { column_type: None },
                 version: ColumnDescVersion::LATEST,
                 system_column: None,
+                nullable,
             },
             is_hidden: false,
         });
