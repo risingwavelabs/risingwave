@@ -87,6 +87,7 @@ impl CatalogController {
             parallelism: Set(streaming_parallelism),
             max_parallelism: Set(max_parallelism as _),
             specific_resource_group: Set(specific_resource_group),
+            expr_context: Set((&ctx.to_expr_context()).into()),
         };
         job.insert(txn).await?;
 
@@ -1653,7 +1654,6 @@ impl CatalogController {
                     actor_id,
                     fragment_id,
                     vnode_bitmap,
-                    expr_context,
                     ..
                 },
                 actor_status,
@@ -1671,7 +1671,6 @@ impl CatalogController {
                     worker_id: Set(actor_status.worker_id() as _),
                     upstream_actor_ids: Set(Default::default()),
                     vnode_bitmap: Set(vnode_bitmap.as_ref().map(|bitmap| bitmap.into())),
-                    expr_context: Set(expr_context.as_ref().unwrap().into()),
                 })
                 .exec(&txn)
                 .await?;
