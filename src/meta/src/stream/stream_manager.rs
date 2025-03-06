@@ -21,7 +21,6 @@ use risingwave_common::bail;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_meta_model::ObjectId;
 use risingwave_pb::catalog::{CreateType, Subscription, Table};
-use risingwave_pb::stream_plan::Dispatcher;
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::Sender;
@@ -41,7 +40,10 @@ use crate::error::bail_invalid_parameter;
 use crate::manager::{
     MetaSrvEnv, MetadataManager, NotificationVersion, StreamingJob, StreamingJobType,
 };
-use crate::model::{ActorId, FragmentId, StreamJobFragments, TableParallelism};
+use crate::model::{
+    ActorId, FragmentActorDispatchers, FragmentId, StreamJobFragments, StreamJobFragmentsToCreate,
+    TableParallelism,
+};
 use crate::stream::{SourceChange, SourceManagerRef};
 use crate::{MetaError, MetaResult};
 
@@ -57,7 +59,7 @@ pub struct CreateStreamingJobOption {
 /// Note: for better readability, keep this struct complete and immutable once created.
 pub struct CreateStreamingJobContext {
     /// New dispatchers to add from upstream actors to downstream actors.
-    pub dispatchers: HashMap<FragmentId, HashMap<ActorId, Vec<Dispatcher>>>,
+    pub dispatchers: FragmentActorDispatchers,
 
     /// Internal tables in the streaming job.
     pub internal_tables: BTreeMap<u32, Table>,
@@ -78,7 +80,11 @@ pub struct CreateStreamingJobContext {
     pub job_type: StreamingJobType,
 
     /// Context provided for potential replace table, typically used when sinking into a table.
-    pub replace_table_job_info: Option<(StreamingJob, ReplaceStreamJobContext, StreamJobFragments)>,
+    pub replace_table_job_info: Option<(
+        StreamingJob,
+        ReplaceStreamJobContext,
+        StreamJobFragmentsToCreate,
+    )>,
 
     pub snapshot_backfill_info: Option<SnapshotBackfillInfo>,
     pub cross_db_snapshot_backfill_info: SnapshotBackfillInfo,
@@ -177,7 +183,7 @@ pub struct ReplaceStreamJobContext {
     pub merge_updates: HashMap<FragmentId, Vec<MergeUpdate>>,
 
     /// New dispatchers to add from upstream actors to downstream actors.
-    pub dispatchers: HashMap<FragmentId, HashMap<ActorId, Vec<Dispatcher>>>,
+    pub dispatchers: FragmentActorDispatchers,
 
     /// The locations of the actors to build in the new job to replace.
     pub building_locations: Locations,
@@ -241,7 +247,7 @@ impl GlobalStreamManager {
     /// This function is a wrapper over [`Self::create_streaming_job_impl`].
     pub async fn create_streaming_job(
         self: &Arc<Self>,
-        stream_job_fragments: StreamJobFragments,
+        stream_job_fragments: StreamJobFragmentsToCreate,
         ctx: CreateStreamingJobContext,
     ) -> MetaResult<NotificationVersion> {
         let table_id = stream_job_fragments.stream_job_id();
@@ -336,7 +342,7 @@ impl GlobalStreamManager {
     /// ([`crate::manager::MetadataManager::wait_streaming_job_finished`]).
     async fn create_streaming_job_impl(
         &self,
-        stream_job_fragments: StreamJobFragments,
+        stream_job_fragments: StreamJobFragmentsToCreate,
         CreateStreamingJobContext {
             streaming_job,
             dispatchers,
@@ -448,7 +454,7 @@ impl GlobalStreamManager {
     /// Send replace job command to barrier scheduler.
     pub async fn replace_stream_job(
         &self,
-        new_fragments: StreamJobFragments,
+        new_fragments: StreamJobFragmentsToCreate,
         ReplaceStreamJobContext {
             old_fragments,
             merge_updates,
