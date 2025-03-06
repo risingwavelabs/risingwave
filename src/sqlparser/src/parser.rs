@@ -2208,15 +2208,7 @@ impl Parser<'_> {
     ) -> ModalResult<Statement> {
         impl_parse_to!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], self);
 
-        let name = self.parse_object_name()?;
-        self.expect_token(&Token::LParen)?;
-        let args = if self.peek_token().token == Token::RParen {
-            None
-        } else {
-            Some(self.parse_comma_separated(Parser::parse_function_arg)?)
-        };
-
-        self.expect_token(&Token::RParen)?;
+        let FunctionDesc { name, args } = self.parse_function_desc()?;
 
         let return_type = if self.parse_keyword(Keyword::RETURNS) {
             if self.parse_keyword(Keyword::TABLE) {
@@ -5210,6 +5202,42 @@ impl Parser<'_> {
             GrantObjects::AllViewsInSchema {
                 schemas: self.parse_comma_separated(Parser::parse_object_name)?,
             }
+        } else if self.parse_keywords(&[
+            Keyword::ALL,
+            Keyword::FUNCTIONS,
+            Keyword::IN,
+            Keyword::SCHEMA,
+        ]) {
+            GrantObjects::AllFunctionsInSchema {
+                schemas: self.parse_comma_separated(Parser::parse_object_name)?,
+            }
+        } else if self.parse_keywords(&[
+            Keyword::ALL,
+            Keyword::SECRETS,
+            Keyword::IN,
+            Keyword::SCHEMA,
+        ]) {
+            GrantObjects::AllSecretsInSchema {
+                schemas: self.parse_comma_separated(Parser::parse_object_name)?,
+            }
+        } else if self.parse_keywords(&[
+            Keyword::ALL,
+            Keyword::CONNECTIONS,
+            Keyword::IN,
+            Keyword::SCHEMA,
+        ]) {
+            GrantObjects::AllConnectionsInSchema {
+                schemas: self.parse_comma_separated(Parser::parse_object_name)?,
+            }
+        } else if self.parse_keywords(&[
+            Keyword::ALL,
+            Keyword::SUBSCRIPTIONS,
+            Keyword::IN,
+            Keyword::SCHEMA,
+        ]) {
+            GrantObjects::AllSubscriptionsInSchema {
+                schemas: self.parse_comma_separated(Parser::parse_object_name)?,
+            }
         } else if self.parse_keywords(&[Keyword::MATERIALIZED, Keyword::VIEW]) {
             GrantObjects::Mviews(self.parse_comma_separated(Parser::parse_object_name)?)
         } else {
@@ -5220,18 +5248,30 @@ impl Parser<'_> {
                 Keyword::TABLE,
                 Keyword::SOURCE,
                 Keyword::SINK,
-                Keyword::VIEWS,
+                Keyword::VIEW,
+                Keyword::SUBSCRIPTION,
+                Keyword::FUNCTION,
+                Keyword::CONNECTION,
+                Keyword::SECRET,
             ]);
-            let objects = self.parse_comma_separated(Parser::parse_object_name);
-            match object_type {
-                Some(Keyword::DATABASE) => GrantObjects::Databases(objects?),
-                Some(Keyword::SCHEMA) => GrantObjects::Schemas(objects?),
-                Some(Keyword::SEQUENCE) => GrantObjects::Sequences(objects?),
-                Some(Keyword::SOURCE) => GrantObjects::Sources(objects?),
-                Some(Keyword::SINK) => GrantObjects::Sinks(objects?),
-                Some(Keyword::VIEW) => GrantObjects::Views(objects?),
-                Some(Keyword::TABLE) | None => GrantObjects::Tables(objects?),
-                _ => unreachable!(),
+            if let Some(Keyword::FUNCTION) = object_type {
+                let func_descs = self.parse_comma_separated(Parser::parse_function_desc)?;
+                GrantObjects::Functions(func_descs)
+            } else {
+                let objects = self.parse_comma_separated(Parser::parse_object_name);
+                match object_type {
+                    Some(Keyword::DATABASE) => GrantObjects::Databases(objects?),
+                    Some(Keyword::SCHEMA) => GrantObjects::Schemas(objects?),
+                    Some(Keyword::SEQUENCE) => GrantObjects::Sequences(objects?),
+                    Some(Keyword::SOURCE) => GrantObjects::Sources(objects?),
+                    Some(Keyword::SINK) => GrantObjects::Sinks(objects?),
+                    Some(Keyword::VIEW) => GrantObjects::Views(objects?),
+                    Some(Keyword::SUBSCRIPTION) => GrantObjects::Subscriptions(objects?),
+                    Some(Keyword::CONNECTION) => GrantObjects::Connections(objects?),
+                    Some(Keyword::SECRET) => GrantObjects::Secrets(objects?),
+                    Some(Keyword::TABLE) | None => GrantObjects::Tables(objects?),
+                    _ => unreachable!(),
+                }
             }
         };
 
