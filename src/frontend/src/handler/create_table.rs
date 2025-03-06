@@ -40,7 +40,7 @@ use risingwave_connector::source::cdc::build_cdc_table_id;
 use risingwave_connector::source::cdc::external::{
     ExternalTableConfig, ExternalTableImpl, DATABASE_NAME_KEY, SCHEMA_NAME_KEY, TABLE_NAME_KEY,
 };
-use risingwave_connector::{source, WithOptionsSecResolved};
+use risingwave_connector::{source, WithOptionsSecResolved, WithPropertiesExt};
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::{PbSource, PbTable, PbWebhookSourceInfo, Table, WatermarkDesc};
 use risingwave_pb::ddl_service::TableJobType;
@@ -520,6 +520,10 @@ pub(crate) async fn gen_create_table_plan_with_source(
 
     let session = &handler_args.session;
     let with_properties = bind_connector_props(&handler_args, &format_encode, false)?;
+
+    if with_properties.is_shareable_cdc_connector() {
+        generated_columns_check_for_cdc_table(&column_defs)?;
+    }
 
     let (columns_from_resolve_source, source_info) = bind_columns_from_source(
         session,
@@ -1087,7 +1091,7 @@ pub(super) async fn handle_create_table_plan(
             // cdc table cannot be append-only
             let (format_encode, source_name) =
                 Binder::resolve_schema_qualified_name(db_name, cdc_table.source_name.clone())?;
-
+            generated_columns_check_for_cdc_table(&column_defs)?;
             let source = {
                 let catalog_reader = session.env().catalog_reader().read_guard();
                 let schema_name = format_encode
@@ -1188,6 +1192,32 @@ pub(super) async fn handle_create_table_plan(
         }
     };
     Ok((plan, source, table, job_type))
+}
+
+fn generated_columns_check_for_cdc_table(columns: &Vec<ColumnDef>) -> Result<()> {
+    let mut found_generated_column = false;
+    for column in columns {
+        let mut is_generated = false;
+
+        for option_def in &column.options {
+            if let ColumnOption::GeneratedColumns(_) = option_def.option {
+                is_generated = true;
+                break;
+            }
+        }
+
+        if is_generated {
+            found_generated_column = true;
+        } else if found_generated_column {
+            return Err(ErrorCode::NotSupported(
+                "Non-generated column found after a generated column.".into(),
+                "Ensure that all generated columns appear at the end of the cdc table definition."
+                    .into(),
+            )
+            .into());
+        }
+    }
+    Ok(())
 }
 
 fn sanity_check_for_cdc_table(
