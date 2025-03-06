@@ -30,17 +30,15 @@ use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::hash::ActorMapping;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_meta_model::{ObjectId, WorkerId, actor, fragment, streaming_job};
-use risingwave_pb::common::{PbActorLocation, WorkerNode, WorkerType};
+use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_pb::meta::FragmentWorkerSlotMappings;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::fragment::{
     FragmentDistributionType, PbFragmentDistributionType,
 };
-use risingwave_pb::meta::table_fragments::{self, ActorStatus, PbFragment, State};
+use risingwave_pb::meta::table_fragments::{self, State};
 use risingwave_pb::stream_plan::{
-    Dispatcher, FragmentTypeFlag, PbDispatcher, PbDispatcherType, PbStreamActor, StreamActor,
-    StreamNode,
+    Dispatcher, FragmentTypeFlag, PbDispatcher, PbDispatcherType, StreamNode,
 };
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Receiver;
@@ -51,7 +49,9 @@ use tokio::time::{Instant, MissedTickBehavior};
 use crate::barrier::{Command, Reschedule};
 use crate::controller::scale::RescheduleWorkingSet;
 use crate::manager::{LocalNotification, MetaSrvEnv, MetadataManager};
-use crate::model::{ActorId, DispatcherId, FragmentId, TableParallelism};
+use crate::model::{
+    ActorId, DispatcherId, FragmentId, StreamActor, StreamActorWithDispatchers, TableParallelism,
+};
 use crate::serving::{
     ServingVnodeMapping, to_deleted_fragment_worker_slot_mapping, to_fragment_worker_slot_mapping,
 };
@@ -69,7 +69,7 @@ pub struct CustomFragmentInfo {
     pub distribution_type: PbFragmentDistributionType,
     pub state_table_ids: Vec<u32>,
     pub node: StreamNode,
-    pub actor_template: PbStreamActor,
+    pub actor_template: StreamActorWithDispatchers,
     pub actors: Vec<CustomActorInfo>,
 }
 
@@ -80,48 +80,6 @@ pub struct CustomActorInfo {
     pub dispatcher: Vec<Dispatcher>,
     /// `None` if singleton.
     pub vnode_bitmap: Option<Bitmap>,
-}
-
-impl From<&PbStreamActor> for CustomActorInfo {
-    fn from(
-        PbStreamActor {
-            actor_id,
-            fragment_id,
-            dispatcher,
-            vnode_bitmap,
-            ..
-        }: &PbStreamActor,
-    ) -> Self {
-        CustomActorInfo {
-            actor_id: *actor_id,
-            fragment_id: *fragment_id,
-            dispatcher: dispatcher.clone(),
-            vnode_bitmap: vnode_bitmap.as_ref().map(Bitmap::from),
-        }
-    }
-}
-
-impl From<&PbFragment> for CustomFragmentInfo {
-    fn from(fragment: &PbFragment) -> Self {
-        CustomFragmentInfo {
-            fragment_id: fragment.fragment_id,
-            fragment_type_mask: fragment.fragment_type_mask,
-            distribution_type: fragment.distribution_type(),
-            state_table_ids: fragment.state_table_ids.clone(),
-            node: fragment.nodes.clone().unwrap(),
-            actor_template: fragment
-                .actors
-                .first()
-                .cloned()
-                .expect("no actor in fragment"),
-            actors: fragment
-                .actors
-                .iter()
-                .map(CustomActorInfo::from)
-                .sorted_by(|actor_a, actor_b| actor_a.actor_id.cmp(&actor_b.actor_id))
-                .collect(),
-        }
-    }
 }
 
 impl CustomFragmentInfo {
@@ -504,8 +462,8 @@ impl ScaleController {
             fragment_state: &mut HashMap<FragmentId, State>,
             fragment_to_table: &mut HashMap<FragmentId, TableId>,
             fragments: HashMap<risingwave_meta_model::FragmentId, fragment::Model>,
-            actors: HashMap<risingwave_meta_model::ActorId, actor::Model>,
-            mut actor_dispatchers: HashMap<risingwave_meta_model::ActorId, Vec<PbDispatcher>>,
+            actors: HashMap<ActorId, actor::Model>,
+            mut actor_dispatchers: HashMap<ActorId, Vec<PbDispatcher>>,
             related_jobs: HashMap<ObjectId, (streaming_job::Model, String)>,
         ) {
             let mut fragment_actors: HashMap<
@@ -528,7 +486,9 @@ impl ScaleController {
                 },
             ) in actors
             {
-                let dispatchers = actor_dispatchers.remove(&actor_id).unwrap_or_default();
+                let dispatchers = actor_dispatchers
+                    .remove(&(actor_id as _))
+                    .unwrap_or_default();
 
                 let actor_info = CustomActorInfo {
                     actor_id: actor_id as _,
@@ -582,17 +542,19 @@ impl ScaleController {
                     distribution_type: distribution_type.into(),
                     state_table_ids: state_table_ids.into_u32_array(),
                     node: stream_node.to_protobuf(),
-                    actor_template: PbStreamActor {
-                        actor_id,
-                        fragment_id: fragment_id as _,
+                    actor_template: (
+                        StreamActor {
+                            actor_id,
+                            fragment_id: fragment_id as _,
+                            vnode_bitmap,
+                            mview_definition: job_definition.to_owned(),
+                            expr_context: expr_contexts
+                                .get(&actor_id)
+                                .cloned()
+                                .map(|expr_context| expr_context.to_protobuf()),
+                        },
                         dispatcher,
-                        vnode_bitmap: vnode_bitmap.map(|b| b.to_protobuf()),
-                        mview_definition: job_definition.to_owned(),
-                        expr_context: expr_contexts
-                            .get(&actor_id)
-                            .cloned()
-                            .map(|expr_context| expr_context.to_protobuf()),
-                    },
+                    ),
                     actors,
                 };
 
@@ -1184,7 +1146,7 @@ impl ScaleController {
 
             for actor_to_create in &actors_to_create {
                 let new_actor_id = actor_to_create.0;
-                let mut new_actor = fragment.actor_template.clone();
+                let (mut new_actor, mut dispatchers) = fragment.actor_template.clone();
 
                 // This should be assigned before the `modify_actor_upstream_and_downstream` call,
                 // because we need to use the new actor id to find the upstream and
@@ -1198,16 +1160,17 @@ impl ScaleController {
                     &fragment_actor_bitmap,
                     &no_shuffle_downstream_actors_map,
                     &mut new_actor,
+                    &mut dispatchers,
                 )?;
 
                 if let Some(bitmap) = fragment_actor_bitmap
                     .get(fragment_id)
                     .and_then(|actor_bitmaps| actor_bitmaps.get(new_actor_id))
                 {
-                    new_actor.vnode_bitmap = Some(bitmap.to_protobuf());
+                    new_actor.vnode_bitmap = Some(bitmap.to_protobuf().into());
                 }
 
-                new_created_actors.insert(*new_actor_id, new_actor);
+                new_created_actors.insert(*new_actor_id, (new_actor, dispatchers));
             }
         }
 
@@ -1417,16 +1380,7 @@ impl ScaleController {
             let mut created_actors = HashMap::new();
             for (actor_id, worker_id) in actors_to_create {
                 let actor = new_created_actors.get(actor_id).cloned().unwrap();
-                created_actors.insert(
-                    *actor_id,
-                    (
-                        actor,
-                        ActorStatus {
-                            location: PbActorLocation::from_worker(*worker_id as _),
-                            state: ActorState::Inactive as i32,
-                        },
-                    ),
-                );
+                created_actors.insert(*actor_id, (actor, *worker_id));
             }
 
             fragment_created_actors.insert(*fragment_id, created_actors);
@@ -1554,9 +1508,10 @@ impl ScaleController {
         fragment_actor_bitmap: &HashMap<FragmentId, HashMap<ActorId, Bitmap>>,
         no_shuffle_downstream_actors_map: &HashMap<ActorId, HashMap<FragmentId, ActorId>>,
         new_actor: &mut StreamActor,
+        dispatchers: &mut Vec<PbDispatcher>,
     ) -> MetaResult<()> {
         // Update downstream actor ids
-        for dispatcher in &mut new_actor.dispatcher {
+        for dispatcher in dispatchers {
             let downstream_fragment_id = dispatcher
                 .downstream_actor_id
                 .iter()
