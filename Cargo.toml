@@ -98,7 +98,7 @@ development = ["expect-test", "pretty_assertions"]
 [workspace.dependencies]
 # Uncomment this line after it is released.
 # foyer = { version = "0.15.0", features = ["tracing", "nightly"] }
-foyer = { git = "https://github.com/foyer-rs/foyer", rev = "6e0bac24af2cc79c52ade6fccce608b8bb3f364f", features = ["tracing", "nightly"] }
+foyer = { git = "https://github.com/foyer-rs/foyer", rev = "6ac4eb73481c0b186da9230c83a7ea8135e6beff", features = ["tracing", "nightly"] }
 mixtrics = { version = "0.0.3", features = ["prometheus"] }
 apache-avro = { git = "https://github.com/risingwavelabs/avro", rev = "25113ba88234a9ae23296e981d8302c290fdaa4b", features = [
     "snappy",

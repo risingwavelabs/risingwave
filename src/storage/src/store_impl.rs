@@ -649,7 +649,9 @@ impl StateStoreImpl {
                                 opts.meta_file_cache_reclaimers
                                     + opts.meta_file_cache_reclaimers / 2,
                             )
-                            .with_recover_concurrency(opts.meta_file_cache_recover_concurrency),
+                            .with_recover_concurrency(opts.meta_file_cache_recover_concurrency)
+                            .with_flush_io_size(256 * 1024)
+                            .with_flush_io_depth(64),
                     );
                 if opts.meta_file_cache_insert_rate_limit_mb > 0 {
                     builder = builder.with_admission_picker(Arc::new(RateLimitPicker::new(
@@ -699,7 +701,9 @@ impl StateStoreImpl {
                                 opts.data_file_cache_reclaimers
                                     + opts.data_file_cache_reclaimers / 2,
                             )
-                            .with_recover_concurrency(opts.data_file_cache_recover_concurrency),
+                            .with_recover_concurrency(opts.data_file_cache_recover_concurrency)
+                            .with_flush_io_size(256 * 1024)
+                            .with_flush_io_depth(64),
                     );
                 if opts.data_file_cache_insert_rate_limit_mb > 0 {
                     builder = builder.with_admission_picker(Arc::new(RateLimitPicker::new(
