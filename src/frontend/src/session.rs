@@ -253,7 +253,7 @@ impl FrontendEnv {
             creating_streaming_job_tracker: Arc::new(creating_streaming_tracker),
             compute_runtime,
             mem_context: MemoryContext::none(),
-            sbc_addr: "http://serverless-backfill-controller:1298".to_owned(),
+            sbc_addr: Default::default(),
         }
     }
 
