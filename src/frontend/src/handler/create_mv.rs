@@ -183,7 +183,7 @@ pub async fn handle_create_mv(
 }
 
 /// Send a provision request to the serverless backfill controller
-pub async fn provision_serverless_backfill(sbc_addr: &String) -> Result<String> {
+pub async fn provision_serverless_backfill(sbc_addr: String) -> Result<String> {
     let request = tonic::Request::new(ProvisionRequest {});
     let mut client =
         node_group_controller_service_client::NodeGroupControllerServiceClient::connect(
@@ -260,11 +260,11 @@ pub async fn handle_create_mv_bound(
             ))));
         }
 
-        let sbc_addr = SESSION_MANAGER
-            .get()
-            .expect("session manager has been initialized")
-            .env()
-            .sbc_address();
+        let sbc_addr = match SESSION_MANAGER.get() {
+            Some(manager) => manager.env().sbc_address(),
+            None => "",
+        }
+        .to_owned();
 
         if is_serverless_backfill && sbc_addr.is_empty() {
             return Err(RwError::from(InvalidInputSyntax(
