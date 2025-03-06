@@ -12,11 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::atomic::Ordering;
-
 use futures_async_stream::try_stream;
 use tokio::time::Instant;
 
+use crate::executor::monitor::ProfileMetricsExt;
 use crate::executor::prelude::*;
 
 #[try_stream(ok = Message, error = StreamExecutorError)]
@@ -26,28 +25,18 @@ pub async fn stream_node_metrics(
     input: impl MessageStream,
     actor_ctx: ActorContextRef,
 ) {
-    if !enable_explain_analyze_stats {
-        #[for_await]
-        for message in input {
-            yield message?;
-        }
-    } else {
-        let stats = actor_ctx.streaming_metrics.new_profile_metrics(operator_id);
+    let stats = actor_ctx
+        .streaming_metrics
+        .new_profile_metrics(operator_id, enable_explain_analyze_stats);
 
-        #[for_await]
-        for message in input {
-            let message = message?;
-            if let Message::Chunk(ref c) = message {
-                stats
-                    .stream_node_output_row_count
-                    .fetch_add(c.cardinality() as u64, Ordering::Relaxed);
-            }
-            let blocking_duration = Instant::now();
-            yield message;
-            stats.stream_node_output_blocking_duration_ms.fetch_add(
-                blocking_duration.elapsed().as_millis() as u64,
-                Ordering::Relaxed,
-            );
+    #[for_await]
+    for message in input {
+        let message = message?;
+        if let Message::Chunk(ref c) = message {
+            stats.inc_row_count(c.cardinality() as u64);
         }
+        let blocking_duration = Instant::now();
+        yield message;
+        stats.inc_blocking_duration_ms(blocking_duration.elapsed().as_millis() as u64);
     }
 }
