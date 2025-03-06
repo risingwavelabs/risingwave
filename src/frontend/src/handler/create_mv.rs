@@ -285,7 +285,10 @@ pub async fn handle_create_mv_bound(
         } else {
             resource_group
         };
-        tracing::debug!(resource_group = resource_group, "provisioning on resource group");
+        tracing::debug!(
+            resource_group = resource_group,
+            "provisioning on resource group"
+        );
 
         let context = OptimizerContext::from_handler_args(handler_args);
         let has_order_by = !query.order.is_empty();
