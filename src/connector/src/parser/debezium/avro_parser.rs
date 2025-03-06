@@ -35,14 +35,11 @@ use crate::schema::schema_registry::{
 
 #[derive(Debug)]
 pub struct DebeziumAvroAccessBuilder {
-    schema: ResolvedAvroSchema,
+    reader_schema: ResolvedAvroSchema,
     schema_resolver: Arc<ConfluentSchemaCache>,
-    key_schema: Option<Arc<Schema>>,
     value: Option<Value>,
-    encoding_type: EncodingType,
 }
 
-// TODO: reduce encodingtype match
 impl AccessBuilder for DebeziumAvroAccessBuilder {
     async fn generate_accessor(
         &mut self,
@@ -50,19 +47,15 @@ impl AccessBuilder for DebeziumAvroAccessBuilder {
         _: &crate::source::SourceMeta,
     ) -> ConnectorResult<AccessImpl<'_>> {
         let (schema_id, mut raw_payload) = extract_schema_id(&payload)?;
-        let schema = self.schema_resolver.get_by_id(schema_id).await?;
-        self.value = Some(from_avro_datum(schema.as_ref(), &mut raw_payload, None)?);
-        self.key_schema = match self.encoding_type {
-            EncodingType::Key => Some(schema),
-            EncodingType::Value => None,
-        };
+        let writer_schema = self.schema_resolver.get_by_id(schema_id).await?;
+        self.value = Some(from_avro_datum(
+            writer_schema.as_ref(),
+            &mut raw_payload,
+            Some(&self.reader_schema.original_schema),
+        )?);
         Ok(AccessImpl::Avro(AvroAccess::new(
-            self.value.as_mut().unwrap(),
-            // Assumption: Key will not contain reference, so unresolved schema can work here.
-            AvroParseOptions::create(match self.encoding_type {
-                EncodingType::Key => self.key_schema.as_mut().unwrap(),
-                EncodingType::Value => &self.schema.original_schema,
-            }),
+            self.value.as_ref().unwrap(),
+            AvroParseOptions::create(&self.reader_schema.original_schema),
         )))
     }
 }
@@ -73,17 +66,18 @@ impl DebeziumAvroAccessBuilder {
         encoding_type: EncodingType,
     ) -> ConnectorResult<Self> {
         let DebeziumAvroParserConfig {
+            key_schema,
             outer_schema,
             schema_resolver,
-            ..
         } = config;
 
         Ok(Self {
-            schema: ResolvedAvroSchema::create(outer_schema)?,
+            reader_schema: ResolvedAvroSchema::create(match encoding_type {
+                EncodingType::Key => key_schema,
+                EncodingType::Value => outer_schema,
+            })?,
             schema_resolver,
-            key_schema: None,
             value: None,
-            encoding_type,
         })
     }
 }
