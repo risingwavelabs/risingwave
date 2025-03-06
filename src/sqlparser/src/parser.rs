@@ -2068,17 +2068,31 @@ impl Parser<'_> {
         let if_not_exists = self.parse_keywords(&[Keyword::IF, Keyword::NOT, Keyword::EXISTS]);
         let db_name = self.parse_object_name()?;
         let _ = self.parse_keyword(Keyword::WITH);
-        let owner = if self.parse_keyword(Keyword::OWNER) {
-            let _ = self.consume_token(&Token::Eq);
-            Some(self.parse_object_name()?)
-        } else {
-            None
-        };
+
+        let mut owner = None;
+        let mut resource_group = None;
+
+        while let Some(keyword) =
+            self.parse_one_of_keywords(&[Keyword::OWNER, Keyword::RESOURCE_GROUP])
+        {
+            match keyword {
+                Keyword::OWNER => {
+                    let _ = self.consume_token(&Token::Eq);
+                    owner = Some(self.parse_object_name()?);
+                }
+                Keyword::RESOURCE_GROUP => {
+                    let _ = self.consume_token(&Token::Eq);
+                    resource_group = Some(self.parse_set_variable()?);
+                }
+                _ => unreachable!(),
+            }
+        }
 
         Ok(Statement::CreateDatabase {
             db_name,
             if_not_exists,
             owner,
+            resource_group,
         })
     }
 
