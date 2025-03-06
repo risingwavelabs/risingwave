@@ -58,6 +58,14 @@ pub fn make_date(year: i32, month: i32, day: i32) -> Result<Date> {
     Ok(Date(make_naive_date(year, month, day)?))
 }
 
+#[function("make_date(int4) -> date")]
+pub fn make_date_from_days(days: i32) -> Result<Date> {
+    Date::with_days_since_unix_epoch(days).map_err(|e| ExprError::InvalidParam {
+        name: "days",
+        reason: e.to_string().into(),
+    })
+}
+
 // hour int, min int, sec double precision
 #[function("make_time(int4, int4, float8) -> time")]
 pub fn make_time(hour: i32, min: i32, sec: F64) -> Result<Time> {

@@ -75,3 +75,8 @@ select DATE '2022-08-09' - (INTERVAL '-2147483648 days');
 # date_interval_add
 statement error out of range
 select DATE '2022-08-09' + (INTERVAL '-2147483648 days');
+
+query ?
+select make_date(0);
+----
+1970-01-01
