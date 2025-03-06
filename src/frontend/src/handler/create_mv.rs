@@ -266,6 +266,12 @@ pub async fn handle_create_mv_bound(
             .env()
             .sbc_address();
 
+        if is_serverless_backfill && sbc_addr.is_empty() {
+            return Err(RwError::from(InvalidInputSyntax(
+                "Serverless Backfill is disabled on-premise. Use RisingWave cloud at https://cloud.risingwave.com/auth/signup to try this feature".to_owned(),
+            )));
+        }
+
         let resource_group = if is_serverless_backfill {
             match provision_serverless_backfill(sbc_addr).await {
                 Err(e) => {

@@ -183,11 +183,8 @@ pub struct FrontendOpts {
     /// Address of the serverless backfill controller.
     /// Needed if frontend receives a query like
     /// CREATE MATERIALIZED VIEW ... WITH ( `cloud.serverless_backfill_enabled=true` )
-    #[clap(
-        long,
-        env = "RW_SBC_ADDR",
-        default_value = "http://serverless-backfill-controller:1298"
-    )]
+    /// Feature disabled by default.
+    #[clap(long, env = "RW_SBC_ADDR", default_value = "")]
     pub sbc_addr: String,
 }
 
