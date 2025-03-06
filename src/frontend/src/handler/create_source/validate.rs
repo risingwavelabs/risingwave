@@ -71,9 +71,6 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                     Format::Native => vec![Encode::Native],
                     Format::Plain => vec![Encode::Bytes, Encode::Json],
                 ),
-                LEGACY_S3_CONNECTOR => hashmap!(
-                    Format::Plain => vec![Encode::Csv, Encode::Json],
-                ),
                 OPENDAL_S3_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Csv, Encode::Json, Encode::Parquet],
                 ),

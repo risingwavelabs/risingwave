@@ -25,6 +25,30 @@
 - sql:
     CREATE TABLE t1(v1 varchar, v2 int, v3 int);
     CREATE TABLE t2(v1 varchar, v2 int, v3 int);
+    SELECT t1.v1 t1_v1, t1.v2 t1_v2, t2.v1 t2_v1, t2.v2 t2_v2 FROM t1 ASOF JOIN t2 ON t1.v1 = t2.v1 and t1.v2 *2 < t2.v2 where t1.v2 < 10 and t2.v2 < 10;
+  expected_outputs:
+    - stream_plan
+    - batch_plan
+
+- sql:
+    CREATE TABLE t1(v1 varchar, v2 int, v3 int);
+    CREATE TABLE t2(v1 varchar, v2 int, v3 int);
+    SELECT t1.v1 t1_v1, t1.v2 t1_v2, t2.v1 t2_v1, t2.v2 t2_v2 FROM t1 ASOF LEFT JOIN t2 ON t1.v1 = t2.v1 and t1.v2 *2 < t2.v2 where t1.v2 < 10 and t2.v2 < 10;
+  expected_outputs:
+    - stream_plan
+    - batch_plan
+
+- sql:
+    CREATE TABLE t1(v1 varchar, v2 int, v3 int);
+    CREATE TABLE t2(v1 varchar, v2 int, v3 int);
+    SELECT t1.v1 t1_v1, t1.v2 t1_v2, t2.v1 t2_v1, t2.v2 t2_v2 FROM t1 ASOF LEFT JOIN t2 ON t1.v1 = t2.v1 and t1.v2 *2 < t2.v2 and t1.v2 < 10 and t2.v2 < 10;
+  expected_outputs:
+    - stream_plan
+    - batch_plan
+
+- sql:
+    CREATE TABLE t1(v1 varchar, v2 int, v3 int);
+    CREATE TABLE t2(v1 varchar, v2 int, v3 int);
     SELECT t1.v1 t1_v1, t1.v2 t1_v2, t2.v1 t2_v1, t2.v2 t2_v2 FROM t1 ASOF JOIN t2 ON t1.v1 = t2.v1 and t1.v2 < t2.v2 and t1.v3 < t2.v3;
   expected_outputs:
   - stream_error
@@ -37,3 +61,50 @@
   expected_outputs:
   - stream_error
   - batch_error
+
+# asof lookup join
+- sql: |
+    create table t (a int, b int);
+    create table t2 (c int, d int);
+    create index idx on t2(d) include (c);
+    select * from t asof join t2 on t.b = t2.d and t.a < t2.c;
+  expected_outputs:
+  - batch_plan
+- sql: |
+    create table t (a int, b int);
+    create table t2 (c int, d int);
+    create index idx on t2(d) include (c);
+    create index idx2 on t2(c, d);
+    create index idx3 on t2(c) include(d);
+    select * from t asof join t2 on t.a = t2.c and t.b < t2.d;
+  expected_outputs:
+  - batch_plan
+- sql: |
+    create table t (a int, b int);
+    create table t2 (c int, d int);
+    create index idx on t2(d) include (c);
+    select * from t asof join t2 on t.b = t2.d;
+  expected_outputs:
+  - batch_error
+- sql: |
+    create table t (a int, b int);
+    create table t2 (c int, d int);
+    create index idx on t2(c, d);
+    select * from t asof join t2 on t.b = t2.d and t.a = t2.c and t.a < t2.c;
+  expected_outputs:
+  - batch_plan
+- name: test index join prefix lookup
+  sql: |
+    create table t (a int, b int);
+    create table t2 (c int, d int);
+    create index idx on t2(c, d) distributed by (c);
+    select * from t asof join t2 on t.a = t2.c and t.b < t2.d;
+  expected_outputs:
+  - batch_plan
+- name: shouldn't be a lookup join
+  sql: |
+    create table t(a int, b int);
+    create index idx on t(a, b) distributed by (a);
+    select * from t t1 asof join t t2 on t1.b = t2.b and t1.a < t2.a;
+  expected_outputs:
+  - batch_plan
