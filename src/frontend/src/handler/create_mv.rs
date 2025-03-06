@@ -271,7 +271,7 @@ pub async fn handle_create_mv_bound(
                 Err(e) => {
                     return Err(RwError::from(ProtocolError(format!(
                         "failed to provision serverless backfill nodes: {}",
-                        e
+                        e.as_report()
                     ))));
                 }
                 Ok(val) => Some(val),
