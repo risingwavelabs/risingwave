@@ -94,6 +94,9 @@ pub mod monitor_service;
 #[cfg_attr(madsim, path = "sim/backup_service.rs")]
 pub mod backup_service;
 #[rustfmt::skip]
+#[cfg_attr(madsim, path = "sim/serverless_backfill_controller.rs")]
+pub mod serverless_backfill_controller;
+#[rustfmt::skip]
 #[cfg_attr(madsim, path = "sim/frontend_service.rs")]
 pub mod frontend_service;
 #[rustfmt::skip]
@@ -109,9 +112,6 @@ pub mod telemetry;
 #[rustfmt::skip]
 #[path = "sim/secret.rs"]
 pub mod secret;
-#[rustfmt::skip]
-#[path = "serverless_backfill_controller.rs"]
-pub mod serverless_backfill_controller;
 #[rustfmt::skip]
 #[path = "connector_service.serde.rs"]
 pub mod connector_service_serde;
