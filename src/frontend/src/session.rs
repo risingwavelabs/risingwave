@@ -1389,7 +1389,6 @@ impl SessionManagerImpl {
     pub async fn new(opts: FrontendOpts) -> Result<Self> {
         // TODO(shutdown): only save join handles that **need** to be shutdown
         let (env, join_handles, shutdown_senders) = FrontendEnv::init(opts).await?;
-        // TODO: add sbc_add to frontend env?
         Ok(Self {
             env,
             _join_handles: join_handles,
