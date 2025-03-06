@@ -167,4 +167,4 @@ check_link_info() {
 }
 
 echo "--- Install sqllogictest dev"
-cargo install sqllogictest-bin --git https://github.com/risinglightdb/sqllogictest-rs --rev 58938e7cdb422fab51a20508d3dd9260044e4012
+cargo install sqllogictest-bin --git https://github.com/risinglightdb/sqllogictest-rs --rev 041937ea9e292e1c89d70101593a24eea6b8047d
