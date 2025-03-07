@@ -379,7 +379,7 @@ pub async fn handle(
                     columns,
                     append_only,
                     on_conflict,
-                    with_version_column,
+                    with_version_column.map(|d| d.real_value()),
                     engine,
                 )
                 .await;
@@ -396,7 +396,7 @@ pub async fn handle(
                 source_watermarks,
                 append_only,
                 on_conflict,
-                with_version_column,
+                with_version_column.map(|d| d.real_value()),
                 cdc_table_info,
                 include_column_options,
                 webhook_info,
