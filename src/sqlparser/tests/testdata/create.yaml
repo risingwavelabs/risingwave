@@ -25,6 +25,14 @@
     sql parser error: expected description of the format, found: EOF
     LINE 1: CREATE SOURCE src
                              ^
+- input: |-
+    create table s0 (v1 int, v2 varchar) with (
+      connector = 'kafka',
+      topic = 'kafka_1_csv_topic',
+      properties.bootstrap.server = 'message_queue:29092',
+      scan.startup.mode = 'earliest'
+    ) row format csv DELIMITED BY ',';
+  formatted_sql: CREATE TABLE s0 (v1 INT, v2 CHARACTER VARYING) WITH (connector = 'kafka', topic = 'kafka_1_csv_topic', properties.bootstrap.server = 'message_queue:29092', scan.startup.mode = 'earliest') ROW FORMAT CSV DELIMITED BY ','
 - input: CREATE SOURCE src-a FORMAT PLAIN ENCODE JSON
   error_msg: |-
     sql parser error: expected description of the format, found: -
