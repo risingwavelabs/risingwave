@@ -149,6 +149,10 @@ pub struct RwConfig {
 
     #[serde(default)]
     #[config_doc(nested)]
+    pub frontend: FrontendConfig,
+
+    #[serde(default)]
+    #[config_doc(nested)]
     pub streaming: StreamingConfig,
 
     #[serde(default)]
@@ -630,18 +634,21 @@ pub struct BatchConfig {
     /// Enable the spill out to disk feature for batch queries.
     #[serde(default = "default::batch::enable_spill")]
     pub enable_spill: bool,
+}
 
-    /// Total maximum memory allowed for running message in the frontend.
-    #[serde(default = "default::batch::frontend_max_running_message_bytes")]
-    pub frontend_max_running_message_bytes: u64,
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
+pub struct FrontendConfig {
+    /// Total memory constraints for running queries.
+    #[serde(default = "default::frontend::max_total_query_size_bytes")]
+    pub max_total_query_size_bytes: u64,
 
-    /// A message under this threshold will not be throttled for memory constraints.
-    #[serde(default = "default::batch::frontend_throttling_filter_min_bytes")]
-    pub frontend_throttling_filter_min_bytes: u64,
+    /// A query of size under this threshold will never be rejected due to memory constraints.
+    #[serde(default = "default::frontend::min_single_query_size_bytes")]
+    pub min_single_query_size_bytes: u64,
 
-    /// A message exceeding this threshold will always be throttled for memory constraints.
-    #[serde(default = "default::batch::frontend_throttling_filter_max_bytes")]
-    pub frontend_throttling_filter_max_bytes: u64,
+    /// A query of size exceeding this threshold will always be rejected due to memory constraints.
+    #[serde(default = "default::frontend::max_single_query_size_bytes")]
+    pub max_single_query_size_bytes: u64,
 }
 
 /// The section `[streaming]` in `risingwave.toml`.
@@ -2210,16 +2217,18 @@ pub mod default {
             .map(str::to_string)
             .collect()
         }
+    }
 
-        pub fn frontend_max_running_message_bytes() -> u64 {
+    pub mod frontend {
+        pub fn max_total_query_size_bytes() -> u64 {
             1024 * 1024 * 1024
         }
 
-        pub fn frontend_throttling_filter_min_bytes() -> u64 {
+        pub fn min_single_query_size_bytes() -> u64 {
             1024 * 1024
         }
 
-        pub fn frontend_throttling_filter_max_bytes() -> u64 {
+        pub fn max_single_query_size_bytes() -> u64 {
             1024 * 1024 * 1024
         }
     }

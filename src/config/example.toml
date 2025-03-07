@@ -121,14 +121,16 @@ frontend_compute_runtime_worker_threads = 4
 mask_worker_temporary_secs = 30
 redact_sql_option_keywords = ["credential", "key", "password", "private", "secret", "token"]
 enable_spill = true
-frontend_max_running_message_bytes = 1073741824
-frontend_throttling_filter_min_bytes = 1048576
-frontend_throttling_filter_max_bytes = 1073741824
 
 [batch.developer]
 batch_connector_message_buffer_size = 16
 batch_output_channel_size = 64
 batch_chunk_size = 1024
+
+[frontend]
+max_total_query_size_bytes = 1073741824
+min_single_query_size_bytes = 1048576
+max_single_query_size_bytes = 1073741824
 
 [streaming]
 in_flight_barrier_nums = 10000

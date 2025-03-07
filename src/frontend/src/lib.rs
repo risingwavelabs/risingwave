@@ -200,7 +200,8 @@ impl Default for FrontendOpts {
 use std::future::Future;
 use std::pin::Pin;
 
-use pgwire::pg_protocol::{ConnectionContext, MessageMemoryManager, TlsConfig};
+use pgwire::memory_manager::MessageMemoryManager;
+use pgwire::pg_protocol::{ConnectionContext, TlsConfig};
 
 use crate::session::SESSION_MANAGER;
 
@@ -228,11 +229,11 @@ pub fn start(
                 .map(|s| s.to_lowercase())
                 .collect::<HashSet<_>>(),
         );
-        let batch_config = &session_mgr.env().batch_config();
+        let frontend_config = &session_mgr.env().frontend_config();
         let message_memory_manager = Arc::new(MessageMemoryManager::new(
-            batch_config.frontend_max_running_message_bytes,
-            batch_config.frontend_throttling_filter_min_bytes,
-            batch_config.frontend_throttling_filter_max_bytes,
+            frontend_config.max_total_query_size_bytes,
+            frontend_config.min_single_query_size_bytes,
+            frontend_config.max_single_query_size_bytes,
         ));
 
         let webhook_service = crate::webhook::WebhookService::new(webhook_listen_addr);

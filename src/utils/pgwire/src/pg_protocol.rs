@@ -18,7 +18,6 @@ use std::io::ErrorKind;
 use std::panic::AssertUnwindSafe;
 use std::pin::Pin;
 use std::str::Utf8Error;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Weak};
 use std::time::{Duration, Instant};
 use std::{io, str};
@@ -41,6 +40,7 @@ use tokio_openssl::SslStream;
 use tracing::Instrument;
 
 use crate::error::{PsqlError, PsqlResult};
+use crate::memory_manager::{MessageMemoryGuard, MessageMemoryManagerRef};
 use crate::net::AddressRef;
 use crate::pg_extended::ResultCache;
 use crate::pg_message::{
@@ -68,75 +68,6 @@ static RW_QUERY_LOG_TRUNCATE_LEN: LazyLock<usize> =
 tokio::task_local! {
     /// The current session. Concrete type is erased for different session implementations.
     pub static CURRENT_SESSION: Weak<dyn Any + Send + Sync>
-}
-
-/// `MessageMemoryManager` tracks memory usage of frontend messages and provides hint of whether this message would cause memory constraint violation.
-///
-/// For any message of size n,
-/// - If n <= `min_filter_bytes`, the message won't add to the memory constraint, because the message is too small that it can always be accepted.
-/// - If n > `max_filter_bytes`, the message won't add to the memory constraint, because the message is too large that it's better to be rejected immediately.
-/// - Otherwise, the message will add size n to the memory constraint. See `MessageMemoryManager::add`.
-pub struct MessageMemoryManager {
-    pub current_running_bytes: AtomicU64,
-    pub max_running_bytes: u64,
-    pub min_filter_bytes: u64,
-    pub max_filter_bytes: u64,
-}
-
-pub type MessageMemoryManagerRef = Arc<MessageMemoryManager>;
-
-impl MessageMemoryManager {
-    pub fn new(max_running_bytes: u64, min_bytes: u64, max_bytes: u64) -> Self {
-        Self {
-            current_running_bytes: AtomicU64::new(0),
-            max_running_bytes,
-            min_filter_bytes: min_bytes,
-            max_filter_bytes: max_bytes,
-        }
-    }
-
-    /// Returns a `ServerThrottleReason` indicating whether any memory constraint has been violated.
-    fn add(
-        self: &MessageMemoryManagerRef,
-        bytes: u64,
-    ) -> (Option<ServerThrottleReason>, Option<MessageMemoryGuard>) {
-        if bytes > self.max_filter_bytes {
-            return (Some(ServerThrottleReason::TooLargeMessage), None);
-        }
-        if bytes <= self.min_filter_bytes {
-            return (None, None);
-        }
-        let prev = self
-            .current_running_bytes
-            .fetch_add(bytes, Ordering::Relaxed);
-        let guard: MessageMemoryGuard = MessageMemoryGuard {
-            bytes,
-            manager: self.clone(),
-        };
-        // Always permit at least one entry, regardless of its size.
-        let reason = if prev != 0 && prev + bytes > self.max_running_bytes {
-            Some(ServerThrottleReason::TooManyMemoryUsage)
-        } else {
-            None
-        };
-        (reason, Some(guard))
-    }
-
-    fn sub(&self, bytes: u64) {
-        self.current_running_bytes
-            .fetch_sub(bytes, Ordering::Relaxed);
-    }
-}
-
-pub struct MessageMemoryGuard {
-    bytes: u64,
-    manager: MessageMemoryManagerRef,
-}
-
-impl Drop for MessageMemoryGuard {
-    fn drop(&mut self) {
-        self.manager.sub(self.bytes);
-    }
 }
 
 /// The state machine for each psql connection.
@@ -259,7 +190,7 @@ fn redact_sql(sql: &str, keywords: RedactSqlOptionKeywordsRef) -> String {
 pub struct ConnectionContext {
     pub tls_config: Option<TlsConfig>,
     pub redact_sql_option_keywords: Option<RedactSqlOptionKeywordsRef>,
-    pub message_memory_manager: Arc<MessageMemoryManager>,
+    pub message_memory_manager: MessageMemoryManagerRef,
 }
 
 impl<S, SM> PgProtocol<S, SM>
@@ -594,10 +525,10 @@ where
             FeMessage::HealthCheck => self.process_health_check(),
             FeMessage::ServerThrottle(reason) => match reason {
                 ServerThrottleReason::TooLargeMessage => {
-                    return Err(PsqlError::ServerThrottle(anyhow::anyhow!(format!("frontend_throttling_filter_max_bytes {} has been exceeded, please either reduce the message size or increase the limit", self.message_memory_manager.max_filter_bytes)).into()));
+                    return Err(PsqlError::ServerThrottle(anyhow::anyhow!("max_single_query_size_bytes {} has been exceeded, please either reduce the query size or increase the limit", self.message_memory_manager.max_filter_bytes).into()));
                 }
                 ServerThrottleReason::TooManyMemoryUsage => {
-                    return Err(PsqlError::ServerThrottle(anyhow::anyhow!(format!("frontend_max_running_message_bytes {} has been exceeded, please either retry or increase the limit", self.message_memory_manager.max_running_bytes)).into()));
+                    return Err(PsqlError::ServerThrottle(anyhow::anyhow!("max_total_query_size_bytes {} has been exceeded, please either retry or increase the limit", self.message_memory_manager.max_running_bytes).into()));
                 }
             },
         }
