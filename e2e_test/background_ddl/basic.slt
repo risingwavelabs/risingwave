@@ -126,6 +126,8 @@ create materialized view if not exists m1 as select * from t;
 statement ok
 create materialized view if not exists m1 as select * from t;
 
+sleep 1s
+
 statement ok
 drop materialized view m1;
 
