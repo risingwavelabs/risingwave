@@ -4317,6 +4317,36 @@ impl Parser<'_> {
             self.expect_token(&Token::RParen)?;
         }
 
+        if analyze {
+            fn parse_analyze_target(parser: &mut Parser<'_>) -> ModalResult<Option<AnalyzeTarget>> {
+                if parser.parse_keyword(Keyword::TABLE) {
+                    let table_name = parser.parse_object_name()?;
+                    Ok(Some(AnalyzeTarget::Table(table_name)))
+                } else if parser.parse_keyword(Keyword::INDEX) {
+                    let index_name = parser.parse_object_name()?;
+                    Ok(Some(AnalyzeTarget::Index(index_name)))
+                } else if parser.parse_keywords(&[Keyword::MATERIALIZED, Keyword::VIEW]) {
+                    let view_name = parser.parse_object_name()?;
+                    Ok(Some(AnalyzeTarget::MaterializedView(view_name)))
+                } else if parser.parse_keyword(Keyword::INDEX) {
+                    let index_name = parser.parse_object_name()?;
+                    Ok(Some(AnalyzeTarget::Index(index_name)))
+                } else if parser.parse_keyword(Keyword::SINK) {
+                    let sink_name = parser.parse_object_name()?;
+                    Ok(Some(AnalyzeTarget::Sink(sink_name)))
+                } else if parser.parse_word("ID") {
+                    let job_id = parser.parse_literal_uint()? as u32;
+                    Ok(Some(AnalyzeTarget::Id(job_id)))
+                } else {
+                    Ok(None)
+                }
+            }
+            if let Some(target) = parse_analyze_target(self)? {
+                let statement = Statement::ExplainAnalyzeStreamJob { target };
+                return Ok(statement);
+            }
+        }
+
         let statement = self.parse_statement()?;
         Ok(Statement::Explain {
             analyze,
