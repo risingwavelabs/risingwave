@@ -143,5 +143,9 @@ harness = false
 name = "bench_table_watermarks"
 harness = false
 
+[[bench]]
+name = "bench_sort_sst"
+harness = false
+
 [lints]
 workspace = true
