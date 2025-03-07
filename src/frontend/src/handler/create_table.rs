@@ -2105,11 +2105,13 @@ mod tests {
             "v1" => DataType::Int16,
             "v2" => StructType::new(
                 vec![("v3", DataType::Int64),("v4", DataType::Float64),("v5", DataType::Float64)],
-            ).into(),
+            )
+            .with_ids([3, 4, 5].map(ColumnId::new))
+            .into(),
             RW_TIMESTAMP_COLUMN_NAME => DataType::Timestamptz,
         };
 
-        assert_eq!(columns, expected_columns);
+        assert_eq!(columns, expected_columns, "{columns:#?}");
     }
 
     #[test]

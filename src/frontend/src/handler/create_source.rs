@@ -1031,7 +1031,7 @@ pub mod tests {
     use std::sync::Arc;
 
     use risingwave_common::catalog::{
-        DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, ROW_ID_COLUMN_NAME,
+        ColumnId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, ROW_ID_COLUMN_NAME,
     };
     use risingwave_common::types::{DataType, StructType};
 
@@ -1076,6 +1076,7 @@ pub mod tests {
             ("address", DataType::Varchar),
             ("zipcode", DataType::Varchar),
         ])
+        .with_ids([5, 6].map(ColumnId::new))
         .into();
         let expected_columns = maplit::hashmap! {
             ROW_ID_COLUMN_NAME => DataType::Serial,
@@ -1084,9 +1085,11 @@ pub mod tests {
             "rate" => DataType::Float32,
             "country" => StructType::new(
                 vec![("address", DataType::Varchar),("city", city_type),("zipcode", DataType::Varchar)],
-            ).into(),
+            )
+            .with_ids([3, 4, 7].map(ColumnId::new))
+            .into(),
         };
-        assert_eq!(columns, expected_columns);
+        assert_eq!(columns, expected_columns, "{columns:#?}");
     }
 
     #[tokio::test]
