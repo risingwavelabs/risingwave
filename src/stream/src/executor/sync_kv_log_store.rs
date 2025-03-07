@@ -152,6 +152,14 @@ struct FlushedChunkInfo {
 }
 
 enum WriteFuture<S: LocalStateStore> {
+    /// We trigger a brief pause to let the `ReadFuture` be polled in the following scenarios:
+    /// - When seeing an upstream data chunk.
+    /// - When seeing a checkpoint barrier.
+    /// - We resume the stream after the pause.
+    ///
+    /// We trigger resume to let the `ReadFuture` to be polled in the following scenarios:
+    /// - After the pause duration.
+    /// - After the read future consumes a chunk.
     Paused {
         message: Message,
         sleep_future: Option<Pin<Box<Sleep>>>,
@@ -357,9 +365,9 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                                 match msg {
                                     Message::Barrier(barrier) => {
                                         if clean_state
+                                            && barrier.kind.is_checkpoint()
                                             && buffer.no_flushed_items()
                                             && !buffer.is_empty()
-                                            && barrier.kind.is_checkpoint()
                                         {
                                             write_future_state = WriteFuture::paused(
                                                 self.pause_duration_ms,
