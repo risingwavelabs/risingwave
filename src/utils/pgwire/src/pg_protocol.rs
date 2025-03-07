@@ -550,6 +550,7 @@ where
                     let (reason, guard) = self.message_memory_manager.add(payload_len);
                     if let Some(reason) = reason {
                         // Release the memory ASAP.
+                        drop(guard);
                         self.stream.skip_body().await?;
                         return Ok((FeMessage::ServerThrottle(reason), None));
                     }
