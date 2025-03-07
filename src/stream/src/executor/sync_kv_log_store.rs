@@ -366,7 +366,6 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                                     Message::Barrier(barrier) => {
                                         if clean_state
                                             && barrier.kind.is_checkpoint()
-                                            && buffer.no_flushed_items()
                                             && !buffer.is_empty()
                                         {
                                             write_future_state = WriteFuture::paused(
