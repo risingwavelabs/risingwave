@@ -38,14 +38,14 @@ use risingwave_pb::stream_plan::stream_fragment_graph::{
 };
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    DispatchStrategy, DispatcherType, FragmentTypeFlag, StreamActor,
+    DispatchStrategy, DispatcherType, FragmentTypeFlag,
     StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamScanNode, StreamScanType,
 };
 
 use crate::MetaResult;
 use crate::barrier::SnapshotBackfillInfo;
 use crate::manager::{MetaSrvEnv, StreamingJob, StreamingJobType};
-use crate::model::{ActorId, Fragment, FragmentId};
+use crate::model::{ActorId, Fragment, FragmentId, StreamActor};
 use crate::stream::stream_graph::id::{GlobalFragmentId, GlobalFragmentIdGen, GlobalTableIdGen};
 use crate::stream::stream_graph::schedule::Distribution;
 

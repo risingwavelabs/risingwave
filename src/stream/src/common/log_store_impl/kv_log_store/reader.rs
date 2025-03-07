@@ -34,9 +34,7 @@ use risingwave_common::util::epoch::{EpochExt, EpochPair};
 use risingwave_connector::sink::log_store::{
     ChunkId, LogReader, LogStoreReadItem, LogStoreResult, TruncateOffset,
 };
-use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange, prefixed_range_with_vnode};
-use risingwave_storage::StateStoreIter;
 use risingwave_storage::error::StorageResult;
 use risingwave_storage::hummock::CachePolicy;
 use risingwave_storage::store::{
@@ -80,6 +78,7 @@ mod rewind_backoff_policy {
 
 use rewind_backoff_policy::*;
 use risingwave_common::must_match;
+use risingwave_storage::StateStoreIter;
 
 struct RewindDelay {
     last_rewind_truncate_offset: Option<TruncateOffset>,
@@ -231,7 +230,6 @@ pub struct AutoRebuildStateStoreReadIter<S: StateStoreRead, F> {
     // call to get whether to rebuild the iter. Once return true, the closure should reset itself.
     should_rebuild: F,
     end_bound: Bound<TableKey<Bytes>>,
-    epoch: HummockEpoch,
     options: ReadOptions,
 }
 
@@ -240,19 +238,17 @@ impl<S: StateStoreRead, F: FnMut() -> bool> AutoRebuildStateStoreReadIter<S, F> 
         state_store: Arc<S>,
         should_rebuild: F,
         range: TableKeyRange,
-        epoch: HummockEpoch,
         options: ReadOptions,
     ) -> StorageResult<Self> {
         let (start_bound, end_bound) = range;
         let iter = state_store
-            .iter((start_bound, end_bound.clone()), epoch, options.clone())
+            .iter((start_bound, end_bound.clone()), options.clone())
             .await?;
         Ok(Self {
             state_store,
             iter,
             should_rebuild,
             end_bound,
-            epoch,
             options,
         })
     }
@@ -262,7 +258,6 @@ pub(crate) mod timeout_auto_rebuild {
     use std::sync::Arc;
     use std::time::{Duration, Instant};
 
-    use risingwave_hummock_sdk::HummockEpoch;
     use risingwave_hummock_sdk::key::TableKeyRange;
     use risingwave_storage::error::StorageResult;
     use risingwave_storage::store::{ReadOptions, StateStoreRead};
@@ -275,7 +270,6 @@ pub(crate) mod timeout_auto_rebuild {
     pub(super) async fn iter_with_timeout_rebuild<S: StateStoreRead>(
         state_store: Arc<S>,
         range: TableKeyRange,
-        epoch: HummockEpoch,
         options: ReadOptions,
         timeout: Duration,
     ) -> StorageResult<TimeoutAutoRebuildIter<S>> {
@@ -315,7 +309,6 @@ pub(crate) mod timeout_auto_rebuild {
                 }
             },
             range,
-            epoch,
             options,
         )
         .await
@@ -342,7 +335,6 @@ impl<S: StateStoreRead, F: FnMut() -> bool + Send> StateStoreIter
                         Included(TableKey(range_start.clone())),
                         self.end_bound.clone(),
                     ),
-                    self.epoch,
                     self.options.clone(),
                 )
                 .await?;
@@ -668,7 +660,6 @@ impl<S: StateStoreRead> LogStoreReadState<S> {
                         state_store
                             .iter(
                                 (Included(range_start), Included(range_end)),
-                                HummockEpoch::MAX,
                                 ReadOptions {
                                     prefetch_options:
                                     PrefetchOptions::prefetch_for_large_range_scan(),
@@ -743,7 +734,6 @@ impl<S: StateStoreRead> LogStoreReadState<S> {
                 iter_with_timeout_rebuild(
                     state_store,
                     key_range,
-                    HummockEpoch::MAX,
                     ReadOptions {
                         // This stream lives too long, the connection of prefetch object may break. So use a short connection prefetch.
                         prefetch_options: PrefetchOptions::prefetch_for_small_range_scan(),
@@ -778,6 +768,7 @@ mod tests {
     use itertools::Itertools;
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::{EpochExt, test_epoch};
+    use risingwave_hummock_sdk::HummockReadEpoch;
     use risingwave_hummock_sdk::key::{KeyPayloadType, TableKey, prefixed_range_with_vnode};
     use risingwave_hummock_test::local_state_store_test_utils::LocalStateStoreTestExt;
     use risingwave_hummock_test::test_utils::prepare_hummock_test_env;
@@ -785,7 +776,8 @@ mod tests {
         iterator_test_table_key_of, iterator_test_value_of,
     };
     use risingwave_storage::store::{
-        LocalStateStore, NewLocalOptions, ReadOptions, SealCurrentEpochOptions, StateStoreRead,
+        LocalStateStore, NewLocalOptions, NewReadSnapshotOptions, ReadOptions,
+        SealCurrentEpochOptions, StateStoreRead,
     };
     use risingwave_storage::{StateStore, StateStoreIter};
 
@@ -848,8 +840,18 @@ mod tests {
         );
 
         let kv_iter = pairs.clone().into_iter();
-        let iter = state_store
-            .iter(key_range.clone(), epoch, read_options.clone())
+        let snapshot = state_store
+            .new_read_snapshot(
+                HummockReadEpoch::NoWait(epoch),
+                NewReadSnapshotOptions {
+                    table_id: TEST_TABLE_ID,
+                },
+            )
+            .await
+            .unwrap();
+        let snapshot = Arc::new(snapshot);
+        let iter = snapshot
+            .iter(key_range.clone(), read_options.clone())
             .await
             .unwrap();
         validate(kv_iter, iter).await;
@@ -861,7 +863,7 @@ mod tests {
         let mut rebuild_count = 0;
         let rebuild_count_mut_ref = &mut rebuild_count;
         let iter = AutoRebuildStateStoreReadIter::new(
-            state_store,
+            snapshot,
             move || {
                 *count_mut_ref += 1;
                 if *count_mut_ref % rebuild_period == 0 {
@@ -872,7 +874,6 @@ mod tests {
                 }
             },
             key_range.clone(),
-            epoch,
             read_options,
         )
         .await

@@ -26,7 +26,7 @@ use ddl::WebhookSourceInfo;
 use itertools::Itertools;
 use tracing::{debug, instrument};
 use winnow::combinator::{alt, cut_err, dispatch, fail, opt, peek, preceded, repeat, separated};
-use winnow::{PResult, Parser as _};
+use winnow::{ModalResult, Parser as _};
 
 use crate::ast::*;
 use crate::keywords::{self, Keyword};
@@ -66,7 +66,6 @@ macro_rules! parser_err {
     ($($arg:tt)*) => {
         return Err(winnow::error::ErrMode::Backtrack(<winnow::error::ContextError as winnow::error::FromExternalError<_, _>>::from_external_error(
             &Parser::default(),
-            winnow::error::ErrorKind::Fail,
             $crate::parser::StrError(format!($($arg)*)),
         )))
     };
@@ -76,7 +75,6 @@ impl From<StrError> for winnow::error::ErrMode<winnow::error::ContextError> {
     fn from(e: StrError) -> Self {
         winnow::error::ErrMode::Backtrack(<winnow::error::ContextError as winnow::error::FromExternalError<_, _>>::from_external_error(
             &Parser::default(),
-            winnow::error::ErrorKind::Fail,
             e,
         ))
     }
@@ -248,7 +246,7 @@ impl Parser<'_> {
     }
 
     /// Parse a list of semicolon-separated statements.
-    fn parse_statements(&mut self) -> PResult<Vec<Statement>> {
+    fn parse_statements(&mut self) -> ModalResult<Vec<Statement>> {
         let mut stmts = Vec::new();
         let mut expecting_statement_delimiter = false;
         loop {
@@ -274,7 +272,7 @@ impl Parser<'_> {
 
     /// Parse a single top-level statement (such as SELECT, INSERT, CREATE, etc.),
     /// stopping before the statement separator, if any.
-    pub fn parse_statement(&mut self) -> PResult<Statement> {
+    pub fn parse_statement(&mut self) -> ModalResult<Statement> {
         let checkpoint = *self;
         let token = self.next_token();
         match token.token {
@@ -340,13 +338,13 @@ impl Parser<'_> {
         }
     }
 
-    pub fn parse_truncate(&mut self) -> PResult<Statement> {
+    pub fn parse_truncate(&mut self) -> ModalResult<Statement> {
         let _ = self.parse_keyword(Keyword::TABLE);
         let table_name = self.parse_object_name()?;
         Ok(Statement::Truncate { table_name })
     }
 
-    pub fn parse_analyze(&mut self) -> PResult<Statement> {
+    pub fn parse_analyze(&mut self) -> ModalResult<Statement> {
         let table_name = self.parse_object_name()?;
 
         Ok(Statement::Analyze { table_name })
@@ -360,7 +358,7 @@ impl Parser<'_> {
     ///   contain parentheses.
     /// - Selecting all columns from a table. In this case, it is a
     ///   [`WildcardOrExpr::QualifiedWildcard`] or a [`WildcardOrExpr::Wildcard`].
-    pub fn parse_wildcard_or_expr(&mut self) -> PResult<WildcardOrExpr> {
+    pub fn parse_wildcard_or_expr(&mut self) -> ModalResult<WildcardOrExpr> {
         let checkpoint = *self;
 
         match self.next_token().token {
@@ -400,7 +398,7 @@ impl Parser<'_> {
         &mut self,
         ident: Ident,
         simple_wildcard_expr: WildcardOrExpr,
-    ) -> PResult<WildcardOrExpr> {
+    ) -> ModalResult<WildcardOrExpr> {
         let mut idents = vec![ident];
         let mut except_cols = vec![];
         match simple_wildcard_expr {
@@ -433,7 +431,7 @@ impl Parser<'_> {
         &mut self,
         expr: Expr,
         simple_wildcard_expr: WildcardOrExpr,
-    ) -> PResult<WildcardOrExpr> {
+    ) -> ModalResult<WildcardOrExpr> {
         if let WildcardOrExpr::Expr(e) = simple_wildcard_expr {
             return Ok(WildcardOrExpr::Expr(e));
         }
@@ -481,7 +479,7 @@ impl Parser<'_> {
     /// Tries to parses a wildcard expression without any parentheses.
     ///
     /// If wildcard is not found, go back to `index` and parse an expression.
-    pub fn parse_simple_wildcard_expr(&mut self, checkpoint: Self) -> PResult<WildcardOrExpr> {
+    pub fn parse_simple_wildcard_expr(&mut self, checkpoint: Self) -> ModalResult<WildcardOrExpr> {
         let mut id_parts = vec![];
         while self.consume_token(&Token::Period) {
             let ckpt = *self;
@@ -508,7 +506,7 @@ impl Parser<'_> {
         self.parse_expr().map(WildcardOrExpr::Expr)
     }
 
-    pub fn parse_except(&mut self) -> PResult<Option<Vec<Expr>>> {
+    pub fn parse_except(&mut self) -> ModalResult<Option<Vec<Expr>>> {
         if !self.parse_keyword(Keyword::EXCEPT) {
             return Ok(None);
         }
@@ -524,12 +522,12 @@ impl Parser<'_> {
     }
 
     /// Parse a new expression
-    pub fn parse_expr(&mut self) -> PResult<Expr> {
+    pub fn parse_expr(&mut self) -> ModalResult<Expr> {
         self.parse_subexpr(Precedence::Zero)
     }
 
     /// Parse tokens until the precedence changes
-    pub fn parse_subexpr(&mut self, precedence: Precedence) -> PResult<Expr> {
+    pub fn parse_subexpr(&mut self, precedence: Precedence) -> ModalResult<Expr> {
         debug!("parsing expr, current token: {:?}", self.peek_token().token);
         let mut expr = self.parse_prefix()?;
         debug!("prefix: {:?}", expr);
@@ -547,7 +545,7 @@ impl Parser<'_> {
     }
 
     /// Parse an expression prefix
-    pub fn parse_prefix(&mut self) -> PResult<Expr> {
+    pub fn parse_prefix(&mut self) -> ModalResult<Expr> {
         // PostgreSQL allows any string literal to be preceded by a type name, indicating that the
         // string literal represents a literal of that type. Some examples:
         //
@@ -755,7 +753,7 @@ impl Parser<'_> {
         }
     }
 
-    fn parse_param(&mut self, param: String) -> PResult<Expr> {
+    fn parse_param(&mut self, param: String) -> ModalResult<Expr> {
         let Ok(index) = param.parse() else {
             parser_err!("Parameter symbol has a invalid index {}.", param);
         };
@@ -763,7 +761,7 @@ impl Parser<'_> {
     }
 
     /// Parses a field selection expression. See also [`Expr::FieldIdentifier`].
-    pub fn parse_struct_selection(&mut self, expr: Expr) -> PResult<Expr> {
+    pub fn parse_struct_selection(&mut self, expr: Expr) -> ModalResult<Expr> {
         let mut nested_expr = expr;
         // Unwrap parentheses
         while let Expr::Nested(inner) = nested_expr {
@@ -774,11 +772,11 @@ impl Parser<'_> {
     }
 
     /// Parses consecutive field identifiers after a period. i.e., `.foo.bar.baz`
-    pub fn parse_fields(&mut self) -> PResult<Vec<Ident>> {
+    pub fn parse_fields(&mut self) -> ModalResult<Vec<Ident>> {
         repeat(.., preceded(Token::Period, cut_err(Self::parse_identifier))).parse_next(self)
     }
 
-    pub fn parse_qualified_operator(&mut self) -> PResult<QualifiedOperator> {
+    pub fn parse_qualified_operator(&mut self) -> ModalResult<QualifiedOperator> {
         self.expect_token(&Token::LParen)?;
 
         let checkpoint = *self;
@@ -819,7 +817,7 @@ impl Parser<'_> {
     }
 
     /// Parse a function call.
-    pub fn parse_function(&mut self) -> PResult<Expr> {
+    pub fn parse_function(&mut self) -> ModalResult<Expr> {
         // [aggregate:]
         let scalar_as_agg = if self.parse_keyword(Keyword::AGGREGATE) {
             self.expect_token(&Token::Colon)?;
@@ -891,7 +889,7 @@ impl Parser<'_> {
         }))
     }
 
-    pub fn parse_window_frame_units(&mut self) -> PResult<WindowFrameUnits> {
+    pub fn parse_window_frame_units(&mut self) -> ModalResult<WindowFrameUnits> {
         dispatch! { peek(keyword);
             Keyword::ROWS => keyword.value(WindowFrameUnits::Rows),
             Keyword::RANGE => keyword.value(WindowFrameUnits::Range),
@@ -903,7 +901,7 @@ impl Parser<'_> {
         .parse_next(self)
     }
 
-    pub fn parse_window_frame(&mut self) -> PResult<WindowFrame> {
+    pub fn parse_window_frame(&mut self) -> ModalResult<WindowFrame> {
         let units = self.parse_window_frame_units()?;
         let bounds = if self.parse_keyword(Keyword::BETWEEN) {
             // `BETWEEN <frame_start> AND <frame_end>`
@@ -934,7 +932,7 @@ impl Parser<'_> {
     }
 
     /// Parse `CURRENT ROW` or `{ <non-negative numeric | datetime | interval> | UNBOUNDED } { PRECEDING | FOLLOWING }`
-    pub fn parse_window_frame_bound(&mut self) -> PResult<WindowFrameBound> {
+    pub fn parse_window_frame_bound(&mut self) -> ModalResult<WindowFrameBound> {
         if self.parse_keywords(&[Keyword::CURRENT, Keyword::ROW]) {
             Ok(WindowFrameBound::CurrentRow)
         } else {
@@ -953,7 +951,7 @@ impl Parser<'_> {
         }
     }
 
-    pub fn parse_window_frame_exclusion(&mut self) -> PResult<WindowFrameExclusion> {
+    pub fn parse_window_frame_exclusion(&mut self) -> ModalResult<WindowFrameExclusion> {
         if self.parse_keywords(&[Keyword::CURRENT, Keyword::ROW]) {
             Ok(WindowFrameExclusion::CurrentRow)
         } else if self.parse_keyword(Keyword::GROUP) {
@@ -969,7 +967,7 @@ impl Parser<'_> {
 
     /// parse a group by expr. a group by expr can be one of group sets, roll up, cube, or simple
     /// expr.
-    fn parse_group_by_expr(&mut self) -> PResult<Expr> {
+    fn parse_group_by_expr(&mut self) -> ModalResult<Expr> {
         if self.parse_keywords(&[Keyword::GROUPING, Keyword::SETS]) {
             self.expect_token(&Token::LParen)?;
             let result = self.parse_comma_separated(|p| p.parse_tuple(true, true))?;
@@ -993,7 +991,7 @@ impl Parser<'_> {
     /// parse a tuple with `(` and `)`.
     /// If `lift_singleton` is true, then a singleton tuple is lifted to a tuple of length 1,
     /// otherwise it will fail. If `allow_empty` is true, then an empty tuple is allowed.
-    fn parse_tuple(&mut self, lift_singleton: bool, allow_empty: bool) -> PResult<Vec<Expr>> {
+    fn parse_tuple(&mut self, lift_singleton: bool, allow_empty: bool) -> ModalResult<Vec<Expr>> {
         if lift_singleton {
             if self.consume_token(&Token::LParen) {
                 let result = if allow_empty && self.consume_token(&Token::RParen) {
@@ -1020,49 +1018,49 @@ impl Parser<'_> {
         }
     }
 
-    pub fn parse_case_expr(&mut self) -> PResult<Expr> {
+    pub fn parse_case_expr(&mut self) -> ModalResult<Expr> {
         parser_v2::expr_case(self)
     }
 
     /// Parse a SQL CAST function e.g. `CAST(expr AS FLOAT)`
-    pub fn parse_cast_expr(&mut self) -> PResult<Expr> {
+    pub fn parse_cast_expr(&mut self) -> ModalResult<Expr> {
         parser_v2::expr_cast(self)
     }
 
     /// Parse a SQL TRY_CAST function e.g. `TRY_CAST(expr AS FLOAT)`
-    pub fn parse_try_cast_expr(&mut self) -> PResult<Expr> {
+    pub fn parse_try_cast_expr(&mut self) -> ModalResult<Expr> {
         parser_v2::expr_try_cast(self)
     }
 
     /// Parse a SQL EXISTS expression e.g. `WHERE EXISTS(SELECT ...)`.
-    pub fn parse_exists_expr(&mut self) -> PResult<Expr> {
+    pub fn parse_exists_expr(&mut self) -> ModalResult<Expr> {
         self.expect_token(&Token::LParen)?;
         let exists_node = Expr::Exists(Box::new(self.parse_query()?));
         self.expect_token(&Token::RParen)?;
         Ok(exists_node)
     }
 
-    pub fn parse_extract_expr(&mut self) -> PResult<Expr> {
+    pub fn parse_extract_expr(&mut self) -> ModalResult<Expr> {
         parser_v2::expr_extract(self)
     }
 
-    pub fn parse_substring_expr(&mut self) -> PResult<Expr> {
+    pub fn parse_substring_expr(&mut self) -> ModalResult<Expr> {
         parser_v2::expr_substring(self)
     }
 
     /// `POSITION(<expr> IN <expr>)`
-    pub fn parse_position_expr(&mut self) -> PResult<Expr> {
+    pub fn parse_position_expr(&mut self) -> ModalResult<Expr> {
         parser_v2::expr_position(self)
     }
 
     /// `OVERLAY(<expr> PLACING <expr> FROM <expr> [ FOR <expr> ])`
-    pub fn parse_overlay_expr(&mut self) -> PResult<Expr> {
+    pub fn parse_overlay_expr(&mut self) -> ModalResult<Expr> {
         parser_v2::expr_overlay(self)
     }
 
     /// `TRIM ([WHERE] ['text'] FROM 'text')`\
     /// `TRIM ([WHERE] [FROM] 'text' [, 'text'])`
-    pub fn parse_trim_expr(&mut self) -> PResult<Expr> {
+    pub fn parse_trim_expr(&mut self) -> ModalResult<Expr> {
         self.expect_token(&Token::LParen)?;
         let mut trim_where = None;
         if let Token::Word(word) = self.peek_token().token {
@@ -1098,7 +1096,7 @@ impl Parser<'_> {
         })
     }
 
-    pub fn parse_trim_where(&mut self) -> PResult<TrimWhereField> {
+    pub fn parse_trim_where(&mut self) -> ModalResult<TrimWhereField> {
         dispatch! { peek(keyword);
             Keyword::BOTH => keyword.value(TrimWhereField::Both),
             Keyword::LEADING => keyword.value(TrimWhereField::Leading),
@@ -1110,7 +1108,7 @@ impl Parser<'_> {
     }
 
     /// Parses an array expression `[ex1, ex2, ..]`
-    pub fn parse_array_expr(&mut self) -> PResult<Expr> {
+    pub fn parse_array_expr(&mut self) -> ModalResult<Expr> {
         let mut expected_depth = None;
         let exprs = self.parse_array_inner(0, &mut expected_depth)?;
         Ok(Expr::Array(Array {
@@ -1124,7 +1122,7 @@ impl Parser<'_> {
         &mut self,
         depth: usize,
         expected_depth: &mut Option<usize>,
-    ) -> PResult<Vec<Expr>> {
+    ) -> ModalResult<Vec<Expr>> {
         self.expect_token(&Token::LBracket)?;
         if let Some(expected_depth) = *expected_depth
             && depth > expected_depth
@@ -1157,7 +1155,7 @@ impl Parser<'_> {
     }
 
     /// Parses a map expression `MAP {k1:v1, k2:v2, ..}`
-    pub fn parse_map_expr(&mut self) -> PResult<Expr> {
+    pub fn parse_map_expr(&mut self) -> ModalResult<Expr> {
         self.expect_token(&Token::LBrace)?;
         if self.consume_token(&Token::RBrace) {
             return Ok(Expr::Map { entries: vec![] });
@@ -1173,7 +1171,7 @@ impl Parser<'_> {
     }
 
     // This function parses date/time fields for interval qualifiers.
-    pub fn parse_date_time_field(&mut self) -> PResult<DateTimeField> {
+    pub fn parse_date_time_field(&mut self) -> ModalResult<DateTimeField> {
         dispatch! { peek(keyword);
             Keyword::YEAR => keyword.value(DateTimeField::Year),
             Keyword::MONTH => keyword.value(DateTimeField::Month),
@@ -1196,7 +1194,7 @@ impl Parser<'_> {
     //   select extract("invaLId" from null::date);
     //   select extract('invaLId' from null::date);
     // ```
-    pub fn parse_date_time_field_in_extract(&mut self) -> PResult<String> {
+    pub fn parse_date_time_field_in_extract(&mut self) -> ModalResult<String> {
         let checkpoint = *self;
         let token = self.next_token();
         match token.token {
@@ -1221,7 +1219,7 @@ impl Parser<'_> {
     ///   6. `INTERVAL '1:1' HOUR (5) TO MINUTE (5)`
     ///
     /// Note that we do not currently attempt to parse the quoted value.
-    pub fn parse_literal_interval(&mut self) -> PResult<Expr> {
+    pub fn parse_literal_interval(&mut self) -> ModalResult<Expr> {
         // The SQL standard allows an optional sign before the value string, but
         // it is not clear if any implementations support that syntax, so we
         // don't currently try to parse it. (The sign can instead be included
@@ -1289,7 +1287,7 @@ impl Parser<'_> {
     }
 
     /// Parse an operator following an expression
-    pub fn parse_infix(&mut self, expr: Expr, precedence: Precedence) -> PResult<Expr> {
+    pub fn parse_infix(&mut self, expr: Expr, precedence: Precedence) -> ModalResult<Expr> {
         let checkpoint = *self;
         let tok = self.next_token();
         debug!("parsing infix {:?}", tok.token);
@@ -1510,7 +1508,7 @@ impl Parser<'_> {
     }
 
     /// parse the ESCAPE CHAR portion of LIKE, ILIKE, and SIMILAR TO
-    pub fn parse_escape(&mut self) -> PResult<Option<EscapeChar>> {
+    pub fn parse_escape(&mut self) -> ModalResult<Option<EscapeChar>> {
         if self.parse_keyword(Keyword::ESCAPE) {
             let s = self.parse_literal_string()?;
             let mut chs = s.chars();
@@ -1530,7 +1528,7 @@ impl Parser<'_> {
 
     /// We parse both `array[1,9][1]`, `array[1,9][1:2]`, `array[1,9][:2]`, `array[1,9][1:]` and
     /// `array[1,9][:]` in this function.
-    pub fn parse_array_index(&mut self, expr: Expr) -> PResult<Expr> {
+    pub fn parse_array_index(&mut self, expr: Expr) -> ModalResult<Expr> {
         let new_expr = match self.peek_token().token {
             Token::Colon => {
                 // [:] or [:N]
@@ -1595,7 +1593,7 @@ impl Parser<'_> {
     }
 
     /// Parses the optional constraints following the `IS [NOT] JSON` predicate
-    pub fn parse_is_json(&mut self, expr: Expr, negated: bool) -> PResult<Expr> {
+    pub fn parse_is_json(&mut self, expr: Expr, negated: bool) -> ModalResult<Expr> {
         let item_type = match self.peek_token().token {
             Token::Word(w) => match w.keyword {
                 Keyword::VALUE => Some(JsonPredicateType::Value),
@@ -1627,7 +1625,7 @@ impl Parser<'_> {
     }
 
     /// Parses the parens following the `[ NOT ] IN` operator
-    pub fn parse_in(&mut self, expr: Expr, negated: bool) -> PResult<Expr> {
+    pub fn parse_in(&mut self, expr: Expr, negated: bool) -> ModalResult<Expr> {
         self.expect_token(&Token::LParen)?;
         let in_op = if matches!(self.peek_token().token, Token::Word(w) if w.keyword == Keyword::SELECT || w.keyword == Keyword::WITH)
         {
@@ -1648,7 +1646,7 @@ impl Parser<'_> {
     }
 
     /// Parses `BETWEEN <low> AND <high>`, assuming the `BETWEEN` keyword was already consumed
-    pub fn parse_between(&mut self, expr: Expr, negated: bool) -> PResult<Expr> {
+    pub fn parse_between(&mut self, expr: Expr, negated: bool) -> ModalResult<Expr> {
         // Stop parsing subexpressions for <low> and <high> on tokens with
         // precedence lower than that of `BETWEEN`, such as `AND`, `IS`, etc.
         let low = self.parse_subexpr(Precedence::Between)?;
@@ -1663,7 +1661,7 @@ impl Parser<'_> {
     }
 
     /// Parse a postgresql casting style which is in the form of `expr::datatype`
-    pub fn parse_pg_cast(&mut self, expr: Expr) -> PResult<Expr> {
+    pub fn parse_pg_cast(&mut self, expr: Expr) -> ModalResult<Expr> {
         Ok(Expr::Cast {
             expr: Box::new(expr),
             data_type: self.parse_data_type()?,
@@ -1671,7 +1669,7 @@ impl Parser<'_> {
     }
 
     /// Get the precedence of the next token
-    pub fn get_next_precedence(&self) -> PResult<Precedence> {
+    pub fn get_next_precedence(&self) -> ModalResult<Precedence> {
         use Precedence as P;
 
         let token = self.peek_token();
@@ -1820,12 +1818,12 @@ impl Parser<'_> {
     }
 
     /// Report an expected error at the current position.
-    pub fn expected<T>(&self, expected: &str) -> PResult<T> {
+    pub fn expected<T>(&self, expected: &str) -> ModalResult<T> {
         parser_err!("expected {}, found: {}", expected, self.peek_token().token)
     }
 
     /// Revert the parser to a previous position and report an expected error.
-    pub fn expected_at<T>(&mut self, checkpoint: Self, expected: &str) -> PResult<T> {
+    pub fn expected_at<T>(&mut self, checkpoint: Self, expected: &str) -> ModalResult<T> {
         *self = checkpoint;
         self.expected(expected)
     }
@@ -1894,7 +1892,7 @@ impl Parser<'_> {
     }
 
     /// Bail out if the current token is not one of the expected keywords, or consume it if it is
-    pub fn expect_one_of_keywords(&mut self, keywords: &[Keyword]) -> PResult<Keyword> {
+    pub fn expect_one_of_keywords(&mut self, keywords: &[Keyword]) -> ModalResult<Keyword> {
         if let Some(keyword) = self.parse_one_of_keywords(keywords) {
             Ok(keyword)
         } else {
@@ -1904,7 +1902,7 @@ impl Parser<'_> {
     }
 
     /// Bail out if the current token is not an expected keyword, or consume it if it is
-    pub fn expect_keyword(&mut self, expected: Keyword) -> PResult<()> {
+    pub fn expect_keyword(&mut self, expected: Keyword) -> ModalResult<()> {
         if self.parse_keyword(expected) {
             Ok(())
         } else {
@@ -1914,7 +1912,7 @@ impl Parser<'_> {
 
     /// Bail out if the following tokens are not the expected sequence of
     /// keywords, or consume them if they are.
-    pub fn expect_keywords(&mut self, expected: &[Keyword]) -> PResult<()> {
+    pub fn expect_keywords(&mut self, expected: &[Keyword]) -> ModalResult<()> {
         for &kw in expected {
             self.expect_keyword(kw)?;
         }
@@ -1933,7 +1931,7 @@ impl Parser<'_> {
     }
 
     /// Bail out if the current token is not an expected keyword, or consume it if it is
-    pub fn expect_token(&mut self, expected: &Token) -> PResult<()> {
+    pub fn expect_token(&mut self, expected: &Token) -> ModalResult<()> {
         if self.consume_token(expected) {
             Ok(())
         } else {
@@ -1942,9 +1940,9 @@ impl Parser<'_> {
     }
 
     /// Parse a comma-separated list of 1+ items accepted by `F`
-    pub fn parse_comma_separated<T, F>(&mut self, mut f: F) -> PResult<Vec<T>>
+    pub fn parse_comma_separated<T, F>(&mut self, mut f: F) -> ModalResult<Vec<T>>
     where
-        F: FnMut(&mut Self) -> PResult<T>,
+        F: FnMut(&mut Self) -> ModalResult<T>,
     {
         let mut values = vec![];
         loop {
@@ -1961,7 +1959,7 @@ impl Parser<'_> {
     #[must_use]
     fn maybe_parse<T, F>(&mut self, mut f: F) -> Option<T>
     where
-        F: FnMut(&mut Self) -> PResult<T>,
+        F: FnMut(&mut Self) -> ModalResult<T>,
     {
         let checkpoint = *self;
         if let Ok(t) = f(self) {
@@ -1974,7 +1972,7 @@ impl Parser<'_> {
 
     /// Parse either `ALL` or `DISTINCT`. Returns `true` if `DISTINCT` is parsed and results in a
     /// `ParserError` if both `ALL` and `DISTINCT` are fround.
-    pub fn parse_all_or_distinct(&mut self) -> PResult<bool> {
+    pub fn parse_all_or_distinct(&mut self) -> ModalResult<bool> {
         let all = self.parse_keyword(Keyword::ALL);
         let distinct = self.parse_keyword(Keyword::DISTINCT);
         if all && distinct {
@@ -1985,7 +1983,7 @@ impl Parser<'_> {
     }
 
     /// Parse either `ALL` or `DISTINCT` or `DISTINCT ON (<expr>)`.
-    pub fn parse_all_or_distinct_on(&mut self) -> PResult<Distinct> {
+    pub fn parse_all_or_distinct_on(&mut self) -> ModalResult<Distinct> {
         if self.parse_keywords(&[Keyword::DISTINCT, Keyword::ON]) {
             self.expect_token(&Token::LParen)?;
             let exprs = self.parse_comma_separated(Parser::parse_expr)?;
@@ -1999,7 +1997,7 @@ impl Parser<'_> {
     }
 
     /// Parse a SQL CREATE statement
-    pub fn parse_create(&mut self) -> PResult<Statement> {
+    pub fn parse_create(&mut self) -> ModalResult<Statement> {
         let or_replace = self.parse_keywords(&[Keyword::OR, Keyword::REPLACE]);
         let temporary = self
             .parse_one_of_keywords(&[Keyword::TEMP, Keyword::TEMPORARY])
@@ -2045,7 +2043,7 @@ impl Parser<'_> {
         }
     }
 
-    pub fn parse_create_schema(&mut self) -> PResult<Statement> {
+    pub fn parse_create_schema(&mut self) -> ModalResult<Statement> {
         let if_not_exists = self.parse_keywords(&[Keyword::IF, Keyword::NOT, Keyword::EXISTS]);
         let (schema_name, owner) = if self.parse_keyword(Keyword::AUTHORIZATION) {
             let owner = self.parse_object_name()?;
@@ -2066,21 +2064,43 @@ impl Parser<'_> {
         })
     }
 
-    pub fn parse_create_database(&mut self) -> PResult<Statement> {
+    pub fn parse_create_database(&mut self) -> ModalResult<Statement> {
         let if_not_exists = self.parse_keywords(&[Keyword::IF, Keyword::NOT, Keyword::EXISTS]);
         let db_name = self.parse_object_name()?;
         let _ = self.parse_keyword(Keyword::WITH);
-        let owner = if self.parse_keyword(Keyword::OWNER) {
-            let _ = self.consume_token(&Token::Eq);
-            Some(self.parse_object_name()?)
-        } else {
-            None
-        };
+
+        let mut owner = None;
+        let mut resource_group = None;
+
+        while let Some(keyword) =
+            self.parse_one_of_keywords(&[Keyword::OWNER, Keyword::RESOURCE_GROUP])
+        {
+            match keyword {
+                Keyword::OWNER => {
+                    if owner.is_some() {
+                        parser_err!("duplicate OWNER clause in CREATE DATABASE");
+                    }
+
+                    let _ = self.consume_token(&Token::Eq);
+                    owner = Some(self.parse_object_name()?);
+                }
+                Keyword::RESOURCE_GROUP => {
+                    if resource_group.is_some() {
+                        parser_err!("duplicate RESOURCE_GROUP clause in CREATE DATABASE");
+                    }
+
+                    let _ = self.consume_token(&Token::Eq);
+                    resource_group = Some(self.parse_set_variable()?);
+                }
+                _ => unreachable!(),
+            }
+        }
 
         Ok(Statement::CreateDatabase {
             db_name,
             if_not_exists,
             owner,
+            resource_group,
         })
     }
 
@@ -2088,7 +2108,7 @@ impl Parser<'_> {
         &mut self,
         materialized: bool,
         or_replace: bool,
-    ) -> PResult<Statement> {
+    ) -> ModalResult<Statement> {
         let if_not_exists = self.parse_keywords(&[Keyword::IF, Keyword::NOT, Keyword::EXISTS]);
         // Many dialects support `OR ALTER` right after `CREATE`, but we don't (yet).
         // ANSI SQL and Postgres support RECURSIVE here, but we don't support it either.
@@ -2127,7 +2147,7 @@ impl Parser<'_> {
         &mut self,
         _or_replace: bool,
         temporary: bool,
-    ) -> PResult<Statement> {
+    ) -> ModalResult<Statement> {
         impl_parse_to!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], self);
         impl_parse_to!(source_name: ObjectName, self);
 
@@ -2173,7 +2193,7 @@ impl Parser<'_> {
     // FROM
     // <materialized_view: Ident>
     // [WITH (properties)]?
-    pub fn parse_create_sink(&mut self, _or_replace: bool) -> PResult<Statement> {
+    pub fn parse_create_sink(&mut self, _or_replace: bool) -> ModalResult<Statement> {
         Ok(Statement::CreateSink {
             stmt: CreateSinkStatement::parse_to(self)?,
         })
@@ -2186,7 +2206,7 @@ impl Parser<'_> {
     // FROM
     // <materialized_view: Ident>
     // [WITH (properties)]?
-    pub fn parse_create_subscription(&mut self, _or_replace: bool) -> PResult<Statement> {
+    pub fn parse_create_subscription(&mut self, _or_replace: bool) -> ModalResult<Statement> {
         Ok(Statement::CreateSubscription {
             stmt: CreateSubscriptionStatement::parse_to(self)?,
         })
@@ -2197,7 +2217,7 @@ impl Parser<'_> {
     // [IF NOT EXISTS]?
     // <connection_name: Ident>
     // [WITH (properties)]?
-    pub fn parse_create_connection(&mut self) -> PResult<Statement> {
+    pub fn parse_create_connection(&mut self) -> ModalResult<Statement> {
         Ok(Statement::CreateConnection {
             stmt: CreateConnectionStatement::parse_to(self)?,
         })
@@ -2207,7 +2227,7 @@ impl Parser<'_> {
         &mut self,
         or_replace: bool,
         temporary: bool,
-    ) -> PResult<Statement> {
+    ) -> ModalResult<Statement> {
         impl_parse_to!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], self);
 
         let name = self.parse_object_name()?;
@@ -2257,7 +2277,7 @@ impl Parser<'_> {
         })
     }
 
-    fn parse_create_aggregate(&mut self, or_replace: bool) -> PResult<Statement> {
+    fn parse_create_aggregate(&mut self, or_replace: bool) -> ModalResult<Statement> {
         impl_parse_to!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], self);
 
         let name = self.parse_object_name()?;
@@ -2282,32 +2302,32 @@ impl Parser<'_> {
         })
     }
 
-    pub fn parse_declare(&mut self) -> PResult<Statement> {
+    pub fn parse_declare(&mut self) -> ModalResult<Statement> {
         Ok(Statement::DeclareCursor {
             stmt: DeclareCursorStatement::parse_to(self)?,
         })
     }
 
-    pub fn parse_fetch_cursor(&mut self) -> PResult<Statement> {
+    pub fn parse_fetch_cursor(&mut self) -> ModalResult<Statement> {
         Ok(Statement::FetchCursor {
             stmt: FetchCursorStatement::parse_to(self)?,
         })
     }
 
-    pub fn parse_close_cursor(&mut self) -> PResult<Statement> {
+    pub fn parse_close_cursor(&mut self) -> ModalResult<Statement> {
         Ok(Statement::CloseCursor {
             stmt: CloseCursorStatement::parse_to(self)?,
         })
     }
 
-    fn parse_table_column_def(&mut self) -> PResult<TableColumnDef> {
+    fn parse_table_column_def(&mut self) -> ModalResult<TableColumnDef> {
         Ok(TableColumnDef {
             name: self.parse_identifier_non_reserved()?,
             data_type: self.parse_data_type()?,
         })
     }
 
-    fn parse_function_arg(&mut self) -> PResult<OperateFunctionArg> {
+    fn parse_function_arg(&mut self) -> ModalResult<OperateFunctionArg> {
         let mode = if self.parse_keyword(Keyword::IN) {
             Some(ArgMode::In)
         } else if self.parse_keyword(Keyword::OUT) {
@@ -2343,10 +2363,10 @@ impl Parser<'_> {
         })
     }
 
-    fn parse_create_function_body(&mut self) -> PResult<CreateFunctionBody> {
+    fn parse_create_function_body(&mut self) -> ModalResult<CreateFunctionBody> {
         let mut body = CreateFunctionBody::default();
         loop {
-            fn ensure_not_set<T>(field: &Option<T>, name: &str) -> PResult<()> {
+            fn ensure_not_set<T>(field: &Option<T>, name: &str) -> ModalResult<()> {
                 if field.is_some() {
                     parser_err!("{name} specified more than once");
                 }
@@ -2382,7 +2402,7 @@ impl Parser<'_> {
         }
     }
 
-    fn parse_create_function_using(&mut self) -> PResult<CreateFunctionUsing> {
+    fn parse_create_function_using(&mut self) -> ModalResult<CreateFunctionUsing> {
         let keyword = self.expect_one_of_keywords(&[Keyword::LINK, Keyword::BASE64])?;
 
         match keyword {
@@ -2405,28 +2425,28 @@ impl Parser<'_> {
     //     | CREATEUSER | NOCREATEUSER
     //     | LOGIN | NOLOGIN
     //     | [ ENCRYPTED ] PASSWORD 'password' | PASSWORD NULL | OAUTH
-    fn parse_create_user(&mut self) -> PResult<Statement> {
+    fn parse_create_user(&mut self) -> ModalResult<Statement> {
         Ok(Statement::CreateUser(CreateUserStatement::parse_to(self)?))
     }
 
-    fn parse_create_secret(&mut self) -> PResult<Statement> {
+    fn parse_create_secret(&mut self) -> ModalResult<Statement> {
         Ok(Statement::CreateSecret {
             stmt: CreateSecretStatement::parse_to(self)?,
         })
     }
 
-    pub fn parse_with_properties(&mut self) -> PResult<Vec<SqlOption>> {
+    pub fn parse_with_properties(&mut self) -> ModalResult<Vec<SqlOption>> {
         Ok(self
             .parse_options_with_preceding_keyword(Keyword::WITH)?
             .to_vec())
     }
 
-    pub fn parse_discard(&mut self) -> PResult<Statement> {
+    pub fn parse_discard(&mut self) -> ModalResult<Statement> {
         self.expect_keyword(Keyword::ALL)?;
         Ok(Statement::Discard(DiscardType::All))
     }
 
-    pub fn parse_drop(&mut self) -> PResult<Statement> {
+    pub fn parse_drop(&mut self) -> ModalResult<Statement> {
         if self.parse_keyword(Keyword::FUNCTION) {
             return self.parse_drop_function();
         } else if self.parse_keyword(Keyword::AGGREGATE) {
@@ -2439,7 +2459,7 @@ impl Parser<'_> {
     /// DROP FUNCTION [ IF EXISTS ] name [ ( [ [ argmode ] [ argname ] argtype [, ...] ] ) ] [, ...]
     /// [ CASCADE | RESTRICT ]
     /// ```
-    fn parse_drop_function(&mut self) -> PResult<Statement> {
+    fn parse_drop_function(&mut self) -> ModalResult<Statement> {
         let if_exists = self.parse_keywords(&[Keyword::IF, Keyword::EXISTS]);
         let func_desc = self.parse_comma_separated(Parser::parse_function_desc)?;
         let option = match self.parse_one_of_keywords(&[Keyword::CASCADE, Keyword::RESTRICT]) {
@@ -2458,7 +2478,7 @@ impl Parser<'_> {
     /// DROP AGGREGATE [ IF EXISTS ] name [ ( [ [ argmode ] [ argname ] argtype [, ...] ] ) ] [, ...]
     /// [ CASCADE | RESTRICT ]
     /// ```
-    fn parse_drop_aggregate(&mut self) -> PResult<Statement> {
+    fn parse_drop_aggregate(&mut self) -> ModalResult<Statement> {
         let if_exists = self.parse_keywords(&[Keyword::IF, Keyword::EXISTS]);
         let func_desc = self.parse_comma_separated(Parser::parse_function_desc)?;
         let option = match self.parse_one_of_keywords(&[Keyword::CASCADE, Keyword::RESTRICT]) {
@@ -2473,7 +2493,7 @@ impl Parser<'_> {
         })
     }
 
-    fn parse_function_desc(&mut self) -> PResult<FunctionDesc> {
+    fn parse_function_desc(&mut self) -> ModalResult<FunctionDesc> {
         let name = self.parse_object_name()?;
 
         let args = if self.consume_token(&Token::LParen) {
@@ -2491,7 +2511,7 @@ impl Parser<'_> {
         Ok(FunctionDesc { name, args })
     }
 
-    pub fn parse_create_index(&mut self, unique: bool) -> PResult<Statement> {
+    pub fn parse_create_index(&mut self, unique: bool) -> ModalResult<Statement> {
         let if_not_exists = self.parse_keywords(&[Keyword::IF, Keyword::NOT, Keyword::EXISTS]);
         let index_name = self.parse_object_name()?;
         self.expect_keyword(Keyword::ON)?;
@@ -2522,7 +2542,7 @@ impl Parser<'_> {
         })
     }
 
-    pub fn parse_with_version_column(&mut self) -> PResult<Option<String>> {
+    pub fn parse_with_version_column(&mut self) -> ModalResult<Option<String>> {
         if self.parse_keywords(&[Keyword::WITH, Keyword::VERSION, Keyword::COLUMN]) {
             self.expect_token(&Token::LParen)?;
             let name = self.parse_identifier_non_reserved()?;
@@ -2533,7 +2553,7 @@ impl Parser<'_> {
         }
     }
 
-    pub fn parse_on_conflict(&mut self) -> PResult<Option<OnConflict>> {
+    pub fn parse_on_conflict(&mut self) -> ModalResult<Option<OnConflict>> {
         if self.parse_keywords(&[Keyword::ON, Keyword::CONFLICT]) {
             self.parse_handle_conflict_behavior()
         } else {
@@ -2541,7 +2561,11 @@ impl Parser<'_> {
         }
     }
 
-    pub fn parse_create_table(&mut self, or_replace: bool, temporary: bool) -> PResult<Statement> {
+    pub fn parse_create_table(
+        &mut self,
+        or_replace: bool,
+        temporary: bool,
+    ) -> ModalResult<Statement> {
         let if_not_exists = self.parse_keywords(&[Keyword::IF, Keyword::NOT, Keyword::EXISTS]);
         let table_name = self.parse_object_name()?;
         // parse optional column list (schema) and watermarks on source.
@@ -2668,7 +2692,7 @@ impl Parser<'_> {
         })
     }
 
-    pub fn parse_include_options(&mut self) -> PResult<IncludeOption> {
+    pub fn parse_include_options(&mut self) -> ModalResult<IncludeOption> {
         let mut options = vec![];
         while self.parse_keyword(Keyword::INCLUDE) {
             let column_type = self.parse_identifier()?;
@@ -2723,7 +2747,7 @@ impl Parser<'_> {
         Ok(options)
     }
 
-    pub fn parse_columns_with_watermark(&mut self) -> PResult<ColumnsDefTuple> {
+    pub fn parse_columns_with_watermark(&mut self) -> ModalResult<ColumnsDefTuple> {
         let mut columns = vec![];
         let mut constraints = vec![];
         let mut watermarks = vec![];
@@ -2764,7 +2788,7 @@ impl Parser<'_> {
         Ok((columns, constraints, watermarks, wildcard_idx))
     }
 
-    fn parse_column_def(&mut self) -> PResult<ColumnDef> {
+    fn parse_column_def(&mut self) -> ModalResult<ColumnDef> {
         let name = self.parse_identifier_non_reserved()?;
         let data_type = if let Token::Word(_) = self.peek_token().token {
             Some(self.parse_data_type()?)
@@ -2800,7 +2824,7 @@ impl Parser<'_> {
         })
     }
 
-    pub fn parse_optional_column_option(&mut self) -> PResult<Option<ColumnOption>> {
+    pub fn parse_optional_column_option(&mut self) -> ModalResult<Option<ColumnOption>> {
         if self.parse_keywords(&[Keyword::NOT, Keyword::NULL]) {
             Ok(Some(ColumnOption::NotNull))
         } else if self.parse_keyword(Keyword::NULL) {
@@ -2855,7 +2879,7 @@ impl Parser<'_> {
         }
     }
 
-    pub fn parse_handle_conflict_behavior(&mut self) -> PResult<Option<OnConflict>> {
+    pub fn parse_handle_conflict_behavior(&mut self) -> ModalResult<Option<OnConflict>> {
         if self.parse_keyword(Keyword::OVERWRITE) {
             // compatible with v1.9 - v2.0
             Ok(Some(OnConflict::UpdateFull))
@@ -2879,7 +2903,7 @@ impl Parser<'_> {
         }
     }
 
-    pub fn parse_referential_action(&mut self) -> PResult<ReferentialAction> {
+    pub fn parse_referential_action(&mut self) -> ModalResult<ReferentialAction> {
         if self.parse_keyword(Keyword::RESTRICT) {
             Ok(ReferentialAction::Restrict)
         } else if self.parse_keyword(Keyword::CASCADE) {
@@ -2895,7 +2919,7 @@ impl Parser<'_> {
         }
     }
 
-    pub fn parse_optional_watermark(&mut self) -> PResult<Option<SourceWatermark>> {
+    pub fn parse_optional_watermark(&mut self) -> ModalResult<Option<SourceWatermark>> {
         if self.parse_keyword(Keyword::WATERMARK) {
             self.expect_keyword(Keyword::FOR)?;
             let column = self.parse_identifier_non_reserved()?;
@@ -2907,7 +2931,7 @@ impl Parser<'_> {
         }
     }
 
-    pub fn parse_optional_table_constraint(&mut self) -> PResult<Option<TableConstraint>> {
+    pub fn parse_optional_table_constraint(&mut self) -> ModalResult<Option<TableConstraint>> {
         let name = if self.parse_keyword(Keyword::CONSTRAINT) {
             Some(self.parse_identifier_non_reserved()?)
         } else {
@@ -2976,7 +3000,7 @@ impl Parser<'_> {
     pub fn parse_options_with_preceding_keyword(
         &mut self,
         keyword: Keyword,
-    ) -> PResult<Vec<SqlOption>> {
+    ) -> ModalResult<Vec<SqlOption>> {
         if self.parse_keyword(keyword) {
             self.expect_token(&Token::LParen)?;
             self.parse_options_inner()
@@ -2985,7 +3009,7 @@ impl Parser<'_> {
         }
     }
 
-    pub fn parse_options(&mut self) -> PResult<Vec<SqlOption>> {
+    pub fn parse_options(&mut self) -> ModalResult<Vec<SqlOption>> {
         if self.peek_token() == Token::LParen {
             self.next_token();
             self.parse_options_inner()
@@ -2995,7 +3019,7 @@ impl Parser<'_> {
     }
 
     // has parsed a LParen
-    pub fn parse_options_inner(&mut self) -> PResult<Vec<SqlOption>> {
+    pub fn parse_options_inner(&mut self) -> ModalResult<Vec<SqlOption>> {
         let mut values = vec![];
         loop {
             values.push(Parser::parse_sql_option(self)?);
@@ -3010,7 +3034,7 @@ impl Parser<'_> {
         Ok(values)
     }
 
-    pub fn parse_sql_option(&mut self) -> PResult<SqlOption> {
+    pub fn parse_sql_option(&mut self) -> ModalResult<SqlOption> {
         let name = self.parse_object_name()?;
         self.expect_token(&Token::Eq)?;
         let value = {
@@ -3032,7 +3056,7 @@ impl Parser<'_> {
         Ok(SqlOption { name, value })
     }
 
-    pub fn parse_since(&mut self) -> PResult<Since> {
+    pub fn parse_since(&mut self) -> ModalResult<Since> {
         if self.parse_keyword(Keyword::SINCE) {
             let checkpoint = *self;
             let token = self.next_token();
@@ -3070,7 +3094,7 @@ impl Parser<'_> {
         }
     }
 
-    pub fn parse_emit_mode(&mut self) -> PResult<Option<EmitMode>> {
+    pub fn parse_emit_mode(&mut self) -> ModalResult<Option<EmitMode>> {
         if self.parse_keyword(Keyword::EMIT) {
             match self.parse_one_of_keywords(&[Keyword::IMMEDIATELY, Keyword::ON]) {
                 Some(Keyword::IMMEDIATELY) => Ok(Some(EmitMode::Immediately)),
@@ -3086,7 +3110,7 @@ impl Parser<'_> {
         }
     }
 
-    pub fn parse_alter(&mut self) -> PResult<Statement> {
+    pub fn parse_alter(&mut self) -> ModalResult<Statement> {
         if self.parse_keyword(Keyword::DATABASE) {
             self.parse_alter_database()
         } else if self.parse_keyword(Keyword::SCHEMA) {
@@ -3122,7 +3146,7 @@ impl Parser<'_> {
         }
     }
 
-    pub fn parse_alter_database(&mut self) -> PResult<Statement> {
+    pub fn parse_alter_database(&mut self) -> ModalResult<Statement> {
         let database_name = self.parse_object_name()?;
         let operation = if self.parse_keywords(&[Keyword::OWNER, Keyword::TO]) {
             let owner_name: Ident = self.parse_identifier()?;
@@ -3146,7 +3170,7 @@ impl Parser<'_> {
         })
     }
 
-    pub fn parse_alter_schema(&mut self) -> PResult<Statement> {
+    pub fn parse_alter_schema(&mut self) -> ModalResult<Statement> {
         let schema_name = self.parse_object_name()?;
         let operation = if self.parse_keywords(&[Keyword::OWNER, Keyword::TO]) {
             let owner_name: Ident = self.parse_identifier()?;
@@ -3170,11 +3194,11 @@ impl Parser<'_> {
         })
     }
 
-    pub fn parse_alter_user(&mut self) -> PResult<Statement> {
+    pub fn parse_alter_user(&mut self) -> ModalResult<Statement> {
         Ok(Statement::AlterUser(AlterUserStatement::parse_to(self)?))
     }
 
-    pub fn parse_alter_table(&mut self) -> PResult<Statement> {
+    pub fn parse_alter_table(&mut self) -> ModalResult<Statement> {
         let _ = self.parse_keyword(Keyword::ONLY);
         let table_name = self.parse_object_name()?;
         let operation = if self.parse_keyword(Keyword::ADD) {
@@ -3300,7 +3324,7 @@ impl Parser<'_> {
 
     /// BACKFILL_RATE_LIMIT = default | NUMBER
     /// BACKFILL_RATE_LIMIT TO default | NUMBER
-    pub fn parse_alter_backfill_rate_limit(&mut self) -> PResult<Option<i32>> {
+    pub fn parse_alter_backfill_rate_limit(&mut self) -> ModalResult<Option<i32>> {
         if !self.parse_word("BACKFILL_RATE_LIMIT") {
             return Ok(None);
         }
@@ -3322,7 +3346,7 @@ impl Parser<'_> {
 
     /// DML_RATE_LIMIT = default | NUMBER
     /// DML_RATE_LIMIT TO default | NUMBER
-    pub fn parse_alter_dml_rate_limit(&mut self) -> PResult<Option<i32>> {
+    pub fn parse_alter_dml_rate_limit(&mut self) -> ModalResult<Option<i32>> {
         if !self.parse_word("DML_RATE_LIMIT") {
             return Ok(None);
         }
@@ -3344,7 +3368,7 @@ impl Parser<'_> {
 
     /// SOURCE_RATE_LIMIT = default | NUMBER
     /// SOURCE_RATE_LIMIT TO default | NUMBER
-    pub fn parse_alter_source_rate_limit(&mut self, is_table: bool) -> PResult<Option<i32>> {
+    pub fn parse_alter_source_rate_limit(&mut self, is_table: bool) -> ModalResult<Option<i32>> {
         if !self.parse_word("SOURCE_RATE_LIMIT") {
             return Ok(None);
         }
@@ -3365,7 +3389,7 @@ impl Parser<'_> {
         Ok(Some(rate_limit))
     }
 
-    pub fn parse_alter_index(&mut self) -> PResult<Statement> {
+    pub fn parse_alter_index(&mut self) -> ModalResult<Statement> {
         let index_name = self.parse_object_name()?;
         let operation = if self.parse_keyword(Keyword::RENAME) {
             if self.parse_keyword(Keyword::TO) {
@@ -3403,7 +3427,7 @@ impl Parser<'_> {
         })
     }
 
-    pub fn parse_alter_view(&mut self, materialized: bool) -> PResult<Statement> {
+    pub fn parse_alter_view(&mut self, materialized: bool) -> ModalResult<Statement> {
         let view_name = self.parse_object_name()?;
         let operation = if self.parse_keyword(Keyword::RENAME) {
             if self.parse_keyword(Keyword::TO) {
@@ -3489,7 +3513,7 @@ impl Parser<'_> {
 
     /// SINK_RATE_LIMIT = default | NUMBER
     /// SINK_RATE_LIMIT TO default | NUMBER
-    pub fn parse_alter_sink_rate_limit(&mut self) -> PResult<Option<i32>> {
+    pub fn parse_alter_sink_rate_limit(&mut self) -> ModalResult<Option<i32>> {
         if !self.parse_word("SINK_RATE_LIMIT") {
             return Ok(None);
         }
@@ -3509,7 +3533,7 @@ impl Parser<'_> {
         Ok(Some(rate_limit))
     }
 
-    pub fn parse_alter_sink(&mut self) -> PResult<Statement> {
+    pub fn parse_alter_sink(&mut self) -> ModalResult<Statement> {
         let sink_name = self.parse_object_name()?;
         let operation = if self.parse_keyword(Keyword::RENAME) {
             if self.parse_keyword(Keyword::TO) {
@@ -3561,7 +3585,7 @@ impl Parser<'_> {
         })
     }
 
-    pub fn parse_alter_subscription(&mut self) -> PResult<Statement> {
+    pub fn parse_alter_subscription(&mut self) -> ModalResult<Statement> {
         let subscription_name = self.parse_object_name()?;
         let operation = if self.parse_keyword(Keyword::RENAME) {
             if self.parse_keyword(Keyword::TO) {
@@ -3599,7 +3623,7 @@ impl Parser<'_> {
         })
     }
 
-    pub fn parse_alter_source(&mut self) -> PResult<Statement> {
+    pub fn parse_alter_source(&mut self) -> ModalResult<Statement> {
         let source_name = self.parse_object_name()?;
         let operation = if self.parse_keyword(Keyword::RENAME) {
             if self.parse_keyword(Keyword::TO) {
@@ -3664,7 +3688,7 @@ impl Parser<'_> {
         })
     }
 
-    pub fn parse_alter_function(&mut self) -> PResult<Statement> {
+    pub fn parse_alter_function(&mut self) -> ModalResult<Statement> {
         let FunctionDesc { name, args } = self.parse_function_desc()?;
 
         let operation = if self.parse_keyword(Keyword::SET) {
@@ -3687,7 +3711,7 @@ impl Parser<'_> {
         })
     }
 
-    pub fn parse_alter_connection(&mut self) -> PResult<Statement> {
+    pub fn parse_alter_connection(&mut self) -> ModalResult<Statement> {
         let connection_name = self.parse_object_name()?;
         let operation = if self.parse_keyword(Keyword::SET) {
             if self.parse_keyword(Keyword::SCHEMA) {
@@ -3698,8 +3722,13 @@ impl Parser<'_> {
             } else {
                 return self.expected("SCHEMA after SET");
             }
+        } else if self.parse_keywords(&[Keyword::OWNER, Keyword::TO]) {
+            let owner_name: Ident = self.parse_identifier()?;
+            AlterConnectionOperation::ChangeOwner {
+                new_owner_name: owner_name,
+            }
         } else {
-            return self.expected("SET after ALTER CONNECTION");
+            return self.expected("SET, or OWNER TO after ALTER CONNECTION");
         };
 
         Ok(Statement::AlterConnection {
@@ -3708,7 +3737,7 @@ impl Parser<'_> {
         })
     }
 
-    pub fn parse_alter_system(&mut self) -> PResult<Statement> {
+    pub fn parse_alter_system(&mut self) -> ModalResult<Statement> {
         self.expect_keyword(Keyword::SET)?;
         let param = self.parse_identifier()?;
         if self.expect_keyword(Keyword::TO).is_err() && self.expect_token(&Token::Eq).is_err() {
@@ -3718,7 +3747,7 @@ impl Parser<'_> {
         Ok(Statement::AlterSystem { param, value })
     }
 
-    pub fn parse_alter_secret(&mut self) -> PResult<Statement> {
+    pub fn parse_alter_secret(&mut self) -> ModalResult<Statement> {
         let secret_name = self.parse_object_name()?;
         let with_options = self.parse_with_properties()?;
         self.expect_keyword(Keyword::AS)?;
@@ -3732,7 +3761,7 @@ impl Parser<'_> {
     }
 
     /// Parse a copy statement
-    pub fn parse_copy(&mut self) -> PResult<Statement> {
+    pub fn parse_copy(&mut self) -> ModalResult<Statement> {
         let table_name = self.parse_object_name()?;
         let columns = self.parse_parenthesized_column_list(Optional)?;
         self.expect_keywords(&[Keyword::FROM, Keyword::STDIN])?;
@@ -3782,7 +3811,7 @@ impl Parser<'_> {
         values
     }
 
-    pub fn ensure_parse_value(&mut self) -> PResult<Value> {
+    pub fn ensure_parse_value(&mut self) -> ModalResult<Value> {
         match self.parse_value_and_obj_ref::<true>()? {
             SqlOptionValue::Value(value) => Ok(value),
             SqlOptionValue::SecretRef(_) | SqlOptionValue::ConnectionRef(_) => unreachable!(),
@@ -3792,7 +3821,7 @@ impl Parser<'_> {
     /// Parse a literal value (numbers, strings, date/time, booleans)
     pub fn parse_value_and_obj_ref<const FORBID_OBJ_REF: bool>(
         &mut self,
-    ) -> PResult<SqlOptionValue> {
+    ) -> ModalResult<SqlOptionValue> {
         let checkpoint = *self;
         let token = self.next_token();
         match token.token {
@@ -3829,7 +3858,7 @@ impl Parser<'_> {
         }
     }
 
-    fn parse_secret_ref(&mut self) -> PResult<SecretRefValue> {
+    fn parse_secret_ref(&mut self) -> ModalResult<SecretRefValue> {
         let secret_name = self.parse_object_name()?;
         let ref_as = if self.parse_keywords(&[Keyword::AS, Keyword::FILE]) {
             SecretRefAsType::File
@@ -3842,7 +3871,7 @@ impl Parser<'_> {
         })
     }
 
-    fn parse_set_variable(&mut self) -> PResult<SetVariableValue> {
+    fn parse_set_variable(&mut self) -> ModalResult<SetVariableValue> {
         alt((
             Keyword::DEFAULT.value(SetVariableValue::Default),
             separated(
@@ -3873,7 +3902,7 @@ impl Parser<'_> {
         .parse_next(self)
     }
 
-    pub fn parse_number_value(&mut self) -> PResult<String> {
+    pub fn parse_number_value(&mut self) -> ModalResult<String> {
         let checkpoint = *self;
         match self.ensure_parse_value()? {
             Value::Number(v) => Ok(v),
@@ -3882,11 +3911,11 @@ impl Parser<'_> {
     }
 
     /// Parse an unsigned literal integer/long
-    pub fn parse_literal_uint(&mut self) -> PResult<u64> {
+    pub fn parse_literal_uint(&mut self) -> ModalResult<u64> {
         literal_uint(self)
     }
 
-    pub fn parse_function_definition(&mut self) -> PResult<FunctionDefinition> {
+    pub fn parse_function_definition(&mut self) -> ModalResult<FunctionDefinition> {
         alt((
             single_quoted_string.map(FunctionDefinition::SingleQuotedDef),
             dollar_quoted_string.map(FunctionDefinition::DoubleDollarDef),
@@ -3897,7 +3926,7 @@ impl Parser<'_> {
     }
 
     /// Parse a literal string
-    pub fn parse_literal_string(&mut self) -> PResult<String> {
+    pub fn parse_literal_string(&mut self) -> ModalResult<String> {
         let checkpoint = *self;
         let token = self.next_token();
         match token.token {
@@ -3907,7 +3936,7 @@ impl Parser<'_> {
     }
 
     /// Parse a map key string
-    pub fn parse_map_key(&mut self) -> PResult<Expr> {
+    pub fn parse_map_key(&mut self) -> ModalResult<Expr> {
         alt((
             Self::parse_function,
             single_quoted_string.map(|s| Expr::Value(Value::SingleQuotedString(s))),
@@ -3918,14 +3947,17 @@ impl Parser<'_> {
     }
 
     /// Parse a SQL datatype (in the context of a CREATE TABLE statement for example)
-    pub fn parse_data_type(&mut self) -> PResult<DataType> {
+    pub fn parse_data_type(&mut self) -> ModalResult<DataType> {
         parser_v2::data_type(self)
     }
 
     /// Parse `AS identifier` (or simply `identifier` if it's not a reserved keyword)
     /// Some examples with aliases: `SELECT 1 foo`, `SELECT COUNT(*) AS cnt`,
     /// `SELECT ... FROM t1 foo, t2 bar`, `SELECT ... FROM (...) AS bar`
-    pub fn parse_optional_alias(&mut self, reserved_kwds: &[Keyword]) -> PResult<Option<Ident>> {
+    pub fn parse_optional_alias(
+        &mut self,
+        reserved_kwds: &[Keyword],
+    ) -> ModalResult<Option<Ident>> {
         let after_as = self.parse_keyword(Keyword::AS);
         let checkpoint = *self;
         let token = self.next_token();
@@ -3955,7 +3987,7 @@ impl Parser<'_> {
     pub fn parse_optional_table_alias(
         &mut self,
         reserved_kwds: &[Keyword],
-    ) -> PResult<Option<TableAlias>> {
+    ) -> ModalResult<Option<TableAlias>> {
         match self.parse_optional_alias(reserved_kwds)? {
             Some(name) => {
                 let columns = self.parse_parenthesized_column_list(Optional)?;
@@ -3966,7 +3998,7 @@ impl Parser<'_> {
     }
 
     /// syntax `FOR SYSTEM_TIME AS OF PROCTIME()` is used for temporal join.
-    pub fn parse_as_of(&mut self) -> PResult<AsOf> {
+    pub fn parse_as_of(&mut self) -> ModalResult<AsOf> {
         Keyword::FOR.parse_next(self)?;
         alt((
             preceded(
@@ -4034,7 +4066,7 @@ impl Parser<'_> {
 
     /// Parse a possibly qualified, possibly quoted identifier, e.g.
     /// `foo` or `myschema."table"
-    pub fn parse_object_name(&mut self) -> PResult<ObjectName> {
+    pub fn parse_object_name(&mut self) -> ModalResult<ObjectName> {
         let mut idents = vec![];
         loop {
             idents.push(self.parse_identifier()?);
@@ -4046,7 +4078,7 @@ impl Parser<'_> {
     }
 
     /// Parse identifiers strictly i.e. don't parse keywords
-    pub fn parse_identifiers_non_keywords(&mut self) -> PResult<Vec<Ident>> {
+    pub fn parse_identifiers_non_keywords(&mut self) -> ModalResult<Vec<Ident>> {
         let mut idents = vec![];
         loop {
             match self.peek_token().token {
@@ -4068,7 +4100,7 @@ impl Parser<'_> {
     }
 
     /// Parse identifiers
-    pub fn parse_identifiers(&mut self) -> PResult<Vec<Ident>> {
+    pub fn parse_identifiers(&mut self) -> ModalResult<Vec<Ident>> {
         let mut idents = vec![];
         loop {
             let token = self.next_token();
@@ -4085,7 +4117,7 @@ impl Parser<'_> {
     }
 
     /// Parse a simple one-word identifier (possibly quoted, possibly a keyword)
-    pub fn parse_identifier(&mut self) -> PResult<Ident> {
+    pub fn parse_identifier(&mut self) -> ModalResult<Ident> {
         let checkpoint = *self;
         let token = self.next_token();
         match token.token {
@@ -4095,7 +4127,7 @@ impl Parser<'_> {
     }
 
     /// Parse a simple one-word identifier (possibly quoted, possibly a non-reserved keyword)
-    pub fn parse_identifier_non_reserved(&mut self) -> PResult<Ident> {
+    pub fn parse_identifier_non_reserved(&mut self) -> ModalResult<Ident> {
         let checkpoint = *self;
         let token = self.next_token();
         match token.token {
@@ -4110,7 +4142,10 @@ impl Parser<'_> {
     }
 
     /// Parse a parenthesized comma-separated list of unqualified, possibly quoted identifiers
-    pub fn parse_parenthesized_column_list(&mut self, optional: IsOptional) -> PResult<Vec<Ident>> {
+    pub fn parse_parenthesized_column_list(
+        &mut self,
+        optional: IsOptional,
+    ) -> ModalResult<Vec<Ident>> {
         if self.consume_token(&Token::LParen) {
             let cols = self.parse_comma_separated(Parser::parse_identifier_non_reserved)?;
             self.expect_token(&Token::RParen)?;
@@ -4122,7 +4157,7 @@ impl Parser<'_> {
         }
     }
 
-    pub fn parse_returning(&mut self, optional: IsOptional) -> PResult<Vec<SelectItem>> {
+    pub fn parse_returning(&mut self, optional: IsOptional) -> ModalResult<Vec<SelectItem>> {
         if self.parse_keyword(Keyword::RETURNING) {
             let cols = self.parse_comma_separated(Parser::parse_select_item)?;
             Ok(cols)
@@ -4133,7 +4168,7 @@ impl Parser<'_> {
         }
     }
 
-    pub fn parse_row_expr(&mut self) -> PResult<Expr> {
+    pub fn parse_row_expr(&mut self) -> ModalResult<Expr> {
         Ok(Expr::Row(self.parse_token_wrapped_exprs(
             &Token::LParen,
             &Token::RParen,
@@ -4141,7 +4176,11 @@ impl Parser<'_> {
     }
 
     /// Parse a comma-separated list (maybe empty) from a wrapped expression
-    pub fn parse_token_wrapped_exprs(&mut self, left: &Token, right: &Token) -> PResult<Vec<Expr>> {
+    pub fn parse_token_wrapped_exprs(
+        &mut self,
+        left: &Token,
+        right: &Token,
+    ) -> ModalResult<Vec<Expr>> {
         if self.consume_token(left) {
             let exprs = if self.consume_token(right) {
                 vec![]
@@ -4156,7 +4195,7 @@ impl Parser<'_> {
         }
     }
 
-    pub fn parse_optional_precision(&mut self) -> PResult<Option<u64>> {
+    pub fn parse_optional_precision(&mut self) -> ModalResult<Option<u64>> {
         if self.consume_token(&Token::LParen) {
             let n = self.parse_literal_uint()?;
             self.expect_token(&Token::RParen)?;
@@ -4166,7 +4205,7 @@ impl Parser<'_> {
         }
     }
 
-    pub fn parse_optional_precision_scale(&mut self) -> PResult<(Option<u64>, Option<u64>)> {
+    pub fn parse_optional_precision_scale(&mut self) -> ModalResult<(Option<u64>, Option<u64>)> {
         if self.consume_token(&Token::LParen) {
             let n = self.parse_literal_uint()?;
             let scale = if self.consume_token(&Token::Comma) {
@@ -4181,7 +4220,7 @@ impl Parser<'_> {
         }
     }
 
-    pub fn parse_delete(&mut self) -> PResult<Statement> {
+    pub fn parse_delete(&mut self) -> ModalResult<Statement> {
         self.expect_keyword(Keyword::FROM)?;
         let table_name = self.parse_object_name()?;
         let selection = if self.parse_keyword(Keyword::WHERE) {
@@ -4210,7 +4249,7 @@ impl Parser<'_> {
         }
     }
 
-    pub fn parse_explain(&mut self) -> PResult<Statement> {
+    pub fn parse_explain(&mut self) -> ModalResult<Statement> {
         let mut options = ExplainOptions::default();
 
         let explain_key_words = [
@@ -4223,7 +4262,7 @@ impl Parser<'_> {
             Keyword::FORMAT,
         ];
 
-        let parse_explain_option = |parser: &mut Parser<'_>| -> PResult<()> {
+        let parse_explain_option = |parser: &mut Parser<'_>| -> ModalResult<()> {
             let keyword = parser.expect_one_of_keywords(&explain_key_words)?;
             match keyword {
                 Keyword::VERBOSE => options.verbose = parser.parse_optional_boolean(true),
@@ -4290,7 +4329,7 @@ impl Parser<'_> {
     /// preceded with some `WITH` CTE declarations and optionally followed
     /// by `ORDER BY`. Unlike some other parse_... methods, this one doesn't
     /// expect the initial keyword to be already consumed
-    pub fn parse_query(&mut self) -> PResult<Query> {
+    pub fn parse_query(&mut self) -> ModalResult<Query> {
         let with = if self.parse_keyword(Keyword::WITH) {
             Some(With {
                 recursive: self.parse_keyword(Keyword::RECURSIVE),
@@ -4344,7 +4383,7 @@ impl Parser<'_> {
     }
 
     /// Parse a CTE (`alias [( col1, col2, ... )] AS (subquery)`)
-    fn parse_cte(&mut self) -> PResult<Cte> {
+    fn parse_cte(&mut self) -> ModalResult<Cte> {
         let name = self.parse_identifier_non_reserved()?;
         let cte = if self.parse_keyword(Keyword::AS) {
             let cte_inner = self.parse_cte_inner()?;
@@ -4363,7 +4402,7 @@ impl Parser<'_> {
         Ok(cte)
     }
 
-    fn parse_cte_inner(&mut self) -> PResult<CteInner> {
+    fn parse_cte_inner(&mut self) -> ModalResult<CteInner> {
         if let Ok(()) = self.expect_token(&Token::LParen) {
             let query = self.parse_query()?;
             self.expect_token(&Token::RParen)?;
@@ -4386,7 +4425,7 @@ impl Parser<'_> {
     ///   subquery ::= query_body [ order_by_limit ]
     ///   set_operation ::= query_body { 'UNION' | 'EXCEPT' | 'INTERSECT' } [ 'ALL' ] query_body
     /// ```
-    fn parse_query_body(&mut self, precedence: u8) -> PResult<SetExpr> {
+    fn parse_query_body(&mut self, precedence: u8) -> ModalResult<SetExpr> {
         // We parse the expression using a Pratt parser, as in `parse_expr()`.
         // Start by parsing a restricted SELECT or a `(subquery)`:
         let mut expr = if self.parse_keyword(Keyword::SELECT) {
@@ -4442,7 +4481,7 @@ impl Parser<'_> {
         }
     }
 
-    fn parse_corresponding(&mut self) -> PResult<Corresponding> {
+    fn parse_corresponding(&mut self) -> ModalResult<Corresponding> {
         let corresponding = if self.parse_keyword(Keyword::CORRESPONDING) {
             let column_list = if self.parse_keyword(Keyword::BY) {
                 Some(self.parse_parenthesized_column_list(IsOptional::Mandatory)?)
@@ -4458,7 +4497,7 @@ impl Parser<'_> {
 
     /// Parse a restricted `SELECT` statement (no CTEs / `UNION` / `ORDER BY`),
     /// assuming the initial `SELECT` was already consumed
-    pub fn parse_select(&mut self) -> PResult<Select> {
+    pub fn parse_select(&mut self) -> ModalResult<Select> {
         let distinct = self.parse_all_or_distinct_on()?;
 
         let projection = self.parse_comma_separated(Parser::parse_select_item)?;
@@ -4533,7 +4572,7 @@ impl Parser<'_> {
         })
     }
 
-    pub fn parse_set(&mut self) -> PResult<Statement> {
+    pub fn parse_set(&mut self) -> ModalResult<Statement> {
         let modifier = self.parse_one_of_keywords(&[Keyword::SESSION, Keyword::LOCAL]);
         if self.parse_keywords(&[Keyword::TIME, Keyword::ZONE]) {
             let value = alt((
@@ -4610,7 +4649,7 @@ impl Parser<'_> {
     /// If have `databases`,`tables`,`columns`,`schemas` and `materialized views` after show,
     /// return `Statement::ShowCommand` or `Statement::ShowColumn`,
     /// otherwise, return `Statement::ShowVariable`.
-    pub fn parse_show(&mut self) -> PResult<Statement> {
+    pub fn parse_show(&mut self) -> ModalResult<Statement> {
         let checkpoint = *self;
         if let Token::Word(w) = self.next_token().token {
             match w.keyword {
@@ -4779,7 +4818,7 @@ impl Parser<'_> {
         })
     }
 
-    pub fn parse_cancel_job(&mut self) -> PResult<Statement> {
+    pub fn parse_cancel_job(&mut self) -> ModalResult<Statement> {
         // CANCEL [JOBS|JOB] job_ids
         match self.peek_token().token {
             Token::Word(w) if Keyword::JOBS == w.keyword || Keyword::JOB == w.keyword => {
@@ -4798,14 +4837,14 @@ impl Parser<'_> {
         Ok(Statement::CancelJobs(JobIdents(job_ids)))
     }
 
-    pub fn parse_kill_process(&mut self) -> PResult<Statement> {
+    pub fn parse_kill_process(&mut self) -> ModalResult<Statement> {
         let process_id = self.parse_literal_uint()? as i32;
         Ok(Statement::Kill(process_id))
     }
 
     /// Parser `from schema` after `show tables` and `show materialized views`, if not conclude
     /// `from` then use default schema name.
-    pub fn parse_from_and_identifier(&mut self) -> PResult<Option<Ident>> {
+    pub fn parse_from_and_identifier(&mut self) -> ModalResult<Option<Ident>> {
         if self.parse_keyword(Keyword::FROM) {
             Ok(Some(self.parse_identifier_non_reserved()?))
         } else {
@@ -4814,7 +4853,7 @@ impl Parser<'_> {
     }
 
     /// Parse object type and name after `show create`.
-    pub fn parse_show_create(&mut self) -> PResult<Statement> {
+    pub fn parse_show_create(&mut self) -> ModalResult<Statement> {
         if let Token::Word(w) = self.next_token().token {
             let show_type = match w.keyword {
                 Keyword::TABLE => ShowCreateType::Table,
@@ -4845,7 +4884,7 @@ impl Parser<'_> {
         )
     }
 
-    pub fn parse_show_statement_filter(&mut self) -> PResult<Option<ShowStatementFilter>> {
+    pub fn parse_show_statement_filter(&mut self) -> ModalResult<Option<ShowStatementFilter>> {
         if self.parse_keyword(Keyword::LIKE) {
             Ok(Some(ShowStatementFilter::Like(
                 self.parse_literal_string()?,
@@ -4861,7 +4900,7 @@ impl Parser<'_> {
         }
     }
 
-    pub fn parse_table_and_joins(&mut self) -> PResult<TableWithJoins> {
+    pub fn parse_table_and_joins(&mut self) -> ModalResult<TableWithJoins> {
         let relation = self.parse_table_factor()?;
 
         // Note that for keywords to be properly handled here, they need to be
@@ -4961,7 +5000,7 @@ impl Parser<'_> {
     }
 
     /// A table name or a parenthesized subquery, followed by optional `[AS] alias`
-    pub fn parse_table_factor(&mut self) -> PResult<TableFactor> {
+    pub fn parse_table_factor(&mut self) -> ModalResult<TableFactor> {
         if self.parse_keyword(Keyword::LATERAL) {
             // LATERAL must always be followed by a subquery.
             if !self.consume_token(&Token::LParen) {
@@ -5064,7 +5103,7 @@ impl Parser<'_> {
         }
     }
 
-    pub fn parse_derived_table_factor(&mut self, lateral: IsLateral) -> PResult<TableFactor> {
+    pub fn parse_derived_table_factor(&mut self, lateral: IsLateral) -> ModalResult<TableFactor> {
         let subquery = Box::new(self.parse_query()?);
         self.expect_token(&Token::RParen)?;
         let alias = self.parse_optional_table_alias(keywords::RESERVED_FOR_TABLE_ALIAS)?;
@@ -5078,7 +5117,7 @@ impl Parser<'_> {
         })
     }
 
-    fn parse_join_constraint(&mut self, natural: bool) -> PResult<JoinConstraint> {
+    fn parse_join_constraint(&mut self, natural: bool) -> ModalResult<JoinConstraint> {
         if natural {
             Ok(JoinConstraint::Natural)
         } else if self.parse_keyword(Keyword::ON) {
@@ -5094,7 +5133,7 @@ impl Parser<'_> {
     }
 
     /// Parse a GRANT statement.
-    pub fn parse_grant(&mut self) -> PResult<Statement> {
+    pub fn parse_grant(&mut self) -> ModalResult<Statement> {
         let (privileges, objects) = self.parse_grant_revoke_privileges_objects()?;
 
         self.expect_keyword(Keyword::TO)?;
@@ -5116,7 +5155,7 @@ impl Parser<'_> {
         })
     }
 
-    fn parse_grant_revoke_privileges_objects(&mut self) -> PResult<(Privileges, GrantObjects)> {
+    fn parse_grant_revoke_privileges_objects(&mut self) -> ModalResult<(Privileges, GrantObjects)> {
         let privileges = if self.parse_keyword(Keyword::ALL) {
             Privileges::All {
                 with_privileges_keyword: self.parse_keyword(Keyword::PRIVILEGES),
@@ -5221,7 +5260,7 @@ impl Parser<'_> {
         Ok((privileges, objects))
     }
 
-    fn parse_grant_permission(&mut self) -> PResult<(Keyword, Option<Vec<Ident>>)> {
+    fn parse_grant_permission(&mut self) -> ModalResult<(Keyword, Option<Vec<Ident>>)> {
         let kw = self.expect_one_of_keywords(&[
             Keyword::CONNECT,
             Keyword::CREATE,
@@ -5251,7 +5290,7 @@ impl Parser<'_> {
     }
 
     /// Parse a REVOKE statement
-    pub fn parse_revoke(&mut self) -> PResult<Statement> {
+    pub fn parse_revoke(&mut self) -> ModalResult<Statement> {
         let revoke_grant_option =
             self.parse_keywords(&[Keyword::GRANT, Keyword::OPTION, Keyword::FOR]);
         let (privileges, objects) = self.parse_grant_revoke_privileges_objects()?;
@@ -5280,7 +5319,7 @@ impl Parser<'_> {
     }
 
     /// Parse an INSERT statement
-    pub fn parse_insert(&mut self) -> PResult<Statement> {
+    pub fn parse_insert(&mut self) -> ModalResult<Statement> {
         self.expect_keyword(Keyword::INTO)?;
 
         let table_name = self.parse_object_name()?;
@@ -5296,7 +5335,7 @@ impl Parser<'_> {
         })
     }
 
-    pub fn parse_update(&mut self) -> PResult<Statement> {
+    pub fn parse_update(&mut self) -> ModalResult<Statement> {
         let table_name = self.parse_object_name()?;
 
         self.expect_keyword(Keyword::SET)?;
@@ -5316,7 +5355,7 @@ impl Parser<'_> {
     }
 
     /// Parse a `var = expr` assignment, used in an UPDATE statement
-    pub fn parse_assignment(&mut self) -> PResult<Assignment> {
+    pub fn parse_assignment(&mut self) -> ModalResult<Assignment> {
         let id = self.parse_identifiers_non_keywords()?;
         self.expect_token(&Token::Eq)?;
 
@@ -5330,7 +5369,7 @@ impl Parser<'_> {
     }
 
     /// Parse a `[VARIADIC] name => expr`.
-    fn parse_function_args(&mut self) -> PResult<(bool, FunctionArg)> {
+    fn parse_function_args(&mut self) -> ModalResult<(bool, FunctionArg)> {
         let variadic = self.parse_keyword(Keyword::VARIADIC);
         let arg = if self.peek_nth_token(1) == Token::RArrow {
             let name = self.parse_identifier()?;
@@ -5345,7 +5384,7 @@ impl Parser<'_> {
         Ok((variadic, arg))
     }
 
-    pub fn parse_argument_list(&mut self) -> PResult<FunctionArgList> {
+    pub fn parse_argument_list(&mut self) -> ModalResult<FunctionArgList> {
         self.expect_token(&Token::LParen)?;
         if self.consume_token(&Token::RParen) {
             Ok(FunctionArgList::empty())
@@ -5384,7 +5423,7 @@ impl Parser<'_> {
     }
 
     /// Parse a comma-delimited list of projections after SELECT
-    pub fn parse_select_item(&mut self) -> PResult<SelectItem> {
+    pub fn parse_select_item(&mut self) -> ModalResult<SelectItem> {
         match self.parse_wildcard_or_expr()? {
             WildcardOrExpr::Expr(expr) => self
                 .parse_optional_alias(keywords::RESERVED_FOR_COLUMN_ALIAS)
@@ -5403,7 +5442,7 @@ impl Parser<'_> {
     }
 
     /// Parse an expression, optionally followed by ASC or DESC (used in ORDER BY)
-    pub fn parse_order_by_expr(&mut self) -> PResult<OrderByExpr> {
+    pub fn parse_order_by_expr(&mut self) -> ModalResult<OrderByExpr> {
         let expr = self.parse_expr()?;
 
         let asc = if self.parse_keyword(Keyword::ASC) {
@@ -5430,7 +5469,7 @@ impl Parser<'_> {
     }
 
     /// Parse a LIMIT clause
-    pub fn parse_limit(&mut self) -> PResult<Option<Expr>> {
+    pub fn parse_limit(&mut self) -> ModalResult<Option<Expr>> {
         if self.parse_keyword(Keyword::ALL) {
             Ok(None)
         } else {
@@ -5440,7 +5479,7 @@ impl Parser<'_> {
     }
 
     /// Parse an OFFSET clause
-    pub fn parse_offset(&mut self) -> PResult<String> {
+    pub fn parse_offset(&mut self) -> ModalResult<String> {
         let value = self.parse_number_value()?;
         // TODO(Kexiang): support LIMIT expr
         if self.consume_token(&Token::DoubleColon) {
@@ -5451,7 +5490,7 @@ impl Parser<'_> {
     }
 
     /// Parse a FETCH clause
-    pub fn parse_fetch(&mut self) -> PResult<Fetch> {
+    pub fn parse_fetch(&mut self) -> ModalResult<Fetch> {
         self.expect_one_of_keywords(&[Keyword::FIRST, Keyword::NEXT])?;
         let quantity = if self
             .parse_one_of_keywords(&[Keyword::ROW, Keyword::ROWS])
@@ -5476,7 +5515,7 @@ impl Parser<'_> {
         })
     }
 
-    pub fn parse_values(&mut self) -> PResult<Values> {
+    pub fn parse_values(&mut self) -> ModalResult<Values> {
         let values = self.parse_comma_separated(|parser| {
             parser.expect_token(&Token::LParen)?;
             let exprs = parser.parse_comma_separated(Parser::parse_expr)?;
@@ -5486,21 +5525,21 @@ impl Parser<'_> {
         Ok(Values(values))
     }
 
-    pub fn parse_start_transaction(&mut self) -> PResult<Statement> {
+    pub fn parse_start_transaction(&mut self) -> ModalResult<Statement> {
         self.expect_keyword(Keyword::TRANSACTION)?;
         Ok(Statement::StartTransaction {
             modes: self.parse_transaction_modes()?,
         })
     }
 
-    pub fn parse_begin(&mut self) -> PResult<Statement> {
+    pub fn parse_begin(&mut self) -> ModalResult<Statement> {
         let _ = self.parse_one_of_keywords(&[Keyword::TRANSACTION, Keyword::WORK]);
         Ok(Statement::Begin {
             modes: self.parse_transaction_modes()?,
         })
     }
 
-    pub fn parse_transaction_modes(&mut self) -> PResult<Vec<TransactionMode>> {
+    pub fn parse_transaction_modes(&mut self) -> ModalResult<Vec<TransactionMode>> {
         let mut modes = vec![];
         let mut required = false;
         loop {
@@ -5536,19 +5575,19 @@ impl Parser<'_> {
         Ok(modes)
     }
 
-    pub fn parse_commit(&mut self) -> PResult<Statement> {
+    pub fn parse_commit(&mut self) -> ModalResult<Statement> {
         Ok(Statement::Commit {
             chain: self.parse_commit_rollback_chain()?,
         })
     }
 
-    pub fn parse_rollback(&mut self) -> PResult<Statement> {
+    pub fn parse_rollback(&mut self) -> ModalResult<Statement> {
         Ok(Statement::Rollback {
             chain: self.parse_commit_rollback_chain()?,
         })
     }
 
-    pub fn parse_commit_rollback_chain(&mut self) -> PResult<bool> {
+    pub fn parse_commit_rollback_chain(&mut self) -> ModalResult<bool> {
         let _ = self.parse_one_of_keywords(&[Keyword::TRANSACTION, Keyword::WORK]);
         if self.parse_keyword(Keyword::AND) {
             let chain = !self.parse_keyword(Keyword::NO);
@@ -5559,13 +5598,13 @@ impl Parser<'_> {
         }
     }
 
-    fn parse_deallocate(&mut self) -> PResult<Statement> {
+    fn parse_deallocate(&mut self) -> ModalResult<Statement> {
         let prepare = self.parse_keyword(Keyword::PREPARE);
         let name = self.parse_identifier()?;
         Ok(Statement::Deallocate { name, prepare })
     }
 
-    fn parse_execute(&mut self) -> PResult<Statement> {
+    fn parse_execute(&mut self) -> ModalResult<Statement> {
         let name = self.parse_identifier()?;
 
         let mut parameters = vec![];
@@ -5577,7 +5616,7 @@ impl Parser<'_> {
         Ok(Statement::Execute { name, parameters })
     }
 
-    fn parse_prepare(&mut self) -> PResult<Statement> {
+    fn parse_prepare(&mut self) -> ModalResult<Statement> {
         let name = self.parse_identifier()?;
 
         let mut data_types = vec![];
@@ -5595,7 +5634,7 @@ impl Parser<'_> {
         })
     }
 
-    fn parse_comment(&mut self) -> PResult<Statement> {
+    fn parse_comment(&mut self) -> ModalResult<Statement> {
         self.expect_keyword(Keyword::ON)?;
         let checkpoint = *self;
         let token = self.next_token();
@@ -5625,7 +5664,7 @@ impl Parser<'_> {
         })
     }
 
-    fn parse_use(&mut self) -> PResult<Statement> {
+    fn parse_use(&mut self) -> ModalResult<Statement> {
         let db_name = self.parse_object_name()?;
         Ok(Statement::Use { db_name })
     }
@@ -5633,7 +5672,7 @@ impl Parser<'_> {
 
 impl Word {
     /// Convert a Word to a Identifier, return ParserError when the Word's value is a empty string.
-    pub fn to_ident(&self) -> PResult<Ident> {
+    pub fn to_ident(&self) -> ModalResult<Ident> {
         if self.value.is_empty() {
             parser_err!("zero-length delimited identifier at or near \"{self}\"")
         } else {

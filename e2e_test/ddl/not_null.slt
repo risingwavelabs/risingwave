@@ -1,0 +1,155 @@
+### Test batch input
+
+statement ok
+CREATE TABLE test_struct (
+  id INT PRIMARY KEY,
+  info STRUCT <first_name VARCHAR, last_name VARCHAR> NOT NULL
+);
+
+statement ok
+INSERT INTO test_struct (id, info) VALUES (1, ('Alice', 'Smith'));
+
+statement error null value in column "info" of relation "test_struct" violates not-null constraint
+INSERT INTO test_struct (id, info) VALUES (2, NULL);
+
+statement ok
+FLUSH;
+
+statement error null value in column "info" of relation "test_struct" violates not-null constraint
+UPDATE test_struct SET info = NULL WHERE id = 1;
+
+statement ok
+INSERT INTO test_struct (id, info)
+SELECT 3, ROW('John', 'Doe')::STRUCT <first_name VARCHAR, last_name VARCHAR>;
+
+statement error null value in column "info" of relation "test_struct" violates not-null constraint
+INSERT INTO test_struct (id, info)
+SELECT 4,  NULL::STRUCT <first_name VARCHAR, last_name VARCHAR>;
+
+statement ok
+UPDATE test_struct SET info = (SELECT ROW('Jane', 'Smith')::STRUCT <first_name VARCHAR, last_name VARCHAR>) WHERE id = 1;
+
+statement error null value in column "info" of relation "test_struct" violates not-null constraint
+UPDATE test_struct SET info = (SELECT NULL::STRUCT <first_name VARCHAR, last_name VARCHAR>) WHERE id = 1;
+
+statement ok
+FLUSH;
+
+query TT
+SELECT COUNT(*) FROM test_struct;
+----
+2
+
+statement ok
+DROP TABLE test_struct;
+
+statement ok
+CREATE TABLE test_array (
+  id INT PRIMARY KEY,
+  numbers INT[] NOT NULL
+);
+
+statement ok
+INSERT INTO test_array (id, numbers) VALUES (1, ARRAY[1, 2, 3]);
+
+statement error null value in column "numbers" of relation "test_array" violates not-null constraint
+INSERT INTO test_array (id, numbers) VALUES (2, NULL);
+
+statement ok
+FLUSH;
+
+statement error null value in column "numbers" of relation "test_array" violates not-null constraint
+UPDATE test_array SET numbers = NULL WHERE id = 1;
+
+statement ok
+UPDATE test_array SET numbers = ARRAY[]::INT[] WHERE id = 1;
+
+statement ok
+INSERT INTO test_array (id, numbers)
+SELECT 3, ARRAY[4, 5, 6];
+
+statement error null value in column "numbers" of relation "test_array" violates not-null constraint
+INSERT INTO test_array (id, numbers)
+SELECT 4, NULL::INT[];
+
+statement ok
+UPDATE test_array SET numbers = (SELECT ARRAY[7,8,9]) WHERE id = 1;
+
+statement error null value in column "numbers" of relation "test_array" violates not-null constraint
+UPDATE test_array SET numbers = (SELECT NULL::INT[]) WHERE id = 1;
+
+statement ok
+FLUSH;
+
+query TT
+SELECT COUNT(*) FROM test_array;
+----
+2
+
+statement ok
+DROP TABLE test_array;
+
+### Test stream input
+
+statement ok
+CREATE TABLE test_person (id INT PRIMARY KEY NOT NULL, name VARCHAR NULL, age INT NOT NULL, height FLOAT NOT NULL);
+
+statement ok
+INSERT INTO test_person (id, name, age, height) VALUES (1, 'Alice', 30, 5.5);
+
+statement ok
+INSERT INTO test_person (id, name, age, height) VALUES (2, NULL, 25, 6.0);
+
+statement error null value in column "id" of relation "test_person" violates not-null constraint
+INSERT INTO test_person (id, name, age, height) VALUES (NULL, 'Bob', 40, 5.8);
+
+statement error null value in column "age" of relation "test_person" violates not-null constraint
+INSERT INTO test_person (id, name, age, height) VALUES (3, 'Charlie', NULL, 6.1);
+
+statement error null value in column "height" of relation "test_person" violates not-null constraint
+INSERT INTO test_person (id, name, age, height) VALUES (4, 'Diana', 35, NULL);
+
+statement ok
+FLUSH;
+
+query TT
+SELECT COUNT(*) FROM test_person;
+----
+2
+
+statement ok
+CREATE TABLE test_person_source (id INT PRIMARY KEY, name VARCHAR NULL, age INT, height FLOAT);
+
+statement ok
+INSERT INTO test_person_source (id, name, age, height) VALUES
+  (101, 'John', 28, 5.9),
+  (102, 'Sarah', NULL, 5.5),
+  (103, NULL, 40, 6.1),
+  (104, 'Michael', 35, NULL),
+  (105, 'Emma', 29, 5.4);
+
+statement ok
+CREATE SINK test_person_sink INTO test_person AS SELECT * FROM test_person_source;
+
+statement ok
+FLUSH;
+
+query TT
+SELECT * FROM test_person ORDER BY id;
+----
+  1 Alice    30    5.5
+  2 NULL     25      6
+101 John     28    5.9
+102 Sarah    NULL  5.5
+103 NULL     40    6.1
+104 Michael  35    NULL
+105 Emma     29    5.4
+
+statement ok
+DROP SINK test_person_sink;
+
+statement ok
+DROP TABLE test_person_source;
+
+statement ok
+DROP TABLE test_person;

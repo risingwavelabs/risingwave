@@ -145,6 +145,9 @@ pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<Bo
         arg_types: &arg_types,
         return_type: &return_type,
         always_retry_on_network_error: false,
+        language,
+        is_async: None,
+        is_batched: None,
     })
     .context("failed to build UDF runtime")?;
 

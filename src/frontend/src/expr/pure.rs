@@ -138,6 +138,8 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::Acosd
             | Type::Atan
             | Type::Atan2
+            | Type::Atand
+            | Type::Atan2d
             | Type::Sqrt
             | Type::Cbrt
             | Type::Sign
@@ -265,7 +267,8 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::MapInsert
             | Type::MapLength
             | Type::VnodeUser
-            |Type::RwEpochToTs =>
+            | Type::RwEpochToTs
+            | Type::CheckNotNull =>
             // expression output is deterministic(same result for the same input)
             {
                 func_call

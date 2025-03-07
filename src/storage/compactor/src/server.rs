@@ -85,11 +85,20 @@ pub async fn prepare_start_parameters(
     let non_reserved_memory_bytes = (compactor_opts.compactor_total_memory_bytes as f64
         * config.storage.compactor_memory_available_proportion)
         as usize;
-    let meta_cache_capacity_bytes = storage_opts.meta_cache_capacity_mb * (1 << 20);
+    let meta_cache_capacity_bytes = compactor_opts.compactor_meta_cache_memory_bytes;
     let compactor_memory_limit_bytes = match config.storage.compactor_memory_limit_mb {
-        Some(compactor_memory_limit_mb) => compactor_memory_limit_mb as u64 * (1 << 20),
-        None => (non_reserved_memory_bytes - meta_cache_capacity_bytes) as u64,
-    };
+        Some(compactor_memory_limit_mb) => compactor_memory_limit_mb * (1 << 20),
+        None => {
+            non_reserved_memory_bytes
+        }
+    }
+    .checked_sub(compactor_opts.compactor_meta_cache_memory_bytes).unwrap_or_else(|| {
+        panic!(
+            "compactor_total_memory_bytes {} is too small to hold compactor_meta_cache_memory_bytes {}",
+            meta_cache_capacity_bytes,
+            meta_cache_capacity_bytes
+        );
+    });
 
     tracing::info!(
         "Compactor non_reserved_memory_bytes {} meta_cache_capacity_bytes {} compactor_memory_limit_bytes {} sstable_size_bytes {} block_size_bytes {}",
@@ -108,7 +117,7 @@ pub async fn prepare_start_parameters(
             + storage_opts.block_size_kb * (1 << 10))
             as u64;
 
-        assert!(compactor_memory_limit_bytes > min_compactor_memory_limit_bytes * 2);
+        assert!(compactor_memory_limit_bytes > min_compactor_memory_limit_bytes as usize * 2);
     }
 
     let object_store = build_remote_object_store(
@@ -135,7 +144,7 @@ pub async fn prepare_start_parameters(
         .unwrap(),
     );
 
-    let memory_limiter = Arc::new(MemoryLimiter::new(compactor_memory_limit_bytes));
+    let memory_limiter = Arc::new(MemoryLimiter::new(compactor_memory_limit_bytes as u64));
     let storage_memory_config = extract_storage_memory_config(&config);
     let memory_collector = Arc::new(HummockMemoryCollector::new(
         sstable_store.clone(),
