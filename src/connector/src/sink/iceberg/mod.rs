@@ -1319,6 +1319,8 @@ impl IcebergSinkCommitter {
 impl SinkCommitCoordinator for IcebergSinkCommitter {
     async fn init(&mut self) -> crate::sink::Result<Option<u64>> {
         tracing::info!("Iceberg commit coordinator inited.");
+        // todo(wcy-fdu): The operation of the exactly once sink in the recovery phase will be performed here, and the returned rewind start offset will be updated.
+        // refer to https://github.com/risingwavelabs/risingwave/pull/19771/files#diff-4eafd6e83f9e3fc16b46073e7f3f65261a06c4fac63a997c89abbb1fdd2ad724R1375-R1415
         Ok(None)
     }
 
