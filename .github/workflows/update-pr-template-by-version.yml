@@ -58,8 +58,10 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git checkout -b update-pr-template-${{ env.version }}
+          git diff
           git add .github/pull_request_template.md
           git commit -m "chore: update PR template with highest release version ${{ env.version }}"
+          git diff ..main
           git push origin update-pr-template-${{ env.version }}
 
       - name: Create pull request
