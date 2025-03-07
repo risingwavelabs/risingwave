@@ -434,7 +434,13 @@ impl fmt::Display for CsvInfo {
                 display_separated(&[Keyword::WITHOUT, Keyword::HEADER], " ")
             ));
         }
-        impl_fmt_display!(delimiter, v, self);
+        let delimiter = (self.delimiter as char).to_string();
+        v.extend_from_slice(&[
+            Keyword::DELIMITED.to_string(),
+            Keyword::BY.to_string(),
+            AstString(delimiter).to_string(),
+        ]);
+        // impl_fmt_display!(AstString((delimiter as char).to_string()), v, self);
         v.iter().join(" ").fmt(f)
     }
 }
