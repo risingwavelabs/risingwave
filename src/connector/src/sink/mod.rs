@@ -692,7 +692,7 @@ pub trait LogSinker: 'static {
 
 #[async_trait]
 pub trait SinkCommitCoordinator {
-    /// Initialize the sink committer coordinator
+    /// Initialize the sink committer coordinator, return the log store rewind start offset.
     async fn init(&mut self) -> Result<Option<u64>>;
     /// After collecting the metadata from each sink writer, a coordinator will call `commit` with
     /// the set of metadata. The metadata is serialized into bytes, because the metadata is expected
