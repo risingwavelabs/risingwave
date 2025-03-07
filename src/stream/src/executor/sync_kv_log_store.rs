@@ -154,7 +154,7 @@ struct FlushedChunkInfo {
 enum WriteFuture<S: LocalStateStore> {
     Paused {
         message: Message,
-        sleep_future: Pin<Box<Sleep>>,
+        sleep_future: Option<Pin<Box<Sleep>>>,
         stream: BoxedMessageStream,
         write_state: LogStoreWriteState<S>, // Just used to hold the state
     },
@@ -217,7 +217,7 @@ impl<S: LocalStateStore> WriteFuture<S> {
         write_state: LogStoreWriteState<S>,
     ) -> Self {
         Self::Paused {
-            sleep_future: Box::pin(sleep(duration)),
+            sleep_future: Some(Box::pin(sleep(duration))),
             message,
             stream,
             write_state,
@@ -229,7 +229,9 @@ impl<S: LocalStateStore> WriteFuture<S> {
     ) -> StreamExecutorResult<(BoxedMessageStream, LogStoreWriteState<S>, WriteFutureEvent)> {
         match self {
             WriteFuture::Paused { sleep_future, .. } => {
-                sleep_future.await;
+                if let Some(sleep_future) = sleep_future {
+                    sleep_future.await;
+                }
                 must_match!(replace(self, WriteFuture::Empty), WriteFuture::Paused { stream, write_state, message, .. } => {
                     Ok((stream, write_state, WriteFutureEvent::UpstreamMessageReceived(message)))
                 })
@@ -488,7 +490,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                                 &mut write_future_state
                             {
                                 assert!(buffer.current_size < self.max_buffer_size);
-                                *sleep_future = Box::pin(sleep(Duration::ZERO));
+                                *sleep_future = None;
                             }
                         }
                         let (chunk, new_truncate_offset) = result?;
