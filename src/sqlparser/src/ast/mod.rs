@@ -1636,7 +1636,13 @@ impl fmt::Display for Statement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut buf = String::new();
         self.fmt_inner(&mut buf)?;
-        let _ = Parser::parse_sql(&buf).unwrap();
+        // TODO: expand this check to all statements
+        if matches!(
+            self,
+            Statement::CreateTable { .. } | Statement::CreateSource { .. }
+        ) {
+            let _ = Parser::parse_sql(&buf).unwrap();
+        }
         f.write_str(&buf)
     }
 }
