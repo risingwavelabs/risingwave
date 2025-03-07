@@ -153,9 +153,8 @@ struct FlushedChunkInfo {
 
 enum WriteFuture<S: LocalStateStore> {
     /// We trigger a brief pause to let the `ReadFuture` be polled in the following scenarios:
-    /// - When seeing an upstream data chunk.
-    /// - When seeing a checkpoint barrier.
-    /// - We resume the stream after the pause.
+    /// - When seeing an upstream data chunk, when the buffer becomes full.
+    /// - When seeing a checkpoint barrier, when the buffer is not empty.
     ///
     /// We trigger resume to let the `ReadFuture` to be polled in the following scenarios:
     /// - After the pause duration.
