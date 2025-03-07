@@ -15,13 +15,14 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-And don't forget to include the generated `risingwave-<xxx>-dashboard.json` in the commit.
 
 ## Generate Dashboard
 
 ```bash
 ./generate.sh
 ```
+
+Don't forget to include the generated `risingwave-<xxx>-dashboard.json` in the commit.
 
 ## Update without Restarting Grafana (to localhost:3001)
 
