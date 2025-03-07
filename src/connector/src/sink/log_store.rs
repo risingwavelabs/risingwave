@@ -172,6 +172,11 @@ pub trait LogReader: Send + Sized + 'static {
     /// Initialize the log reader. Usually function as waiting for log writer to be initialized.
     fn init(&mut self) -> impl Future<Output = LogStoreResult<()>> + Send + '_;
 
+    /// Set the rewind start offset. If it is None, it indicates to rewind from the last truncate offset.
+    fn start_offset(&mut self, _start_offset: Option<u64>) -> LogStoreResult<()> {
+        Ok(())
+    }
+
     /// Emit the next item.
     ///
     /// The implementation should ensure that the future is cancellation safe.

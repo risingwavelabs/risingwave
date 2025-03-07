@@ -191,6 +191,8 @@ pub struct KvLogStoreReader<S: StateStoreRead> {
     rewind_delay: RewindDelay,
 
     align_epoch_on_init: bool,
+
+    rewind_start_offset: Option<u64>,
 }
 
 impl<S: StateStoreRead> KvLogStoreReader<S> {
@@ -220,6 +222,7 @@ impl<S: StateStoreRead> KvLogStoreReader<S> {
             identity,
             rewind_delay,
             align_epoch_on_init,
+            rewind_start_offset: None,
         }
     }
 }
@@ -375,6 +378,11 @@ impl<S: StateStoreRead> KvLogStoreReader<S> {
 }
 
 impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
+    fn start_offset(&mut self, start_offset: Option<u64>) -> LogStoreResult<()> {
+        self.rewind_start_offset = start_offset;
+        Ok(())
+    }
+
     async fn init(&mut self) -> LogStoreResult<()> {
         let aligned_range_start = if let Some(init_epoch_rx) = self.init_epoch_rx.take() {
             let (init_epoch, aligned_range_start) = init_epoch_rx
@@ -624,7 +632,7 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
         } else {
             self.future_state = KvLogStoreReaderFutureState::Empty;
         }
-        self.rx.rewind();
+        self.rx.rewind(self.rewind_start_offset);
 
         Ok(())
     }
