@@ -3678,8 +3678,14 @@ impl Parser<'_> {
         } else if self.parse_keywords(&[Keyword::SWAP, Keyword::WITH]) {
             let target_source = self.parse_object_name()?;
             AlterSourceOperation::SwapRenameSource { target_source }
+        } else if self.parse_keyword(Keyword::CONNECTOR) {
+            let with_options = self.parse_with_properties()?;
+            AlterSourceOperation::AlterConnectorProps {
+                alter_props: with_options,
+            }
         } else {
-            return self.expected("RENAME, ADD COLUMN, OWNER TO or SET after ALTER SOURCE");
+            return self
+                .expected("RENAME, ADD COLUMN, OWNER TO, CONNECTOR or SET after ALTER SOURCE");
         };
 
         Ok(Statement::AlterSource {
