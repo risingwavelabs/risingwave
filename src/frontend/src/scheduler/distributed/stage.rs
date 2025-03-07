@@ -641,7 +641,14 @@ impl StageRunner {
         };
 
         // Notify QueryRunner to poll chunk from result_rx.
-        let (result_tx, result_rx) = tokio::sync::mpsc::channel(100);
+        let (result_tx, result_rx) = tokio::sync::mpsc::channel(
+            self.ctx
+                .session
+                .env()
+                .batch_config()
+                .developer
+                .root_stage_channel_size,
+        );
         self.notify_stage_scheduled(QueryMessage::Stage(StageEvent::ScheduledRoot(result_rx)))
             .await;
 

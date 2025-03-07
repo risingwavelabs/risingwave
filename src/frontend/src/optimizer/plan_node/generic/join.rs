@@ -600,14 +600,23 @@ fn push_down_to_inputs(
 pub fn can_push_left_from_filter(ty: JoinType) -> bool {
     matches!(
         ty,
-        JoinType::Inner | JoinType::LeftOuter | JoinType::LeftSemi | JoinType::LeftAnti
+        JoinType::Inner
+            | JoinType::LeftOuter
+            | JoinType::LeftSemi
+            | JoinType::LeftAnti
+            | JoinType::AsofInner
+            | JoinType::AsofLeftOuter
     )
 }
 
 pub fn can_push_right_from_filter(ty: JoinType) -> bool {
     matches!(
         ty,
-        JoinType::Inner | JoinType::RightOuter | JoinType::RightSemi | JoinType::RightAnti
+        JoinType::Inner
+            | JoinType::RightOuter
+            | JoinType::RightSemi
+            | JoinType::RightAnti
+            | JoinType::AsofInner
     )
 }
 
@@ -621,13 +630,21 @@ pub fn can_push_on_from_filter(ty: JoinType) -> bool {
 pub fn can_push_left_from_on(ty: JoinType) -> bool {
     matches!(
         ty,
-        JoinType::Inner | JoinType::RightOuter | JoinType::LeftSemi
+        JoinType::Inner
+            | JoinType::RightOuter
+            | JoinType::LeftSemi
+            | JoinType::AsofInner
+            | JoinType::AsofLeftOuter
     )
 }
 
 pub fn can_push_right_from_on(ty: JoinType) -> bool {
     matches!(
         ty,
-        JoinType::Inner | JoinType::LeftOuter | JoinType::RightSemi
+        JoinType::Inner
+            | JoinType::LeftOuter
+            | JoinType::RightSemi
+            | JoinType::AsofInner
+            | JoinType::AsofLeftOuter
     )
 }

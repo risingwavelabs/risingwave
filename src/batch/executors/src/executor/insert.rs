@@ -20,9 +20,8 @@ use itertools::Itertools;
 use risingwave_common::array::{
     ArrayBuilder, DataChunk, Op, PrimitiveArrayBuilder, SerialArray, StreamChunk,
 };
-use risingwave_common::catalog::{Field, Schema, TableId, TableVersionId};
+use risingwave_common::catalog::{Schema, TableId, TableVersionId};
 use risingwave_common::transaction::transaction_id::TxnId;
-use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_dml::dml_manager::DmlManagerRef;
 use risingwave_expr::expr::{BoxedExpression, build_from_prost};
@@ -77,13 +76,7 @@ impl InsertExecutor {
             dml_manager,
             child,
             chunk_size,
-            schema: if returning {
-                table_schema
-            } else {
-                Schema {
-                    fields: vec![Field::unnamed(DataType::Serial)],
-                }
-            },
+            schema: table_schema,
             identity,
             column_indices,
             sorted_default_columns,
@@ -136,6 +129,7 @@ impl InsertExecutor {
                 .enumerate()
                 .map(|(i, idx)| (*idx, columns[i].clone()))
                 .collect_vec();
+
             ordered_columns.reserve(ordered_columns.len() + self.sorted_default_columns.len());
 
             for (idx, expr) in &self.sorted_default_columns {
@@ -268,14 +262,15 @@ mod tests {
     use futures::StreamExt;
     use risingwave_common::array::{Array, ArrayImpl, I32Array, StructArray};
     use risingwave_common::catalog::{
-        ColumnDesc, ColumnId, INITIAL_TABLE_VERSION_ID, schema_test_utils,
+        ColumnDesc, ColumnId, Field, INITIAL_TABLE_VERSION_ID, schema_test_utils,
     };
     use risingwave_common::transaction::transaction_message::TxnMsg;
-    use risingwave_common::types::StructType;
+    use risingwave_common::types::{DataType, StructType};
     use risingwave_dml::dml_manager::DmlManager;
     use risingwave_storage::hummock::CachePolicy;
+    use risingwave_storage::hummock::test_utils::*;
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::store::{ReadOptions, StateStoreReadExt};
+    use risingwave_storage::store::ReadOptions;
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;

@@ -123,6 +123,8 @@ pub struct ColumnDesc {
     /// Currently the system column is used for `_rw_timestamp` only and is generated at runtime,
     /// so this field is not persisted.
     pub system_column: Option<SystemColumn>,
+    /// Whether the column is nullable. Only applies to BatchInsert/BatchUpdate operations into tables.
+    pub nullable: bool,
 }
 
 impl ColumnDesc {
@@ -140,6 +142,7 @@ impl ColumnDesc {
             additional_column: AdditionalColumn { column_type: None },
             version: ColumnDescVersion::LATEST,
             system_column: None,
+            nullable: true,
         }
     }
 
@@ -199,6 +202,7 @@ impl ColumnDesc {
             additional_column_type: 0, // deprecated
             additional_column: Some(self.additional_column.clone()),
             version: self.version as i32,
+            nullable: self.nullable,
         }
     }
 
@@ -235,6 +239,7 @@ impl From<PbColumnDesc> for ColumnDesc {
             additional_column,
             version,
             system_column: None,
+            nullable: prost.nullable,
         }
     }
 }
@@ -311,6 +316,11 @@ impl ColumnCatalog {
     /// Get a reference to the column desc's data type.
     pub fn data_type(&self) -> &DataType {
         &self.column_desc.data_type
+    }
+
+    /// Get nullable info of the column.
+    pub fn nullable(&self) -> bool {
+        self.column_desc.nullable
     }
 
     /// Get the column desc's column id.

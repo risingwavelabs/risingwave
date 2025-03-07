@@ -27,6 +27,7 @@ struct RwDatabases {
     name: String,
     owner: i32,
     acl: Vec<String>,
+    resource_group: String,
 }
 
 #[system_catalog(table, "rw_catalog.rw_databases")]
@@ -43,6 +44,7 @@ fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwDatabases>> {
             name: db.name().into(),
             owner: db.owner() as i32,
             acl: get_acl_items(&Object::DatabaseId(db.id()), false, &users, username_map),
+            resource_group: db.resource_group.clone(),
         })
         .collect())
 }

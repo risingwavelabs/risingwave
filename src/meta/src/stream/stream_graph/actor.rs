@@ -28,8 +28,7 @@ use risingwave_pb::plan_common::ExprContext;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use risingwave_pb::stream_plan::{
-    DispatchStrategy, Dispatcher, DispatcherType, MergeNode, StreamActor, StreamNode,
-    StreamScanType,
+    DispatchStrategy, Dispatcher, DispatcherType, MergeNode, StreamNode, StreamScanType,
 };
 
 use super::Locations;
@@ -37,7 +36,10 @@ use super::id::GlobalFragmentIdsExt;
 use crate::MetaResult;
 use crate::controller::cluster::StreamingClusterInfo;
 use crate::manager::{MetaSrvEnv, StreamingJob};
-use crate::model::{DispatcherId, Fragment, FragmentActorUpstreams, FragmentId};
+use crate::model::{
+    DispatcherId, Fragment, FragmentActorDispatchers, FragmentActorUpstreams, FragmentId,
+    StreamActor, StreamActorWithDispatchers,
+};
 use crate::stream::stream_graph::fragment::{
     CompleteStreamFragmentGraph, DownstreamExternalEdgeId, EdgeId, EitherFragment,
     StreamFragmentEdge,
@@ -306,21 +308,27 @@ impl FragmentActorBuilder {
 
 impl ActorBuilder {
     /// Build an actor after all the upstreams and downstreams are processed.
-    fn build(self, job: &StreamingJob, expr_context: ExprContext) -> MetaResult<StreamActor> {
+    fn build(
+        self,
+        job: &StreamingJob,
+        expr_context: ExprContext,
+    ) -> MetaResult<StreamActorWithDispatchers> {
         // Only fill the definition when debug assertions enabled, otherwise use name instead.
         #[cfg(not(debug_assertions))]
         let mview_definition = job.name();
         #[cfg(debug_assertions)]
         let mview_definition = job.definition();
 
-        Ok(StreamActor {
-            actor_id: self.actor_id.as_global_id(),
-            fragment_id: self.fragment_id.as_global_id(),
-            dispatcher: self.downstreams.into_values().collect(),
-            vnode_bitmap: self.vnode_bitmap.map(|b| b.to_protobuf()),
-            mview_definition,
-            expr_context: Some(expr_context),
-        })
+        Ok((
+            StreamActor {
+                actor_id: self.actor_id.as_global_id(),
+                fragment_id: self.fragment_id.as_global_id(),
+                vnode_bitmap: self.vnode_bitmap,
+                mview_definition,
+                expr_context: Some(expr_context),
+            },
+            self.downstreams.into_values().collect(),
+        ))
     }
 }
 
@@ -711,6 +719,8 @@ pub struct ActorGraphBuildResult {
     /// The graph of sealed fragments, including all actors.
     pub graph: BTreeMap<FragmentId, Fragment>,
     pub actor_upstreams: BTreeMap<FragmentId, FragmentActorUpstreams>,
+    /// The dispatchers from the new graph to be create.
+    pub actor_dispatchers: FragmentActorDispatchers,
 
     /// The scheduled locations of the actors to be built.
     pub building_locations: Locations,
@@ -719,7 +729,7 @@ pub struct ActorGraphBuildResult {
     pub existing_locations: Locations,
 
     /// The new dispatchers to be added to the upstream mview actors. Used for MV on MV.
-    pub dispatchers: HashMap<FragmentId, HashMap<ActorId, Vec<Dispatcher>>>,
+    pub dispatchers: FragmentActorDispatchers,
 
     /// The updates to be applied to the downstream chain actors. Used for schema change (replace
     /// table plan).
@@ -866,10 +876,11 @@ impl ActorGraphBuilder {
         }
 
         // Serialize the graph into a map of sealed fragments.
-        let (graph, actor_upstreams) = {
+        let (graph, actor_upstreams, actor_dispatchers) = {
             let mut fragment_actors: HashMap<GlobalFragmentId, (StreamNode, Vec<StreamActor>)> =
                 HashMap::new();
             let mut fragment_actor_upstreams: BTreeMap<_, FragmentActorUpstreams> = BTreeMap::new();
+            let mut fragment_actor_dispatchers: HashMap<_, HashMap<_, _>> = HashMap::new();
 
             // As all fragments are processed, we can now `build` the actors where the `Exchange`
             // and `Chain` are rewritten.
@@ -885,7 +896,18 @@ impl ActorGraphBuilder {
                             node,
                             builders
                                 .into_values()
-                                .map(|builder| builder.build(job, expr_context.clone()))
+                                .map(|builder| {
+                                    builder.build(job, expr_context.clone()).map(
+                                        |(actor, dispatchers)| {
+                                            fragment_actor_dispatchers
+                                                .entry(fragment_id.as_global_id())
+                                                .or_default()
+                                                .try_insert(actor.actor_id, dispatchers)
+                                                .expect("non-duplicate");
+                                            actor
+                                        },
+                                    )
+                                })
                                 .try_collect()?,
                         ),
                     )
@@ -908,6 +930,7 @@ impl ActorGraphBuilder {
                     })
                     .collect(),
                 fragment_actor_upstreams,
+                fragment_actor_dispatchers,
             )
         };
 
@@ -975,6 +998,7 @@ impl ActorGraphBuilder {
         Ok(ActorGraphBuildResult {
             graph,
             actor_upstreams,
+            actor_dispatchers,
             building_locations,
             existing_locations,
             dispatchers,
@@ -1043,7 +1067,7 @@ impl ActorGraphBuilder {
                     let worker_slot_id = match &distribution {
                         Distribution::Singleton(worker_slot_id) => *worker_slot_id,
                         Distribution::Hash(mapping) => mapping
-                            .get_matched(&Bitmap::from(a.get_vnode_bitmap().unwrap()))
+                            .get_matched(a.vnode_bitmap.as_ref().unwrap())
                             .unwrap(),
                     };
 

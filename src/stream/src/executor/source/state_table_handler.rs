@@ -186,6 +186,7 @@ pub fn default_source_internal_table(id: u32) -> PbTable {
                     ..Default::default()
                 }),
                 column_id,
+                nullable: true,
                 ..Default::default()
             }),
             is_hidden: false,

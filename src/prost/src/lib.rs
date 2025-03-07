@@ -489,6 +489,7 @@ impl std::fmt::Debug for plan_common::ColumnDesc {
             additional_column,
             generated_or_default_column,
             version,
+            nullable,
         } = self;
 
         let mut s = f.debug_struct("ColumnDesc");
@@ -515,6 +516,7 @@ impl std::fmt::Debug for plan_common::ColumnDesc {
         if let Some(generated_or_default_column) = generated_or_default_column {
             s.field("generated_or_default_column", &generated_or_default_column);
         }
+        s.field("nullable", nullable);
         s.finish()
     }
 }
