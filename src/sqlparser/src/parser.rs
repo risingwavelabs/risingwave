@@ -4402,7 +4402,7 @@ impl Parser<'_> {
         if let Ok(()) = self.expect_token(&Token::LParen) {
             let query = self.parse_query()?;
             self.expect_token(&Token::RParen)?;
-            Ok(CteInner::Query(query))
+            Ok(CteInner::Query(Box::new(query)))
         } else {
             let changelog = self.parse_identifier_non_reserved()?;
             if changelog.to_string().to_lowercase() != "changelog" {
