@@ -20,7 +20,7 @@ use core::fmt;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::FormatEncodeOptions;
+use super::{FormatEncodeOptions, SqlOption};
 use crate::ast::{
     DataType, Expr, Ident, ObjectName, SecretRefValue, SetVariableValue, Value,
     display_comma_separated, display_separated,
@@ -234,6 +234,9 @@ pub enum AlterSourceOperation {
     SetParallelism {
         parallelism: SetVariableValue,
         deferred: bool,
+    },
+    AlterConnectorProps {
+        alter_props: Vec<SqlOption>,
     },
 }
 
@@ -529,6 +532,13 @@ impl fmt::Display for AlterSourceOperation {
                     "SET PARALLELISM TO {}{}",
                     parallelism,
                     if *deferred { " DEFERRED" } else { "" }
+                )
+            }
+            AlterSourceOperation::AlterConnectorProps { alter_props } => {
+                write!(
+                    f,
+                    "CONNECTOR WITH ({})",
+                    display_comma_separated(alter_props)
                 )
             }
         }
