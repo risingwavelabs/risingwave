@@ -1347,7 +1347,7 @@ fn level_delete_ssts(
     original_len != operand.table_infos.len()
 }
 
-fn level_insert_ssts(operand: &mut Level, insert_table_infos: &Vec<SstableInfo>) {
+pub fn level_insert_ssts(operand: &mut Level, insert_table_infos: &Vec<SstableInfo>) {
     operand.total_file_size += insert_table_infos
         .iter()
         .map(|sst| sst.sst_size)

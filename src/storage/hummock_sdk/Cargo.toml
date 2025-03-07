@@ -24,5 +24,9 @@ workspace-hack = { path = "../../workspace-hack" }
 [features]
 test = []
 
+#[[bench]]
+#name = "bench_apply_delta"
+#harness = false
+
 [lints]
 workspace = true
