@@ -187,7 +187,7 @@ steps:
     timeout_in_minutes: 40
     retry: *auto-retry
 
-  - label: "end-to-end source test"
+  - label: "end-to-end source test (part %n)"
     command: "ci/scripts/e2e-source-test.sh -p ci-dev"
     if: |
       !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
@@ -203,9 +203,10 @@ steps:
           upload-container-logs: always
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 20
+    parallelism: 2
     retry: *auto-retry
 
-  - label: "end-to-end sink test"
+  - label: "end-to-end sink test (part %n)"
     command: "ci/scripts/e2e-sink-test.sh -p ci-dev"
     if: |
       !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
@@ -220,6 +221,7 @@ steps:
           run: sink-test-env
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 20
+    parallelism: 2
     cancel_on_build_failing: true
     retry: *auto-retry
 
