@@ -2860,7 +2860,7 @@ impl fmt::Display for SqlOption {
             })
             .unwrap_or(false);
         if should_redact {
-            write!(f, "{} = [REDACTED]", self.name)
+            write!(f, "{} = '[REDACTED]'", self.name)
         } else {
             write!(f, "{} = {}", self.name, self.value)
         }
