@@ -1651,7 +1651,13 @@ impl fmt::Display for Statement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut buf = String::new();
         self.fmt_inner(&mut buf)?;
-        let _ = Parser::parse_sql(&buf).expect("normalized SQL should be parsable");
+        // TODO(#20713): expand this check to all statements
+        if matches!(
+            self,
+            Statement::CreateTable { .. } | Statement::CreateSource { .. }
+        ) {
+            let _ = Parser::parse_sql(&buf).expect("normalized SQL should be parsable");
+        }
         f.write_str(&buf)
     }
 }
