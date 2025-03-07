@@ -672,7 +672,7 @@ struct SyncedLogStoreBuffer {
 impl SyncedLogStoreBuffer {
     /// Returns true if there are flushed items in the buffer.
     fn no_flushed_items(&self) -> bool {
-        self.flushed_count == 0 && self.current_size > 0
+        self.flushed_count == 0
     }
 
     fn is_empty(&self) -> bool {
