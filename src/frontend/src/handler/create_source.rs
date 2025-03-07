@@ -864,9 +864,15 @@ pub async fn bind_create_source_or_table_with_connector(
     }
 
     // XXX: why do we use col_id_gen here? It doesn't seem to be very necessary.
-    // XXX: should we also change the col id for struct fields?
     for c in &mut columns {
+        let original_data_type = c.data_type().clone();
         col_id_gen.generate(c)?;
+        // TODO: Now we restore the data type for `CREATE SOURCE`, so that keep the nested field id unset.
+        //       This behavior is inconsistent with `CREATE TABLE`, and should be fixed once we refactor
+        //       `ALTER SOURCE` to also use `ColumnIdGenerator` in the future.
+        if is_create_source {
+            c.column_desc.data_type = original_data_type;
+        }
     }
     debug_assert_column_ids_distinct(&columns);
 
