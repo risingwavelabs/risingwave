@@ -157,7 +157,7 @@ impl StructType {
         }
     }
 
-    /// Compares the datatype with another, ignoring nested field names and metadata.
+    /// Compares the datatype with another, ignoring nested field names and ids.
     pub fn equals_datatype(&self, other: &StructType) -> bool {
         if self.len() != other.len() {
             return false;
