@@ -98,6 +98,43 @@ public class JniCatalogWrapper {
     }
 
     /**
+     * Checks if a namespace exists in the catalog.
+     *
+     * @param namespaceStr The namespace to check.
+     * @return true if the namespace exists, false otherwise.
+     */
+    public boolean namespaceExists(String namespaceStr) {
+        Namespace namespace;
+        if (namespaceStr == null) {
+            namespace = Namespace.empty();
+        } else {
+            namespace = Namespace.of(namespaceStr);
+        }
+        if (catalog instanceof SupportsNamespaces) {
+            return ((SupportsNamespaces) catalog).namespaceExists(namespace);
+        } else {
+            return false;
+        }
+    }
+
+    /**
+     * Create a namespace in the catalog.
+     *
+     * @param namespaceStr The namespace to create.
+     */
+    public void createNamespace(String namespaceStr) {
+        Namespace namespace;
+        if (namespaceStr == null) {
+            namespace = Namespace.empty();
+        } else {
+            namespace = Namespace.of(namespaceStr);
+        }
+        if (catalog instanceof SupportsNamespaces) {
+            ((SupportsNamespaces) catalog).createNamespace(namespace);
+        }
+    }
+
+    /**
      * Drop a table from the catalog.
      *
      * @param tableIdentifier The identifier of the table to drop.
