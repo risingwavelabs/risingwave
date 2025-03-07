@@ -97,6 +97,53 @@ function restore() {
   1>/dev/null 2>&1
 }
 
+function create_minio_bucket() {
+  local bucket_name
+  bucket_name=$1
+  ${BACKUP_TEST_MCLI} -C "${BACKUP_TEST_MCLI_CONFIG}" \
+  mb "hummock-minio/${bucket_name}"
+}
+
+function cp_minio_bucket() {
+  local from
+  from=$1
+  local to
+  to=$2
+  ${BACKUP_TEST_MCLI} -C "${BACKUP_TEST_MCLI_CONFIG}" \
+  cp --recursive "hummock-minio/${from}" "hummock-minio/${to}"
+}
+
+function restore_with_overwrite() {
+  local job_id
+  job_id=$1
+  local overwrite_hummock_storage_url
+  overwrite_hummock_storage_url=$2
+  local overwrite_hummock_storage_dir
+  overwrite_hummock_storage_dir=$3
+  local overwrite_backup_storage_url
+  overwrite_backup_storage_url=$4
+  local overwrite_backup_storage_dir
+  overwrite_backup_storage_dir=$5
+  echo "try to restore snapshot ${job_id}"
+  stop_cluster
+  clean_meta_store
+  start_meta_store_minio
+  ${BACKUP_TEST_RW_ALL_IN_ONE} \
+  risectl \
+  meta \
+  restore-meta \
+  --meta-store-type "sql" \
+  --meta-snapshot-id "${job_id}" \
+  --sql-endpoint "sqlite://${RW_SQLITE_DB}?mode=rwc" \
+  --overwrite-hummock-storage-endpoint \
+  --overwrite-backup-storage-url "${overwrite_backup_storage_url}" \
+  --overwrite-backup-storage-directory "${overwrite_backup_storage_dir}" \
+  --hummock-storage-url "${overwrite_hummock_storage_url}" \
+  --hummock-storage-directory "${overwrite_hummock_storage_dir}" \
+  --backup-storage-url minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 \
+  1>/dev/null 2>&1
+}
+
 function execute_sql() {
   local sql
   sql=$1
