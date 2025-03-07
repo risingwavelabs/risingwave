@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![allow(clippy::large_enum_variant)]
+#![allow(clippy::result_large_err)]
 #![feature(allocator_api)]
 #![feature(bound_as_ref)]
 #![feature(custom_test_frameworks)]
