@@ -228,6 +228,26 @@ impl ColumnIdGenerator {
                 None => None,
             };
 
+            // Only top-level column and struct fields need an ID.
+            let need_gen_id = matches!(path.last().unwrap(), Segment::Field(_));
+
+            let new_id = if need_gen_id {
+                if let Some(id) = original_column_id {
+                    assert!(
+                        id != ColumnId::placeholder(),
+                        "original column id should not be placeholder"
+                    );
+                    id
+                } else {
+                    let id = this.next_column_id;
+                    this.next_column_id = this.next_column_id.next();
+                    id
+                }
+            } else {
+                // Column ID is actually unused by caller (for list and map types), just use a placeholder.
+                ColumnId::placeholder()
+            };
+
             let new_data_type = match data_type {
                 DataType::Struct(fields) => {
                     let mut new_fields = Vec::new();
@@ -257,26 +277,6 @@ impl ColumnIdGenerator {
                 }
 
                 data_types::simple!() => data_type,
-            };
-
-            // Only top-level column and struct fields need an ID.
-            let need_gen_id = matches!(path.last().unwrap(), Segment::Field(_));
-
-            let new_id = if need_gen_id {
-                if let Some(id) = original_column_id {
-                    assert!(
-                        id != ColumnId::placeholder(),
-                        "original column id should not be placeholder"
-                    );
-                    id
-                } else {
-                    let id = this.next_column_id;
-                    this.next_column_id = this.next_column_id.next();
-                    id
-                }
-            } else {
-                // Column ID is actually unused by caller (for list and map types), just use a placeholder.
-                ColumnId::placeholder()
             };
 
             Ok((new_id, new_data_type))
@@ -520,8 +520,8 @@ mod tests {
                                                                 ),
                                                             ],
                                                             field_ids: [
-                                                                #2,
-                                                                #3,
+                                                                #4,
+                                                                #5,
                                                             ],
                                                         },
                                                     ),
@@ -532,12 +532,12 @@ mod tests {
                                 ),
                             ],
                             field_ids: [
-                                #1,
-                                #4,
+                                #2,
+                                #3,
                             ],
                         },
                     ),
-                    column_id: #5,
+                    column_id: #1,
                     name: "nested",
                     generated_or_default_column: None,
                     description: None,
@@ -546,6 +546,7 @@ mod tests {
                     },
                     version: Pr13707,
                     system_column: None,
+                    nullable: true,
                 },
                 is_hidden: false,
             }
@@ -602,7 +603,7 @@ mod tests {
                                                             ],
                                                             field_ids: [
                                                                 #7,
-                                                                #3,
+                                                                #5,
                                                                 #8,
                                                             ],
                                                         },
@@ -615,11 +616,11 @@ mod tests {
                             ],
                             field_ids: [
                                 #6,
-                                #4,
+                                #3,
                             ],
                         },
                     ),
-                    column_id: #5,
+                    column_id: #1,
                     name: "nested",
                     generated_or_default_column: None,
                     description: None,
@@ -628,6 +629,7 @@ mod tests {
                     },
                     version: Pr13707,
                     system_column: None,
+                    nullable: true,
                 },
                 is_hidden: false,
             }
