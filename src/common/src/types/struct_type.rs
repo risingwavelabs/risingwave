@@ -30,9 +30,15 @@ pub struct StructType(Arc<StructTypeInner>);
 
 impl Debug for StructType {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let alternate = f.alternate();
+
         let mut d = f.debug_struct("StructType");
         d.field("fields", &self.0.fields);
-        if let Some(ids) = &self.0.field_ids {
+        if let Some(ids) = &self.0.field_ids
+        // TODO: This is for making `EXPLAIN` output more concise, but it hurts the readability
+        // for testing and debugging. Avoid using `Debug` repr in `EXPLAIN` output instead.
+            && alternate
+        {
             d.field("field_ids", ids);
         }
         d.finish()
