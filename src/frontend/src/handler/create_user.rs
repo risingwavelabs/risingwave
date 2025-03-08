@@ -124,7 +124,7 @@ pub async fn handle_create_user(
         let user_name = Binder::resolve_user_name(stmt.user_name)?;
         let user_reader = session.env().user_info_reader().read_guard();
         if user_reader.get_user_by_name(&user_name).is_some() {
-            return Err(CatalogError::Duplicated("user", user_name).into());
+            return Err(CatalogError::duplicated("user", user_name).into());
         }
 
         let session_user = user_reader
