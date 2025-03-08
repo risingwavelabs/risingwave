@@ -280,6 +280,7 @@ pub async fn run_slt_task(
                         label: "madsim".to_string(),
                     }
                 })
+                && background_ddl_rate > 0.0
             {
                 let background_ddl_setting = rng.gen_bool(background_ddl_rate);
                 let set_background_ddl = Record::Statement {
