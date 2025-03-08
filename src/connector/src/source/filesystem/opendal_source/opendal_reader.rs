@@ -137,9 +137,7 @@ impl<Src: OpendalSource> OpendalReader<Src> {
             .range(start_offset as u64..)
             .into_future() // Unlike `rustc`, `try_stream` seems require manual `into_future`.
             .await?;
-        let stream_reader = StreamReader::new(
-            reader.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)),
-        );
+        let stream_reader = StreamReader::new(reader.map_err(std::io::Error::other));
 
         let mut buf_reader: Pin<Box<dyn AsyncBufRead + Send>> = match compression_format {
             CompressionFormat::Gzip => {

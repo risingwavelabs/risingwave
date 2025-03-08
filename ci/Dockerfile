@@ -40,8 +40,7 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-mo
 
 ENV PATH /root/.cargo/bin/:$PATH
 
-RUN rustup toolchain install --profile minimal && \
-    rustup show && \
+RUN rustup show && \
     rustup default `rustup show active-toolchain | awk '{print $1}'` && \
     rustup component add rustfmt llvm-tools-preview clippy && \
     rustup target add wasm32-wasip1
@@ -79,7 +78,7 @@ RUN cargo binstall -y --locked cargo-llvm-cov cargo-nextest cargo-sort cargo-cac
     && rm -rf "/root/.cargo/registry/cache" \
     && rm -rf "/root/.cargo/git/db" \
     && cargo uninstall cargo-cache
-RUN cargo install cargo-dylint@3.2.1 dylint-link@3.2.1
+RUN cargo install cargo-dylint@4.0.1 dylint-link@4.0.1
 
 # install risedev
 COPY <<EOF /root/.cargo/bin/risedev

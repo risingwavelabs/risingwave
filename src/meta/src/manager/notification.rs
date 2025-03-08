@@ -387,7 +387,7 @@ impl NotificationManagerCore {
             match senders.entry(worker_key.clone()) {
                 Entry::Occupied(entry) => {
                     let _ = entry.get().send(Ok(response)).inspect_err(|err| {
-                        warn_send_failure!(target.subscribe_type, &worker_key, err);
+                        warn_send_failure!(target.subscribe_type, &worker_key, err.as_report());
                         entry.remove_entry();
                     });
                 }
@@ -400,7 +400,7 @@ impl NotificationManagerCore {
                 sender
                     .send(Ok(response.clone()))
                     .inspect_err(|err| {
-                        warn_send_failure!(target.subscribe_type, &worker_key, err);
+                        warn_send_failure!(target.subscribe_type, &worker_key, err.as_report());
                     })
                     .is_ok()
             });

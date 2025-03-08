@@ -163,7 +163,7 @@ macro_rules! register_executor {
 }
 pub use register_executor;
 
-impl<'a> ExecutorBuilder<'a> {
+impl ExecutorBuilder<'_> {
     pub async fn build(&self) -> Result<BoxedExecutor> {
         self.try_build()
             .await

@@ -395,9 +395,7 @@ mod tests {
         );
         let (ops, columns, visibility) = chunk.into_inner();
 
-        let visibilities = std::iter::repeat(visibility)
-            .take(agg_calls.len())
-            .collect_vec();
+        let visibilities = std::iter::repeat_n(visibility, agg_calls.len()).collect_vec();
         let visibilities = deduplicater
             .dedup_chunk(&ops, &columns, visibilities, &mut dedup_tables, None)
             .await
@@ -436,9 +434,7 @@ mod tests {
         );
         let (ops, columns, visibility) = chunk.into_inner();
 
-        let visibilities = std::iter::repeat(visibility)
-            .take(agg_calls.len())
-            .collect_vec();
+        let visibilities = std::iter::repeat_n(visibility, agg_calls.len()).collect_vec();
         let visibilities = deduplicater
             .dedup_chunk(&ops, &columns, visibilities, &mut dedup_tables, None)
             .await
@@ -487,9 +483,7 @@ mod tests {
         );
         let (ops, columns, visibility) = chunk.into_inner();
 
-        let visibilities = std::iter::repeat(visibility)
-            .take(agg_calls.len())
-            .collect_vec();
+        let visibilities = std::iter::repeat_n(visibility, agg_calls.len()).collect_vec();
         let visibilities = deduplicater
             .dedup_chunk(&ops, &columns, visibilities, &mut dedup_tables, None)
             .await
@@ -576,9 +570,7 @@ mod tests {
         );
         let (ops, columns, visibility) = chunk.into_inner();
 
-        let visibilities = std::iter::repeat(visibility)
-            .take(agg_calls.len())
-            .collect_vec();
+        let visibilities = std::iter::repeat_n(visibility, agg_calls.len()).collect_vec();
         let visibilities = deduplicater
             .dedup_chunk(
                 &ops,
@@ -617,9 +609,7 @@ mod tests {
         );
         let (ops, columns, visibility) = chunk.into_inner();
 
-        let visibilities = std::iter::repeat(visibility)
-            .take(agg_calls.len())
-            .collect_vec();
+        let visibilities = std::iter::repeat_n(visibility, agg_calls.len()).collect_vec();
         let visibilities = deduplicater
             .dedup_chunk(
                 &ops,

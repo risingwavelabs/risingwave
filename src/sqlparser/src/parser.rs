@@ -1064,10 +1064,7 @@ impl Parser<'_> {
         self.expect_token(&Token::LParen)?;
         let mut trim_where = None;
         if let Token::Word(word) = self.peek_token().token {
-            if [Keyword::BOTH, Keyword::LEADING, Keyword::TRAILING]
-                .iter()
-                .any(|d| word.keyword == *d)
-            {
+            if [Keyword::BOTH, Keyword::LEADING, Keyword::TRAILING].contains(&word.keyword) {
                 trim_where = Some(self.parse_trim_where()?);
             }
         }
@@ -1244,8 +1241,7 @@ impl Parser<'_> {
                     Keyword::MINUTE,
                     Keyword::SECOND,
                 ]
-                .iter()
-                .any(|d| kw.keyword == *d) =>
+                .contains(&kw.keyword) =>
             {
                 Some(self.parse_date_time_field()?)
             }
@@ -1886,7 +1882,7 @@ impl Parser<'_> {
 
     pub fn peek_nth_any_of_keywords(&mut self, n: usize, keywords: &[Keyword]) -> bool {
         match self.peek_nth_token(n).token {
-            Token::Word(w) => keywords.iter().any(|keyword| *keyword == w.keyword),
+            Token::Word(w) => keywords.contains(&w.keyword),
             _ => false,
         }
     }
@@ -4406,7 +4402,7 @@ impl Parser<'_> {
         if let Ok(()) = self.expect_token(&Token::LParen) {
             let query = self.parse_query()?;
             self.expect_token(&Token::RParen)?;
-            Ok(CteInner::Query(query))
+            Ok(CteInner::Query(Box::new(query)))
         } else {
             let changelog = self.parse_identifier_non_reserved()?;
             if changelog.to_string().to_lowercase() != "changelog" {

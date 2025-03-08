@@ -62,7 +62,6 @@ impl SliceLen for Parser<'_> {
 impl<'a> StreamIsPartial for Parser<'a> {
     type PartialState = <&'a [TokenWithLocation] as StreamIsPartial>::PartialState;
 
-    #[must_use]
     #[inline(always)]
     fn complete(&mut self) -> Self::PartialState {
         self.0.complete()

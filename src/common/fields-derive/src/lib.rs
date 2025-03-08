@@ -127,7 +127,7 @@ fn get_primary_key(input: &syn::DeriveInput) -> Option<Vec<usize>> {
             struct_
                 .fields
                 .iter()
-                .position(|f| f.ident.as_ref().map_or(false, |i| i == name))
+                .position(|f| f.ident.as_ref().is_some_and(|i| i == name))
                 .expect("primary key not found")
         };
         return Some(

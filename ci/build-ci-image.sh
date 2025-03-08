@@ -10,7 +10,7 @@ cat ../rust-toolchain
 # shellcheck disable=SC2155
 
 # REMEMBER TO ALSO UPDATE ci/docker-compose.yml
-export BUILD_ENV_VERSION=v20250220
+export BUILD_ENV_VERSION=v20250307
 
 export BUILD_TAG="public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION}"
 
@@ -19,7 +19,7 @@ arch
 
 echo "--- Check docker-compose"
 set +e
-if ! grep "${BUILD_TAG}" docker-compose.yml; then
+if ! grep "$BUILD_TAG" docker-compose.yml; then
     echo "${BUILD_TAG} is not set up for docker-compose, please modify docker-compose.yml."
     exit 1
 fi
@@ -31,9 +31,9 @@ aws ecr-public get-login-password --region us-east-1 | docker login --username A
 echo "--- Check image existence"
 set +e
 # remove all local images to ensure we fetch remote images
-docker image rm ${BUILD_TAG}
+docker image rm "$BUILD_TAG"
 # check manifest
-if docker manifest inspect "${BUILD_TAG}"; then
+if docker manifest inspect "$BUILD_TAG"; then
     echo "+++ Image already exists"
     echo "${BUILD_TAG} already exists -- skipping build image"
     exit 0
@@ -47,7 +47,7 @@ else
     export DOCKER_BUILD_PROGRESS="--progress=plain"
 fi
 
-docker build -t ${BUILD_TAG} ${DOCKER_BUILD_PROGRESS} --no-cache .
+docker build -t "$BUILD_TAG" "$DOCKER_BUILD_PROGRESS" --no-cache .
 
 echo "--- Docker push"
-docker push ${BUILD_TAG}
+docker push "$BUILD_TAG"

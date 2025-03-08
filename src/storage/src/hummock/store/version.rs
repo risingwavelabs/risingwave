@@ -731,8 +731,8 @@ impl HummockVersionReader {
         .await
     }
 
-    pub async fn iter_with_memtable<'a, 'b>(
-        &'a self,
+    pub async fn iter_with_memtable<'b>(
+        &self,
         table_key_range: TableKeyRange,
         epoch: u64,
         read_options: ReadOptions,
@@ -778,8 +778,8 @@ impl HummockVersionReader {
         ))
     }
 
-    pub async fn rev_iter<'a, 'b>(
-        &'a self,
+    pub async fn rev_iter<'b>(
+        &self,
         table_key_range: TableKeyRange,
         epoch: u64,
         read_options: ReadOptions,

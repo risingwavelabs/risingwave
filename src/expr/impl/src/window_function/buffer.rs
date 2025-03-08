@@ -518,9 +518,7 @@ impl<V: Clone> WindowImpl for SessionWindow<V> {
             // same session. Otherwise, we can safely say it's saturated.
             self.latest_session
                 .as_ref()
-                .map_or(false, |LatestSession { start_idx, .. }| {
-                    window.left_idx < *start_idx
-                })
+                .is_some_and(|LatestSession { start_idx, .. }| window.left_idx < *start_idx)
         }
     }
 

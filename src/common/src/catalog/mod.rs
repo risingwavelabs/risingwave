@@ -77,7 +77,7 @@ pub const SYSTEM_SCHEMAS: [&str; 3] = [
     RW_CATALOG_SCHEMA_NAME,
 ];
 pub fn is_system_schema(schema_name: &str) -> bool {
-    SYSTEM_SCHEMAS.iter().any(|s| *s == schema_name)
+    SYSTEM_SCHEMAS.contains(&schema_name)
 }
 
 pub const RW_RESERVED_COLUMN_NAME_PREFIX: &str = "_rw_";

@@ -729,9 +729,7 @@ impl<F: TableBuilderFactory> CompactTaskExecutor<F> {
                 self.last_key_is_delete = true;
             }
 
-            if self.last_table_id.map_or(true, |last_table_id| {
-                last_table_id != self.last_key.user_key.table_id.table_id
-            }) {
+            if self.last_table_id != Some(self.last_key.user_key.table_id.table_id) {
                 if let Some(last_table_id) = self.last_table_id.take() {
                     self.compaction_statistics
                         .delta_drop_stat

@@ -208,6 +208,6 @@ impl crate::JsonSchema {
         let avro_schema = jst::convert_avro(&self.0, jst::Context::default()).to_string();
         let schema =
             apache_avro::Schema::parse_str(&avro_schema).context("failed to parse avro schema")?;
-        avro_schema_to_fields(&schema, Some(MapHandling::Jsonb)).map_err(Into::into)
+        avro_schema_to_fields(&schema, Some(MapHandling::Jsonb))
     }
 }

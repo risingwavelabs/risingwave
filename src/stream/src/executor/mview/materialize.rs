@@ -575,7 +575,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
         }
     }
 
-    pub async fn handle<'a, S: StateStore>(
+    pub async fn handle<S: StateStore>(
         &mut self,
         row_ops: Vec<(Op, Vec<u8>, Bytes)>,
         table: &StateTableInner<S, SD>,

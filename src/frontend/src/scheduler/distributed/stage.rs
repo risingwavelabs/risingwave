@@ -264,7 +264,7 @@ impl StageExecution {
 
     pub async fn is_scheduled(&self) -> bool {
         let s = self.state.read().await;
-        matches!(*s, StageState::Running { .. } | StageState::Completed)
+        matches!(*s, StageState::Running | StageState::Completed)
     }
 
     pub async fn is_pending(&self) -> bool {
@@ -1137,7 +1137,7 @@ impl StageRunner {
     }
 
     fn mask_failed_serving_worker(&self, worker: &WorkerNode) {
-        if !worker.property.as_ref().map_or(false, |p| p.is_serving) {
+        if !worker.property.as_ref().is_some_and(|p| p.is_serving) {
             return;
         }
         let duration = Duration::from_secs(std::cmp::max(

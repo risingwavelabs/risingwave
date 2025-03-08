@@ -246,7 +246,7 @@ impl Store {
         let rows = self
             .rows
             .iter()
-            .flat_map(|(row, &count)| std::iter::repeat(row).take(count))
+            .flat_map(|(row, &count)| std::iter::repeat_n(row, count))
             .collect_vec();
 
         DataChunk::from_rows(&rows, &data_types)

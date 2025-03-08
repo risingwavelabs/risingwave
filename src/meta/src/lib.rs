@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![allow(clippy::large_enum_variant)]
+#![allow(clippy::result_large_err)]
 #![allow(clippy::derive_partial_eq_without_eq)]
 #![feature(trait_alias)]
 #![feature(type_alias_impl_trait)]
 #![feature(map_try_insert)]
-#![feature(extract_if)]
-#![feature(hash_extract_if)]
 #![feature(btree_extract_if)]
 #![feature(let_chains)]
 #![feature(error_generic_member_access)]
@@ -27,7 +27,6 @@
 #![feature(custom_test_frameworks)]
 #![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
 #![feature(impl_trait_in_assoc_type)]
-#![feature(const_option)]
 #![feature(anonymous_lifetime_in_impl_trait)]
 #![feature(duration_millis_float)]
 #![feature(iterator_try_reduce)]

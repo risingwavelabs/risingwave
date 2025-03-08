@@ -26,7 +26,6 @@ use risingwave_storage::StateStore;
 use super::source_backfill_executor::{BackfillStateWithProgress, BackfillStates};
 use crate::common::table::state_table::StateTable;
 use crate::executor::StreamExecutorResult;
-use crate::executor::error::StreamExecutorError;
 
 pub struct BackfillStateTableHandler<S: StateStore> {
     state_store: StateTable<S>,
@@ -52,7 +51,6 @@ impl<S: StateStore> BackfillStateTableHandler<S> {
         self.state_store
             .get_row(row::once(Some(Self::string_to_scalar(key.as_ref()))))
             .await
-            .map_err(StreamExecutorError::from)
     }
 
     /// XXX: we might get stale data for other actors' writes, but it's fine?
