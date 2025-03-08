@@ -39,7 +39,8 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-mo
 
 ENV PATH /root/.cargo/bin/:$PATH
 
-RUN rustup show && \
+RUN rustup toolchain install --profile minimal && \
+    rustup show && \
     rustup default `rustup show active-toolchain | awk '{print $1}'` && \
     rustup component add rustfmt llvm-tools-preview clippy && \
     rustup target add wasm32-wasip1
