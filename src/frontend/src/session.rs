@@ -176,6 +176,9 @@ pub(crate) struct FrontendEnv {
 
     /// Memory context used for batch executors in frontend.
     mem_context: MemoryContext,
+
+    /// address of the serverless backfill controller.
+    sbc_addr: String,
 }
 
 /// Session map identified by `(process_id, secret_key)`
@@ -250,6 +253,7 @@ impl FrontendEnv {
             creating_streaming_job_tracker: Arc::new(creating_streaming_tracker),
             compute_runtime,
             mem_context: MemoryContext::none(),
+            sbc_addr: Default::default(),
         }
     }
 
@@ -486,6 +490,7 @@ impl FrontendEnv {
                 batch_config: config.batch,
                 meta_config: config.meta,
                 streaming_config: config.streaming,
+                sbc_addr: opts.sbc_addr,
                 source_metrics,
                 creating_streaming_job_tracker,
                 compute_runtime,
@@ -548,6 +553,10 @@ impl FrontendEnv {
 
     pub fn session_params_snapshot(&self) -> SessionConfig {
         self.session_params.read_recursive().clone()
+    }
+
+    pub fn sbc_address(&self) -> &String {
+        &self.sbc_addr
     }
 
     pub fn server_address(&self) -> &HostAddr {
