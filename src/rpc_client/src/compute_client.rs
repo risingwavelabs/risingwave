@@ -71,7 +71,7 @@ impl ComputeClient {
         let channel = Endpoint::from_shared(format!("http://{}", &addr))?
             .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
             .initial_stream_window_size(STREAM_WINDOW_SIZE)
-            .connect_timeout(Duration::from_secs(5))
+            .connect_timeout(Duration::from_secs(30))
             .monitored_connect(
                 "grpc-compute-client",
                 TcpConfig {
