@@ -120,6 +120,10 @@ impl SharedContext {
         }
     }
 
+    pub fn term_id(&self) -> String {
+        self.local_barrier_manager.term_id.clone()
+    }
+
     #[cfg(test)]
     pub fn for_test() -> Self {
         use std::sync::Arc;

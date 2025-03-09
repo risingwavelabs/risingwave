@@ -91,6 +91,7 @@ impl StreamClient {
         &self,
         version_id: HummockVersionId,
         mv_depended_subscriptions: &HashMap<TableId, HashMap<u32, u64>>,
+        term_id: String,
     ) -> Result<StreamingControlHandle> {
         let first_request = StreamingControlStreamRequest {
             request: Some(streaming_control_stream_request::Request::Init(
@@ -107,6 +108,7 @@ impl StreamClient {
                                 })
                         })
                         .collect(),
+                    term_id,
                 },
             )),
         };
