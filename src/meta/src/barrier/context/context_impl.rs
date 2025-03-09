@@ -21,9 +21,11 @@ use risingwave_pb::stream_plan::PbFragmentTypeFlag;
 use risingwave_pb::stream_service::streaming_control_stream_request::PbInitRequest;
 use risingwave_rpc_client::StreamingControlHandle;
 
+use crate::MetaResult;
 use crate::barrier::command::CommandContext;
 use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl};
 use crate::barrier::progress::TrackingJob;
+use crate::barrier::schedule::MarkReadyOptions;
 use crate::barrier::{
     BarrierManagerStatus, BarrierWorkerRuntimeInfoSnapshot, Command, CreateStreamingJobCommandInfo,
     CreateStreamingJobType, DatabaseRuntimeInfoSnapshot, RecoveryReason, ReplaceStreamJobPlan,
@@ -31,7 +33,6 @@ use crate::barrier::{
 };
 use crate::hummock::CommitEpochInfo;
 use crate::stream::SourceChange;
-use crate::{MetaError, MetaResult};
 
 impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
     async fn commit_epoch(&self, commit_info: CommitEpochInfo) -> MetaResult<HummockVersionStats> {
@@ -57,9 +58,10 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
             .abort_and_mark_blocked(database_id, "cluster is under recovering");
     }
 
-    fn mark_ready(&self, database_id: Option<DatabaseId>) {
-        self.scheduled_barriers.mark_ready(database_id);
-        if database_id.is_none() {
+    fn mark_ready(&self, options: MarkReadyOptions) {
+        let is_global = matches!(&options, MarkReadyOptions::Global { .. });
+        self.scheduled_barriers.mark_ready(options);
+        if is_global {
             self.set_status(BarrierManagerStatus::Running);
         }
     }
@@ -68,8 +70,10 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         command.post_collect(self).await
     }
 
-    async fn notify_creating_job_failed(&self, err: &MetaError) {
-        self.metadata_manager.notify_finish_failed(err).await
+    async fn notify_creating_job_failed(&self, database_id: Option<DatabaseId>, err: String) {
+        self.metadata_manager
+            .notify_finish_failed(database_id, err)
+            .await
     }
 
     async fn finish_creating_job(&self, job: TrackingJob) -> MetaResult<()> {
