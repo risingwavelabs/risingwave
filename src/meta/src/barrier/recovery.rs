@@ -291,11 +291,13 @@ impl GlobalBarrierManager {
                     };
 
                     let reset_start_time = Instant::now();
+                    let next_term_id = GlobalBarrierManagerContext::next_term_id();
                     control_stream_manager
                         .reset(
                             version_id,
                             &subscription_info,
                             active_streaming_nodes.current(),
+                            next_term_id.clone(),
                         )
                         .await
                         .inspect_err(|err| {
@@ -362,6 +364,7 @@ impl GlobalBarrierManager {
                         active_streaming_nodes,
                         control_stream_manager,
                         tracker,
+                        next_term_id
                     )
                 };
                 if recovery_result.is_err() {
@@ -384,6 +387,7 @@ impl GlobalBarrierManager {
             self.active_streaming_nodes,
             self.control_stream_manager,
             create_mview_tracker,
+            self.term_id,
         ) = new_state;
 
         self.checkpoint_control =
@@ -392,6 +396,7 @@ impl GlobalBarrierManager {
         tracing::info!(
             epoch = self.state.in_flight_prev_epoch().map(|epoch| epoch.value().0),
             paused = ?self.state.paused_reason(),
+            term_id = self.term_id,
             "recovery success"
         );
 
