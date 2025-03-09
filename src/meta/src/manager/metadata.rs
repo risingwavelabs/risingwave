@@ -31,6 +31,7 @@ use tokio::sync::oneshot;
 use tokio::time::{Instant, sleep};
 use tracing::warn;
 
+use crate::MetaResult;
 use crate::barrier::Reschedule;
 use crate::controller::catalog::CatalogControllerRef;
 use crate::controller::cluster::{ClusterControllerRef, StreamingClusterInfo, WorkerExtraInfo};
@@ -41,7 +42,6 @@ use crate::model::{
 };
 use crate::stream::{JobReschedulePostUpdates, SplitAssignment};
 use crate::telemetry::MetaTelemetryJobDesc;
-use crate::{MetaError, MetaResult};
 
 #[derive(Clone)]
 pub struct MetadataManager {
@@ -786,6 +786,7 @@ impl MetadataManager {
     /// The progress is updated per barrier.
     pub(crate) async fn wait_streaming_job_finished(
         &self,
+        database_id: DatabaseId,
         id: ObjectId,
     ) -> MetaResult<NotificationVersion> {
         tracing::debug!("wait_streaming_job_finished: {id:?}");
@@ -795,13 +796,16 @@ impl MetadataManager {
         }
         let (tx, rx) = oneshot::channel();
 
-        mgr.register_finish_notifier(id, tx);
+        mgr.register_finish_notifier(database_id.database_id as _, id, tx);
         drop(mgr);
-        rx.await.map_err(|e| anyhow!(e))?
+        rx.await
+            .map_err(|_| "no received reason".to_owned())
+            .and_then(|result| result)
+            .map_err(|reason| anyhow!("failed to wait streaming job finish: {}", reason).into())
     }
 
-    pub(crate) async fn notify_finish_failed(&self, err: &MetaError) {
+    pub(crate) async fn notify_finish_failed(&self, database_id: Option<DatabaseId>, err: String) {
         let mut mgr = self.catalog_controller.get_inner_write_guard().await;
-        mgr.notify_finish_failed(err);
+        mgr.notify_finish_failed(database_id.map(|id| id.database_id as _), err);
     }
 }

@@ -326,7 +326,7 @@ async fn test_recovery_cancels_foreground_ddl() -> Result<()> {
     match handle.await? {
         Ok(_) => panic!("create m1 should fail"),
         Err(e) => {
-            assert!(e.to_string().contains("adhoc recovery triggered"));
+            assert!(e.to_string().contains("adhoc recovery"));
         }
     }
     Ok(())
