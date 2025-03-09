@@ -201,6 +201,7 @@ pub(super) enum LocalActorOperation {
         init_request: InitRequest,
     },
     TakeReceiver {
+        term_id: String,
         ids: UpDownActorIds,
         result_sender: oneshot::Sender<StreamResult<Receiver>>,
     },
@@ -274,15 +275,18 @@ pub(super) struct LocalBarrierWorker {
 
     /// Cached result of [`Self::try_find_root_failure`].
     cached_root_failure: Option<ScoredStreamError>,
+
+    term_id: String,
 }
 
 impl LocalBarrierWorker {
-    pub(super) fn new(actor_manager: Arc<StreamActorManager>) -> Self {
+    pub(super) fn new(actor_manager: Arc<StreamActorManager>, term_id: String) -> Self {
         let (event_tx, event_rx) = unbounded_channel();
         let (failure_tx, failure_rx) = unbounded_channel();
         let shared_context = Arc::new(SharedContext::new(
             &actor_manager.env,
             LocalBarrierManager {
+                term_id: term_id.clone(),
                 barrier_event_sender: event_tx,
                 actor_failure_sender: failure_tx,
             },
@@ -296,6 +300,7 @@ impl LocalBarrierWorker {
             barrier_event_rx: event_rx,
             actor_failure_rx: failure_rx,
             cached_root_failure: None,
+            term_id,
         }
     }
 
@@ -316,7 +321,7 @@ impl LocalBarrierWorker {
                         match actor_op {
                             LocalActorOperation::NewControlStream { handle, init_request  } => {
                                 self.control_stream_handle.reset_stream_with_err(Status::internal("control stream has been reset to a new one"));
-                                self.reset(HummockVersionId::new(init_request.version_id)).await;
+                                self.reset(HummockVersionId::new(init_request.version_id), init_request.term_id).await;
                                 self.state.add_subscriptions(init_request.subscriptions);
                                 self.control_stream_handle = handle;
                                 self.control_stream_handle.send_response(StreamingControlStreamResponse {
@@ -431,8 +436,29 @@ impl LocalBarrierWorker {
             LocalActorOperation::NewControlStream { .. } | LocalActorOperation::Shutdown { .. } => {
                 unreachable!("event {actor_op} should be handled separately in async context")
             }
-            LocalActorOperation::TakeReceiver { ids, result_sender } => {
-                let _ = result_sender.send(self.current_shared_context.take_receiver(ids));
+            LocalActorOperation::TakeReceiver {
+                term_id,
+                ids,
+                result_sender,
+            } => {
+                let result = try {
+                    if self.term_id != term_id {
+                        warn!(
+                            ?ids,
+                            term_id,
+                            current_term_id = self.term_id,
+                            "take receiver on unmatched term_id"
+                        );
+                        Err(anyhow!(
+                            "take receiver {:?} on unmatched term_id {} to current term_id {}",
+                            ids,
+                            term_id,
+                            self.term_id
+                        ))?;
+                    }
+                    self.current_shared_context.take_receiver(ids)?
+                };
+                let _ = result_sender.send(result);
             }
             #[cfg(test)]
             LocalActorOperation::GetCurrentSharedContext(sender) => {
@@ -572,8 +598,8 @@ impl LocalBarrierWorker {
     }
 
     /// Reset all internal states.
-    pub(super) fn reset_state(&mut self) {
-        *self = Self::new(self.actor_manager.clone());
+    pub(super) fn reset_state(&mut self, term_id: String) {
+        *self = Self::new(self.actor_manager.clone(), term_id);
     }
 
     /// When a [`crate::executor::StreamConsumer`] (typically [`crate::executor::DispatchExecutor`]) get a barrier, it should report
@@ -661,6 +687,7 @@ impl LocalBarrierWorker {
 
 #[derive(Clone)]
 pub struct LocalBarrierManager {
+    pub term_id: String,
     barrier_event_sender: UnboundedSender<LocalBarrierEvent>,
     actor_failure_sender: UnboundedSender<(ActorId, StreamError)>,
 }
@@ -693,7 +720,7 @@ impl LocalBarrierWorker {
             await_tree_reg,
             runtime: runtime.into(),
         });
-        let worker = LocalBarrierWorker::new(actor_manager);
+        let worker = LocalBarrierWorker::new(actor_manager, "uninitialized".into());
         tokio::spawn(worker.run(actor_op_rx))
     }
 }
@@ -858,6 +885,7 @@ impl LocalBarrierManager {
             while rx.recv().await.is_some() {}
         });
         Self {
+            term_id: "for_test".to_string(),
             barrier_event_sender: tx,
             actor_failure_sender: failure_tx,
         }
@@ -912,6 +940,7 @@ pub(crate) mod barrier_test_utils {
                 init_request: InitRequest {
                     version_id: 0,
                     subscriptions: vec![],
+                    term_id: "for_test".into(),
                 },
             });
 

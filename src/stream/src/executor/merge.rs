@@ -927,6 +927,7 @@ mod tests {
                 (0, 0),
                 Arc::new(StreamingMetrics::unused()),
                 BATCHED_PERMITS,
+                "for_test".into(),
             )
         };
 
