@@ -987,7 +987,7 @@ pub async fn handle_create_source(
     // If it is a temporary source, put it into SessionImpl.
     if stmt.temporary {
         if session.get_temporary_source(&source_catalog.name).is_some() {
-            return Err(CatalogError::Duplicated("source", source_catalog.name.clone()).into());
+            return Err(CatalogError::duplicated("source", source_catalog.name.clone()).into());
         }
         session.create_temporary_source(source_catalog);
         return Ok(PgResponse::empty_result(StatementType::CREATE_SOURCE));

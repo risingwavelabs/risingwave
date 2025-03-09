@@ -56,7 +56,7 @@ pub async fn handle_create_database(
                     .notice(format!("database \"{}\" exists, skipping", database_name))
                     .into())
             } else {
-                Err(CatalogError::Duplicated("database", database_name).into())
+                Err(CatalogError::Duplicated("database", database_name, false).into())
             };
         }
     }

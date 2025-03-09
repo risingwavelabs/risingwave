@@ -491,11 +491,13 @@ pub async fn run_slt_task(
                             }
                             | SqlCmd::CreateMaterializedView { .. }
                                 if i != 0
+                                    && let e = e.to_string()
                                     // It should not be a gRPC request to meta error,
                                     // otherwise it means that the catalog is not yet populated to fe.
-                                    && !e.to_string().contains("gRPC request to meta service failed")
-                                    && e.to_string().contains("exists")
-                                    && e.to_string().contains("Catalog error") =>
+                                    && !e.contains("gRPC request to meta service failed")
+                                    && e.contains("exists")
+                                    && !e.contains("under creation")
+                                    && e.contains("Catalog error") =>
                             {
                                 break;
                             }
