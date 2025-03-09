@@ -140,6 +140,9 @@ impl IcebergCommon {
             }
             if let Some(gcs_credential) = &self.gcs_credential {
                 iceberg_configs.insert(GCS_CREDENTIALS_JSON.to_owned(), gcs_credential.clone());
+                if catalog_type != "rest" && catalog_type != "rest_rust" {
+                    bail!("gcs unsupported in {} catalog", &catalog_type);
+                }
             }
 
             match &self.warehouse_path {
