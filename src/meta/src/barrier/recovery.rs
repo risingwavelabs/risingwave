@@ -17,6 +17,7 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Context};
 use itertools::Itertools;
+use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::WorkerSlotId;
@@ -29,7 +30,7 @@ use risingwave_pb::stream_plan::{AddMutation, StreamActor};
 use thiserror_ext::AsReport;
 use tokio::time::Instant;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
-use tracing::{debug, error, info, warn, Instrument};
+use tracing::{debug, info, warn, Instrument};
 
 use super::{CheckpointControl, TracedEpoch};
 use crate::barrier::info::{InflightGraphInfo, InflightSubscriptionInfo};
@@ -555,7 +556,7 @@ impl GlobalBarrierManagerContext {
                 info!("integrity check passed");
             }
             Err(_) => {
-                error!("integrity check failed");
+                bail!("integrity check failed");
             }
         }
 
@@ -616,7 +617,7 @@ impl GlobalBarrierManagerContext {
             table_parallelisms
         );
 
-        let schedulable_worker_ids = active_nodes
+        let schedulable_worker_ids: BTreeSet<_> = active_nodes
             .current()
             .values()
             .filter(|worker| {
@@ -634,59 +635,82 @@ impl GlobalBarrierManagerContext {
             schedulable_worker_ids
         );
 
-        let plan = self
-            .scale_controller
-            .generate_table_resize_plan(TableResizePolicy {
-                worker_ids: schedulable_worker_ids,
-                table_parallelisms: table_parallelisms.clone(),
-            })
-            .await?;
+        for (table_id, parallelism) in table_parallelisms {
+            let local_table_parallelism = HashMap::from([(table_id, parallelism)]);
+            let plan = self
+                .scale_controller
+                .generate_table_resize_plan(TableResizePolicy {
+                    worker_ids: schedulable_worker_ids.clone(),
+                    table_parallelisms: local_table_parallelism.clone(),
+                })
+                .await?;
 
-        let table_parallelisms: HashMap<_, _> = table_parallelisms
-            .into_iter()
-            .map(|(table_id, parallelism)| {
-                debug_assert_ne!(parallelism, TableParallelism::Custom);
-                (TableId::new(table_id), parallelism)
-            })
-            .collect();
+            info!(table_id = table_id, "plan generated for job",);
 
-        let mut compared_table_parallelisms = table_parallelisms.clone();
+            let table_parallelisms: HashMap<_, _> = local_table_parallelism
+                .into_iter()
+                .map(|(table_id, parallelism)| {
+                    debug_assert_ne!(parallelism, TableParallelism::Custom);
+                    (TableId::new(table_id), parallelism)
+                })
+                .collect();
 
-        // skip reschedule if no reschedule is generated.
-        let reschedule_fragment = if plan.is_empty() {
-            HashMap::new()
-        } else {
-            self.scale_controller
-                .analyze_reschedule_plan(
-                    plan,
-                    RescheduleOptions {
-                        resolve_no_shuffle_upstream: true,
-                        skip_create_new_actors: true,
-                    },
-                    Some(&mut compared_table_parallelisms),
-                )
-                .await?
-        };
+            let mut compared_table_parallelisms = table_parallelisms.clone();
 
-        // Because custom parallelism doesn't exist, this function won't result in a no-shuffle rewrite for table parallelisms.
-        debug_assert_eq!(compared_table_parallelisms, table_parallelisms);
+            // skip reschedule if no reschedule is generated.
+            let reschedule_fragment = if plan.is_empty() {
+                HashMap::new()
+            } else {
+                self.scale_controller
+                    .analyze_reschedule_plan(
+                        plan,
+                        RescheduleOptions {
+                            resolve_no_shuffle_upstream: true,
+                            skip_create_new_actors: true,
+                        },
+                        Some(&mut compared_table_parallelisms),
+                    )
+                    .await?
+            };
 
-        info!("post applying reschedule for offline scaling");
+            // Because custom parallelism doesn't exist, this function won't result in a no-shuffle rewrite for table parallelisms.
+            debug_assert_eq!(compared_table_parallelisms, table_parallelisms);
 
-        if let Err(e) = self
-            .scale_controller
-            .post_apply_reschedule(&reschedule_fragment, &table_parallelisms)
-            .await
-        {
-            tracing::error!(
-                error = %e.as_report(),
-                "failed to apply reschedule for offline scaling in recovery",
+            info!(
+                table_id = table_id,
+                "post applying reschedule for offline scaling"
             );
 
-            return Err(e);
+            if let Err(e) = self
+                .scale_controller
+                .post_apply_reschedule(&reschedule_fragment, &table_parallelisms)
+                .await
+            {
+                tracing::error!(
+                    error = %e.as_report(),
+                    "failed to apply reschedule for offline scaling in recovery",
+                );
+
+                return Err(e);
+            }
+
+            info!(
+                table_id = table_id,
+                "post applied reschedule for offline scaling"
+            );
         }
 
         info!("scaling actors succeed.");
+
+        match self.scale_controller.integrity_check().await {
+            Ok(_) => {
+                info!("integrity check passed");
+            }
+            Err(_) => {
+                bail!("integrity check failed");
+            }
+        }
+
         Ok(())
     }
 
