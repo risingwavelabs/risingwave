@@ -15,7 +15,7 @@
 use std::cmp::min;
 use std::path::Path;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Result, bail};
 use itertools::Itertools;
@@ -228,7 +228,11 @@ pub async fn run_slt_task(
         || kill_opts.kill_frontend
         || kill_opts.kill_compactor;
     let files = glob::glob(glob).expect("failed to read glob pattern");
-    for file in files {
+    let files = files.collect_vec();
+    let file_count = files.len();
+    let start_time = Instant::now();
+    println!("starts running {} files", file_count);
+    for (i, file) in files.into_iter().enumerate() {
         // use a session per file
         let mut tester =
             sqllogictest::Runner::new(|| RisingWave::connect("frontend".into(), "dev".into()));
@@ -236,7 +240,8 @@ pub async fn run_slt_task(
 
         let file = file.unwrap();
         let path = file.as_path();
-        println!("{}", path.display());
+        let file_start_time = Instant::now();
+        println!("{} starts", path.display());
         if kill && KILL_IGNORE_FILES.iter().any(|s| path.ends_with(s)) {
             continue;
         }
@@ -559,7 +564,19 @@ pub async fn run_slt_task(
                 handle.await.unwrap();
             }
         }
+        println!(
+            "{} finishes in {:?} ({}/{})",
+            path.display(),
+            file_start_time.elapsed(),
+            i + 1,
+            file_count
+        );
     }
+    println!(
+        "finishes running {} files in {:?}",
+        file_count,
+        start_time.elapsed()
+    );
 }
 
 pub async fn run_parallel_slt_task(glob: &str, jobs: usize) -> Result<(), ParallelTestError> {
