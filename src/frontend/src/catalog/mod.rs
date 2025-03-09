@@ -107,7 +107,7 @@ pub enum CatalogError {
     #[error("{0} not found: {1}")]
     NotFound(&'static str, String),
     #[error(
-        "{0} with name {1}  exists{under_creation}", under_creation = (.2).then_some(" but under creation").unwrap_or("")
+        "{0} with name {1} exists{under_creation}", under_creation = (.2).then_some(" but under creation").unwrap_or("")
     )]
     Duplicated(
         &'static str,
