@@ -66,6 +66,7 @@ message StreamingControlStreamRequest {
   message InitRequest {
     uint64 version_id = 1;
     repeated stream_plan.SubscriptionUpstreamInfo subscriptions = 2;
+    string term_id = 3;
   }
 
   message RemovePartialGraphRequest {

@@ -216,9 +216,14 @@ impl LocalStreamManager {
             })
     }
 
-    pub async fn take_receiver(&self, ids: UpDownActorIds) -> StreamResult<Receiver> {
+    pub async fn take_receiver(
+        &self,
+        term_id: String,
+        ids: UpDownActorIds,
+    ) -> StreamResult<Receiver> {
         self.actor_op_tx
             .send_and_await(|result_sender| LocalActorOperation::TakeReceiver {
+                term_id,
                 ids,
                 result_sender,
             })
@@ -249,7 +254,7 @@ impl LocalStreamManager {
 
 impl LocalBarrierWorker {
     /// Force stop all actors on this worker, and then drop their resources.
-    pub(super) async fn reset(&mut self, version_id: HummockVersionId) {
+    pub(super) async fn reset(&mut self, version_id: HummockVersionId, term_id: String) {
         self.state.abort_actors().await;
         if let Some(m) = self.actor_manager.await_tree_reg.as_ref() {
             m.clear();
@@ -261,7 +266,7 @@ impl LocalBarrierWorker {
                 .verbose_instrument_await("store_clear_shared_buffer")
                 .await
         }
-        self.reset_state();
+        self.reset_state(term_id);
         self.actor_manager.env.dml_manager_ref().clear();
     }
 }

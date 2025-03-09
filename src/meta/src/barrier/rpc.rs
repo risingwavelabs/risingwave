@@ -72,6 +72,7 @@ impl ControlStreamManager {
         &mut self,
         node: WorkerNode,
         subscription: &InflightSubscriptionInfo,
+        term_id: String,
     ) {
         let node_id = node.id as WorkerId;
         if self.nodes.contains_key(&node_id) {
@@ -95,6 +96,7 @@ impl ControlStreamManager {
                     node.clone(),
                     version_id,
                     &subscription.mv_depended_subscriptions,
+                    term_id.clone(),
                 )
                 .await
             {
@@ -120,6 +122,7 @@ impl ControlStreamManager {
         version_id: HummockVersionId,
         subscriptions: &InflightSubscriptionInfo,
         nodes: &HashMap<WorkerId, WorkerNode>,
+        term_id: String,
     ) -> MetaResult<()> {
         let nodes = try_join_all(nodes.iter().map(|(worker_id, node)| async {
             let node = self
@@ -128,6 +131,7 @@ impl ControlStreamManager {
                     node.clone(),
                     version_id,
                     &subscriptions.mv_depended_subscriptions,
+                    term_id.clone(),
                 )
                 .await?;
             Result::<_, MetaError>::Ok((*worker_id, node))
@@ -440,13 +444,14 @@ impl GlobalBarrierManagerContext {
         node: WorkerNode,
         initial_version_id: HummockVersionId,
         mv_depended_subscriptions: &HashMap<TableId, HashMap<u32, u64>>,
+        term_id: String,
     ) -> MetaResult<ControlStreamNode> {
         let handle = self
             .env
             .stream_client_pool()
             .get(&node)
             .await?
-            .start_streaming_control(initial_version_id, mv_depended_subscriptions)
+            .start_streaming_control(initial_version_id, mv_depended_subscriptions, term_id)
             .await?;
         Ok(ControlStreamNode {
             worker: node.clone(),

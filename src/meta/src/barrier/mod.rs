@@ -47,6 +47,7 @@ use tokio::sync::oneshot::{Receiver, Sender};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn, Instrument};
+use uuid::Uuid;
 
 use self::command::CommandContext;
 use self::notifier::Notifier;
@@ -206,6 +207,8 @@ pub struct GlobalBarrierManager {
     active_streaming_nodes: ActiveStreamingWorkerNodes,
 
     control_stream_manager: ControlStreamManager,
+
+    term_id: String,
 }
 
 /// Controls the concurrent execution of commands.
@@ -557,6 +560,7 @@ impl GlobalBarrierManager {
             pending_non_checkpoint_barriers: Vec::new(),
             active_streaming_nodes,
             control_stream_manager,
+            term_id: GlobalBarrierManagerContext::next_term_id(),
         }
     }
 
@@ -742,7 +746,7 @@ impl GlobalBarrierManager {
                         .on_new_worker_node_map(self.active_streaming_nodes.current());
                     self.checkpoint_control.creating_streaming_job_controls.values().for_each(|job| job.on_new_worker_node_map(self.active_streaming_nodes.current()));
                     if let ActiveStreamingWorkerChange::Add(node) | ActiveStreamingWorkerChange::Update(node) = changed_worker {
-                        self.control_stream_manager.add_worker(node, &self.state.inflight_subscription_info).await;
+                        self.control_stream_manager.add_worker(node, &self.state.inflight_subscription_info, self.term_id.clone()).await;
                     }
                 }
 
@@ -1495,6 +1499,10 @@ impl GlobalBarrierManagerContext {
         }
 
         Ok(ddl_progress.into_values().collect())
+    }
+
+    fn next_term_id() -> String {
+        Uuid::new_v4().to_string()
     }
 }
 

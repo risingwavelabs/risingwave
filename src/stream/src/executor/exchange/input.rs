@@ -172,6 +172,7 @@ impl RemoteInput {
         up_down_frag: UpDownFragmentIds,
         metrics: Arc<StreamingMetrics>,
         batched_permits: usize,
+        term_id: String,
     ) -> Self {
         let actor_id = up_down_ids.0;
 
@@ -184,6 +185,7 @@ impl RemoteInput {
                 up_down_frag,
                 metrics,
                 batched_permits,
+                term_id,
             ),
         }
     }
@@ -213,6 +215,7 @@ mod remote_input {
         up_down_frag: UpDownFragmentIds,
         metrics: Arc<StreamingMetrics>,
         batched_permits_limit: usize,
+        term_id: String,
     ) -> RemoteInputStreamInner {
         run_inner(
             client_pool,
@@ -221,6 +224,7 @@ mod remote_input {
             up_down_frag,
             metrics,
             batched_permits_limit,
+            term_id,
         )
     }
 
@@ -232,10 +236,17 @@ mod remote_input {
         up_down_frag: UpDownFragmentIds,
         metrics: Arc<StreamingMetrics>,
         batched_permits_limit: usize,
+        term_id: String,
     ) {
         let client = client_pool.get_by_addr(upstream_addr).await?;
         let (stream, permits_tx) = client
-            .get_stream(up_down_ids.0, up_down_ids.1, up_down_frag.0, up_down_frag.1)
+            .get_stream(
+                up_down_ids.0,
+                up_down_ids.1,
+                up_down_frag.0,
+                up_down_frag.1,
+                term_id,
+            )
             .await?;
 
         let up_actor_id = up_down_ids.0.to_string();
@@ -338,6 +349,7 @@ pub(crate) fn new_input(
             (upstream_fragment_id, fragment_id),
             metrics,
             context.config.developer.exchange_batched_permits,
+            context.term_id(),
         )
         .boxed_input()
     };
