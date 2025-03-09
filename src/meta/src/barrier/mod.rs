@@ -28,6 +28,7 @@ use crate::manager::ActiveStreamingWorkerNodes;
 use crate::model::{ActorId, StreamActorWithDispatchers, StreamJobFragments};
 use crate::{MetaError, MetaResult};
 
+mod backfill_order_control;
 mod checkpoint;
 mod command;
 mod complete_task;
