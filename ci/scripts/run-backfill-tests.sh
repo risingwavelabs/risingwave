@@ -66,7 +66,7 @@ rename_logs_with_prefix() {
 }
 
 kill_cluster() {
-  risedev ci-kill
+  risedev ci-kill-no-dump-logs
   wait
 }
 
