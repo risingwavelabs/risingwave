@@ -165,3 +165,12 @@ check_link_info() {
       exit 1
   fi
 }
+
+# Set nextest partition argument based on BuildKite parallel job configuration
+if [ -n "${BUILDKITE_PARALLEL_JOB:-}" ] && [ -n "${BUILDKITE_PARALLEL_JOB_COUNT:-}" ]; then
+  # Add 1 to BUILDKITE_PARALLEL_JOB to get 1-based index
+  NEXTEST_PARTITION_ARG="--partition hash:$((BUILDKITE_PARALLEL_JOB + 1))/${BUILDKITE_PARALLEL_JOB_COUNT}"
+  echo "NEXTEST_PARTITION_ARG is set to \"$NEXTEST_PARTITION_ARG\" based on Buildkite parallel job configuration."
+else
+  NEXTEST_PARTITION_ARG=""
+fi
