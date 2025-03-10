@@ -3769,14 +3769,32 @@ impl Parser<'_> {
         if !self.parse_keyword(Keyword::SET) {
             return self.expected("SET after ALTER FRAGMENT");
         }
-        let Some(rate_limit) = self.parse_alter_backfill_rate_limit()? else {
-            return self.expected("expected BACKFILL_RATE_LIMIT after SET");
-        };
+        let rate_limit = self.parse_alter_fragment_rate_limit()?;
         let operation = AlterFragmentOperation::AlterBackfillRateLimit { rate_limit };
         Ok(Statement::AlterFragment {
             fragment_id,
             operation,
         })
+    }
+
+    fn parse_alter_fragment_rate_limit(&mut self) -> ModalResult<i32> {
+        if !self.parse_word("RATE_LIMIT") {
+            return self.expected("expected RATE_LIMIT after SET");
+        }
+        if self.expect_keyword(Keyword::TO).is_err() && self.expect_token(&Token::Eq).is_err() {
+            return self.expected("TO or = after RATE_LIMIT");
+        }
+        let rate_limit = if self.parse_keyword(Keyword::DEFAULT) {
+            -1
+        } else {
+            let s = self.parse_number_value()?;
+            if let Ok(n) = s.parse::<i32>() {
+                n
+            } else {
+                return self.expected("number or DEFAULT");
+            }
+        };
+        Ok(rate_limit)
     }
 
     /// Parse a copy statement
