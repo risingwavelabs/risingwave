@@ -247,6 +247,15 @@ impl LogReader for BoundedInMemLogStoreReader {
     async fn rewind(&mut self) -> LogStoreResult<()> {
         Err(anyhow!("should not call rewind on it"))
     }
+
+    async fn build_stream_from_start_offset(
+        &mut self,
+        _start_offset: Option<u64>,
+    ) -> LogStoreResult<()> {
+        Err(anyhow!(
+            "should not call build_stream_from_start_offset on it"
+        ))
+    }
 }
 
 impl LogWriter for BoundedInMemLogStoreWriter {

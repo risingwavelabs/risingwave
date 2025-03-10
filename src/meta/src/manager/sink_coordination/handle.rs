@@ -61,11 +61,16 @@ impl SinkWriterCoordinationHandle {
         &self.vnode_bitmap
     }
 
-    pub(super) fn start(&mut self) -> anyhow::Result<()> {
+    pub(super) fn start(
+        &mut self,
+        log_store_rewind_start_epoch: Option<u64>,
+    ) -> anyhow::Result<()> {
         self.response_tx
             .send(Ok(CoordinateResponse {
                 msg: Some(coordinate_response::Msg::StartResponse(
-                    StartCoordinationResponse {},
+                    StartCoordinationResponse {
+                        log_store_rewind_start_epoch,
+                    },
                 )),
             }))
             .map_err(|_| anyhow!("fail to send start response"))
