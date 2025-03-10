@@ -15,7 +15,7 @@
 use itertools::Itertools;
 
 use super::*;
-use crate::model::{FragmentActorDispatchers, StreamJobFragments};
+use crate::model::{FragmentNewNoShuffle, FragmentReplaceUpstream, StreamJobFragments};
 
 impl SourceManager {
     /// Migrates splits from previous actors to the new actors for a rescheduled fragment.
@@ -147,10 +147,11 @@ impl SourceManager {
     pub async fn allocate_splits_for_replace_source(
         &self,
         table_fragments: &StreamJobFragments,
-        merge_updates: &HashMap<FragmentId, Vec<MergeUpdate>>,
+        upstream_updates: &FragmentReplaceUpstream,
+        new_no_shuffle: &FragmentNewNoShuffle,
     ) -> MetaResult<SplitAssignment> {
-        tracing::debug!(?merge_updates, "allocate_splits_for_replace_source");
-        if merge_updates.is_empty() {
+        tracing::debug!(?upstream_updates, "allocate_splits_for_replace_source");
+        if upstream_updates.is_empty() {
             // no existing downstream. We can just re-allocate splits arbitrarily.
             return self.allocate_splits(table_fragments).await;
         }
@@ -172,24 +173,27 @@ impl SourceManager {
         let fragment_id = fragments.into_iter().next().unwrap();
 
         debug_assert!(
-            merge_updates.values().flatten().next().is_some()
-                && merge_updates.values().flatten().all(|merge_update| {
-                    merge_update.new_upstream_fragment_id == Some(fragment_id)
-                })
-                && merge_updates
+            upstream_updates.values().flatten().next().is_some()
+                && upstream_updates
                     .values()
                     .flatten()
-                    .map(|merge_update| merge_update.upstream_fragment_id)
+                    .all(|(_, new_upstream_fragment_id)| {
+                        *new_upstream_fragment_id == fragment_id
+                    })
+                && upstream_updates
+                    .values()
+                    .flatten()
+                    .map(|(upstream_fragment_id, _)| upstream_fragment_id)
                     .all_equal(),
-            "merge update should only replace one fragment: {:?}",
-            merge_updates
+            "upstream update should only replace one fragment: {:?}",
+            upstream_updates
         );
-        let prev_fragment_id = merge_updates
+        let prev_fragment_id = upstream_updates
             .values()
             .flatten()
             .next()
-            .expect("non-empty")
-            .upstream_fragment_id;
+            .map(|(upstream_fragment_id, _)| *upstream_fragment_id)
+            .expect("non-empty");
         // Here we align the new source executor to backfill executors
         //
         // old_source => new_source            backfill_1
@@ -202,18 +206,18 @@ impl SourceManager {
         //
         // Note: we can choose any backfill actor to align here.
         // We use `HashMap` to dedup.
-        let aligned_actors: HashMap<ActorId, ActorId> = merge_updates
-            .values()
-            .flatten()
-            .map(|merge_update| {
-                assert_eq!(merge_update.added_upstream_actor_id.len(), 1);
-                // Note: removed_upstream_actor_id is not set for replace job, so we can't use it.
-                assert_eq!(merge_update.removed_upstream_actor_id.len(), 0);
-                (
-                    merge_update.added_upstream_actor_id[0],
-                    merge_update.actor_id,
-                )
+        let aligned_actors: HashMap<ActorId, ActorId> = new_no_shuffle
+            .iter()
+            .filter_map(|(upstream_fragment_id, new_no_shuffle)| {
+                if *upstream_fragment_id == fragment_id {
+                    Some(new_no_shuffle.values())
+                } else {
+                    None
+                }
             })
+            .flatten()
+            .flatten()
+            .map(|(upstream_actor_id, actor_id)| (*upstream_actor_id, *actor_id))
             .collect();
         let assignment = align_splits(
             aligned_actors.into_iter(),
@@ -231,8 +235,8 @@ impl SourceManager {
     pub async fn allocate_splits_for_backfill(
         &self,
         table_fragments: &StreamJobFragments,
-        // dispatchers from SourceExecutor to SourceBackfillExecutor
-        dispatchers: &FragmentActorDispatchers,
+        upstream_new_no_shuffle: &FragmentNewNoShuffle,
+        upstream_actors: &HashMap<FragmentId, HashSet<ActorId>>,
     ) -> MetaResult<SplitAssignment> {
         let core = self.core.lock().await;
 
@@ -242,31 +246,27 @@ impl SourceManager {
 
         for (_source_id, fragments) in source_backfill_fragments {
             for (fragment_id, upstream_source_fragment_id) in fragments {
-                let fragment_dispatchers = dispatchers.get(&upstream_source_fragment_id);
-                let upstream_actors = core
-                    .metadata_manager
-                    .get_running_actors_of_fragment(upstream_source_fragment_id)
-                    .await?;
-                let mut backfill_actors = vec![];
-                for upstream_actor in upstream_actors {
-                    if let Some(dispatchers) = fragment_dispatchers
-                        .and_then(|dispatchers| dispatchers.get(&upstream_actor))
-                    {
-                        let err = || {
-                            anyhow::anyhow!(
-                                "source backfill fragment's upstream fragment should have one dispatcher, fragment_id: {fragment_id}, upstream_fragment_id: {upstream_source_fragment_id}, upstream_actor: {upstream_actor}, dispatchers: {dispatchers:?}",
-                                fragment_id = fragment_id,
-                                upstream_source_fragment_id = upstream_source_fragment_id,
-                                upstream_actor = upstream_actor,
-                                dispatchers = dispatchers
-                            )
-                        };
-                        if dispatchers.len() != 1 || dispatchers[0].downstream_actor_id.len() != 1 {
-                            return Err(err().into());
-                        }
+                let source_upstream_new_no_shuffle =
+                    upstream_new_no_shuffle.get(&upstream_source_fragment_id);
 
-                        backfill_actors
-                            .push((dispatchers[0].downstream_actor_id[0], upstream_actor));
+                let upstream_actors = upstream_actors.get(&upstream_source_fragment_id);
+                let mut backfill_actors = vec![];
+                for upstream_actor in upstream_actors.into_iter().flatten() {
+                    if let Some(no_shuffle_backfill_actor) = source_upstream_new_no_shuffle
+                        .and_then(|source_upstream_new_no_shuffle| {
+                            source_upstream_new_no_shuffle.get(&fragment_id)
+                        })
+                        .and_then(|new_no_shuffle| new_no_shuffle.get(upstream_actor))
+                    {
+                        backfill_actors.push((*no_shuffle_backfill_actor, *upstream_actor));
+                    } else {
+                        return Err(anyhow::anyhow!(
+                            "source backfill fragment's upstream fragment should have one-on-one no_shuffle mapping, fragment_id: {fragment_id}, upstream_fragment_id: {upstream_source_fragment_id}, upstream_actor: {upstream_actor}, source_upstream_new_no_shuffle: {source_upstream_new_no_shuffle:?}",
+                            fragment_id = fragment_id,
+                            upstream_source_fragment_id = upstream_source_fragment_id,
+                            upstream_actor = upstream_actor,
+                            source_upstream_new_no_shuffle = source_upstream_new_no_shuffle
+                        ).into());
                     }
                 }
                 assigned.insert(
