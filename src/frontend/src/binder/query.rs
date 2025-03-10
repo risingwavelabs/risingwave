@@ -342,7 +342,7 @@ impl Binder {
                             right,
                         },
                         with,
-                    ) = Self::validate_rcte(query)?
+                    ) = Self::validate_rcte(*query)?
                     else {
                         return Err(ErrorCode::BindError(
                             "expect `SetOperation` as the return type of validation".into(),
@@ -378,7 +378,7 @@ impl Binder {
             } else {
                 match cte_inner {
                     CteInner::Query(query) => {
-                        let bound_query = self.bind_query(query)?;
+                        let bound_query = self.bind_query(*query)?;
                         self.context.cte_to_relation.insert(
                             table_name,
                             Rc::new(RefCell::new(BindingCte {

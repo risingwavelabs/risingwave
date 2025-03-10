@@ -132,7 +132,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
         let (query, query_schema) = self.gen_local_query();
         let cte = Cte {
             alias: alias.clone(),
-            cte_inner: risingwave_sqlparser::ast::CteInner::Query(query),
+            cte_inner: risingwave_sqlparser::ast::CteInner::Query(Box::new(query)),
         };
 
         let with_tables = vec![Table::new(alias.name.real_value(), query_schema)];
