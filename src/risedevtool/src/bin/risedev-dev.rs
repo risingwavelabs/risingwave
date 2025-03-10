@@ -355,6 +355,7 @@ fn task_main(
     Ok((stat, log_buffer))
 }
 
+#[derive(Debug)]
 struct TaskResult {
     id: String,
     time: Duration,
@@ -396,7 +397,15 @@ impl TaskScheduler {
             }));
         }
         for handle in handles {
-            for TaskResult { id, time, log } in handle.join().unwrap()? {
+            let join_res = handle.join();
+            let Ok(res) = join_res else {
+                let panic = join_res.unwrap_err();
+                anyhow::bail!(
+                    "failed to join thread, likely panicked: {}",
+                    panic_message::panic_message(&panic)
+                );
+            };
+            for TaskResult { id, time, log } in res? {
                 stats.push((id, time));
                 write!(logger, "{}", log)?;
             }

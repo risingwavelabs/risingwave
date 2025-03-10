@@ -10364,6 +10364,7 @@ dependencies = [
  "log",
  "madsim-rdkafka",
  "madsim-tokio",
+ "panic-message",
  "redis 0.25.4",
  "regex",
  "reqwest 0.12.4",

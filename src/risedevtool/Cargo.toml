@@ -21,6 +21,7 @@ google-cloud-pubsub = "0.30"
 indicatif = "0.17"
 itertools = { workspace = true }
 log = "0.4"
+panic-message = "0.3"
 rdkafka = { workspace = true }
 redis = "0.25"
 regex = "1"
