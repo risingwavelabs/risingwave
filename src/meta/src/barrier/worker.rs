@@ -628,7 +628,10 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
 
         // We take retry into consideration because this is the latency user sees for a cluster to
         // get recovered.
-        let recovery_timer = GLOBAL_META_METRICS.recovery_latency.start_timer();
+        let recovery_timer = GLOBAL_META_METRICS
+            .recovery_latency
+            .with_label_values(&["global"])
+            .start_timer();
 
         let new_state = tokio_retry::Retry::spawn(retry_strategy, || async {
             // We need to notify_creating_job_failed in every recovery retry, because in outer create_streaming_job handler,
@@ -746,7 +749,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
             };
             if let Err(err) = &recovery_result {
                 tracing::error!(error = %err.as_report(), "recovery failed");
-                GLOBAL_META_METRICS.recovery_failure_cnt.inc();
+                GLOBAL_META_METRICS.recovery_failure_cnt.with_label_values(&["global"]).inc();
             }
             recovery_result
         })
