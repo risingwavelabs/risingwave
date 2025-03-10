@@ -7,6 +7,7 @@ tests=( \
 "test_pin_sst.sh" \
 "test_query_backup.sh" \
 "test_set_config.sh" \
+"test_overwrite_endpoint.sh" \
 )
 for t in "${tests[@]}"
 do

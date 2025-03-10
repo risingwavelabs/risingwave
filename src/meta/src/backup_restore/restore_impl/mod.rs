@@ -28,4 +28,11 @@ pub trait Loader<S: Metadata> {
 #[async_trait::async_trait]
 pub trait Writer<S: Metadata> {
     async fn write(&self, s: MetaSnapshot<S>) -> BackupResult<()>;
+    async fn overwrite(
+        &self,
+        new_storage_url: &str,
+        new_storage_dir: &str,
+        new_backup_url: &str,
+        new_backup_dir: &str,
+    ) -> BackupResult<()>;
 }
