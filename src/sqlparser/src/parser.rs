@@ -104,6 +104,8 @@ pub enum IsLateral {
 
 use IsLateral::*;
 
+use crate::ast::ddl::AlterFragmentOperation;
+
 pub type IncludeOption = Vec<IncludeOptionItem>;
 
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -3139,9 +3141,11 @@ impl Parser<'_> {
             self.parse_alter_subscription()
         } else if self.parse_keyword(Keyword::SECRET) {
             self.parse_alter_secret()
+        } else if self.parse_word("FRAGMENT") {
+            self.parse_alter_fragment()
         } else {
             self.expected(
-                "DATABASE, SCHEMA, TABLE, INDEX, MATERIALIZED, VIEW, SINK, SUBSCRIPTION, SOURCE, FUNCTION, USER, SECRET or SYSTEM after ALTER"
+                "DATABASE, FRAGMENT, SCHEMA, TABLE, INDEX, MATERIALIZED, VIEW, SINK, SUBSCRIPTION, SOURCE, FUNCTION, USER, SECRET or SYSTEM after ALTER"
             )
         }
     }
@@ -3756,6 +3760,21 @@ impl Parser<'_> {
         Ok(Statement::AlterSecret {
             name: secret_name,
             with_options,
+            operation,
+        })
+    }
+
+    pub fn parse_alter_fragment(&mut self) -> ModalResult<Statement> {
+        let fragment_id = self.parse_literal_uint()? as u32;
+        if !self.parse_keyword(Keyword::SET) {
+            return self.expected("SET after ALTER FRAGMENT");
+        }
+        let Some(rate_limit) = self.parse_alter_backfill_rate_limit()? else {
+            return self.expected("expected BACKFILL_RATE_LIMIT after SET");
+        };
+        let operation = AlterFragmentOperation::AlterBackfillRateLimit { rate_limit };
+        Ok(Statement::AlterFragment {
+            fragment_id,
             operation,
         })
     }
