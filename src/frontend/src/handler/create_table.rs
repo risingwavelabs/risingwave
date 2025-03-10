@@ -96,8 +96,8 @@ fn ensure_column_options_supported(c: &ColumnDef) -> Result<()> {
             ColumnOption::DefaultValue(_) => {}
             ColumnOption::DefaultValueInternal { .. } => {}
             ColumnOption::Unique { is_primary: true } => {}
-            ColumnOption::Null {} => {}
-            ColumnOption::NotNull {} => {}
+            ColumnOption::Null => {}
+            ColumnOption::NotNull => {}
             _ => bail_not_implemented!("column constraints \"{}\"", option_def),
         }
     }
