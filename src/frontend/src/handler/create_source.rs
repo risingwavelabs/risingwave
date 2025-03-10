@@ -1037,7 +1037,7 @@ pub mod tests {
     use std::sync::Arc;
 
     use risingwave_common::catalog::{
-        ColumnId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, ROW_ID_COLUMN_NAME,
+        DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, ROW_ID_COLUMN_NAME,
     };
     use risingwave_common::types::{DataType, StructType};
 
