@@ -106,12 +106,13 @@ impl CheckpointControl {
         &mut self,
         resp: BarrierCompleteResponse,
         control_stream_manager: &mut ControlStreamManager,
+        periodic_barriers: &mut PeriodicBarriers,
     ) -> MetaResult<()> {
         let database_id = DatabaseId::new(resp.database_id);
         let database_status = self.databases.get_mut(&database_id).expect("should exist");
         match database_status {
             DatabaseCheckpointControlStatus::Running(database) => {
-                database.barrier_collected(resp, control_stream_manager)
+                database.barrier_collected(resp, control_stream_manager, periodic_barriers)
             }
             DatabaseCheckpointControlStatus::Recovering(state) => {
                 state.barrier_collected(resp);
@@ -570,12 +571,12 @@ impl DatabaseCheckpointControl {
         let mut table_ids_to_merge = HashMap::new();
 
         for (table_id, creating_streaming_job) in &self.creating_streaming_job_controls {
-            if let Some(graph_info) = creating_streaming_job.should_merge_to_upstream() {
+            if creating_streaming_job.should_merge_to_upstream() {
                 table_ids_to_merge.insert(
                     *table_id,
                     (
                         creating_streaming_job.snapshot_backfill_info.clone(),
-                        graph_info,
+                        creating_streaming_job.graph_info.clone(),
                     ),
                 );
             }
@@ -631,6 +632,7 @@ impl DatabaseCheckpointControl {
         &mut self,
         resp: BarrierCompleteResponse,
         control_stream_manager: &mut ControlStreamManager,
+        periodic_barriers: &mut PeriodicBarriers,
     ) -> MetaResult<()> {
         let worker_id = resp.worker_id;
         let prev_epoch = resp.epoch;
@@ -654,10 +656,14 @@ impl DatabaseCheckpointControl {
                 }
             }
             Some(creating_job_id) => {
-                self.creating_streaming_job_controls
+                let should_merge_to_upstream = self
+                    .creating_streaming_job_controls
                     .get_mut(&creating_job_id)
                     .expect("should exist")
                     .collect(prev_epoch, worker_id as _, resp, control_stream_manager)?;
+                if should_merge_to_upstream {
+                    periodic_barriers.force_checkpoint_in_next_barrier();
+                }
             }
         }
         Ok(())
@@ -801,14 +807,14 @@ impl DatabaseCheckpointControl {
                     node.notifiers.into_iter().for_each(|notifier| {
                         notifier.notify_collected();
                     });
-                    if let Some((scheduled_barriers, _)) = &mut context
+                    if let Some((periodic_barriers, _)) = &mut context
                         && self.create_mview_tracker.has_pending_finished_jobs()
                         && self
                             .command_ctx_queue
                             .values()
                             .all(|node| !node.command_ctx.barrier_info.kind.is_checkpoint())
                     {
-                        scheduled_barriers.force_checkpoint_in_next_barrier();
+                        periodic_barriers.force_checkpoint_in_next_barrier();
                     }
                     continue;
                 }
