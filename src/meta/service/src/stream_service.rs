@@ -136,6 +136,11 @@ impl StreamManagerService for StreamServiceImpl {
                     .update_sink_rate_limit_by_sink_id(request.id as SinkId, request.rate)
                     .await?
             }
+            ThrottleTarget::Fragment => {
+                self.metadata_manager
+                    .update_fragment_rate_limit_by_fragment_id(request.id as _, request.rate)
+                    .await?
+            }
             ThrottleTarget::Unspecified => {
                 return Err(Status::invalid_argument("unspecified throttle target"));
             }
