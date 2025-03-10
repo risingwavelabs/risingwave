@@ -1330,14 +1330,33 @@ fn level_insert_ssts(operand: &mut Level, insert_table_infos: &Vec<SstableInfo>)
         .iter()
         .map(|sst| sst.uncompressed_file_size)
         .sum::<u64>();
-    operand
-        .table_infos
-        .extend(insert_table_infos.iter().cloned());
-    operand
-        .table_infos
-        .sort_by(|sst1, sst2| sst1.key_range.cmp(&sst2.key_range));
     if operand.level_type == PbLevelType::Overlapping {
         operand.level_type = PbLevelType::Nonoverlapping;
+        operand
+            .table_infos
+            .extend(insert_table_infos.iter().cloned());
+        operand
+            .table_infos
+            .sort_by(|sst1, sst2| sst1.key_range.cmp(&sst2.key_range));
+    } else {
+        // for i in insert_table_infos {
+        //     let pos = operand
+        //         .table_infos
+        //         .partition_point(|b| b.key_range.cmp(&i.key_range) == Ordering::Less);
+        //     operand.table_infos.insert(pos, i.clone());
+        // }
+        if let Some(i) = insert_table_infos.first() {
+            let pos = operand
+                .table_infos
+                .partition_point(|b| b.key_range.cmp(&i.key_range) == Ordering::Less);
+            operand.table_infos.splice(
+                pos..pos,
+                insert_table_infos
+                    .iter()
+                    .sorted_by(|sst1, sst2| sst1.key_range.cmp(&sst2.key_range))
+                    .cloned(),
+            );
+        }
     }
     assert!(
         can_concat(&operand.table_infos),
