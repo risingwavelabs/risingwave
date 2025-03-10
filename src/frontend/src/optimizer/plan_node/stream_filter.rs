@@ -12,13 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::types::DataType;
 use risingwave_pb::stream_plan::FilterNode;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::stream::prelude::*;
 use super::utils::impl_distill_by_unit;
 use super::{ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode, generic};
-use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor};
+use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef};
 use crate::optimizer::plan_node::PlanBase;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -49,6 +50,22 @@ impl StreamFilter {
 
     pub fn predicate(&self) -> &Condition {
         &self.core.predicate
+    }
+
+    /// Create a `StreamFilter` to filter out rows where any key is null.
+    pub fn filter_out_any_null_keys(input: PlanRef, key: &[usize]) -> PlanRef {
+        let schema = input.schema();
+        let cond = ExprImpl::and(key.iter().map(|&i| {
+            FunctionCall::new_unchecked(
+                ExprType::IsNotNull,
+                vec![InputRef::new(i, schema.fields()[i].data_type.clone()).into()],
+                DataType::Boolean,
+            )
+            .into()
+        }));
+        let predicate = Condition::with_expr(cond);
+        let logical_filter = generic::Filter::new(predicate, input);
+        StreamFilter::new(logical_filter).into()
     }
 }
 

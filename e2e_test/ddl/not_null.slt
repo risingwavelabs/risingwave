@@ -94,6 +94,23 @@ DROP TABLE test_array;
 statement ok
 CREATE TABLE test_person (id INT PRIMARY KEY NOT NULL, name VARCHAR NULL, age INT NOT NULL, height FLOAT NOT NULL);
 
+query TT
+select column_name, is_nullable from information_schema.columns where table_name = 'test_person' order by column_name;
+----
+age    NO
+height NO
+id     NO
+name   YES
+
+query TT
+select rw_catalog.rw_columns.name, is_nullable from rw_catalog.rw_columns JOIN rw_catalog.rw_tables ON rw_catalog.rw_columns.relation_id = w_catalog.rw_tables.id WHERE rw_catalog.rw_tables.name = 'test_person' order by rw_catalog.rw_columns.name;
+----
+_rw_timestamp t
+age           f
+height        f
+id            f
+name          t
+
 statement ok
 INSERT INTO test_person (id, name, age, height) VALUES (1, 'Alice', 30, 5.5);
 
@@ -140,9 +157,7 @@ SELECT * FROM test_person ORDER BY id;
   1 Alice    30    5.5
   2 NULL     25      6
 101 John     28    5.9
-102 Sarah    NULL  5.5
 103 NULL     40    6.1
-104 Michael  35    NULL
 105 Emma     29    5.4
 
 statement ok
