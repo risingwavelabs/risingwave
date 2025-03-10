@@ -459,7 +459,7 @@ impl<'a> UpstreamBuffer<'a, ConsumingSnapshot> {
     }
 }
 
-impl<'a, S> UpstreamBuffer<'a, S> {
+impl<S> UpstreamBuffer<'_, S> {
     async fn concurrently_consume_upstream(&mut self) -> StreamExecutorError {
         {
             loop {
@@ -514,7 +514,7 @@ impl<'a, S> UpstreamBuffer<'a, S> {
     }
 }
 
-impl<'a> UpstreamBuffer<'a, ConsumingLogStore> {
+impl UpstreamBuffer<'_, ConsumingLogStore> {
     async fn next_checkpoint_barrier(
         &mut self,
     ) -> StreamExecutorResult<Option<Vec<DispatcherBarrier>>> {
@@ -539,7 +539,7 @@ impl<'a> UpstreamBuffer<'a, ConsumingLogStore> {
     }
 }
 
-impl<'a, S> UpstreamBuffer<'a, S> {
+impl<S> UpstreamBuffer<'_, S> {
     /// Run a future while concurrently polling the upstream so that the upstream
     /// won't be back-pressured.
     async fn run_future<T, E: Into<StreamExecutorError>>(

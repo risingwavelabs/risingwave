@@ -367,11 +367,11 @@ impl HummockManager {
     /// 1. ssts with `key_range.left` greater than `split_key` will be split to the right group
     /// 2. the sst containing `split_key` will be split into two separate ssts and their `key_range` will be changed `sst_1`: [`sst.key_range.left`, `split_key`) `sst_2`: [`split_key`, `sst.key_range.right`]
     /// 3. currently only `vnode` 0 and `vnode` max is supported. (Due to the above rule, vnode max will be rewritten as `table_id` + 1, `vnode` 0)
-    ///     `parent_group_id`: the `group_id` to split
-    ///     `split_table_ids`: the `table_ids` to split, now we still support to split multiple tables to one group at once, pass `split_table_ids` for per `split` operation for checking
-    ///     `table_id_to_split`: the `table_id` to split
-    ///     `vnode_to_split`: the `vnode` to split
-    ///     `partition_vnode_count`: the partition count for the single table group if need
+    ///   - `parent_group_id`: the `group_id` to split
+    ///   - `split_table_ids`: the `table_ids` to split, now we still support to split multiple tables to one group at once, pass `split_table_ids` for per `split` operation for checking
+    ///   - `table_id_to_split`: the `table_id` to split
+    ///   - `vnode_to_split`: the `vnode` to split
+    ///   - `partition_vnode_count`: the partition count for the single table group if need
     async fn split_compaction_group_impl(
         &self,
         parent_group_id: CompactionGroupId,

@@ -880,8 +880,8 @@ impl ExprImpl {
                             // Currently we will return `None` for non-literal because the result of the expression might be '1 day'. However, there will definitely exist false positives such as '1 second + 1 second'.
                             // We will treat the expression as an input offset when rhs is `null`.
                             if rhs.return_type() == DataType::Interval
-                                && rhs.as_literal().map_or(true, |literal| {
-                                    literal.get_data().as_ref().map_or(false, |scalar| {
+                                && rhs.as_literal().is_none_or(|literal| {
+                                    literal.get_data().as_ref().is_some_and(|scalar| {
                                         let interval = scalar.as_interval();
                                         interval.months() != 0 || interval.days() != 0
                                     })

@@ -654,7 +654,7 @@ impl FromIterator<Option<bool>> for Bitmap {
 
 impl Bitmap {
     pub fn to_protobuf(&self) -> PbBuffer {
-        let body_len = (self.num_bits + 7) / 8 + 1;
+        let body_len = self.num_bits.div_ceil(8) + 1;
         let mut body = Vec::with_capacity(body_len);
         body.push((self.num_bits % 8) as u8);
         match &self.bits {
@@ -667,7 +667,10 @@ impl Bitmap {
             }
             Some(bits) => {
                 body.extend_from_slice(unsafe {
-                    std::slice::from_raw_parts(bits.as_ptr() as *const u8, (self.num_bits + 7) / 8)
+                    std::slice::from_raw_parts(
+                        bits.as_ptr() as *const u8,
+                        self.num_bits.div_ceil(8),
+                    )
                 });
             }
         }

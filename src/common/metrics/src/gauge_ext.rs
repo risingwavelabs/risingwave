@@ -22,7 +22,6 @@ pub type UintGauge = GenericGauge<AtomicU64>;
 #[easy_ext::ext(IntGaugeExt)]
 impl IntGauge {
     /// Increment the gauge, and return a guard that will decrement the gauge when dropped.
-    #[must_use]
     pub fn inc_guard(&self) -> impl Drop + '_ {
         struct Guard<'a> {
             gauge: &'a IntGauge,
@@ -48,7 +47,6 @@ impl IntGauge {
 #[easy_ext::ext(UintGaugeExt)]
 impl UintGauge {
     /// Increment the gauge, and return a guard that will decrement the gauge when dropped.
-    #[must_use]
     pub fn inc_guard(&self) -> impl Drop + '_ {
         struct Guard<'a> {
             gauge: &'a UintGauge,

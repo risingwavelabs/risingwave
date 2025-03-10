@@ -79,7 +79,7 @@ pub fn get_prost_action(action: &Action) -> PbAction {
         Action::Select { .. } => PbAction::Select,
         Action::Insert { .. } => PbAction::Insert,
         Action::Update { .. } => PbAction::Update,
-        Action::Delete { .. } => PbAction::Delete,
+        Action::Delete => PbAction::Delete,
         Action::Connect => PbAction::Connect,
         Action::Create => PbAction::Create,
         Action::Usage => PbAction::Usage,

@@ -146,10 +146,11 @@ impl StreamTableScan {
     ///
     /// FIXME(kwannoel):
     /// - Across all vnodes, the values are the same.
-    /// - e.g. | vnode | pk ...  | `backfill_finished` | `row_count` |
-    ///        | 1002 | Int64(1) | t                   | 10          |
-    ///        | 1003 | Int64(1) | t                   | 10          |
-    ///        | 1003 | Int64(1) | t                   | 10          |
+    /// - e.g.
+    ///   | vnode | pk ...  | `backfill_finished` | `row_count` |
+    ///   | 1002 | Int64(1) | t                   | 10          |
+    ///   | 1003 | Int64(1) | t                   | 10          |
+    ///   | 1003 | Int64(1) | t                   | 10          |
     ///
     /// Eventually we should track progress per vnode, to support scaling with both mview and
     /// the corresponding `no_shuffle_backfill`.

@@ -101,9 +101,7 @@ impl CatalogController {
         update_fields: &[PbUpdateField],
     ) -> MetaResult<NotificationVersion> {
         let inner = self.inner.write().await;
-        let rename_flag = update_fields
-            .iter()
-            .any(|&field| field == PbUpdateField::Rename);
+        let rename_flag = update_fields.contains(&PbUpdateField::Rename);
         if rename_flag {
             check_user_name_duplicate(&update_user.name, &inner.db).await?;
         }

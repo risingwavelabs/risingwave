@@ -122,7 +122,7 @@ fn jsonbb_contains(left: ValueRef<'_>, right: ValueRef<'_>, root: bool) -> bool 
             right_obj.iter().all(|(key, value)| {
                 left_obj
                     .get(key)
-                    .map_or(false, |left_val| jsonbb_contains(left_val, value, false))
+                    .is_some_and(|left_val| jsonbb_contains(left_val, value, false))
             })
         }
 

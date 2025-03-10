@@ -172,7 +172,7 @@ pub async fn start_serving_vnode_mapping_worker(
                         Some(notification) => {
                             match notification {
                                 LocalNotification::WorkerNodeActivated(w) | LocalNotification::WorkerNodeDeleted(w) =>  {
-                                    if w.r#type() != WorkerType::ComputeNode || !w.property.as_ref().map_or(false, |p| p.is_serving) {
+                                    if w.r#type() != WorkerType::ComputeNode || !w.property.as_ref().is_some_and(|p| p.is_serving) {
                                         continue;
                                     }
                                     let (workers, streaming_parallelisms) = fetch_serving_infos(&metadata_manager).await;

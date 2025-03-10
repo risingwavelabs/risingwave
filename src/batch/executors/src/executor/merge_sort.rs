@@ -143,7 +143,7 @@ impl MergeSortExecutor {
                 let chunk = chunk?;
                 assert_ne!(chunk.cardinality(), 0);
                 let new_chunk_size = chunk.estimated_heap_size() as i64;
-                let old = std::mem::replace(&mut self.current_chunks[input_idx], Some(chunk));
+                let old = self.current_chunks[input_idx].replace(chunk);
                 self.mem_context.add(new_chunk_size);
                 old
             }

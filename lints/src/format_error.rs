@@ -14,17 +14,15 @@
 
 use clippy_utils::diagnostics::span_lint_and_help;
 use clippy_utils::macros::{
-    find_format_arg_expr, is_format_macro, macro_backtrace, FormatArgsStorage,
+    FormatArgsStorage, find_format_arg_expr, is_format_macro, macro_backtrace,
 };
 use clippy_utils::ty::{implements_trait, match_type};
-use clippy_utils::{
-    is_in_cfg_test, is_in_test_function, is_trait_method, match_def_path, match_function_call,
-};
+use clippy_utils::{is_in_cfg_test, is_in_test_function, is_trait_method, match_def_path};
 use rustc_ast::FormatArgsPiece;
 use rustc_hir::{Expr, ExprKind};
 use rustc_lint::{LateContext, LateLintPass};
 use rustc_session::{declare_tool_lint, impl_lint_pass};
-use rustc_span::{sym, Span};
+use rustc_span::{Span, sym};
 
 declare_tool_lint! {
     /// ### What it does
@@ -74,6 +72,23 @@ const TRACING_MACROS_EVENT: [&str; 3] = ["tracing", "macros", "event"];
 const ANYHOW_MACROS_ANYHOW: [&str; 3] = ["anyhow", "macros", "anyhow"];
 const ANYHOW_ERROR: [&str; 2] = ["anyhow", "Error"];
 const THISERROR_EXT_REPORT_REPORT: [&str; 3] = ["thiserror_ext", "report", "Report"];
+
+fn match_function_call<'tcx>(
+    cx: &LateContext<'tcx>,
+    expr: &'tcx Expr<'_>,
+    path: &[&str],
+) -> Option<&'tcx [Expr<'tcx>]> {
+    if let ExprKind::Call(path_expr, args) = expr.kind {
+        if let ExprKind::Path(qpath) = path_expr.kind {
+            if let Some(def_id) = cx.qpath_res(&qpath, path_expr.hir_id).opt_def_id() {
+                if match_def_path(cx, def_id, path) {
+                    return Some(args);
+                }
+            }
+        }
+    }
+    None
+}
 
 impl<'tcx> LateLintPass<'tcx> for FormatError {
     fn check_expr(&mut self, cx: &LateContext<'tcx>, expr: &'tcx Expr<'_>) {

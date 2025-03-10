@@ -466,7 +466,7 @@ impl AsyncTruncateSinkWriter for KafkaSinkWriter {
     }
 }
 
-impl<'w> KafkaPayloadWriter<'w> {
+impl KafkaPayloadWriter<'_> {
     /// The actual `send_result` function, will be called when the `KafkaSinkWriter` needs to sink
     /// messages
     async fn send_result<'a, K, P>(&'a mut self, mut record: FutureRecord<'a, K, P>) -> Result<()>
@@ -570,7 +570,7 @@ impl<'w> KafkaPayloadWriter<'w> {
     }
 }
 
-impl<'a> FormattedSink for KafkaPayloadWriter<'a> {
+impl FormattedSink for KafkaPayloadWriter<'_> {
     type K = Vec<u8>;
     type V = Vec<u8>;
 

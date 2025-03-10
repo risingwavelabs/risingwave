@@ -16,7 +16,6 @@
     refining_impl_trait,
     reason = "Some of the Row::iter() implementations returns ExactSizeIterator. Is this reasonable?"
 )]
-#![feature(extract_if)]
 #![feature(trait_alias)]
 #![feature(type_alias_impl_trait)]
 #![feature(test)]

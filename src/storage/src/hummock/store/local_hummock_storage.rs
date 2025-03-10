@@ -775,8 +775,8 @@ pub struct HummockStorageIteratorInner<'a> {
     stats_guard: IterLocalMetricsGuard,
 }
 
-impl<'a> StateStoreIter for HummockStorageIteratorInner<'a> {
-    async fn try_next<'b>(&'b mut self) -> StorageResult<Option<StateStoreKeyedRowRef<'b>>> {
+impl StateStoreIter for HummockStorageIteratorInner<'_> {
+    async fn try_next(&mut self) -> StorageResult<Option<StateStoreKeyedRowRef<'_>>> {
         let iter = &mut self.inner;
         if !self.initial_read {
             self.initial_read = true;
@@ -857,8 +857,8 @@ pub struct HummockStorageRevIteratorInner<'a> {
     stats_guard: IterLocalMetricsGuard,
 }
 
-impl<'a> StateStoreIter for HummockStorageRevIteratorInner<'a> {
-    async fn try_next<'b>(&'b mut self) -> StorageResult<Option<StateStoreKeyedRowRef<'b>>> {
+impl StateStoreIter for HummockStorageRevIteratorInner<'_> {
+    async fn try_next(&mut self) -> StorageResult<Option<StateStoreKeyedRowRef<'_>>> {
         let iter = &mut self.inner;
         if !self.initial_read {
             self.initial_read = true;

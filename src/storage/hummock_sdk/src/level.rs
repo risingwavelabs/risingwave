@@ -241,7 +241,7 @@ impl Levels {
         self.levels
             .last()
             .as_ref()
-            .map_or(false, |level| level.level_idx == level_idx)
+            .is_some_and(|level| level.level_idx == level_idx)
     }
 
     pub fn count_ssts(&self) -> usize {

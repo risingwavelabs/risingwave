@@ -674,7 +674,7 @@ impl ToText for ListRef<'_> {
                 // chars and whitespaces.
                 let need_quote = !matches!(datum_ref, None | Some(ScalarRefImpl::List(_)))
                     && (s.is_empty()
-                        || s.to_ascii_lowercase() == "null"
+                        || s.eq_ignore_ascii_case("null")
                         || s.contains([
                             '"', '\\', ',',
                             // whilespace:

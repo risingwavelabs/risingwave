@@ -2927,7 +2927,7 @@ fn parse_recursive_cte() {
             name: Ident::new_unchecked("nums"),
             columns: vec![Ident::new_unchecked("val")],
         },
-        cte_inner: CteInner::Query(cte_query),
+        cte_inner: CteInner::Query(Box::new(cte_query)),
     };
     assert_eq!(with.cte_tables.first().unwrap(), &expected);
 }
