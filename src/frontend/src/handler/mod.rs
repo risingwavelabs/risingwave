@@ -46,7 +46,7 @@ mod alter_rename;
 mod alter_resource_group;
 mod alter_secret;
 mod alter_set_schema;
-mod alter_sink_config;
+mod alter_sink_props;
 mod alter_source_column;
 mod alter_source_with_sr;
 mod alter_streaming_rate_limit;
@@ -897,8 +897,8 @@ pub async fn handle(
         }
 
         Statement::AlterSink { name, operation } => match operation {
-            AlterSinkOperation::SetSinkConfig { config } => {
-                alter_sink_config::handle_alter_sink_config(handler_args, name, config).await
+            AlterSinkOperation::SetSinkProps { changed_props } => {
+                alter_sink_props::handle_alter_sink_props(handler_args, name, changed_props).await
             }
             AlterSinkOperation::RenameSink { sink_name } => {
                 alter_rename::handle_rename_sink(handler_args, name, sink_name).await

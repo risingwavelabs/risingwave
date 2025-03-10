@@ -33,7 +33,7 @@ use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
 use risingwave_pb::stream_plan::update_mutation::*;
 use risingwave_pb::stream_plan::{
-    AddMutation, AlterSinkConfigMutation, BarrierMutation, CombinedMutation, Dispatcher,
+    AddMutation, AlterConnectorPropsMutation, BarrierMutation, CombinedMutation, Dispatcher,
     Dispatchers, DropSubscriptionsMutation, PauseMutation, ResumeMutation, SinkConfigInfo,
     SourceChangeSplitMutation, StopMutation, StreamActor, SubscriptionUpstreamInfo,
     ThrottleMutation, UpdateMutation,
@@ -52,7 +52,7 @@ use crate::model::{
     ActorId, ActorUpstreams, DispatcherId, FragmentId, StreamJobActorsToCreate, StreamJobFragments,
 };
 use crate::stream::{
-    AlterSinkConfig, JobReschedulePostUpdates, SplitAssignment, ThrottleConfig,
+    AlterConnectorProps, JobReschedulePostUpdates, SplitAssignment, ThrottleConfig,
     build_actor_connector_splits,
 };
 
@@ -364,7 +364,7 @@ pub enum Command {
         upstream_mv_table_id: TableId,
     },
 
-    AlterSinkConfig(AlterSinkConfig),
+    AlterConnectorProps(AlterConnectorProps),
 }
 
 impl Command {
@@ -453,7 +453,7 @@ impl Command {
             Command::Throttle(_) => None,
             Command::CreateSubscription { .. } => None,
             Command::DropSubscription { .. } => None,
-            Command::AlterSinkConfig(_) => None,
+            Command::AlterConnectorProps(_) => None,
         }
     }
 
@@ -963,7 +963,7 @@ impl Command {
                         upstream_mv_table_id: upstream_mv_table_id.table_id,
                     }],
                 })),
-                Command::AlterSinkConfig(config) => {
+                Command::AlterConnectorProps(config) => {
                     let mut sink_actor_config_info = HashMap::default();
                     for (k, v) in config {
                         sink_actor_config_info.insert(
@@ -973,7 +973,7 @@ impl Command {
                             },
                         );
                     }
-                    Some(Mutation::AlterSinkConfig(AlterSinkConfigMutation {
+                    Some(Mutation::AlterConnectorProps(AlterConnectorPropsMutation {
                         sink_actor_config_info,
                     }))
                 }

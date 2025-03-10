@@ -317,7 +317,7 @@ impl CommandContext {
             }
             Command::DropSubscription { .. } => {}
             Command::MergeSnapshotBackfillStreamingJobs(_) => {}
-            Command::AlterSinkConfig(_) => {}
+            Command::AlterConnectorProps(_) => {}
         }
 
         Ok(())

@@ -1609,11 +1609,11 @@ impl CatalogController {
             .await
     }
 
-    pub async fn update_sink_config_by_sink_id(
+    pub async fn update_sink_props_by_sink_id(
         &self,
         sink_id: SinkId,
-        config: HashMap<String, String>,
-    ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
+        props: BTreeMap<String, String>,
+    ) -> MetaResult<HashMap<String, String>> {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
 
@@ -1623,12 +1623,24 @@ impl CatalogController {
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found(ObjectType::Sink.as_str(), sink_id))?;
 
-        // Validate that config can be altered
+        // Validate that props can be altered
         match sink.properties.inner_ref().get(CONNECTOR_TYPE_KEY) {
             Some(connector) => match_sink_name_str!(
                 connector.to_lowercase().as_str(),
                 SinkType,
-                SinkType::validate_alter_config(&config),
+                {
+                    for (k, v) in &props {
+                        if !SinkType::SINK_ALTER_CONFIG_LIST.contains(&k.as_str()) {
+                            return Err(SinkError::Config(anyhow!(
+                                "unsupported alter config: {}={}",
+                                k,
+                                v
+                            ))
+                            .into());
+                        }
+                    }
+                    SinkType::validate_alter_config(&props)
+                },
                 |sink: &str| Err(SinkError::Config(anyhow!("unsupported sink type {}", sink)))
             )?,
             None => {
@@ -1639,15 +1651,15 @@ impl CatalogController {
         };
 
         let mut new_config = sink.properties.clone().into_inner();
-        new_config.extend(config.clone());
+        new_config.extend(props);
 
         {
-            let active_source = sink::ActiveModel {
+            let active_sink = sink::ActiveModel {
                 sink_id: Set(sink_id),
-                properties: Set(risingwave_meta_model::Property(new_config)),
+                properties: Set(risingwave_meta_model::Property(new_config.clone())),
                 ..Default::default()
             };
-            active_source.update(&txn).await?;
+            active_sink.update(&txn).await?;
         }
 
         let fragments: Vec<(FragmentId, i32, StreamNode)> = Fragment::find()
@@ -1661,42 +1673,39 @@ impl CatalogController {
             .into_tuple()
             .all(&txn)
             .await?;
-        let mut fragments = fragments
+        let fragments = fragments
             .into_iter()
-            .map(|(id, mask, stream_node)| (id, mask, stream_node.to_protobuf()))
-            .collect_vec();
-
-        fragments.retain_mut(|(_, fragment_type_mask, stream_node)| {
-            let mut found = false;
-            if *fragment_type_mask & FragmentTypeFlag::Sink as i32 != 0 {
-                visit_stream_node_mut(stream_node, |node| {
+            .filter(|(_, fragment_type_mask, _)| {
+                *fragment_type_mask & FragmentTypeFlag::Sink as i32 != 0
+            })
+            .filter_map(|(id, _, stream_node)| {
+                let mut stream_node = stream_node.to_protobuf();
+                let mut found = false;
+                visit_stream_node_mut(&mut stream_node, |node| {
                     if let PbNodeBody::Sink(node) = node
                         && let Some(sink_desc) = &mut node.sink_desc
                         && sink_desc.id == sink_id as u32
                     {
-                        sink_desc.properties.extend(config.clone());
+                        sink_desc.properties = new_config.clone();
                         found = true;
                     }
                 });
-            }
-            found
-        });
+                if found { Some((id, stream_node)) } else { None }
+            })
+            .collect_vec();
         assert!(
             !fragments.is_empty(),
             "sink id should be used by at least one fragment"
         );
-        let fragment_ids = fragments.iter().map(|(id, _, _)| *id).collect_vec();
-        for (id, fragment_type_mask, stream_node) in fragments {
+        for (id, stream_node) in fragments {
             fragment::ActiveModel {
                 fragment_id: Set(id),
-                fragment_type_mask: Set(fragment_type_mask),
                 stream_node: Set(StreamNode::from(&stream_node)),
                 ..Default::default()
             }
             .update(&txn)
             .await?;
         }
-        let fragment_actors = get_fragment_actor_ids(&txn, fragment_ids).await?;
 
         txn.commit().await?;
 
@@ -1712,7 +1721,7 @@ impl CatalogController {
             )
             .await;
 
-        Ok(fragment_actors)
+        Ok(new_config.into_iter().collect())
     }
 
     pub async fn post_apply_reschedules(

@@ -3509,7 +3509,7 @@ impl Parser<'_> {
         Ok(Some(rate_limit))
     }
 
-    pub fn parse_alter_sink_config(&mut self) -> PResult<(String, String)> {
+    pub fn parse_alter_sink_props(&mut self) -> PResult<(String, String)> {
         let config_name = self.parse_identifier()?;
         if self.expect_keyword(Keyword::TO).is_err() && self.expect_token(&Token::Eq).is_err() {
             return self.expected("TO or = after ALTER SINK SET");
@@ -3555,11 +3555,11 @@ impl Parser<'_> {
             } else if let Some(rate_limit) = self.parse_alter_sink_rate_limit()? {
                 AlterSinkOperation::SetSinkRateLimit { rate_limit }
             } else {
-                let config = self
-                    .parse_comma_separated(Parser::parse_alter_sink_config)?
+                let changed_props = self
+                    .parse_comma_separated(Parser::parse_alter_sink_props)?
                     .into_iter()
                     .collect();
-                AlterSinkOperation::SetSinkConfig { config }
+                AlterSinkOperation::SetSinkProps { changed_props }
             }
         } else if self.parse_keywords(&[Keyword::SWAP, Keyword::WITH]) {
             let target_sink = self.parse_object_name()?;

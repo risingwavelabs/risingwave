@@ -39,7 +39,7 @@ use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation as PbMutation;
 use risingwave_pb::stream_plan::update_mutation::{DispatcherUpdate, MergeUpdate};
 use risingwave_pb::stream_plan::{
-    AlterSinkConfigMutation, BarrierMutation, CombinedMutation, Dispatchers,
+    AlterConnectorPropsMutation, BarrierMutation, CombinedMutation, Dispatchers,
     DropSubscriptionsMutation, PauseMutation, PbAddMutation, PbBarrier, PbBarrierMutation,
     PbDispatcher, PbStreamMessageBatch, PbUpdateMutation, PbWatermark, ResumeMutation,
     SinkConfigInfo, SourceChangeSplitMutation, StopMutation, SubscriptionUpstreamInfo,
@@ -308,7 +308,7 @@ pub enum Mutation {
     Resume,
     Throttle(HashMap<ActorId, Option<u32>>),
     AddAndUpdate(AddMutation, UpdateMutation),
-    AlterSinkConfig(HashMap<ActorId, HashMap<String, String>>),
+    AlterConnectorProps(HashMap<ActorId, HashMap<String, String>>),
     DropSubscriptions {
         /// `subscriber` -> `upstream_mv_table_id`
         subscriptions_to_drop: Vec<(u32, TableId)>,
@@ -514,7 +514,7 @@ impl Barrier {
             | Mutation::SourceChangeSplit(_)
             | Mutation::Throttle(_)
             | Mutation::DropSubscriptions { .. }
-            | Mutation::AlterSinkConfig(_) => false,
+            | Mutation::AlterConnectorProps(_) => false,
         }
     }
 
@@ -739,8 +739,8 @@ impl Mutation {
                     )
                     .collect(),
             }),
-            Mutation::AlterSinkConfig(map) => {
-                PbMutation::AlterSinkConfig(AlterSinkConfigMutation {
+            Mutation::AlterConnectorProps(map) => {
+                PbMutation::AlterConnectorProps(AlterConnectorPropsMutation {
                     sink_actor_config_info: map
                         .iter()
                         .map(|(actor_id, options)| {
@@ -873,8 +873,8 @@ impl Mutation {
                     .map(|info| (info.subscriber_id, TableId::new(info.upstream_mv_table_id)))
                     .collect(),
             },
-            PbMutation::AlterSinkConfig(alter_sink_option) => Mutation::AlterSinkConfig(
-                alter_sink_option
+            PbMutation::AlterConnectorProps(alter_sink_props) => Mutation::AlterConnectorProps(
+                alter_sink_props
                     .sink_actor_config_info
                     .iter()
                     .map(|(actor_id, options)| {

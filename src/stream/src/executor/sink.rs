@@ -371,7 +371,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                     }
                                 }
                             }
-                            Mutation::AlterSinkConfig(config) => {
+                            Mutation::AlterConnectorProps(config) => {
                                 if let Some(map) = config.get(&actor_id) {
                                     if let Err(e) = update_config_tx.send(map.clone()) {
                                         error!(
@@ -646,7 +646,8 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                     if F::ALLOW_REWIND {
                         match log_reader.rewind().await {
                             Ok(()) => {
-                                sink_param.properties.extend(config);
+                                sink_param.properties = config.into_iter().collect();
+                                println!("sink_param.properties: {:?}", sink_param.properties);
                                 sink.update_config(sink_param.properties.clone())
                                     .map_err(|e| {
                                         StreamExecutorError::from((e, sink_param.sink_id.sink_id))
@@ -667,7 +668,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                             }
                         }
                     } else {
-                        sink_param.properties.extend(config);
+                        sink_param.properties = config.into_iter().collect();
                         sink.update_config(sink_param.properties.clone())
                             .map_err(|e| {
                                 StreamExecutorError::from((e, sink_param.sink_id.sink_id))

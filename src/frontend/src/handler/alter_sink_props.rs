@@ -23,10 +23,10 @@ use crate::Binder;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::error::Result;
 
-pub async fn handle_alter_sink_config(
+pub async fn handle_alter_sink_props(
     handler_args: HandlerArgs,
     table_name: ObjectName,
-    config: BTreeMap<String, String>,
+    changed_props: BTreeMap<String, String>,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
     let sink_id = {
@@ -50,7 +50,7 @@ pub async fn handle_alter_sink_config(
     };
 
     let meta_client = session.env().meta_client();
-    meta_client.alter_sink_config(sink_id, config).await?;
+    meta_client.alter_sink_props(sink_id, changed_props).await?;
 
     Ok(PgResponse::empty_result(StatementType::ALTER_SINK))
 }

@@ -195,8 +195,8 @@ pub enum AlterSinkOperation {
     SetSinkRateLimit {
         rate_limit: i32,
     },
-    SetSinkConfig {
-        config: BTreeMap<String, String>,
+    SetSinkProps {
+        changed_props: BTreeMap<String, String>,
     },
 }
 
@@ -471,12 +471,12 @@ impl fmt::Display for AlterSinkOperation {
             AlterSinkOperation::SetSinkRateLimit { rate_limit } => {
                 write!(f, "SET SINK_RATE_LIMIT TO {}", rate_limit)
             }
-            AlterSinkOperation::SetSinkConfig { config } => {
-                let configs = config
+            AlterSinkOperation::SetSinkProps { changed_props } => {
+                let changed_props = changed_props
                     .iter()
                     .map(|(k, v)| format!("{} TO {}", k, v))
                     .collect::<Vec<String>>();
-                write!(f, "SET {}", configs.join(", "))
+                write!(f, "SET {}", changed_props.join(", "))
             }
         }
     }

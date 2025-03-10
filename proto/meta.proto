@@ -322,12 +322,20 @@ message RecoverRequest {}
 
 message RecoverResponse {}
 
-message AlterSinkConfigRequest {
-  uint32 sink_id = 1;
-  map<string, string> config = 2;
+message AlterConnectorPropsRequest {
+  enum AlterConnectorPropsObject {
+    UNSPECIFIED = 0;
+    SOURCE = 1;
+    SINK = 2;
+    CONNECTION = 3;
+  }
+
+  uint32 object_id = 1;
+  map<string, string> changed_props = 2;
+  AlterConnectorPropsObject object_type = 3;
 }
 
-message AlterSinkConfigResponse {}
+message AlterConnectorPropsResponse {}
 
 service StreamManagerService {
   rpc Flush(FlushRequest) returns (FlushResponse);
@@ -343,7 +351,7 @@ service StreamManagerService {
   rpc ApplyThrottle(ApplyThrottleRequest) returns (ApplyThrottleResponse);
   rpc Recover(RecoverRequest) returns (RecoverResponse);
   rpc ListRateLimits(ListRateLimitsRequest) returns (ListRateLimitsResponse);
-  rpc AlterSinkConfig(AlterSinkConfigRequest) returns (AlterSinkConfigResponse);
+  rpc AlterConnectorProps(AlterConnectorPropsRequest) returns (AlterConnectorPropsResponse);
 }
 
 // Below for cluster service.

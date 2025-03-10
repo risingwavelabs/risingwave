@@ -1118,10 +1118,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         unimplemented!()
     }
 
-    async fn alter_sink_config(
+    async fn alter_sink_props(
         &self,
         _sink_id: u32,
-        _config: BTreeMap<String, String>,
+        _changed_props: BTreeMap<String, String>,
     ) -> RpcResult<()> {
         unimplemented!()
     }

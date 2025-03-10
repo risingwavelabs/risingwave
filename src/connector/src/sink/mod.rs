@@ -45,7 +45,7 @@ pub mod trivial;
 pub mod utils;
 pub mod writer;
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::future::Future;
 use std::sync::LazyLock;
 
@@ -644,16 +644,7 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
         }
     }
 
-    fn validate_alter_config(config: &HashMap<String, String>) -> Result<()> {
-        for (k, v) in config {
-            if !Self::SINK_ALTER_CONFIG_LIST.contains(&k.as_str()) {
-                return Err(SinkError::Config(anyhow!(
-                    "unsupported alter config: {}={}",
-                    k,
-                    v
-                )));
-            }
-        }
+    fn validate_alter_config(_config: &BTreeMap<String, String>) -> Result<()> {
         Ok(())
     }
 
@@ -669,7 +660,15 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
         Err(SinkError::Coordinator(anyhow!("no coordinator")))
     }
 
-    fn update_config(&mut self, _config: BTreeMap<String, String>) -> Result<()>;
+    fn update_config(&mut self, config: BTreeMap<String, String>) -> Result<()> {
+        if !config.is_empty() {
+            return Err(SinkError::Config(anyhow!(
+                "unsupported update config: {:?}",
+                config
+            )));
+        }
+        Ok(())
+    }
 }
 
 pub trait SinkLogReader: Send + Sized + 'static {

@@ -693,19 +693,16 @@ impl MetadataManager {
             .collect())
     }
 
-    pub async fn update_sink_config_by_sink_id(
+    pub async fn update_sink_props_by_sink_id(
         &self,
         sink_id: SinkId,
-        config: HashMap<String, String>,
-    ) -> MetaResult<Vec<ActorId>> {
-        let fragment_actors = self
+        props: BTreeMap<String, String>,
+    ) -> MetaResult<HashMap<String, String>> {
+        let new_props = self
             .catalog_controller
-            .update_sink_config_by_sink_id(sink_id, config)
+            .update_sink_props_by_sink_id(sink_id, props)
             .await?;
-        Ok(fragment_actors
-            .into_iter()
-            .flat_map(|(_, actor_id)| actor_id.into_iter().map(|id| id as _))
-            .collect())
+        Ok(new_props)
     }
 
     pub async fn update_actor_splits_by_split_assignment(

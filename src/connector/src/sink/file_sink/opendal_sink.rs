@@ -119,10 +119,6 @@ impl<S: OpendalSinkBackend> Sink for FileSink<S> {
 
     const SINK_NAME: &'static str = S::SINK_NAME;
 
-    fn update_config(&mut self, _config: BTreeMap<String, String>) -> Result<()> {
-        Ok(())
-    }
-
     async fn validate(&self) -> Result<()> {
         if !self.is_append_only {
             return Err(SinkError::Config(anyhow!(

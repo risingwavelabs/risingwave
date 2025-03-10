@@ -131,8 +131,11 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn get_meta_store_endpoint(&self) -> Result<String>;
 
-    async fn alter_sink_config(&self, sink_id: u32, config: BTreeMap<String, String>)
-    -> Result<()>;
+    async fn alter_sink_props(
+        &self,
+        sink_id: u32,
+        changed_props: BTreeMap<String, String>,
+    ) -> Result<()>;
 }
 
 pub struct FrontendMetaClientImpl(pub MetaClient);
@@ -317,11 +320,11 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         self.0.get_meta_store_endpoint().await
     }
 
-    async fn alter_sink_config(
+    async fn alter_sink_props(
         &self,
         sink_id: u32,
-        config: BTreeMap<String, String>,
+        changed_props: BTreeMap<String, String>,
     ) -> Result<()> {
-        self.0.alter_sink_config(sink_id, config).await
+        self.0.alter_sink_props(sink_id, changed_props).await
     }
 }
