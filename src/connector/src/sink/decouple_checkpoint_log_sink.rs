@@ -182,8 +182,4 @@ impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for DecoupleCheckpointLogSink
             }
         }
     }
-
-    fn get_rewind_start_offset(&self) -> Option<u64> {
-        self.rewind_start_offset
-    }
 }

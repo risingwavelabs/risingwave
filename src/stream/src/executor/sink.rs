@@ -563,15 +563,10 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                 log_reader.init().await?;
 
                 loop {
-                    let res = sink.new_log_sinker(sink_writer_param.clone()).await;
-                    let Err(e) = match res {
-                        Ok(log_sinker) => {
-                            log_reader.rewind().await?;
-
-                            log_sinker.consume_log_and_sink(&mut log_reader).await
-                        }
-                        Err(err) => Err(err),
-                    };
+                    let Err(e) = sink
+                        .new_log_sinker(sink_writer_param.clone())
+                        .and_then(|log_sinker| log_sinker.consume_log_and_sink(&mut log_reader))
+                        .await;
                     GLOBAL_ERROR_METRICS.user_sink_error.report([
                         "sink_executor_error".to_owned(),
                         sink_param.sink_id.to_string(),
@@ -597,7 +592,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                     error = %e.as_report(),
                                     executor_id = sink_writer_param.executor_id,
                                     sink_id = sink_param.sink_id.sink_id,
-                                    "rewind successfully after sink error"
+                                    "reset log reader stream successfully after sink error"
                                 );
                                 Ok(())
                             }

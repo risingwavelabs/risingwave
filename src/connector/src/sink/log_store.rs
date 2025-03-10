@@ -172,7 +172,7 @@ pub trait LogReader: Send + Sized + 'static {
     /// Initialize the log reader. Usually function as waiting for log writer to be initialized.
     fn init(&mut self) -> impl Future<Output = LogStoreResult<()>> + Send + '_;
 
-    /// Build stream from given `start_offset`, if it is None, it indicates to read from the last truncate offset.
+    /// Build stream from given `start_offset` or aligned start offset recorded previously.
     fn build_stream_from_start_offset(
         &mut self,
         start_offset: Option<u64>,

@@ -374,7 +374,7 @@ mod tests {
     impl<C: Send, F: FnMut(u64, Vec<SinkMetadata>, &mut C) -> Result<(), SinkError> + Send>
         SinkCommitCoordinator for MockCoordinator<C, F>
     {
-        async fn init(&mut self) -> risingwave_connector::sink::Result<(Option<u64>)> {
+        async fn init(&mut self) -> risingwave_connector::sink::Result<Option<u64>> {
             Ok(None)
         }
 

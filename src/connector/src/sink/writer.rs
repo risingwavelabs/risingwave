@@ -127,6 +127,7 @@ impl<W> LogSinkerOf<W> {
 #[async_trait]
 impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for LogSinkerOf<W> {
     async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<!> {
+        log_reader.build_stream_from_start_offset(None).await?;
         let mut sink_writer = self.writer;
         let metrics = self.sink_writer_metrics;
         #[derive(Debug)]
