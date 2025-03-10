@@ -657,6 +657,10 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
 }
 
 pub trait SinkLogReader: Send + Sized + 'static {
+    fn build_stream_from_start_offset(
+        &mut self,
+        start_offset: Option<u64>,
+    ) -> impl Future<Output = LogStoreResult<()>> + Send + '_;
     /// Emit the next item.
     ///
     /// The implementation should ensure that the future is cancellation safe.
@@ -679,15 +683,18 @@ impl<R: LogReader> SinkLogReader for R {
     fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()> {
         <Self as LogReader>::truncate(self, offset)
     }
+
+    fn build_stream_from_start_offset(
+        &mut self,
+        start_offset: Option<u64>,
+    ) -> impl std::future::Future<Output = LogStoreResult<()>> + std::marker::Send {
+        <Self as LogReader>::build_stream_from_start_offset(self, start_offset)
+    }
 }
 
 #[async_trait]
-pub trait LogSinker: 'static {
+pub trait LogSinker: 'static + Send {
     async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<!>;
-
-    fn get_rewind_start_offset(&self) -> Option<u64> {
-        None
-    }
 }
 
 #[async_trait]

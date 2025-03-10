@@ -134,6 +134,13 @@ impl LogReader for MockRangeLogReader {
     async fn rewind(&mut self) -> LogStoreResult<()> {
         Err(anyhow!("should not call rewind"))
     }
+
+    async fn build_stream_from_start_offset(
+        &mut self,
+        _start_offset: Option<u64>,
+    ) -> LogStoreResult<()> {
+        Err(anyhow!("should not call build_stream_from_start_offset"))
+    }
 }
 
 impl MockRangeLogReader {

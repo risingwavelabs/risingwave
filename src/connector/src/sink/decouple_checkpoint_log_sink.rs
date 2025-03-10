@@ -60,6 +60,10 @@ impl<W> DecoupleCheckpointLogSinkerOf<W> {
 #[async_trait]
 impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for DecoupleCheckpointLogSinkerOf<W> {
     async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<!> {
+        log_reader
+            .build_stream_from_start_offset(self.rewind_start_offset)
+            .await?;
+
         let mut sink_writer = self.writer;
         #[derive(Debug)]
         enum LogConsumerState {
