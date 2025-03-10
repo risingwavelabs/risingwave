@@ -21,6 +21,7 @@ TEST_PATTERN="$@"
 echo "--- Run integration tests in deterministic simulation mode"
 seq "$TEST_NUM" | parallel "MADSIM_TEST_SEED={} NEXTEST_PROFILE=ci-sim \
  cargo nextest run \
+ $NEXTEST_PARTITION_ARG \
  --no-fail-fast \
  --cargo-metadata target/nextest/cargo-metadata.json \
  --binaries-metadata target/nextest/binaries-metadata.json \
