@@ -40,6 +40,7 @@ use crate::scheduler::{DistributedQueryStream, LocalQueryStream};
 use crate::session::SessionImpl;
 use crate::utils::WithOptions;
 
+mod alter_connector_props;
 mod alter_owner;
 mod alter_parallelism;
 mod alter_rename;
@@ -993,6 +994,14 @@ pub async fn handle(
             }
         },
         Statement::AlterSource { name, operation } => match operation {
+            AlterSourceOperation::AlterConnectorProps { alter_props } => {
+                alter_connector_props::handle_alter_source_connector_props(
+                    handler_args,
+                    name,
+                    alter_props,
+                )
+                .await
+            }
             AlterSourceOperation::RenameSource { source_name } => {
                 alter_rename::handle_rename_source(handler_args, name, source_name).await
             }
