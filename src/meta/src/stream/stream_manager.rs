@@ -15,6 +15,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
+use futures::FutureExt;
 use futures::future::join_all;
 use itertools::Itertools;
 use risingwave_common::bail;
@@ -238,11 +239,12 @@ impl GlobalStreamManager {
     /// 3. Notify related worker nodes to update and build the actors.
     /// 4. Store related meta data.
     ///
-    /// This function is a wrapper over [`Self::create_streaming_job_impl`].
+    /// This function is a wrapper over [`Self::run_create_streaming_job_command`].
     pub async fn create_streaming_job(
         self: &Arc<Self>,
         stream_job_fragments: StreamJobFragments,
         ctx: CreateStreamingJobContext,
+        run_command_notifier: Option<oneshot::Sender<MetaResult<()>>>,
     ) -> MetaResult<NotificationVersion> {
         let table_id = stream_job_fragments.stream_job_id();
         let database_id = ctx.streaming_job.database_id().into();
@@ -252,9 +254,33 @@ impl GlobalStreamManager {
 
         let stream_manager = self.clone();
         let fut = async move {
-            let res = stream_manager
-                .create_streaming_job_impl(stream_job_fragments, ctx)
-                .await;
+            let res: MetaResult<_> = try {
+                let (source_change, streaming_job) = stream_manager
+                    .run_create_streaming_job_command(stream_job_fragments, ctx)
+                    .inspect(move |result| {
+                        if let Some(tx) = run_command_notifier {
+                            let _ = tx.send(match result {
+                                Ok(_) => {
+                                    Ok(())
+                                }
+                                Err(err) => {
+                                    Err(err.clone())
+                                }
+                            });
+                        }
+                    })
+                    .await?;
+                let version = stream_manager
+                    .metadata_manager
+                    .wait_streaming_job_finished(
+                        streaming_job.id() as _,
+                    )
+                    .await?;
+                stream_manager.source_manager.apply_source_change(source_change).await;
+                tracing::debug!(?streaming_job, "stream job finish");
+                version
+            };
+
             match res {
                 Ok(version) => {
                     let _ = sender
@@ -334,7 +360,7 @@ impl GlobalStreamManager {
 
     /// The function will only return after backfilling finishes
     /// ([`crate::manager::MetadataManager::wait_streaming_job_finished`]).
-    async fn create_streaming_job_impl(
+    async fn run_create_streaming_job_command(
         &self,
         stream_job_fragments: StreamJobFragments,
         CreateStreamingJobContext {
@@ -349,7 +375,7 @@ impl GlobalStreamManager {
             cross_db_snapshot_backfill_info,
             ..
         }: CreateStreamingJobContext,
-    ) -> MetaResult<NotificationVersion> {
+    ) -> MetaResult<(SourceChange, StreamingJob)> {
         let mut replace_table_command = None;
 
         tracing::debug!(
@@ -436,13 +462,8 @@ impl GlobalStreamManager {
             .await?;
 
         tracing::debug!(?streaming_job, "first barrier collected for stream job");
-        let version = self
-            .metadata_manager
-            .wait_streaming_job_finished(streaming_job.id() as _)
-            .await?;
-        self.source_manager.apply_source_change(source_change).await;
-        tracing::debug!(?streaming_job, "stream job finish");
-        Ok(version)
+
+        Ok((source_change, streaming_job))
     }
 
     /// Send replace job command to barrier scheduler.
