@@ -129,6 +129,11 @@ batch_receiver_channel_size = 1000
 batch_root_stage_channel_size = 100
 batch_chunk_size = 1024
 
+[frontend]
+max_total_query_size_bytes = 1073741824
+min_single_query_size_bytes = 1048576
+max_single_query_size_bytes = 1073741824
+
 [streaming]
 in_flight_barrier_nums = 10000
 async_stack_trace = "ReleaseVerbose"
