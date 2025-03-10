@@ -537,7 +537,7 @@ steps:
     cancel_on_build_failing: true
     retry: *auto-retry
 
-  - label: "integration test (deterministic simulation)"
+  - label: "integration test (deterministic simulation, part %n)"
     command: "TEST_NUM=5 ci/scripts/deterministic-it-test.sh"
     if: |
       !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
@@ -548,6 +548,7 @@ steps:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 22
+    parallelism: 2
     retry: *auto-retry
 
   - label: "end-to-end test (deterministic simulation, part %n)"
