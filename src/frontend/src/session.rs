@@ -1062,6 +1062,13 @@ impl SessionImpl {
         let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
         let (connection, _) =
             catalog_reader.get_connection_by_name(db_name, schema_path, connection_name)?;
+
+        self.check_privileges(&[ObjectCheckItem::new(
+            connection.owner(),
+            AclMode::Usage,
+            Object::ConnectionId(connection.id),
+        )])?;
+
         Ok(connection.clone())
     }
 
@@ -1123,6 +1130,13 @@ impl SessionImpl {
                     format!("table \"{}\" does not exist", table_name),
                 )
             })?;
+
+        self.check_privileges(&[ObjectCheckItem::new(
+            table.owner(),
+            AclMode::Select,
+            Object::TableId(table.id.table_id()),
+        )])?;
+
         Ok(table.clone())
     }
 
@@ -1138,6 +1152,13 @@ impl SessionImpl {
         let catalog_reader = self.env().catalog_reader().read_guard();
         let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
         let (secret, _) = catalog_reader.get_secret_by_name(db_name, schema_path, secret_name)?;
+
+        self.check_privileges(&[ObjectCheckItem::new(
+            secret.owner(),
+            AclMode::Create,
+            Object::SecretId(secret.id.secret_id()),
+        )])?;
+
         Ok(secret.clone())
     }
 
