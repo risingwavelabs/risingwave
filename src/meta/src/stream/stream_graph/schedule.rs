@@ -25,7 +25,6 @@ use anyhow::Context;
 use either::Either;
 use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
-use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash::{ActorMapping, VnodeCountCompat, WorkerSlotId, WorkerSlotMapping};
 use risingwave_common::util::stream_graph_visitor::visit_fragment;
 use risingwave_common::{bail, hash};
@@ -164,7 +163,7 @@ impl Distribution {
                     .map(|actor| {
                         (
                             actor.actor_id as hash::ActorId,
-                            Bitmap::from(actor.vnode_bitmap.as_ref().unwrap()),
+                            actor.vnode_bitmap.clone().unwrap(),
                         )
                     })
                     .collect();

@@ -22,30 +22,12 @@ jobs:
       - name: Fetch all branches
         run: git fetch --prune --all
 
-      - name: Set up Python (for version comparison)
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.x'
-
       - name: Determine highest release version
         id: highest_version
         run: |
-          import re
-          import subprocess
-
-          branches = subprocess.check_output(['git', 'branch', '-r'], text=True)
-          release_versions = []
-          pattern = re.compile(r'origin/release-(\d+)\.(\d+)')
-
-          for line in branches.splitlines():
-              match = pattern.search(line)
-              if match:
-                  major, minor = map(int, match.groups())
-                  release_versions.append((major, minor))
-
-          highest = max(release_versions)
-          highest_version = f"{highest[0]}.{highest[1]}"
-          echo "version=${highest_version}" >> $GITHUB_ENV
+          HIGHEST_VERSION=$(git branch -r | grep -oE 'release-[0-9]+\.[0-9]+' | sed 's/release-//' | sort -V | tail -n1)
+          echo "Highest release version found: $HIGHEST_VERSION"
+          echo "version=$HIGHEST_VERSION" >> $GITHUB_ENV
 
       - name: Check if update is needed
         id: check_update
@@ -76,8 +58,10 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git checkout -b update-pr-template-${{ env.version }}
+          git diff
           git add .github/pull_request_template.md
           git commit -m "chore: update PR template with highest release version ${{ env.version }}"
+          git diff ..main
           git push origin update-pr-template-${{ env.version }}
 
       - name: Create pull request
@@ -88,3 +72,4 @@ jobs:
           body: "This PR updates the pull request template to reflect the highest release version: ${{ env.version }}."
           base: main
           branch: update-pr-template-${{ env.version }}
+

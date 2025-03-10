@@ -15,13 +15,13 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
+use futures::FutureExt;
 use futures::future::join_all;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_meta_model::ObjectId;
 use risingwave_pb::catalog::{CreateType, Subscription, Table};
-use risingwave_pb::stream_plan::Dispatcher;
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::Sender;
@@ -41,7 +41,10 @@ use crate::error::bail_invalid_parameter;
 use crate::manager::{
     MetaSrvEnv, MetadataManager, NotificationVersion, StreamingJob, StreamingJobType,
 };
-use crate::model::{ActorId, FragmentId, StreamJobFragments, TableParallelism};
+use crate::model::{
+    ActorId, FragmentActorDispatchers, FragmentId, StreamJobFragments, StreamJobFragmentsToCreate,
+    TableParallelism,
+};
 use crate::stream::{SourceChange, SourceManagerRef};
 use crate::{MetaError, MetaResult};
 
@@ -57,7 +60,7 @@ pub struct CreateStreamingJobOption {
 /// Note: for better readability, keep this struct complete and immutable once created.
 pub struct CreateStreamingJobContext {
     /// New dispatchers to add from upstream actors to downstream actors.
-    pub dispatchers: HashMap<FragmentId, HashMap<ActorId, Vec<Dispatcher>>>,
+    pub dispatchers: FragmentActorDispatchers,
 
     /// Internal tables in the streaming job.
     pub internal_tables: BTreeMap<u32, Table>,
@@ -78,7 +81,11 @@ pub struct CreateStreamingJobContext {
     pub job_type: StreamingJobType,
 
     /// Context provided for potential replace table, typically used when sinking into a table.
-    pub replace_table_job_info: Option<(StreamingJob, ReplaceStreamJobContext, StreamJobFragments)>,
+    pub replace_table_job_info: Option<(
+        StreamingJob,
+        ReplaceStreamJobContext,
+        StreamJobFragmentsToCreate,
+    )>,
 
     pub snapshot_backfill_info: Option<SnapshotBackfillInfo>,
     pub cross_db_snapshot_backfill_info: SnapshotBackfillInfo,
@@ -177,7 +184,7 @@ pub struct ReplaceStreamJobContext {
     pub merge_updates: HashMap<FragmentId, Vec<MergeUpdate>>,
 
     /// New dispatchers to add from upstream actors to downstream actors.
-    pub dispatchers: HashMap<FragmentId, HashMap<ActorId, Vec<Dispatcher>>>,
+    pub dispatchers: FragmentActorDispatchers,
 
     /// The locations of the actors to build in the new job to replace.
     pub building_locations: Locations,
@@ -238,11 +245,12 @@ impl GlobalStreamManager {
     /// 3. Notify related worker nodes to update and build the actors.
     /// 4. Store related meta data.
     ///
-    /// This function is a wrapper over [`Self::create_streaming_job_impl`].
+    /// This function is a wrapper over [`Self::run_create_streaming_job_command`].
     pub async fn create_streaming_job(
         self: &Arc<Self>,
-        stream_job_fragments: StreamJobFragments,
+        stream_job_fragments: StreamJobFragmentsToCreate,
         ctx: CreateStreamingJobContext,
+        run_command_notifier: Option<oneshot::Sender<MetaResult<()>>>,
     ) -> MetaResult<NotificationVersion> {
         let table_id = stream_job_fragments.stream_job_id();
         let database_id = ctx.streaming_job.database_id().into();
@@ -252,9 +260,33 @@ impl GlobalStreamManager {
 
         let stream_manager = self.clone();
         let fut = async move {
-            let res = stream_manager
-                .create_streaming_job_impl(stream_job_fragments, ctx)
-                .await;
+            let res: MetaResult<_> = try {
+                let (source_change, streaming_job) = stream_manager
+                    .run_create_streaming_job_command(stream_job_fragments, ctx)
+                    .inspect(move |result| {
+                        if let Some(tx) = run_command_notifier {
+                            let _ = tx.send(match result {
+                                Ok(_) => {
+                                    Ok(())
+                                }
+                                Err(err) => {
+                                    Err(err.clone())
+                                }
+                            });
+                        }
+                    })
+                    .await?;
+                let version = stream_manager
+                    .metadata_manager
+                    .wait_streaming_job_finished(
+                        streaming_job.id() as _,
+                    )
+                    .await?;
+                stream_manager.source_manager.apply_source_change(source_change).await;
+                tracing::debug!(?streaming_job, "stream job finish");
+                version
+            };
+
             match res {
                 Ok(version) => {
                     let _ = sender
@@ -334,9 +366,9 @@ impl GlobalStreamManager {
 
     /// The function will only return after backfilling finishes
     /// ([`crate::manager::MetadataManager::wait_streaming_job_finished`]).
-    async fn create_streaming_job_impl(
+    async fn run_create_streaming_job_command(
         &self,
-        stream_job_fragments: StreamJobFragments,
+        stream_job_fragments: StreamJobFragmentsToCreate,
         CreateStreamingJobContext {
             streaming_job,
             dispatchers,
@@ -349,7 +381,7 @@ impl GlobalStreamManager {
             cross_db_snapshot_backfill_info,
             ..
         }: CreateStreamingJobContext,
-    ) -> MetaResult<NotificationVersion> {
+    ) -> MetaResult<(SourceChange, StreamingJob)> {
         let mut replace_table_command = None;
 
         tracing::debug!(
@@ -436,19 +468,14 @@ impl GlobalStreamManager {
             .await?;
 
         tracing::debug!(?streaming_job, "first barrier collected for stream job");
-        let version = self
-            .metadata_manager
-            .wait_streaming_job_finished(streaming_job.id() as _)
-            .await?;
-        self.source_manager.apply_source_change(source_change).await;
-        tracing::debug!(?streaming_job, "stream job finish");
-        Ok(version)
+
+        Ok((source_change, streaming_job))
     }
 
     /// Send replace job command to barrier scheduler.
     pub async fn replace_stream_job(
         &self,
-        new_fragments: StreamJobFragments,
+        new_fragments: StreamJobFragmentsToCreate,
         ReplaceStreamJobContext {
             old_fragments,
             merge_updates,

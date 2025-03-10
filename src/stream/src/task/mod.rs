@@ -210,7 +210,7 @@ impl SharedContext {
     pub(crate) fn add_actors(&self, new_actor_infos: impl Iterator<Item = ActorInfo>) {
         let mut actor_infos = self.actor_infos.write();
         for actor in new_actor_infos {
-            if let Some(prev_actor) = actor_infos.get(&actor.get_actor_id()) {
+            if let Some(prev_actor) = actor_infos.get(&actor.actor_id) {
                 if cfg!(debug_assertions) {
                     panic!("duplicate actor info: {:?} {:?}", actor, actor_infos);
                 }
@@ -222,7 +222,7 @@ impl SharedContext {
                     );
                 }
             } else {
-                actor_infos.insert(actor.get_actor_id(), actor);
+                actor_infos.insert(actor.actor_id, actor);
             }
         }
     }

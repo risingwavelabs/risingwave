@@ -102,6 +102,7 @@ mod test {
                             },
                             version: Pr13707,
                             system_column: None,
+                            nullable: true,
                         },
                         ColumnDesc {
                             data_type: Int16,
@@ -114,6 +115,7 @@ mod test {
                             },
                             version: Pr13707,
                             system_column: None,
+                            nullable: true,
                         },
                     ],
                     [
@@ -146,6 +148,7 @@ mod test {
                             },
                             version: Pr13707,
                             system_column: None,
+                            nullable: true,
                         },
                         ColumnDesc {
                             data_type: Varchar,
@@ -158,6 +161,7 @@ mod test {
                             },
                             version: Pr13707,
                             system_column: None,
+                            nullable: true,
                         },
                     ],
                     [

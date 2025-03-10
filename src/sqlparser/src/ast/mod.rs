@@ -1556,6 +1556,7 @@ pub enum Statement {
         db_name: ObjectName,
         if_not_exists: bool,
         owner: Option<ObjectName>,
+        resource_group: Option<SetVariableValue>,
     },
     /// GRANT privileges ON objects TO grantees
     Grant {
@@ -1762,6 +1763,7 @@ impl fmt::Display for Statement {
                 db_name,
                 if_not_exists,
                 owner,
+                resource_group,
             } => {
                 write!(f, "CREATE DATABASE")?;
                 if *if_not_exists {
@@ -1771,6 +1773,10 @@ impl fmt::Display for Statement {
                 if let Some(owner) = owner {
                     write!(f, " WITH OWNER = {}", owner)?;
                 }
+                if let Some(resource_group) = resource_group {
+                    write!(f, " RESOURCE_GROUP = {}", resource_group)?;
+                }
+
                 Ok(())
             }
             Statement::CreateFunction {

@@ -97,6 +97,9 @@ pub struct CompactorOpts {
     /// Total available memory for the frontend node in bytes. Used by compactor.
     #[clap(long, env = "RW_COMPACTOR_TOTAL_MEMORY_BYTES", default_value_t = default_compactor_total_memory_bytes())]
     pub compactor_total_memory_bytes: usize,
+
+    #[clap(long, env = "RW_COMPACTOR_META_CACHE_MEMORY_BYTES", default_value_t = default_compactor_meta_cache_memory_bytes())]
+    pub compactor_meta_cache_memory_bytes: usize,
 }
 
 impl risingwave_common::opts::Opts for CompactorOpts {
@@ -151,4 +154,8 @@ pub fn start(
 
 pub fn default_compactor_total_memory_bytes() -> usize {
     system_memory_available_bytes()
+}
+
+pub fn default_compactor_meta_cache_memory_bytes() -> usize {
+    128 * 1024 * 1024 // 128MB
 }

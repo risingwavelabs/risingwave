@@ -923,11 +923,21 @@ impl SessionImpl {
             (schema_name, relation_name)
         };
         match catalog_reader.check_relation_name_duplicated(db_name, &schema_name, &relation_name) {
-            Err(CatalogError::Duplicated(_, name)) if if_not_exists => Ok(Either::Right(
-                PgResponse::builder(stmt_type)
-                    .notice(format!("relation \"{}\" already exists, skipping", name))
-                    .into(),
-            )),
+            Err(CatalogError::Duplicated(_, name, is_creating)) if if_not_exists => {
+                let is_creating_str = if is_creating {
+                    " but still creating"
+                } else {
+                    ""
+                };
+                Ok(Either::Right(
+                    PgResponse::builder(stmt_type)
+                        .notice(format!(
+                            "relation \"{}\" already exists{}, skipping",
+                            name, is_creating_str
+                        ))
+                        .into(),
+                ))
+            }
             Err(e) => Err(e.into()),
             Ok(_) => Ok(Either::Left(())),
         }
@@ -1005,7 +1015,7 @@ impl SessionImpl {
                         .into(),
                 ))
             } else {
-                Err(CatalogError::Duplicated("function", full_name).into())
+                Err(CatalogError::duplicated("function", full_name).into())
             }
         } else {
             Ok(Either::Left(()))
