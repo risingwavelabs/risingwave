@@ -474,6 +474,7 @@ async fn test_graph_builder() -> MetaResult<()> {
     let ActorGraphBuildResult {
         graph,
         actor_upstreams,
+        actor_dispatchers,
         ..
     } = actor_graph_builder.generate_graph(&env, &job, expr_context)?;
 
@@ -509,9 +510,12 @@ async fn test_graph_builder() -> MetaResult<()> {
 
     for actor in actors {
         assert_eq!(
-            expected_downstream.get(&actor.get_actor_id()).unwrap(),
-            actor
-                .dispatcher
+            expected_downstream.get(&actor.actor_id).unwrap(),
+            actor_dispatchers
+                .get(&actor.fragment_id)
+                .unwrap()
+                .get(&actor.actor_id)
+                .unwrap()
                 .first()
                 .map_or(&vec![], |d| d.get_downstream_actor_id()),
         );
@@ -526,7 +530,7 @@ async fn test_graph_builder() -> MetaResult<()> {
                 for actor in &fragment.actors {
                     assert_eq!(
                         expected_upstream
-                            .get(&actor.get_actor_id())
+                            .get(&actor.actor_id)
                             .unwrap()
                             .iter()
                             .collect::<HashSet<_>>(),

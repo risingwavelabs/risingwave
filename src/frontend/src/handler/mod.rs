@@ -408,9 +408,16 @@ pub async fn handle(
             db_name,
             if_not_exists,
             owner,
+            resource_group,
         } => {
-            create_database::handle_create_database(handler_args, db_name, if_not_exists, owner)
-                .await
+            create_database::handle_create_database(
+                handler_args,
+                db_name,
+                if_not_exists,
+                owner,
+                resource_group,
+            )
+            .await
         }
         Statement::CreateSchema {
             schema_name,
@@ -1074,6 +1081,15 @@ pub async fn handle(
                     new_schema_name,
                     StatementType::ALTER_CONNECTION,
                     None,
+                )
+                .await
+            }
+            AlterConnectionOperation::ChangeOwner { new_owner_name } => {
+                alter_owner::handle_alter_owner(
+                    handler_args,
+                    name,
+                    new_owner_name,
+                    StatementType::ALTER_CONNECTION,
                 )
                 .await
             }

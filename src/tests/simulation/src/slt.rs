@@ -277,8 +277,20 @@ pub async fn run_slt_task(
             }
 
             let cmd = match &record {
-                sqllogictest::Record::Statement { sql, .. }
-                | sqllogictest::Record::Query { sql, .. } => extract_sql_command(sql),
+                sqllogictest::Record::Statement {
+                    sql, conditions, ..
+                }
+                | sqllogictest::Record::Query {
+                    sql, conditions, ..
+                } if conditions
+                    .iter()
+                    .all(|c| !matches!(c, Condition::SkipIf{ label } if label == "madsim"))
+                    && !conditions
+                        .iter()
+                        .any(|c| matches!(c, Condition::OnlyIf{ label} if label != "madsim" )) =>
+                {
+                    extract_sql_command(sql)
+                }
                 _ => SqlCmd::Others,
             };
 
@@ -328,10 +340,9 @@ pub async fn run_slt_task(
             // For kill enabled.
             tracing::debug!(?cmd, "Running");
 
-            if background_ddl_rate > 0.0
-                && let SqlCmd::SetBackgroundDdl { enable } = cmd
-            {
+            if let SqlCmd::SetBackgroundDdl { enable } = cmd {
                 manual_background_ddl_enabled = enable;
+                background_ddl_enabled = enable;
             }
 
             // For each background ddl compatible statement, provide a chance for background_ddl=true.
@@ -480,11 +491,13 @@ pub async fn run_slt_task(
                             }
                             | SqlCmd::CreateMaterializedView { .. }
                                 if i != 0
+                                    && let e = e.to_string()
                                     // It should not be a gRPC request to meta error,
                                     // otherwise it means that the catalog is not yet populated to fe.
-                                    && !e.to_string().contains("gRPC request to meta service failed")
-                                    && e.to_string().contains("exists")
-                                    && e.to_string().contains("Catalog error") =>
+                                    && !e.contains("gRPC request to meta service failed")
+                                    && e.contains("exists")
+                                    && !e.contains("under creation")
+                                    && e.contains("Catalog error") =>
                             {
                                 break;
                             }
