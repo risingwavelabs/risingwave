@@ -259,7 +259,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
             self.rate_limit_rps,
         )
         .await?;
-        let mut delete_file: Arc<str> = "".into();
+        let mut reading_file: Arc<str> = "".into();
 
         while let Some(msg) = stream.next().await {
             match msg {
@@ -383,7 +383,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                 .unwrap();
                                 debug_assert_eq!(mapping.len(), 1);
                                 if let Some((split_id, _offset)) = mapping.into_iter().next() {
-                                    delete_file = split_id.clone();
+                                    reading_file = split_id.clone();
                                     let row = state_store_handler.get(split_id.clone()).await?
                                         .unwrap_or_else(|| {
                                             panic!("The fs_split (file_name) {:?} should be in the state table.",
@@ -412,7 +412,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                             }
                             None => {
                                 splits_on_fetch -= 1;
-                                state_store_handler.delete(delete_file.clone()).await?;
+                                state_store_handler.delete(reading_file.clone()).await?;
                             }
                         },
                     }
