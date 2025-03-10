@@ -18,6 +18,7 @@ use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnCatalog, INITIAL_TABLE_VERSION_ID, TableVersionId};
 use risingwave_common::types::{DataType, MapType, StructType, data_types};
+use risingwave_common::util::iter_util::ZipEqFast;
 
 use crate::TableCatalog;
 use crate::catalog::ColumnId;
@@ -104,7 +105,7 @@ impl ColumnIdGenerator {
                     }
 
                     for ((field_name, field_data_type), field_id) in
-                        fields.iter().zip_eq(fields.ids_or_placeholder())
+                        fields.iter().zip_eq_fast(fields.ids_or_placeholder())
                     {
                         with_segment!(Segment::Field(field_name.to_owned()), {
                             handle(existing, alterable, path, field_id, field_data_type.clone());
