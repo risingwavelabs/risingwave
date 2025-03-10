@@ -9704,7 +9704,7 @@ dependencies = [
  "indoc",
  "libc",
  "memoffset",
- "parking_lot 0.11.2",
+ "parking_lot 0.12.1",
  "portable-atomic",
  "pyo3-build-config",
  "pyo3-ffi",
@@ -13607,9 +13607,9 @@ dependencies = [
 
 [[package]]
 name = "sqllogictest"
-version = "0.27.1"
+version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "07a06aea5e52b0a63b9d8328b46ea2740cdab4cac13def8ef4f2e5288610f9ed"
+checksum = "17b2f0b80fc250ed3fdd82fc88c0ada5ad62ee1ed5314ac5474acfa52082f518"
 dependencies = [
  "async-trait",
  "educe",
