@@ -1545,7 +1545,6 @@ impl CatalogController {
 
         fragment::ActiveModel {
             fragment_id: Set(fragment_id),
-            fragment_type_mask: Set(fragment_type_mask),
             stream_node: Set(stream_node),
             ..Default::default()
         }
