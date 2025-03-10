@@ -10,7 +10,7 @@ cat ../rust-toolchain
 # shellcheck disable=SC2155
 
 # REMEMBER TO ALSO UPDATE ci/docker-compose.yml
-export BUILD_ENV_VERSION=v20250307
+export BUILD_ENV_VERSION=v20250307-slt-0.28.0
 
 export BUILD_TAG="public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION}"
 
@@ -20,8 +20,8 @@ arch
 echo "--- Check docker-compose"
 set +e
 if ! grep "$BUILD_TAG" docker-compose.yml; then
-    echo "${BUILD_TAG} is not set up for docker-compose, please modify docker-compose.yml."
-    exit 1
+	echo "${BUILD_TAG} is not set up for docker-compose, please modify docker-compose.yml."
+	exit 1
 fi
 set -e
 
@@ -34,17 +34,17 @@ set +e
 docker image rm "$BUILD_TAG"
 # check manifest
 if docker manifest inspect "$BUILD_TAG"; then
-    echo "+++ Image already exists"
-    echo "${BUILD_TAG} already exists -- skipping build image"
-    exit 0
+	echo "+++ Image already exists"
+	echo "${BUILD_TAG} already exists -- skipping build image"
+	exit 0
 fi
 set -ex
 
 echo "--- Docker build"
 if [[ -z ${BUILDKITE} ]]; then
-    export DOCKER_BUILD_PROGRESS="--progress=auto"
+	export DOCKER_BUILD_PROGRESS="--progress=auto"
 else
-    export DOCKER_BUILD_PROGRESS="--progress=plain"
+	export DOCKER_BUILD_PROGRESS="--progress=plain"
 fi
 
 docker build -t "$BUILD_TAG" "$DOCKER_BUILD_PROGRESS" --no-cache .

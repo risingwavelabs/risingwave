@@ -635,11 +635,11 @@ pub(crate) async fn wait_for_update(
     loop {
         match tokio::time::timeout(Duration::from_secs(30), receiver.changed()).await {
             Err(_) => {
-                let backtrace = if cfg!(debug_assertions) {
-                    format!("{:?}", Backtrace::capture())
-                } else {
-                    "backtrace log not enabled in non-debug mode".into()
-                };
+                // Provide backtrace iff in debug mode for observability.
+                let backtrace = cfg!(debug_assertions)
+                    .then(Backtrace::capture)
+                    .map(tracing::field::display);
+
                 // The reason that we need to retry here is batch scan in
                 // chain/rearrange_chain is waiting for an
                 // uncommitted epoch carried by the CreateMV barrier, which
