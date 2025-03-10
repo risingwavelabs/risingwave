@@ -80,6 +80,7 @@ pub use {
     risingwave_license as license,
 };
 pub mod lru;
+pub mod operator;
 pub mod opts;
 pub mod range;
 pub mod row;
