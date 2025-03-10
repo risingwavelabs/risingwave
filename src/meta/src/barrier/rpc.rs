@@ -48,7 +48,7 @@ use risingwave_pb::stream_service::{
 };
 use risingwave_rpc_client::StreamingControlHandle;
 use thiserror_ext::AsReport;
-use tokio::time::{sleep, timeout};
+use tokio::time::sleep;
 use tokio_retry::strategy::ExponentialBackoff;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
@@ -58,6 +58,7 @@ use crate::barrier::checkpoint::{BarrierWorkerState, DatabaseCheckpointControl};
 use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl};
 use crate::barrier::info::{BarrierInfo, InflightDatabaseInfo};
 use crate::barrier::progress::CreateMviewProgressTracker;
+use crate::barrier::utils::NodeToCollect;
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::manager::MetaSrvEnv;
 use crate::model::{
@@ -66,8 +67,6 @@ use crate::model::{
 };
 use crate::stream::build_actor_connector_splits;
 use crate::{MetaError, MetaResult};
-
-const COLLECT_ERROR_TIMEOUT: Duration = Duration::from_secs(3);
 
 fn to_partial_graph_id(job_id: Option<TableId>) -> u32 {
     job_id
@@ -309,30 +308,6 @@ impl ControlStreamManager {
         poll_fn(|cx| self.poll_next_response(cx)).await
     }
 
-    pub(super) async fn collect_errors(
-        &mut self,
-        worker_id: WorkerId,
-        first_err: MetaError,
-    ) -> Vec<(WorkerId, MetaError)> {
-        let mut errors = vec![(worker_id, first_err)];
-        #[cfg(not(madsim))]
-        {
-            {
-                let _ = timeout(COLLECT_ERROR_TIMEOUT, async {
-                    while !self.nodes.is_empty() {
-                        let (worker_id, result) = self.next_response().await;
-                        if let Err(e) = result {
-                            errors.push((worker_id, e));
-                        }
-                    }
-                })
-                .await;
-            }
-        }
-        tracing::debug!(?errors, "collected stream errors");
-        errors
-    }
-
     fn collect_init_request(
         &self,
         initial_inflight_infos: impl Iterator<
@@ -392,7 +367,7 @@ impl ControlStreamManager {
         subscription_info: InflightSubscriptionInfo,
         is_paused: bool,
         hummock_version_stats: &HummockVersionStats,
-    ) -> MetaResult<(HashSet<WorkerId>, DatabaseCheckpointControl, u64)> {
+    ) -> MetaResult<(NodeToCollect, DatabaseCheckpointControl, u64)> {
         let source_split_assignments = info
             .fragment_infos()
             .flat_map(|info| info.actors.keys())
@@ -520,7 +495,7 @@ impl ControlStreamManager {
         is_paused: bool,
         pre_applied_graph_info: &InflightDatabaseInfo,
         applied_graph_info: &InflightDatabaseInfo,
-    ) -> MetaResult<HashSet<WorkerId>> {
+    ) -> MetaResult<NodeToCollect> {
         let mutation = command.and_then(|c| c.to_mutation(is_paused));
         let subscriptions_to_add = if let Some(Mutation::Add(add)) = &mutation {
             add.subscriptions_to_add.clone()
@@ -559,7 +534,7 @@ impl ControlStreamManager {
         mut new_actors: Option<StreamJobActorsToCreate>,
         subscriptions_to_add: Vec<SubscriptionUpstreamInfo>,
         subscriptions_to_remove: Vec<SubscriptionUpstreamInfo>,
-    ) -> MetaResult<HashSet<WorkerId>> {
+    ) -> MetaResult<NodeToCollect> {
         fail_point!("inject_barrier_err", |_| risingwave_common::bail!(
             "inject_barrier_err"
         ));
@@ -579,7 +554,7 @@ impl ControlStreamManager {
                 .map(|table_id| table_id.table_id)
                 .collect();
 
-        let mut node_need_collect = HashSet::new();
+        let mut node_need_collect = HashMap::new();
         let new_actors_location_to_broadcast = new_actors
             .iter()
             .flatten()
@@ -608,7 +583,8 @@ impl ControlStreamManager {
                     .map(|actors| actors.iter().cloned())
                     .into_iter()
                     .flatten()
-                    .collect();
+                    .collect_vec();
+                let is_empty = actor_ids_to_collect.is_empty();
                 {
                     let mutation = mutation.clone();
                     let barrier = Barrier {
@@ -691,7 +667,7 @@ impl ControlStreamManager {
                             ))
                         })?;
 
-                    node_need_collect.insert(*node_id as WorkerId);
+                    node_need_collect.insert(*node_id as WorkerId, is_empty);
                     Result::<_, MetaError>::Ok(())
                 }
             })
