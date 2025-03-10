@@ -160,7 +160,7 @@ steps:
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 38
+    timeout_in_minutes: 35
     retry: *auto-retry
 
   - label: "end-to-end test for opendal (parallel)"
@@ -181,7 +181,7 @@ steps:
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 40
+    timeout_in_minutes: 12
     retry: *auto-retry
 
   - label: "end-to-end source test"

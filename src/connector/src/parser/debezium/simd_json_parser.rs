@@ -75,15 +75,17 @@ impl AccessBuilder for DebeziumJsonAccessBuilder {
 pub struct DebeziumMongoJsonAccessBuilder {
     value: Option<Vec<u8>>,
     json_parse_options: JsonParseOptions,
+    strong_schema: bool,
 }
 
 impl DebeziumMongoJsonAccessBuilder {
-    pub fn new() -> anyhow::Result<Self> {
+    pub fn new(strong_schema: bool) -> anyhow::Result<Self> {
         Ok(Self {
             value: None,
             json_parse_options: JsonParseOptions::new_for_debezium(
                 TimestamptzHandling::GuessNumberUnit,
             ),
+            strong_schema,
         })
     }
 }
@@ -108,6 +110,7 @@ impl AccessBuilder for DebeziumMongoJsonAccessBuilder {
 
         Ok(AccessImpl::MongoJson(MongoJsonAccess::new(
             JsonAccess::new_with_options(payload, &self.json_parse_options),
+            self.strong_schema,
         )))
     }
 }
