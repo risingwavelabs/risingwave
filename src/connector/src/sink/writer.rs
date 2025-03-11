@@ -96,7 +96,6 @@ pub trait FormattedSink {
         F::K: SerTo<Self::K>,
         F::V: SerTo<Self::V>,
     {
-        println!("write_one1 {:?}", chunk);
         for r in formatter.format_chunk(&chunk) {
             let (event_key_object, event_object) = r?;
 
@@ -257,7 +256,6 @@ impl<W: AsyncTruncateSinkWriter> LogSinker for AsyncTruncateLogSinkerOf<W> {
                     let (epoch, item) = item_result?;
                     match item {
                         LogStoreReadItem::StreamChunk { chunk_id, chunk } => {
-                            println!("write chunkewq21 {:?}", chunk);
                             let add_future = self.future_manager.start_write_chunk(epoch, chunk_id);
                             self.writer.write_chunk(chunk, add_future).await?;
                         }
