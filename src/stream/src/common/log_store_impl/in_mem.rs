@@ -252,9 +252,7 @@ impl LogReader for BoundedInMemLogStoreReader {
         &mut self,
         _start_offset: Option<u64>,
     ) -> LogStoreResult<()> {
-        Err(anyhow!(
-            "should not call build_stream_from_start_offset on it"
-        ))
+        Ok(())
     }
 }
 
