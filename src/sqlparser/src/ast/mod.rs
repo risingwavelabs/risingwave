@@ -37,9 +37,10 @@ use winnow::ModalResult;
 
 pub use self::data_type::{DataType, StructField};
 pub use self::ddl::{
-    AlterColumnOperation, AlterConnectionOperation, AlterDatabaseOperation, AlterFunctionOperation,
-    AlterSchemaOperation, AlterSecretOperation, AlterTableOperation, ColumnDef, ColumnOption,
-    ColumnOptionDef, ReferentialAction, SourceWatermark, TableConstraint, WebhookSourceInfo,
+    AlterColumnOperation, AlterConnectionOperation, AlterDatabaseOperation, AlterFragmentOperation,
+    AlterFunctionOperation, AlterSchemaOperation, AlterSecretOperation, AlterTableOperation,
+    ColumnDef, ColumnOption, ColumnOptionDef, ReferentialAction, SourceWatermark, TableConstraint,
+    WebhookSourceInfo,
 };
 pub use self::legacy_source::{
     AvroSchema, CompatibleFormatEncode, DebeziumAvroSchema, ProtobufSchema, get_delimiter,
@@ -1451,6 +1452,11 @@ pub enum Statement {
         with_options: Vec<SqlOption>,
         operation: AlterSecretOperation,
     },
+    /// ALTER FRAGMENT
+    AlterFragment {
+        fragment_id: u32,
+        operation: AlterFragmentOperation,
+    },
     /// DESCRIBE TABLE OR SOURCE
     Describe {
         /// Table or Source name
@@ -2272,6 +2278,12 @@ impl fmt::Display for Statement {
             Statement::Use { db_name } => {
                 write!(f, "USE {}", db_name)?;
                 Ok(())
+            }
+            Statement::AlterFragment {
+                fragment_id,
+                operation,
+            } => {
+                write!(f, "ALTER FRAGMENT {} {}", fragment_id, operation)
             }
         }
     }

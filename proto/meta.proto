@@ -306,6 +306,7 @@ enum ThrottleTarget {
   CDC_TABLE = 4;
   TABLE_DML = 5;
   SINK = 6;
+  FRAGMENT = 7;
 }
 
 message ApplyThrottleRequest {
