@@ -66,14 +66,31 @@ impl ScaleService for ScaleServiceImpl {
     ) -> Result<Response<GetClusterInfoResponse>, Status> {
         let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
 
-        let table_fragments = self
+        let stream_job_fragments = self
             .metadata_manager
             .catalog_controller
             .table_fragments()
-            .await?
-            .values()
-            .map(|tf| tf.to_protobuf())
-            .collect();
+            .await?;
+
+        let mut table_fragments = Vec::with_capacity(stream_job_fragments.len());
+        for (_, stream_job_fragments) in stream_job_fragments {
+            let upstreams = self
+                .metadata_manager
+                .catalog_controller
+                .upstream_fragments(stream_job_fragments.fragment_ids())
+                .await?;
+            let dispatchers = self
+                .metadata_manager
+                .catalog_controller
+                .get_fragment_actor_dispatchers(
+                    stream_job_fragments
+                        .fragment_ids()
+                        .map(|id| id as _)
+                        .collect(),
+                )
+                .await?;
+            table_fragments.push(stream_job_fragments.to_protobuf(&upstreams, &dispatchers))
+        }
 
         let worker_nodes = self
             .metadata_manager

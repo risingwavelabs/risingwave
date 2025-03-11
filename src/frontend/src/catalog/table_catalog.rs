@@ -837,14 +837,14 @@ mod tests {
             columns: vec![
                 ColumnCatalog::row_id_column().to_protobuf(),
                 PbColumnCatalog {
-                    column_desc: Some(PbColumnDesc::new_struct(
+                    column_desc: Some(PbColumnDesc::new(
+                        DataType::from(StructType::new([
+                            ("address", DataType::Varchar),
+                            ("zipcode", DataType::Varchar),
+                        ]))
+                        .to_protobuf(),
                         "country",
                         1,
-                        ".test.Country",
-                        vec![
-                            PbColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "address", 2),
-                            PbColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "zipcode", 3),
-                        ],
                     )),
                     is_hidden: false,
                 },
@@ -917,6 +917,7 @@ mod tests {
                             additional_column: AdditionalColumn { column_type: None },
                             version: ColumnDescVersion::LATEST,
                             system_column: None,
+                            nullable: true,
                         },
                         is_hidden: false
                     },

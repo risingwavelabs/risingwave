@@ -33,20 +33,19 @@ use risingwave_common::util::stream_graph_visitor::{
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::ddl_service::TableJobType;
-use risingwave_pb::meta::table_fragments::Fragment;
 use risingwave_pb::stream_plan::stream_fragment_graph::{
     Parallelism, StreamFragment, StreamFragmentEdge as StreamFragmentEdgeProto,
 };
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    DispatchStrategy, DispatcherType, FragmentTypeFlag, StreamActor,
+    DispatchStrategy, DispatcherType, FragmentTypeFlag,
     StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamScanNode, StreamScanType,
 };
 
 use crate::MetaResult;
 use crate::barrier::SnapshotBackfillInfo;
 use crate::manager::{MetaSrvEnv, StreamingJob, StreamingJobType};
-use crate::model::{ActorId, FragmentId};
+use crate::model::{ActorId, Fragment, FragmentId, StreamActor};
 use crate::stream::stream_graph::id::{GlobalFragmentId, GlobalFragmentIdGen, GlobalTableIdGen};
 use crate::stream::stream_graph::schedule::Distribution;
 
@@ -929,7 +928,7 @@ impl CompleteStreamFragmentGraph {
                             {
                                 // Resolve the required output columns from the upstream materialized view.
                                 let (dist_key_indices, output_indices) = {
-                                    let nodes = upstream_fragment.get_nodes().unwrap();
+                                    let nodes = &upstream_fragment.nodes;
                                     let mview_node =
                                         nodes.get_node_body().unwrap().as_materialize().unwrap();
                                     let all_column_ids = mview_node.column_ids();
@@ -973,7 +972,7 @@ impl CompleteStreamFragmentGraph {
                                     GlobalFragmentId::new(source_fragment.fragment_id);
 
                                 let output_indices = {
-                                    let nodes = upstream_fragment.get_nodes().unwrap();
+                                    let nodes = &upstream_fragment.nodes;
                                     let source_node =
                                         nodes.get_node_body().unwrap().as_source().unwrap();
 
@@ -1219,7 +1218,7 @@ impl CompleteStreamFragmentGraph {
             upstream_table_columns: _,
         } = building_fragment;
 
-        let distribution_type = distribution.to_distribution_type() as i32;
+        let distribution_type = distribution.to_distribution_type();
         let vnode_count = distribution.vnode_count();
 
         let materialized_fragment_id =
@@ -1235,20 +1234,14 @@ impl CompleteStreamFragmentGraph {
             .chain(materialized_fragment_id)
             .collect();
 
-        let upstream_fragment_ids = self
-            .get_upstreams(id)
-            .map(|(id, _)| id.as_global_id())
-            .collect();
-
         Fragment {
             fragment_id: inner.fragment_id,
             fragment_type_mask: inner.fragment_type_mask,
             distribution_type,
             actors,
             state_table_ids,
-            upstream_fragment_ids,
             maybe_vnode_count: VnodeCount::set(vnode_count).to_protobuf(),
-            nodes: Some(stream_node),
+            nodes: stream_node,
         }
     }
 

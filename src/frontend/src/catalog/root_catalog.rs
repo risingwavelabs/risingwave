@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId, TableId};
+use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId, StreamJobStatus, TableId};
 use risingwave_common::session_config::{SearchPath, USER_NAME_WILD_CARD};
 use risingwave_common::types::DataType;
 use risingwave_connector::sink::catalog::SinkCatalog;
@@ -153,12 +153,14 @@ impl Catalog {
                 .unwrap()
                 .create_sys_table(sys_table);
         }
-        for sys_view in get_sys_views_in_schema(proto.name.as_str()) {
+        for mut sys_view in get_sys_views_in_schema(proto.name.as_str()) {
+            sys_view.database_id = proto.database_id;
+            sys_view.schema_id = proto.id;
             self.get_database_mut(proto.database_id)
                 .unwrap()
                 .get_schema_mut(proto.id)
                 .unwrap()
-                .create_sys_view(sys_view);
+                .create_sys_view(Arc::new(sys_view));
         }
     }
 
@@ -940,25 +942,35 @@ impl Catalog {
     ) -> CatalogResult<()> {
         let schema = self.get_schema_by_name(db_name, schema_name)?;
 
-        if let Some(table) = schema.get_created_table_by_name(relation_name) {
+        if let Some(table) = schema.get_table_by_name(relation_name) {
+            let is_creating = table.stream_job_status == StreamJobStatus::Creating;
             if table.is_index() {
-                Err(CatalogError::Duplicated("index", relation_name.to_owned()))
+                Err(CatalogError::Duplicated(
+                    "index",
+                    relation_name.to_owned(),
+                    is_creating,
+                ))
             } else if table.is_mview() {
                 Err(CatalogError::Duplicated(
                     "materialized view",
                     relation_name.to_owned(),
+                    is_creating,
                 ))
             } else {
-                Err(CatalogError::Duplicated("table", relation_name.to_owned()))
+                Err(CatalogError::Duplicated(
+                    "table",
+                    relation_name.to_owned(),
+                    is_creating,
+                ))
             }
         } else if schema.get_source_by_name(relation_name).is_some() {
-            Err(CatalogError::Duplicated("source", relation_name.to_owned()))
+            Err(CatalogError::duplicated("source", relation_name.to_owned()))
         } else if schema.get_sink_by_name(relation_name).is_some() {
-            Err(CatalogError::Duplicated("sink", relation_name.to_owned()))
+            Err(CatalogError::duplicated("sink", relation_name.to_owned()))
         } else if schema.get_view_by_name(relation_name).is_some() {
-            Err(CatalogError::Duplicated("view", relation_name.to_owned()))
+            Err(CatalogError::duplicated("view", relation_name.to_owned()))
         } else if schema.get_subscription_by_name(relation_name).is_some() {
-            Err(CatalogError::Duplicated(
+            Err(CatalogError::duplicated(
                 "subscription",
                 relation_name.to_owned(),
             ))
@@ -984,7 +996,7 @@ impl Catalog {
                 "{function_name}({})",
                 arg_types.iter().map(|t| t.to_string()).join(",")
             );
-            Err(CatalogError::Duplicated("function", name))
+            Err(CatalogError::duplicated("function", name))
         } else {
             Ok(())
         }
@@ -1000,7 +1012,7 @@ impl Catalog {
         let schema = self.get_schema_by_name(db_name, schema_name)?;
 
         if schema.get_connection_by_name(connection_name).is_some() {
-            Err(CatalogError::Duplicated(
+            Err(CatalogError::duplicated(
                 "connection",
                 connection_name.to_owned(),
             ))
@@ -1018,7 +1030,7 @@ impl Catalog {
         let schema = self.get_schema_by_name(db_name, schema_name)?;
 
         if schema.get_secret_by_name(secret_name).is_some() {
-            Err(CatalogError::Duplicated("secret", secret_name.to_owned()))
+            Err(CatalogError::duplicated("secret", secret_name.to_owned()))
         } else {
             Ok(())
         }

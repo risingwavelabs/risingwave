@@ -518,14 +518,8 @@ impl Barrier {
     /// Whether this barrier requires the executor to pause its data stream on startup.
     pub fn is_pause_on_startup(&self) -> bool {
         match self.mutation.as_deref() {
-            Some(
-                  Mutation::Update { .. } // new actors for scaling
-                | Mutation::Add(AddMutation { pause: true, .. }) // new streaming job, or recovery
-            ) => true,
-            Some(Mutation::AddAndUpdate(AddMutation { pause, ..}, _)) => {
-                assert!(pause);
-                true
-            },
+            Some(Mutation::Add(AddMutation { pause, .. }))
+            | Some(Mutation::AddAndUpdate(AddMutation { pause, .. }, _)) => *pause,
             _ => false,
         }
     }
@@ -747,7 +741,9 @@ impl Mutation {
 
     fn from_protobuf(prost: &PbMutation) -> StreamExecutorResult<Self> {
         let mutation = match prost {
-            PbMutation::Stop(stop) => Mutation::Stop(HashSet::from_iter(stop.get_actors().clone())),
+            PbMutation::Stop(stop) => {
+                Mutation::Stop(HashSet::from_iter(stop.actors.iter().cloned()))
+            }
 
             PbMutation::Update(update) => Mutation::Update(UpdateMutation {
                 dispatchers: update

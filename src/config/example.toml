@@ -125,6 +125,8 @@ enable_spill = true
 [batch.developer]
 batch_connector_message_buffer_size = 16
 batch_output_channel_size = 64
+batch_receiver_channel_size = 1000
+batch_root_stage_channel_size = 100
 batch_chunk_size = 1024
 
 [frontend]
@@ -300,3 +302,4 @@ pause_on_next_bootstrap = false
 enable_tracing = false
 license_key = ""
 time_travel_retention_ms = 600000
+adaptive_parallelism_strategy = "Auto"

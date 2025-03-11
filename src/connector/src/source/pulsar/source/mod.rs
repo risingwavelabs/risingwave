@@ -14,3 +14,5 @@
 
 mod message;
 pub mod reader;
+
+pub use message::PulsarMeta;

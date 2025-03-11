@@ -26,9 +26,6 @@ use risingwave_connector::source::SplitImpl;
 use risingwave_hummock_sdk::change_log::build_table_change_log_delta;
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::catalog::{CreateType, Table};
-use risingwave_pb::common::PbWorkerNode;
-use risingwave_pb::meta::PausedReason;
-use risingwave_pb::meta::table_fragments::PbActorStatus;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use risingwave_pb::stream_plan::barrier::BarrierKind as PbBarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
@@ -37,7 +34,7 @@ use risingwave_pb::stream_plan::update_mutation::*;
 use risingwave_pb::stream_plan::{
     AddMutation, BarrierMutation, CombinedMutation, Dispatcher, Dispatchers,
     DropSubscriptionsMutation, PauseMutation, ResumeMutation, SourceChangeSplitMutation,
-    StopMutation, StreamActor, SubscriptionUpstreamInfo, ThrottleMutation, UpdateMutation,
+    StopMutation, SubscriptionUpstreamInfo, ThrottleMutation, UpdateMutation,
 };
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::warn;
@@ -50,7 +47,9 @@ use crate::controller::fragment::InflightFragmentInfo;
 use crate::hummock::{CommitEpochInfo, NewTableFragmentInfo};
 use crate::manager::{StreamingJob, StreamingJobType};
 use crate::model::{
-    ActorId, ActorUpstreams, DispatcherId, FragmentId, StreamJobActorsToCreate, StreamJobFragments,
+    ActorId, ActorUpstreams, DispatcherId, FragmentActorDispatchers, FragmentId,
+    StreamActorWithDispatchers, StreamJobActorsToCreate, StreamJobFragments,
+    StreamJobFragmentsToCreate,
 };
 use crate::stream::{
     JobReschedulePostUpdates, SplitAssignment, ThrottleConfig, build_actor_connector_splits,
@@ -85,7 +84,7 @@ pub struct Reschedule {
     /// `Source` and `SourceBackfill` are handled together here.
     pub actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
 
-    pub newly_created_actors: Vec<(StreamActor, PbActorStatus)>,
+    pub newly_created_actors: Vec<(StreamActorWithDispatchers, WorkerId)>,
 }
 
 /// Replacing an old job with a new one. All actors in the job will be rebuilt.
@@ -97,11 +96,11 @@ pub struct Reschedule {
 #[derive(Debug, Clone)]
 pub struct ReplaceStreamJobPlan {
     pub old_fragments: StreamJobFragments,
-    pub new_fragments: StreamJobFragments,
+    pub new_fragments: StreamJobFragmentsToCreate,
     /// Downstream jobs of the replaced job need to update their `Merge` node to
     /// connect to the new fragment.
     pub merge_updates: HashMap<FragmentId, Vec<MergeUpdate>>,
-    pub dispatchers: HashMap<FragmentId, HashMap<ActorId, Vec<Dispatcher>>>,
+    pub dispatchers: FragmentActorDispatchers,
     /// For a table with connector, the `SourceExecutor` actor will also be rebuilt with new actor ids.
     /// We need to reassign splits for it.
     ///
@@ -124,7 +123,7 @@ impl ReplaceStreamJobPlan {
                 self.streaming_job.id().into(),
                 InflightFragmentInfo {
                     fragment_id: fragment.fragment_id,
-                    nodes: fragment.nodes.clone().unwrap(),
+                    nodes: fragment.nodes.clone(),
                     actors: fragment
                         .actors
                         .iter()
@@ -205,8 +204,8 @@ impl ReplaceStreamJobPlan {
 #[educe(Debug)]
 pub struct CreateStreamingJobCommandInfo {
     #[educe(Debug(ignore))]
-    pub stream_job_fragments: StreamJobFragments,
-    pub dispatchers: HashMap<FragmentId, HashMap<ActorId, Vec<Dispatcher>>>,
+    pub stream_job_fragments: StreamJobFragmentsToCreate,
+    pub dispatchers: FragmentActorDispatchers,
     pub init_split_assignment: SplitAssignment,
     pub definition: String,
     pub job_type: StreamingJobType,
@@ -227,7 +226,7 @@ impl CreateStreamingJobCommandInfo {
                     fragment.fragment_id,
                     InflightFragmentInfo {
                         fragment_id: fragment.fragment_id,
-                        nodes: fragment.nodes.clone().unwrap(),
+                        nodes: fragment.nodes.clone(),
                         actors: fragment
                             .actors
                             .iter()
@@ -278,14 +277,14 @@ pub enum Command {
     /// all messages before the checkpoint barrier should have been committed.
     Flush,
 
-    /// `Pause` command generates a `Pause` barrier with the provided [`PausedReason`] **only if**
+    /// `Pause` command generates a `Pause` barrier **only if**
     /// the cluster is not already paused. Otherwise, a barrier with no mutation will be generated.
-    Pause(PausedReason),
+    Pause,
 
-    /// `Resume` command generates a `Resume` barrier with the provided [`PausedReason`] **only
+    /// `Resume` command generates a `Resume` barrier **only
     /// if** the cluster is paused with the same reason. Otherwise, a barrier with no mutation
     /// will be generated.
-    Resume(PausedReason),
+    Resume,
 
     /// `DropStreamingJobs` command generates a `Stop` barrier to stop the given
     /// [`Vec<ActorId>`]. The catalog has ensured that these streaming jobs are safe to be
@@ -366,12 +365,12 @@ pub enum Command {
 }
 
 impl Command {
-    pub fn pause(reason: PausedReason) -> Self {
-        Self::Pause(reason)
+    pub fn pause() -> Self {
+        Self::Pause
     }
 
-    pub fn resume(reason: PausedReason) -> Self {
-        Self::Resume(reason)
+    pub fn resume() -> Self {
+        Self::Resume
     }
 
     pub fn cancel(table_fragments: &StreamJobFragments) -> Self {
@@ -389,8 +388,8 @@ impl Command {
     pub(crate) fn fragment_changes(&self) -> Option<HashMap<FragmentId, CommandFragmentChanges>> {
         match self {
             Command::Flush => None,
-            Command::Pause(_) => None,
-            Command::Resume(_) => None,
+            Command::Pause => None,
+            Command::Resume => None,
             Command::DropStreamingJobs {
                 unregistered_fragment_ids,
                 ..
@@ -454,19 +453,9 @@ impl Command {
         }
     }
 
-    /// If we need to send a barrier to modify actor configuration, we will pause the barrier
-    /// injection. return true.
-    pub fn should_pause_inject_barrier(&self) -> bool {
-        // Note: the meaning for `Pause` is not pausing the periodic barrier injection, but for
-        // pausing the sources on compute nodes. However, when `Pause` is used for configuration
-        // change like scaling and migration, it must pause the concurrent checkpoint to ensure the
-        // previous checkpoint has been done.
-        matches!(self, Self::Pause(PausedReason::ConfigChange))
-    }
-
     pub fn need_checkpoint(&self) -> bool {
         // todo! Reviewing the flow of different command to reduce the amount of checkpoint
-        !matches!(self, Command::Resume(_))
+        !matches!(self, Command::Resume)
     }
 }
 
@@ -503,8 +492,6 @@ impl BarrierKind {
 /// [`CommandContext`] is used for generating barrier and doing post stuffs according to the given
 /// [`Command`].
 pub(super) struct CommandContext {
-    /// Resolved info in this barrier loop.
-    pub(super) node_map: HashMap<WorkerId, PbWorkerNode>,
     subscription_info: InflightSubscriptionInfo,
 
     pub(super) barrier_info: BarrierInfo,
@@ -532,7 +519,6 @@ impl std::fmt::Debug for CommandContext {
 
 impl CommandContext {
     pub(super) fn new(
-        node_map: HashMap<WorkerId, PbWorkerNode>,
         barrier_info: BarrierInfo,
         subscription_info: InflightSubscriptionInfo,
         table_ids_to_commit: HashSet<TableId>,
@@ -540,7 +526,6 @@ impl CommandContext {
         span: tracing::Span,
     ) -> Self {
         Self {
-            node_map,
             subscription_info,
             barrier_info,
             table_ids_to_commit,
@@ -648,24 +633,24 @@ impl CommandContext {
 
 impl Command {
     /// Generate a mutation for the given command.
-    pub fn to_mutation(&self, current_paused_reason: Option<PausedReason>) -> Option<Mutation> {
+    pub fn to_mutation(&self, is_currently_paused: bool) -> Option<Mutation> {
         let mutation =
             match self {
                 Command::Flush => None,
 
-                Command::Pause(_) => {
+                Command::Pause => {
                     // Only pause when the cluster is not already paused.
                     // XXX: what if pause(r1) - pause(r2) - resume(r1) - resume(r2)??
-                    if current_paused_reason.is_none() {
+                    if !is_currently_paused {
                         Some(Mutation::Pause(PauseMutation {}))
                     } else {
                         None
                     }
                 }
 
-                Command::Resume(reason) => {
+                Command::Resume => {
                     // Only resume when the cluster is paused with the same reason.
-                    if current_paused_reason == Some(*reason) {
+                    if is_currently_paused {
                         Some(Mutation::Resume(ResumeMutation {}))
                     } else {
                         None
@@ -749,7 +734,7 @@ impl Command {
                         added_actors,
                         actor_splits,
                         // If the cluster is already paused, the new actors should be paused too.
-                        pause: current_paused_reason.is_some(),
+                        pause: is_currently_paused,
                         subscriptions_to_add,
                     }));
 
@@ -1003,8 +988,8 @@ impl Command {
                 let mut actor_upstreams = Self::collect_actor_upstreams(
                     get_actors_to_create()
                         .flat_map(|(fragment_id, _, actors)| {
-                            actors.map(move |(actor, _)| {
-                                (actor.actor_id, fragment_id, actor.dispatcher.as_slice())
+                            actors.map(move |(actor, dispatchers, _)| {
+                                (actor.actor_id, fragment_id, dispatchers.as_slice())
                             })
                         })
                         .chain(
@@ -1034,7 +1019,7 @@ impl Command {
                 );
                 let mut map = StreamJobActorsToCreate::default();
                 for (fragment_id, node, actors) in get_actors_to_create() {
-                    for (actor, worker_id) in actors {
+                    for (actor, dispatchers, worker_id) in actors {
                         map.entry(worker_id)
                             .or_default()
                             .entry(fragment_id)
@@ -1043,6 +1028,7 @@ impl Command {
                             .push((
                                 actor.clone(),
                                 actor_upstreams.remove(&actor.actor_id).unwrap_or_default(),
+                                dispatchers.clone(),
                             ))
                     }
                 }
@@ -1055,14 +1041,17 @@ impl Command {
             } => {
                 let mut actor_upstreams = Self::collect_actor_upstreams(
                     reschedules.iter().flat_map(|(fragment_id, reschedule)| {
-                        reschedule.newly_created_actors.iter().map(|(actor, _)| {
-                            (actor.actor_id, *fragment_id, actor.dispatcher.as_slice())
-                        })
+                        reschedule
+                            .newly_created_actors
+                            .iter()
+                            .map(|((actor, dispatchers), _)| {
+                                (actor.actor_id, *fragment_id, dispatchers.as_slice())
+                            })
                     }),
                     Some((reschedules, fragment_actors)),
                 );
                 let mut map: HashMap<WorkerId, HashMap<_, (_, Vec<_>)>> = HashMap::new();
-                for (fragment_id, actor, status) in
+                for (fragment_id, (actor, dispatchers), worker_id) in
                     reschedules.iter().flat_map(|(fragment_id, reschedule)| {
                         reschedule
                             .newly_created_actors
@@ -1070,9 +1059,8 @@ impl Command {
                             .map(|(actors, status)| (*fragment_id, actors, status))
                     })
                 {
-                    let worker_id = status.location.as_ref().unwrap().worker_node_id as _;
                     let upstreams = actor_upstreams.remove(&actor.actor_id).unwrap_or_default();
-                    map.entry(worker_id)
+                    map.entry(*worker_id)
                         .or_default()
                         .entry(fragment_id)
                         .or_insert_with(|| {
@@ -1080,7 +1068,7 @@ impl Command {
                             (node, vec![])
                         })
                         .1
-                        .push((actor.clone(), upstreams));
+                        .push((actor.clone(), upstreams, dispatchers.clone()));
                 }
                 Some(map)
             }
@@ -1090,8 +1078,8 @@ impl Command {
                         .new_fragments
                         .actors_to_create()
                         .flat_map(|(fragment_id, _, actors)| {
-                            actors.map(move |(actor, _)| {
-                                (actor.actor_id, fragment_id, actor.dispatcher.as_slice())
+                            actors.map(move |(actor, dispatchers, _)| {
+                                (actor.actor_id, fragment_id, dispatchers.as_slice())
                             })
                         })
                         .chain(replace_table.dispatchers.iter().flat_map(
@@ -1105,7 +1093,7 @@ impl Command {
                 );
                 let mut map = StreamJobActorsToCreate::default();
                 for (fragment_id, node, actors) in replace_table.new_fragments.actors_to_create() {
-                    for (actor, worker_id) in actors {
+                    for (actor, dispatchers, worker_id) in actors {
                         map.entry(worker_id)
                             .or_default()
                             .entry(fragment_id)
@@ -1114,6 +1102,7 @@ impl Command {
                             .push((
                                 actor.clone(),
                                 actor_upstreams.remove(&actor.actor_id).unwrap_or_default(),
+                                dispatchers.clone(),
                             ))
                     }
                 }
@@ -1126,7 +1115,7 @@ impl Command {
     fn generate_update_mutation_for_replace_table(
         old_fragments: &StreamJobFragments,
         merge_updates: &HashMap<FragmentId, Vec<MergeUpdate>>,
-        dispatchers: &HashMap<FragmentId, HashMap<ActorId, Vec<Dispatcher>>>,
+        dispatchers: &FragmentActorDispatchers,
         init_split_assignment: &SplitAssignment,
     ) -> Option<Mutation> {
         let dropped_actors = old_fragments.actor_ids();
@@ -1156,34 +1145,6 @@ impl Command {
             actor_splits,
             ..Default::default()
         }))
-    }
-
-    /// Returns the paused reason after executing the current command.
-    pub fn next_paused_reason(
-        this: Option<&Self>,
-        current_paused_reason: Option<PausedReason>,
-    ) -> Option<PausedReason> {
-        match this {
-            Some(Command::Pause(reason)) => {
-                // Only pause when the cluster is not already paused.
-                if current_paused_reason.is_none() {
-                    Some(*reason)
-                } else {
-                    current_paused_reason
-                }
-            }
-
-            Some(Command::Resume(reason)) => {
-                // Only resume when the cluster is paused with the same reason.
-                if current_paused_reason == Some(*reason) {
-                    None
-                } else {
-                    current_paused_reason
-                }
-            }
-
-            _ => current_paused_reason,
-        }
     }
 
     /// For `CancelStreamingJob`, returns the table id of the target table.

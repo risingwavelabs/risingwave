@@ -276,7 +276,23 @@ pub(super) mod handlers {
             .get_job_fragments_by_id(&table_id)
             .await
             .map_err(err)?;
-        Ok(Json(table_fragments.to_protobuf()))
+        let upstream_fragments = srv
+            .metadata_manager
+            .catalog_controller
+            .upstream_fragments(table_fragments.fragment_ids())
+            .await
+            .map_err(err)?;
+        let dispatchers = srv
+            .metadata_manager
+            .catalog_controller
+            .get_fragment_actor_dispatchers(
+                table_fragments.fragment_ids().map(|id| id as _).collect(),
+            )
+            .await
+            .map_err(err)?;
+        Ok(Json(
+            table_fragments.to_protobuf(&upstream_fragments, &dispatchers),
+        ))
     }
 
     pub async fn list_users(Extension(srv): Extension<Service>) -> Result<Json<Vec<PbUserInfo>>> {

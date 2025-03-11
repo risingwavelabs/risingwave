@@ -25,14 +25,12 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use prost::Message as _;
 use risingwave_common::catalog::{
     CdcTableDesc, ColumnCatalog, ColumnDesc, ConflictBehavior, DEFAULT_SCHEMA_NAME, Engine,
-    FieldLike, INITIAL_TABLE_VERSION_ID, RISINGWAVE_ICEBERG_ROW_ID, ROW_ID_COLUMN_NAME, TableId,
-    TableVersionId,
+    RISINGWAVE_ICEBERG_ROW_ID, ROW_ID_COLUMN_NAME, TableId,
 };
 use risingwave_common::config::MetaBackend;
 use risingwave_common::license::Feature;
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_common::system_param::reader::SystemParamsRead;
-use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_common::{bail, bail_not_implemented};
@@ -88,95 +86,8 @@ use crate::stream_fragmenter::build_graph;
 use crate::utils::OverwriteOptions;
 use crate::{Binder, TableCatalog, WithOptions};
 
-/// Column ID generator for a new table or a new version of an existing table to alter.
-#[derive(Debug)]
-pub struct ColumnIdGenerator {
-    /// Existing column names and their IDs and data types.
-    ///
-    /// This is used for aligning column IDs between versions (`ALTER`s). If a column already
-    /// exists and the data type matches, its ID is reused. Otherwise, a new ID is generated.
-    ///
-    /// For a new table, this is empty.
-    pub existing: HashMap<String, (ColumnId, DataType)>,
-
-    /// The next column ID to generate, used for new columns that do not exist in `existing`.
-    pub next_column_id: ColumnId,
-
-    /// The version ID of the table to be created or altered.
-    ///
-    /// For a new table, this is 0. For altering an existing table, this is the **next** version ID
-    /// of the `version_id` field in the original table catalog.
-    pub version_id: TableVersionId,
-}
-
-impl ColumnIdGenerator {
-    /// Creates a new [`ColumnIdGenerator`] for altering an existing table.
-    pub fn new_alter(original: &TableCatalog) -> Self {
-        let existing = original
-            .columns()
-            .iter()
-            .map(|col| {
-                (
-                    col.name().to_owned(),
-                    (col.column_id(), col.data_type().clone()),
-                )
-            })
-            .collect();
-
-        let version = original.version().expect("version field not set");
-
-        Self {
-            existing,
-            next_column_id: version.next_column_id,
-            version_id: version.version_id + 1,
-        }
-    }
-
-    /// Creates a new [`ColumnIdGenerator`] for a new table.
-    pub fn new_initial() -> Self {
-        Self {
-            existing: HashMap::new(),
-            next_column_id: ColumnId::first_user_column(),
-            version_id: INITIAL_TABLE_VERSION_ID,
-        }
-    }
-
-    /// Generates a new [`ColumnId`] for a column with the given field.
-    ///
-    /// Returns an error if the data type of the column has been changed.
-    pub fn generate(&mut self, field: impl FieldLike) -> Result<ColumnId> {
-        if let Some((id, original_type)) = self.existing.get(field.name()) {
-            // Intentionally not using `datatype_equals` here because we want nested types to be
-            // exactly the same, **NOT** ignoring field names as they may be referenced in expressions
-            // of generated columns or downstream jobs.
-            // TODO: support compatible changes on types, typically for `STRUCT` types.
-            //       https://github.com/risingwavelabs/risingwave/issues/19755
-            if original_type == field.data_type() {
-                Ok(*id)
-            } else {
-                bail_not_implemented!(
-                    "The data type of column \"{}\" has been changed from \"{}\" to \"{}\". \
-                     This is currently not supported, even if it could be a compatible change in external systems.",
-                    field.name(),
-                    original_type,
-                    field.data_type()
-                );
-            }
-        } else {
-            let id = self.next_column_id;
-            self.next_column_id = self.next_column_id.next();
-            Ok(id)
-        }
-    }
-
-    /// Consume this generator and return a [`TableVersion`] for the table to be created or altered.
-    pub fn into_version(self) -> TableVersion {
-        TableVersion {
-            version_id: self.version_id,
-            next_column_id: self.next_column_id,
-        }
-    }
-}
+mod col_id_gen;
+pub use col_id_gen::*;
 
 fn ensure_column_options_supported(c: &ColumnDef) -> Result<()> {
     for option_def in &c.options {
@@ -185,6 +96,8 @@ fn ensure_column_options_supported(c: &ColumnDef) -> Result<()> {
             ColumnOption::DefaultValue(_) => {}
             ColumnOption::DefaultValueInternal { .. } => {}
             ColumnOption::Unique { is_primary: true } => {}
+            ColumnOption::Null {} => {}
+            ColumnOption::NotNull {} => {}
             _ => bail_not_implemented!("column constraints \"{}\"", option_def),
         }
     }
@@ -209,6 +122,7 @@ pub fn bind_sql_columns(
             name,
             data_type,
             collation,
+            options,
             ..
         } = column;
 
@@ -245,6 +159,13 @@ pub fn bind_sql_columns(
             check_column_name_not_reserved(&name.real_value())?;
         }
 
+        let mut nullable: bool = true;
+        for option in options {
+            if option.option == ColumnOption::NotNull {
+                nullable = false;
+            }
+        }
+
         columns.push(ColumnCatalog {
             column_desc: ColumnDesc {
                 data_type: bind_data_type(&data_type)?,
@@ -255,6 +176,7 @@ pub fn bind_sql_columns(
                 additional_column: AdditionalColumn { column_type: None },
                 version: ColumnDescVersion::LATEST,
                 system_column: None,
+                nullable,
             },
             is_hidden: false,
         });
@@ -1182,30 +1104,14 @@ pub(super) async fn handle_create_table_plan(
                         }
                     }
 
-                    let (mut columns, pk_names) =
+                    let (columns, pk_names) =
                         bind_cdc_table_schema(&column_defs, &constraints, false)?;
                     // read default value definition from external db
                     let (options, secret_refs) = cdc_with_options.clone().into_parts();
-                    let config = ExternalTableConfig::try_from_btreemap(options, secret_refs)
+                    let _config = ExternalTableConfig::try_from_btreemap(options, secret_refs)
                         .context("failed to extract external table config")?;
 
-                    let table: ExternalTableImpl = ExternalTableImpl::connect(config)
-                        .await
-                        .context("failed to auto derive table schema")?;
-                    let external_columns: HashMap<&str, &ColumnDesc> = table
-                        .column_descs()
-                        .iter()
-                        .map(|column_desc| (column_desc.name.as_str(), column_desc))
-                        .collect();
-
-                    for col in &mut columns {
-                        // Keep the default column aligned with external table.
-                        // Note the generated columns have not been initialized yet. If a column is not found here, it should be a generated column.
-                        if let Some(external_column_desc) = external_columns.get(col.name()) {
-                            col.column_desc.generated_or_default_column =
-                                external_column_desc.generated_or_default_column.clone();
-                        }
-                    }
+                    // NOTE: if the external table has a default column, we will only treat it as a normal column.
                     (columns, pk_names)
                 }
             };
@@ -1485,9 +1391,6 @@ pub async fn create_iceberg_engine_table(
     constraints: Vec<TableConstraint>,
     table_name: ObjectName,
 ) -> Result<()> {
-    risingwave_common::license::Feature::IcebergEngine
-        .check_available()
-        .map_err(|e| anyhow::anyhow!(e))?;
     // 1. fetch iceberg engine options from the meta node. Or use iceberg engine connection provided by users.
     // 2. create a hummock table
     // 3. create an iceberg sink
@@ -2141,87 +2044,12 @@ fn bind_webhook_info(
 #[cfg(test)]
 mod tests {
     use risingwave_common::catalog::{
-        DEFAULT_DATABASE_NAME, Field, ROW_ID_COLUMN_NAME, RW_TIMESTAMP_COLUMN_NAME,
+        DEFAULT_DATABASE_NAME, ROW_ID_COLUMN_NAME, RW_TIMESTAMP_COLUMN_NAME,
     };
     use risingwave_common::types::{DataType, StructType};
 
     use super::*;
     use crate::test_utils::{LocalFrontend, PROTO_FILE_DATA, create_proto_file};
-
-    struct BrandNewColumn(&'static str);
-    use BrandNewColumn as B;
-
-    impl FieldLike for BrandNewColumn {
-        fn name(&self) -> &str {
-            self.0
-        }
-
-        fn data_type(&self) -> &DataType {
-            unreachable!("for brand new columns, data type will not be accessed")
-        }
-    }
-
-    #[test]
-    fn test_col_id_gen_initial() {
-        let mut gen = ColumnIdGenerator::new_initial();
-        assert_eq!(gen.generate(B("v1")).unwrap(), ColumnId::new(1));
-        assert_eq!(gen.generate(B("v2")).unwrap(), ColumnId::new(2));
-    }
-
-    #[test]
-    fn test_col_id_gen_alter() {
-        let mut gen = ColumnIdGenerator::new_alter(&TableCatalog {
-            columns: vec![
-                ColumnCatalog {
-                    column_desc: ColumnDesc::from_field_with_column_id(
-                        &Field::with_name(DataType::Float32, "f32"),
-                        1,
-                    ),
-                    is_hidden: false,
-                },
-                ColumnCatalog {
-                    column_desc: ColumnDesc::from_field_with_column_id(
-                        &Field::with_name(DataType::Float64, "f64"),
-                        2,
-                    ),
-                    is_hidden: false,
-                },
-                ColumnCatalog {
-                    column_desc: ColumnDesc::from_field_with_column_id(
-                        &Field::with_name(
-                            StructType::new([("f1", DataType::Int32)]).into(),
-                            "nested",
-                        ),
-                        3,
-                    ),
-                    is_hidden: false,
-                },
-            ],
-            version: Some(TableVersion::new_initial_for_test(ColumnId::new(3))),
-            ..Default::default()
-        });
-
-        assert_eq!(gen.generate(B("v1")).unwrap(), ColumnId::new(4));
-        assert_eq!(gen.generate(B("v2")).unwrap(), ColumnId::new(5));
-        assert_eq!(
-            gen.generate(Field::new("f32", DataType::Float32)).unwrap(),
-            ColumnId::new(1)
-        );
-
-        // mismatched data type
-        gen.generate(Field::new("f64", DataType::Float32))
-            .unwrap_err();
-
-        // mismatched data type
-        // we require the nested data type to be exactly the same
-        gen.generate(Field::new(
-            "nested",
-            StructType::new([("f1", DataType::Int32), ("f2", DataType::Int64)]).into(),
-        ))
-        .unwrap_err();
-
-        assert_eq!(gen.generate(B("v3")).unwrap(), ColumnId::new(6));
-    }
 
     #[tokio::test]
     async fn test_create_table_handler() {

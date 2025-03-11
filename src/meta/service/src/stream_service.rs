@@ -87,7 +87,7 @@ impl StreamManagerService for StreamServiceImpl {
     async fn pause(&self, _: Request<PauseRequest>) -> Result<Response<PauseResponse>, Status> {
         for database_id in self.metadata_manager.list_active_database_ids().await? {
             self.barrier_scheduler
-                .run_command(database_id, Command::pause(PausedReason::Manual))
+                .run_command(database_id, Command::pause())
                 .await?;
         }
         Ok(Response::new(PauseResponse {}))
@@ -97,7 +97,7 @@ impl StreamManagerService for StreamServiceImpl {
     async fn resume(&self, _: Request<ResumeRequest>) -> Result<Response<ResumeResponse>, Status> {
         for database_id in self.metadata_manager.list_active_database_ids().await? {
             self.barrier_scheduler
-                .run_command(database_id, Command::resume(PausedReason::Manual))
+                .run_command(database_id, Command::resume())
                 .await?;
         }
         Ok(Response::new(ResumeResponse {}))
@@ -213,6 +213,14 @@ impl StreamManagerService for StreamServiceImpl {
                 .catalog_controller
                 .get_job_fragments_by_id(job_id as _)
                 .await?;
+            let mut dispatchers = self
+                .metadata_manager
+                .catalog_controller
+                .get_fragment_actor_dispatchers(
+                    table_fragments.fragment_ids().map(|id| id as _).collect(),
+                )
+                .await?;
+            let ctx = table_fragments.ctx.to_protobuf();
             info.insert(
                 table_fragments.stream_job_id().table_id,
                 TableFragmentInfo {
@@ -226,13 +234,18 @@ impl StreamManagerService for StreamServiceImpl {
                                 .into_iter()
                                 .map(|actor| ActorInfo {
                                     id: actor.actor_id,
-                                    node: fragment.nodes.clone(),
-                                    dispatcher: actor.dispatcher,
+                                    node: Some(fragment.nodes.clone()),
+                                    dispatcher: dispatchers
+                                        .get_mut(&(fragment.fragment_id as _))
+                                        .and_then(|dispatchers| {
+                                            dispatchers.remove(&(actor.actor_id as _))
+                                        })
+                                        .unwrap_or_default(),
                                 })
                                 .collect_vec(),
                         })
                         .collect_vec(),
-                    ctx: Some(table_fragments.ctx.to_protobuf()),
+                    ctx: Some(ctx),
                 },
             );
         }
@@ -297,21 +310,21 @@ impl StreamManagerService for StreamServiceImpl {
             .await?;
         let distributions = fragment_descs
             .into_iter()
-            .map(
-                |fragment_desc| list_fragment_distribution_response::FragmentDistribution {
+            .map(|(fragment_desc, upstreams)| {
+                list_fragment_distribution_response::FragmentDistribution {
                     fragment_id: fragment_desc.fragment_id as _,
                     table_id: fragment_desc.job_id as _,
                     distribution_type: PbFragmentDistributionType::from(
                         fragment_desc.distribution_type,
                     ) as _,
                     state_table_ids: fragment_desc.state_table_ids.into_u32_array(),
-                    upstream_fragment_ids: fragment_desc.upstream_fragment_id.into_u32_array(),
+                    upstream_fragment_ids: upstreams.iter().map(|id| *id as _).collect(),
                     fragment_type_mask: fragment_desc.fragment_type_mask as _,
                     parallelism: fragment_desc.parallelism as _,
                     vnode_count: fragment_desc.vnode_count as _,
                     node: Some(fragment_desc.stream_node.to_protobuf()),
-                },
-            )
+                }
+            })
             .collect_vec();
 
         Ok(Response::new(ListFragmentDistributionResponse {

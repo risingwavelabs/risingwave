@@ -33,7 +33,7 @@ use std::sync::Arc;
 use itertools::Itertools;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-use winnow::PResult;
+use winnow::ModalResult;
 
 pub use self::data_type::{DataType, StructField};
 pub use self::ddl::{
@@ -192,7 +192,7 @@ impl From<&str> for Ident {
 }
 
 impl ParseTo for Ident {
-    fn parse_to(parser: &mut Parser<'_>) -> PResult<Self> {
+    fn parse_to(parser: &mut Parser<'_>) -> ModalResult<Self> {
         parser.parse_identifier()
     }
 }
@@ -236,7 +236,7 @@ impl fmt::Display for ObjectName {
 }
 
 impl ParseTo for ObjectName {
-    fn parse_to(p: &mut Parser<'_>) -> PResult<Self> {
+    fn parse_to(p: &mut Parser<'_>) -> ModalResult<Self> {
         p.parse_object_name()
     }
 }
@@ -1355,7 +1355,7 @@ pub enum Statement {
         returns: Option<CreateFunctionReturns>,
         /// Optional parameters.
         params: CreateFunctionBody,
-        with_options: CreateFunctionWithOptions,
+        with_options: CreateFunctionWithOptions, // FIXME(eric): use Option<>
     },
     /// CREATE AGGREGATE
     ///
@@ -1556,6 +1556,7 @@ pub enum Statement {
         db_name: ObjectName,
         if_not_exists: bool,
         owner: Option<ObjectName>,
+        resource_group: Option<SetVariableValue>,
     },
     /// GRANT privileges ON objects TO grantees
     Grant {
@@ -1762,6 +1763,7 @@ impl fmt::Display for Statement {
                 db_name,
                 if_not_exists,
                 owner,
+                resource_group,
             } => {
                 write!(f, "CREATE DATABASE")?;
                 if *if_not_exists {
@@ -1771,6 +1773,10 @@ impl fmt::Display for Statement {
                 if let Some(owner) = owner {
                     write!(f, " WITH OWNER = {}", owner)?;
                 }
+                if let Some(resource_group) = resource_group {
+                    write!(f, " RESOURCE_GROUP = {}", resource_group)?;
+                }
+
                 Ok(())
             }
             Statement::CreateFunction {
@@ -2408,8 +2414,12 @@ pub enum GrantObjects {
     AllTablesInSchema { schemas: Vec<ObjectName> },
     /// Grant privileges on `ALL SOURCES IN SCHEMA <schema_name> [, ...]`
     AllSourcesInSchema { schemas: Vec<ObjectName> },
+    /// Grant privileges on `ALL SINKS IN SCHEMA <schema_name> [, ...]`
+    AllSinksInSchema { schemas: Vec<ObjectName> },
     /// Grant privileges on `ALL MATERIALIZED VIEWS IN SCHEMA <schema_name> [, ...]`
     AllMviewsInSchema { schemas: Vec<ObjectName> },
+    /// Grant privileges on `ALL VIEWS IN SCHEMA <schema_name> [, ...]`
+    AllViewsInSchema { schemas: Vec<ObjectName> },
     /// Grant privileges on specific databases
     Databases(Vec<ObjectName>),
     /// Grant privileges on specific schemas
@@ -2424,6 +2434,8 @@ pub enum GrantObjects {
     Tables(Vec<ObjectName>),
     /// Grant privileges on specific sinks
     Sinks(Vec<ObjectName>),
+    /// Grant privileges on specific views
+    Views(Vec<ObjectName>),
 }
 
 impl fmt::Display for GrantObjects {
@@ -2466,6 +2478,20 @@ impl fmt::Display for GrantObjects {
                     display_comma_separated(schemas)
                 )
             }
+            GrantObjects::AllSinksInSchema { schemas } => {
+                write!(
+                    f,
+                    "ALL SINKS IN SCHEMA {}",
+                    display_comma_separated(schemas)
+                )
+            }
+            GrantObjects::AllViewsInSchema { schemas } => {
+                write!(
+                    f,
+                    "ALL VIEWS IN SCHEMA {}",
+                    display_comma_separated(schemas)
+                )
+            }
             GrantObjects::Databases(databases) => {
                 write!(f, "DATABASE {}", display_comma_separated(databases))
             }
@@ -2477,6 +2503,9 @@ impl fmt::Display for GrantObjects {
             }
             GrantObjects::Sinks(sinks) => {
                 write!(f, "SINK {}", display_comma_separated(sinks))
+            }
+            GrantObjects::Views(views) => {
+                write!(f, "VIEW {}", display_comma_separated(views))
             }
         }
     }
@@ -2765,7 +2794,7 @@ impl fmt::Display for ObjectType {
 }
 
 impl ParseTo for ObjectType {
-    fn parse_to(parser: &mut Parser<'_>) -> PResult<Self> {
+    fn parse_to(parser: &mut Parser<'_>) -> ModalResult<Self> {
         let object_type = if parser.parse_keyword(Keyword::TABLE) {
             ObjectType::Table
         } else if parser.parse_keyword(Keyword::VIEW) {
@@ -2822,24 +2851,12 @@ impl fmt::Display for SqlOption {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum SqlOptionValue {
     Value(Value),
     SecretRef(SecretRefValue),
     ConnectionRef(ConnectionRefValue),
-}
-
-impl fmt::Debug for SqlOptionValue {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            SqlOptionValue::Value(value) => write!(f, "{:?}", value),
-            SqlOptionValue::SecretRef(secret_ref) => write!(f, "secret {:?}", secret_ref),
-            SqlOptionValue::ConnectionRef(connection_ref) => {
-                write!(f, "connection {:?}", connection_ref)
-            }
-        }
-    }
 }
 
 impl fmt::Display for SqlOptionValue {
@@ -2848,7 +2865,7 @@ impl fmt::Display for SqlOptionValue {
             SqlOptionValue::Value(value) => write!(f, "{}", value),
             SqlOptionValue::SecretRef(secret_ref) => write!(f, "secret {}", secret_ref),
             SqlOptionValue::ConnectionRef(connection_ref) => {
-                write!(f, "connection {}", connection_ref)
+                write!(f, "{}", connection_ref)
             }
         }
     }
@@ -3252,13 +3269,10 @@ impl fmt::Display for CreateFunctionBody {
 pub struct CreateFunctionWithOptions {
     /// Always retry on network errors.
     pub always_retry_on_network_error: Option<bool>,
-}
-
-/// TODO(kwannoel): Generate from the struct definition instead.
-impl CreateFunctionWithOptions {
-    fn is_empty(&self) -> bool {
-        self.always_retry_on_network_error.is_none()
-    }
+    /// Use async functions (only available for JS UDF)
+    pub r#async: Option<bool>,
+    /// Call in batch mode (only available for JS UDF)
+    pub batch: Option<bool>,
 }
 
 /// TODO(kwannoel): Generate from the struct definition instead.
@@ -3266,34 +3280,50 @@ impl TryFrom<Vec<SqlOption>> for CreateFunctionWithOptions {
     type Error = StrError;
 
     fn try_from(with_options: Vec<SqlOption>) -> Result<Self, Self::Error> {
-        let mut always_retry_on_network_error = None;
+        let mut options = Self::default();
         for option in with_options {
-            if option.name.to_string().to_lowercase() == "always_retry_on_network_error" {
-                always_retry_on_network_error = Some(matches!(
-                    option.value,
-                    SqlOptionValue::Value(Value::Boolean(true))
-                ));
-            } else {
-                return Err(StrError(format!("Unsupported option: {}", option.name)));
+            match option.name.to_string().to_lowercase().as_str() {
+                "always_retry_on_network_error" => {
+                    options.always_retry_on_network_error = Some(matches!(
+                        option.value,
+                        SqlOptionValue::Value(Value::Boolean(true))
+                    ));
+                }
+                "async" => {
+                    options.r#async = Some(matches!(
+                        option.value,
+                        SqlOptionValue::Value(Value::Boolean(true))
+                    ))
+                }
+                "batch" => {
+                    options.batch = Some(matches!(
+                        option.value,
+                        SqlOptionValue::Value(Value::Boolean(true))
+                    ))
+                }
+                _ => {
+                    return Err(StrError(format!("unknown option: {}", option.name)));
+                }
             }
         }
-        Ok(Self {
-            always_retry_on_network_error,
-        })
+        Ok(options)
     }
 }
 
 impl Display for CreateFunctionWithOptions {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.is_empty() {
+        if self == &Self::default() {
             return Ok(());
         }
         let mut options = vec![];
-        if let Some(always_retry_on_network_error) = self.always_retry_on_network_error {
-            options.push(format!(
-                "ALWAYS_RETRY_NETWORK_ERRORS = {}",
-                always_retry_on_network_error
-            ));
+        if let Some(v) = self.always_retry_on_network_error {
+            options.push(format!("always_retry_on_network_error = {}", v));
+        }
+        if let Some(v) = self.r#async {
+            options.push(format!("async = {}", v));
+        }
+        if let Some(v) = self.batch {
+            options.push(format!("batch = {}", v));
         }
         write!(f, " WITH ( {} )", display_comma_separated(&options))
     }
@@ -3594,6 +3624,8 @@ mod tests {
             },
             with_options: CreateFunctionWithOptions {
                 always_retry_on_network_error: None,
+                r#async: None,
+                batch: None,
             },
         };
         assert_eq!(
@@ -3617,10 +3649,12 @@ mod tests {
             },
             with_options: CreateFunctionWithOptions {
                 always_retry_on_network_error: Some(true),
+                r#async: None,
+                batch: None,
             },
         };
         assert_eq!(
-            "CREATE FUNCTION foo(INT) RETURNS INT LANGUAGE python IMMUTABLE AS 'SELECT 1' WITH ( ALWAYS_RETRY_NETWORK_ERRORS = true )",
+            "CREATE FUNCTION foo(INT) RETURNS INT LANGUAGE python IMMUTABLE AS 'SELECT 1' WITH ( always_retry_on_network_error = true )",
             format!("{}", create_function)
         );
     }

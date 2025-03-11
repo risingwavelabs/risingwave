@@ -30,10 +30,9 @@ use risingwave_connector::source::SplitImpl;
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::common::{ActorInfo, WorkerNode};
 use risingwave_pb::hummock::HummockVersionStats;
-use risingwave_pb::meta::PausedReason;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::{
-    AddMutation, Barrier, BarrierMutation, StreamActor, StreamNode, SubscriptionUpstreamInfo,
+    AddMutation, Barrier, BarrierMutation, StreamNode, SubscriptionUpstreamInfo,
 };
 use risingwave_pb::stream_service::inject_barrier_request::build_actor_info::UpstreamActors;
 use risingwave_pb::stream_service::inject_barrier_request::{
@@ -62,7 +61,8 @@ use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::manager::MetaSrvEnv;
 use crate::model::{
-    ActorId, FragmentId, StreamActorWithUpstreams, StreamJobActorsToCreate, StreamJobFragments,
+    ActorId, FragmentId, StreamActorWithDispatchers, StreamActorWithUpDownstreams,
+    StreamJobActorsToCreate, StreamJobFragments,
 };
 use crate::stream::build_actor_connector_splits;
 use crate::{MetaError, MetaResult};
@@ -327,11 +327,11 @@ impl ControlStreamManager {
         database_id: DatabaseId,
         info: InflightDatabaseInfo,
         state_table_committed_epochs: &mut HashMap<TableId, u64>,
-        stream_actors: &mut HashMap<ActorId, StreamActor>,
+        stream_actors: &mut HashMap<ActorId, StreamActorWithDispatchers>,
         source_splits: &mut HashMap<ActorId, Vec<SplitImpl>>,
         background_jobs: &mut HashMap<TableId, (String, StreamJobFragments)>,
         subscription_info: InflightSubscriptionInfo,
-        paused_reason: Option<PausedReason>,
+        is_paused: bool,
         hummock_version_stats: &HummockVersionStats,
     ) -> MetaResult<(HashSet<WorkerId>, DatabaseCheckpointControl, u64)> {
         let source_split_assignments = info
@@ -349,7 +349,7 @@ impl ControlStreamManager {
             actor_dispatchers: Default::default(),
             added_actors: Default::default(),
             actor_splits: build_actor_connector_splits(&source_split_assignments),
-            pause: paused_reason.is_some(),
+            pause: is_paused,
             subscriptions_to_add: Default::default(),
         });
 
@@ -382,31 +382,29 @@ impl ControlStreamManager {
             .fragment_infos()
             .flat_map(|fragment_info| fragment_info.actors.keys())
             .map(|actor_id| {
-                let stream_actor = stream_actors.remove(actor_id).expect("should exist");
-                (stream_actor.actor_id, stream_actor)
+                let (stream_actor, dispatchers) =
+                    stream_actors.remove(actor_id).expect("should exist");
+                (stream_actor.actor_id, (stream_actor, dispatchers))
             })
             .collect();
 
         let mut actor_upstreams = Command::collect_actor_upstreams(
-            stream_actors.values().map(|actor| {
-                (
-                    actor.actor_id,
-                    actor.fragment_id,
-                    actor.dispatcher.as_slice(),
-                )
+            stream_actors.values().map(|(actor, dispatchers)| {
+                (actor.actor_id, actor.fragment_id, dispatchers.as_slice())
             }),
             None,
         );
 
         let mut node_actors: HashMap<
             _,
-            HashMap<FragmentId, (StreamNode, Vec<StreamActorWithUpstreams>)>,
+            HashMap<FragmentId, (StreamNode, Vec<StreamActorWithUpDownstreams>)>,
         > = HashMap::new();
         for fragment_info in info.fragment_infos() {
             for (actor_id, worker_id) in &fragment_info.actors {
                 let worker_id = *worker_id as WorkerId;
                 let actor_id = *actor_id as ActorId;
-                let stream_actor = stream_actors.remove(&actor_id).expect("should exist");
+                let (stream_actor, dispatchers) =
+                    stream_actors.remove(&actor_id).expect("should exist");
                 let upstream = actor_upstreams.remove(&actor_id).unwrap_or_default();
                 node_actors
                     .entry(worker_id)
@@ -414,7 +412,7 @@ impl ControlStreamManager {
                     .entry(fragment_info.fragment_id)
                     .or_insert_with(|| (fragment_info.nodes.clone(), vec![]))
                     .1
-                    .push((stream_actor, upstream));
+                    .push((stream_actor, upstream, dispatchers));
             }
         }
 
@@ -442,7 +440,7 @@ impl ControlStreamManager {
         );
 
         let new_epoch = barrier_info.curr_epoch;
-        let state = BarrierWorkerState::recovery(new_epoch, info, subscription_info, paused_reason);
+        let state = BarrierWorkerState::recovery(new_epoch, info, subscription_info, is_paused);
         Ok((
             node_to_collect,
             DatabaseCheckpointControl::recovery(
@@ -460,11 +458,11 @@ impl ControlStreamManager {
         database_id: DatabaseId,
         command: Option<&Command>,
         barrier_info: &BarrierInfo,
-        prev_paused_reason: Option<PausedReason>,
+        is_paused: bool,
         pre_applied_graph_info: &InflightDatabaseInfo,
         applied_graph_info: &InflightDatabaseInfo,
     ) -> MetaResult<HashSet<WorkerId>> {
-        let mutation = command.and_then(|c| c.to_mutation(prev_paused_reason));
+        let mutation = command.and_then(|c| c.to_mutation(is_paused));
         let subscriptions_to_add = if let Some(Mutation::Add(add)) = &mutation {
             add.subscriptions_to_add.clone()
         } else {
@@ -594,21 +592,27 @@ impl ControlStreamManager {
                                                     node: Some(node),
                                                     actors: actors
                                                         .into_iter()
-                                                        .map(|(actor, upstreams)| BuildActorInfo {
-                                                            actor: Some(actor),
-                                                            fragment_upstreams: upstreams
-                                                                .into_iter()
-                                                                .map(|(fragment_id, upstreams)| {
-                                                                    (
-                                                                        fragment_id,
-                                                                        UpstreamActors {
-                                                                            actors: upstreams
-                                                                                .into_iter()
-                                                                                .collect(),
-                                                                        },
-                                                                    )
-                                                                })
-                                                                .collect(),
+                                                        .map(|(actor, upstreams, dispatchers)| {
+                                                            BuildActorInfo {
+                                                                actor_id: actor.actor_id,
+                                                                fragment_upstreams: upstreams
+                                                                    .into_iter()
+                                                                    .map(|(fragment_id, upstreams)| {
+                                                                        (
+                                                                            fragment_id,
+                                                                            UpstreamActors {
+                                                                                actors: upstreams
+                                                                                    .into_iter()
+                                                                                    .collect(),
+                                                                            },
+                                                                        )
+                                                                    })
+                                                                    .collect(),
+                                                                dispatchers,
+                                                                vnode_bitmap: actor.vnode_bitmap.map(|bitmap| bitmap.to_protobuf()),
+                                                                mview_definition: actor.mview_definition,
+                                                                expr_context: actor.expr_context,
+                                                            }
                                                         })
                                                         .collect(),
                                                 }
