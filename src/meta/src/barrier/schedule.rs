@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::hash_map::Entry;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::iter::once;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -27,6 +28,7 @@ use risingwave_hummock_sdk::HummockVersionId;
 use tokio::select;
 use tokio::sync::{oneshot, watch};
 use tokio::time::Interval;
+use tracing::{info, warn};
 
 use super::notifier::Notifier;
 use super::{Command, Scheduled};
@@ -85,13 +87,13 @@ type DatabaseScheduledQueue = StatusQueue<VecDeque<ScheduledQueueItem>>;
 type ScheduledQueue = StatusQueue<HashMap<DatabaseId, DatabaseScheduledQueue>>;
 
 impl<T> StatusQueue<T> {
-    fn new() -> Self
+    fn new(status: QueueStatus) -> Self
     where
         T: Default,
     {
         Self {
             queue: T::default(),
-            status: QueueStatus::Ready,
+            status,
         }
     }
 
@@ -172,7 +174,7 @@ impl BarrierScheduler {
         metrics: Arc<MetaMetrics>,
     ) -> (Self, ScheduledBarriers) {
         let inner = Arc::new(Inner {
-            queue: Mutex::new(ScheduledQueue::new()),
+            queue: Mutex::new(ScheduledQueue::new(QueueStatus::Ready)),
             changed_tx: watch::channel(()).0,
             metrics,
         });
@@ -200,7 +202,7 @@ impl BarrierScheduler {
         let queue = queue
             .queue
             .entry(database_id)
-            .or_insert_with(DatabaseScheduledQueue::new);
+            .or_insert_with(|| DatabaseScheduledQueue::new(QueueStatus::Ready));
         scheduleds
             .iter()
             .try_for_each(|scheduled| queue.validate_item(scheduled))?;
@@ -405,6 +407,13 @@ impl ScheduledBarriers {
     }
 }
 
+pub(super) enum MarkReadyOptions {
+    Database(DatabaseId),
+    Global {
+        blocked_databases: HashSet<DatabaseId>,
+    },
+}
+
 impl ScheduledBarriers {
     /// Pre buffered drop and cancel command, return true if any.
     pub(super) fn pre_apply_drop_cancel(&self, database_id: Option<DatabaseId>) -> bool {
@@ -416,54 +425,120 @@ impl ScheduledBarriers {
     pub(super) fn abort_and_mark_blocked(
         &self,
         database_id: Option<DatabaseId>,
-        reason: impl Into<String> + Copy,
+        reason: impl Into<String>,
     ) {
         let mut queue = self.inner.queue.lock();
-        let mark_blocked_and_notify_failed = |queue: &mut DatabaseScheduledQueue| {
-            queue.mark_blocked(reason.into());
+        fn database_blocked_reason(database_id: DatabaseId, reason: &String) -> String {
+            format!("database {} unavailable {}", database_id, reason)
+        }
+        fn mark_blocked_and_notify_failed(
+            database_id: DatabaseId,
+            queue: &mut DatabaseScheduledQueue,
+            reason: &String,
+        ) {
+            let reason = database_blocked_reason(database_id, reason);
+            let err: MetaError = anyhow!("{}", reason).into();
+            queue.mark_blocked(reason);
             while let Some(ScheduledQueueItem { notifiers, .. }) = queue.queue.pop_front() {
-                notifiers.into_iter().for_each(|notify| {
-                    notify.notify_collection_failed(anyhow!(reason.into()).into())
-                })
+                notifiers
+                    .into_iter()
+                    .for_each(|notify| notify.notify_collection_failed(err.clone()))
             }
-        };
+        }
         if let Some(database_id) = database_id {
-            let queue = queue
-                .queue
-                .entry(database_id)
-                .or_insert_with(DatabaseScheduledQueue::new);
-            mark_blocked_and_notify_failed(queue);
+            let reason = reason.into();
+            match queue.queue.entry(database_id) {
+                Entry::Occupied(entry) => {
+                    let queue = entry.into_mut();
+                    if queue.status.is_blocked() {
+                        if cfg!(debug_assertions) {
+                            panic!("database {} marked as blocked twice", database_id);
+                        } else {
+                            warn!(?database_id, "database marked as blocked twice");
+                        }
+                    }
+                    info!(?database_id, "database marked as blocked");
+                    mark_blocked_and_notify_failed(database_id, queue, &reason);
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(DatabaseScheduledQueue::new(QueueStatus::Blocked(
+                        database_blocked_reason(database_id, &reason),
+                    )));
+                }
+            }
         } else {
-            queue.mark_blocked(reason.into());
-            for queue in queue.queue.values_mut() {
-                mark_blocked_and_notify_failed(queue);
+            let reason = reason.into();
+            if queue.status.is_blocked() {
+                if cfg!(debug_assertions) {
+                    panic!("cluster marked as blocked twice");
+                } else {
+                    warn!("cluster marked as blocked twice");
+                }
+            }
+            info!("cluster marked as blocked");
+            queue.mark_blocked(reason.clone());
+            for (database_id, queue) in &mut queue.queue {
+                mark_blocked_and_notify_failed(*database_id, queue, &reason);
             }
         }
     }
 
     /// Mark command scheduler as ready to accept new command.
-    pub(super) fn mark_ready(&self, database_id: Option<DatabaseId>) {
+    pub(super) fn mark_ready(&self, options: MarkReadyOptions) {
         let mut queue = self.inner.queue.lock();
-        if let Some(database_id) = database_id {
-            let database_queue = queue
-                .queue
-                .entry(database_id)
-                .or_insert_with(DatabaseScheduledQueue::new);
-            if database_queue.mark_ready() && !database_queue.queue.is_empty() {
-                self.inner.changed_tx.send(()).ok();
-            }
-        } else {
-            let prev_blocked = queue.mark_ready();
-            for queue in queue.queue.values_mut() {
-                queue.mark_ready();
-            }
-            if prev_blocked
-                && queue
+        let queue = &mut *queue;
+        match options {
+            MarkReadyOptions::Database(database_id) => {
+                info!(?database_id, "database marked as ready");
+                let database_queue = queue
                     .queue
-                    .values()
-                    .any(|database_queue| !database_queue.queue.is_empty())
-            {
-                self.inner.changed_tx.send(()).ok();
+                    .entry(database_id)
+                    .or_insert_with(|| DatabaseScheduledQueue::new(QueueStatus::Ready));
+                if !database_queue.status.is_blocked() {
+                    if cfg!(debug_assertions) {
+                        panic!("database {} marked as ready twice", database_id);
+                    } else {
+                        warn!(?database_id, "database marked as ready twice");
+                    }
+                }
+                if database_queue.mark_ready()
+                    && !queue.status.is_blocked()
+                    && !database_queue.queue.is_empty()
+                {
+                    self.inner.changed_tx.send(()).ok();
+                }
+            }
+            MarkReadyOptions::Global { blocked_databases } => {
+                if !queue.status.is_blocked() {
+                    if cfg!(debug_assertions) {
+                        panic!("cluster marked as ready twice");
+                    } else {
+                        warn!("cluster marked as ready twice");
+                    }
+                }
+                info!(?blocked_databases, "cluster marked as ready");
+                let prev_blocked = queue.mark_ready();
+                for database_id in &blocked_databases {
+                    queue.queue.entry(*database_id).or_insert_with(|| {
+                        DatabaseScheduledQueue::new(QueueStatus::Blocked(format!(
+                            "database {} failed to recover in global recovery",
+                            database_id
+                        )))
+                    });
+                }
+                for (database_id, queue) in &mut queue.queue {
+                    if !blocked_databases.contains(database_id) {
+                        queue.mark_ready();
+                    }
+                }
+                if prev_blocked
+                    && queue
+                        .queue
+                        .values()
+                        .any(|database_queue| !database_queue.queue.is_empty())
+                {
+                    self.inner.changed_tx.send(()).ok();
+                }
             }
         }
     }
