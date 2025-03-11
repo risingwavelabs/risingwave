@@ -170,7 +170,7 @@ impl FromArrow for IcebergArrowConvert {}
 /// Iceberg sink with `create_table_if_not_exists` option will use this struct to convert the
 /// iceberg data type to arrow data type.
 ///
-/// Specifically, it will add the field id to the arrow field metadata, because iceberg-rust and icelake need the field id to be set.
+/// Specifically, it will add the field id to the arrow field metadata, because iceberg-rust need the field id to be set.
 ///
 /// Note: this is different from [`IcebergArrowConvert`], which is used to read from/write to
 /// an _existing_ iceberg table. In that case, we just need to make sure the data is compatible to the existing schema.
@@ -196,8 +196,6 @@ impl IcebergCreateTableArrowConvert {
         let mut metadata = HashMap::new();
         // for iceberg-rust
         metadata.insert("PARQUET:field_id".to_owned(), field_id.to_string());
-        // for icelake
-        metadata.insert("column_id".to_owned(), field_id.to_string());
         arrow_field.set_metadata(metadata);
     }
 }
