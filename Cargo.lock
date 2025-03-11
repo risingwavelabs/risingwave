@@ -256,41 +256,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "apache-avro"
-version = "0.17.0"
-source = "git+https://github.com/apache/avro.git#fdab5db0816e28e3e10c87910c8b6f98c33072dc"
-dependencies = [
- "apache-avro-derive",
- "bigdecimal 0.4.5",
- "digest",
- "libflate",
- "log",
- "num-bigint",
- "quad-rand",
- "rand 0.8.5",
- "regex-lite",
- "serde",
- "serde_json",
- "strum 0.26.3",
- "strum_macros 0.26.4",
- "thiserror 1.0.63",
- "typed-builder 0.18.2",
- "uuid",
-]
-
-[[package]]
-name = "apache-avro-derive"
-version = "0.17.0"
-source = "git+https://github.com/apache/avro.git#fdab5db0816e28e3e10c87910c8b6f98c33072dc"
-dependencies = [
- "darling 0.20.9",
- "proc-macro2",
- "quote",
- "serde_json",
- "syn 2.0.87",
-]
-
-[[package]]
 name = "arbitrary"
 version = "1.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1122,7 +1087,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c2d7aec54383fa38ac2f9c28435a02f7312f7174e470c7d5566d2b7e17f9a8d"
 dependencies = [
  "coarsetime",
- "derive_builder 0.20.0",
+ "derive_builder",
  "flexstr",
  "indextree",
  "itertools 0.12.1",
@@ -3998,32 +3963,11 @@ dependencies = [
 
 [[package]]
 name = "derive_builder"
-version = "0.12.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8d67778784b508018359cbc8696edb3db78160bab2c2a28ba7f56ef6932997f8"
-dependencies = [
- "derive_builder_macro 0.12.0",
-]
-
-[[package]]
-name = "derive_builder"
 version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0350b5cb0331628a5916d6c5c0b72e97393b8b6b03b47a9284f4e7f5a405ffd7"
 dependencies = [
- "derive_builder_macro 0.20.0",
-]
-
-[[package]]
-name = "derive_builder_core"
-version = "0.12.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c11bdc11a0c47bc7d37d582b5285da6849c96681023680b906673c5707af7b0f"
-dependencies = [
- "darling 0.14.4",
- "proc-macro2",
- "quote",
- "syn 1.0.109",
+ "derive_builder_macro",
 ]
 
 [[package]]
@@ -4040,21 +3984,11 @@ dependencies = [
 
 [[package]]
 name = "derive_builder_macro"
-version = "0.12.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ebcda35c7a396850a55ffeac740804b40ffec779b98fffbb1738f4033f0ee79e"
-dependencies = [
- "derive_builder_core 0.12.0",
- "syn 1.0.109",
-]
-
-[[package]]
-name = "derive_builder_macro"
 version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "206868b8242f27cecce124c19fd88157fbd0dd334df2587f36417bafbc85097b"
 dependencies = [
- "derive_builder_core 0.20.0",
+ "derive_builder_core",
  "syn 2.0.87",
 ]
 
@@ -4463,26 +4397,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "enum-display"
-version = "0.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "96d4df33d54dd1959d177a0e2c2f4e5a8637a3054aa56861ed7e173ad2043fe2"
-dependencies = [
- "enum-display-macro",
-]
-
-[[package]]
-name = "enum-display-macro"
-version = "0.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a0ce3a36047ede676eb0d2721d065beed8410cf4f113f489604d2971331cb378"
-dependencies = [
- "convert_case 0.6.0",
- "quote",
- "syn 1.0.109",
-]
-
-[[package]]
 name = "enum-iterator"
 version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4689,15 +4603,6 @@ dependencies = [
  "bit-set",
  "regex-automata 0.4.8",
  "regex-syntax 0.8.5",
-]
-
-[[package]]
-name = "faster-hex"
-version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "239f7bfb930f820ab16a9cd95afc26f88264cf6905c960b340a615384aa3338a"
-dependencies = [
- "serde",
 ]
 
 [[package]]
@@ -6176,7 +6081,7 @@ version = "0.4.0"
 source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=683fb89edeaf8d1baae69e1f376d68b92be1d496#683fb89edeaf8d1baae69e1f376d68b92be1d496"
 dependencies = [
  "anyhow",
- "apache-avro 0.17.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "apache-avro 0.17.0",
  "array-init",
  "arrow-arith 53.2.0",
  "arrow-array 53.2.0",
@@ -6192,7 +6097,7 @@ dependencies = [
  "bitvec",
  "bytes",
  "chrono",
- "derive_builder 0.20.0",
+ "derive_builder",
  "fnv",
  "futures",
  "itertools 0.13.0",
@@ -6254,53 +6159,6 @@ dependencies = [
  "serde_json",
  "tokio",
  "typed-builder 0.20.0",
- "uuid",
-]
-
-[[package]]
-name = "icelake"
-version = "0.3.141592654"
-source = "git+https://github.com/risingwavelabs/icelake.git?rev=0ec44fa826c91139c9cf459b005741df990ae9da#0ec44fa826c91139c9cf459b005741df990ae9da"
-dependencies = [
- "anyhow",
- "apache-avro 0.17.0 (git+https://github.com/apache/avro.git)",
- "arrow-arith 53.2.0",
- "arrow-array 53.2.0",
- "arrow-buffer 53.2.0",
- "arrow-cast 53.2.0",
- "arrow-ord 53.2.0",
- "arrow-row 53.2.0",
- "arrow-schema 53.2.0",
- "arrow-select 53.2.0",
- "async-trait",
- "bitvec",
- "bytes",
- "chrono",
- "csv",
- "derive_builder 0.12.0",
- "enum-display",
- "faster-hex",
- "futures",
- "itertools 0.11.0",
- "lazy_static",
- "log",
- "murmur3",
- "once_cell",
- "opendal 0.49.2",
- "ordered-float 3.9.1",
- "parquet 53.2.0",
- "prometheus",
- "regex",
- "reqwest 0.11.20",
- "rust_decimal",
- "serde",
- "serde_bytes",
- "serde_json",
- "serde_with 3.8.1",
- "tokio",
- "toml 0.7.8",
- "url",
- "urlencoding",
  "uuid",
 ]
 
@@ -7249,7 +7107,7 @@ dependencies = [
  "spin 0.9.8",
  "tokio",
  "tokio-util",
- "toml 0.8.12",
+ "toml",
  "tracing",
  "tracing-subscriber",
 ]
@@ -8223,7 +8081,6 @@ dependencies = [
  "md-5",
  "once_cell",
  "percent-encoding",
- "prometheus",
  "quick-xml 0.36.2",
  "reqsign",
  "reqwest 0.12.4",
@@ -10727,7 +10584,7 @@ dependencies = [
  "tinyvec",
  "tokio-retry",
  "tokio-util",
- "toml 0.8.12",
+ "toml",
  "tower-layer",
  "tower-service",
  "tracing",
@@ -11017,7 +10874,6 @@ dependencies = [
  "iceberg",
  "iceberg-catalog-glue",
  "iceberg-catalog-rest",
- "icelake",
  "indexmap 2.7.0",
  "itertools 0.14.0",
  "jni",
@@ -12008,7 +11864,7 @@ dependencies = [
  "serde_with 3.8.1",
  "tokio-postgres",
  "tokio-stream 0.1.15",
- "toml 0.8.12",
+ "toml",
  "tracing",
  "workspace-hack",
 ]
@@ -14660,18 +14516,6 @@ dependencies = [
 
 [[package]]
 name = "toml"
-version = "0.7.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dd79e69d3b627db300ff956027cc6c3798cef26d22526befdfcd12feeb6d2257"
-dependencies = [
- "serde",
- "serde_spanned",
- "toml_datetime",
- "toml_edit 0.19.15",
-]
-
-[[package]]
-name = "toml"
 version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e9dd1545e8208b4a5af1aa9bbd0b4cf7e9ea08fabc5d0a5c67fcaafa17433aa3"
@@ -14698,8 +14542,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1b5bb770da30e5cbfde35a2d7b9b8a2c4b8ef89548a7a6aeab5c9a576e3e7421"
 dependencies = [
  "indexmap 2.7.0",
- "serde",
- "serde_spanned",
  "toml_datetime",
  "winnow 0.5.15",
 ]
@@ -15111,15 +14953,6 @@ dependencies = [
 
 [[package]]
 name = "typed-builder"
-version = "0.18.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "77739c880e00693faef3d65ea3aad725f196da38b22fdc7ea6ded6e1ce4d3add"
-dependencies = [
- "typed-builder-macro 0.18.2",
-]
-
-[[package]]
-name = "typed-builder"
 version = "0.19.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a06fbd5b8de54c5f7c91f6fe4cebb949be2125d7758e630bb58b1d831dbce600"
@@ -15141,17 +14974,6 @@ name = "typed-builder-macro"
 version = "0.16.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f03ca4cb38206e2bef0700092660bb74d696f808514dae47fa1467cbfe26e96e"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.87",
-]
-
-[[package]]
-name = "typed-builder-macro"
-version = "0.18.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1f718dfaf347dcb5b983bfc87608144b0bad87970aebcbea5ce44d2a30c08e63"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -15681,7 +15503,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "sha2",
- "toml 0.8.12",
+ "toml",
  "windows-sys 0.59.0",
  "zstd 0.13.2",
 ]
