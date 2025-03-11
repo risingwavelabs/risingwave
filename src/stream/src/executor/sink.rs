@@ -592,7 +592,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                     error = %e.as_report(),
                                     executor_id = sink_writer_param.executor_id,
                                     sink_id = sink_param.sink_id.sink_id,
-                                    "rewind successfully after sink error"
+                                    "reset log reader stream successfully after sink error"
                                 );
                                 Ok(())
                             }

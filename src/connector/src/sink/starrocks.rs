@@ -28,6 +28,7 @@ use risingwave_common::types::DataType;
 use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
+use sea_orm::DatabaseConnection;
 use serde::Deserialize;
 use serde_derive::Serialize;
 use serde_json::Value;
@@ -331,11 +332,12 @@ impl Sink for StarrocksSink {
             inner,
         )
         .await?;
-
+        let log_store_rewind_start_epoch = writer.log_store_rewind_start_epoch;
         Ok(DecoupleCheckpointLogSinkerOf::new(
             writer,
             metrics,
             commit_checkpoint_interval,
+            log_store_rewind_start_epoch,
         ))
     }
 
@@ -343,7 +345,7 @@ impl Sink for StarrocksSink {
         true
     }
 
-    async fn new_coordinator(&self) -> Result<Self::Coordinator> {
+    async fn new_coordinator(&self, _db: DatabaseConnection) -> Result<Self::Coordinator> {
         let header = HeaderBuilder::new()
             .add_common_header()
             .set_user_password(
@@ -888,9 +890,9 @@ pub struct StarrocksSinkCommitter {
 
 #[async_trait::async_trait]
 impl SinkCommitCoordinator for StarrocksSinkCommitter {
-    async fn init(&mut self) -> Result<()> {
+    async fn init(&mut self) -> Result<Option<u64>> {
         tracing::info!("Starrocks commit coordinator inited.");
-        Ok(())
+        Ok(None)
     }
 
     async fn commit(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()> {

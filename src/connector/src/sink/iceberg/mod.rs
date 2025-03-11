@@ -63,9 +63,14 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntCounter};
 use risingwave_common_estimate_size::EstimateSize;
+use risingwave_meta_model::exactly_once_iceberg_sink::{self, Column, Entity, Model};
 use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
+use sea_orm::{
+    ColumnTrait, DatabaseConnection, EntityTrait, Order, PaginatorTrait, QueryFilter, QueryOrder,
+    Set,
+};
 use serde_derive::Deserialize;
 use serde_json::from_value;
 use serde_with::{DisplayFromStr, serde_as};
@@ -130,6 +135,10 @@ pub struct IcebergConfig {
     #[serde(default, deserialize_with = "deserialize_bool_from_string")]
     pub create_table_if_not_exists: bool,
 
+    /// Whether it is exactly_once, the default is not.
+    #[serde(default)]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub is_exactly_once: Option<bool>,
     // Retry commit num when iceberg commit fail. default is 8.
     // # TODO
     // Iceberg table may store the retry commit num in table meta.
@@ -503,7 +512,7 @@ impl Sink for IcebergSink {
             inner,
         )
         .await?;
-
+        let log_store_rewind_start_epoch = writer.log_store_rewind_start_epoch;
         let commit_checkpoint_interval =
             NonZeroU64::new(self.config.commit_checkpoint_interval).expect(
                 "commit_checkpoint_interval should be greater than 0, and it should be checked in config validation",
@@ -513,6 +522,7 @@ impl Sink for IcebergSink {
             writer,
             metrics,
             commit_checkpoint_interval,
+            log_store_rewind_start_epoch,
         ))
     }
 
@@ -520,13 +530,19 @@ impl Sink for IcebergSink {
         true
     }
 
-    async fn new_coordinator(&self) -> Result<Self::Coordinator> {
+    async fn new_coordinator(&self, db: DatabaseConnection) -> Result<Self::Coordinator> {
         let catalog = self.config.create_catalog().await?;
         let table = self.create_and_validate_table().await?;
         // FIXME(Dylan): Disable EMR serverless compaction for now.
         Ok(IcebergSinkCommitter {
             catalog,
             table,
+            is_exactly_once: self.config.is_exactly_once.unwrap_or_default(),
+            last_commit_epoch: 0,
+            sink_id: self.param.sink_id.sink_id(),
+            config: self.config.clone(),
+            param: self.param.clone(),
+            db,
             commit_notifier: None,
             _compact_task_guard: None,
             commit_retry_num: self.config.commit_retry_num,
@@ -1188,7 +1204,7 @@ const SCHEMA_ID: &str = "schema_id";
 const PARTITION_SPEC_ID: &str = "partition_spec_id";
 const DATA_FILES: &str = "data_files";
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 struct IcebergCommitResult {
     schema_id: i32,
     partition_spec_id: i32,
@@ -1248,6 +1264,55 @@ impl IcebergCommitResult {
             bail!("Can't create iceberg sink write result from empty data!")
         }
     }
+
+    fn try_from_sealized_bytes(value: Vec<u8>) -> Result<Self> {
+        let mut values = if let serde_json::Value::Object(value) =
+            serde_json::from_slice::<serde_json::Value>(&value)
+                .context("Can't parse iceberg sink metadata")?
+        {
+            value
+        } else {
+            bail!("iceberg sink metadata should be an object");
+        };
+
+        let schema_id;
+        if let Some(serde_json::Value::Number(value)) = values.remove(SCHEMA_ID) {
+            schema_id = value
+                .as_u64()
+                .ok_or_else(|| anyhow!("schema_id should be a u64"))?;
+        } else {
+            bail!("iceberg sink metadata should have schema_id");
+        }
+
+        let partition_spec_id;
+        if let Some(serde_json::Value::Number(value)) = values.remove(PARTITION_SPEC_ID) {
+            partition_spec_id = value
+                .as_u64()
+                .ok_or_else(|| anyhow!("partition_spec_id should be a u64"))?;
+        } else {
+            bail!("iceberg sink metadata should have partition_spec_id");
+        }
+
+        let data_files: Vec<SerializedDataFile>;
+        if let serde_json::Value::Array(values) = values
+            .remove(DATA_FILES)
+            .ok_or_else(|| anyhow!("iceberg sink metadata should have data_files object"))?
+        {
+            data_files = values
+                .into_iter()
+                .map(from_value::<SerializedDataFile>)
+                .collect::<std::result::Result<_, _>>()
+                .unwrap();
+        } else {
+            bail!("iceberg sink metadata should have data_files object");
+        }
+
+        Ok(Self {
+            schema_id: schema_id as i32,
+            partition_spec_id: partition_spec_id as i32,
+            data_files,
+        })
+    }
 }
 
 impl<'a> TryFrom<&'a IcebergCommitResult> for SinkMetadata {
@@ -1286,9 +1351,45 @@ impl<'a> TryFrom<&'a IcebergCommitResult> for SinkMetadata {
     }
 }
 
+impl TryFrom<IcebergCommitResult> for Vec<u8> {
+    type Error = SinkError;
+
+    fn try_from(value: IcebergCommitResult) -> std::result::Result<Vec<u8>, Self::Error> {
+        let json_data_files = serde_json::Value::Array(
+            value
+                .data_files
+                .iter()
+                .map(serde_json::to_value)
+                .collect::<std::result::Result<Vec<serde_json::Value>, _>>()
+                .context("Can't serialize data files to json")?,
+        );
+        let json_value = serde_json::Value::Object(
+            vec![
+                (
+                    SCHEMA_ID.to_owned(),
+                    serde_json::Value::Number(value.schema_id.into()),
+                ),
+                (
+                    PARTITION_SPEC_ID.to_owned(),
+                    serde_json::Value::Number(value.partition_spec_id.into()),
+                ),
+                (DATA_FILES.to_owned(), json_data_files),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        Ok(serde_json::to_vec(&json_value).context("Can't serialize iceberg sink metadata")?)
+    }
+}
 pub struct IcebergSinkCommitter {
     catalog: Arc<dyn Catalog>,
     table: Table,
+    pub last_commit_epoch: u64,
+    pub(crate) is_exactly_once: bool,
+    pub(crate) sink_id: u32,
+    pub(crate) config: IcebergConfig,
+    pub(crate) param: SinkParam,
+    pub(crate) db: DatabaseConnection,
     commit_notifier: Option<mpsc::UnboundedSender<()>>,
     commit_retry_num: u32,
     _compact_task_guard: Option<oneshot::Sender<()>>,
@@ -1327,14 +1428,54 @@ impl IcebergSinkCommitter {
 
 #[async_trait::async_trait]
 impl SinkCommitCoordinator for IcebergSinkCommitter {
-    async fn init(&mut self) -> Result<()> {
+    async fn init(&mut self) -> Result<Option<u64>> {
+        if self.is_exactly_once
+            && self
+                .iceberg_sink_has_pre_commit_metadata(&self.db, self.param.sink_id.sink_id())
+                .await?
+        {
+            tracing::info!("Re commit");
+            let ordered_metadata_list_by_end_epoch = self
+                .get_pre_commit_info_by_sink_id(&self.db, self.param.sink_id.sink_id())
+                .await?;
+
+            let mut last_recommit_epoch = 0;
+            for (end_epoch, sealized_bytes, snapshot_id) in ordered_metadata_list_by_end_epoch {
+                let write_results_bytes = deserialize_metadata(sealized_bytes);
+                let mut write_results = vec![];
+
+                for each in write_results_bytes {
+                    let write_result = IcebergCommitResult::try_from_sealized_bytes(each)?;
+                    write_results.push(write_result);
+                }
+                // If the snapshot_id corresponding to a batch of files exists in Iceberg, it is considered that this batch of files has been successfully committed to Iceberg.
+                if self.is_snapshot_id_valid(&self.config, snapshot_id).await? {
+                    // skip
+                    tracing::debug!(
+                        "All pre-commit files have been successfully committed into iceberg and do not need to be committed again."
+                    );
+                    self.delete_row_by_sink_id_and_end_epoch(&self.db, self.sink_id, end_epoch)
+                        .await?;
+                } else {
+                    // recommit
+                    tracing::debug!(
+                        "There are files that were not successfully committed; re-commit these files."
+                    );
+                    self.re_commit(end_epoch, write_results).await?;
+                }
+                last_recommit_epoch = end_epoch;
+            }
+            tracing::info!("Iceberg commit coordinator inited.");
+            return Ok(Some(last_recommit_epoch));
+        }
+
         tracing::info!("Iceberg commit coordinator inited.");
-        Ok(())
+        return Ok(None);
     }
 
     async fn commit(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()> {
         tracing::info!("Starting iceberg commit in epoch {epoch}.");
-        let write_results = metadata
+        let write_results: Vec<IcebergCommitResult> = metadata
             .iter()
             .map(IcebergCommitResult::try_from)
             .collect::<Result<Vec<IcebergCommitResult>>>()?;
@@ -1344,6 +1485,7 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
             tracing::debug!(?epoch, "no data to commit");
             return Ok(());
         }
+
         // guarantee that all write results has same schema_id and partition_spec_id
         if write_results
             .iter()
@@ -1356,7 +1498,34 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
                 "schema_id and partition_spec_id should be the same in all write results"
             )));
         }
+        self.commit_iceberg_inner(epoch, write_results).await
+    }
+}
 
+/// Methods Required to Achieve Exactly Once Semantics
+impl IcebergSinkCommitter {
+    async fn re_commit(
+        &mut self,
+        epoch: u64,
+        write_results: Vec<IcebergCommitResult>,
+    ) -> Result<()> {
+        tracing::info!("Starting iceberg re_commit in epoch {epoch}.");
+
+        // Skip if no data to commit
+        if write_results.is_empty() || write_results.iter().all(|r| r.data_files.is_empty()) {
+            tracing::debug!(?epoch, "no data to commit");
+            return Ok(());
+        }
+        self.commit_iceberg_inner(epoch, write_results).await?;
+        Ok(())
+    }
+
+    async fn commit_iceberg_inner(
+        &mut self,
+        epoch: u64,
+        write_results: Vec<IcebergCommitResult>,
+    ) -> Result<()> {
+        self.last_commit_epoch = epoch;
         let expect_schema_id = write_results[0].schema_id;
         let expect_partition_spec_id = write_results[0].partition_spec_id;
 
@@ -1390,6 +1559,30 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
             .partition_type(schema)
             .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
 
+        let txn = Transaction::new(&self.table);
+        let snapshot_id = txn.generate_unique_snapshot_id();
+
+        if self.is_exactly_once {
+            // persist pre commit metadata and snapshot id in system table.
+            let mut pre_commit_metadata_bytes = Vec::new();
+            for each_parallelism_write_result in write_results.clone() {
+                let each_parallelism_write_result_bytes: Vec<u8> =
+                    each_parallelism_write_result.try_into()?;
+                pre_commit_metadata_bytes.push(each_parallelism_write_result_bytes);
+            }
+
+            let pre_commit_metadata_bytes: Vec<u8> = serialize_metadata(pre_commit_metadata_bytes);
+
+            self.persist_pre_commit_metadata(
+                self.db.clone(),
+                self.last_commit_epoch,
+                epoch,
+                pre_commit_metadata_bytes,
+                snapshot_id,
+            )
+            .await?;
+        }
+
         let data_files = write_results
             .into_iter()
             .flat_map(|r| {
@@ -1399,7 +1592,6 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
                 })
             })
             .collect::<Result<Vec<DataFile>>>()?;
-
         // # TODO:
         // This retry behavior should be revert and do in iceberg-rust when it supports retry(Track in: https://github.com/apache/iceberg-rust/issues/964)
         // because retry logic involved reapply the commit metadata.
@@ -1419,7 +1611,7 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
             .await?;
             let txn = Transaction::new(&table);
             let mut append_action = txn
-                .fast_append(None, vec![])
+                .fast_append(Some(snapshot_id), None, vec![])
                 .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
             append_action
                 .add_data_files(data_files.clone())
@@ -1442,7 +1634,136 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
             }
         }
         tracing::info!("Succeeded to commit to iceberg table in epoch {epoch}.");
+
+        if self.is_exactly_once {
+            self.delete_row_by_sink_id_and_end_epoch(&self.db, self.sink_id, epoch)
+                .await?;
+            tracing::info!("Succeeded delete pre commit metadata in epoch {epoch}.");
+        }
         Ok(())
+    }
+
+    async fn persist_pre_commit_metadata(
+        &self,
+        db: DatabaseConnection,
+        start_epoch: u64,
+        end_epoch: u64,
+        pre_commit_metadata: Vec<u8>,
+        snapshot_id: i64,
+    ) -> Result<()> {
+        let m = exactly_once_iceberg_sink::ActiveModel {
+            sink_id: Set(self.sink_id),
+            end_epoch: Set(end_epoch),
+            start_epoch: Set(start_epoch),
+            metadata: Set(pre_commit_metadata),
+            committed: Set(false),
+            snapshot_id: Set(snapshot_id),
+        };
+        match exactly_once_iceberg_sink::Entity::insert(m).exec(&db).await {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                tracing::error!("Error inserting into system table: {:?}", e);
+                Err(e.into())
+            }
+        }
+    }
+
+    async fn delete_row_by_sink_id_and_end_epoch(
+        &self,
+        db: &DatabaseConnection,
+        sink_id: u32,
+        end_epoch: u64,
+    ) -> Result<()> {
+        match Entity::delete_many()
+            .filter(Column::SinkId.eq(sink_id))
+            .filter(Column::EndEpoch.eq(end_epoch))
+            .exec(db)
+            .await
+        {
+            Ok(result) => {
+                let deleted_count = result.rows_affected;
+
+                if deleted_count == 0 {
+                    tracing::info!(
+                        "No item deleted in iceberg exactly once system table, end_epoch = {}.",
+                        end_epoch
+                    );
+                } else {
+                    tracing::info!(
+                        "Deleted item in iceberg exactly once system table, end_epoch = {}.",
+                        end_epoch
+                    );
+                }
+                Ok(())
+            }
+            Err(e) => {
+                tracing::error!(
+                    "Error deleting from iceberg exactly once system table: {:?}",
+                    e
+                );
+                Err(e.into())
+            }
+        }
+    }
+
+    async fn iceberg_sink_has_pre_commit_metadata(
+        &self,
+        db: &DatabaseConnection,
+        sink_id: u32,
+    ) -> Result<bool> {
+        match exactly_once_iceberg_sink::Entity::find()
+            .filter(exactly_once_iceberg_sink::Column::SinkId.eq(sink_id))
+            .count(db)
+            .await
+        {
+            Ok(count) => Ok(count > 0),
+            Err(e) => {
+                tracing::error!(
+                    "Error querying pre-commit metadata from system table: {:?}",
+                    e
+                );
+                Err(e.into())
+            }
+        }
+    }
+
+    async fn get_pre_commit_info_by_sink_id(
+        &self,
+        db: &DatabaseConnection,
+        sink_id: u32,
+    ) -> Result<Vec<(u64, Vec<u8>, i64)>> {
+        let models: Vec<Model> = Entity::find()
+            .filter(Column::SinkId.eq(sink_id))
+            .order_by(Column::EndEpoch, Order::Asc)
+            .all(db)
+            .await?;
+
+        let mut result: Vec<(u64, Vec<u8>, i64)> = Vec::new();
+
+        for model in models {
+            result.push((model.end_epoch, model.metadata, model.snapshot_id));
+        }
+
+        Ok(result)
+    }
+
+    /// During pre-commit metadata, we record the `snapshot_id` corresponding to each batch of files.
+    /// Therefore, the logic for checking whether all files in this batch are present in Iceberg
+    /// has been changed to verifying if their corresponding `snapshot_id` exists in Iceberg.
+    async fn is_snapshot_id_valid(
+        &self,
+        iceberg_config: &IcebergConfig,
+        snapshot_id: i64,
+    ) -> Result<bool> {
+        let iceberg_common = iceberg_config.common.clone();
+        let table = iceberg_common
+            .load_table(&iceberg_config.java_catalog_props)
+            .await?;
+        if table.metadata().snapshot_by_id(snapshot_id).is_some() {
+            Ok(true)
+        } else {
+            Ok(false)
+        }
     }
 }
 
@@ -1549,10 +1870,7 @@ fn check_compatibility(
 }
 
 /// Try to match our schema with iceberg schema.
-pub fn try_matches_arrow_schema(
-    rw_schema: &Schema,
-    arrow_schema: &ArrowSchema,
-) -> anyhow::Result<()> {
+pub fn try_matches_arrow_schema(rw_schema: &Schema, arrow_schema: &ArrowSchema) -> Result<()> {
     if rw_schema.fields.len() != arrow_schema.fields().len() {
         bail!(
             "Schema length mismatch, risingwave is {}, and iceberg is {}",
@@ -1570,6 +1888,14 @@ pub fn try_matches_arrow_schema(
 
     check_compatibility(schema_fields, &arrow_schema.fields)?;
     Ok(())
+}
+
+pub fn serialize_metadata(metadata: Vec<Vec<u8>>) -> Vec<u8> {
+    serde_json::to_vec(&metadata).unwrap()
+}
+
+pub fn deserialize_metadata(bytes: Vec<u8>) -> Vec<Vec<u8>> {
+    serde_json::from_slice(&bytes).unwrap()
 }
 
 #[cfg(test)]
@@ -1810,6 +2136,7 @@ mod test {
                 .collect(),
             commit_checkpoint_interval: DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE,
             create_table_if_not_exists: false,
+            is_exactly_once: None,
             commit_retry_num: 8,
         };
 

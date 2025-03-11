@@ -111,6 +111,7 @@ risingwave_common = { workspace = true }
 risingwave_common_estimate_size = { workspace = true }
 risingwave_common_rate_limit = { workspace = true }
 risingwave_connector_codec = { workspace = true }
+risingwave_meta_model = { workspace = true }
 risingwave_jni_core = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
@@ -121,6 +122,7 @@ rustls-pemfile = "2"
 rustls-pki-types = "1"
 rw_futures_util = { workspace = true }
 scopeguard = "1"
+sea-orm = { workspace = true }
 sea-schema = { version = "0.16", default-features = false, features = [
     "discovery",
     "sqlx-postgres",

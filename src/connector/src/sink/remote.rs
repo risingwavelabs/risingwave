@@ -50,6 +50,7 @@ use risingwave_rpc_client::{
     SinkWriterStreamHandle,
 };
 use rw_futures_util::drop_either_future;
+use sea_orm::DatabaseConnection;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{Receiver, unbounded_channel};
@@ -310,6 +311,7 @@ impl RemoteLogSinker {
 #[async_trait]
 impl LogSinker for RemoteLogSinker {
     async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<!> {
+        log_reader.build_stream_from_start_offset(None).await?;
         let mut request_tx = self.request_sender;
         let mut response_err_stream_rx = self.response_stream;
         let sink_writer_metrics = self.sink_writer_metrics;
@@ -555,7 +557,7 @@ impl<R: RemoteSinkTrait> Sink for CoordinatedRemoteSink<R> {
         true
     }
 
-    async fn new_coordinator(&self) -> Result<Self::Coordinator> {
+    async fn new_coordinator(&self, _db: DatabaseConnection) -> Result<Self::Coordinator> {
         RemoteCoordinator::new::<R>(self.param.clone()).await
     }
 }
@@ -675,8 +677,8 @@ impl RemoteCoordinator {
 
 #[async_trait]
 impl SinkCommitCoordinator for RemoteCoordinator {
-    async fn init(&mut self) -> Result<()> {
-        Ok(())
+    async fn init(&mut self) -> Result<Option<u64>> {
+        Ok(None)
     }
 
     async fn commit(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()> {
