@@ -595,6 +595,7 @@ fn is_sink_support_commit_checkpoint_interval(sink_name: &str) -> bool {
 }
 pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
     const SINK_NAME: &'static str;
+    const SINK_ALTER_CONFIG_LIST: &'static [&'static str] = &[];
     type LogSinker: LogSinker;
     type Coordinator: SinkCommitCoordinator;
 
@@ -643,6 +644,10 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
         }
     }
 
+    fn validate_alter_config(_config: &BTreeMap<String, String>) -> Result<()> {
+        Ok(())
+    }
+
     async fn validate(&self) -> Result<()>;
     async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker>;
 
@@ -653,6 +658,16 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
     #[expect(clippy::unused_async)]
     async fn new_coordinator(&self) -> Result<Self::Coordinator> {
         Err(SinkError::Coordinator(anyhow!("no coordinator")))
+    }
+
+    fn update_config(&mut self, config: BTreeMap<String, String>) -> Result<()> {
+        if !config.is_empty() {
+            return Err(SinkError::Config(anyhow!(
+                "unsupported update config: {:?}",
+                config
+            )));
+        }
+        Ok(())
     }
 }
 

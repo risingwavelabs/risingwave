@@ -20,7 +20,7 @@ use core::fmt;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::FormatEncodeOptions;
+use super::{FormatEncodeOptions, SqlOption};
 use crate::ast::{
     DataType, Expr, Ident, ObjectName, SecretRefValue, SetVariableValue, Value,
     display_comma_separated, display_separated,
@@ -193,6 +193,9 @@ pub enum AlterSinkOperation {
     },
     SetSinkRateLimit {
         rate_limit: i32,
+    },
+    SetSinkProps {
+        changed_props: Vec<SqlOption>,
     },
 }
 
@@ -467,6 +470,9 @@ impl fmt::Display for AlterSinkOperation {
             }
             AlterSinkOperation::SetSinkRateLimit { rate_limit } => {
                 write!(f, "SET SINK_RATE_LIMIT TO {}", rate_limit)
+            }
+            AlterSinkOperation::SetSinkProps { changed_props } => {
+                write!(f, "CONNECTOR WITH {:?}", changed_props)
             }
         }
     }

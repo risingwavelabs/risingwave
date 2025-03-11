@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::mem;
 
 use anyhow::anyhow;
@@ -27,7 +28,7 @@ use risingwave_common_estimate_size::EstimateSize;
 use risingwave_common_estimate_size::collections::EstimatedVec;
 use risingwave_common_rate_limit::RateLimit;
 use risingwave_connector::dispatch_sink;
-use risingwave_connector::sink::catalog::SinkType;
+use risingwave_connector::sink::catalog::{SinkId, SinkType};
 use risingwave_connector::sink::log_store::{
     LogReader, LogReaderExt, LogReaderMetrics, LogStoreFactory, LogWriter, LogWriterExt,
     LogWriterMetrics,
@@ -248,6 +249,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             };
 
             let (rate_limit_tx, rate_limit_rx) = unbounded_channel();
+            let (update_config_tx, update_config_rx) = unbounded_channel();
             // Init the rate limit
             rate_limit_tx.send(self.rate_limit.into()).unwrap();
 
@@ -260,7 +262,9 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                         processed_input,
                         log_writer.monitored(log_writer_metrics),
                         actor_id,
+                        sink_id,
                         rate_limit_tx,
+                        update_config_tx,
                         rebuild_sink_tx,
                     );
 
@@ -273,6 +277,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                             self.sink_writer_param,
                             self.actor_context,
                             rate_limit_rx,
+                            update_config_rx,
                             rebuild_sink_rx,
                         )
                         .instrument_await(format!("consume_log (sink_id {sink_id})"))
@@ -293,7 +298,9 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         input: impl MessageStream,
         mut log_writer: W,
         actor_id: ActorId,
+        sink_id: SinkId,
         rate_limit_tx: UnboundedSender<RateLimit>,
+        update_config_tx: UnboundedSender<HashMap<String, String>>,
         rebuild_sink_tx: UnboundedSender<(Arc<Bitmap>, oneshot::Sender<()>)>,
     ) {
         pin_mut!(input);
@@ -359,6 +366,19 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                         error!(
                                             error = %e.as_report(),
                                             "fail to send sink ate limit update"
+                                        );
+                                        return Err(StreamExecutorError::from(
+                                            e.to_report_string(),
+                                        ));
+                                    }
+                                }
+                            }
+                            Mutation::ConnectorPropsChange(config) => {
+                                if let Some(map) = config.get(&sink_id.sink_id) {
+                                    if let Err(e) = update_config_tx.send(map.clone()) {
+                                        error!(
+                                            error = %e.as_report(),
+                                            "fail to send sink alter props"
                                         );
                                         return Err(StreamExecutorError::from(
                                             e.to_report_string(),
@@ -505,13 +525,14 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
 
     #[expect(clippy::too_many_arguments)]
     async fn execute_consume_log<S: Sink, R: LogReader>(
-        sink: S,
+        mut sink: S,
         log_reader: R,
         columns: Vec<ColumnCatalog>,
-        sink_param: SinkParam,
+        mut sink_param: SinkParam,
         mut sink_writer_param: SinkWriterParam,
         actor_context: ActorContextRef,
         rate_limit_rx: UnboundedReceiver<RateLimit>,
+        mut update_config_rx: UnboundedReceiver<HashMap<String, String>>,
         mut rebuild_sink_rx: UnboundedReceiver<(Arc<Bitmap>, oneshot::Sender<()>)>,
     ) -> StreamExecutorResult<!> {
         let visible_columns = columns
@@ -558,10 +579,9 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             .monitored(metrics)
             .rate_limited(rate_limit_rx);
 
+        log_reader.init().await?;
         loop {
             let future = async {
-                log_reader.init().await?;
-
                 loop {
                     let Err(e) = sink
                         .new_log_sinker(sink_writer_param.clone())
@@ -621,6 +641,42 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                     if notify.send(()).is_err() {
                         warn!("failed to notify rebuild sink");
                     }
+                    log_reader.init().await?;
+                }
+                result = update_config_rx.recv()  => {
+                    let config = result.ok_or_else(|| anyhow!("failed to receive new sink config"))?;
+                    if F::ALLOW_REWIND {
+                        match log_reader.rewind().await {
+                            Ok(()) => {
+                                sink_param.properties = config.into_iter().collect();
+                                sink.update_config(sink_param.properties.clone())
+                                    .map_err(|e| {
+                                        StreamExecutorError::from((e, sink_param.sink_id.sink_id))
+                                    })?;
+                                info!(
+                                    executor_id = sink_writer_param.executor_id,
+                                    sink_id = sink_param.sink_id.sink_id,
+                                    "alter sink config successfully with rewind"
+                                );
+                                Ok(())
+                            }
+                            Err(rewind_err) => {
+                                error!(
+                                    error = %rewind_err.as_report(),
+                                    "fail to rewind log reader for alter sink config "
+                                );
+                                Err(anyhow!("fail to rewind log after alter table").into())
+                            }
+                        }
+                    } else {
+                        sink_param.properties = config.into_iter().collect();
+                        sink.update_config(sink_param.properties.clone())
+                            .map_err(|e| {
+                                StreamExecutorError::from((e, sink_param.sink_id.sink_id))
+                            })?;
+                        Err(anyhow!("alter sink config need to rebuild sink.").into())
+                    }
+                    .map_err(|e| StreamExecutorError::from((e, sink_param.sink_id.sink_id)))?;
                 }
             }
         }
