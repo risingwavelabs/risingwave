@@ -29,7 +29,7 @@ use risingwave_common::util::query_log::*;
 use risingwave_common::util::tracing::layer::set_toggle_otel_layer_fn;
 use thiserror_ext::AsReport;
 use tracing::level_filters::LevelFilter as Level;
-use tracing_subscriber::filter::{FilterFn, Targets};
+use tracing_subscriber::filter::Targets;
 use tracing_subscriber::fmt::FormatFields;
 use tracing_subscriber::fmt::format::DefaultFields;
 use tracing_subscriber::fmt::time::OffsetTime;
