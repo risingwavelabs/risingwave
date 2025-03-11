@@ -633,7 +633,7 @@ pub fn extract_bson_field(
                     AccessError::TypeError {
                         expected: type_expected.to_string(),
                         got: "unparsable string".into(),
-                        value: number.to_string(),
+                        value: number.to_owned(),
                     }
                 })?;
                 Some(ScalarImpl::Decimal(dec))
@@ -795,7 +795,7 @@ fn bson_extract_number(bson_doc: &serde_json::Value, type_expected: &DataType) -
                     return Err(AccessError::TypeError {
                         expected: type_expected.to_string(),
                         got: "string".into(),
-                        value: num_str.to_string(),
+                        value: num_str.to_owned(),
                     });
                 }
             };
@@ -814,7 +814,7 @@ fn bson_extract_number(bson_doc: &serde_json::Value, type_expected: &DataType) -
                     return Err(AccessError::TypeError {
                         expected: type_expected.to_string(),
                         got: "string".into(),
-                        value: num_str.to_string(),
+                        value: num_str.to_owned(),
                     });
                 }
             };
@@ -828,7 +828,7 @@ fn bson_extract_number(bson_doc: &serde_json::Value, type_expected: &DataType) -
                 return Err(AccessError::TypeError {
                     expected: type_expected.to_string(),
                     got: "string".into(),
-                    value: num_str.to_string(),
+                    value: num_str.to_owned(),
                 });
             }
         };
@@ -838,7 +838,7 @@ fn bson_extract_number(bson_doc: &serde_json::Value, type_expected: &DataType) -
                     return Err(AccessError::TypeError {
                         expected: type_expected.to_string(),
                         got: "string".into(),
-                        value: num_str.to_string(),
+                        value: num_str.to_owned(),
                     });
                 }
                 return Ok(Some(ScalarImpl::Int16(parsed_num as i16)));
@@ -848,7 +848,7 @@ fn bson_extract_number(bson_doc: &serde_json::Value, type_expected: &DataType) -
                     return Err(AccessError::TypeError {
                         expected: type_expected.to_string(),
                         got: "string".into(),
-                        value: num_str.to_string(),
+                        value: num_str.to_owned(),
                     });
                 }
                 return Ok(Some(ScalarImpl::Int32(parsed_num as i32)));
@@ -900,11 +900,11 @@ fn bson_extract_number(bson_doc: &serde_json::Value, type_expected: &DataType) -
         });
     }
 
-    return Err(AccessError::TypeError {
+    Err(AccessError::TypeError {
         expected: type_expected.to_string(),
         got: "unknown".into(),
         value: bson_doc.to_string(),
-    });
+    })
 }
 
 fn bson_extract_date(bson_doc: &serde_json::Value, type_expected: &DataType) -> AccessResult {

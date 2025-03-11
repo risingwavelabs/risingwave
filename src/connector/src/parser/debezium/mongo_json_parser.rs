@@ -479,8 +479,8 @@ mod tests {
             let data = [
                 ScalarImpl::Int64(1004),
                 ScalarImpl::Utf8("Starblazer X-2000".into()),
-                ScalarImpl::Date(expected_date.clone().into()),
-                ScalarImpl::Timestamptz(expected_datetime.clone().into()),
+                ScalarImpl::Date(expected_date.into()),
+                ScalarImpl::Timestamptz(expected_datetime.into()),
             ];
             for (i, datum) in data.iter().enumerate() {
                 assert_eq!(row.datum_at(i).to_owned_datum(), Some(datum.clone()));
@@ -578,8 +578,8 @@ mod tests {
                 ScalarImpl::Int64(1004),
                 ScalarImpl::Utf8("John Doe".into()),
                 ScalarImpl::Int32(30),
-                ScalarImpl::Date(expected_birth_date.clone().into()),
-                ScalarImpl::Timestamptz(expected_created_at.clone().into()),
+                ScalarImpl::Date(expected_birth_date.into()),
+                ScalarImpl::Timestamptz(expected_created_at.into()),
             ];
             for (i, datum) in data.iter().enumerate() {
                 assert_eq!(row.datum_at(i).to_owned_datum(), Some(datum.clone()));
