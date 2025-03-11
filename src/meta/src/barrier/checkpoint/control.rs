@@ -44,9 +44,9 @@ use crate::barrier::rpc::{ControlStreamManager, from_partial_graph_id};
 use crate::barrier::schedule::{NewBarrier, PeriodicBarriers};
 use crate::barrier::utils::collect_creating_job_commit_epoch_info;
 use crate::barrier::{
-    BarrierKind, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
-    InflightSubscriptionInfo, SnapshotBackfillInfo, TracedEpoch,
+    BarrierKind, Command, CreateStreamingJobType, InflightSubscriptionInfo, TracedEpoch,
 };
+use crate::controller::fragment::InflightFragmentInfo;
 use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::stream::fill_snapshot_backfill_epoch;
 use crate::{MetaError, MetaResult};
@@ -331,11 +331,7 @@ impl CheckpointControl {
                 .values()
             {
                 progress.extend([(
-                    creating_job
-                        .info
-                        .stream_job_fragments
-                        .stream_job_id()
-                        .table_id,
+                    creating_job.job_id.table_id,
                     creating_job.gen_ddl_progress(),
                 )]);
             }
@@ -582,7 +578,7 @@ impl DatabaseCheckpointControl {
 
     fn jobs_to_merge(
         &self,
-    ) -> Option<HashMap<TableId, (SnapshotBackfillInfo, InflightStreamingJobInfo)>> {
+    ) -> Option<HashMap<TableId, (HashSet<TableId>, InflightStreamingJobInfo)>> {
         let mut table_ids_to_merge = HashMap::new();
 
         for (table_id, creating_streaming_job) in &self.creating_streaming_job_controls {
@@ -590,7 +586,9 @@ impl DatabaseCheckpointControl {
                 table_ids_to_merge.insert(
                     *table_id,
                     (
-                        creating_streaming_job.snapshot_backfill_info.clone(),
+                        creating_streaming_job
+                            .snapshot_backfill_upstream_tables
+                            .clone(),
                         creating_streaming_job.graph_info.clone(),
                     ),
                 );
@@ -726,12 +724,7 @@ impl DatabaseCheckpointControl {
                             *table_id,
                             (
                                 progress_epoch,
-                                creating_job
-                                    .snapshot_backfill_info
-                                    .upstream_mv_table_id_to_backfill_epoch
-                                    .keys()
-                                    .cloned()
-                                    .collect(),
+                                creating_job.snapshot_backfill_upstream_tables.clone(),
                             ),
                         )
                     })
@@ -795,12 +788,7 @@ impl DatabaseCheckpointControl {
                     .remove(&table_id)
                     .expect("should exist");
                 assert!(creating_streaming_job.is_finished());
-                assert!(
-                    epoch_state
-                        .finished_jobs
-                        .insert(table_id, (creating_streaming_job.info, resps))
-                        .is_none()
-                );
+                assert!(epoch_state.finished_jobs.insert(table_id, resps).is_none());
             }
         }
         assert!(self.completing_barrier.is_none());
@@ -836,10 +824,10 @@ impl DatabaseCheckpointControl {
                 node.state
                     .finished_jobs
                     .drain()
-                    .for_each(|(_, (info, resps))| {
+                    .for_each(|(job_id, resps)| {
                         node.state.resps.extend(resps);
                         finished_jobs.push(TrackingJob::New(TrackingCommand {
-                            info,
+                            job_id,
                             replace_stream_job: None,
                         }));
                     });
@@ -868,11 +856,11 @@ impl DatabaseCheckpointControl {
                     &mut task.commit_info,
                     epoch,
                     resps,
-                    self.creating_streaming_job_controls[&table_id]
-                        .info
-                        .stream_job_fragments
-                        .all_table_ids()
-                        .map(TableId::new),
+                    InflightFragmentInfo::existing_table_ids(
+                        self.creating_streaming_job_controls[&table_id]
+                            .graph_info
+                            .fragment_infos(),
+                    ),
                     is_first_time,
                 );
                 let (_, creating_job_epochs) =
@@ -927,7 +915,7 @@ struct BarrierEpochState {
 
     creating_jobs_to_wait: HashSet<TableId>,
 
-    finished_jobs: HashMap<TableId, (CreateStreamingJobCommandInfo, Vec<BarrierCompleteResponse>)>,
+    finished_jobs: HashMap<TableId, Vec<BarrierCompleteResponse>>,
 }
 
 impl BarrierEpochState {
@@ -1035,10 +1023,9 @@ impl DatabaseCheckpointControl {
                         .upstream_mv_table_id_to_backfill_epoch
                         .values_mut()
                     {
-                        assert!(
-                            snapshot_backfill_epoch
-                                .replace(barrier_info.prev_epoch())
-                                .is_none(),
+                        assert_eq!(
+                            snapshot_backfill_epoch.replace(barrier_info.prev_epoch()),
+                            None,
                             "must not set previously"
                         );
                     }
@@ -1051,7 +1038,11 @@ impl DatabaseCheckpointControl {
                     }
                     let info = info.clone();
                     let job_id = info.stream_job_fragments.stream_job_id();
-                    let snapshot_backfill_info = snapshot_backfill_info.clone();
+                    let snapshot_backfill_upstream_tables = snapshot_backfill_info
+                        .upstream_mv_table_id_to_backfill_epoch
+                        .keys()
+                        .cloned()
+                        .collect();
                     let mutation = command
                         .as_ref()
                         .expect("checked Some")
@@ -1063,7 +1054,7 @@ impl DatabaseCheckpointControl {
                         job_id,
                         CreatingStreamingJobControl::new(
                             info,
-                            snapshot_backfill_info,
+                            snapshot_backfill_upstream_tables,
                             barrier_info.prev_epoch(),
                             hummock_version_stats,
                             mutation,

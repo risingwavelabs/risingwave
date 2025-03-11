@@ -55,7 +55,7 @@ impl CreateMviewLogStoreProgressTracker {
         let avg = sum / count;
         let avg_lag_time = Duration::from_millis(Epoch(avg as _).physical_time());
         format!(
-            "actor: {}/{}, avg epoch lag {:?}",
+            "actor: {}/{}, avg lag {:?}",
             self.finished_actors.len(),
             self.ongoing_actors.len() + self.finished_actors.len(),
             avg_lag_time
