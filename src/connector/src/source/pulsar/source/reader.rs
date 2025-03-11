@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 
 use anyhow::Context;
 use async_trait::async_trait;
@@ -22,11 +21,7 @@ use itertools::Itertools;
 use pulsar::consumer::InitialPosition;
 use pulsar::message::proto::MessageIdData;
 use pulsar::{Consumer, ConsumerBuilder, ConsumerOptions, Pulsar, SubType, TokioExecutor};
-use risingwave_common::array::StreamChunk;
-use risingwave_common::array::arrow::IcebergArrowConvert;
-use risingwave_common::array::arrow::arrow_array_iceberg::{Int32Array, Int64Array, RecordBatch};
 use risingwave_common::{bail, ensure};
-use thiserror_ext::AsReport;
 
 use crate::error::ConnectorResult;
 use crate::parser::ParserConfig;
@@ -82,7 +77,6 @@ impl SplitReader for PulsarSplitReader {
                     source_context,
                 ))
             }
-            Self::Iceberg(reader) => Box::pin(reader.into_stream()),
         }
     }
 }
