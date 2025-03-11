@@ -4384,7 +4384,19 @@ impl Parser<'_> {
             }
         }
 
-        let statement = self.parse_statement()?;
+        let statement = match self.parse_statement() {
+            Ok(statement) => statement,
+            error @ Err(_) => {
+                return if analyze {
+                    self.expected_at(
+                        *self,
+                        "SINK, TABLE, MATERIALIZED VIEW, INDEX or a statement after ANALYZE",
+                    )
+                } else {
+                    error
+                };
+            }
+        };
         Ok(Statement::Explain {
             analyze,
             statement: Box::new(statement),
