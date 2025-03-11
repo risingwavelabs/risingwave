@@ -59,18 +59,18 @@ public class PostgresDialect implements JdbcDialect {
 
     @Override
     public SchemaTableName createSchemaTableName(String schemaName, String tableName) {
-        if (schemaName == null || schemaName.isBlank()) {
-            schemaName = "public";
-        }
         return new SchemaTableName(schemaName, tableName);
     }
 
     @Override
     public String getNormalizedTableName(SchemaTableName schemaTableName) {
-        assert schemaTableName.getSchemaName() != null;
-        return quoteIdentifier(schemaTableName.getSchemaName())
-                + '.'
-                + quoteIdentifier(schemaTableName.getTableName());
+        if (schemaTableName.schemaName == null || schemaTableName.schemaName.isBlank()) {
+            return quoteIdentifier(schemaTableName.getTableName());
+        } else {
+            return quoteIdentifier(schemaTableName.getSchemaName())
+                    + '.'
+                    + quoteIdentifier(schemaTableName.getTableName());
+        }
     }
 
     @Override

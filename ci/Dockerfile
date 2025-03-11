@@ -40,7 +40,8 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-mo
 
 ENV PATH /root/.cargo/bin/:$PATH
 
-RUN rustup show && \
+RUN rustup toolchain install --profile minimal && \
+    rustup show && \
     rustup default `rustup show active-toolchain | awk '{print $1}'` && \
     rustup component add rustfmt llvm-tools-preview clippy && \
     rustup target add wasm32-wasip1
@@ -71,7 +72,7 @@ ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
 RUN curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
 RUN cargo binstall -y --locked cargo-llvm-cov cargo-nextest cargo-sort cargo-cache cargo-machete \
     cargo-make@0.37.9 \
-    sqllogictest-bin@0.27.1 \
+    sqllogictest-bin@0.28.0 \
     sccache@0.7.4 \
     && cargo cache -a \
     && rm -rf "/root/.cargo/registry/index" \

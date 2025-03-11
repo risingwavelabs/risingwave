@@ -43,9 +43,7 @@ use risingwave_pb::source::{PbConnectorSplit, PbConnectorSplits};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
-use risingwave_pb::stream_plan::{
-    FragmentTypeFlag, PbDispatcher, PbFragmentTypeFlag, PbStreamActor, PbStreamNode,
-};
+use risingwave_pb::stream_plan::{FragmentTypeFlag, PbFragmentTypeFlag, PbStreamNode};
 use risingwave_pb::user::PbUserInfo;
 use sea_orm::ActiveValue::Set;
 use sea_orm::sea_query::{BinOper, Expr, Query, SimpleExpr};
@@ -65,7 +63,10 @@ use crate::controller::utils::{
     get_fragment_mappings, get_internal_tables_by_id, rebuild_fragment_mapping_from_actors,
 };
 use crate::manager::{NotificationVersion, StreamingJob, StreamingJobType};
-use crate::model::{StreamContext, StreamJobFragments, TableParallelism};
+use crate::model::{
+    FragmentActorDispatchers, StreamActor, StreamContext, StreamJobFragmentsToCreate,
+    TableParallelism,
+};
 use crate::stream::{JobReschedulePostUpdates, SplitAssignment};
 use crate::{MetaError, MetaResult};
 
@@ -392,7 +393,7 @@ impl CatalogController {
     /// Insert fragments and actors to meta store. Used both for creating new jobs and replacing jobs.
     pub async fn prepare_streaming_job(
         &self,
-        stream_job_fragments: &StreamJobFragments,
+        stream_job_fragments: &StreamJobFragmentsToCreate,
         streaming_job: &StreamingJob,
         for_replace: bool,
     ) -> MetaResult<()> {
@@ -408,9 +409,14 @@ impl CatalogController {
         let mut fragment_relations = BTreeMap::new();
 
         // Fill in the fragment relation based on the actor dispatcher.
-        for (fragment, actors, actor_dispatchers) in &fragment_actors {
+        for (fragment, actors) in &fragment_actors {
+            let actor_dispatchers = stream_job_fragments
+                .dispatchers
+                .get(&(fragment.fragment_id as _));
             for actor in actors {
-                if let Some(dispatcher) = actor_dispatchers.get(&actor.actor_id) {
+                if let Some(dispatcher) = actor_dispatchers
+                    .and_then(|actor_dispatchers| actor_dispatchers.get(&(actor.actor_id as _)))
+                {
                     for dispatcher in dispatcher {
                         let key = (fragment.fragment_id, dispatcher.dispatcher_id);
 
@@ -446,10 +452,7 @@ impl CatalogController {
         }
 
         // Add fragments.
-        let (fragments, actors): (Vec<_>, Vec<_>) = fragment_actors
-            .into_iter()
-            .map(|(fragment, actors, _)| (fragment, actors))
-            .unzip();
+        let (fragments, actors): (Vec<_>, Vec<_>) = fragment_actors.into_iter().unzip();
         for fragment in fragments {
             let fragment_id = fragment.fragment_id;
             let state_table_ids = fragment.state_table_ids.inner_ref().clone();
@@ -650,10 +653,7 @@ impl CatalogController {
         &self,
         job_id: ObjectId,
         actor_ids: Vec<crate::model::ActorId>,
-        new_actor_dispatchers: &HashMap<
-            crate::model::FragmentId,
-            HashMap<crate::model::ActorId, Vec<PbDispatcher>>,
-        >,
+        new_actor_dispatchers: &FragmentActorDispatchers,
         split_assignment: &SplitAssignment,
     ) -> MetaResult<()> {
         self.post_collect_job_fragments_inner(
@@ -670,10 +670,7 @@ impl CatalogController {
         &self,
         job_id: ObjectId,
         actor_ids: Vec<crate::model::ActorId>,
-        new_actor_dispatchers: &HashMap<
-            crate::model::FragmentId,
-            HashMap<crate::model::ActorId, Vec<PbDispatcher>>,
-        >,
+        new_actor_dispatchers: &FragmentActorDispatchers,
         split_assignment: &SplitAssignment,
         is_mv: bool,
     ) -> MetaResult<()> {
@@ -1768,14 +1765,17 @@ impl CatalogController {
 
             // add new actors
             for (
-                PbStreamActor {
-                    actor_id,
-                    fragment_id,
-                    vnode_bitmap,
-                    expr_context,
-                    ..
-                },
-                actor_status,
+                (
+                    StreamActor {
+                        actor_id,
+                        fragment_id,
+                        vnode_bitmap,
+                        expr_context,
+                        ..
+                    },
+                    _,
+                ),
+                worker_id,
             ) in newly_created_actors
             {
                 let splits = actor_splits
@@ -1787,9 +1787,11 @@ impl CatalogController {
                     fragment_id: Set(fragment_id as _),
                     status: Set(ActorStatus::Running),
                     splits: Set(splits.map(|splits| (&PbConnectorSplits { splits }).into())),
-                    worker_id: Set(actor_status.worker_id() as _),
+                    worker_id: Set(worker_id),
                     upstream_actor_ids: Set(Default::default()),
-                    vnode_bitmap: Set(vnode_bitmap.as_ref().map(|bitmap| bitmap.into())),
+                    vnode_bitmap: Set(vnode_bitmap
+                        .as_ref()
+                        .map(|bitmap| (&bitmap.to_protobuf()).into())),
                     expr_context: Set(expr_context.as_ref().unwrap().into()),
                 })
                 .exec(&txn)

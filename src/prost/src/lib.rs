@@ -488,6 +488,7 @@ impl std::fmt::Debug for plan_common::ColumnDesc {
             additional_column,
             generated_or_default_column,
             version,
+            nullable,
         } = self;
 
         let mut s = f.debug_struct("ColumnDesc");
@@ -514,7 +515,56 @@ impl std::fmt::Debug for plan_common::ColumnDesc {
         if let Some(generated_or_default_column) = generated_or_default_column {
             s.field("generated_or_default_column", &generated_or_default_column);
         }
+        s.field("nullable", nullable);
         s.finish()
+    }
+}
+
+impl expr::UserDefinedFunction {
+    pub fn name_in_runtime(&self) -> Option<&str> {
+        if self.version() < expr::UdfExprVersion::NameInRuntime {
+            if self.language == "rust" || self.language == "wasm" {
+                // The `identifier` value of Rust and WASM UDF before `NameInRuntime`
+                // is not used any more. The real bound function name should be the same
+                // as `name`.
+                Some(&self.name)
+            } else {
+                // `identifier`s of other UDFs already mean `name_in_runtime` before `NameInRuntime`.
+                self.identifier.as_deref()
+            }
+        } else {
+            // after `PbUdfExprVersion::NameInRuntime`, `identifier` means `name_in_runtime`
+            self.identifier.as_deref()
+        }
+    }
+}
+
+impl expr::UserDefinedFunctionMetadata {
+    pub fn name_in_runtime(&self) -> Option<&str> {
+        if self.version() < expr::UdfExprVersion::NameInRuntime {
+            if self.language == "rust" || self.language == "wasm" {
+                // The `identifier` value of Rust and WASM UDF before `NameInRuntime`
+                // is not used any more. And unfortunately, we don't have the original name
+                // in `PbUserDefinedFunctionMetadata`, so we need to extract the name from
+                // the old `identifier` value (e.g. `foo()->int32`).
+                let old_identifier = self
+                    .identifier
+                    .as_ref()
+                    .expect("Rust/WASM UDF must have identifier");
+                Some(
+                    old_identifier
+                        .split_once("(")
+                        .expect("the old identifier must contain `(`")
+                        .0,
+                )
+            } else {
+                // `identifier`s of other UDFs already mean `name_in_runtime` before `NameInRuntime`.
+                self.identifier.as_deref()
+            }
+        } else {
+            // after `PbUdfExprVersion::NameInRuntime`, `identifier` means `name_in_runtime`
+            self.identifier.as_deref()
+        }
     }
 }
 

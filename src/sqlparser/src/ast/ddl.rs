@@ -250,6 +250,7 @@ pub enum AlterFunctionOperation {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum AlterConnectionOperation {
     SetSchema { new_schema_name: ObjectName },
+    ChangeOwner { new_owner_name: Ident },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -555,6 +556,9 @@ impl fmt::Display for AlterConnectionOperation {
         match self {
             AlterConnectionOperation::SetSchema { new_schema_name } => {
                 write!(f, "SET SCHEMA {new_schema_name}")
+            }
+            AlterConnectionOperation::ChangeOwner { new_owner_name } => {
+                write!(f, "OWNER TO {new_owner_name}")
             }
         }
     }

@@ -762,7 +762,9 @@ impl Mutation {
 
     fn from_protobuf(prost: &PbMutation) -> StreamExecutorResult<Self> {
         let mutation = match prost {
-            PbMutation::Stop(stop) => Mutation::Stop(HashSet::from_iter(stop.get_actors().clone())),
+            PbMutation::Stop(stop) => {
+                Mutation::Stop(HashSet::from_iter(stop.actors.iter().cloned()))
+            }
 
             PbMutation::Update(update) => Mutation::Update(UpdateMutation {
                 dispatchers: update

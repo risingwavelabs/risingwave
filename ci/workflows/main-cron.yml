@@ -10,10 +10,10 @@ anchors:
         run: rw-build-env
         config: ci/docker-compose.yml
         mount-buildkite-agent: true
+        propagate-environment: true
     - docker-compose-standard: &docker-compose-standard
         <<: *docker-compose
         run: ci-standard-env
-        propagate-environment: true
 
   - sql-backend: &sql-backend
       matrix:
@@ -159,7 +159,7 @@ steps:
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 20
+    timeout_in_minutes: 30
     retry: *auto-retry
 
   - group: "end-to-end connector test (release)"

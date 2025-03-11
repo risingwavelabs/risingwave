@@ -214,6 +214,14 @@ impl StreamManagerService for StreamServiceImpl {
                 .catalog_controller
                 .get_job_fragments_by_id(job_id as _)
                 .await?;
+            let mut dispatchers = self
+                .metadata_manager
+                .catalog_controller
+                .get_fragment_actor_dispatchers(
+                    table_fragments.fragment_ids().map(|id| id as _).collect(),
+                )
+                .await?;
+            let ctx = table_fragments.ctx.to_protobuf();
             info.insert(
                 table_fragments.stream_job_id().table_id,
                 TableFragmentInfo {
@@ -228,12 +236,17 @@ impl StreamManagerService for StreamServiceImpl {
                                 .map(|actor| ActorInfo {
                                     id: actor.actor_id,
                                     node: Some(fragment.nodes.clone()),
-                                    dispatcher: actor.dispatcher,
+                                    dispatcher: dispatchers
+                                        .get_mut(&(fragment.fragment_id as _))
+                                        .and_then(|dispatchers| {
+                                            dispatchers.remove(&(actor.actor_id as _))
+                                        })
+                                        .unwrap_or_default(),
                                 })
                                 .collect_vec(),
                         })
                         .collect_vec(),
-                    ctx: Some(table_fragments.ctx.to_protobuf()),
+                    ctx: Some(ctx),
                 },
             );
         }

@@ -6,10 +6,10 @@ import "backup_service.proto";
 import "catalog.proto";
 import "common.proto";
 import "hummock.proto";
+import "secret.proto";
 import "source.proto";
 import "stream_plan.proto";
 import "user.proto";
-import "secret.proto";
 
 option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;

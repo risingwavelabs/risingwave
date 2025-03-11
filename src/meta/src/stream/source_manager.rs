@@ -34,7 +34,6 @@ use risingwave_connector::source::{
 use risingwave_meta_model::SourceId;
 use risingwave_pb::catalog::Source;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
-use risingwave_pb::stream_plan::Dispatcher;
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -381,7 +380,7 @@ impl SourceManager {
             .values()
             .flatten()
             .flat_map(|fragment_id| fragments.get(fragment_id).unwrap().actors.iter())
-            .map(|actor| actor.get_actor_id())
+            .map(|actor| actor.actor_id)
             .collect::<HashSet<_>>();
 
         self.apply_source_change(SourceChange::ReplaceJob {
