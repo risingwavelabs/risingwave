@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_connector::WithPropertiesExt;
 #[cfg(not(debug_assertions))]
 use risingwave_connector::error::ConnectorError;
-use risingwave_connector::{source::AnySplitEnumerator, WithPropertiesExt};
+use risingwave_connector::source::AnySplitEnumerator;
 
 use super::*;
 
@@ -113,11 +114,8 @@ pub async fn create_source_worker(
         .await?;
 
         // if fail to fetch meta info, will refuse to create source
-        tokio::time::timeout(
-            sync_call_timeout,
-            worker.tick(),
-        )
-        .await
+        tokio::time::timeout(sync_call_timeout, worker.tick())
+            .await
             .with_context(|| {
                 format!(
                     "failed to fetch meta info for source {}, timeout {:?}",
