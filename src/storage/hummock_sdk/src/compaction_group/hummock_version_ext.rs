@@ -1364,18 +1364,31 @@ fn level_insert_ssts(operand: &mut Level, insert_table_infos: &Vec<SstableInfo>)
         operand
             .table_infos
             .sort_by(|sst1, sst2| sst1.key_range.cmp(&sst2.key_range));
-    } else {
-        if let Some(i) = insert_table_infos.first() {
-            let pos = operand
-                .table_infos
-                .partition_point(|b| b.key_range.cmp(&i.key_range) == Ordering::Less);
-            operand.table_infos.splice(
-                pos..pos,
-                insert_table_infos
-                    .iter()
-                    .sorted_by(|sst1, sst2| sst1.key_range.cmp(&sst2.key_range))
-                    .cloned(),
-            );
+    } else if !insert_table_infos.is_empty() {
+        let sorted_insert: Vec<_> = insert_table_infos
+            .iter()
+            .sorted_by(|sst1, sst2| sst1.key_range.cmp(&sst2.key_range))
+            .cloned()
+            .collect();
+        let first = &sorted_insert[0];
+        let last = &sorted_insert[sorted_insert.len() - 1];
+        let pos = operand
+            .table_infos
+            .partition_point(|b| b.key_range.cmp(&first.key_range) == Ordering::Less);
+        if pos >= operand.table_infos.len()
+            || last.key_range.cmp(&operand.table_infos[pos].key_range) == Ordering::Less
+        {
+            operand.table_infos.splice(pos..pos, sorted_insert);
+        } else {
+            // If this branch is reached, it indicates some unexpected behavior in compaction.
+            // Here we issue a warning and fall back to insert one by one.
+            warn!(insert = ?insert_table_infos, level = ?operand.table_infos, "unexpected overlap");
+            for i in insert_table_infos {
+                let pos = operand
+                    .table_infos
+                    .partition_point(|b| b.key_range.cmp(&i.key_range) == Ordering::Less);
+                operand.table_infos.insert(pos, i.clone());
+            }
         }
     }
     assert!(
