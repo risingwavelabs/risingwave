@@ -17,6 +17,7 @@ use std::collections::VecDeque;
 use std::future::{Future, pending, ready};
 use std::mem::take;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::anyhow;
 use futures::future::{Either, try_join_all};
@@ -25,7 +26,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::metrics::LabelGuardedIntCounter;
 use risingwave_common::row::OwnedRow;
-use risingwave_common::util::epoch::EpochPair;
+use risingwave_common::util::epoch::{Epoch, EpochPair};
 use risingwave_common_rate_limit::RateLimit;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::StateStore;
@@ -129,7 +130,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
             self.snapshot_epoch
         {
             if first_upstream_barrier.epoch != first_recv_barrier.epoch {
-                assert_eq!(snapshot_epoch, first_upstream_barrier.epoch.prev);
+                assert!(snapshot_epoch <= first_upstream_barrier.epoch.prev);
                 Some(snapshot_epoch)
             } else {
                 None
@@ -158,11 +159,6 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
 
         let (mut barrier_epoch, mut need_report_finish) = {
             if let Some(snapshot_epoch) = should_snapshot_backfill {
-                assert!(
-                    backfill_state
-                        .latest_progress()
-                        .all(|(_, progress)| progress.is_none())
-                );
                 let table_id_str = format!("{}", self.upstream_table.table_id().table_id);
                 let actor_id_str = format!("{}", self.actor_ctx.id);
 
@@ -178,7 +174,15 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                 );
 
                 // Phase 1: consume upstream snapshot
-                let mut barrier_epoch = {
+                let (mut barrier_epoch, upstream_buffer) = if first_recv_barrier_epoch.prev
+                    < snapshot_epoch
+                {
+                    info!(
+                        table_id = %self.upstream_table.table_id(),
+                        snapshot_epoch,
+                        barrier_epoch = ?first_recv_barrier_epoch,
+                        "start consuming snapshot"
+                    );
                     {
                         let consuming_snapshot_row_count = self
                             .metrics
@@ -218,18 +222,32 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                     let post_commit = backfill_state.commit(recv_barrier.epoch).await?;
                     yield Message::Barrier(recv_barrier);
                     post_commit.post_yield_barrier(None).await?;
-                    recv_barrier_epoch
+                    (
+                        recv_barrier_epoch,
+                        upstream_buffer.start_consuming_log_store(snapshot_epoch),
+                    )
+                } else {
+                    info!(
+                        table_id = %self.upstream_table.table_id(),
+                        snapshot_epoch,
+                        barrier_epoch = ?first_recv_barrier_epoch,
+                        "skip consuming snapshot"
+                    );
+                    (
+                        first_recv_barrier_epoch,
+                        upstream_buffer.start_consuming_log_store(first_recv_barrier_epoch.prev),
+                    )
                 };
-
-                let upstream_buffer = upstream_buffer.start_consuming_log_store(snapshot_epoch);
 
                 // Phase 2: consume upstream log store
                 if let Some(mut upstream_buffer) = upstream_buffer {
-                    let initial_pending_lag = upstream_buffer.pending_epoch_lag();
+                    let initial_pending_lag = Duration::from_millis(
+                        Epoch(upstream_buffer.pending_epoch_lag()).physical_time(),
+                    );
                     info!(
                         ?barrier_epoch,
                         table_id = self.upstream_table.table_id().table_id,
-                        initial_pending_lag,
+                        ?initial_pending_lag,
                         "start consuming log store"
                     );
 
@@ -695,25 +713,33 @@ async fn make_log_stream(
 async fn make_snapshot_stream(
     upstream_table: &BatchTable<impl StateStore>,
     snapshot_epoch: u64,
-    start_pk: Option<OwnedRow>,
+    backfill_state: &BackfillState<impl StateStore>,
     rate_limit: RateLimit,
     chunk_size: usize,
 ) -> StreamExecutorResult<VnodeStream<impl super::vnode_stream::ChangeLogRowStream>> {
     let data_types = upstream_table.schema().data_types();
-    let start_pk = start_pk.as_ref();
-    let vnode_streams = try_join_all(upstream_table.vnodes().iter_vnodes().map(move |vnode| {
-        upstream_table
-            .batch_iter_vnode(
-                HummockReadEpoch::Committed(snapshot_epoch),
-                start_pk,
-                vnode,
-                PrefetchOptions::prefetch_for_large_range_scan(),
-            )
-            .map_ok(move |stream| {
-                let stream = stream.map_ok(ChangeLogRow::Insert).map_err(Into::into);
-                (vnode, stream, 0)
+    let vnode_streams = try_join_all(backfill_state.latest_progress().filter_map(
+        move |(vnode, progress)| {
+            let start_pk = match progress.map(|progress| &progress.progress) {
+                None => Some(None),
+                Some(EpochBackfillProgress::Consuming { latest_pk }) => Some(Some(latest_pk)),
+                Some(EpochBackfillProgress::Consumed) => None,
+            };
+            start_pk.map(|start_pk| {
+                upstream_table
+                    .batch_iter_vnode(
+                        HummockReadEpoch::Committed(snapshot_epoch),
+                        start_pk,
+                        vnode,
+                        PrefetchOptions::prefetch_for_large_range_scan(),
+                    )
+                    .map_ok(move |stream| {
+                        let stream = stream.map_ok(ChangeLogRow::Insert).map_err(Into::into);
+                        (vnode, stream, 0)
+                    })
             })
-    }))
+        },
+    ))
     .await?;
     let builder = create_builder(rate_limit, chunk_size, data_types.clone());
     Ok(VnodeStream::new(
@@ -737,17 +763,15 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
 ) {
     let mut barrier_epoch = first_recv_barrier_epoch;
 
-    info!(
-        table_id = upstream_table.table_id().table_id,
-        ?barrier_epoch,
-        "start consuming snapshot"
-    );
-
-    let todo = 0;
-
     // start consume upstream snapshot
-    let mut snapshot_stream =
-        make_snapshot_stream(upstream_table, snapshot_epoch, None, rate_limit, chunk_size).await?;
+    let mut snapshot_stream = make_snapshot_stream(
+        upstream_table,
+        snapshot_epoch,
+        &*backfill_state,
+        rate_limit,
+        chunk_size,
+    )
+    .await?;
 
     async fn select_barrier_and_snapshot_stream(
         barrier_rx: &mut UnboundedReceiver<Barrier>,
