@@ -61,6 +61,7 @@ pub(crate) struct CheckpointControl {
 impl CheckpointControl {
     pub(crate) fn new(
         databases: impl IntoIterator<Item = (DatabaseId, DatabaseCheckpointControl)>,
+        unconnected_databases: HashSet<DatabaseId>,
         hummock_version_stats: HummockVersionStats,
     ) -> Self {
         Self {
@@ -72,6 +73,14 @@ impl CheckpointControl {
                         DatabaseCheckpointControlStatus::Running(control),
                     )
                 })
+                .chain(unconnected_databases.into_iter().map(|database_id| {
+                    (
+                        database_id,
+                        DatabaseCheckpointControlStatus::Recovering(
+                            DatabaseRecoveringState::resetting(),
+                        ),
+                    )
+                }))
                 .collect(),
             hummock_version_stats,
         }
@@ -140,6 +149,12 @@ impl CheckpointControl {
             })
             .max_by_key(|epoch| epoch.value())
             .cloned()
+    }
+
+    pub(crate) fn recovering_databases(&self) -> impl Iterator<Item = DatabaseId> + '_ {
+        self.databases.iter().filter_map(|(database_id, database)| {
+            database.running_state().is_none().then_some(*database_id)
+        })
     }
 
     pub(crate) fn handle_new_barrier(

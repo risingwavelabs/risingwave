@@ -29,11 +29,12 @@ use tracing::{info, warn};
 use crate::barrier::checkpoint::control::DatabaseCheckpointControlStatus;
 use crate::barrier::checkpoint::{CheckpointControl, DatabaseCheckpointControl};
 use crate::barrier::complete_task::BarrierCompleteOutput;
+use crate::barrier::info::InflightDatabaseInfo;
 use crate::barrier::rpc::ControlStreamManager;
 use crate::barrier::worker::{
     get_retry_backoff_strategy, RetryBackoffFuture, RetryBackoffStrategy,
 };
-use crate::barrier::DatabaseRuntimeInfoSnapshot;
+use crate::barrier::{DatabaseRuntimeInfoSnapshot, InflightSubscriptionInfo};
 use crate::MetaResult;
 
 /// We can treat each database as a state machine of 3 states: `Running`, `Resetting` and `Initializing`.
@@ -90,6 +91,21 @@ pub(super) enum RecoveringStateAction {
 }
 
 impl DatabaseRecoveringState {
+    pub(super) fn resetting() -> Self {
+        let mut retry_backoff_strategy = get_retry_backoff_strategy();
+        let backoff_future = retry_backoff_strategy.next().unwrap();
+        Self {
+            stage: DatabaseRecoveringStage::Resetting {
+                remaining_workers: Default::default(),
+                reset_workers: Default::default(),
+                reset_request_id: 0,
+                backoff_future: Some(backoff_future),
+            },
+            next_reset_request_id: 1,
+            retry_backoff_strategy,
+        }
+    }
+
     fn next_retry(&mut self) -> (RetryBackoffFuture, u32) {
         let backoff_future = self
             .retry_backoff_strategy
@@ -321,6 +337,13 @@ impl CheckpointControl {
 pub(crate) struct EnterInitializing(pub(crate) HashMap<WorkerId, ResetDatabaseResponse>);
 
 impl DatabaseStatusAction<'_, EnterInitializing> {
+    pub(crate) fn inflight_infos(
+        &self,
+    ) -> impl Iterator<Item = (DatabaseId, &InflightSubscriptionInfo, &InflightDatabaseInfo)> + '_
+    {
+        self.control.inflight_infos()
+    }
+
     pub(crate) fn enter(
         self,
         runtime_info: DatabaseRuntimeInfoSnapshot,
