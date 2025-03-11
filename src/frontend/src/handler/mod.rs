@@ -379,7 +379,7 @@ pub async fn handle(
                     columns,
                     append_only,
                     on_conflict,
-                    with_version_column,
+                    with_version_column.map(|x| x.real_value()),
                     engine,
                 )
                 .await;
@@ -396,7 +396,7 @@ pub async fn handle(
                 source_watermarks,
                 append_only,
                 on_conflict,
-                with_version_column,
+                with_version_column.map(|x| x.real_value()),
                 cdc_table_info,
                 include_column_options,
                 webhook_info,
@@ -1102,6 +1102,19 @@ pub async fn handle(
             with_options,
             operation,
         } => alter_secret::handle_alter_secret(handler_args, name, with_options, operation).await,
+        Statement::AlterFragment {
+            fragment_id,
+            operation: AlterFragmentOperation::AlterBackfillRateLimit { rate_limit },
+        } => {
+            alter_streaming_rate_limit::handle_alter_streaming_rate_limit_by_id(
+                &handler_args.session,
+                PbThrottleTarget::Fragment,
+                fragment_id,
+                rate_limit,
+                StatementType::SET_VARIABLE,
+            )
+            .await
+        }
         Statement::StartTransaction { modes } => {
             transaction::handle_begin(handler_args, START_TRANSACTION, modes).await
         }
