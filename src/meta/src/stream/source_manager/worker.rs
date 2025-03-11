@@ -98,11 +98,10 @@ pub async fn create_source_worker(
     let enable_scale_in = connector_properties.enable_drop_split();
     let enable_adaptive_splits = connector_properties.enable_adaptive_splits();
     let (command_tx, command_rx) = tokio::sync::mpsc::unbounded_channel();
-    let sync_call_timeout = if let Some(timeout) = source.with_properties.get_sync_call_timeout() {
-        timeout
-    } else {
-        DEFAULT_SOURCE_TICK_TIMEOUT
-    };
+    let sync_call_timeout = source
+        .with_properties
+        .get_sync_call_timeout()
+        .unwrap_or(DEFAULT_SOURCE_TICK_TIMEOUT);
     let handle = {
         let mut worker = ConnectorSourceWorker::create(
             source,
