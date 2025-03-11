@@ -34,11 +34,10 @@ use crate::session::FrontendEnv;
 
 #[derive(Fields)]
 struct ExplainAnalyzeStreamJobOutput {
-    operator_id: String,
     identity: String,
     actor_ids: String,
-    output_rps: String,
-    avg_output_pending_ratio: String,
+    output_rows_per_second: String,
+    downstream_backpressure_ratio: String,
 }
 
 pub async fn handle_explain_analyze_stream_job(
@@ -151,7 +150,6 @@ pub async fn handle_explain_analyze_stream_job(
 /// This is an internal struct used ONLY for explain analyze stream job.
 #[derive(Debug)]
 struct StreamNode {
-    operator_id: u64,
     fragment_id: u32,
     identity: String,
     actor_ids: Vec<u32>,
@@ -161,7 +159,6 @@ struct StreamNode {
 impl StreamNode {
     fn new_for_dispatcher(fragment_id: u32) -> Self {
         StreamNode {
-            operator_id: fragment_id as u64,
             fragment_id,
             identity: "Dispatcher".to_owned(),
             actor_ids: vec![],
@@ -292,7 +289,6 @@ fn extract_stream_node_infos(
                     .map(|input| unique_operator_id(fragment_id, input.operator_id))
                     .collect();
                 StreamNode {
-                    operator_id,
                     fragment_id,
                     identity,
                     actor_ids: vec![],
@@ -407,7 +403,6 @@ fn render_graph_with_metrics(
             .map(|stats| (stats.total_output_throughput, stats.total_output_pending_ms))
             .unwrap_or((0, 0));
         let row = ExplainAnalyzeStreamJobOutput {
-            operator_id: node.operator_id.to_string(),
             identity: identity_rendered,
             actor_ids: node
                 .actor_ids
@@ -415,8 +410,9 @@ fn render_graph_with_metrics(
                 .map(|id| id.to_string())
                 .collect::<Vec<_>>()
                 .join(","),
-            output_rps: (output_throughput as f64 / profiling_duration_secs).to_string(),
-            avg_output_pending_ratio: (Duration::from_millis(output_latency).as_secs_f64()
+            output_rows_per_second: (output_throughput as f64 / profiling_duration_secs)
+                .to_string(),
+            downstream_backpressure_ratio: (Duration::from_millis(output_latency).as_secs_f64()
                 / node.actor_ids.len() as f64
                 / profiling_duration_secs)
                 .to_string(),

@@ -82,5 +82,6 @@ impl CountMap {
 
     pub fn gc(map: &mut HashMap<u64, Count>) {
         map.retain(|_, v| Arc::strong_count(v) > 1);
+        tracing::info!("Size of CountMap after GC: {}", map.len());
     }
 }
