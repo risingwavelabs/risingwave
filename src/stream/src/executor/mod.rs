@@ -39,10 +39,10 @@ use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation as PbMutation;
 use risingwave_pb::stream_plan::update_mutation::{DispatcherUpdate, MergeUpdate};
 use risingwave_pb::stream_plan::{
-    AlterConnectorPropsMutation, BarrierMutation, CombinedMutation, Dispatchers,
-    DropSubscriptionsMutation, PauseMutation, PbAddMutation, PbBarrier, PbBarrierMutation,
-    PbDispatcher, PbStreamMessageBatch, PbUpdateMutation, PbWatermark, ResumeMutation,
-    SinkConfigInfo, SourceChangeSplitMutation, StopMutation, SubscriptionUpstreamInfo,
+    AlterConnectorPropsMutation, BarrierMutation, CombinedMutation, ConnectorPropsInfo,
+    Dispatchers, DropSubscriptionsMutation, PauseMutation, PbAddMutation, PbBarrier,
+    PbBarrierMutation, PbDispatcher, PbStreamMessageBatch, PbUpdateMutation, PbWatermark,
+    ResumeMutation, SourceChangeSplitMutation, StopMutation, SubscriptionUpstreamInfo,
     ThrottleMutation,
 };
 use smallvec::SmallVec;
@@ -741,13 +741,13 @@ impl Mutation {
             }),
             Mutation::AlterConnectorProps(map) => {
                 PbMutation::AlterConnectorProps(AlterConnectorPropsMutation {
-                    sink_actor_config_info: map
+                    connector_props_infos: map
                         .iter()
                         .map(|(actor_id, options)| {
                             (
                                 *actor_id,
-                                SinkConfigInfo {
-                                    sink_config_info: options
+                                ConnectorPropsInfo {
+                                    connector_props_info: options
                                         .iter()
                                         .map(|(k, v)| (k.clone(), v.clone()))
                                         .collect(),
@@ -873,22 +873,24 @@ impl Mutation {
                     .map(|info| (info.subscriber_id, TableId::new(info.upstream_mv_table_id)))
                     .collect(),
             },
-            PbMutation::AlterConnectorProps(alter_sink_props) => Mutation::AlterConnectorProps(
-                alter_sink_props
-                    .sink_actor_config_info
-                    .iter()
-                    .map(|(actor_id, options)| {
-                        (
-                            *actor_id,
-                            options
-                                .sink_config_info
-                                .iter()
-                                .map(|(k, v)| (k.clone(), v.clone()))
-                                .collect(),
-                        )
-                    })
-                    .collect(),
-            ),
+            PbMutation::AlterConnectorProps(alter_connector_props) => {
+                Mutation::AlterConnectorProps(
+                    alter_connector_props
+                        .connector_props_infos
+                        .iter()
+                        .map(|(actor_id, options)| {
+                            (
+                                *actor_id,
+                                options
+                                    .connector_props_info
+                                    .iter()
+                                    .map(|(k, v)| (k.clone(), v.clone()))
+                                    .collect(),
+                            )
+                        })
+                        .collect(),
+                )
+            }
             PbMutation::Combined(CombinedMutation { mutations }) => match &mutations[..] {
                 [
                     BarrierMutation {

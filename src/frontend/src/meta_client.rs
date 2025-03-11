@@ -37,6 +37,7 @@ use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::meta::list_streaming_job_states_response::StreamingJobState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::{EventLog, PbThrottleTarget, RecoveryStatus};
+use risingwave_pb::secret::PbSecretRef;
 use risingwave_rpc_client::error::Result;
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 
@@ -135,6 +136,8 @@ pub trait FrontendMetaClient: Send + Sync {
         &self,
         sink_id: u32,
         changed_props: BTreeMap<String, String>,
+        changed_secret_refs: BTreeMap<String, PbSecretRef>,
+        connector_conn_ref: Option<u32>,
     ) -> Result<()>;
 }
 
@@ -324,7 +327,16 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         &self,
         sink_id: u32,
         changed_props: BTreeMap<String, String>,
+        changed_secret_refs: BTreeMap<String, PbSecretRef>,
+        connector_conn_ref: Option<u32>,
     ) -> Result<()> {
-        self.0.alter_sink_props(sink_id, changed_props).await
+        self.0
+            .alter_sink_props(
+                sink_id,
+                changed_props,
+                changed_secret_refs,
+                connector_conn_ref,
+            )
+            .await
     }
 }

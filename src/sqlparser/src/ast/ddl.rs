@@ -16,12 +16,11 @@
 #[cfg(not(feature = "std"))]
 use alloc::{boxed::Box, string::ToString, vec::Vec};
 use core::fmt;
-use std::collections::BTreeMap;
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::FormatEncodeOptions;
+use super::{FormatEncodeOptions, SqlOption};
 use crate::ast::{
     DataType, Expr, Ident, ObjectName, SecretRefValue, SetVariableValue, Value,
     display_comma_separated, display_separated,
@@ -196,7 +195,7 @@ pub enum AlterSinkOperation {
         rate_limit: i32,
     },
     SetSinkProps {
-        changed_props: BTreeMap<String, String>,
+        changed_props: Vec<SqlOption>,
     },
 }
 
@@ -472,11 +471,7 @@ impl fmt::Display for AlterSinkOperation {
                 write!(f, "SET SINK_RATE_LIMIT TO {}", rate_limit)
             }
             AlterSinkOperation::SetSinkProps { changed_props } => {
-                let changed_props = changed_props
-                    .iter()
-                    .map(|(k, v)| format!("{} TO {}", k, v))
-                    .collect::<Vec<String>>();
-                write!(f, "SET {}", changed_props.join(", "))
+                write!(f, "CONNECTOR WITH {:?}", changed_props)
             }
         }
     }

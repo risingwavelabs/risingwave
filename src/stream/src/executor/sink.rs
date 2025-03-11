@@ -28,7 +28,7 @@ use risingwave_common_estimate_size::EstimateSize;
 use risingwave_common_estimate_size::collections::EstimatedVec;
 use risingwave_common_rate_limit::RateLimit;
 use risingwave_connector::dispatch_sink;
-use risingwave_connector::sink::catalog::SinkType;
+use risingwave_connector::sink::catalog::{SinkId, SinkType};
 use risingwave_connector::sink::log_store::{
     LogReader, LogReaderExt, LogReaderMetrics, LogStoreFactory, LogWriter, LogWriterExt,
     LogWriterMetrics,
@@ -262,6 +262,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                         processed_input,
                         log_writer.monitored(log_writer_metrics),
                         actor_id,
+                        sink_id,
                         rate_limit_tx,
                         update_config_tx,
                         rebuild_sink_tx,
@@ -297,6 +298,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         input: impl MessageStream,
         mut log_writer: W,
         actor_id: ActorId,
+        sink_id: SinkId,
         rate_limit_tx: UnboundedSender<RateLimit>,
         update_config_tx: UnboundedSender<HashMap<String, String>>,
         rebuild_sink_tx: UnboundedSender<(Arc<Bitmap>, oneshot::Sender<()>)>,
@@ -372,11 +374,11 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                 }
                             }
                             Mutation::AlterConnectorProps(config) => {
-                                if let Some(map) = config.get(&actor_id) {
+                                if let Some(map) = config.get(&sink_id.sink_id) {
                                     if let Err(e) = update_config_tx.send(map.clone()) {
                                         error!(
                                             error = %e.as_report(),
-                                            "fail to send sink alter config"
+                                            "fail to send sink alter props"
                                         );
                                         return Err(StreamExecutorError::from(
                                             e.to_report_string(),
@@ -647,7 +649,6 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                         match log_reader.rewind().await {
                             Ok(()) => {
                                 sink_param.properties = config.into_iter().collect();
-                                println!("sink_param.properties: {:?}", sink_param.properties);
                                 sink.update_config(sink_param.properties.clone())
                                     .map_err(|e| {
                                         StreamExecutorError::from((e, sink_param.sink_id.sink_id))

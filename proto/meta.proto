@@ -9,6 +9,7 @@ import "hummock.proto";
 import "source.proto";
 import "stream_plan.proto";
 import "user.proto";
+import "secret.proto";
 
 option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
@@ -332,7 +333,9 @@ message AlterConnectorPropsRequest {
 
   uint32 object_id = 1;
   map<string, string> changed_props = 2;
-  AlterConnectorPropsObject object_type = 3;
+  map<string, secret.SecretRef> changed_secret_refs = 3;
+  optional uint32 connector_conn_ref = 4;
+  AlterConnectorPropsObject object_type = 5;
 }
 
 message AlterConnectorPropsResponse {}

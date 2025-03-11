@@ -33,9 +33,9 @@ use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
 use risingwave_pb::stream_plan::update_mutation::*;
 use risingwave_pb::stream_plan::{
-    AddMutation, AlterConnectorPropsMutation, BarrierMutation, CombinedMutation, Dispatcher,
-    Dispatchers, DropSubscriptionsMutation, PauseMutation, ResumeMutation, SinkConfigInfo,
-    SourceChangeSplitMutation, StopMutation, StreamActor, SubscriptionUpstreamInfo,
+    AddMutation, AlterConnectorPropsMutation, BarrierMutation, CombinedMutation,
+    ConnectorPropsInfo, Dispatcher, Dispatchers, DropSubscriptionsMutation, PauseMutation,
+    ResumeMutation, SourceChangeSplitMutation, StopMutation, StreamActor, SubscriptionUpstreamInfo,
     ThrottleMutation, UpdateMutation,
 };
 use risingwave_pb::stream_service::BarrierCompleteResponse;
@@ -964,17 +964,17 @@ impl Command {
                     }],
                 })),
                 Command::AlterConnectorProps(config) => {
-                    let mut sink_actor_config_info = HashMap::default();
+                    let mut connector_props_infos = HashMap::default();
                     for (k, v) in config {
-                        sink_actor_config_info.insert(
+                        connector_props_infos.insert(
                             *k,
-                            SinkConfigInfo {
-                                sink_config_info: v.clone(),
+                            ConnectorPropsInfo {
+                                connector_props_info: v.clone(),
                             },
                         );
                     }
                     Some(Mutation::AlterConnectorProps(AlterConnectorPropsMutation {
-                        sink_actor_config_info,
+                        connector_props_infos,
                     }))
                 }
             };
