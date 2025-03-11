@@ -45,7 +45,7 @@ pub(crate) struct CreatingStreamingJobControl {
     pub(super) snapshot_backfill_info: SnapshotBackfillInfo,
     backfill_epoch: u64,
 
-    graph_info: InflightStreamingJobInfo,
+    pub(super) graph_info: InflightStreamingJobInfo,
 
     barrier_control: CreatingStreamingJobBarrierControl,
     status: CreatingStreamingJobStatus,
@@ -292,7 +292,7 @@ impl CreatingStreamingJobControl {
         worker_id: WorkerId,
         resp: BarrierCompleteResponse,
         control_stream_manager: &mut ControlStreamManager,
-    ) -> MetaResult<()> {
+    ) -> MetaResult<bool> {
         let prev_barriers_to_inject = self.status.update_progress(&resp.create_mview_progress);
         self.barrier_control.collect(epoch, worker_id, resp);
         if let Some(prev_barriers_to_inject) = prev_barriers_to_inject {
@@ -309,18 +309,18 @@ impl CreatingStreamingJobControl {
                 )?;
             }
         }
-        Ok(())
+        Ok(self.should_merge_to_upstream())
     }
 
-    pub(super) fn should_merge_to_upstream(&self) -> Option<InflightStreamingJobInfo> {
+    pub(super) fn should_merge_to_upstream(&self) -> bool {
         if let CreatingStreamingJobStatus::ConsumingLogStore {
             ref log_store_progress_tracker,
         } = &self.status
             && log_store_progress_tracker.is_finished()
         {
-            Some(self.graph_info.clone())
+            true
         } else {
-            None
+            false
         }
     }
 }
