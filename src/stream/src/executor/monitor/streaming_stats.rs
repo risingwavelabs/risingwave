@@ -49,10 +49,10 @@ pub struct StreamingMetrics {
     pub executor_row_count: RelabeledGuardedIntCounterVec<3>,
 
     // Profiling Metrics:
-    // Aggregated per stream node (e.g. hash agg, join, project, etc...)
-    // Only active when profiling, should be dropped otherwise.
-    pub stream_node_output_row_count: CountMap,
-    pub stream_node_output_blocking_duration_ms: CountMap,
+    // Aggregated per operator rather than per actor.
+    // These are purely in-memory, never collected by prometheus.
+    pub mem_stream_node_output_row_count: CountMap,
+    pub mem_stream_node_output_blocking_duration_ms: CountMap,
 
     // Streaming actor metrics from tokio (disabled by default)
     actor_execution_time: LabelGuardedGaugeVec<1>,
@@ -1074,8 +1074,8 @@ impl StreamingMetrics {
         Self {
             level,
             executor_row_count,
-            stream_node_output_row_count,
-            stream_node_output_blocking_duration_ms,
+            mem_stream_node_output_row_count: stream_node_output_row_count,
+            mem_stream_node_output_blocking_duration_ms: stream_node_output_blocking_duration_ms,
             actor_execution_time,
             actor_scheduled_duration,
             actor_scheduled_cnt,
@@ -1551,10 +1551,10 @@ impl StreamingMetrics {
         if enable_profiling {
             ProfileMetricsImpl::ProfileMetrics(ProfileMetrics {
                 stream_node_output_row_count: self
-                    .stream_node_output_row_count
+                    .mem_stream_node_output_row_count
                     .new_or_get_counter(operator_id),
                 stream_node_output_blocking_duration_ms: self
-                    .stream_node_output_blocking_duration_ms
+                    .mem_stream_node_output_blocking_duration_ms
                     .new_or_get_counter(operator_id),
             })
         } else {
