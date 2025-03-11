@@ -1102,6 +1102,19 @@ pub async fn handle(
             with_options,
             operation,
         } => alter_secret::handle_alter_secret(handler_args, name, with_options, operation).await,
+        Statement::AlterFragment {
+            fragment_id,
+            operation: AlterFragmentOperation::AlterBackfillRateLimit { rate_limit },
+        } => {
+            alter_streaming_rate_limit::handle_alter_streaming_rate_limit_by_id(
+                &handler_args.session,
+                PbThrottleTarget::Fragment,
+                fragment_id,
+                rate_limit,
+                StatementType::SET_VARIABLE,
+            )
+            .await
+        }
         Statement::StartTransaction { modes } => {
             transaction::handle_begin(handler_args, START_TRANSACTION, modes).await
         }

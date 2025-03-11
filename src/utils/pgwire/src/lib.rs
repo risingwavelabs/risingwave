@@ -23,6 +23,7 @@
 
 pub mod error;
 pub mod error_or_notice;
+pub mod memory_manager;
 pub mod net;
 pub mod pg_extended;
 pub mod pg_field_descriptor;
