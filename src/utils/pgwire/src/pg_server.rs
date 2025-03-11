@@ -349,9 +349,10 @@ mod tests {
     use tokio_postgres::NoTls;
 
     use crate::error::PsqlResult;
+    use crate::memory_manager::MessageMemoryManager;
     use crate::pg_field_descriptor::PgFieldDescriptor;
     use crate::pg_message::TransactionStatus;
-    use crate::pg_protocol::{ConnectionContext, MessageMemoryManager};
+    use crate::pg_protocol::ConnectionContext;
     use crate::pg_response::{PgResponse, RowSetResult, StatementType};
     use crate::pg_server::{
         BoxedError, ExecContext, ExecContextGuard, Session, SessionId, SessionManager,
