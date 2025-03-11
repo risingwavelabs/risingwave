@@ -179,7 +179,7 @@ pub(super) struct BarrierCompleteOutput {
 impl CompletingTask {
     pub(super) fn next_completed_barrier<'a>(
         &'a mut self,
-        scheduled_barriers: &mut PeriodicBarriers,
+        periodic_barriers: &mut PeriodicBarriers,
         checkpoint_control: &mut CheckpointControl,
         control_stream_manager: &mut ControlStreamManager,
         context: &Arc<impl GlobalBarrierWorkerContext>,
@@ -189,7 +189,7 @@ impl CompletingTask {
         // it has been collected.
         if let CompletingTask::None = self {
             if let Some(task) = checkpoint_control
-                .next_complete_barrier_task(Some((scheduled_barriers, control_stream_manager)))
+                .next_complete_barrier_task(Some((periodic_barriers, control_stream_manager)))
             {
                 {
                     let epochs_to_ack = task.epochs_to_ack();
