@@ -33,7 +33,7 @@ use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
 use risingwave_pb::stream_plan::update_mutation::*;
 use risingwave_pb::stream_plan::{
-    AddMutation, ConnectorPropsChangeMutation, BarrierMutation, CombinedMutation,
+    AddMutation, BarrierMutation, CombinedMutation, ConnectorPropsChangeMutation,
     ConnectorPropsInfo, Dispatcher, Dispatchers, DropSubscriptionsMutation, PauseMutation,
     ResumeMutation, SourceChangeSplitMutation, StopMutation, StreamActor, SubscriptionUpstreamInfo,
     ThrottleMutation, UpdateMutation,
@@ -52,7 +52,8 @@ use crate::model::{
     ActorId, ActorUpstreams, DispatcherId, FragmentId, StreamJobActorsToCreate, StreamJobFragments,
 };
 use crate::stream::{
-    build_actor_connector_splits, ConnectorPropsChange, JobReschedulePostUpdates, SplitAssignment, ThrottleConfig
+    ConnectorPropsChange, JobReschedulePostUpdates, SplitAssignment, ThrottleConfig,
+    build_actor_connector_splits,
 };
 
 /// [`Reschedule`] is for the [`Command::RescheduleFragment`], which is used for rescheduling actors
@@ -972,9 +973,11 @@ impl Command {
                             },
                         );
                     }
-                    Some(Mutation::ConnectorPropsChange(ConnectorPropsChangeMutation {
-                        connector_props_infos,
-                    }))
+                    Some(Mutation::ConnectorPropsChange(
+                        ConnectorPropsChangeMutation {
+                            connector_props_infos,
+                        },
+                    ))
                 }
             };
 

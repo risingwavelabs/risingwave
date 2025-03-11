@@ -39,7 +39,7 @@ use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation as PbMutation;
 use risingwave_pb::stream_plan::update_mutation::{DispatcherUpdate, MergeUpdate};
 use risingwave_pb::stream_plan::{
-    ConnectorPropsChangeMutation, BarrierMutation, CombinedMutation, ConnectorPropsInfo,
+    BarrierMutation, CombinedMutation, ConnectorPropsChangeMutation, ConnectorPropsInfo,
     Dispatchers, DropSubscriptionsMutation, PauseMutation, PbAddMutation, PbBarrier,
     PbBarrierMutation, PbDispatcher, PbStreamMessageBatch, PbUpdateMutation, PbWatermark,
     ResumeMutation, SourceChangeSplitMutation, StopMutation, SubscriptionUpstreamInfo,
