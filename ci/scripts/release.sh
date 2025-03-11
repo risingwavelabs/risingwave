@@ -33,7 +33,6 @@ mvn -v
 echo "--- Install rust"
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify-path --default-toolchain none -y
 source "$HOME/.cargo/env"
-rustup toolchain install --profile minimal
 rustup show
 source ci/scripts/common.sh
 unset RUSTC_WRAPPER # disable sccache
