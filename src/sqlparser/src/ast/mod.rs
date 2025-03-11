@@ -1302,7 +1302,7 @@ pub enum Statement {
         /// On conflict behavior
         on_conflict: Option<OnConflict>,
         /// with_version_column behind on conflict
-        with_version_column: Option<String>,
+        with_version_column: Option<Ident>,
         /// `AS ( query )`
         query: Option<Box<Query>>,
         /// `FROM cdc_source TABLE database_name.table_name`
