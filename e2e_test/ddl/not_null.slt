@@ -91,6 +91,7 @@ DROP TABLE test_array;
 
 ### Test stream input
 
+# TODO(Kexiang): enforce DEFAULT when altering table with NOT NULL, e.g., ALTER TABLE test_person ADD weight FLOAT DEFAULT 5 NOT NULL
 statement ok
 CREATE TABLE test_person (id INT PRIMARY KEY NOT NULL, name VARCHAR NULL, age INT NOT NULL, height FLOAT NOT NULL);
 

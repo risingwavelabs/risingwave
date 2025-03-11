@@ -786,10 +786,10 @@ impl PlanRoot {
             .map(|c| c.column_desc.clone())
             .collect();
 
-        let mut not_null_keys = vec![];
+        let mut not_null_idxs = vec![];
         for (idx, column) in column_descs.iter().enumerate() {
             if !column.nullable {
-                not_null_keys.push(idx);
+                not_null_idxs.push(idx);
             }
         }
 
@@ -919,9 +919,9 @@ impl PlanRoot {
 
         let mut stream_plan = inline_session_timezone_in_exprs(context, stream_plan)?;
 
-        if !not_null_keys.is_empty() {
+        if !not_null_idxs.is_empty() {
             stream_plan =
-                StreamFilter::filter_out_any_null_keys(stream_plan.clone(), &not_null_keys);
+                StreamFilter::filter_out_any_null_rows(stream_plan.clone(), &not_null_idxs);
         }
 
         StreamMaterialize::create_for_table(

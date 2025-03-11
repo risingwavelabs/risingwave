@@ -52,10 +52,10 @@ impl StreamFilter {
         &self.core.predicate
     }
 
-    /// Create a `StreamFilter` to filter out rows where any key is null.
-    pub fn filter_out_any_null_keys(input: PlanRef, key: &[usize]) -> PlanRef {
+    /// Create a `StreamFilter` to filter out rows where null values violate NOT NULL constraints.
+    pub fn filter_out_any_null_rows(input: PlanRef, not_null_idxs: &[usize]) -> PlanRef {
         let schema = input.schema();
-        let cond = ExprImpl::and(key.iter().map(|&i| {
+        let cond = ExprImpl::and(not_null_idxs.iter().map(|&i| {
             FunctionCall::new_unchecked(
                 ExprType::IsNotNull,
                 vec![InputRef::new(i, schema.fields()[i].data_type.clone()).into()],
