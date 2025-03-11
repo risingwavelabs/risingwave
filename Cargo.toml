@@ -69,7 +69,7 @@ members = [
     "src/utils/workspace-config",
     "src/workspace-hack",
 ]
-exclude = ["e2e_test/udf/wasm", "e2e_test/source_inline/pubsub", "lints"]
+exclude = ["e2e_test/source_inline/pubsub", "e2e_test/udf/wasm", "lints"]
 resolver = "2"
 
 [workspace.package]
@@ -327,7 +327,7 @@ redundant_explicit_links = "allow"
 lto = "off"
 # use parallel frontend to speed up build
 # TODO: may consider applying to release/production profile as well
-rustflags = ["-Z", "threads=8"]
+# rustflags = ["-Z", "threads=8"]
 
 [profile.release]
 debug = "full"
