@@ -56,12 +56,9 @@ impl Sink for TestSink {
     async fn new_log_sinker(
         &self,
         writer_param: SinkWriterParam,
-    ) -> crate::sink::Result<(Self::LogSinker, Option<u64>)> {
+    ) -> crate::sink::Result<Self::LogSinker> {
         let metrics = SinkWriterMetrics::new(&writer_param);
-        Ok((
-            build_box_writer(self.param.clone(), writer_param).into_log_sinker(metrics),
-            None,
-        ))
+        Ok(build_box_writer(self.param.clone(), writer_param).into_log_sinker(metrics))
     }
 }
 

@@ -319,10 +319,7 @@ impl Sink for KafkaSink {
 
     const SINK_NAME: &'static str = KAFKA_SINK;
 
-    async fn new_log_sinker(
-        &self,
-        _writer_param: SinkWriterParam,
-    ) -> Result<(Self::LogSinker, Option<u64>)> {
+    async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         let formatter = SinkFormatterImpl::new(
             &self.format_desc,
             self.schema.clone(),
@@ -341,12 +338,9 @@ impl Sink for KafkaSink {
             .unwrap_or(KAFKA_WRITER_MAX_QUEUE_SIZE) as f32
             * KAFKA_WRITER_MAX_QUEUE_SIZE_RATIO) as usize;
 
-        Ok((
-            KafkaSinkWriter::new(self.config.clone(), formatter)
-                .await?
-                .into_log_sinker(max_delivery_buffer_size),
-            None,
-        ))
+        Ok(KafkaSinkWriter::new(self.config.clone(), formatter)
+            .await?
+            .into_log_sinker(max_delivery_buffer_size))
     }
 
     async fn validate(&self) -> Result<()> {

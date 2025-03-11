@@ -36,9 +36,133 @@
       │   └─StreamTableScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
       └─StreamExchange { dist: HashShard(t2.v1) }
         └─StreamTableScan { table: t2, columns: [t2.v1, t2.v2, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+- sql: CREATE TABLE t1(v1 varchar, v2 int, v3 int); CREATE TABLE t2(v1 varchar, v2 int, v3 int); SELECT t1.v1 t1_v1, t1.v2 t1_v2, t2.v1 t2_v1, t2.v2 t2_v2 FROM t1 ASOF JOIN t2 ON t1.v1 = t2.v1 and t1.v2 *2 < t2.v2 where t1.v2 < 10 and t2.v2 < 10;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchHashJoin { type: AsofInner, predicate: t1.v1 = t2.v1 AND ($expr1 < t2.v2), output: [t1.v1, t1.v2, t2.v1, t2.v2] }
+      ├─BatchExchange { order: [], dist: HashShard(t1.v1) }
+      │ └─BatchProject { exprs: [t1.v1, t1.v2, (t1.v2 * 2:Int32) as $expr1] }
+      │   └─BatchFilter { predicate: (t1.v2 < 10:Int32) }
+      │     └─BatchScan { table: t1, columns: [t1.v1, t1.v2], distribution: SomeShard }
+      └─BatchExchange { order: [], dist: HashShard(t2.v1) }
+        └─BatchFilter { predicate: (t2.v2 < 10:Int32) }
+          └─BatchScan { table: t2, columns: [t2.v1, t2.v2], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [t1_v1, t1_v2, t2_v1, t2_v2, t1._row_id(hidden), t2._row_id(hidden)], stream_key: [t1._row_id, t2._row_id, t1_v1], pk_columns: [t1._row_id, t2._row_id, t1_v1], pk_conflict: NoCheck }
+    └─StreamAsOfJoin { type: AsofInner, predicate: t1.v1 = t2.v1 AND ($expr1 < t2.v2), output: [t1.v1, t1.v2, t2.v1, t2.v2, t1._row_id, t2._row_id] }
+      ├─StreamExchange { dist: HashShard(t1.v1) }
+      │ └─StreamProject { exprs: [t1.v1, t1.v2, (t1.v2 * 2:Int32) as $expr1, t1._row_id] }
+      │   └─StreamFilter { predicate: (t1.v2 < 10:Int32) }
+      │     └─StreamTableScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+      └─StreamExchange { dist: HashShard(t2.v1) }
+        └─StreamFilter { predicate: (t2.v2 < 10:Int32) }
+          └─StreamTableScan { table: t2, columns: [t2.v1, t2.v2, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+- sql: CREATE TABLE t1(v1 varchar, v2 int, v3 int); CREATE TABLE t2(v1 varchar, v2 int, v3 int); SELECT t1.v1 t1_v1, t1.v2 t1_v2, t2.v1 t2_v1, t2.v2 t2_v2 FROM t1 ASOF LEFT JOIN t2 ON t1.v1 = t2.v1 and t1.v2 *2 < t2.v2 where t1.v2 < 10 and t2.v2 < 10;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchFilter { predicate: (t2.v2 < 10:Int32) }
+      └─BatchHashJoin { type: AsofLeftOuter, predicate: t1.v1 = t2.v1 AND ($expr1 < t2.v2), output: [t1.v1, t1.v2, t2.v1, t2.v2] }
+        ├─BatchExchange { order: [], dist: HashShard(t1.v1) }
+        │ └─BatchProject { exprs: [t1.v1, t1.v2, (t1.v2 * 2:Int32) as $expr1] }
+        │   └─BatchFilter { predicate: (t1.v2 < 10:Int32) }
+        │     └─BatchScan { table: t1, columns: [t1.v1, t1.v2], distribution: SomeShard }
+        └─BatchExchange { order: [], dist: HashShard(t2.v1) }
+          └─BatchScan { table: t2, columns: [t2.v1, t2.v2], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [t1_v1, t1_v2, t2_v1, t2_v2, t1._row_id(hidden), t2._row_id(hidden)], stream_key: [t1._row_id, t2._row_id, t1_v1], pk_columns: [t1._row_id, t2._row_id, t1_v1], pk_conflict: NoCheck }
+    └─StreamFilter { predicate: (t2.v2 < 10:Int32) }
+      └─StreamAsOfJoin { type: AsofLeftOuter, predicate: t1.v1 = t2.v1 AND ($expr1 < t2.v2), output: [t1.v1, t1.v2, t2.v1, t2.v2, t1._row_id, t2._row_id] }
+        ├─StreamExchange { dist: HashShard(t1.v1) }
+        │ └─StreamProject { exprs: [t1.v1, t1.v2, (t1.v2 * 2:Int32) as $expr1, t1._row_id] }
+        │   └─StreamFilter { predicate: (t1.v2 < 10:Int32) }
+        │     └─StreamTableScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+        └─StreamExchange { dist: HashShard(t2.v1) }
+          └─StreamTableScan { table: t2, columns: [t2.v1, t2.v2, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+- sql: CREATE TABLE t1(v1 varchar, v2 int, v3 int); CREATE TABLE t2(v1 varchar, v2 int, v3 int); SELECT t1.v1 t1_v1, t1.v2 t1_v2, t2.v1 t2_v1, t2.v2 t2_v2 FROM t1 ASOF LEFT JOIN t2 ON t1.v1 = t2.v1 and t1.v2 *2 < t2.v2 and t1.v2 < 10 and t2.v2 < 10;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchHashJoin { type: AsofLeftOuter, predicate: t1.v1 = t2.v1 AND ($expr1 < t2.v2), output: [t1.v1, t1.v2, t2.v1, t2.v2] }
+      ├─BatchExchange { order: [], dist: HashShard(t1.v1) }
+      │ └─BatchProject { exprs: [t1.v1, t1.v2, (t1.v2 * 2:Int32) as $expr1] }
+      │   └─BatchFilter { predicate: (t1.v2 < 10:Int32) }
+      │     └─BatchScan { table: t1, columns: [t1.v1, t1.v2], distribution: SomeShard }
+      └─BatchExchange { order: [], dist: HashShard(t2.v1) }
+        └─BatchFilter { predicate: (t2.v2 < 10:Int32) }
+          └─BatchScan { table: t2, columns: [t2.v1, t2.v2], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [t1_v1, t1_v2, t2_v1, t2_v2, t1._row_id(hidden), t2._row_id(hidden)], stream_key: [t1._row_id, t2._row_id, t1_v1], pk_columns: [t1._row_id, t2._row_id, t1_v1], pk_conflict: NoCheck }
+    └─StreamAsOfJoin { type: AsofLeftOuter, predicate: t1.v1 = t2.v1 AND ($expr1 < t2.v2), output: [t1.v1, t1.v2, t2.v1, t2.v2, t1._row_id, t2._row_id] }
+      ├─StreamExchange { dist: HashShard(t1.v1) }
+      │ └─StreamProject { exprs: [t1.v1, t1.v2, (t1.v2 * 2:Int32) as $expr1, t1._row_id] }
+      │   └─StreamFilter { predicate: (t1.v2 < 10:Int32) }
+      │     └─StreamTableScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+      └─StreamExchange { dist: HashShard(t2.v1) }
+        └─StreamFilter { predicate: (t2.v2 < 10:Int32) }
+          └─StreamTableScan { table: t2, columns: [t2.v1, t2.v2, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
 - sql: CREATE TABLE t1(v1 varchar, v2 int, v3 int); CREATE TABLE t2(v1 varchar, v2 int, v3 int); SELECT t1.v1 t1_v1, t1.v2 t1_v2, t2.v1 t2_v1, t2.v2 t2_v2 FROM t1 ASOF JOIN t2 ON t1.v1 = t2.v1 and t1.v2 < t2.v2 and t1.v3 < t2.v3;
   batch_error: 'Invalid input syntax: AsOf join requires exactly 1 ineuquality condition'
   stream_error: 'Invalid input syntax: AsOf join requires exactly 1 ineuquality condition'
 - sql: CREATE TABLE t1(v1 varchar, v2 int, v3 int); CREATE TABLE t2(v1 varchar, v2 int, v3 int); SELECT t1.v1 t1_v1, t1.v2 t1_v2, t2.v1 t2_v1, t2.v2 t2_v2 FROM t1 ASOF JOIN t2 ON t1.v2 < t2.v2;
   batch_error: 'Invalid input syntax: AsOf join requires at least 1 equal condition'
   stream_error: 'Invalid input syntax: AsOf join requires at least 1 equal condition'
+- sql: |
+    create table t (a int, b int);
+    create table t2 (c int, d int);
+    create index idx on t2(d) include (c);
+    select * from t asof join t2 on t.b = t2.d and t.a < t2.c;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchLookupJoin { type: AsofInner, predicate: t.b = idx.d AND (t.a < idx.c), output: all, lookup table: idx }
+      └─BatchExchange { order: [], dist: UpstreamHashShard(t.b) }
+        └─BatchScan { table: t, columns: [t.a, t.b], distribution: SomeShard }
+- sql: |
+    create table t (a int, b int);
+    create table t2 (c int, d int);
+    create index idx on t2(d) include (c);
+    create index idx2 on t2(c, d);
+    create index idx3 on t2(c) include(d);
+    select * from t asof join t2 on t.a = t2.c and t.b < t2.d;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchLookupJoin { type: AsofInner, predicate: t.a = idx2.c AND (t.b < idx2.d), output: all, lookup table: idx2 }
+      └─BatchExchange { order: [], dist: UpstreamHashShard(t.a) }
+        └─BatchScan { table: t, columns: [t.a, t.b], distribution: SomeShard }
+- sql: |
+    create table t (a int, b int);
+    create table t2 (c int, d int);
+    create index idx on t2(d) include (c);
+    select * from t asof join t2 on t.b = t2.d;
+  batch_error: 'Invalid input syntax: AsOf join requires exactly 1 ineuquality condition'
+- sql: |
+    create table t (a int, b int);
+    create table t2 (c int, d int);
+    create index idx on t2(c, d);
+    select * from t asof join t2 on t.b = t2.d and t.a = t2.c and t.a < t2.c;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchLookupJoin { type: AsofInner, predicate: t.a = idx.c AND t.b = idx.d AND (t.a < idx.c), output: all, lookup table: idx }
+      └─BatchExchange { order: [], dist: UpstreamHashShard(t.a) }
+        └─BatchScan { table: t, columns: [t.a, t.b], distribution: SomeShard }
+- name: test index join prefix lookup
+  sql: |
+    create table t (a int, b int);
+    create table t2 (c int, d int);
+    create index idx on t2(c, d) distributed by (c);
+    select * from t asof join t2 on t.a = t2.c and t.b < t2.d;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchLookupJoin { type: AsofInner, predicate: t.a = idx.c AND (t.b < idx.d), output: all, lookup table: idx }
+      └─BatchExchange { order: [], dist: UpstreamHashShard(t.a) }
+        └─BatchScan { table: t, columns: [t.a, t.b], distribution: SomeShard }
+- name: shouldn't be a lookup join
+  sql: |
+    create table t(a int, b int);
+    create index idx on t(a, b) distributed by (a);
+    select * from t t1 asof join t t2 on t1.b = t2.b and t1.a < t2.a;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchHashJoin { type: AsofInner, predicate: t.b = t.b AND (t.a < t.a), output: all }
+      ├─BatchExchange { order: [], dist: HashShard(t.b) }
+      │ └─BatchScan { table: t, columns: [t.a, t.b], distribution: SomeShard }
+      └─BatchExchange { order: [], dist: HashShard(t.b) }
+        └─BatchScan { table: t, columns: [t.a, t.b], distribution: SomeShard }

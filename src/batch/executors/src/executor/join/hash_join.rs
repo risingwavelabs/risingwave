@@ -214,6 +214,10 @@ impl<K> EquiJoinParams<K> {
             asof_desc,
         }
     }
+
+    pub(crate) fn is_asof_join(&self) -> bool {
+        self.asof_desc.is_some()
+    }
 }
 
 /// State variables used in left outer/semi/anti join and full outer join.
@@ -694,7 +698,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             );
 
             if let Some(cond) = self.cond.as_ref()
-                && params.asof_desc.is_none()
+                && !params.is_asof_join()
             {
                 let stream = match self.join_type {
                     JoinType::Inner => Self::do_inner_join_with_non_equi_condition(params, cond),

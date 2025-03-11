@@ -146,7 +146,7 @@ impl<S: OpendalSinkBackend> Sink for FileSink<S> {
     async fn new_log_sinker(
         &self,
         writer_param: crate::sink::SinkWriterParam,
-    ) -> Result<(Self::LogSinker, Option<u64>)> {
+    ) -> Result<Self::LogSinker> {
         let writer = OpenDalSinkWriter::new(
             self.op.clone(),
             &self.path,
@@ -156,7 +156,7 @@ impl<S: OpendalSinkBackend> Sink for FileSink<S> {
             self.engine_type.clone(),
             self.batching_strategy.clone(),
         )?;
-        Ok((BatchingLogSinker::new(writer), None))
+        Ok(BatchingLogSinker::new(writer))
     }
 }
 

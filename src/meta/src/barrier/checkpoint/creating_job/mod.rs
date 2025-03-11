@@ -78,8 +78,8 @@ impl CreatingStreamingJobControl {
             info.stream_job_fragments
                 .actors_to_create()
                 .flat_map(|(fragment_id, _, actors)| {
-                    actors.map(move |(actor, _)| {
-                        (actor.actor_id, fragment_id, actor.dispatcher.as_slice())
+                    actors.map(move |(actor, dispatchers, _)| {
+                        (actor.actor_id, fragment_id, dispatchers.as_slice())
                     })
                 })
                 .chain(
@@ -95,7 +95,7 @@ impl CreatingStreamingJobControl {
         );
         let mut actors_to_create = StreamJobActorsToCreate::default();
         for (fragment_id, node, actors) in info.stream_job_fragments.actors_to_create() {
-            for (actor, worker_id) in actors {
+            for (actor, dispatchers, worker_id) in actors {
                 actors_to_create
                     .entry(worker_id)
                     .or_default()
@@ -105,6 +105,7 @@ impl CreatingStreamingJobControl {
                     .push((
                         actor.clone(),
                         actor_upstreams.remove(&actor.actor_id).unwrap_or_default(),
+                        dispatchers.clone(),
                     ))
             }
         }

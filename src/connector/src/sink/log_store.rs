@@ -172,10 +172,12 @@ pub trait LogReader: Send + Sized + 'static {
     /// Initialize the log reader. Usually function as waiting for log writer to be initialized.
     fn init(&mut self) -> impl Future<Output = LogStoreResult<()>> + Send + '_;
 
-    /// Set the rewind start offset. If it is None, it indicates to rewind from the last truncate offset.
-    fn start_offset(&mut self, _start_offset: Option<u64>) -> LogStoreResult<()> {
-        Ok(())
-    }
+    /// Build stream from given `start_offset` or aligned start offset recorded previously.
+    fn build_stream_from_start_offset(
+        &mut self,
+        start_offset: Option<u64>,
+    ) -> impl Future<Output = LogStoreResult<()>> + Send + '_;
+
     /// Emit the next item.
     ///
     /// The implementation should ensure that the future is cancellation safe.
@@ -233,6 +235,13 @@ impl<F: Fn(StreamChunk) -> StreamChunk + Send + 'static, R: LogReader> LogReader
     fn rewind(&mut self) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
         self.inner.rewind()
     }
+
+    fn build_stream_from_start_offset(
+        &mut self,
+        start_offset: Option<u64>,
+    ) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
+        self.inner.build_stream_from_start_offset(start_offset)
+    }
 }
 
 pub struct BackpressureMonitoredLogReader<R: LogReader> {
@@ -279,6 +288,13 @@ impl<R: LogReader> LogReader for BackpressureMonitoredLogReader<R> {
         self.inner.rewind().inspect_ok(|_| {
             self.wait_new_future_start_time = None;
         })
+    }
+
+    fn build_stream_from_start_offset(
+        &mut self,
+        start_offset: Option<u64>,
+    ) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
+        self.inner.build_stream_from_start_offset(start_offset)
     }
 }
 
@@ -337,6 +353,13 @@ impl<R: LogReader> LogReader for MonitoredLogReader<R> {
 
     fn rewind(&mut self) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
         self.inner.rewind().instrument_await("log_reader_rewind")
+    }
+
+    fn build_stream_from_start_offset(
+        &mut self,
+        start_offset: Option<u64>,
+    ) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
+        self.inner.build_stream_from_start_offset(start_offset)
     }
 }
 
@@ -549,6 +572,13 @@ impl<R: LogReader> LogReader for RateLimitedLogReader<R> {
         self.core.consumed_offset_queue.clear();
         self.core.next_chunk_id = 0;
         self.core.inner.rewind()
+    }
+
+    fn build_stream_from_start_offset(
+        &mut self,
+        start_offset: Option<u64>,
+    ) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
+        self.core.inner.build_stream_from_start_offset(start_offset)
     }
 }
 

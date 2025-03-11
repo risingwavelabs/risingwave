@@ -150,25 +150,63 @@ fn make_prost_privilege(
                 grant_objs.push(PbObject::SinkId(sink.id.sink_id));
             }
         }
+        GrantObjects::Views(views) => {
+            let db_name = &session.database();
+            let search_path = session.config().search_path();
+            let user_name = &session.user_name();
+
+            for name in views {
+                let (schema_name, view_name) =
+                    Binder::resolve_schema_qualified_name(db_name, name)?;
+                let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
+
+                let (view, _) = reader.get_view_by_name(db_name, schema_path, &view_name)?;
+                grant_objs.push(PbObject::ViewId(view.id));
+            }
+        }
         GrantObjects::AllSourcesInSchema { schemas } => {
             for schema in schemas {
                 let schema_name = Binder::resolve_schema_name(schema)?;
                 let schema = reader.get_schema_by_name(&session.database(), &schema_name)?;
-                grant_objs.push(PbObject::AllSourcesSchemaId(schema.id()));
+                schema.iter_source().for_each(|source| {
+                    grant_objs.push(PbObject::SourceId(source.id));
+                });
             }
         }
         GrantObjects::AllMviewsInSchema { schemas } => {
             for schema in schemas {
                 let schema_name = Binder::resolve_schema_name(schema)?;
                 let schema = reader.get_schema_by_name(&session.database(), &schema_name)?;
-                grant_objs.push(PbObject::AllTablesSchemaId(schema.id()));
+                schema.iter_all_mvs().for_each(|mview| {
+                    grant_objs.push(PbObject::TableId(mview.id().table_id));
+                });
             }
         }
         GrantObjects::AllTablesInSchema { schemas } => {
             for schema in schemas {
                 let schema_name = Binder::resolve_schema_name(schema)?;
                 let schema = reader.get_schema_by_name(&session.database(), &schema_name)?;
-                grant_objs.push(PbObject::AllDmlRelationsSchemaId(schema.id()));
+                schema.iter_user_table().for_each(|table| {
+                    grant_objs.push(PbObject::TableId(table.id().table_id));
+                });
+            }
+        }
+        GrantObjects::AllSinksInSchema { schemas } => {
+            for schema in schemas {
+                let schema_name = Binder::resolve_schema_name(schema)?;
+                let schema = reader.get_schema_by_name(&session.database(), &schema_name)?;
+                schema.iter_sink().for_each(|sink| {
+                    grant_objs.push(PbObject::SinkId(sink.id.sink_id));
+                });
+            }
+        }
+        GrantObjects::AllViewsInSchema { schemas } => {
+            for schema in schemas {
+                let schema_name = Binder::resolve_schema_name(schema)?;
+                let schema = reader.get_schema_by_name(&session.database(), &schema_name)?;
+                schema.iter_view().for_each(|view| {
+                    grant_objs.push(PbObject::ViewId(view.id));
+                });
             }
         }
         o => {

@@ -185,22 +185,16 @@ impl Sink for MqttSink {
         Ok(())
     }
 
-    async fn new_log_sinker(
-        &self,
-        writer_param: SinkWriterParam,
-    ) -> Result<(Self::LogSinker, Option<u64>)> {
-        Ok((
-            MqttSinkWriter::new(
-                self.config.clone(),
-                self.schema.clone(),
-                &self.format_desc,
-                &self.name,
-                writer_param.executor_id,
-            )
-            .await?
-            .into_log_sinker(usize::MAX),
-            None,
-        ))
+    async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
+        Ok(MqttSinkWriter::new(
+            self.config.clone(),
+            self.schema.clone(),
+            &self.format_desc,
+            &self.name,
+            writer_param.executor_id,
+        )
+        .await?
+        .into_log_sinker(usize::MAX))
     }
 }
 

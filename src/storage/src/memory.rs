@@ -1037,7 +1037,9 @@ impl<R: RangeKv> LocalStateStore for RangeKvLocalStateStore<R> {
             .or_insert_with(|| TableState::new(options.epoch.prev))
             .next_epochs
             .insert(options.epoch.prev, options.epoch.curr);
-        TableState::wait_epoch(&self.inner.tables, self.table_id, options.epoch.prev).await;
+        if self.vnodes.len() > 1 {
+            TableState::wait_epoch(&self.inner.tables, self.table_id, options.epoch.prev).await;
+        }
 
         Ok(())
     }
@@ -1067,25 +1069,28 @@ impl<R: RangeKv> LocalStateStore for RangeKvLocalStateStore<R> {
             .expect("should be set when init");
 
         table_state.next_epochs.insert(prev_epoch, next_epoch);
-        let sealing_epoch_vnodes = table_state
-            .sealing_epochs
-            .entry(prev_epoch)
-            .or_insert_with(|| BitmapBuilder::zeroed(self.vnodes.len()));
-        assert_eq!(self.vnodes.len(), sealing_epoch_vnodes.len());
-        for vnode in self.vnodes.iter_ones() {
-            assert!(!sealing_epoch_vnodes.is_set(vnode));
-            sealing_epoch_vnodes.set(vnode, true);
-        }
-        if (0..self.vnodes.len()).all(|vnode| sealing_epoch_vnodes.is_set(vnode)) {
-            let (all_sealed_epoch, _) = table_state.sealing_epochs.pop_first().expect("non-empty");
-            assert_eq!(
-                all_sealed_epoch, prev_epoch,
-                "new all_sealed_epoch must be the current prev epoch"
-            );
-            if let Some(prev_latest_sealed_epoch) =
-                table_state.latest_sealed_epoch.replace(prev_epoch)
-            {
-                assert!(prev_epoch > prev_latest_sealed_epoch);
+        if self.vnodes.len() > 1 {
+            let sealing_epoch_vnodes = table_state
+                .sealing_epochs
+                .entry(prev_epoch)
+                .or_insert_with(|| BitmapBuilder::zeroed(self.vnodes.len()));
+            assert_eq!(self.vnodes.len(), sealing_epoch_vnodes.len());
+            for vnode in self.vnodes.iter_ones() {
+                assert!(!sealing_epoch_vnodes.is_set(vnode));
+                sealing_epoch_vnodes.set(vnode, true);
+            }
+            if (0..self.vnodes.len()).all(|vnode| sealing_epoch_vnodes.is_set(vnode)) {
+                let (all_sealed_epoch, _) =
+                    table_state.sealing_epochs.pop_first().expect("non-empty");
+                assert_eq!(
+                    all_sealed_epoch, prev_epoch,
+                    "new all_sealed_epoch must be the current prev epoch"
+                );
+                if let Some(prev_latest_sealed_epoch) =
+                    table_state.latest_sealed_epoch.replace(prev_epoch)
+                {
+                    assert!(prev_epoch > prev_latest_sealed_epoch);
+                }
             }
         }
 
@@ -1129,12 +1134,14 @@ impl<R: RangeKv> LocalStateStore for RangeKvLocalStateStore<R> {
     }
 
     async fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> StorageResult<Arc<Bitmap>> {
-        TableState::wait_epoch(
-            &self.inner.tables,
-            self.table_id,
-            self.epoch.expect("should have init").prev,
-        )
-        .await;
+        if self.vnodes.len() > 1 {
+            TableState::wait_epoch(
+                &self.inner.tables,
+                self.table_id,
+                self.epoch.expect("should have init").prev,
+            )
+            .await;
+        }
         Ok(std::mem::replace(&mut self.vnodes, vnodes))
     }
 

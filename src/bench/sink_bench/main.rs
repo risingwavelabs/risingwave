@@ -135,6 +135,13 @@ impl LogReader for MockRangeLogReader {
     async fn rewind(&mut self) -> LogStoreResult<()> {
         Err(anyhow!("should not call rewind"))
     }
+
+    async fn build_stream_from_start_offset(
+        &mut self,
+        _start_offset: Option<u64>,
+    ) -> LogStoreResult<()> {
+        Err(anyhow!("should not call build_stream_from_start_offset"))
+    }
 }
 
 impl MockRangeLogReader {
@@ -384,7 +391,7 @@ where
         )));
         sink_writer_param.vnode_bitmap = Some(Bitmap::ones(1));
     }
-    let (log_sinker, _) = sink.new_log_sinker(sink_writer_param).await.unwrap();
+    let log_sinker = sink.new_log_sinker(sink_writer_param).await.unwrap();
     match log_sinker.consume_log_and_sink(&mut log_reader).await {
         Ok(_) => Err("Stream closed".to_owned()),
         Err(e) => Err(e.to_report_string()),

@@ -296,10 +296,7 @@ impl Sink for DeltaLakeSink {
 
     const SINK_NAME: &'static str = DELTALAKE_SINK;
 
-    async fn new_log_sinker(
-        &self,
-        writer_param: SinkWriterParam,
-    ) -> Result<(Self::LogSinker, Option<u64>)> {
+    async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         let inner = DeltaLakeSinkWriter::new(
             self.config.clone(),
             self.param.schema().clone(),
@@ -329,9 +326,12 @@ impl Sink for DeltaLakeSink {
                 "commit_checkpoint_interval should be greater than 0, and it should be checked in config validation",
             );
 
-        Ok((
-            DecoupleCheckpointLogSinkerOf::new(writer, metrics, commit_checkpoint_interval),
-            None,
+        let log_store_rewind_start_epoch = writer.log_store_rewind_start_epoch;
+        Ok(DecoupleCheckpointLogSinkerOf::new(
+            writer,
+            metrics,
+            commit_checkpoint_interval,
+            log_store_rewind_start_epoch,
         ))
     }
 

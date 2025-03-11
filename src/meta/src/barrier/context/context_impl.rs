@@ -162,7 +162,7 @@ impl CommandContext {
                             .metadata_manager
                             .catalog_controller
                             .post_collect_job_fragments(
-                                new_fragments.stream_job_id().table_id as _,
+                                new_fragments.stream_job_id.table_id as _,
                                 new_fragments.actor_ids(),
                                 dispatchers,
                                 init_split_assignment,
@@ -283,7 +283,7 @@ impl CommandContext {
                     .metadata_manager
                     .catalog_controller
                     .post_collect_job_fragments(
-                        new_fragments.stream_job_id().table_id as _,
+                        new_fragments.stream_job_id.table_id as _,
                         new_fragments.actor_ids(),
                         dispatchers,
                         init_split_assignment,

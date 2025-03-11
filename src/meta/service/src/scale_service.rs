@@ -79,7 +79,17 @@ impl ScaleService for ScaleServiceImpl {
                 .catalog_controller
                 .upstream_fragments(stream_job_fragments.fragment_ids())
                 .await?;
-            table_fragments.push(stream_job_fragments.to_protobuf(&upstreams))
+            let dispatchers = self
+                .metadata_manager
+                .catalog_controller
+                .get_fragment_actor_dispatchers(
+                    stream_job_fragments
+                        .fragment_ids()
+                        .map(|id| id as _)
+                        .collect(),
+                )
+                .await?;
+            table_fragments.push(stream_job_fragments.to_protobuf(&upstreams, &dispatchers))
         }
 
         let worker_nodes = self

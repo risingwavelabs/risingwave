@@ -302,10 +302,7 @@ impl Sink for StarrocksSink {
         Ok(())
     }
 
-    async fn new_log_sinker(
-        &self,
-        writer_param: SinkWriterParam,
-    ) -> Result<(Self::LogSinker, Option<u64>)> {
+    async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         let commit_checkpoint_interval =
             NonZeroU64::new(self.config.commit_checkpoint_interval).expect(
                 "commit_checkpoint_interval should be greater than 0, and it should be checked in config validation",
@@ -335,10 +332,12 @@ impl Sink for StarrocksSink {
             inner,
         )
         .await?;
-
-        Ok((
-            DecoupleCheckpointLogSinkerOf::new(writer, metrics, commit_checkpoint_interval),
-            None,
+        let log_store_rewind_start_epoch = writer.log_store_rewind_start_epoch;
+        Ok(DecoupleCheckpointLogSinkerOf::new(
+            writer,
+            metrics,
+            commit_checkpoint_interval,
+            log_store_rewind_start_epoch,
         ))
     }
 

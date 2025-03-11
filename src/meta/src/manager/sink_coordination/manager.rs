@@ -490,6 +490,7 @@ mod tests {
             })
             .await
             .unwrap()
+            .0
         };
 
         let (mut client1, mut client2) =
@@ -654,6 +655,7 @@ mod tests {
             })
             .await
             .unwrap()
+            .0
         };
 
         let mut client = build_client(vnode).await;
@@ -742,6 +744,7 @@ mod tests {
             })
             .await
             .unwrap()
+            .0
         };
 
         let (mut client1, client2) = join(build_client(vnode1), build_client(vnode2)).await;
@@ -825,6 +828,7 @@ mod tests {
             })
             .await
             .unwrap()
+            .0
         };
 
         let (mut client1, mut client2) = join(build_client(vnode1), build_client(vnode2)).await;
@@ -960,6 +964,7 @@ mod tests {
             })
             .await
             .unwrap()
+            .0
         };
 
         let (mut client1, mut client2) =

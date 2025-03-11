@@ -645,10 +645,7 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
     }
 
     async fn validate(&self) -> Result<()>;
-    async fn new_log_sinker(
-        &self,
-        writer_param: SinkWriterParam,
-    ) -> Result<(Self::LogSinker, Option<u64>)>;
+    async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker>;
 
     fn is_coordinated_sink(&self) -> bool {
         false
@@ -661,6 +658,10 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
 }
 
 pub trait SinkLogReader: Send + Sized + 'static {
+    fn build_stream_from_start_offset(
+        &mut self,
+        start_offset: Option<u64>,
+    ) -> impl Future<Output = LogStoreResult<()>> + Send + '_;
     /// Emit the next item.
     ///
     /// The implementation should ensure that the future is cancellation safe.
@@ -683,16 +684,24 @@ impl<R: LogReader> SinkLogReader for R {
     fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()> {
         <Self as LogReader>::truncate(self, offset)
     }
+
+    fn build_stream_from_start_offset(
+        &mut self,
+        start_offset: Option<u64>,
+    ) -> impl std::future::Future<Output = LogStoreResult<()>> + std::marker::Send {
+        <Self as LogReader>::build_stream_from_start_offset(self, start_offset)
+    }
 }
 
 #[async_trait]
-pub trait LogSinker: 'static {
+pub trait LogSinker: 'static + Send {
+    // Note: Please rebuild the log reader's read stream before consuming the log store,
     async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<!>;
 }
 
 #[async_trait]
 pub trait SinkCommitCoordinator {
-    /// Initialize the sink committer coordinator
+    /// Initialize the sink committer coordinator, return the log store rewind start offset.
     async fn init(&mut self) -> Result<Option<u64>>;
     /// After collecting the metadata from each sink writer, a coordinator will call `commit` with
     /// the set of metadata. The metadata is serialized into bytes, because the metadata is expected

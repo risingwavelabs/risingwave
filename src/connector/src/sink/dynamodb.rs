@@ -159,16 +159,12 @@ impl Sink for DynamoDbSink {
         Ok(())
     }
 
-    async fn new_log_sinker(
-        &self,
-        _writer_param: SinkWriterParam,
-    ) -> Result<(Self::LogSinker, Option<u64>)> {
-        Ok((
+    async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
+        Ok(
             DynamoDbSinkWriter::new(self.config.clone(), self.schema.clone())
                 .await?
                 .into_log_sinker(self.config.max_future_send_nums),
-            None,
-        ))
+        )
     }
 }
 
