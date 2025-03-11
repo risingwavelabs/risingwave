@@ -18,6 +18,7 @@ use std::marker::PhantomData;
 use risingwave_pb::secret::PbSecretRef;
 
 use crate::sink::catalog::SinkFormatDesc;
+use std::time::Duration;
 use crate::source::cdc::MYSQL_CDC_CONNECTOR;
 use crate::source::cdc::external::CdcTableType;
 use crate::source::iceberg::ICEBERG_CONNECTOR;
@@ -113,6 +114,15 @@ pub trait WithPropertiesExt: Get + Sized {
             return false;
         };
         connector == MYSQL_CDC_CONNECTOR
+    }
+
+    #[inline(always)]
+    fn get_sync_call_timeout(&self) -> Option<Duration> {
+        const SYNC_CALL_TIMEOUT_KEY: &str = "properties.sync.call.timeout"; // only from kafka props, add more if needed
+        self.get(SYNC_CALL_TIMEOUT_KEY)
+             // ignore the error is ok here, because we will parse the field again when building the properties and has more precise error message
+            .map(|s| duration_str::parse_std(s).ok())
+            .flatten()
     }
 
     #[inline(always)]
