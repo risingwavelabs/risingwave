@@ -38,7 +38,7 @@ use super::encoder::{
 };
 use super::redis::{
     KEY_FORMAT, LAT_NAME, LON_NAME, MEMBER_NAME, REDIS_VALUE_TYPE, REDIS_VALUE_TYPE_GEO,
-    REDIS_VALUE_TYPE_STRING, VALUE_FORMAT,
+    REDIS_VALUE_TYPE_PUBSUB, REDIS_VALUE_TYPE_STRING, VALUE_FORMAT,
 };
 use crate::sink::encoder::{
     AvroEncoder, AvroHeader, JsonEncoder, ProtoEncoder, ProtoHeader, TimestampHandlingMode,
@@ -326,6 +326,35 @@ impl EncoderBuild for TemplateEncoder {
                         SinkError::Config(anyhow!("Cannot find `{LON_NAME}`,please set it."))
                     })?;
                     TemplateEncoder::new_geo_value(b.schema, pk_indices, lat_name, lon_name)
+                }
+            },
+            REDIS_VALUE_TYPE_PUBSUB => match pk_indices {
+                Some(_) => {
+                    let pubsub_name = b.format_desc.options.get(KEY_FORMAT).cloned();
+                    let pubsub_column = b.format_desc.options.get(VALUE_FORMAT).cloned();
+                    if (pubsub_name.is_none() && pubsub_column.is_none())
+                        || (pubsub_name.is_some() && pubsub_column.is_some())
+                    {
+                        return Err(SinkError::Config(anyhow!(
+                            "`pubsub_name` and `pubsub_column` only one can be set"
+                        )));
+                    }
+                    TemplateEncoder::new_pubsub_key(
+                        b.schema,
+                        pk_indices,
+                        pubsub_name,
+                        pubsub_column,
+                    )
+                }
+                None => {
+                    let template = b.format_desc.options.get(VALUE_FORMAT).ok_or_else(|| {
+                        SinkError::Config(anyhow!("Cannot find '{VALUE_FORMAT}',please set it."))
+                    })?;
+                    Ok(TemplateEncoder::new_string(
+                        b.schema,
+                        pk_indices,
+                        template.clone(),
+                    ))
                 }
             },
             _ => Err(SinkError::Config(anyhow!(
