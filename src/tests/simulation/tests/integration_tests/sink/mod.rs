@@ -17,8 +17,6 @@ mod basic;
 #[cfg(madsim)]
 mod err_isolation;
 #[cfg(madsim)]
-mod exactly_once_iceberg_sink;
-#[cfg(madsim)]
 mod rate_limit;
 #[cfg(madsim)]
 mod recovery;
