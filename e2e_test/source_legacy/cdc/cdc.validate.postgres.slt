@@ -28,7 +28,7 @@ create table shipments (
   order_id INTEGER,
   origin STRING,
   destination STRING NOT NULL,
-  is_arrived boolean NOT NULL,,
+  is_arrived boolean NOT NULL,
  PRIMARY KEY (shipment_id)
 ) with (
  connector = 'postgres-cdc',
