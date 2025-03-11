@@ -3361,7 +3361,7 @@ fn parse_create_table_on_conflict_with_version_column() {
         } => {
             assert_eq!("t", name.to_string());
             assert_eq!(on_conflict, Some(OnConflict::UpdateFull));
-            assert_eq!(with_version_column, Some("v2".to_owned()));
+            assert_eq!(with_version_column.unwrap().real_value(), "v2");
         }
         _ => unreachable!(),
     }

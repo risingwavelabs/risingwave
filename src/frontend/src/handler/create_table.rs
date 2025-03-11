@@ -1775,7 +1775,7 @@ pub async fn generate_stream_graph_for_replace_table(
     source_watermarks: Vec<SourceWatermark>,
     append_only: bool,
     on_conflict: Option<OnConflict>,
-    with_version_column: Option<String>,
+    with_version_column: Option<Ident>,
     cdc_table_info: Option<CdcTableInfo>,
     new_version_columns: Option<Vec<ColumnCatalog>>,
     include_column_options: IncludeOption,
@@ -1783,6 +1783,7 @@ pub async fn generate_stream_graph_for_replace_table(
 ) -> Result<(StreamFragmentGraph, Table, Option<PbSource>, TableJobType)> {
     use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 
+    let with_version_column = with_version_column.map(|x| x.real_value());
     let ((plan, mut source, table), job_type) = match (format_encode, cdc_table_info.as_ref()) {
         (Some(format_encode), None) => (
             gen_create_table_plan_with_source(
