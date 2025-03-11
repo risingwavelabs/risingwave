@@ -613,7 +613,7 @@ pub fn extract_bson_field(
             if let serde_json::Value::Object(ref mp) = datum {
                 if mp.contains_key("$timestamp") && mp["$timestamp"].is_object() {
                     bson_extract_timestamp(datum, type_expected)?
-                } else if mp.contains_key("$date") && mp["$date"].is_object() {
+                } else if mp.contains_key("$date") {
                     bson_extract_date(datum, type_expected)?
                 } else {
                     return Err(type_error(datum));
@@ -953,6 +953,16 @@ fn bson_extract_date(bson_doc: &serde_json::Value, type_expected: &DataType) -> 
                     got: "object".into(),
                     value: datum.to_string(),
                 })?
+        }
+        // Relaxed format {"$date": "2021-09-01T00:00:00.000Z"}
+        serde_json::Value::String(s) => {
+            let dt =
+                chrono::DateTime::parse_from_rfc3339(s).map_err(|_| AccessError::TypeError {
+                    expected: "valid ISO-8601 date string".into(),
+                    got: "string".into(),
+                    value: datum.to_string(),
+                })?;
+            dt.timestamp_millis()
         }
 
         // jsonv1 format

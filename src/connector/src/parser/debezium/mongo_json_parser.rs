@@ -175,9 +175,16 @@ mod tests {
 
     use super::*;
     use crate::parser::SourceStreamChunkBuilder;
-    use crate::parser::unified::debezium::extract_bson_id;
+    use crate::parser::unified::debezium::{extract_bson_field, extract_bson_id};
     use crate::source::cdc::CDC_MONGODB_STRONG_SCHEMA_KEY;
     use crate::source::{ConnectorProperties, SourceCtrlOpts};
+    fn generate_source_context() -> SourceContext {
+        SourceContext {
+            connector_props: ConnectorProperties::MongodbCdc(Box::default()),
+            ..SourceContext::dummy()
+        }
+    }
+
     #[test]
     fn test_parse_bson_value_id_int() {
         let data = r#"{"_id":{"$numberInt":"2345"}}"#;
@@ -202,6 +209,48 @@ mod tests {
         assert_eq!(a, Some(ScalarImpl::Utf8("5d505646cf6d4fe581014ab2".into())));
     }
 
+    #[test]
+    fn test_parse_bson_date() {
+        let data = r#"{"$date": {"$numberLong": "631152000000"}}"#;
+        let pld: serde_json::Value = serde_json::from_str(data).unwrap();
+        let a = extract_bson_field(&DataType::Date, &pld, None).unwrap();
+        assert_eq!(
+            a,
+            Some(ScalarImpl::Date(
+                chrono::NaiveDate::from_ymd_opt(1990, 1, 1).unwrap().into()
+            ))
+        );
+
+        let data = r#"{"$date": 631152000000}"#;
+        let pld: serde_json::Value = serde_json::from_str(data).unwrap();
+        let a = extract_bson_field(&DataType::Date, &pld, None).unwrap();
+        assert_eq!(
+            a,
+            Some(ScalarImpl::Date(
+                chrono::NaiveDate::from_ymd_opt(1990, 1, 1).unwrap().into()
+            ))
+        );
+
+        let data = r#"null"#;
+        let pld: serde_json::Value = serde_json::from_str(data).unwrap();
+        let a = extract_bson_field(&DataType::Date, &pld, None).unwrap();
+        assert_eq!(a, None);
+    }
+    #[test]
+    fn test_parse_bson_timestamp() {
+        let data = r#"{"$timestamp": {"t": 1735689600, "i": 0}}"#;
+        let pld: serde_json::Value = serde_json::from_str(data).unwrap();
+        let a = extract_bson_field(&DataType::Timestamptz, &pld, None).unwrap();
+        assert_eq!(
+            a,
+            Some(ScalarImpl::Timestamptz(
+                chrono::DateTime::parse_from_rfc3339("2025-01-01T00:00:00Z")
+                    .unwrap()
+                    .into()
+            ))
+        );
+    }
+
     #[tokio::test]
     async fn test_parse_delete_message() {
         let (key, payload) = (
@@ -215,8 +264,10 @@ mod tests {
             SourceColumnDesc::simple("_id", DataType::Varchar, ColumnId::from(0)),
             SourceColumnDesc::simple("payload", DataType::Jsonb, ColumnId::from(1)),
         ];
+
         let mut parser =
-            DebeziumMongoJsonParser::new(columns.clone(), SourceContext::dummy().into()).unwrap();
+            DebeziumMongoJsonParser::new(columns.clone(), generate_source_context().into())
+                .unwrap();
         let mut builder =
             SourceStreamChunkBuilder::new(columns.clone(), SourceCtrlOpts::for_test());
         parser
@@ -253,7 +304,7 @@ mod tests {
         ];
         for data in input {
             let mut parser =
-                DebeziumMongoJsonParser::new(columns.clone(), SourceContext::dummy().into())
+                DebeziumMongoJsonParser::new(columns.clone(), generate_source_context().into())
                     .unwrap();
 
             let mut builder =
@@ -368,7 +419,7 @@ mod tests {
  br#"
 {
   "before": null,
-  "after": "{\"_id\": {\"$numberLong\": \"1004\"}, \"rocket type\": \"Starblazer X-2000\", \"freezed at\": {\"$date\": \"2024-12-01T00:00:00Z\"}, \"launch time\": {\"$timestamp\": {\"t\": 1735689600, \"i\": 0}}}",
+  "after": "{\"_id\": {\"$numberLong\": \"1004\"}, \"rocket type\": \"Starblazer X-2000\", \"freezed at\": {\"$date\": 1733011200000 }, \"launch time\": {\"$timestamp\": {\"t\": 1735689600, \"i\": 0}}}",
   "source": {
     "version": "2.1.4.Final",
     "connector": "mongodb",
@@ -420,7 +471,7 @@ mod tests {
   },
   "payload": {
     "before": null,
-    "after": "{\"_id\": {\"$numberLong\": \"1004\"}, \"rocket type\": \"Starblazer X-2000\", \"freezed at\": {\"$date\": \"2024-12-01T00:00:00Z\"}, \"launch time\": {\"$timestamp\": {\"t\": 1735689600, \"i\": 0}}}",
+    "after": "{\"_id\": {\"$numberLong\": \"1004\"}, \"rocket type\": \"Starblazer X-2000\", \"freezed at\": {\"$date\": 1733011200000 }, \"launch time\": {\"$timestamp\": {\"t\": 1735689600, \"i\": 0}}}",
     "source": {
       "version": "2.1.4.Final",
       "connector": "mongodb",
@@ -466,7 +517,6 @@ mod tests {
                 .expect("build parser");
             let mut builder =
                 SourceStreamChunkBuilder::new(columns.clone(), SourceCtrlOpts::for_test());
-            println!("parsing: {:?}", datum);
             parser
                 .parse_inner(None, Some(datum), builder.row_writer())
                 .await
@@ -503,8 +553,7 @@ mod tests {
             .map(SourceColumnDesc::from)
             .collect::<Vec<_>>();
 
-        let data = vec![
-        br#"
+        let packet = br#"
         {
             "schema": {
                 "type": "struct",
@@ -520,7 +569,7 @@ mod tests {
             },
             "payload": {
                 "before": null,
-                "after": "{\"_id\": {\"$numberLong\": \"1004\"}, \"name\": \"John Doe\", \"age\": {\"$numberInt\": \"30\"}, \"birth_date\": {\"$date\": \"1990-01-01T00:00:00Z\"}, \"created_at\": {\"$timestamp\": {\"t\": 1735689600, \"i\": 0}}}",
+                "after": "{\"_id\": {\"$numberLong\": \"1004\"}, \"name\": \"John Doe\", \"age\": {\"$numberInt\": \"30\"}, \"birth_date\": {\"$date\": 631152000000 }, \"created_at\": {\"$timestamp\": {\"t\": 1735689600, \"i\": 0}}}",
                 "source": {
                     "version": "2.1.4.Final",
                     "connector": "mongodb",
@@ -537,8 +586,7 @@ mod tests {
                 "ts_ms": 1696502096000
             }
         }
-        "#.to_vec(),
-    ];
+        "#.to_vec();
 
         let ConnectorProperties::MongodbCdc(mut cdc_props) =
             ConnectorProperties::MongodbCdc(Box::default())
@@ -559,31 +607,29 @@ mod tests {
         let expected_created_at =
             chrono::DateTime::parse_from_rfc3339("2025-01-01T00:00:00Z").unwrap();
 
-        for datum in data {
-            let mut parser = DebeziumMongoJsonParser::new(columns.clone(), source_ctx.clone())
-                .expect("build parser");
-            let mut builder =
-                SourceStreamChunkBuilder::new(columns.clone(), SourceCtrlOpts::for_test());
-            parser
-                .parse_inner(None, Some(datum), builder.row_writer())
-                .await
-                .unwrap();
-            builder.finish_current_chunk();
-            let chunk = builder.consume_ready_chunks().next().unwrap();
-            let mut rows = chunk.rows();
-            let (op, row) = rows.next().unwrap();
-            assert_eq!(op, Op::Insert);
+        let mut parser = DebeziumMongoJsonParser::new(columns.clone(), source_ctx.clone())
+            .expect("build parser");
+        let mut builder =
+            SourceStreamChunkBuilder::new(columns.clone(), SourceCtrlOpts::for_test());
+        parser
+            .parse_inner(None, Some(packet), builder.row_writer())
+            .await
+            .unwrap();
+        builder.finish_current_chunk();
+        let chunk = builder.consume_ready_chunks().next().unwrap();
+        let mut rows = chunk.rows();
+        let (op, row) = rows.next().unwrap();
+        assert_eq!(op, Op::Insert);
 
-            let data = [
-                ScalarImpl::Int64(1004),
-                ScalarImpl::Utf8("John Doe".into()),
-                ScalarImpl::Int32(30),
-                ScalarImpl::Date(expected_birth_date.into()),
-                ScalarImpl::Timestamptz(expected_created_at.into()),
-            ];
-            for (i, datum) in data.iter().enumerate() {
-                assert_eq!(row.datum_at(i).to_owned_datum(), Some(datum.clone()));
-            }
+        let data = [
+            ScalarImpl::Int64(1004),
+            ScalarImpl::Utf8("John Doe".into()),
+            ScalarImpl::Int32(30),
+            ScalarImpl::Date(expected_birth_date.into()),
+            ScalarImpl::Timestamptz(expected_created_at.into()),
+        ];
+        for (i, datum) in data.iter().enumerate() {
+            assert_eq!(row.datum_at(i).to_owned_datum(), Some(datum.clone()));
         }
     }
 
@@ -811,6 +857,65 @@ mod tests {
                 );
             } else {
                 panic!("Expected list type for hobbies");
+            }
+        }
+    }
+    #[tokio::test]
+    async fn test_null_and_overflow() {
+        let columns = vec![
+            ColumnDesc::named("_id", ColumnId::new(0), DataType::Int64),
+            ColumnDesc::named("name", ColumnId::new(1), DataType::Varchar),
+            ColumnDesc::named("age", ColumnId::new(2), DataType::Int32),
+            ColumnDesc::named("birth_date", ColumnId::new(3), DataType::Date),
+            ColumnDesc::named("created_at", ColumnId::new(4), DataType::Timestamptz),
+        ];
+        let columns = columns
+            .iter()
+            .map(SourceColumnDesc::from)
+            .collect::<Vec<_>>();
+
+        let data = [
+            // all, all fields except _id is null
+            br#"{"schema":null,"payload":{"before":null,"after":"{\"_id\": {\"$numberLong\": \"1004\"}, \"name\": null, \"age\": null, \"birth_date\": null, \"created_at\": null}","patch":null,"filter":null,"updateDescription":null,"source":{"version":"2.1.4.Final","connector":"mongodb","name":"dbserver1","ts_ms":1681879044000,"snapshot":"last","db":"inventory","sequence":null,"rs":"rs0","collection":"customers","ord":1,"lsid":null,"txnNumber":null},"op":"r","ts_ms":1681879054736,"transaction":null}}"#.to_vec(),
+            // payload field only
+            br#"{"before":null,"after":"{\"_id\": {\"$numberLong\": \"1004\"}, \"name\": null, \"age\": null, \"birth_date\": null, \"created_at\": null}","patch":null,"filter":null,"updateDescription":null,"source":{"version":"2.1.4.Final","connector":"mongodb","name":"dbserver1","ts_ms":1681879044000,"snapshot":"last","db":"inventory","sequence":null,"rs":"rs0","collection":"customers","ord":1,"lsid":null,"txnNumber":null},"op":"r","ts_ms":1681879054736,"transaction":null}"#.to_vec(),
+        ];
+
+        let ConnectorProperties::MongodbCdc(mut cdc_props) =
+            ConnectorProperties::MongodbCdc(Box::default())
+        else {
+            unreachable!()
+        };
+        cdc_props
+            .properties
+            .insert(CDC_MONGODB_STRONG_SCHEMA_KEY.to_owned(), "true".to_owned());
+        let source_ctx: Arc<_> = SourceContext {
+            connector_props: ConnectorProperties::MongodbCdc(cdc_props),
+            ..SourceContext::dummy()
+        }
+        .into();
+
+        let mut parser =
+            DebeziumMongoJsonParser::new(columns.clone(), source_ctx.into()).expect("build parser");
+        let mut builder = SourceStreamChunkBuilder::new(columns, SourceCtrlOpts::for_test());
+
+        // all null
+        for i in 0..2 {
+            parser
+                .parse_inner(None, Some(data[i].clone()), builder.row_writer())
+                .await
+                .unwrap();
+            builder.finish_current_chunk();
+            let chunk = builder.consume_ready_chunks().next().unwrap();
+            let mut rows = chunk.rows();
+            let (op, row) = rows.next().unwrap();
+            assert_eq!(op, Op::Insert);
+            assert_eq!(
+                row.datum_at(0).to_owned_datum(),
+                Some(ScalarImpl::Int64(1004))
+            );
+            for j in 1..5 {
+                assert_eq!(row.datum_at(j).to_owned_datum(), None);
             }
         }
     }
