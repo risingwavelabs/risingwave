@@ -383,6 +383,7 @@ impl SerTo<String> for TemplateEncoderOutput {
 }
 
 /// The enum of inputs to `RedisSinkPayloadWriter`
+#[derive(Debug)]
 pub enum RedisSinkPayloadWriterInput {
     // Json and String will be convert to string
     String(String),

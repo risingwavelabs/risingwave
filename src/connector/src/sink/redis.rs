@@ -107,7 +107,6 @@ impl RedisPipe {
                     RedisSinkPayloadWriterInput::RedisPubSubKey(key),
                     RedisSinkPayloadWriterInput::String(v),
                 ) => {
-                    println!("publish{:?},{:?}",key,v);
                     pipe.publish(key, v);
                 }
                 _ => return Err(SinkError::Redis("RedisPipe set not match".to_owned())),
@@ -129,8 +128,6 @@ impl RedisPipe {
                     RedisSinkPayloadWriterInput::RedisPubSubKey(key),
                     RedisSinkPayloadWriterInput::String(v),
                 ) => {
-                    println!("publish{:?},{:?}",key,v);
-
                     pipe.publish(key, v);
                 }
                 _ => return Err(SinkError::Redis("RedisPipe set not match".to_owned())),
@@ -307,11 +304,11 @@ impl Sink for RedisSink {
                 // if not set, default to string
                 Some(REDIS_VALUE_TYPE_STRING) | None => {
                     let key_format = self.format_desc.options.get(KEY_FORMAT).ok_or_else(|| {
-                            SinkError::Config(anyhow!(
-                                "Cannot find '{KEY_FORMAT}', please set it or use JSON"
-                            ))
-                        })?;
-                        TemplateStringEncoder::check_string_format(key_format, &pk_map)?;
+                        SinkError::Config(anyhow!(
+                            "Cannot find '{KEY_FORMAT}', please set it or use JSON"
+                        ))
+                    })?;
+                    TemplateStringEncoder::check_string_format(key_format, &pk_map)?;
                     let value_format =
                         self.format_desc.options.get(VALUE_FORMAT).ok_or_else(|| {
                             SinkError::Config(anyhow!(

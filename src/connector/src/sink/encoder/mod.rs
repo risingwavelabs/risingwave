@@ -50,6 +50,7 @@ pub trait RowEncoder {
 
     fn encode(&self, row: impl Row) -> Result<Self::Output> {
         assert_eq!(row.len(), self.schema().len());
+        println!("write_one1 {:?}", self.col_indices());
         match self.col_indices() {
             Some(col_indices) => self.encode_cols(row, col_indices.iter().copied()),
             None => self.encode_cols(row, 0..self.schema().len()),
