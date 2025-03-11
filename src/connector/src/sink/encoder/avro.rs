@@ -541,9 +541,18 @@ fn on_field<D: MaybeData>(
             _ => return no_match_err(),
         },
         // Group C: experimental
-        DataType::Int16 => return no_match_err(),
-        DataType::Decimal => return no_match_err(),
-        DataType::Jsonb => return no_match_err(),
+        DataType::Int16 => match inner {
+            AvroSchema::Int => maybe.on_base(|s| Ok(Value::Int(s.into_int32())))?,
+            _ => return no_match_err(),
+        },
+        DataType::Decimal => match inner {
+            AvroSchema::String => todo!(),
+            _ => return no_match_err(),
+        },
+        DataType::Jsonb => match inner {
+            AvroSchema::String => maybe.on_base(|s| Ok(Value::String(s.into_utf8().into())))?,
+            _ => return no_match_err(),
+        },
         // Group D: unsupported
         DataType::Int256 => {
             return no_match_err();
