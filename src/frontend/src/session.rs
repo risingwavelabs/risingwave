@@ -47,7 +47,7 @@ use risingwave_common::catalog::{
     DEFAULT_DATABASE_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID,
 };
 use risingwave_common::config::{
-    BatchConfig, MetaConfig, MetricLevel, StreamingConfig, load_config,
+    BatchConfig, FrontendConfig, MetaConfig, MetricLevel, StreamingConfig, load_config,
 };
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::secret::LocalSecretManager;
@@ -162,6 +162,7 @@ pub(crate) struct FrontendEnv {
     spill_metrics: Arc<BatchSpillMetrics>,
 
     batch_config: BatchConfig,
+    frontend_config: FrontendConfig,
     #[expect(dead_code)]
     meta_config: MetaConfig,
     streaming_config: StreamingConfig,
@@ -243,6 +244,7 @@ impl FrontendEnv {
             frontend_metrics: Arc::new(FrontendMetrics::for_test()),
             cursor_metrics: Arc::new(CursorMetrics::for_test()),
             batch_config: BatchConfig::default(),
+            frontend_config: FrontendConfig::default(),
             meta_config: MetaConfig::default(),
             streaming_config: StreamingConfig::default(),
             source_metrics: Arc::new(SourceMetrics::default()),
@@ -484,6 +486,7 @@ impl FrontendEnv {
                 spill_metrics,
                 sessions_map,
                 batch_config: config.batch,
+                frontend_config: config.frontend,
                 meta_config: config.meta,
                 streaming_config: config.streaming,
                 source_metrics,
@@ -560,6 +563,10 @@ impl FrontendEnv {
 
     pub fn batch_config(&self) -> &BatchConfig {
         &self.batch_config
+    }
+
+    pub fn frontend_config(&self) -> &FrontendConfig {
+        &self.frontend_config
     }
 
     pub fn streaming_config(&self) -> &StreamingConfig {
@@ -923,11 +930,21 @@ impl SessionImpl {
             (schema_name, relation_name)
         };
         match catalog_reader.check_relation_name_duplicated(db_name, &schema_name, &relation_name) {
-            Err(CatalogError::Duplicated(_, name)) if if_not_exists => Ok(Either::Right(
-                PgResponse::builder(stmt_type)
-                    .notice(format!("relation \"{}\" already exists, skipping", name))
-                    .into(),
-            )),
+            Err(CatalogError::Duplicated(_, name, is_creating)) if if_not_exists => {
+                let is_creating_str = if is_creating {
+                    " but still creating"
+                } else {
+                    ""
+                };
+                Ok(Either::Right(
+                    PgResponse::builder(stmt_type)
+                        .notice(format!(
+                            "relation \"{}\" already exists{}, skipping",
+                            name, is_creating_str
+                        ))
+                        .into(),
+                ))
+            }
             Err(e) => Err(e.into()),
             Ok(_) => Ok(Either::Left(())),
         }
@@ -1005,7 +1022,7 @@ impl SessionImpl {
                         .into(),
                 ))
             } else {
-                Err(CatalogError::Duplicated("function", full_name).into())
+                Err(CatalogError::duplicated("function", full_name).into())
             }
         } else {
             Ok(Either::Left(()))

@@ -364,7 +364,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     let result: MetaResult<()> = try {
                         match resp {
                             Response::CompleteBarrier(resp) => {
-                                self.checkpoint_control.barrier_collected(resp, &mut self.control_stream_manager)?;
+                                self.checkpoint_control.barrier_collected(resp, &mut self.control_stream_manager, &mut self.periodic_barriers)?;
                             },
                             Response::ReportDatabaseFailure(resp) => {
                                 if !self.enable_recovery {

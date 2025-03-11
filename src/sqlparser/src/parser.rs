@@ -104,6 +104,8 @@ pub enum IsLateral {
 
 use IsLateral::*;
 
+use crate::ast::ddl::AlterFragmentOperation;
+
 pub type IncludeOption = Vec<IncludeOptionItem>;
 
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -2542,12 +2544,12 @@ impl Parser<'_> {
         })
     }
 
-    pub fn parse_with_version_column(&mut self) -> ModalResult<Option<String>> {
+    pub fn parse_with_version_column(&mut self) -> ModalResult<Option<Ident>> {
         if self.parse_keywords(&[Keyword::WITH, Keyword::VERSION, Keyword::COLUMN]) {
             self.expect_token(&Token::LParen)?;
             let name = self.parse_identifier_non_reserved()?;
             self.expect_token(&Token::RParen)?;
-            Ok(Some(name.value))
+            Ok(Some(name))
         } else {
             Ok(None)
         }
@@ -3139,9 +3141,11 @@ impl Parser<'_> {
             self.parse_alter_subscription()
         } else if self.parse_keyword(Keyword::SECRET) {
             self.parse_alter_secret()
+        } else if self.parse_word("FRAGMENT") {
+            self.parse_alter_fragment()
         } else {
             self.expected(
-                "DATABASE, SCHEMA, TABLE, INDEX, MATERIALIZED, VIEW, SINK, SUBSCRIPTION, SOURCE, FUNCTION, USER, SECRET or SYSTEM after ALTER"
+                "DATABASE, FRAGMENT, SCHEMA, TABLE, INDEX, MATERIALIZED, VIEW, SINK, SUBSCRIPTION, SOURCE, FUNCTION, USER, SECRET or SYSTEM after ALTER"
             )
         }
     }
@@ -3758,6 +3762,39 @@ impl Parser<'_> {
             with_options,
             operation,
         })
+    }
+
+    pub fn parse_alter_fragment(&mut self) -> ModalResult<Statement> {
+        let fragment_id = self.parse_literal_uint()? as u32;
+        if !self.parse_keyword(Keyword::SET) {
+            return self.expected("SET after ALTER FRAGMENT");
+        }
+        let rate_limit = self.parse_alter_fragment_rate_limit()?;
+        let operation = AlterFragmentOperation::AlterBackfillRateLimit { rate_limit };
+        Ok(Statement::AlterFragment {
+            fragment_id,
+            operation,
+        })
+    }
+
+    fn parse_alter_fragment_rate_limit(&mut self) -> ModalResult<i32> {
+        if !self.parse_word("RATE_LIMIT") {
+            return self.expected("expected RATE_LIMIT after SET");
+        }
+        if self.expect_keyword(Keyword::TO).is_err() && self.expect_token(&Token::Eq).is_err() {
+            return self.expected("TO or = after RATE_LIMIT");
+        }
+        let rate_limit = if self.parse_keyword(Keyword::DEFAULT) {
+            -1
+        } else {
+            let s = self.parse_number_value()?;
+            if let Ok(n) = s.parse::<i32>() {
+                n
+            } else {
+                return self.expected("number or DEFAULT");
+            }
+        };
+        Ok(rate_limit)
     }
 
     /// Parse a copy statement
