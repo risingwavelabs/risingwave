@@ -20,7 +20,6 @@ use std::fmt::Debug;
 use std::num::NonZeroU64;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::time::Duration;
 
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
@@ -1368,7 +1367,7 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
             SinkError::Iceberg(anyhow!(err))
         })?;
         let table = tx
-            .commit_dyn(self.catalog.as_ref())
+            .commit(self.catalog.as_ref())
             .await
             .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
         self.table = table;

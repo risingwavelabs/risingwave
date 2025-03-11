@@ -59,7 +59,6 @@ google-cloud-pubsub = "0.30"
 iceberg = { workspace = true }
 iceberg-catalog-glue = { workspace = true }
 iceberg-catalog-rest = { workspace = true }
-icelake = { workspace = true }
 indexmap = { version = "2.7.0", features = ["serde"] }
 itertools = { workspace = true }
 jni = { version = "0.21.1", features = ["invocation"] }
