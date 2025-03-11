@@ -48,7 +48,7 @@ pub const CDC_WAIT_FOR_STREAMING_START_TIMEOUT: &str = "cdc.source.wait.streamin
 pub const CDC_AUTO_SCHEMA_CHANGE_KEY: &str = "auto.schema.change";
 
 // User can set strong-schema='true' to enable strong schema for mongo cdc source
-pub const CDC_STRONG_SCHEMA_KEY: &str = "strong_schema";
+pub const CDC_MONGODB_STRONG_SCHEMA_KEY: &str = "strong_schema";
 
 pub const MYSQL_CDC_CONNECTOR: &str = Mysql::CDC_CONNECTOR_NAME;
 pub const POSTGRES_CDC_CONNECTOR: &str = Postgres::CDC_CONNECTOR_NAME;

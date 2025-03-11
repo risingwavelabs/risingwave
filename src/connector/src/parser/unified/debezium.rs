@@ -939,52 +939,62 @@ fn bson_extract_date(bson_doc: &serde_json::Value, type_expected: &DataType) -> 
     };
 
     // deal with the Canonical format only
-    let res =
-        if let serde_json::Value::Object(ref obj) = datum
-            && obj.contains_key("$numberLong")
-            && obj["$numberLong"].is_string()
+    let millis = match datum {
+        // Canonical format {"$date": {"$numberLong": "1630454400000"}}
+        serde_json::Value::Object(obj)
+            if obj.contains_key("$numberLong") && obj["$numberLong"].is_string() =>
         {
-            // strict format
-            let millis = obj["$numberLong"].as_str().unwrap().parse().map_err(|_| {
-                AccessError::TypeError {
+            obj["$numberLong"]
+                .as_str()
+                .unwrap()
+                .parse::<i64>()
+                .map_err(|_| AccessError::TypeError {
                     expected: "timestamp".into(),
                     got: "object".into(),
                     value: datum.to_string(),
-                }
-            })?;
-            let datetime = chrono::DateTime::from_timestamp_millis(millis).ok_or_else(|| {
-                AccessError::TypeError {
-                    expected: "timestamp".into(),
-                    got: "object".into(),
-                    value: datum.to_string(),
-                }
-            })?;
+                })?
+        }
 
-            match type_expected {
-                DataType::Date => {
-                    let naive = datetime.naive_local();
-                    let dt = naive.date();
-                    Some(ScalarImpl::Date(dt.into()))
-                }
-                DataType::Time => {
-                    let naive = datetime.naive_local();
-                    let dt = naive.time();
-                    Some(ScalarImpl::Time(dt.into()))
-                }
-                DataType::Timestamp => {
-                    let naive = datetime.naive_local();
-                    let dt = Timestamp::from(naive);
-                    Some(ScalarImpl::Timestamp(dt))
-                }
-                DataType::Timestamptz => {
-                    let dt = datetime.into();
-                    Some(ScalarImpl::Timestamptz(dt))
-                }
-                _ => unreachable!("DebeziumMongoJsonParser::new must ensure column datatypes."),
-            }
-        } else {
-            return Err(type_error());
-        };
+        // jsonv1 format
+        // {"$date": 1630454400000}
+        serde_json::Value::Number(num) => num.as_i64().ok_or_else(|| AccessError::TypeError {
+            expected: "timestamp".into(),
+            got: "number".into(),
+            value: datum.to_string(),
+        })?,
+
+        _ => return Err(type_error()),
+    };
+
+    let datetime =
+        chrono::DateTime::from_timestamp_millis(millis).ok_or_else(|| AccessError::TypeError {
+            expected: "timestamp".into(),
+            got: "object".into(),
+            value: datum.to_string(),
+        })?;
+
+    let res = match type_expected {
+        DataType::Date => {
+            let naive = datetime.naive_local();
+            let dt = naive.date();
+            Some(ScalarImpl::Date(dt.into()))
+        }
+        DataType::Time => {
+            let naive = datetime.naive_local();
+            let dt = naive.time();
+            Some(ScalarImpl::Time(dt.into()))
+        }
+        DataType::Timestamp => {
+            let naive = datetime.naive_local();
+            let dt = Timestamp::from(naive);
+            Some(ScalarImpl::Timestamp(dt))
+        }
+        DataType::Timestamptz => {
+            let dt = datetime.into();
+            Some(ScalarImpl::Timestamptz(dt))
+        }
+        _ => unreachable!("DebeziumMongoJsonParser::new must ensure column datatypes."),
+    };
     Ok(res)
 }
 

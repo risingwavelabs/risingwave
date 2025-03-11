@@ -15,8 +15,8 @@
 use std::fmt::Debug;
 
 use anyhow::Context;
-use risingwave_common::bail;
 use risingwave_common::types::DataType;
+use risingwave_common::{bail, try_match_expand};
 
 use crate::error::ConnectorResult;
 use crate::parser::simd_json_parser::DebeziumMongoJsonAccessBuilder;
@@ -26,7 +26,8 @@ use crate::parser::{
     AccessBuilderImpl, ByteStreamSourceParser, EncodingProperties, ParserFormat,
     SourceStreamChunkRowWriter,
 };
-use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
+use crate::source::cdc::CDC_MONGODB_STRONG_SCHEMA_KEY;
+use crate::source::{ConnectorProperties, SourceColumnDesc, SourceContext, SourceContextRef};
 
 #[derive(Debug)]
 pub struct DebeziumMongoJsonParser {
@@ -34,6 +35,7 @@ pub struct DebeziumMongoJsonParser {
     source_ctx: SourceContextRef,
     key_builder: AccessBuilderImpl,
     payload_builder: AccessBuilderImpl,
+    strong_schema: bool,
 }
 
 fn build_accessor_builder(
@@ -67,7 +69,14 @@ impl DebeziumMongoJsonParser {
             })
             .context("Debezium Mongo needs a `_id` column with supported types (Varchar Jsonb int32 int64) in table")?.clone();
 
-        let strong_schema = source_ctx.connector_props.enable_strong_schema();
+        let mongo_props =
+            try_match_expand!(&source_ctx.connector_props, ConnectorProperties::MongodbCdc)?;
+
+        let strong_schema = mongo_props
+            .properties
+            .get(CDC_MONGODB_STRONG_SCHEMA_KEY)
+            .map(|v| v == "true")
+            .unwrap_or(false);
 
         if !strong_schema {
             let _payload_column = rw_columns
@@ -101,6 +110,7 @@ impl DebeziumMongoJsonParser {
             source_ctx,
             key_builder,
             payload_builder,
+            strong_schema,
         })
     }
 
@@ -127,7 +137,7 @@ impl DebeziumMongoJsonParser {
 
 impl DebeziumMongoJsonParser {
     pub fn strong_schema(&self) -> bool {
-        self.source_ctx.connector_props.enable_strong_schema()
+        self.strong_schema
     }
 }
 
@@ -166,7 +176,7 @@ mod tests {
     use super::*;
     use crate::parser::SourceStreamChunkBuilder;
     use crate::parser::unified::debezium::extract_bson_id;
-    use crate::source::cdc::CDC_STRONG_SCHEMA_KEY;
+    use crate::source::cdc::CDC_MONGODB_STRONG_SCHEMA_KEY;
     use crate::source::{ConnectorProperties, SourceCtrlOpts};
     #[test]
     fn test_parse_bson_value_id_int() {
@@ -300,7 +310,7 @@ mod tests {
 
         cdc_props
             .properties
-            .insert(CDC_STRONG_SCHEMA_KEY.to_owned(), "true".to_owned());
+            .insert(CDC_MONGODB_STRONG_SCHEMA_KEY.to_owned(), "true".to_owned());
         let source_ctx: Arc<_> = SourceContext {
             connector_props: ConnectorProperties::MongodbCdc(cdc_props),
             ..SourceContext::dummy()
@@ -438,7 +448,7 @@ mod tests {
 
         cdc_props
             .properties
-            .insert(CDC_STRONG_SCHEMA_KEY.to_owned(), "true".to_owned());
+            .insert(CDC_MONGODB_STRONG_SCHEMA_KEY.to_owned(), "true".to_owned());
         let source_ctx: Arc<_> = SourceContext {
             connector_props: ConnectorProperties::MongodbCdc(cdc_props),
             ..SourceContext::dummy()
@@ -538,7 +548,7 @@ mod tests {
 
         cdc_props
             .properties
-            .insert(CDC_STRONG_SCHEMA_KEY.to_owned(), "true".to_owned());
+            .insert(CDC_MONGODB_STRONG_SCHEMA_KEY.to_owned(), "true".to_owned());
         let source_ctx: Arc<_> = SourceContext {
             connector_props: ConnectorProperties::MongodbCdc(cdc_props),
             ..SourceContext::dummy()
@@ -646,7 +656,7 @@ mod tests {
 
         cdc_props
             .properties
-            .insert(CDC_STRONG_SCHEMA_KEY.to_owned(), "true".to_owned());
+            .insert(CDC_MONGODB_STRONG_SCHEMA_KEY.to_owned(), "true".to_owned());
         let source_ctx: Arc<_> = SourceContext {
             connector_props: ConnectorProperties::MongodbCdc(cdc_props),
             ..SourceContext::dummy()
@@ -751,7 +761,7 @@ mod tests {
 
         cdc_props
             .properties
-            .insert(CDC_STRONG_SCHEMA_KEY.to_owned(), "true".to_owned());
+            .insert(CDC_MONGODB_STRONG_SCHEMA_KEY.to_owned(), "true".to_owned());
         let source_ctx: Arc<_> = SourceContext {
             connector_props: ConnectorProperties::MongodbCdc(cdc_props),
             ..SourceContext::dummy()

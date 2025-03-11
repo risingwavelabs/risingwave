@@ -50,7 +50,6 @@ use crate::error::ConnectorResult as Result;
 use crate::parser::ParserConfig;
 use crate::parser::schema_change::SchemaChangeEnvelope;
 use crate::source::SplitImpl::{CitusCdc, MongodbCdc, MysqlCdc, PostgresCdc, SqlServerCdc};
-use crate::source::cdc::CDC_STRONG_SCHEMA_KEY;
 use crate::with_options::WithOptions;
 use crate::{
     WithOptionsSecResolved, dispatch_source_prop, dispatch_split_impl, for_all_connections,
@@ -590,18 +589,6 @@ impl ConnectorProperties {
             || matches!(self, ConnectorProperties::OpendalS3(_))
             || matches!(self, ConnectorProperties::Gcs(_))
             || matches!(self, ConnectorProperties::Azblob(_))
-    }
-
-    /// Whether to enable strong schema for the source.
-    pub fn enable_strong_schema(&self) -> bool {
-        let ConnectorProperties::MongodbCdc(mongo) = self else {
-            return false;
-        };
-
-        mongo
-            .properties
-            .get(CDC_STRONG_SCHEMA_KEY)
-            .map_or(false, |v| v == "true")
     }
 
     pub async fn create_split_enumerator(
