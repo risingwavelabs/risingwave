@@ -44,7 +44,7 @@ use risingwave_pb::plan_common::{
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_sqlparser::ast::{
     CdcTableInfo, ColumnDef, ColumnOption, ConnectorSchema, DataType as AstDataType,
-    ExplainOptions, Format, ObjectName, OnConflict, SourceWatermark, TableConstraint,
+    ExplainOptions, Format, Ident, ObjectName, OnConflict, SourceWatermark, TableConstraint,
 };
 use risingwave_sqlparser::parser::IncludeOption;
 use thiserror_ext::AsReport;
@@ -1337,13 +1337,14 @@ pub async fn generate_stream_graph_for_table(
     source_watermarks: Vec<SourceWatermark>,
     append_only: bool,
     on_conflict: Option<OnConflict>,
-    with_version_column: Option<String>,
+    with_version_column: Option<Ident>,
     cdc_table_info: Option<CdcTableInfo>,
     new_version_columns: Option<Vec<ColumnCatalog>>,
     include_column_options: IncludeOption,
 ) -> Result<(StreamFragmentGraph, Table, Option<PbSource>, TableJobType)> {
     use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 
+    let with_version_column = with_version_column.map(|x| x.real_value());
     let ((plan, source, table), job_type) = match (source_schema, cdc_table_info.as_ref()) {
         (Some(source_schema), None) => (
             gen_create_table_plan_with_source(
