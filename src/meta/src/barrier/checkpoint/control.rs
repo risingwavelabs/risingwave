@@ -987,6 +987,8 @@ impl DatabaseCheckpointControl {
             return Ok(());
         };
 
+        let mut edges = self.state.inflight_graph_info.build_edge(command.as_ref());
+
         // Insert newly added creating job
         if let Some(Command::CreateStreamingJob {
             job_type,
@@ -1040,7 +1042,7 @@ impl DatabaseCheckpointControl {
                     let mutation = command
                         .as_ref()
                         .expect("checked Some")
-                        .to_mutation(false)
+                        .to_mutation(false, &mut edges)
                         .expect("should have some mutation in `CreateStreamingJob` command");
 
                     control_stream_manager.add_partial_graph(self.database_id, Some(job_id))?;
@@ -1052,6 +1054,7 @@ impl DatabaseCheckpointControl {
                             barrier_info.prev_epoch(),
                             hummock_version_stats,
                             mutation,
+                            edges.as_mut().expect("should exist"),
                         ),
                     );
                 }
@@ -1092,6 +1095,7 @@ impl DatabaseCheckpointControl {
             prev_paused_reason,
             &pre_applied_graph_info,
             &self.state.inflight_graph_info,
+            &mut edges,
         ) {
             Ok(node_to_collect) => node_to_collect,
             Err(err) => {

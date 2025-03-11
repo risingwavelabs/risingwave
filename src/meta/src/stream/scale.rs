@@ -1370,7 +1370,7 @@ impl ScaleController {
                     upstream_dispatcher_mapping,
                     downstream_fragment_ids,
                     actor_splits,
-                    newly_created_actors: vec![],
+                    newly_created_actors: Default::default(),
                 },
             );
         }
@@ -1386,9 +1386,9 @@ impl ScaleController {
             fragment_created_actors.insert(*fragment_id, created_actors);
         }
 
-        for (fragment_id, to_create) in &fragment_created_actors {
-            let reschedule = reschedule_fragment.get_mut(fragment_id).unwrap();
-            reschedule.newly_created_actors = to_create.values().cloned().collect();
+        for (fragment_id, to_create) in fragment_created_actors {
+            let reschedule = reschedule_fragment.get_mut(&fragment_id).unwrap();
+            reschedule.newly_created_actors = to_create;
         }
         tracing::debug!("analyze_reschedule_plan result: {:#?}", reschedule_fragment);
 
