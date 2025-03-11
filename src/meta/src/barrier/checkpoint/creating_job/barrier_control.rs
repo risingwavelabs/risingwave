@@ -33,6 +33,7 @@ struct CreatingStreamingJobEpochState {
     node_to_collect: HashSet<WorkerId>,
     resps: Vec<BarrierCompleteResponse>,
     is_checkpoint: bool,
+    is_initial: bool,
     enqueue_time: Instant,
 }
 
@@ -42,7 +43,7 @@ pub(super) struct CreatingStreamingJobBarrierControl {
     // key is prev_epoch of barrier
     inflight_barrier_queue: BTreeMap<u64, CreatingStreamingJobEpochState>,
     backfill_epoch: u64,
-    initial_epoch: Option<u64>,
+    is_initialized: bool,
     max_collected_epoch: Option<u64>,
     // newer epoch at the front.
     pending_barriers_to_complete: VecDeque<CreatingStreamingJobEpochState>,
@@ -57,13 +58,13 @@ pub(super) struct CreatingStreamingJobBarrierControl {
 }
 
 impl CreatingStreamingJobBarrierControl {
-    pub(super) fn new(table_id: TableId, backfill_epoch: u64) -> Self {
+    pub(super) fn new(table_id: TableId, backfill_epoch: u64, is_initialized: bool) -> Self {
         let table_id_str = format!("{}", table_id.table_id);
         Self {
             table_id,
             inflight_barrier_queue: Default::default(),
             backfill_epoch,
-            initial_epoch: None,
+            is_initialized,
             max_collected_epoch: None,
             pending_barriers_to_complete: Default::default(),
             completing_barrier: None,
@@ -122,8 +123,9 @@ impl CreatingStreamingJobBarrierControl {
             table_id = self.table_id.table_id,
             "creating job enqueue epoch"
         );
-        if self.initial_epoch.is_none() {
-            self.initial_epoch = Some(epoch);
+        let is_initial = !self.is_initialized;
+        if !self.is_initialized {
+            self.is_initialized = true;
             assert!(is_checkpoint, "first barrier must be checkpoint barrier");
         }
         if let Some(latest_epoch) = self.latest_epoch() {
@@ -134,6 +136,7 @@ impl CreatingStreamingJobBarrierControl {
             node_to_collect,
             resps: vec![],
             is_checkpoint,
+            is_initial,
             enqueue_time: Instant::now(),
         };
         if epoch_state.node_to_collect.is_empty() && self.inflight_barrier_queue.is_empty() {
@@ -194,7 +197,7 @@ impl CreatingStreamingJobBarrierControl {
                 .pop_back()
                 .expect("non-empty");
             let epoch = epoch_state.epoch;
-            let is_first = self.initial_epoch.expect("should have set") == epoch;
+            let is_first = epoch_state.is_initial;
             if is_first {
                 assert!(epoch_state.is_checkpoint);
             } else if !epoch_state.is_checkpoint {
