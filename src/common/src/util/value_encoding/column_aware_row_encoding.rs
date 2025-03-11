@@ -38,7 +38,7 @@ mod new_serde {
 
     use super::*;
     use crate::array::{ListRef, ListValue, MapRef, MapValue, StructRef, StructValue};
-    use crate::types::{MapType, ScalarImpl, StructType};
+    use crate::types::{MapType, ScalarImpl, StructType, data_types};
     use crate::util::value_encoding::{
         deserialize_value as plain_deserialize_scalar, serialize_scalar as plain_serialize_scalar,
     };
@@ -160,7 +160,7 @@ mod new_serde {
             DataType::List(item_type) => new_deserialize_list(item_type, data)?,
             DataType::Map(map_type) => new_deserialize_map(map_type, data)?,
 
-            _ => plain_deserialize_scalar(ty, data)?,
+            data_types::simple!() => plain_deserialize_scalar(ty, data)?,
         })
     }
 }
