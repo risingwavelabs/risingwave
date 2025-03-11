@@ -200,7 +200,9 @@ impl WorkerNodeManager {
             .try_insert(fragment_id, vnode_mapping)
             .is_err()
         {
-            tracing::info!("Previous batch vnode mapping not found for fragment {fragment_id}, maybe offline scaling with background ddl");
+            tracing::info!(
+                "Previous batch vnode mapping not found for fragment {fragment_id}, maybe offline scaling with background ddl"
+            );
         }
     }
 
@@ -215,7 +217,9 @@ impl WorkerNodeManager {
             .insert(fragment_id, vnode_mapping)
             .is_none()
         {
-            tracing::info!("Previous vnode mapping not found for fragment {fragment_id}, maybe offline scaling with background ddl");
+            tracing::info!(
+                "Previous vnode mapping not found for fragment {fragment_id}, maybe offline scaling with background ddl"
+            );
         }
     }
 

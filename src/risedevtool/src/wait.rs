@@ -18,7 +18,7 @@ use std::path::Path;
 use std::thread::sleep;
 use std::time::Duration;
 
-use anyhow::{anyhow, Context as _, Result};
+use anyhow::{Context as _, Result, anyhow};
 use console::style;
 
 pub fn wait(

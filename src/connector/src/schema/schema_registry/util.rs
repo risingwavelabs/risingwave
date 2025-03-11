@@ -20,7 +20,7 @@ use serde::de::DeserializeOwned;
 use serde_derive::Deserialize;
 use url::{ParseError, Url};
 
-use crate::schema::{bail_invalid_option_error, InvalidOptionError};
+use crate::schema::{InvalidOptionError, bail_invalid_option_error};
 
 pub fn handle_sr_list(addr: &str) -> Result<Vec<Url>, InvalidOptionError> {
     let segment = addr.split(',').collect::<Vec<&str>>();

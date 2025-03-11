@@ -28,16 +28,16 @@ use risingwave_common::session_config::OverWindowCachePolicy as CachePolicy;
 use risingwave_common::types::{Datum, Sentinelled};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common_estimate_size::collections::EstimatedBTreeMap;
-use risingwave_expr::window_function::{create_window_state, StateKey, WindowStates};
-use risingwave_storage::store::PrefetchOptions;
+use risingwave_expr::window_function::{StateKey, WindowStates, create_window_state};
 use risingwave_storage::StateStore;
+use risingwave_storage::store::PrefetchOptions;
 use static_assertions::const_assert;
 
 use super::general::{Calls, RowConverter};
 use crate::common::table::state_table::StateTable;
 use crate::consistency::{consistency_error, enable_strict_consistency};
-use crate::executor::over_window::frame_finder::*;
 use crate::executor::StreamExecutorResult;
+use crate::executor::over_window::frame_finder::*;
 
 pub(super) type CacheKey = Sentinelled<StateKey>;
 
@@ -336,12 +336,13 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
     pub fn cache_real_len(&self) -> usize {
         let len = self.range_cache.inner().len();
         if len <= 1 {
-            debug_assert!(self
-                .range_cache
-                .inner()
-                .first_key_value()
-                .map(|(k, _)| k.is_normal())
-                .unwrap_or(true));
+            debug_assert!(
+                self.range_cache
+                    .inner()
+                    .first_key_value()
+                    .map(|(k, _)| k.is_normal())
+                    .unwrap_or(true)
+            );
             return len;
         }
         // len >= 2

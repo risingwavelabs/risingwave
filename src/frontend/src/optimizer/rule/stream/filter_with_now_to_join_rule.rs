@@ -16,11 +16,11 @@ use risingwave_common::types::DataType;
 use risingwave_pb::plan_common::JoinType;
 
 use crate::expr::{ExprRewriter, FunctionCall, InputRef};
+use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::generic::{self, GenericPlanRef};
 use crate::optimizer::plan_node::{LogicalFilter, LogicalJoin, LogicalNow};
 use crate::optimizer::property::{analyze_monotonicity, monotonicity_variants};
 use crate::optimizer::rule::{BoxedRule, Rule};
-use crate::optimizer::PlanRef;
 use crate::utils::Condition;
 
 /// Convert `LogicalFilter` with now in predicate to left-semi `LogicalJoin`

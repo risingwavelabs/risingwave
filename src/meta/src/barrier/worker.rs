@@ -21,10 +21,10 @@ use anyhow::anyhow;
 use arc_swap::ArcSwap;
 use itertools::Itertools;
 use risingwave_common::catalog::DatabaseId;
-use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::system_param::PAUSE_ON_NEXT_BOOTSTRAP_KEY;
+use risingwave_common::system_param::reader::SystemParamsRead;
+use risingwave_pb::meta::Recovery;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use risingwave_pb::meta::{PausedReason, Recovery};
 use risingwave_pb::stream_service::streaming_control_stream_response::Response;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc;
@@ -32,16 +32,16 @@ use tokio::sync::oneshot::{Receiver, Sender};
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 use tonic::Status;
-use tracing::{debug, error, info, warn, Instrument};
+use tracing::{Instrument, debug, error, info, warn};
 
 use crate::barrier::checkpoint::{CheckpointControl, CheckpointControlEvent};
 use crate::barrier::complete_task::{BarrierCompleteOutput, CompletingTask};
 use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl};
-use crate::barrier::rpc::{merge_node_rpc_errors, ControlStreamManager};
+use crate::barrier::rpc::{ControlStreamManager, merge_node_rpc_errors};
 use crate::barrier::schedule::PeriodicBarriers;
 use crate::barrier::{
-    schedule, BarrierManagerRequest, BarrierManagerStatus, BarrierWorkerRuntimeInfoSnapshot,
-    RecoveryReason,
+    BarrierManagerRequest, BarrierManagerStatus, BarrierWorkerRuntimeInfoSnapshot, RecoveryReason,
+    schedule,
 };
 use crate::error::MetaErrorInner;
 use crate::hummock::HummockManagerRef;
@@ -219,9 +219,8 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
             );
 
             let paused = self.take_pause_on_bootstrap().await.unwrap_or(false);
-            let paused_reason = paused.then_some(PausedReason::Manual);
 
-            self.recovery(paused_reason, None, RecoveryReason::Bootstrap)
+            self.recovery(paused, None, RecoveryReason::Bootstrap)
                 .instrument(span)
                 .await;
         }
@@ -396,7 +395,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     if self
                         .checkpoint_control
                         .can_inject_barrier(self.in_flight_barrier_nums) => {
-                    if let Err(e) = self.checkpoint_control.handle_new_barrier(new_barrier, &mut self.control_stream_manager, &self.active_streaming_nodes) {
+                    if let Err(e) = self.checkpoint_control.handle_new_barrier(new_barrier, &mut self.control_stream_manager) {
                         self.failure_recovery(e).await;
                     }
                 }
@@ -492,7 +491,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
 
             // No need to clean dirty tables for barrier recovery,
             // The foreground stream job should cleanup their own tables.
-            self.recovery(None, Some(err), reason)
+            self.recovery(false, Some(err), reason)
                 .instrument(span)
                 .await;
         } else {
@@ -523,7 +522,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
 
         // No need to clean dirty tables for barrier recovery,
         // The foreground stream job should cleanup their own tables.
-        self.recovery(None, Some(err), RecoveryReason::Adhoc)
+        self.recovery(false, Some(err), RecoveryReason::Adhoc)
             .instrument(span)
             .await;
     }
@@ -545,7 +544,7 @@ impl<C> GlobalBarrierWorker<C> {
 mod retry_strategy {
     use std::time::Duration;
 
-    use tokio_retry::strategy::{jitter, ExponentialBackoff};
+    use tokio_retry::strategy::{ExponentialBackoff, jitter};
 
     // Retry base interval in milliseconds.
     const RECOVERY_RETRY_BASE_INTERVAL: u64 = 20;
@@ -594,7 +593,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
     /// Returns the new state of the barrier manager after recovery.
     pub async fn recovery(
         &mut self,
-        paused_reason: Option<PausedReason>,
+        is_paused: bool,
         err: Option<MetaError>,
         recovery_reason: RecoveryReason,
     ) {
@@ -602,15 +601,11 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
         // Clear all control streams to release resources (connections to compute nodes) first.
         self.control_stream_manager.clear();
 
-        self.recovery_inner(paused_reason, err).await;
+        self.recovery_inner(is_paused, err).await;
         self.context.mark_ready(None);
     }
 
-    async fn recovery_inner(
-        &mut self,
-        paused_reason: Option<PausedReason>,
-        err: Option<MetaError>,
-    ) {
+    async fn recovery_inner(&mut self, is_paused: bool, err: Option<MetaError>) {
         tracing::info!("recovery start!");
         let retry_strategy = get_retry_strategy();
 
@@ -668,7 +663,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         &mut source_splits,
                         &mut background_jobs,
                         subscription_infos.remove(&database_id).unwrap_or_default(),
-                        paused_reason,
+                        is_paused,
                         &hummock_version_stats,
                     )?;
                     if !node_to_collect.is_empty() {
@@ -724,7 +719,8 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     ),
                 )
             };
-            if recovery_result.is_err() {
+            if let Err(err) = &recovery_result {
+                tracing::error!(error = %err.as_report(), "recovery failed");
                 GLOBAL_META_METRICS.recovery_failure_cnt.inc();
             }
             recovery_result

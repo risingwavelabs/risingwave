@@ -50,7 +50,7 @@ use chrono::{DateTime, NaiveDateTime, NaiveTime};
 use itertools::Itertools;
 
 // This is important because we want to use the arrow version specified by the outer mod.
-use super::{arrow_array, arrow_buffer, arrow_cast, arrow_schema, ArrowIntervalType};
+use super::{ArrowIntervalType, arrow_array, arrow_buffer, arrow_cast, arrow_schema};
 // Other import should always use the absolute path.
 use crate::array::*;
 use crate::types::*;
@@ -541,7 +541,7 @@ pub trait FromArrow {
             t => {
                 return Err(ArrayError::from_arrow(format!(
                     "unsupported arrow data type: {t:?}"
-                )))
+                )));
             }
         })
     }

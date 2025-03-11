@@ -23,7 +23,6 @@
 // FIXME: This should be fixed!!! https://github.com/risingwavelabs/risingwave/issues/19906
 #![expect(clippy::large_enum_variant)]
 
-use std::collections::HashMap;
 use std::str::FromStr;
 
 use plan_common::AdditionalColumn;
@@ -385,20 +384,6 @@ impl stream_plan::Dispatcher {
     }
 }
 
-impl meta::table_fragments::Fragment {
-    pub fn dispatches(&self) -> HashMap<i32, stream_plan::DispatchStrategy> {
-        self.actors[0]
-            .dispatcher
-            .iter()
-            .map(|d| {
-                let fragment_id = d.dispatcher_id as _;
-                let strategy = d.as_strategy();
-                (fragment_id, strategy)
-            })
-            .collect()
-    }
-}
-
 impl catalog::StreamSourceInfo {
     /// Refer to [`Self::cdc_source_job`] for details.
     pub fn is_shared(&self) -> bool {
@@ -449,6 +434,7 @@ impl std::fmt::Debug for data::DataType {
             interval_type,
             field_type,
             field_names,
+            field_ids,
             type_name,
             // currently all data types are nullable
             is_nullable: _,
@@ -474,6 +460,9 @@ impl std::fmt::Debug for data::DataType {
         if !self.field_names.is_empty() {
             s.field("field_names", field_names);
         }
+        if !self.field_ids.is_empty() {
+            s.field("field_ids", field_ids);
+        }
         s.finish()
     }
 }
@@ -494,13 +483,12 @@ impl std::fmt::Debug for plan_common::ColumnDesc {
             column_type,
             column_id,
             name,
-            field_descs,
-            type_name,
             description,
             additional_column_type,
             additional_column,
             generated_or_default_column,
             version,
+            nullable,
         } = self;
 
         let mut s = f.debug_struct("ColumnDesc");
@@ -510,12 +498,6 @@ impl std::fmt::Debug for plan_common::ColumnDesc {
             s.field("column_type", &"Unknown");
         }
         s.field("column_id", column_id).field("name", name);
-        if !self.field_descs.is_empty() {
-            s.field("field_descs", field_descs);
-        }
-        if !self.type_name.is_empty() {
-            s.field("type_name", type_name);
-        }
         if let Some(description) = description {
             s.field("description", description);
         }
@@ -533,13 +515,62 @@ impl std::fmt::Debug for plan_common::ColumnDesc {
         if let Some(generated_or_default_column) = generated_or_default_column {
             s.field("generated_or_default_column", &generated_or_default_column);
         }
+        s.field("nullable", nullable);
         s.finish()
+    }
+}
+
+impl expr::UserDefinedFunction {
+    pub fn name_in_runtime(&self) -> Option<&str> {
+        if self.version() < expr::UdfExprVersion::NameInRuntime {
+            if self.language == "rust" || self.language == "wasm" {
+                // The `identifier` value of Rust and WASM UDF before `NameInRuntime`
+                // is not used any more. The real bound function name should be the same
+                // as `name`.
+                Some(&self.name)
+            } else {
+                // `identifier`s of other UDFs already mean `name_in_runtime` before `NameInRuntime`.
+                self.identifier.as_deref()
+            }
+        } else {
+            // after `PbUdfExprVersion::NameInRuntime`, `identifier` means `name_in_runtime`
+            self.identifier.as_deref()
+        }
+    }
+}
+
+impl expr::UserDefinedFunctionMetadata {
+    pub fn name_in_runtime(&self) -> Option<&str> {
+        if self.version() < expr::UdfExprVersion::NameInRuntime {
+            if self.language == "rust" || self.language == "wasm" {
+                // The `identifier` value of Rust and WASM UDF before `NameInRuntime`
+                // is not used any more. And unfortunately, we don't have the original name
+                // in `PbUserDefinedFunctionMetadata`, so we need to extract the name from
+                // the old `identifier` value (e.g. `foo()->int32`).
+                let old_identifier = self
+                    .identifier
+                    .as_ref()
+                    .expect("Rust/WASM UDF must have identifier");
+                Some(
+                    old_identifier
+                        .split_once("(")
+                        .expect("the old identifier must contain `(`")
+                        .0,
+                )
+            } else {
+                // `identifier`s of other UDFs already mean `name_in_runtime` before `NameInRuntime`.
+                self.identifier.as_deref()
+            }
+        } else {
+            // after `PbUdfExprVersion::NameInRuntime`, `identifier` means `name_in_runtime`
+            self.identifier.as_deref()
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::data::{data_type, DataType};
+    use crate::data::{DataType, data_type};
     use crate::plan_common::Field;
     use crate::stream_plan::stream_node::NodeBody;
 

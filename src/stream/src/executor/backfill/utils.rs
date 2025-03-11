@@ -17,8 +17,8 @@ use std::collections::HashMap;
 use std::ops::Bound;
 
 use await_tree::InstrumentAwait;
-use futures::future::try_join_all;
 use futures::Stream;
+use futures::future::try_join_all;
 use futures_async_stream::try_stream;
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{Op, StreamChunk};
@@ -30,14 +30,14 @@ use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqDebug;
-use risingwave_common::util::sort_util::{cmp_datum_iter, OrderType};
+use risingwave_common::util::sort_util::{OrderType, cmp_datum_iter};
 use risingwave_common::util::value_encoding::BasicSerde;
 use risingwave_common_rate_limit::RateLimit;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::source::cdc::external::{CdcOffset, CdcOffsetParseFunc};
+use risingwave_storage::StateStore;
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::table::collect_data_chunk_with_builder;
-use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::{ReplicatedStateTable, StateTableInner};
 use crate::executor::{
@@ -79,9 +79,9 @@ impl BackfillState {
         match self.inner.get(vnode) {
             Some(p) => Ok(p.current_state()),
             None => bail!(
-                    "Backfill progress for vnode {:#?} not found, backfill_state not initialized properly",
-                    vnode,
-                ),
+                "Backfill progress for vnode {:#?} not found, backfill_state not initialized properly",
+                vnode,
+            ),
         }
     }
 
@@ -627,7 +627,7 @@ pub(crate) async fn flush_data<S: StateStore, const IS_REPLICATED: bool>(
             })
         });
     }
-    table.commit(epoch).await
+    table.commit_assert_no_update_vnode_bitmap(epoch).await
 }
 
 /// We want to avoid allocating a row for every vnode.
@@ -812,7 +812,7 @@ pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: 
         backfill_state.mark_committed(vnode);
     }
 
-    table.commit(epoch).await?;
+    table.commit_assert_no_update_vnode_bitmap(epoch).await?;
     Ok(())
 }
 
@@ -836,7 +836,7 @@ pub(crate) async fn persist_state<S: StateStore, const IS_REPLICATED: bool>(
         flush_data(table, epoch, old_state, current_state).await?;
         *old_state = Some(current_state.into());
     } else {
-        table.commit(epoch).await?;
+        table.commit_assert_no_update_vnode_bitmap(epoch).await?;
     }
     Ok(())
 }

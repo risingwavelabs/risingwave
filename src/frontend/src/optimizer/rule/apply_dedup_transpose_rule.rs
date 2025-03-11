@@ -15,8 +15,8 @@
 use risingwave_pb::plan_common::JoinType;
 
 use super::{BoxedRule, Rule};
-use crate::optimizer::plan_node::{LogicalApply, LogicalDedup, LogicalFilter, PlanTreeNodeUnary};
 use crate::optimizer::PlanRef;
+use crate::optimizer::plan_node::{LogicalApply, LogicalDedup, LogicalFilter, PlanTreeNodeUnary};
 use crate::utils::Condition;
 
 /// Transpose `LogicalApply` and `LogicalDedup`.

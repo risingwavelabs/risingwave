@@ -14,7 +14,7 @@
 
 use std::fmt::Write;
 
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_expr::{ExprError, Result, function};
 
 #[function("substr(varchar, int4) -> varchar")]
 pub fn substr_start(s: &str, start: i32, writer: &mut impl Write) -> Result<()> {

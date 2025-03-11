@@ -934,11 +934,13 @@ mod tests {
         );
 
         buffer.append(1, "hello");
-        assert!(buffer
-            .curr_window_values()
-            .cloned()
-            .collect_vec()
-            .is_empty());
+        assert!(
+            buffer
+                .curr_window_values()
+                .cloned()
+                .collect_vec()
+                .is_empty()
+        );
         buffer.append(2, "world");
         let _ = buffer.slide();
         assert_eq!(
@@ -1050,10 +1052,12 @@ mod tests {
         let removed_keys = buffer.slide().map(|(k, _)| k).collect_vec();
         assert_eq!(removed_keys, vec![key(15), key(16)]);
         assert!(buffer.curr_key().is_none());
-        assert!(buffer
-            .curr_window_values()
-            .cloned()
-            .collect_vec()
-            .is_empty());
+        assert!(
+            buffer
+                .curr_window_values()
+                .cloned()
+                .collect_vec()
+                .is_empty()
+        );
     }
 }

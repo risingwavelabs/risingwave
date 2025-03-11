@@ -56,11 +56,13 @@ impl UserDefinedFunction {
             return_type,
             language: udf.language.clone(),
             runtime: udf.runtime.clone(),
-            identifier: udf.identifier.clone(),
+            name_in_runtime: udf.name_in_runtime().map(|x| x.to_owned()),
             body: udf.body.clone(),
             link: udf.link.clone(),
             compressed_binary: udf.compressed_binary.clone(),
             always_retry_on_network_error: udf.always_retry_on_network_error,
+            is_batched: udf.is_batched,
+            is_async: udf.is_async,
         };
 
         Ok(Self {
@@ -93,11 +95,14 @@ impl Expr for UserDefinedFunction {
                     .collect(),
                 language: self.catalog.language.clone(),
                 runtime: self.catalog.runtime.clone(),
-                identifier: self.catalog.identifier.clone(),
+                identifier: self.catalog.name_in_runtime.clone(),
                 link: self.catalog.link.clone(),
                 body: self.catalog.body.clone(),
                 compressed_binary: self.catalog.compressed_binary.clone(),
                 always_retry_on_network_error: self.catalog.always_retry_on_network_error,
+                is_async: self.catalog.is_async,
+                is_batched: self.catalog.is_batched,
+                version: PbUdfExprVersion::LATEST as _,
             }))),
         }
     }

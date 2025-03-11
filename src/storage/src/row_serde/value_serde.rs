@@ -31,8 +31,8 @@ use risingwave_common::util::value_encoding::{
     ValueRowSerdeKind, ValueRowSerializer,
 };
 use risingwave_expr::expr::build_from_prost;
-use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::DefaultColumnDesc;
+use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 
 pub type Result<T> = std::result::Result<T, ValueEncodingError>;
 
@@ -303,8 +303,10 @@ mod tests {
             vec![Some(Int16(5)), Some(Utf8("ABC".into()))]
         );
 
-        // drop all columns is now allowed
-        assert!(try_drop_invalid_columns(&row_bytes, &HashSet::new()).is_none());
+        // all columns are dropped
+        let row_bytes_all_dropped = try_drop_invalid_columns(&row_bytes, &HashSet::new()).unwrap();
+        assert_eq!(row_bytes_all_dropped.len(), 5); // 1 byte flag + 4 bytes for length (0)
+        assert_eq!(&row_bytes_all_dropped[1..], [0, 0, 0, 0]);
     }
 
     #[test]

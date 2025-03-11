@@ -28,12 +28,13 @@ use iceberg::{
     TableUpdate,
 };
 use itertools::Itertools;
-use jni::objects::{GlobalRef, JObject};
 use jni::JavaVM;
+use jni::objects::{GlobalRef, JObject};
 use risingwave_common::bail;
 use risingwave_jni_core::call_method;
-use risingwave_jni_core::jvm_runtime::{execute_with_jni_env, jobj_to_str, JVM};
+use risingwave_jni_core::jvm_runtime::{JVM, execute_with_jni_env, jobj_to_str};
 use serde::{Deserialize, Serialize};
+use thiserror_ext::AsReport;
 
 use crate::error::ConnectorResult;
 
@@ -76,6 +77,20 @@ struct CommitTableResponse {
     metadata: TableMetadata,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+struct ListNamespacesResponse {
+    namespaces: Vec<NamespaceIdent>,
+    next_page_token: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+struct ListTablesResponse {
+    identifiers: Vec<TableIdent>,
+    next_page_token: Option<String>,
+}
+
 impl From<&TableCreation> for CreateTableRequest {
     fn from(value: &TableCreation) -> Self {
         Self {
@@ -98,21 +113,60 @@ pub struct JniCatalog {
 
 #[async_trait]
 impl Catalog for JniCatalog {
-    /// List namespaces from table.
+    /// List namespaces from the catalog.
     async fn list_namespaces(
         &self,
         _parent: Option<&NamespaceIdent>,
     ) -> iceberg::Result<Vec<NamespaceIdent>> {
-        todo!()
+        execute_with_jni_env(self.jvm, |env| {
+            let result_json =
+                call_method!(env, self.java_catalog.as_obj(), {String listNamespaces()})
+                    .with_context(|| "Failed to list iceberg namespaces".to_owned())?;
+
+            let rust_json_str = jobj_to_str(env, result_json)?;
+
+            let resp: ListNamespacesResponse = serde_json::from_str(&rust_json_str)?;
+
+            Ok(resp.namespaces)
+        })
+        .map_err(|e| {
+            iceberg::Error::new(
+                iceberg::ErrorKind::Unexpected,
+                "Failed to list iceberg namespaces.",
+            )
+            .with_source(e)
+        })
     }
 
     /// Create a new namespace inside the catalog.
     async fn create_namespace(
         &self,
-        _namespace: &iceberg::NamespaceIdent,
+        namespace: &iceberg::NamespaceIdent,
         _properties: HashMap<String, String>,
     ) -> iceberg::Result<iceberg::Namespace> {
-        todo!()
+        execute_with_jni_env(self.jvm, |env| {
+            let namespace_jstr = if namespace.is_empty() {
+                env.new_string("").unwrap()
+            } else {
+                if namespace.len() > 1 {
+                    bail!("Namespace with more than one level is not supported!")
+                }
+                env.new_string(&namespace[0]).unwrap()
+            };
+
+            call_method!(env, self.java_catalog.as_obj(), {void createNamespace(String)},
+                &namespace_jstr)
+            .with_context(|| format!("Failed to create namespace: {namespace}"))?;
+
+            Ok(Namespace::new(namespace.clone()))
+        })
+        .map_err(|e| {
+            iceberg::Error::new(
+                iceberg::ErrorKind::Unexpected,
+                "Failed to create namespace.",
+            )
+            .with_source(e)
+        })
     }
 
     /// Get a namespace information from the catalog.
@@ -121,8 +175,31 @@ impl Catalog for JniCatalog {
     }
 
     /// Check if namespace exists in catalog.
-    async fn namespace_exists(&self, _namespace: &NamespaceIdent) -> iceberg::Result<bool> {
-        todo!()
+    async fn namespace_exists(&self, namespace: &NamespaceIdent) -> iceberg::Result<bool> {
+        execute_with_jni_env(self.jvm, |env| {
+            let namespace_jstr = if namespace.is_empty() {
+                env.new_string("").unwrap()
+            } else {
+                if namespace.len() > 1 {
+                    bail!("Namespace with more than one level is not supported!")
+                }
+                env.new_string(&namespace[0]).unwrap()
+            };
+
+            let exists =
+                call_method!(env, self.java_catalog.as_obj(), {boolean namespaceExists(String)},
+                &namespace_jstr)
+                .with_context(|| format!("Failed to check namespace exists: {namespace}"))?;
+
+            Ok(exists)
+        })
+        .map_err(|e| {
+            iceberg::Error::new(
+                iceberg::ErrorKind::Unexpected,
+                "Failed to check namespace exists.",
+            )
+            .with_source(e)
+        })
     }
 
     /// Drop a namespace from the catalog.
@@ -131,8 +208,37 @@ impl Catalog for JniCatalog {
     }
 
     /// List tables from namespace.
-    async fn list_tables(&self, _namespace: &NamespaceIdent) -> iceberg::Result<Vec<TableIdent>> {
-        todo!()
+    async fn list_tables(&self, namespace: &NamespaceIdent) -> iceberg::Result<Vec<TableIdent>> {
+        execute_with_jni_env(self.jvm, |env| {
+            let namespace_jstr = if namespace.is_empty() {
+                env.new_string("").unwrap()
+            } else {
+                if namespace.len() > 1 {
+                    bail!("Namespace with more than one level is not supported!")
+                }
+                env.new_string(&namespace[0]).unwrap()
+            };
+
+            let result_json =
+                call_method!(env, self.java_catalog.as_obj(), {String listTables(String)},
+                &namespace_jstr)
+                .with_context(|| {
+                    format!("Failed to list iceberg tables in namespace: {}", namespace)
+                })?;
+
+            let rust_json_str = jobj_to_str(env, result_json)?;
+
+            let resp: ListTablesResponse = serde_json::from_str(&rust_json_str)?;
+
+            Ok(resp.identifiers)
+        })
+        .map_err(|e| {
+            iceberg::Error::new(
+                iceberg::ErrorKind::Unexpected,
+                "Failed to list iceberg  tables.",
+            )
+            .with_source(e)
+        })
     }
 
     async fn update_namespace(
@@ -270,7 +376,7 @@ impl Catalog for JniCatalog {
         .map_err(|e| {
             iceberg::Error::new(
                 iceberg::ErrorKind::Unexpected,
-                "Failed to load iceberg table.",
+                "Failed to drop iceberg table.",
             )
             .with_source(e)
         })
@@ -299,7 +405,7 @@ impl Catalog for JniCatalog {
         .map_err(|e| {
             iceberg::Error::new(
                 iceberg::ErrorKind::Unexpected,
-                "Failed to load iceberg table.",
+                "Failed to check iceberg table exists.",
             )
             .with_source(e)
         })
@@ -362,6 +468,19 @@ impl Catalog for JniCatalog {
             )
             .with_source(e)
         })
+    }
+}
+
+impl Drop for JniCatalog {
+    fn drop(&mut self) {
+        let _ = execute_with_jni_env(self.jvm, |env| {
+            call_method!(env, self.java_catalog.as_obj(), {void close()})
+                .with_context(|| "Failed to close iceberg catalog".to_owned())?;
+            Ok(())
+        })
+        .inspect_err(
+            |e| tracing::error!(error = ?e.as_report(), "Failed to close iceberg catalog"),
+        );
     }
 }
 

@@ -19,21 +19,20 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use bytes::Bytes;
-use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
+use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header};
 use parking_lot::Mutex;
 use risingwave_common::types::DataType;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
-use risingwave_sqlparser::ast::{RedactSqlOptionKeywordsRef, Statement};
+use risingwave_sqlparser::ast::Statement;
 use serde::Deserialize;
 use thiserror_ext::AsReport;
-use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::error::{PsqlError, PsqlResult};
 use crate::net::{AddressRef, Listener, TcpKeepalive};
 use crate::pg_field_descriptor::PgFieldDescriptor;
 use crate::pg_message::TransactionStatus;
-use crate::pg_protocol::{PgProtocol, TlsConfig};
+use crate::pg_protocol::{ConnectionContext, PgByteStream, PgProtocol};
 use crate::pg_response::{PgResponse, ValuesStream};
 use crate::types::Format;
 
@@ -95,9 +94,10 @@ pub trait Session: Send + Sync {
         params_types: Vec<Option<DataType>>,
     ) -> impl Future<Output = Result<Self::PreparedStatement, BoxedError>> + Send;
 
-    // TODO: maybe this function should be async and return the notice more timely
-    /// try to take the current notices from the session
-    fn take_notices(self: Arc<Self>) -> Vec<String>;
+    /// Receive the next notice message to send to the client.
+    ///
+    /// This function should be cancellation-safe.
+    fn next_notice(self: &Arc<Self>) -> impl Future<Output = String> + Send;
 
     fn bind(
         self: Arc<Self>,
@@ -267,8 +267,7 @@ pub async fn pg_serve(
     addr: &str,
     tcp_keepalive: TcpKeepalive,
     session_mgr: Arc<impl SessionManager>,
-    tls_config: Option<TlsConfig>,
-    redact_sql_option_keywords: Option<RedactSqlOptionKeywordsRef>,
+    context: ConnectionContext,
     shutdown: CancellationToken,
 ) -> Result<(), BoxedError> {
     let listener = Listener::bind(addr).await?;
@@ -288,7 +287,6 @@ pub async fn pg_serve(
     let worker_runtime = tokio::runtime::Handle::current();
     #[cfg(madsim)]
     let worker_runtime = tokio::runtime::Builder::new_multi_thread().build().unwrap();
-
     let session_mgr_clone = session_mgr.clone();
     let f = async move {
         loop {
@@ -299,9 +297,8 @@ pub async fn pg_serve(
                     worker_runtime.spawn(handle_connection(
                         stream,
                         session_mgr_clone.clone(),
-                        tls_config.clone(),
                         Arc::new(peer_addr),
-                        redact_sql_option_keywords.clone(),
+                        context.clone(),
                     ));
                 }
 
@@ -327,36 +324,16 @@ pub async fn pg_serve(
 pub async fn handle_connection<S, SM>(
     stream: S,
     session_mgr: Arc<SM>,
-    tls_config: Option<TlsConfig>,
     peer_addr: AddressRef,
-    redact_sql_option_keywords: Option<RedactSqlOptionKeywordsRef>,
+    context: ConnectionContext,
 ) where
-    S: AsyncWrite + AsyncRead + Unpin,
+    S: PgByteStream,
     SM: SessionManager,
 {
-    let mut pg_proto = PgProtocol::new(
-        stream,
-        session_mgr,
-        tls_config,
-        peer_addr,
-        redact_sql_option_keywords,
-    );
-    loop {
-        let msg = match pg_proto.read_message().await {
-            Ok(msg) => msg,
-            Err(e) => {
-                tracing::error!(error = %e.as_report(), "error when reading message");
-                break;
-            }
-        };
-        tracing::trace!("Received message: {:?}", msg);
-        let ret = pg_proto.process(msg).await;
-        if ret {
-            break;
-        }
-    }
+    PgProtocol::new(stream, session_mgr, peer_addr, context)
+        .run()
+        .await;
 }
-
 #[cfg(test)]
 mod tests {
     use std::error::Error;
@@ -364,20 +341,22 @@ mod tests {
     use std::time::Instant;
 
     use bytes::Bytes;
-    use futures::stream::BoxStream;
     use futures::StreamExt;
+    use futures::stream::BoxStream;
     use risingwave_common::types::DataType;
     use risingwave_common::util::tokio_util::sync::CancellationToken;
     use risingwave_sqlparser::ast::Statement;
     use tokio_postgres::NoTls;
 
     use crate::error::PsqlResult;
+    use crate::memory_manager::MessageMemoryManager;
     use crate::pg_field_descriptor::PgFieldDescriptor;
     use crate::pg_message::TransactionStatus;
+    use crate::pg_protocol::ConnectionContext;
     use crate::pg_response::{PgResponse, RowSetResult, StatementType};
     use crate::pg_server::{
-        pg_serve, BoxedError, ExecContext, ExecContextGuard, Session, SessionId, SessionManager,
-        UserAuthenticator,
+        BoxedError, ExecContext, ExecContextGuard, Session, SessionId, SessionManager,
+        UserAuthenticator, pg_serve,
     };
     use crate::types;
     use crate::types::Row;
@@ -505,8 +484,8 @@ mod tests {
             Ok("".to_owned())
         }
 
-        fn take_notices(self: Arc<Self>) -> Vec<String> {
-            vec![]
+        async fn next_notice(self: &Arc<Self>) -> String {
+            std::future::pending().await
         }
 
         fn transaction_status(&self) -> TransactionStatus {
@@ -537,8 +516,12 @@ mod tests {
                 &bind_addr,
                 socket2::TcpKeepalive::new(),
                 Arc::new(session_mgr),
-                None,
-                None,
+                ConnectionContext {
+                    tls_config: None,
+                    redact_sql_option_keywords: None,
+                    message_memory_manager: MessageMemoryManager::new(u64::MAX, u64::MAX, u64::MAX)
+                        .into(),
+                },
                 CancellationToken::new(), // dummy
             )
             .await

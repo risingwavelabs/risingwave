@@ -26,7 +26,7 @@ pub use query_mode::QueryMode;
 use risingwave_common_proc_macro::{ConfigDoc, SessionConfig};
 pub use search_path::{SearchPath, USER_NAME_WILD_CARD};
 use serde::{Deserialize, Serialize};
-use serde_with::{serde_as, DisplayFromStr};
+use serde_with::{DisplayFromStr, serde_as};
 use thiserror::Error;
 
 use self::non_zero64::ConfigNonZeroU64;
@@ -337,6 +337,38 @@ pub struct SessionConfig {
     // a.k.a. vnode count
     #[parameter(default = VirtualNode::COUNT_FOR_COMPAT, check_hook = check_streaming_max_parallelism)]
     streaming_max_parallelism: usize,
+
+    /// Used to provide the connection information for the iceberg engine.
+    /// Format: iceberg_engine_connection = schema_name.connection_name.
+    #[parameter(default = "", check_hook = check_iceberg_engine_connection)]
+    iceberg_engine_connection: String,
+
+    /// Whether the streaming join should be unaligned or not.
+    #[parameter(default = false)]
+    streaming_enable_unaligned_join: bool,
+
+    /// The timeout for reading from the buffer of the sync log store on barrier.
+    /// Every epoch we will attempt to read the full buffer of the sync log store.
+    /// If we hit the timeout, we will stop reading and continue.
+    #[parameter(default = 256_usize)]
+    streaming_sync_log_store_pause_duration_ms: usize,
+
+    /// The max buffer size for sync logstore, before we start flushing.
+    #[parameter(default = 2048_usize)]
+    streaming_sync_log_store_buffer_size: usize,
+}
+
+fn check_iceberg_engine_connection(val: &str) -> Result<(), String> {
+    if val.is_empty() {
+        return Ok(());
+    }
+
+    let parts: Vec<&str> = val.split('.').collect();
+    if parts.len() != 2 {
+        return Err("Invalid iceberg engine connection format, Should be set to this format: schema_name.connection_name.".to_owned());
+    }
+
+    Ok(())
 }
 
 fn check_timezone(val: &str) -> Result<(), String> {

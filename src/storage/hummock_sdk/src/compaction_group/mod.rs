@@ -57,13 +57,13 @@ pub mod group_split {
     use risingwave_common::hash::VirtualNode;
     use risingwave_pb::hummock::PbLevelType;
 
-    use super::hummock_version_ext::insert_new_sub_level;
     use super::StateTableId;
+    use super::hummock_version_ext::insert_new_sub_level;
     use crate::key::{FullKey, TableKey};
     use crate::key_range::KeyRange;
     use crate::level::{Level, Levels};
     use crate::sstable_info::SstableInfo;
-    use crate::{can_concat, HummockEpoch, KeyComparator};
+    use crate::{HummockEpoch, KeyComparator, can_concat};
 
     // By default, the split key is constructed with vnode = 0 and epoch = MAX, so that we can split table_id to the right group
     pub fn build_split_key(table_id: StateTableId, vnode: VirtualNode) -> Bytes {
@@ -171,14 +171,14 @@ pub mod group_split {
         {
             // origin_sst_info
             origin_sst_info.key_range = key_range_l;
-            origin_sst_info.sst_size = left_size;
+            origin_sst_info.sst_size = std::cmp::max(1, left_size);
             origin_sst_info.table_ids = table_ids_l;
         }
 
         {
             // new sst
             branch_table_info.key_range = key_range_r;
-            branch_table_info.sst_size = right_size;
+            branch_table_info.sst_size = std::cmp::max(1, right_size);
             branch_table_info.table_ids = table_ids_r;
         }
 
@@ -213,11 +213,11 @@ pub mod group_split {
         let mut sst_info = origin_sst_info.get_inner();
         let mut branch_table_info = sst_info.clone();
         branch_table_info.sst_id = *new_sst_id;
-        branch_table_info.sst_size = new_sst_size;
+        branch_table_info.sst_size = std::cmp::max(1, new_sst_size);
         *new_sst_id += 1;
 
         sst_info.sst_id = *new_sst_id;
-        sst_info.sst_size = old_sst_size;
+        sst_info.sst_size = std::cmp::max(1, old_sst_size);
         *new_sst_id += 1;
 
         {
@@ -398,12 +398,23 @@ pub mod group_split {
                         false
                     }
                     SstSplitType::Both => {
+                        let sst_size = sst.sst_size;
+                        if sst_size / 2 == 0 {
+                            tracing::warn!(
+                                id = sst.sst_id,
+                                object_id = sst.object_id,
+                                sst_size = sst.sst_size,
+                                file_size = sst.file_size,
+                                "Sstable sst_size is under expected",
+                            );
+                        };
+
                         let (left, right) = split_sst(
                             sst.clone(),
                             new_sst_id,
                             split_key.clone(),
-                            sst.sst_size / 2,
-                            sst.sst_size / 2,
+                            sst_size / 2,
+                            sst_size / 2,
                         );
                         if let Some(branch_sst) = right {
                             insert_table_infos.push(branch_sst);
@@ -439,6 +450,16 @@ pub mod group_split {
                     // split the sst
                     let sst = level.table_infos[pos].clone();
                     let sst_size = sst.sst_size;
+                    if sst_size / 2 == 0 {
+                        tracing::warn!(
+                            id = sst.sst_id,
+                            object_id = sst.object_id,
+                            sst_size = sst.sst_size,
+                            file_size = sst.file_size,
+                            "Sstable sst_size is under expected",
+                        );
+                    };
+
                     let (left, right) = split_sst(
                         sst,
                         new_sst_id,

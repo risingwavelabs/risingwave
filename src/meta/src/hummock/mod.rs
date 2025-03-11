@@ -34,8 +34,8 @@ pub use mock_hummock_meta_client::MockHummockMetaClient;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
-use crate::backup_restore::BackupManagerRef;
 use crate::MetaOpts;
+use crate::backup_restore::BackupManagerRef;
 
 /// Start hummock's asynchronous tasks.
 pub fn start_hummock_workers(

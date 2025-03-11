@@ -17,15 +17,15 @@ use itertools::Itertools;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::{bail_not_implemented, not_implemented};
-use risingwave_expr::aggregate::{agg_types, AggType, PbAggKind};
+use risingwave_expr::aggregate::{AggType, PbAggKind, agg_types};
 use risingwave_expr::window_function::{Frame, FrameBound, WindowFuncKind};
 
 use super::generic::{GenericPlanRef, OverWindow, PlanWindowFunction, ProjectBuilder};
 use super::utils::impl_distill_by_unit;
 use super::{
-    gen_filter_and_pushdown, BatchOverWindow, ColPrunable, ExprRewritable, Logical, LogicalFilter,
-    LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamEowcOverWindow,
-    StreamEowcSort, StreamOverWindow, ToBatch, ToStream,
+    BatchOverWindow, ColPrunable, ExprRewritable, Logical, LogicalFilter, LogicalProject, PlanBase,
+    PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamEowcOverWindow, StreamEowcSort,
+    StreamOverWindow, ToBatch, ToStream, gen_filter_and_pushdown,
 };
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{
@@ -452,10 +452,12 @@ impl LogicalOverWindow {
 
     pub fn split_with_rule(&self, groups: Vec<Vec<usize>>) -> PlanRef {
         assert!(groups.iter().flatten().all_unique());
-        assert!(groups
-            .iter()
-            .flatten()
-            .all(|&idx| idx < self.window_functions().len()));
+        assert!(
+            groups
+                .iter()
+                .flatten()
+                .all(|&idx| idx < self.window_functions().len())
+        );
 
         let input_len = self.input().schema().len();
         let original_out_fields = (0..input_len + self.window_functions().len()).collect_vec();

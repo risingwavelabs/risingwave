@@ -33,6 +33,7 @@ mvn -v
 echo "--- Install rust"
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify-path --default-toolchain none -y
 source "$HOME/.cargo/env"
+rustup toolchain install --profile minimal
 rustup show
 source ci/scripts/common.sh
 unset RUSTC_WRAPPER # disable sccache
@@ -133,6 +134,10 @@ if [[ -n "${BUILDKITE_TAG}" ]]; then
     echo "--- Release upload risectl asset"
     tar -czvf risectl-"${BUILDKITE_TAG}"-"${ARCH}"-unknown-linux.tar.gz risectl
     gh release upload "${BUILDKITE_TAG}" risectl-"${BUILDKITE_TAG}"-"${ARCH}"-unknown-linux.tar.gz
+
+    echo "--- Release upload connector libs asset"
+    tar -czvf risingwave-connector-"${BUILDKITE_TAG}".tar.gz libs
+    gh release upload "${BUILDKITE_TAG}" risingwave-connector-"${BUILDKITE_TAG}".tar.gz
 
     echo "--- Release upload risingwave-all-in-one asset"
     tar -czvf risingwave-"${BUILDKITE_TAG}"-"${ARCH}"-unknown-linux-all-in-one.tar.gz risingwave libs

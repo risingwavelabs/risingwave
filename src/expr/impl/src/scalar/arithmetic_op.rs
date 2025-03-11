@@ -17,9 +17,9 @@ use std::fmt::Debug;
 use chrono::{Duration, NaiveDateTime};
 use num_traits::{CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Zero};
 use risingwave_common::types::{
-    CheckedAdd, Date, Decimal, FloatExt, Interval, IsNegative, Time, Timestamp, F64,
+    CheckedAdd, Date, Decimal, F64, FloatExt, Interval, IsNegative, Time, Timestamp,
 };
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_expr::{ExprError, Result, function};
 use rust_decimal::MathematicalOps;
 
 #[function("add(*int, *int) -> auto")]
@@ -442,7 +442,7 @@ mod tests {
 
     use num_traits::Float;
     use risingwave_common::types::test_utils::IntervalTestExt;
-    use risingwave_common::types::{Int256, Int256Ref, Scalar, F32};
+    use risingwave_common::types::{F32, Int256, Int256Ref, Scalar};
 
     use super::*;
 
@@ -484,18 +484,26 @@ mod tests {
         assert_eq!(general_mod::<i16, i32, i32>(1i16, 1i32).unwrap(), 0i32);
         assert_eq!(general_neg::<i16>(1i16).unwrap(), -1i16);
 
-        assert!(general_add::<i32, F32, F64>(-1i32, 1f32.into())
-            .unwrap()
-            .is_zero());
-        assert!(general_sub::<i32, F32, F64>(1i32, 1f32.into())
-            .unwrap()
-            .is_zero());
-        assert!(general_mul::<i32, F32, F64>(0i32, 1f32.into())
-            .unwrap()
-            .is_zero());
-        assert!(general_div::<i32, F32, F64>(0i32, 1f32.into())
-            .unwrap()
-            .is_zero());
+        assert!(
+            general_add::<i32, F32, F64>(-1i32, 1f32.into())
+                .unwrap()
+                .is_zero()
+        );
+        assert!(
+            general_sub::<i32, F32, F64>(1i32, 1f32.into())
+                .unwrap()
+                .is_zero()
+        );
+        assert!(
+            general_mul::<i32, F32, F64>(0i32, 1f32.into())
+                .unwrap()
+                .is_zero()
+        );
+        assert!(
+            general_div::<i32, F32, F64>(0i32, 1f32.into())
+                .unwrap()
+                .is_zero()
+        );
         assert_eq!(general_neg::<F32>(1f32.into()).unwrap(), F32::from(-1f32));
         assert_eq!(
             date_interval_add(Date::from_ymd_uncheck(1994, 1, 1), Interval::from_month(12))

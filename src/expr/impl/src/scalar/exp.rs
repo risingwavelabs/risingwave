@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use num_traits::Zero;
-use risingwave_common::types::{Decimal, FloatExt, F64};
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_common::types::{Decimal, F64, FloatExt};
+use risingwave_expr::{ExprError, Result, function};
 
 fn err_logarithm_input() -> ExprError {
     ExprError::InvalidParam {

@@ -18,11 +18,11 @@ use tokio::sync::mpsc;
 use tokio::time::Instant;
 
 use super::exchange::input::BoxedInput;
+use crate::executor::DispatcherMessage;
 use crate::executor::exchange::input::{
     assert_equal_dispatcher_barrier, new_input, process_dispatcher_msg,
 };
 use crate::executor::prelude::*;
-use crate::executor::DispatcherMessage;
 use crate::task::{FragmentId, SharedContext};
 
 /// `ReceiverExecutor` is used along with a channel. After creating a mpsc channel,
@@ -204,7 +204,7 @@ impl Execute for ReceiverExecutor {
 mod tests {
     use std::collections::HashMap;
 
-    use futures::{pin_mut, FutureExt};
+    use futures::{FutureExt, pin_mut};
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 
@@ -308,13 +308,15 @@ mod tests {
         }
         macro_rules! assert_recv_pending {
             () => {
-                assert!(receiver
-                    .next()
-                    .now_or_never()
-                    .flatten()
-                    .transpose()
-                    .unwrap()
-                    .is_none());
+                assert!(
+                    receiver
+                        .next()
+                        .now_or_never()
+                        .flatten()
+                        .transpose()
+                        .unwrap()
+                        .is_none()
+                );
             };
         }
 
@@ -325,22 +327,22 @@ mod tests {
         }
 
         // 3. Send a chunk.
-        send!([old], Message::Chunk(StreamChunk::default()));
+        send!([old], Message::Chunk(StreamChunk::default()).into());
         recv!().unwrap().as_chunk().unwrap(); // We should be able to receive the chunk.
         assert_recv_pending!();
 
-        send!([new], Message::Barrier(b1.clone().into_dispatcher()));
+        send!([new], Message::Barrier(b1.clone().into_dispatcher()).into());
         assert_recv_pending!(); // We should not receive the barrier, as new is not the upstream.
 
-        send!([old], Message::Barrier(b1.clone().into_dispatcher()));
+        send!([old], Message::Barrier(b1.clone().into_dispatcher()).into());
         recv!().unwrap().as_barrier().unwrap(); // We should now receive the barrier.
 
         // 5. Send a chunk to the removed upstream.
-        send_error!([old], Message::Chunk(StreamChunk::default()));
+        send_error!([old], Message::Chunk(StreamChunk::default()).into());
         assert_recv_pending!();
 
         // 6. Send a chunk to the added upstream.
-        send!([new], Message::Chunk(StreamChunk::default()));
+        send!([new], Message::Chunk(StreamChunk::default()).into());
         recv!().unwrap().as_chunk().unwrap(); // We should be able to receive the chunk.
         assert_recv_pending!();
     }

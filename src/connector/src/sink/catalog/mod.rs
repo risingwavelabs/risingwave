@@ -20,8 +20,8 @@ use std::fmt::{Display, Formatter};
 use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::catalog::{
-    ColumnCatalog, ConnectionId, CreateType, DatabaseId, Field, Schema, SchemaId, TableId, UserId,
-    OBJECT_ID_PLACEHOLDER,
+    ColumnCatalog, ConnectionId, CreateType, DatabaseId, Field, OBJECT_ID_PLACEHOLDER, Schema,
+    SchemaId, TableId, UserId,
 };
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
@@ -32,8 +32,8 @@ use risingwave_pb::secret::PbSecretRef;
 use serde_derive::Serialize;
 
 use super::{
-    SinkError, CONNECTOR_TYPE_KEY, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION,
-    SINK_TYPE_UPSERT,
+    CONNECTOR_TYPE_KEY, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION,
+    SINK_TYPE_UPSERT, SinkError,
 };
 
 #[derive(Clone, Copy, Debug, Default, Hash, PartialOrd, PartialEq, Eq)]
@@ -161,10 +161,10 @@ impl Display for SinkEncode {
 
 impl SinkFormatDesc {
     pub fn from_legacy_type(connector: &str, r#type: &str) -> Result<Option<Self>, SinkError> {
+        use crate::sink::Sink as _;
         use crate::sink::kafka::KafkaSink;
         use crate::sink::kinesis::KinesisSink;
         use crate::sink::pulsar::PulsarSink;
-        use crate::sink::Sink as _;
 
         let format = match r#type {
             SINK_TYPE_APPEND_ONLY => SinkFormat::AppendOnly,
@@ -174,7 +174,7 @@ impl SinkFormatDesc {
                 return Err(SinkError::Config(anyhow!(
                     "sink type unsupported: {}",
                     r#type
-                )))
+                )));
             }
         };
         let encode = match connector {
@@ -262,7 +262,7 @@ impl TryFrom<PbSinkFormatDesc> for SinkFormatDesc {
                 return Err(SinkError::Config(anyhow!(
                     "sink format unsupported: {}",
                     f.as_str_name()
-                )))
+                )));
             }
         };
         let encode = match value.encode() {
@@ -275,7 +275,7 @@ impl TryFrom<PbSinkFormatDesc> for SinkFormatDesc {
                 return Err(SinkError::Config(anyhow!(
                     "sink encode unsupported: {}",
                     e.as_str_name()
-                )))
+                )));
             }
         };
         let key_encode = match &value.key_encode() {
@@ -293,7 +293,7 @@ impl TryFrom<PbSinkFormatDesc> for SinkFormatDesc {
                 return Err(SinkError::Config(anyhow!(
                     "unsupported {} as sink key encode",
                     encode.as_str_name()
-                )))
+                )));
             }
         };
 

@@ -14,10 +14,10 @@
 
 use std::sync::Arc;
 
+use risingwave_backup::MetaSnapshotId;
 use risingwave_backup::error::{BackupError, BackupResult};
 use risingwave_backup::meta_snapshot::Metadata;
 use risingwave_backup::storage::{MetaSnapshotStorage, MetaSnapshotStorageRef};
-use risingwave_backup::MetaSnapshotId;
 use risingwave_common::config::{MetaBackend, ObjectStoreConfig};
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::version_checkpoint_path;

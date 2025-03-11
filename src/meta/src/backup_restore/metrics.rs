@@ -15,8 +15,8 @@
 use std::sync::LazyLock;
 
 use prometheus::{
-    exponential_buckets, histogram_opts, register_histogram_vec_with_registry,
-    register_int_counter_with_registry, Histogram, IntCounter, Registry,
+    Histogram, IntCounter, Registry, exponential_buckets, histogram_opts,
+    register_histogram_vec_with_registry, register_int_counter_with_registry,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 

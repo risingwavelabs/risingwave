@@ -18,11 +18,11 @@ use futures::future::{try_join, try_join_all};
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::types::DefaultOrd;
 use risingwave_common::{bail, row};
-use risingwave_expr::expr::{
-    build_func_non_strict, ExpressionBoxExt, InputRefExpression, LiteralExpression,
-    NonStrictExpression,
-};
 use risingwave_expr::Result as ExprResult;
+use risingwave_expr::expr::{
+    ExpressionBoxExt, InputRefExpression, LiteralExpression, NonStrictExpression,
+    build_func_non_strict,
+};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::expr::expr_node::Type;
 use risingwave_storage::table::batch_table::BatchTable;
@@ -198,7 +198,9 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                 }
                 Message::Watermark(watermark) => {
                     if watermark.col_idx == event_time_col_idx {
-                        tracing::warn!("WatermarkFilterExecutor received a watermark on the event it is filtering.");
+                        tracing::warn!(
+                            "WatermarkFilterExecutor received a watermark on the event it is filtering."
+                        );
                         let watermark = watermark.val;
                         if let Some(cur_watermark) = current_watermark.clone()
                             && cur_watermark.default_cmp(&watermark).is_lt()
@@ -218,19 +220,6 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                 Message::Barrier(barrier) => {
                     let prev_epoch = barrier.epoch.prev;
                     let is_checkpoint = barrier.kind.is_checkpoint();
-                    let mut need_update_global_max_watermark = false;
-                    // Update the vnode bitmap for state tables of all agg calls if asked.
-                    if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(ctx.id) {
-                        let other_vnodes_bitmap = Arc::new(!(*vnode_bitmap).clone());
-                        let _ = global_watermark_table.update_vnode_bitmap(other_vnodes_bitmap);
-                        let (previous_vnode_bitmap, _cache_may_stale) =
-                            table.update_vnode_bitmap(vnode_bitmap.clone());
-
-                        // Take the global max watermark when scaling happens.
-                        if previous_vnode_bitmap != vnode_bitmap {
-                            need_update_global_max_watermark = true;
-                        }
-                    }
 
                     if is_checkpoint && last_checkpoint_watermark != current_watermark {
                         last_checkpoint_watermark.clone_from(&current_watermark);
@@ -244,7 +233,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                             }
                         }
                     }
-                    table.commit(barrier.epoch).await?;
+                    let post_commit = table.commit(barrier.epoch).await?;
 
                     if let Some(mutation) = barrier.mutation.as_deref() {
                         match mutation {
@@ -258,7 +247,22 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                         }
                     }
 
+                    let update_vnode_bitmap = barrier.as_update_vnode_bitmap(ctx.id);
                     yield Message::Barrier(barrier);
+
+                    let mut need_update_global_max_watermark = false;
+                    // Update the vnode bitmap for state tables of all agg calls if asked.
+                    if let Some(((vnode_bitmap, previous_vnode_bitmap, _), _cache_may_stale)) =
+                        post_commit.post_yield_barrier(update_vnode_bitmap).await?
+                    {
+                        let other_vnodes_bitmap = Arc::new(!(*vnode_bitmap).clone());
+                        let _ = global_watermark_table.update_vnode_bitmap(other_vnodes_bitmap);
+
+                        // Take the global max watermark when scaling happens.
+                        if previous_vnode_bitmap != vnode_bitmap {
+                            need_update_global_max_watermark = true;
+                        }
+                    }
 
                     if need_update_global_max_watermark {
                         current_watermark = Self::get_global_max_watermark(
@@ -601,7 +605,7 @@ mod tests {
         let mut executor = executor.execute();
 
         // push the 1st barrier after failover
-        tx.push_barrier(test_epoch(4), false);
+        tx.push_barrier(test_epoch(3), false);
         executor.next().await.unwrap().unwrap();
 
         // Init watermark after failover

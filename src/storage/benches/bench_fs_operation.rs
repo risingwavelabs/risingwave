@@ -22,9 +22,9 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use criterion::{criterion_group, criterion_main, Criterion};
-use futures::future::BoxFuture;
+use criterion::{Criterion, criterion_group, criterion_main};
 use futures::FutureExt;
+use futures::future::BoxFuture;
 #[cfg(target_os = "macos")]
 use libc::F_NOCACHE;
 use tempfile::TempDir;

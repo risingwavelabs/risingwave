@@ -14,8 +14,8 @@
 
 use risingwave_common::types::test_utils::IntervalTestExt;
 use risingwave_common::types::{Interval, Timestamp};
-use risingwave_expr::expr::test_utils::make_hop_window_expression;
 use risingwave_expr::expr::NonStrictExpression;
+use risingwave_expr::expr::test_utils::make_hop_window_expression;
 use risingwave_stream::executor::HopWindowExecutor;
 
 use crate::prelude::*;

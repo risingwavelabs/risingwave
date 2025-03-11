@@ -50,7 +50,7 @@ use std::time::Duration;
 
 pub use catalog::TableCatalog;
 mod binder;
-pub use binder::{bind_data_type, Binder};
+pub use binder::{Binder, bind_data_type};
 pub mod expr;
 pub mod handler;
 pub use handler::PgResponseStream;
@@ -69,7 +69,7 @@ use risingwave_common::util::resource_util::memory::system_memory_available_byte
 use risingwave_common::util::tokio_util::sync::CancellationToken;
 pub use stream_fragmenter::build_graph;
 mod utils;
-pub use utils::{explain_stream_graph, WithOptions, WithOptionsSecResolved};
+pub use utils::{WithOptions, WithOptionsSecResolved, explain_stream_graph};
 pub(crate) mod error;
 mod meta_client;
 pub mod test_utils;
@@ -200,7 +200,8 @@ impl Default for FrontendOpts {
 use std::future::Future;
 use std::pin::Pin;
 
-use pgwire::pg_protocol::TlsConfig;
+use pgwire::memory_manager::MessageMemoryManager;
+use pgwire::pg_protocol::{ConnectionContext, TlsConfig};
 
 use crate::session::SESSION_MANAGER;
 
@@ -228,16 +229,24 @@ pub fn start(
                 .map(|s| s.to_lowercase())
                 .collect::<HashSet<_>>(),
         );
+        let frontend_config = &session_mgr.env().frontend_config();
+        let message_memory_manager = Arc::new(MessageMemoryManager::new(
+            frontend_config.max_total_query_size_bytes,
+            frontend_config.min_single_query_size_bytes,
+            frontend_config.max_single_query_size_bytes,
+        ));
 
         let webhook_service = crate::webhook::WebhookService::new(webhook_listen_addr);
         let _task = tokio::spawn(webhook_service.serve());
-
         pg_serve(
             &listen_addr,
             tcp_keepalive,
             session_mgr.clone(),
-            TlsConfig::new_default(),
-            Some(redact_sql_option_keywords),
+            ConnectionContext {
+                tls_config: TlsConfig::new_default(),
+                redact_sql_option_keywords: Some(redact_sql_option_keywords),
+                message_memory_manager,
+            },
             shutdown,
         )
         .await

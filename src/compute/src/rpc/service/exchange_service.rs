@@ -16,25 +16,22 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use either::Either;
-use futures::{pin_mut, Stream, StreamExt, TryStreamExt};
+use futures::{Stream, StreamExt, TryStreamExt, pin_mut};
 use futures_async_stream::try_stream;
 use risingwave_batch::task::BatchManager;
 use risingwave_common::catalog::DatabaseId;
 use risingwave_pb::task_service::exchange_service_server::ExchangeService;
 use risingwave_pb::task_service::{
-    permits, GetDataRequest, GetDataResponse, GetStreamRequest, GetStreamResponse, PbPermits,
+    GetDataRequest, GetDataResponse, GetStreamRequest, GetStreamResponse, PbPermits, permits,
 };
+use risingwave_stream::executor::DispatcherMessageBatch;
 use risingwave_stream::executor::exchange::permit::{MessageWithPermits, Receiver};
-use risingwave_stream::executor::DispatcherMessage;
 use risingwave_stream::task::LocalStreamManager;
 use thiserror_ext::AsReport;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status, Streaming};
 
 use crate::rpc::service::exchange_metrics::ExchangeServiceMetrics;
-
-/// Buffer size of the receiver of the remote channel.
-const BATCH_EXCHANGE_BUFFER_SIZE: usize = 1024;
 
 #[derive(Clone)]
 pub struct ExchangeServiceImpl {
@@ -63,7 +60,8 @@ impl ExchangeService for ExchangeServiceImpl {
             .into_inner()
             .task_output_id
             .expect("Failed to get task output id.");
-        let (tx, rx) = tokio::sync::mpsc::channel(BATCH_EXCHANGE_BUFFER_SIZE);
+        let (tx, rx) =
+            tokio::sync::mpsc::channel(self.batch_mgr.config().developer.receiver_channel_size);
         if let Err(e) = self.batch_mgr.get_data(tx, peer_addr, &pb_task_output_id) {
             error!(
                 %peer_addr,
@@ -178,7 +176,7 @@ impl ExchangeServiceImpl {
                         message: Some(proto),
                         permits: Some(PbPermits { value: permits }),
                     };
-                    let bytes = DispatcherMessage::get_encoded_len(&response);
+                    let bytes = DispatcherMessageBatch::get_encoded_len(&response);
 
                     yield response;
 

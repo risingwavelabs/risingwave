@@ -226,9 +226,11 @@ pub mod tests {
             levels: vec![],
             ..Default::default()
         };
-        assert!(picker
-            .pick_compaction(&empty_level, &levels_handler, &mut local_stats)
-            .is_none());
+        assert!(
+            picker
+                .pick_compaction(&empty_level, &levels_handler, &mut local_stats)
+                .is_none()
+        );
     }
 
     #[test]

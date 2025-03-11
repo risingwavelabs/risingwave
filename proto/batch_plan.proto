@@ -72,6 +72,7 @@ message IcebergScanNode {
     ICEBERG_SCAN_TYPE_DATA_SCAN = 1;
     ICEBERG_SCAN_TYPE_EQUALITY_DELETE_SCAN = 2;
     ICEBERG_SCAN_TYPE_POSITION_DELETE_SCAN = 3;
+    ICEBERG_SCAN_TYPE_COUNT_STAR = 4;
   }
   repeated plan_common.ColumnCatalog columns = 1;
   map<string, string> with_properties = 2;
@@ -370,6 +371,7 @@ message LocalLookupJoinNode {
   // Each key pair can be null safe independently. (left_key, right_key, null_safe)
   repeated bool null_safe = 11;
   optional plan_common.AsOf as_of = 12;
+  optional plan_common.AsOfJoinDesc asof_desc = 13;
 }
 
 // RFC: A new schedule way for distributed lookup join
@@ -387,6 +389,7 @@ message DistributedLookupJoinNode {
   // Each key pair can be null safe independently. (left_key, right_key, null_safe)
   repeated bool null_safe = 9;
   optional plan_common.AsOf as_of = 10;
+  optional plan_common.AsOfJoinDesc asof_desc = 11;
 }
 
 message UnionNode {}

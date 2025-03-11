@@ -15,14 +15,13 @@
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::{DataType, ScalarImpl};
-use risingwave_common::util::iter_util::ZipEqDebug;
-use risingwave_connector::source::iceberg::{extract_bucket_and_file_name, FileScanBackend};
+use risingwave_connector::source::iceberg::{FileScanBackend, extract_bucket_and_file_name};
 
 use super::{BoxedRule, Rule};
 use crate::expr::{Expr, TableFunctionType};
+use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{LogicalFileScan, LogicalTableFunction};
-use crate::optimizer::PlanRef;
 
 /// Transform a special `TableFunction` (with `FILE_SCAN` table function type) into a `LogicalFileScan`
 pub struct TableFunctionToFileScanRule {}
@@ -37,9 +36,8 @@ impl Rule for TableFunctionToFileScanRule {
 
         if let DataType::Struct(st) = table_function_return_type.clone() {
             let fields = st
-                .types()
-                .zip_eq_debug(st.names())
-                .map(|(data_type, name)| Field::with_name(data_type.clone(), name.to_owned()))
+                .iter()
+                .map(|(name, data_type)| Field::with_name(data_type.clone(), name.to_owned()))
                 .collect_vec();
 
             let schema = Schema::new(fields);

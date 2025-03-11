@@ -21,9 +21,8 @@ use std::sync::Arc;
 use ::iceberg::io::{S3_ACCESS_KEY_ID, S3_ENDPOINT, S3_REGION, S3_SECRET_ACCESS_KEY};
 use ::iceberg::table::Table;
 use ::iceberg::{Catalog, TableIdent};
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use iceberg::io::{GCS_CREDENTIALS_JSON, GCS_DISABLE_CONFIG_LOAD, S3_DISABLE_CONFIG_LOAD};
-use iceberg::spec::TableMetadataRef;
 use iceberg_catalog_glue::{AWS_ACCESS_KEY_ID, AWS_REGION_NAME, AWS_SECRET_ACCESS_KEY};
 use risingwave_common::bail;
 use serde_derive::Deserialize;
@@ -54,15 +53,14 @@ pub struct IcebergCommon {
     #[serde(rename = "gcs.credential")]
     pub gcs_credential: Option<String>,
 
-    /// Path of iceberg warehouse, only applicable in storage catalog.
+    /// Path of iceberg warehouse.
     #[serde(rename = "warehouse.path")]
     pub warehouse_path: Option<String>,
     /// AWS Client id, can be omitted for storage catalog or when
     /// caller's AWS account ID matches glue id
     #[serde(rename = "glue.id")]
     pub glue_id: Option<String>,
-    /// Catalog name, can be omitted for storage catalog, but
-    /// must be set for other catalogs.
+    /// Catalog name, default value is risingwave.
     #[serde(rename = "catalog.name")]
     pub catalog_name: Option<String>,
     /// URI of iceberg catalog, only applicable in rest catalog.
@@ -96,7 +94,7 @@ pub struct IcebergCommon {
         deserialize_with = "deserialize_optional_bool_from_string"
     )]
     pub path_style_access: Option<bool>,
-    /// enable config load currently is used by iceberg engine, so it only support jdbc catalog.
+    /// enable config load.
     #[serde(default, deserialize_with = "deserialize_optional_bool_from_string")]
     pub enable_config_load: Option<bool>,
 }
@@ -142,13 +140,16 @@ impl IcebergCommon {
             }
             if let Some(gcs_credential) = &self.gcs_credential {
                 iceberg_configs.insert(GCS_CREDENTIALS_JSON.to_owned(), gcs_credential.clone());
+                if catalog_type != "rest" && catalog_type != "rest_rust" {
+                    bail!("gcs unsupported in {} catalog", &catalog_type);
+                }
             }
 
             match &self.warehouse_path {
                 Some(warehouse_path) => {
                     let (bucket, _) = {
                         let url = Url::parse(warehouse_path);
-                        if url.is_err() && catalog_type == "rest" {
+                        if url.is_err() && (catalog_type == "rest" || catalog_type == "rest_rust") {
                             // If the warehouse path is not a valid URL, it could be a warehouse name in rest catalog
                             // so we allow it to pass here.
                             (None, None)
@@ -175,7 +176,7 @@ impl IcebergCommon {
                     }
                 }
                 None => {
-                    if catalog_type != "rest" {
+                    if catalog_type != "rest" && catalog_type != "rest_rust" {
                         bail!("`warehouse.path` must be set in {} catalog", &catalog_type);
                     }
                 }
@@ -320,22 +321,18 @@ impl IcebergCommon {
                     "s3" | "s3a" => StorageCatalogConfig::S3(
                         storage_catalog::StorageCatalogS3Config::builder()
                             .warehouse(warehouse)
-                            .access_key(self.access_key.clone().ok_or_else(|| {
-                                anyhow!("`s3.access.key` must be set in storage catalog")
-                            })?)
-                            .secret_key(self.secret_key.clone().ok_or_else(|| {
-                                anyhow!("`s3.secret.key` must be set in storage catalog")
-                            })?)
+                            .access_key(self.access_key.clone())
+                            .secret_key(self.secret_key.clone())
                             .region(self.region.clone())
                             .endpoint(self.endpoint.clone())
+                            .enable_config_load(self.enable_config_load)
                             .build(),
                     ),
                     "gs" | "gcs" => StorageCatalogConfig::Gcs(
                         storage_catalog::StorageCatalogGcsConfig::builder()
                             .warehouse(warehouse)
-                            .credential(self.gcs_credential.clone().ok_or_else(|| {
-                                anyhow!("`gcs.credential` must be set in storage catalog")
-                            })?)
+                            .credential(self.gcs_credential.clone())
+                            .enable_config_load(self.enable_config_load)
                             .build(),
                     ),
                     scheme => bail!("Unsupported warehouse scheme: {}", scheme),
@@ -436,6 +433,7 @@ impl IcebergCommon {
             }
             catalog_type
                 if catalog_type == "hive"
+                    || catalog_type == "snowflake"
                     || catalog_type == "jdbc"
                     || catalog_type == "rest"
                     || catalog_type == "glue" =>
@@ -446,6 +444,7 @@ impl IcebergCommon {
                 let catalog_impl = match catalog_type {
                     "hive" => "org.apache.iceberg.hive.HiveCatalog",
                     "jdbc" => "org.apache.iceberg.jdbc.JdbcCatalog",
+                    "snowflake" => "org.apache.iceberg.snowflake.SnowflakeCatalog",
                     "rest" => "org.apache.iceberg.rest.RESTCatalog",
                     "glue" => "org.apache.iceberg.aws.glue.GlueCatalog",
                     _ => unreachable!(),
@@ -461,7 +460,7 @@ impl IcebergCommon {
             "mock" => Ok(Arc::new(mock_catalog::MockCatalog {})),
             _ => {
                 bail!(
-                    "Unsupported catalog type: {}, only support `storage`, `rest`, `hive`, `jdbc`, `glue`",
+                    "Unsupported catalog type: {}, only support `storage`, `rest`, `hive`, `jdbc`, `glue`, `snowflake`",
                     self.catalog_type()
                 )
             }
@@ -483,62 +482,5 @@ impl IcebergCommon {
             .context("Unable to parse table name")?;
 
         catalog.load_table(&table_id).await.map_err(Into::into)
-    }
-
-    pub async fn load_table_with_metadata(
-        &self,
-        metadata: TableMetadataRef,
-        java_catalog_props: &HashMap<String, String>,
-    ) -> ConnectorResult<Table> {
-        match self.catalog_type() {
-            "storage" => {
-                let warehouse = self
-                    .warehouse_path
-                    .clone()
-                    .ok_or_else(|| anyhow!("`warehouse.path` must be set in storage catalog"))?;
-                let url = Url::parse(warehouse.as_ref())
-                    .map_err(|_| anyhow!("Invalid warehouse path: {}", warehouse))?;
-
-                let config = match url.scheme() {
-                    "s3" | "s3a" => StorageCatalogConfig::S3(
-                        storage_catalog::StorageCatalogS3Config::builder()
-                            .warehouse(warehouse)
-                            .access_key(self.access_key.clone().ok_or_else(|| {
-                                anyhow!("`s3.access.key` must be set in storage catalog")
-                            })?)
-                            .secret_key(self.secret_key.clone().ok_or_else(|| {
-                                anyhow!("`s3.secret.key` must be set in storage catalog")
-                            })?)
-                            .region(self.region.clone())
-                            .endpoint(self.endpoint.clone())
-                            .build(),
-                    ),
-                    "gs" | "gcs" => StorageCatalogConfig::Gcs(
-                        storage_catalog::StorageCatalogGcsConfig::builder()
-                            .warehouse(warehouse)
-                            .credential(self.gcs_credential.clone().ok_or_else(|| {
-                                anyhow!("`gcs.credential` must be set in storage catalog")
-                            })?)
-                            .build(),
-                    ),
-                    scheme => bail!("Unsupported warehouse scheme: {}", scheme),
-                };
-
-                let storage_catalog = storage_catalog::StorageCatalog::new(config)?;
-
-                let table_id = self
-                    .full_table_name()
-                    .context("Unable to parse table name")?;
-
-                Ok(Table::builder()
-                    .metadata(metadata)
-                    .identifier(table_id)
-                    .file_io(storage_catalog.file_io().clone())
-                    // Only support readonly table for storage catalog now.
-                    .readonly(true)
-                    .build()?)
-            }
-            _ => self.load_table(java_catalog_props).await,
-        }
     }
 }

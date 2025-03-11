@@ -14,8 +14,8 @@
 
 use foyer::{LfuConfig, LruConfig, S3FifoConfig};
 use risingwave_common::config::{
-    CacheEvictionConfig, EvictionConfig, StorageConfig, StorageMemoryConfig,
-    MAX_BLOCK_CACHE_SHARD_BITS, MAX_META_CACHE_SHARD_BITS, MIN_BUFFER_SIZE_PER_SHARD,
+    CacheEvictionConfig, EvictionConfig, MAX_BLOCK_CACHE_SHARD_BITS, MAX_META_CACHE_SHARD_BITS,
+    MIN_BUFFER_SIZE_PER_SHARD, StorageConfig, StorageMemoryConfig,
 };
 use risingwave_common::util::pretty_bytes::convert;
 
@@ -139,7 +139,11 @@ pub fn storage_memory_config(
             if config_storage_memory_bytes as f64 > storage_memory_bytes {
                 tracing::warn!(
                     "config block_cache_capacity_mb {} + meta_cache_capacity_mb {} + shared_buffer_capacity_mb {} = {} exceeds allowed storage_memory_bytes {}. These configs will be ignored.",
-                    block_cache_capacity_mb, meta_cache_capacity_mb, shared_buffer_capacity_mb, convert(config_storage_memory_bytes as _), convert(storage_memory_bytes as _)
+                    block_cache_capacity_mb,
+                    meta_cache_capacity_mb,
+                    shared_buffer_capacity_mb,
+                    convert(config_storage_memory_bytes as _),
+                    convert(storage_memory_bytes as _)
                 );
                 (None, None, None)
             } else {

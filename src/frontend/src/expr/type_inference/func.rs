@@ -22,10 +22,10 @@ pub use risingwave_expr::sig::*;
 use risingwave_pb::expr::agg_call::PbKind as PbAggKind;
 use risingwave_pb::expr::table_function::PbType as PbTableFuncType;
 
-use super::{align_types, cast_ok_base, CastContext};
+use super::{CastContext, align_types, cast_ok_base};
 use crate::error::{ErrorCode, Result};
 use crate::expr::type_inference::cast::align_array_and_element;
-use crate::expr::{cast_ok, is_row_function, Expr as _, ExprImpl, ExprType, FunctionCall};
+use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall, cast_ok, is_row_function};
 
 /// Infers the return type of a function. Returns `Err` if the function with specified data types
 /// is not supported on backend.

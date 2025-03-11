@@ -13,11 +13,12 @@
 // limitations under the License.
 
 use risingwave_common::catalog::{
-    default_key_column_name_version_mapping, KAFKA_TIMESTAMP_COLUMN_NAME,
+    KAFKA_TIMESTAMP_COLUMN_NAME, default_key_column_name_version_mapping,
 };
 use risingwave_connector::source::reader::desc::SourceDescBuilder;
 use risingwave_connector::source::should_copy_to_format_encode_options;
 use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt};
+use risingwave_expr::bail;
 use risingwave_pb::data::data_type::TypeName as PbTypeName;
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
 use risingwave_pb::plan_common::{
@@ -29,16 +30,14 @@ use risingwave_pb::stream_plan::SourceNode;
 use risingwave_storage::panic_store::PanicStateStore;
 
 use super::*;
+use crate::executor::TroublemakerExecutor;
 use crate::executor::source::{
     FsListExecutor, SourceExecutor, SourceStateTableHandler, StreamSourceCore,
 };
-use crate::executor::TroublemakerExecutor;
 
 pub struct SourceExecutorBuilder;
 
 pub fn create_source_desc_builder(
-    source_type: &str, // "source" or "source backfill"
-    source_id: &TableId,
     mut source_columns: Vec<PbColumnCatalog>,
     params: &ExecutorParams,
     source_info: PbStreamSourceInfo,
@@ -109,8 +108,6 @@ pub fn create_source_desc_builder(
         });
     }
 
-    telemetry_source_build(source_type, source_id, &source_info, &with_properties);
-
     SourceDescBuilder::new(
         source_columns.clone(),
         params.env.source_metrics(),
@@ -168,8 +165,6 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 );
 
                 let source_desc_builder = create_source_desc_builder(
-                    "source",
-                    &source_id,
                     source.columns.clone(),
                     &params,
                     source_info,
@@ -196,20 +191,15 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     state_table_handler,
                 );
 
-                let is_fs_connector = source.with_properties.is_legacy_fs_connector();
+                let is_legacy_fs_connector = source.with_properties.is_legacy_fs_connector();
                 let is_fs_v2_connector = source.with_properties.is_new_fs_connector();
 
-                if is_fs_connector {
-                    #[expect(deprecated)]
-                    crate::executor::source::LegacyFsSourceExecutor::new(
-                        params.actor_context.clone(),
-                        stream_source_core,
-                        params.executor_stats,
-                        barrier_receiver,
-                        system_params,
-                        source.rate_limit,
-                    )?
-                    .boxed()
+                if is_legacy_fs_connector {
+                    // Changed to default since v2.0 https://github.com/risingwavelabs/risingwave/pull/17963
+                    bail!(
+                        "legacy s3 connector is fully deprecated since v2.4.0, please DROP and recreate the s3 source.\nexecutor: {:?}",
+                        params
+                    );
                 } else if is_fs_v2_connector {
                     FsListExecutor::new(
                         params.actor_context.clone(),

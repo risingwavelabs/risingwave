@@ -31,28 +31,28 @@ use risingwave_connector::sink::file_sink::fs::FsSink;
 use risingwave_connector::sink::iceberg::ICEBERG_SINK;
 use risingwave_connector::sink::trivial::TABLE_SINK;
 use risingwave_connector::sink::{
-    SinkError, CONNECTOR_TYPE_KEY, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION,
-    SINK_TYPE_UPSERT, SINK_USER_FORCE_APPEND_ONLY_OPTION,
+    CONNECTOR_TYPE_KEY, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION,
+    SINK_TYPE_UPSERT, SINK_USER_FORCE_APPEND_ONLY_OPTION, SinkError,
 };
 use risingwave_pb::expr::expr_node::Type;
-use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::SinkLogStoreType;
+use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::derive::{derive_columns, derive_pk};
 use super::stream::prelude::*;
 use super::utils::{
-    childless_record, infer_kv_log_store_table_catalog_inner, Distill, IndicesDisplay,
+    Distill, IndicesDisplay, childless_record, infer_kv_log_store_table_catalog_inner,
 };
-use super::{generic, ExprRewritable, PlanBase, PlanRef, StreamNode, StreamProject};
+use super::{ExprRewritable, PlanBase, PlanRef, StreamNode, StreamProject, generic};
+use crate::TableCatalog;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{ExprImpl, FunctionCall, InputRef};
+use crate::optimizer::plan_node::PlanTreeNodeUnary;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::plan_can_use_background_ddl;
-use crate::optimizer::plan_node::PlanTreeNodeUnary;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::WithOptionsSecResolved;
-use crate::TableCatalog;
 
 const DOWNSTREAM_PK_KEY: &str = "primary_key";
 

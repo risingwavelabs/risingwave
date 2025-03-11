@@ -19,8 +19,8 @@
 use std::vec;
 
 use itertools::Itertools;
-use rand::prelude::SliceRandom;
 use rand::Rng;
+use rand::prelude::SliceRandom;
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{
     Cte, Distinct, Expr, Ident, Query, Select, SelectItem, SetExpr, TableWithJoins, Value, With,

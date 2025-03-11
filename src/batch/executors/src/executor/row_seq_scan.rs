@@ -14,7 +14,7 @@
 use std::ops::{Bound, Deref};
 use std::sync::Arc;
 
-use futures::{pin_mut, StreamExt};
+use futures::{StreamExt, pin_mut};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use prometheus::Histogram;
@@ -27,13 +27,13 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::value_encoding::deserialize_datum;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::batch_plan::{scan_range, PbScanRange};
+use risingwave_pb::batch_plan::{PbScanRange, scan_range};
 use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_pb::plan_common::as_of::AsOfType;
-use risingwave_pb::plan_common::{as_of, PbAsOf, StorageTableDesc};
+use risingwave_pb::plan_common::{PbAsOf, StorageTableDesc, as_of};
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::BatchTable;
-use risingwave_storage::{dispatch_state_store, StateStore};
+use risingwave_storage::{StateStore, dispatch_state_store};
 
 use crate::error::{BatchError, Result};
 use crate::executor::{

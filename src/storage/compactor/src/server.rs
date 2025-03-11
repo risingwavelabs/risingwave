@@ -17,7 +17,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use risingwave_common::config::{
-    extract_storage_memory_config, load_config, AsyncStackTraceOption, MetricLevel, RwConfig,
+    AsyncStackTraceOption, MetricLevel, RwConfig, extract_storage_memory_config, load_config,
 };
 use risingwave_common::monitor::{RouterExt, TcpConfig};
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
@@ -40,23 +40,23 @@ use risingwave_storage::compaction_catalog_manager::{
     CompactionCatalogManager, RemoteTableAccessor,
 };
 use risingwave_storage::hummock::compactor::{
-    new_compaction_await_tree_reg_ref, CompactionAwaitTreeRegRef, CompactionExecutor,
-    CompactorContext,
+    CompactionAwaitTreeRegRef, CompactionExecutor, CompactorContext,
+    new_compaction_await_tree_reg_ref,
 };
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::utils::HummockMemoryCollector;
 use risingwave_storage::hummock::{MemoryLimiter, SstableObjectIdManager, SstableStore};
 use risingwave_storage::monitor::{
-    monitor_cache, CompactorMetrics, GLOBAL_COMPACTOR_METRICS, GLOBAL_HUMMOCK_METRICS,
+    CompactorMetrics, GLOBAL_COMPACTOR_METRICS, GLOBAL_HUMMOCK_METRICS, monitor_cache,
 };
 use risingwave_storage::opts::StorageOpts;
 use tokio::sync::mpsc;
 use tracing::info;
 
 use super::compactor_observer::observer_manager::CompactorObserverNode;
+use crate::CompactorOpts;
 use crate::rpc::{CompactorServiceImpl, MonitorServiceImpl};
 use crate::telemetry::CompactorTelemetryCreator;
-use crate::CompactorOpts;
 
 pub async fn prepare_start_parameters(
     compactor_opts: &CompactorOpts,
@@ -85,15 +85,26 @@ pub async fn prepare_start_parameters(
     let non_reserved_memory_bytes = (compactor_opts.compactor_total_memory_bytes as f64
         * config.storage.compactor_memory_available_proportion)
         as usize;
-    let meta_cache_capacity_bytes = storage_opts.meta_cache_capacity_mb * (1 << 20);
+    let meta_cache_capacity_bytes = compactor_opts.compactor_meta_cache_memory_bytes;
     let compactor_memory_limit_bytes = match config.storage.compactor_memory_limit_mb {
-        Some(compactor_memory_limit_mb) => compactor_memory_limit_mb as u64 * (1 << 20),
-        None => (non_reserved_memory_bytes - meta_cache_capacity_bytes) as u64,
-    };
+        Some(compactor_memory_limit_mb) => compactor_memory_limit_mb * (1 << 20),
+        None => {
+            non_reserved_memory_bytes
+        }
+    }
+    .checked_sub(compactor_opts.compactor_meta_cache_memory_bytes).unwrap_or_else(|| {
+        panic!(
+            "compactor_total_memory_bytes {} is too small to hold compactor_meta_cache_memory_bytes {}",
+            meta_cache_capacity_bytes,
+            meta_cache_capacity_bytes
+        );
+    });
 
     tracing::info!(
         "Compactor non_reserved_memory_bytes {} meta_cache_capacity_bytes {} compactor_memory_limit_bytes {} sstable_size_bytes {} block_size_bytes {}",
-        non_reserved_memory_bytes, meta_cache_capacity_bytes, compactor_memory_limit_bytes,
+        non_reserved_memory_bytes,
+        meta_cache_capacity_bytes,
+        compactor_memory_limit_bytes,
         storage_opts.sstable_size_mb * (1 << 20),
         storage_opts.block_size_kb * (1 << 10),
     );
@@ -106,7 +117,7 @@ pub async fn prepare_start_parameters(
             + storage_opts.block_size_kb * (1 << 10))
             as u64;
 
-        assert!(compactor_memory_limit_bytes > min_compactor_memory_limit_bytes * 2);
+        assert!(compactor_memory_limit_bytes > min_compactor_memory_limit_bytes as usize * 2);
     }
 
     let object_store = build_remote_object_store(
@@ -133,7 +144,7 @@ pub async fn prepare_start_parameters(
         .unwrap(),
     );
 
-    let memory_limiter = Arc::new(MemoryLimiter::new(compactor_memory_limit_bytes));
+    let memory_limiter = Arc::new(MemoryLimiter::new(compactor_memory_limit_bytes as u64));
     let storage_memory_config = extract_storage_memory_config(&config);
     let memory_collector = Arc::new(HummockMemoryCollector::new(
         sstable_store.clone(),

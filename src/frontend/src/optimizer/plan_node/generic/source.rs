@@ -23,10 +23,10 @@ use risingwave_sqlparser::ast::AsOf;
 
 use super::super::utils::TableCatalogBuilder;
 use super::GenericPlanNode;
+use crate::TableCatalog;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::FunctionalDependencySet;
-use crate::TableCatalog;
 
 /// In which scnario the source node is created
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -163,14 +163,10 @@ impl Source {
         let key = Field {
             data_type: DataType::Varchar,
             name: "partition_id".to_owned(),
-            sub_fields: vec![],
-            type_name: "".to_owned(),
         };
         let value = Field {
             data_type: DataType::Jsonb,
             name: "offset_info".to_owned(),
-            sub_fields: vec![],
-            type_name: "".to_owned(),
         };
 
         let ordered_col_idx = builder.add_column(&key);

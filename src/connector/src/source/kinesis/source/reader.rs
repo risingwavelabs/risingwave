@@ -14,25 +14,25 @@
 
 use std::time::Duration;
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use async_trait::async_trait;
+use aws_sdk_kinesis::Client as KinesisClient;
 use aws_sdk_kinesis::error::{ProvideErrorMetadata, SdkError};
 use aws_sdk_kinesis::operation::get_records::{GetRecordsError, GetRecordsOutput};
 use aws_sdk_kinesis::primitives::DateTime;
 use aws_sdk_kinesis::types::ShardIteratorType;
-use aws_sdk_kinesis::Client as KinesisClient;
 use futures_async_stream::try_stream;
 use risingwave_common::bail;
 use thiserror_ext::AsReport;
 
 use crate::error::ConnectorResult as Result;
 use crate::parser::ParserConfig;
+use crate::source::kinesis::KinesisProperties;
 use crate::source::kinesis::source::message::from_kinesis_record;
 use crate::source::kinesis::split::{KinesisOffset, KinesisSplit};
-use crate::source::kinesis::KinesisProperties;
 use crate::source::{
-    into_chunk_stream, BoxSourceChunkStream, Column, SourceContextRef, SourceMessage, SplitId,
-    SplitMetaData, SplitReader,
+    BoxSourceChunkStream, Column, SourceContextRef, SourceMessage, SplitId, SplitMetaData,
+    SplitReader, into_chunk_stream,
 };
 
 #[derive(Debug, Clone)]
@@ -92,7 +92,8 @@ impl SplitReader for KinesisSplitReader {
             && properties.start_timestamp_millis.is_some()
         {
             // cannot bail! here because all new split readers will fail to start if user set 'scan.startup.mode' to 'timestamp'
-            tracing::warn!("scan.startup.mode needs to be set to 'timestamp' if you want to start with a specific timestamp, starting shard {} from the beginning",
+            tracing::warn!(
+                "scan.startup.mode needs to be set to 'timestamp' if you want to start with a specific timestamp, starting shard {} from the beginning",
                 split.id()
             );
         }
@@ -334,7 +335,7 @@ impl KinesisSplitReader {
 
 #[cfg(test)]
 mod tests {
-    use futures::{pin_mut, StreamExt};
+    use futures::{StreamExt, pin_mut};
 
     use super::*;
     use crate::connector_common::KinesisCommon;

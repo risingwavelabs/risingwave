@@ -208,7 +208,9 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                             if self.state_table.value_indices().is_some() {
                                 // TODO(st1page): when materialize partial columns(), we should
                                 // construct some columns in the pk
-                                panic!("materialize executor with data check can not handle only materialize partial columns")
+                                panic!(
+                                    "materialize executor with data check can not handle only materialize partial columns"
+                                )
                             };
                             let values = data_chunk.serialize();
 
@@ -281,18 +283,22 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                         self.may_have_downstream,
                         &self.depended_subscription_ids,
                     );
-                    self.state_table
+                    let post_commit = self
+                        .state_table
                         .commit_may_switch_consistent_op(b.epoch, op_consistency_level)
                         .await?;
-                    if !self.state_table.is_consistent_op() {
+                    if !post_commit.inner().is_consistent_op() {
                         assert_eq!(self.conflict_behavior, ConflictBehavior::Overwrite);
                     }
 
-                    // Update the vnode bitmap for the state table if asked.
-                    if let Some(vnode_bitmap) = b.as_update_vnode_bitmap(self.actor_context.id) {
-                        let (_, cache_may_stale) =
-                            self.state_table.update_vnode_bitmap(vnode_bitmap);
+                    let update_vnode_bitmap = b.as_update_vnode_bitmap(self.actor_context.id);
+                    let b_epoch = b.epoch;
+                    yield Message::Barrier(b);
 
+                    // Update the vnode bitmap for the state table if asked.
+                    if let Some((_, cache_may_stale)) =
+                        post_commit.post_yield_barrier(update_vnode_bitmap).await?
+                    {
                         if cache_may_stale {
                             self.materialize_cache.data.clear();
                         }
@@ -300,9 +306,9 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
 
                     self.metrics
                         .materialize_current_epoch
-                        .set(b.epoch.curr as i64);
+                        .set(b_epoch.curr as i64);
 
-                    Message::Barrier(b)
+                    continue;
                 }
             }
         }

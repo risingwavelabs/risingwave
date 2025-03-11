@@ -30,7 +30,7 @@ use std::ops::{Add, Sub};
 
 pub use key_cmp::*;
 use risingwave_common::util::epoch::EPOCH_SPILL_TIME_MASK;
-use risingwave_pb::common::{batch_query_epoch, BatchQueryEpoch};
+use risingwave_pb::common::{BatchQueryEpoch, batch_query_epoch};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sstable_info::SstableInfo;
 use tracing::warn;

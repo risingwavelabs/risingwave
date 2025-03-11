@@ -132,7 +132,10 @@ impl Binder {
                 scalar_as_agg,
                 "`AGGREGATE:` prefix is not allowed for `array_transform`"
             );
-            reject_syntax!(!arg_list.is_args_only(), "keywords like `DISTINCT`, `ORDER BY` are not allowed in `array_transform` argument list");
+            reject_syntax!(
+                !arg_list.is_args_only(),
+                "keywords like `DISTINCT`, `ORDER BY` are not allowed in `array_transform` argument list"
+            );
             reject_syntax!(
                 within_group.is_some(),
                 "`WITHIN GROUP` is not allowed in `array_transform` call"
@@ -317,9 +320,14 @@ impl Binder {
                     "`VARIADIC` is not allowed in table function call"
                 );
                 self.ensure_table_function_allowed()?;
-                return Ok(TableFunction::new_postgres_query(args)
-                    .context("postgres_query error")?
-                    .into());
+                return Ok(TableFunction::new_postgres_query(
+                    &self.catalog,
+                    &self.db_name,
+                    self.bind_schema_path(schema_name.as_deref()),
+                    args,
+                )
+                .context("postgres_query error")?
+                .into());
             }
             // `mysql_query` table function
             if func_name.eq("mysql_query") {
@@ -328,9 +336,14 @@ impl Binder {
                     "`VARIADIC` is not allowed in table function call"
                 );
                 self.ensure_table_function_allowed()?;
-                return Ok(TableFunction::new_mysql_query(args)
-                    .context("mysql_query error")?
-                    .into());
+                return Ok(TableFunction::new_mysql_query(
+                    &self.catalog,
+                    &self.db_name,
+                    self.bind_schema_path(schema_name.as_deref()),
+                    args,
+                )
+                .context("mysql_query error")?
+                .into());
             }
             // UDTF
             if let Some(ref udf) = udf
@@ -390,13 +403,11 @@ impl Binder {
 
         let inner_ty = match bound_array.return_type() {
             DataType::List(ty) => *ty,
-            real_type => {
-                return Err(ErrorCode::BindError(format!(
+            real_type => return Err(ErrorCode::BindError(format!(
                 "The `array` argument for `array_transform` should be an array, but {} were got",
                 real_type
             ))
-                .into())
-            }
+            .into()),
         };
 
         let ast::FunctionArgExpr::Expr(ast::Expr::LambdaFunction {
