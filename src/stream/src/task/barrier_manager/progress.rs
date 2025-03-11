@@ -289,7 +289,8 @@ impl CreateMviewProgressReporter {
         assert_matches!(
             self.state,
             Some(BackfillState::DoneConsumingUpstreamTableOrSource(_))
-                | Some(BackfillState::ConsumingLogStore { .. }),
+                | Some(BackfillState::ConsumingLogStore { .. })
+                | None,
             "cannot finish log store progress at state {:?}",
             self.state
         );
