@@ -373,7 +373,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                     }
                                 }
                             }
-                            Mutation::AlterConnectorProps(config) => {
+                            Mutation::ConnectorPropsChange(config) => {
                                 if let Some(map) = config.get(&sink_id.sink_id) {
                                     if let Err(e) = update_config_tx.send(map.clone()) {
                                         error!(

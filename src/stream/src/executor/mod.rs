@@ -39,7 +39,7 @@ use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation as PbMutation;
 use risingwave_pb::stream_plan::update_mutation::{DispatcherUpdate, MergeUpdate};
 use risingwave_pb::stream_plan::{
-    AlterConnectorPropsMutation, BarrierMutation, CombinedMutation, ConnectorPropsInfo,
+    ConnectorPropsChangeMutation, BarrierMutation, CombinedMutation, ConnectorPropsInfo,
     Dispatchers, DropSubscriptionsMutation, PauseMutation, PbAddMutation, PbBarrier,
     PbBarrierMutation, PbDispatcher, PbStreamMessageBatch, PbUpdateMutation, PbWatermark,
     ResumeMutation, SourceChangeSplitMutation, StopMutation, SubscriptionUpstreamInfo,
@@ -308,7 +308,7 @@ pub enum Mutation {
     Resume,
     Throttle(HashMap<ActorId, Option<u32>>),
     AddAndUpdate(AddMutation, UpdateMutation),
-    AlterConnectorProps(HashMap<ActorId, HashMap<String, String>>),
+    ConnectorPropsChange(HashMap<u32, HashMap<String, String>>),
     DropSubscriptions {
         /// `subscriber` -> `upstream_mv_table_id`
         subscriptions_to_drop: Vec<(u32, TableId)>,
@@ -514,7 +514,7 @@ impl Barrier {
             | Mutation::SourceChangeSplit(_)
             | Mutation::Throttle(_)
             | Mutation::DropSubscriptions { .. }
-            | Mutation::AlterConnectorProps(_) => false,
+            | Mutation::ConnectorPropsChange(_) => false,
         }
     }
 
@@ -739,8 +739,8 @@ impl Mutation {
                     )
                     .collect(),
             }),
-            Mutation::AlterConnectorProps(map) => {
-                PbMutation::AlterConnectorProps(AlterConnectorPropsMutation {
+            Mutation::ConnectorPropsChange(map) => {
+                PbMutation::ConnectorPropsChange(ConnectorPropsChangeMutation {
                     connector_props_infos: map
                         .iter()
                         .map(|(actor_id, options)| {
@@ -873,8 +873,8 @@ impl Mutation {
                     .map(|info| (info.subscriber_id, TableId::new(info.upstream_mv_table_id)))
                     .collect(),
             },
-            PbMutation::AlterConnectorProps(alter_connector_props) => {
-                Mutation::AlterConnectorProps(
+            PbMutation::ConnectorPropsChange(alter_connector_props) => {
+                Mutation::ConnectorPropsChange(
                     alter_connector_props
                         .connector_props_infos
                         .iter()

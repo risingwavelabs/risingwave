@@ -492,7 +492,7 @@ impl StreamManagerService for StreamServiceImpl {
 
         let _i = self
             .barrier_scheduler
-            .run_command(database_id, Command::AlterConnectorProps(mutation))
+            .run_command(database_id, Command::ConnectorPropsChange(mutation))
             .await?;
 
         Ok(Response::new(AlterConnectorPropsResponse {}))

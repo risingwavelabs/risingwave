@@ -114,7 +114,7 @@ message ConnectorPropsInfo {
   map<string, string> connector_props_info = 1;
 }
 
-message AlterConnectorPropsMutation {
+message ConnectorPropsChangeMutation {
   map<uint32, ConnectorPropsInfo> connector_props_infos = 1;
 }
 
@@ -138,7 +138,7 @@ message BarrierMutation {
     // Drop subscription on mv
     DropSubscriptionsMutation drop_subscriptions = 12;
     // Alter sink/connector/source props
-    AlterConnectorPropsMutation alter_connector_props = 13;
+    ConnectorPropsChangeMutation connector_props_change = 13;
     // Combined mutation.
     // Currently, it can only be Add & Update, which is for sink into table.
     CombinedMutation combined = 100;
