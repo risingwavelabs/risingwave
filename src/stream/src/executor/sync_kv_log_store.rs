@@ -539,6 +539,11 @@ impl<S: StateStoreRead> ReadFuture<S> {
                             continue;
                         }
                         KvLogStoreItem::StreamChunk(chunk) => {
+                            metrics.persistent_log_read_metrics.storage_read_count.inc();
+                            metrics
+                                .persistent_log_read_metrics
+                                .storage_read_size
+                                .inc_by(chunk.cardinality() as _);
                             // TODO: should have truncate offset when consuming historical data
                             return Ok((chunk, None));
                         }
@@ -791,6 +796,7 @@ impl SyncedLogStoreBuffer {
             }
             _ => {}
         }
+        self.update_unconsumed_buffer_metrics();
         item
     }
 
