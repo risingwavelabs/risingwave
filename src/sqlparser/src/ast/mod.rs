@@ -11,6 +11,7 @@
 // limitations under the License.
 
 //! SQL Abstract Syntax Tree (AST) types
+mod analyze;
 mod data_type;
 pub(crate) mod ddl;
 mod legacy_source;
@@ -56,6 +57,7 @@ pub use self::value::{
     ConnectionRefValue, CstyleEscapedString, DateTimeField, DollarQuotedString, JsonPredicateType,
     SecretRefAsType, SecretRefValue, TrimWhereField, Value,
 };
+pub use crate::ast::analyze::AnalyzeTarget;
 pub use crate::ast::ddl::{
     AlterIndexOperation, AlterSinkOperation, AlterSourceOperation, AlterSubscriptionOperation,
     AlterViewOperation,
@@ -1612,6 +1614,13 @@ pub enum Statement {
         /// options of the explain statement
         options: ExplainOptions,
     },
+    /// EXPLAIN ANALYZE for stream job
+    /// We introduce a new statement rather than reuse `EXPLAIN` because
+    /// the body of the statement is not an SQL query.
+    /// TODO(kwannoel): Make profiling duration configurable: EXPLAIN ANALYZE (DURATION 1s) ...
+    ExplainAnalyzeStreamJob {
+        target: AnalyzeTarget,
+    },
     /// CREATE USER
     CreateUser(CreateUserStatement),
     /// ALTER USER
@@ -1657,6 +1666,9 @@ impl fmt::Display for Statement {
                 options.fmt(f)?;
 
                 write!(f, "{}", statement)
+            }
+            Statement::ExplainAnalyzeStreamJob { target } => {
+                write!(f, "EXPLAIN ANALYZE {}", target)
             }
             Statement::Query(s) => write!(f, "{}", s),
             Statement::Truncate { table_name } => {
