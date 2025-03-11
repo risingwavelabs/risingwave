@@ -37,10 +37,8 @@ use risingwave_pb::stream_plan::stream_fragment_graph::{
     Parallelism, StreamFragment, StreamFragmentEdge as StreamFragmentEdgeProto,
 };
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{
-    DispatchStrategy, DispatcherType, FragmentTypeFlag,
-    StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamScanNode, StreamScanType,
-};
+use risingwave_pb::stream_plan::{BackfillOrderStrategy, DispatchStrategy, DispatcherType, FragmentTypeFlag, StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamScanNode, StreamScanType, BackfillOrderUnspecified};
+use risingwave_pb::stream_plan::backfill_order_strategy::Strategy;
 
 use crate::MetaResult;
 use crate::barrier::SnapshotBackfillInfo;
@@ -373,6 +371,9 @@ pub struct StreamFragmentGraph {
     /// upstream fragment graph requires two fragments to be in the same distribution,
     /// thus the same vnode count.
     max_parallelism: usize,
+
+    /// The backfill ordering strategy of the graph.
+    backfill_order_strategy: BackfillOrderStrategy,
 }
 
 impl StreamFragmentGraph {
@@ -445,6 +446,9 @@ impl StreamFragmentGraph {
         };
 
         let max_parallelism = proto.max_parallelism as usize;
+        let backfill_order_strategy = proto.backfill_order_strategy.unwrap_or_else(|| BackfillOrderStrategy {
+            strategy: Some(Strategy::Unspecified(BackfillOrderUnspecified {}))
+        });
 
         Ok(Self {
             fragments,
@@ -453,6 +457,7 @@ impl StreamFragmentGraph {
             dependent_table_ids,
             specified_parallelism,
             max_parallelism,
+            backfill_order_strategy,
         })
     }
 
