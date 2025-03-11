@@ -1096,4 +1096,7 @@ message StreamFragmentGraph {
   // upstream fragment graph requires two fragments to be in the same distribution,
   // thus the same vnode count.
   uint32 max_parallelism = 7;
+
+  // The backfill order strategy for the fragments.
+  BackfillOrderStrategy backfill_order_strategy = 8;
 }
