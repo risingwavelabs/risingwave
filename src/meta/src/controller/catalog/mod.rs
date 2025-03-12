@@ -987,14 +987,16 @@ impl CatalogControllerInner {
         &mut self,
         table_ids: impl Iterator<Item = TableId>,
     ) -> Vec<PbTable> {
-        let mut res = vec![];
-        for table_id in table_ids {
-            if let Some(t) = self.dropped_tables.remove(&table_id) {
-                res.push(t);
-                continue;
-            }
-            tracing::warn!("table {table_id} not found");
-        }
-        res
+        table_ids
+            .filter_map(|table_id| {
+                self.dropped_tables.remove(&table_id).map_or_else(
+                    || {
+                        tracing::warn!(table_id, "table not found");
+                        None
+                    },
+                    Some,
+                )
+            })
+            .collect()
     }
 }
