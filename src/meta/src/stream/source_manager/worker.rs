@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_connector::WithPropertiesExt;
 #[cfg(not(debug_assertions))]
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::source::AnySplitEnumerator;
@@ -97,6 +98,10 @@ pub async fn create_source_worker(
     let enable_scale_in = connector_properties.enable_drop_split();
     let enable_adaptive_splits = connector_properties.enable_adaptive_splits();
     let (command_tx, command_rx) = tokio::sync::mpsc::unbounded_channel();
+    let sync_call_timeout = source
+        .with_properties
+        .get_sync_call_timeout()
+        .unwrap_or(DEFAULT_SOURCE_TICK_TIMEOUT);
     let handle = {
         let mut worker = ConnectorSourceWorker::create(
             source,
@@ -108,12 +113,8 @@ pub async fn create_source_worker(
         .await?;
 
         // if fail to fetch meta info, will refuse to create source
-
-        // todo: make the timeout configurable, longer than `properties.sync.call.timeout`
-        // in kafka
-        tokio::time::timeout(DEFAULT_SOURCE_TICK_TIMEOUT, worker.tick())
+        tokio::time::timeout(sync_call_timeout, worker.tick())
             .await
-            .ok()
             .with_context(|| {
                 format!(
                     "failed to fetch meta info for source {}, timeout {:?}",
