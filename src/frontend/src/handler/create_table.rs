@@ -1120,36 +1120,36 @@ pub(super) async fn handle_create_table_plan(
                         }
                     }
 
-                    let (mut columns, pk_names) =
+                    let (columns, pk_names) =
                         bind_cdc_table_schema(&column_defs, &constraints, None)?;
                     // read default value definition from external db
                     let (options, secret_refs) = cdc_with_options.clone().into_parts();
-                    let config = ExternalTableConfig::try_from_btreemap(options, secret_refs)
+                    let _config = ExternalTableConfig::try_from_btreemap(options, secret_refs)
                         .context("failed to extract external table config")?;
 
-                    let table = ExternalTableImpl::connect(config)
-                        .await
-                        .context("failed to auto derive table schema")?;
-                    let external_columns: HashMap<&str, &ColumnDesc> = table
-                        .column_descs()
-                        .iter()
-                        .map(|column_desc| (column_desc.name.as_str(), column_desc))
-                        .collect();
+                    // let table = ExternalTableImpl::connect(config)
+                    //     .await
+                    //     .context("failed to auto derive table schema")?;
+                    // let external_columns: HashMap<&str, &ColumnDesc> = table
+                    //     .column_descs()
+                    //     .iter()
+                    //     .map(|column_desc| (column_desc.name.as_str(), column_desc))
+                    //     .collect();
 
-                    for col in &mut columns {
-                        let external_column_desc =
-                            *external_columns.get(col.name()).ok_or_else(|| {
-                                ErrorCode::ConnectorError(
-                                    format!(
-                                        "Column '{}' not found in the upstream database",
-                                        col.name()
-                                    )
-                                    .into(),
-                                )
-                            })?;
-                        col.column_desc.generated_or_default_column =
-                            external_column_desc.generated_or_default_column.clone();
-                    }
+                    // for col in &mut columns {
+                    //     let external_column_desc =
+                    //         *external_columns.get(col.name()).ok_or_else(|| {
+                    //             ErrorCode::ConnectorError(
+                    //                 format!(
+                    //                     "Column '{}' not found in the upstream database",
+                    //                     col.name()
+                    //                 )
+                    //                 .into(),
+                    //             )
+                    //         })?;
+                    //     col.column_desc.generated_or_default_column =
+                    //         external_column_desc.generated_or_default_column.clone();
+                    // }
                     (columns, pk_names)
                 }
             };
