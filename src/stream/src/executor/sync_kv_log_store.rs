@@ -519,6 +519,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
 
             let mut log_store_stream = tokio_stream::StreamExt::peekable(log_store_stream);
             let mut clean_state = log_store_stream.peek().await.is_none();
+            self.metrics.unclean_state.set(if clean_state { 0 } else { 1 });
 
             let mut read_future_state = ReadFuture::ReadingPersistedStream(log_store_stream);
 
@@ -562,6 +563,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                                                 write_state,
                                             );
                                             clean_state = false;
+                                            self.metrics.unclean_state.set(1);
                                         } else {
                                             if let Some(mutation) = barrier.mutation.as_deref() {
                                                 match mutation {
@@ -626,6 +628,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                                                     write_state,
                                                 );
                                                 clean_state = false;
+                                                self.metrics.unclean_state.set(1);
                                             } else {
                                                 seq_id = new_seq_id;
                                                 write_future_state = WriteFuture::flush_chunk(
@@ -683,6 +686,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                             && buffer.no_flushed_items()
                         {
                             clean_state = true;
+                            self.metrics.unclean_state.set(0);
 
                             // Let write future resume immediately
                             if let WriteFuture::Paused { sleep_future, .. } =
