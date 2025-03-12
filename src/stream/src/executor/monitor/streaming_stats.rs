@@ -182,6 +182,22 @@ pub struct StreamingMetrics {
     pub kv_log_store_buffer_unconsumed_epoch_count: LabelGuardedIntGaugeVec<4>,
     pub kv_log_store_buffer_unconsumed_min_epoch: LabelGuardedIntGaugeVec<4>,
 
+    pub sync_kv_log_store_total_read_count: LabelGuardedIntCounterVec<4>,
+    pub sync_kv_log_store_total_read_size: LabelGuardedIntCounterVec<4>,
+    pub sync_kv_log_store_buffer_read_size: LabelGuardedIntCounterVec<4>,
+    pub sync_kv_log_store_buffer_read_count: LabelGuardedIntCounterVec<4>,
+    pub sync_kv_log_store_write_pause_duration_ns: LabelGuardedIntCounterVec<4>,
+    pub sync_kv_log_store_unclean_state: LabelGuardedIntGaugeVec<4>,
+    pub sync_kv_log_store_wait_next_poll_ns: LabelGuardedIntCounterVec<4>,
+    pub sync_kv_log_store_storage_write_count: LabelGuardedIntCounterVec<4>,
+    pub sync_kv_log_store_storage_write_size: LabelGuardedIntCounterVec<4>,
+    pub sync_kv_log_store_storage_read_count: LabelGuardedIntCounterVec<5>,
+    pub sync_kv_log_store_storage_read_size: LabelGuardedIntCounterVec<5>,
+    pub sync_kv_log_store_buffer_unconsumed_item_count: LabelGuardedIntGaugeVec<4>,
+    pub sync_kv_log_store_buffer_unconsumed_row_count: LabelGuardedIntGaugeVec<4>,
+    pub sync_kv_log_store_buffer_unconsumed_epoch_count: LabelGuardedIntGaugeVec<4>,
+    pub sync_kv_log_store_buffer_unconsumed_min_epoch: LabelGuardedIntGaugeVec<4>,
+
     // Memory management
     pub lru_runtime_loop_count: IntCounter,
     pub lru_latest_sequence: IntGauge,
@@ -872,6 +888,132 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let sync_kv_log_store_wait_next_poll_ns = register_guarded_int_counter_vec_with_registry!(
+            "sync_kv_log_store_wait_next_poll_ns",
+            "Total duration (ns) of waiting for next poll",
+            &["actor_id", "target", "fragment_id", "relation"],
+            registry
+        )
+        .unwrap();
+
+        let sync_kv_log_store_total_read_count = register_guarded_int_counter_vec_with_registry!(
+            "sync_kv_log_store_total_read_count",
+            "Total read row count throughput of sync_kv log store",
+            &["actor_id", "target", "fragment_id", "relation"],
+            registry
+        )
+        .unwrap();
+
+        let sync_kv_log_store_total_read_size = register_guarded_int_counter_vec_with_registry!(
+            "sync_kv_log_store_total_read_size",
+            "Total read size throughput of sync_kv log store",
+            &["actor_id", "target", "fragment_id", "relation"],
+            registry
+        )
+        .unwrap();
+
+        let sync_kv_log_store_buffer_read_size = register_guarded_int_counter_vec_with_registry!(
+            "sync_kv_log_store_buffer_read_size",
+            "Read size throughput of sync_kv log store buffer",
+            &["actor_id", "target", "fragment_id", "relation"],
+            registry
+        )
+        .unwrap();
+
+        let sync_kv_log_store_buffer_read_count = register_guarded_int_counter_vec_with_registry!(
+            "sync_kv_log_store_buffer_read_count",
+            "Read row count throughput of sync_kv log store buffer",
+            &["actor_id", "target", "fragment_id", "relation"],
+            registry
+        )
+        .unwrap();
+
+        let sync_kv_log_store_write_pause_duration_ns =
+            register_guarded_int_counter_vec_with_registry!(
+                "sync_kv_log_store_write_pause_duration_ms",
+                "Duration (ns) of sync_kv log store write pause",
+                &["actor_id", "target", "fragment_id", "relation"],
+                registry
+            )
+            .unwrap();
+
+        let sync_kv_log_store_unclean_state = register_guarded_int_gauge_vec_with_registry!(
+            "sync_kv_log_store_unclean_state",
+            "Unclean state of sync_kv log store",
+            &["actor_id", "target", "fragment_id", "relation"],
+            registry
+        )
+        .unwrap();
+
+        let sync_kv_log_store_storage_write_count =
+            register_guarded_int_counter_vec_with_registry!(
+                "sync_kv_log_store_storage_write_count",
+                "Write row count throughput of sync_kv log store",
+                &["actor_id", "target", "fragment_id", "relation"],
+                registry
+            )
+            .unwrap();
+
+        let sync_kv_log_store_storage_write_size = register_guarded_int_counter_vec_with_registry!(
+            "sync_kv_log_store_storage_write_size",
+            "Write size throughput of sync_kv log store",
+            &["actor_id", "target", "fragment_id", "relation"],
+            registry
+        )
+        .unwrap();
+
+        let sync_kv_log_store_storage_read_count = register_guarded_int_counter_vec_with_registry!(
+            "sync_kv_log_store_storage_read_count",
+            "Write row count throughput of sync_kv log store",
+            &["actor_id", "target", "fragment_id", "relation", "read_type"],
+            registry
+        )
+        .unwrap();
+
+        let sync_kv_log_store_storage_read_size = register_guarded_int_counter_vec_with_registry!(
+            "sync_kv_log_store_storage_read_size",
+            "Write size throughput of sync_kv log store",
+            &["actor_id", "target", "fragment_id", "relation", "read_type"],
+            registry
+        )
+        .unwrap();
+
+        let sync_kv_log_store_buffer_unconsumed_item_count =
+            register_guarded_int_gauge_vec_with_registry!(
+                "sync_kv_log_store_buffer_unconsumed_item_count",
+                "Number of Unconsumed Item in buffer",
+                &["actor_id", "target", "fragment_id", "relation"],
+                registry
+            )
+            .unwrap();
+
+        let sync_kv_log_store_buffer_unconsumed_row_count =
+            register_guarded_int_gauge_vec_with_registry!(
+                "sync_kv_log_store_buffer_unconsumed_row_count",
+                "Number of Unconsumed Row in buffer",
+                &["actor_id", "target", "fragment_id", "relation"],
+                registry
+            )
+            .unwrap();
+
+        let sync_kv_log_store_buffer_unconsumed_epoch_count =
+            register_guarded_int_gauge_vec_with_registry!(
+                "sync_kv_log_store_buffer_unconsumed_epoch_count",
+                "Number of Unconsumed Epoch in buffer",
+                &["actor_id", "target", "fragment_id", "relation"],
+                registry
+            )
+            .unwrap();
+
+        let sync_kv_log_store_buffer_unconsumed_min_epoch =
+            register_guarded_int_gauge_vec_with_registry!(
+                "sync_kv_log_store_buffer_unconsumed_min_epoch",
+                "Number of Unconsumed Epoch in buffer",
+                &["actor_id", "target", "fragment_id", "relation"],
+                registry
+            )
+            .unwrap();
+
         let kv_log_store_storage_write_count = register_guarded_int_counter_vec_with_registry!(
             "kv_log_store_storage_write_count",
             "Write row count throughput of kv log store",
@@ -1161,6 +1303,21 @@ impl StreamingMetrics {
             kv_log_store_buffer_unconsumed_row_count,
             kv_log_store_buffer_unconsumed_epoch_count,
             kv_log_store_buffer_unconsumed_min_epoch,
+            sync_kv_log_store_total_read_count,
+            sync_kv_log_store_total_read_size,
+            sync_kv_log_store_buffer_read_size,
+            sync_kv_log_store_buffer_read_count,
+            sync_kv_log_store_write_pause_duration_ns,
+            sync_kv_log_store_unclean_state,
+            sync_kv_log_store_wait_next_poll_ns,
+            sync_kv_log_store_storage_write_count,
+            sync_kv_log_store_storage_write_size,
+            sync_kv_log_store_storage_read_count,
+            sync_kv_log_store_storage_read_size,
+            sync_kv_log_store_buffer_unconsumed_item_count,
+            sync_kv_log_store_buffer_unconsumed_row_count,
+            sync_kv_log_store_buffer_unconsumed_epoch_count,
+            sync_kv_log_store_buffer_unconsumed_min_epoch,
             lru_runtime_loop_count,
             lru_latest_sequence,
             lru_watermark_sequence,
