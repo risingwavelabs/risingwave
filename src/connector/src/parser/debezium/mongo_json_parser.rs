@@ -896,13 +896,13 @@ mod tests {
         .into();
 
         let mut parser =
-            DebeziumMongoJsonParser::new(columns.clone(), source_ctx.into()).expect("build parser");
+            DebeziumMongoJsonParser::new(columns.clone(), source_ctx).expect("build parser");
         let mut builder = SourceStreamChunkBuilder::new(columns, SourceCtrlOpts::for_test());
 
         // all null
-        for i in 0..2 {
+        for text in data {
             parser
-                .parse_inner(None, Some(data[i].clone()), builder.row_writer())
+                .parse_inner(None, Some(text.clone()), builder.row_writer())
                 .await
                 .unwrap();
             builder.finish_current_chunk();
@@ -914,8 +914,8 @@ mod tests {
                 row.datum_at(0).to_owned_datum(),
                 Some(ScalarImpl::Int64(1004))
             );
-            for j in 1..5 {
-                assert_eq!(row.datum_at(j).to_owned_datum(), None);
+            for i in 1..5 {
+                assert_eq!(row.datum_at(i).to_owned_datum(), None);
             }
         }
     }
