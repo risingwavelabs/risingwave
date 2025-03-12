@@ -57,7 +57,7 @@ mod new_serde {
     }
 
     fn new_serialize_struct(struct_type: &StructType, value: StructRef<'_>, buf: &mut impl BufMut) {
-        let serializer = super::Serializer::new_new(
+        let serializer = super::Serializer::new(
             &struct_type.ids().unwrap().collect_vec(), // TODO: avoid this clone
             struct_type.types().cloned(),              // TODO: avoid this clone
         );
@@ -319,21 +319,8 @@ pub struct Serializer {
 }
 
 impl Serializer {
-    /// Create a new `Serializer` with current `column_ids`
-    pub fn new(column_ids: &[ColumnId]) -> Self {
-        // currently we hard-code ColumnId as i32
-        let mut encoded_column_ids = Vec::with_capacity(column_ids.len() * 4);
-        for id in column_ids {
-            encoded_column_ids.put_i32_le(id.get_id());
-        }
-
-        Self {
-            encoded_column_ids,
-            data_types: Vec::new(),
-        }
-    }
-
-    pub fn new_new(
+    /// Create a new `Serializer` with given `column_ids` and `data_types`.
+    pub fn new(
         column_ids: &[ColumnId],
         data_types: impl IntoIterator<Item = DataType>,
     ) -> Self {
@@ -527,6 +514,7 @@ impl ValueRowDeserializer for ColumnAwareSerde {
 
 /// Deserializes row `encoded_bytes`, drops columns not in `valid_column_ids`, serializes and returns.
 /// If no column is dropped, returns None.
+// TODO: we only support trimming dropped top-level columns here; also support nested fields.
 pub fn try_drop_invalid_columns(
     encoded_bytes: &[u8],
     valid_column_ids: &HashSet<i32>,
@@ -550,6 +538,10 @@ pub fn try_drop_invalid_columns(
         }
     }
 
-    let row_bytes = Serializer::new(&column_ids).serialize_raw(datums);
+    // Data types are only needed when we are actually serializing. But we have encoded data here.
+    // Simple pass dummy data types.
+    let dummy_data_types = vec![DataType::Boolean; column_ids.len()];
+
+    let row_bytes = Serializer::new(&column_ids, dummy_data_types).serialize_raw(datums);
     Some(row_bytes)
 }
