@@ -73,6 +73,8 @@ pub(super) struct GlobalBarrierWorker<C> {
     /// The max barrier nums in flight
     in_flight_barrier_nums: usize,
 
+    enable_per_database_isolation: bool,
+
     pub(super) context: Arc<C>,
 
     env: MetaSrvEnv,
@@ -124,9 +126,10 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
 
         let control_stream_manager = ControlStreamManager::new(env.clone());
 
-        let checkpoint_frequency = env.system_params_reader().await.checkpoint_frequency() as _;
-        let interval =
-            Duration::from_millis(env.system_params_reader().await.barrier_interval_ms() as u64);
+        let reader = env.system_params_reader().await;
+        let checkpoint_frequency = reader.checkpoint_frequency() as _;
+        let enable_per_database_isolation = reader.per_database_isolation();
+        let interval = Duration::from_millis(reader.barrier_interval_ms() as u64);
         let periodic_barriers = PeriodicBarriers::new(interval, checkpoint_frequency);
         tracing::info!(
             "Starting barrier scheduler with: checkpoint_frequency={:?}",
@@ -137,6 +140,7 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
             enable_recovery,
             periodic_barriers,
             in_flight_barrier_nums,
+            enable_per_database_isolation,
             context,
             env,
             checkpoint_control: CheckpointControl::default(),
@@ -290,7 +294,8 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         {
                             self.periodic_barriers.set_min_interval(Duration::from_millis(p.barrier_interval_ms() as u64));
                             self.periodic_barriers
-                                .set_checkpoint_frequency(p.checkpoint_frequency() as usize)
+                                .set_checkpoint_frequency(p.checkpoint_frequency() as usize);
+                            self.enable_per_database_isolation = p.per_database_isolation();
                         }
                     }
                 }
@@ -365,6 +370,9 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                     if !self.enable_recovery {
                                         panic!("control stream to worker {} failed but recovery not enabled: {:?}", worker_id, err.as_report());
                                     }
+                                    if !self.enable_per_database_isolation {
+                                        Err(err.clone())?;
+                                    }
                                     Self::report_collect_failure(&self.env, &err);
                                     for database_id in failed_databases {
                                         if let Some(entering_recovery) = self.checkpoint_control.on_report_failure(database_id, &mut self.control_stream_manager) {
@@ -391,6 +399,9 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                 if !self.enable_recovery {
                                     panic!("database failure reported but recovery not enabled: {:?}", resp)
                                 }
+                                if !self.enable_per_database_isolation {
+                                        Err(anyhow!("database {} reset", resp.database_id))?;
+                                    }
                                 let database_id = DatabaseId::new(resp.database_id);
                                 if let Some(entering_recovery) = self.checkpoint_control.on_report_failure(database_id, &mut self.control_stream_manager) {
                                     warn!(database_id = database_id.database_id, "database entering recovery");
