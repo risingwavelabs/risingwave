@@ -245,6 +245,16 @@ impl Parser<'_> {
             .map_err(|e| ParserError::ParserError(e.inner().to_string()))
     }
 
+    /// Parse function description from a string.
+    pub fn parse_function_desc_str(func: &str) -> Result<FunctionDesc, ParserError> {
+        let mut tokenizer = Tokenizer::new(func);
+        let tokens = tokenizer.tokenize_with_location()?;
+        let parser = Parser(&tokens);
+        Parser::parse_function_desc
+            .parse(parser)
+            .map_err(|e| ParserError::ParserError(e.inner().to_string()))
+    }
+
     /// Parse a list of semicolon-separated statements.
     fn parse_statements(&mut self) -> ModalResult<Vec<Statement>> {
         let mut stmts = Vec::new();
