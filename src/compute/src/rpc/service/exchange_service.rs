@@ -93,6 +93,7 @@ impl ExchangeService for ExchangeServiceImpl {
             up_fragment_id,
             down_fragment_id,
             database_id,
+            term_id,
         } = {
             let req = request_stream
                 .next()
@@ -106,7 +107,11 @@ impl ExchangeService for ExchangeServiceImpl {
 
         let receiver = self
             .stream_mgr
-            .take_receiver(DatabaseId::new(database_id), (up_actor_id, down_actor_id))
+            .take_receiver(
+                DatabaseId::new(database_id),
+                term_id,
+                (up_actor_id, down_actor_id),
+            )
             .await?;
 
         // Map the remaining stream to add-permits.

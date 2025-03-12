@@ -112,6 +112,7 @@ impl ControlStreamManager {
         inflight_infos: impl Iterator<
             Item = (DatabaseId, &InflightSubscriptionInfo, &InflightDatabaseInfo),
         >,
+        term_id: String,
         context: &impl GlobalBarrierWorkerContext,
     ) {
         let node_id = node.id as WorkerId;
@@ -121,7 +122,7 @@ impl ControlStreamManager {
         }
         let node_host = node.host.clone().unwrap();
 
-        let init_request = self.collect_init_request(inflight_infos);
+        let init_request = self.collect_init_request(inflight_infos, term_id);
         match context.new_control_stream(&node, &init_request).await {
             Ok(handle) => {
                 assert!(
@@ -149,6 +150,7 @@ impl ControlStreamManager {
         inflight_infos: impl Iterator<
             Item = (DatabaseId, &InflightSubscriptionInfo, &InflightDatabaseInfo),
         >,
+        term_id: String,
         context: &impl GlobalBarrierWorkerContext,
     ) {
         let node_id = node.id as WorkerId;
@@ -160,7 +162,7 @@ impl ControlStreamManager {
         let mut backoff = ExponentialBackoff::from_millis(100)
             .max_delay(Duration::from_secs(3))
             .factor(5);
-        let init_request = self.collect_init_request(inflight_infos);
+        let init_request = self.collect_init_request(inflight_infos, term_id);
         const MAX_RETRY: usize = 5;
         for i in 1..=MAX_RETRY {
             match context.new_control_stream(&node, &init_request).await {
@@ -194,9 +196,13 @@ impl ControlStreamManager {
     pub(super) async fn reset(
         &mut self,
         nodes: &HashMap<WorkerId, WorkerNode>,
+        term_id: String,
         context: &impl GlobalBarrierWorkerContext,
     ) -> HashSet<WorkerId> {
-        let init_request = PbInitRequest { databases: vec![] };
+        let init_request = PbInitRequest {
+            databases: vec![],
+            term_id,
+        };
         let init_request = &init_request;
         let nodes = join_all(nodes.iter().map(|(worker_id, node)| async move {
             let result = context.new_control_stream(node, init_request).await;
@@ -312,6 +318,7 @@ impl ControlStreamManager {
         initial_inflight_infos: impl Iterator<
             Item = (DatabaseId, &InflightSubscriptionInfo, &InflightDatabaseInfo),
         >,
+        term_id: String,
     ) -> PbInitRequest {
         PbInitRequest {
             databases: initial_inflight_infos
@@ -344,6 +351,7 @@ impl ControlStreamManager {
                     },
                 )
                 .collect(),
+            term_id,
         }
     }
 }
