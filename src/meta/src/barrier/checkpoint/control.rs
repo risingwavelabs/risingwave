@@ -22,6 +22,7 @@ use anyhow::anyhow;
 use fail::fail_point;
 use prometheus::HistogramTimer;
 use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntGauge};
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
@@ -76,7 +77,7 @@ impl CheckpointControl {
                     (
                         database_id,
                         DatabaseCheckpointControlStatus::Recovering(
-                            DatabaseRecoveringState::resetting(),
+                            DatabaseRecoveringState::resetting(database_id),
                         ),
                     )
                 }))
@@ -506,6 +507,32 @@ impl DatabaseCheckpointControlStatus {
     }
 }
 
+struct DatabaseCheckpointControlMetrics {
+    barrier_latency: LabelGuardedHistogram<1>,
+    in_flight_barrier_nums: LabelGuardedIntGauge<1>,
+    all_barrier_nums: LabelGuardedIntGauge<1>,
+}
+
+impl DatabaseCheckpointControlMetrics {
+    fn new(database_id: DatabaseId) -> Self {
+        let database_id_str = database_id.database_id.to_string();
+        let barrier_latency = GLOBAL_META_METRICS
+            .barrier_latency
+            .with_guarded_label_values(&[&database_id_str]);
+        let in_flight_barrier_nums = GLOBAL_META_METRICS
+            .in_flight_barrier_nums
+            .with_guarded_label_values(&[&database_id_str]);
+        let all_barrier_nums = GLOBAL_META_METRICS
+            .all_barrier_nums
+            .with_guarded_label_values(&[&database_id_str]);
+        Self {
+            barrier_latency,
+            in_flight_barrier_nums,
+            all_barrier_nums,
+        }
+    }
+}
+
 /// Controls the concurrent execution of commands.
 pub(crate) struct DatabaseCheckpointControl {
     database_id: DatabaseId,
@@ -522,6 +549,8 @@ pub(crate) struct DatabaseCheckpointControl {
     creating_streaming_job_controls: HashMap<TableId, CreatingStreamingJobControl>,
 
     create_mview_tracker: CreateMviewProgressTracker,
+
+    metrics: DatabaseCheckpointControlMetrics,
 }
 
 impl DatabaseCheckpointControl {
@@ -534,6 +563,7 @@ impl DatabaseCheckpointControl {
             committed_epoch: None,
             creating_streaming_job_controls: Default::default(),
             create_mview_tracker: Default::default(),
+            metrics: DatabaseCheckpointControlMetrics::new(database_id),
         }
     }
 
@@ -551,6 +581,7 @@ impl DatabaseCheckpointControl {
             committed_epoch: Some(committed_epoch),
             creating_streaming_job_controls: Default::default(),
             create_mview_tracker,
+            metrics: DatabaseCheckpointControlMetrics::new(database_id),
         }
     }
 
@@ -564,19 +595,14 @@ impl DatabaseCheckpointControl {
 
     /// Update the metrics of barrier nums.
     fn update_barrier_nums_metrics(&self) {
-        let database_id_str = self.database_id.database_id.to_string();
-        GLOBAL_META_METRICS
-            .in_flight_barrier_nums
-            .with_label_values(&[&database_id_str])
-            .set(
-                self.command_ctx_queue
-                    .values()
-                    .filter(|x| x.state.is_inflight())
-                    .count() as i64,
-            );
-        GLOBAL_META_METRICS
+        self.metrics.in_flight_barrier_nums.set(
+            self.command_ctx_queue
+                .values()
+                .filter(|x| x.state.is_inflight())
+                .count() as i64,
+        );
+        self.metrics
             .all_barrier_nums
-            .with_label_values(&[&database_id_str])
             .set(self.total_command_num() as i64);
     }
 
@@ -611,7 +637,7 @@ impl DatabaseCheckpointControl {
         node_to_collect: HashSet<WorkerId>,
         creating_jobs_to_wait: HashSet<TableId>,
     ) {
-        let timer = GLOBAL_META_METRICS.barrier_latency.start_timer();
+        let timer = self.metrics.barrier_latency.start_timer();
 
         if let Some((_, node)) = self.command_ctx_queue.last_key_value() {
             assert_eq!(

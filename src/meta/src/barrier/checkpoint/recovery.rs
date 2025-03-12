@@ -17,6 +17,7 @@ use std::mem::{replace, take};
 use std::task::{Context, Poll};
 
 use futures::FutureExt;
+use prometheus::{HistogramTimer, IntCounter};
 use risingwave_common::catalog::DatabaseId;
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
@@ -36,6 +37,7 @@ use crate::barrier::worker::{
     RetryBackoffFuture, RetryBackoffStrategy, get_retry_backoff_strategy,
 };
 use crate::barrier::{DatabaseRuntimeInfoSnapshot, InflightSubscriptionInfo};
+use crate::rpc::metrics::GLOBAL_META_METRICS;
 
 /// We can treat each database as a state machine of 3 states: `Running`, `Resetting` and `Initializing`.
 /// The state transition can be triggered when receiving 3 variants of response: `ReportDatabaseFailure`, `BarrierComplete`, `DatabaseReset`.
@@ -83,6 +85,7 @@ pub(crate) struct DatabaseRecoveringState {
     stage: DatabaseRecoveringStage,
     next_reset_request_id: u32,
     retry_backoff_strategy: RetryBackoffStrategy,
+    metrics: DatabaseRecoveryMetrics,
 }
 
 pub(super) enum RecoveringStateAction {
@@ -90,10 +93,35 @@ pub(super) enum RecoveringStateAction {
     EnterRunning,
 }
 
+struct DatabaseRecoveryMetrics {
+    recovery_failure_cnt: IntCounter,
+    recovery_timer: Option<HistogramTimer>,
+}
+
+impl DatabaseRecoveryMetrics {
+    fn new(database_id: DatabaseId) -> Self {
+        let database_id_str = format!("database {}", database_id.database_id);
+        Self {
+            recovery_failure_cnt: GLOBAL_META_METRICS
+                .recovery_failure_cnt
+                .with_label_values(&[database_id_str.as_str()]),
+            recovery_timer: Some(
+                GLOBAL_META_METRICS
+                    .recovery_latency
+                    .with_label_values(&[database_id_str.as_str()])
+                    .start_timer(),
+            ),
+        }
+    }
+}
+
 impl DatabaseRecoveringState {
-    pub(super) fn resetting() -> Self {
+    pub(super) fn resetting(database_id: DatabaseId) -> Self {
         let mut retry_backoff_strategy = get_retry_backoff_strategy();
         let backoff_future = retry_backoff_strategy.next().unwrap();
+        let metrics = DatabaseRecoveryMetrics::new(database_id);
+        metrics.recovery_failure_cnt.inc();
+
         Self {
             stage: DatabaseRecoveringStage::Resetting {
                 remaining_workers: Default::default(),
@@ -103,6 +131,7 @@ impl DatabaseRecoveringState {
             },
             next_reset_request_id: 1,
             retry_backoff_strategy,
+            metrics,
         }
     }
 
@@ -267,6 +296,7 @@ impl DatabaseStatusAction<'_, EnterReset> {
                 let reset_request_id = 0;
                 let remaining_workers =
                     control_stream_manager.reset_database(self.database_id, reset_request_id);
+                let metrics = DatabaseRecoveryMetrics::new(self.database_id);
                 *database_status =
                     DatabaseCheckpointControlStatus::Recovering(DatabaseRecoveringState {
                         stage: DatabaseRecoveringStage::Resetting {
@@ -277,6 +307,7 @@ impl DatabaseStatusAction<'_, EnterReset> {
                         },
                         next_reset_request_id: reset_request_id + 1,
                         retry_backoff_strategy: get_retry_backoff_strategy(),
+                        metrics,
                     });
             }
             DatabaseCheckpointControlStatus::Recovering(state) => match state.stage {
@@ -287,6 +318,7 @@ impl DatabaseStatusAction<'_, EnterReset> {
                     let (backoff_future, reset_request_id) = state.next_retry();
                     let remaining_workers =
                         control_stream_manager.reset_database(self.database_id, reset_request_id);
+                    state.metrics.recovery_failure_cnt.inc();
                     state.stage = DatabaseRecoveringStage::Resetting {
                         remaining_workers,
                         reset_workers: Default::default(),
@@ -321,6 +353,7 @@ impl CheckpointControl {
                     let (backoff_future, reset_request_id) = state.next_retry();
                     let remaining_workers =
                         control_stream_manager.reset_database(database_id, reset_request_id);
+                    state.metrics.recovery_failure_cnt.inc();
                     state.stage = DatabaseRecoveringStage::Resetting {
                         remaining_workers,
                         reset_workers: Default::default(),
@@ -400,6 +433,7 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
                 let (backoff_future, reset_request_id) = status.next_retry();
                 let remaining_workers =
                     control_stream_manager.reset_database(self.database_id, reset_request_id);
+                status.metrics.recovery_failure_cnt.inc();
                 status.stage = DatabaseRecoveringStage::Resetting {
                     remaining_workers,
                     reset_workers: Default::default(),
@@ -438,6 +472,16 @@ impl DatabaseStatusAction<'_, EnterRunning> {
                     reset_request_id: 0,
                     backoff_future: None,
                 };
+                if let Some(recovery_timer) = state.metrics.recovery_timer.take() {
+                    recovery_timer.observe_duration();
+                } else if cfg!(debug_assertions) {
+                    panic!(
+                        "take database {} recovery latency for twice",
+                        self.database_id
+                    )
+                } else {
+                    warn!(database_id = %self.database_id,"failed to take recovery latency")
+                }
                 match replace(&mut state.stage, temp_place_holder) {
                     DatabaseRecoveringStage::Resetting { .. } => {
                         unreachable!("can only enter running during initializing")
