@@ -468,16 +468,15 @@ pub(crate) async fn gen_create_table_plan_with_source(
     let with_properties = bind_connector_props(&handler_args, &format_encode, false)?;
     if with_properties.is_shareable_cdc_connector() {
         generated_columns_check_for_cdc_table(&column_defs)?;
-    } else {
-        if column_defs.iter().any(|col| {
-            col.options
-                .iter()
-                .any(|def| matches!(def.option, ColumnOption::NotNull))
-        }) {
-            notice_to_user(
-                "The table contains columns with NOT NULL constraints. Any rows from upstream violating the constraints will be ignored silently.",
-            );
-        }
+    } else if column_defs.iter().any(|col| {
+        col.options
+            .iter()
+            .any(|def| matches!(def.option, ColumnOption::NotNull))
+    }) {
+        // if non-cdc source
+        notice_to_user(
+            "The table contains columns with NOT NULL constraints. Any rows from upstream violating the constraints will be ignored silently.",
+        );
     }
 
     let db_name: &str = &session.database();
