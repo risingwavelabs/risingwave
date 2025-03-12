@@ -30,6 +30,7 @@ use tracing::warn;
 use super::group_split::split_sst_with_table_ids;
 use super::{StateTableId, group_split};
 use crate::change_log::{ChangeLogDeltaCommon, TableChangeLogCommon};
+use crate::compact_task::is_compaction_task_expired;
 use crate::compaction_group::StaticCompactionGroupId;
 use crate::key_range::KeyRangeCommon;
 use crate::level::{Level, LevelCommon, Levels, OverlappingLevel};
@@ -40,6 +41,7 @@ use crate::version::{
     IntraLevelDelta, IntraLevelDeltaCommon, ObjectIdReader, SstableIdReader,
 };
 use crate::{CompactionGroupId, HummockSstableId, HummockSstableObjectId, can_concat};
+
 #[derive(Debug, Clone, Default)]
 pub struct SstDeltaInfo {
     pub insert_sst_level: u32,
@@ -274,6 +276,8 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
             .levels
             .get_many_mut([&parent_group_id, &group_id])
             .map(|res| res.unwrap());
+        // After certain compaction group operation, e.g. split, any ongoing compaction tasks created prior to that should be rejected due to expiration.
+        // By incrementing the compaction_group_version_id of the compaction group, and comparing it with the one recorded in compaction task, expired compaction tasks can be identified.
         parent_levels.compaction_group_version_id += 1;
         cur_levels.compaction_group_version_id += 1;
         let l0 = &mut parent_levels.l0;
@@ -842,6 +846,8 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
             .levels
             .get_many_mut([&parent_group_id, &group_id])
             .map(|res| res.unwrap());
+        // After certain compaction group operation, e.g. split, any ongoing compaction tasks created prior to that should be rejected due to expiration.
+        // By incrementing the compaction_group_version_id of the compaction group, and comparing it with the one recorded in compaction task, expired compaction tasks can be identified.
         parent_levels.compaction_group_version_id += 1;
         cur_levels.compaction_group_version_id += 1;
 
@@ -987,7 +993,10 @@ impl Levels {
         } = level_delta;
         let new_vnode_partition_count = *vnode_partition_count;
 
-        if self.compaction_group_version_id != *compaction_group_version_id {
+        if is_compaction_task_expired(
+            self.compaction_group_version_id,
+            *compaction_group_version_id,
+        ) {
             warn!(
                 current_compaction_group_version_id = self.compaction_group_version_id,
                 delta_compaction_group_version_id = compaction_group_version_id,

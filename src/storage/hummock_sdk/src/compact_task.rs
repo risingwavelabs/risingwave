@@ -206,6 +206,20 @@ impl CompactTask {
             .filter(|table_id| existing_table_ids.contains(table_id))
             .collect()
     }
+
+    pub fn is_expired(&self, compaction_group_version_id_expected: u64) -> bool {
+        is_compaction_task_expired(
+            self.compaction_group_version_id,
+            compaction_group_version_id_expected,
+        )
+    }
+}
+
+pub fn is_compaction_task_expired(
+    compaction_group_version_id_in_task: u64,
+    compaction_group_version_id_expected: u64,
+) -> bool {
+    compaction_group_version_id_in_task != compaction_group_version_id_expected
 }
 
 impl From<PbCompactTask> for CompactTask {

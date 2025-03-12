@@ -1239,16 +1239,15 @@ impl HummockManager {
                         .levels
                         .get(&compact_task.compaction_group_id)
                         .unwrap();
-                    let is_compaction_group_version_id_match = group.compaction_group_version_id
-                        == compact_task.compaction_group_version_id;
-                    if !is_compaction_group_version_id_match {
+                    let is_expired = compact_task.is_expired(group.compaction_group_version_id);
+                    if is_expired {
                         compact_task.task_status = TaskStatus::InputOutdatedCanceled;
                         warn!(
                             "The task may be expired because of group split, task:\n {:?}",
                             compact_task_to_string(&compact_task)
                         );
                     }
-                    is_compaction_group_version_id_match
+                    is_expired
                 }
             } else {
                 false
