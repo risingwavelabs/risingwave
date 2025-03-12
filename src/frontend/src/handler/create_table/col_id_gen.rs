@@ -61,8 +61,8 @@ pub struct ColumnIdGenerator {
     /// For a new table, this is empty.
     existing: Existing,
 
-    /// Columns whose data type cannot be altered because they were persisted with legacy encoding,
-    /// i.e., the `field_ids` are unset for struct data type.
+    /// Columns whose data type cannot be altered because they are not composite, or they were
+    /// persisted with legacy encoding, i.e., the `field_ids` are unset for struct data type.
     unalterable_columns: HashSet<String>,
 
     /// The next column ID to generate, used for new columns that do not exist in `existing`.
@@ -78,13 +78,7 @@ pub struct ColumnIdGenerator {
 impl ColumnIdGenerator {
     /// Creates a new [`ColumnIdGenerator`] for altering an existing table.
     pub fn new_alter(original: &TableCatalog) -> Self {
-        fn handle(
-            existing: &mut Existing,
-            alterable: &mut bool,
-            path: &mut Path,
-            id: ColumnId,
-            data_type: DataType,
-        ) {
+        fn handle(existing: &mut Existing, path: &mut Path, id: ColumnId, data_type: DataType) {
             macro_rules! with_segment {
                 ($segment:expr, $block:block) => {
                     path.push($segment);
@@ -93,36 +87,29 @@ impl ColumnIdGenerator {
                 };
             }
 
-            // For `List` and `Map` types, there's no id for the element as its own structure won't change.
-            const P: ColumnId = ColumnId::placeholder();
-
             match &data_type {
                 DataType::Struct(fields) => {
-                    // Mark this column as unalterable if we encounter any nested fields with unset IDs,
-                    // i.e., it was persisted with legacy encoding that's not column-aware.
-                    if fields.ids().is_none() {
-                        *alterable = false;
-                    }
-
                     for ((field_name, field_data_type), field_id) in
                         fields.iter().zip_eq_fast(fields.ids_or_placeholder())
                     {
                         with_segment!(Segment::Field(field_name.to_owned()), {
-                            handle(existing, alterable, path, field_id, field_data_type.clone());
+                            handle(existing, path, field_id, field_data_type.clone());
                         });
                     }
                 }
                 DataType::List(inner) => {
+                    // There's no id for the element as list's own structure won't change.
                     with_segment!(Segment::ListElement, {
-                        handle(existing, alterable, path, P, *inner.clone());
+                        handle(existing, path, ColumnId::placeholder(), *inner.clone());
                     });
                 }
                 DataType::Map(map) => {
+                    // There's no id for the key/value as map's own structure won't change.
                     with_segment!(Segment::MapKey, {
-                        handle(existing, alterable, path, P, map.key().clone());
+                        handle(existing, path, ColumnId::placeholder(), map.key().clone());
                     });
                     with_segment!(Segment::MapValue, {
-                        handle(existing, alterable, path, P, map.value().clone());
+                        handle(existing, path, ColumnId::placeholder(), map.value().clone());
                     });
                 }
 
@@ -140,15 +127,13 @@ impl ColumnIdGenerator {
         // Collect all existing fields into `existing`.
         for col in original.columns() {
             let mut path = vec![Segment::Field(col.name().to_owned())];
-            let mut alterable = true;
             handle(
                 &mut existing,
-                &mut alterable,
                 &mut path,
                 col.column_id(),
                 col.data_type().clone(),
             );
-            if !alterable {
+            if col.data_type().can_alter() != Some(true) {
                 unalterable_columns.insert(col.name().to_owned());
             }
         }
@@ -185,11 +170,17 @@ impl ColumnIdGenerator {
 
             // For column with legacy encoding, ensure the data type is not changed.
             if original_data_type != col.data_type() {
-                bail!(
-                    "column \"{}\" was persisted with legacy encoding thus cannot be altered, \
-                     consider dropping and readding the column",
-                    col.name()
-                );
+                match original_data_type {
+                    data_types::simple!() => bail!(
+                        "column \"{}\" cannot be altered; only composite types can be altered",
+                        col.name()
+                    ),
+                    data_types::composite!() => bail!(
+                        "column \"{}\" was persisted with legacy encoding thus cannot be altered, \
+                         consider dropping and readding the column",
+                        col.name()
+                    ),
+                }
             } else {
                 // Only update the top-level column ID, without traversing nested fields.
                 col.column_desc.column_id = *original_column_id;
