@@ -17,6 +17,7 @@
 // NOTE: When adding or modifying data types, remember to update the type matrix in
 // src/expr/macro/src/types.rs
 
+use std::assert_matches::assert_matches;
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::str::FromStr;
