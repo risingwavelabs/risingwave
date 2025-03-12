@@ -20,7 +20,6 @@
 #![feature(hash_extract_if)]
 #![feature(proc_macro_hygiene)]
 #![feature(stmt_expr_attributes)]
-#![feature(strict_provenance)]
 #![feature(test)]
 #![feature(trait_alias)]
 #![feature(type_alias_impl_trait)]

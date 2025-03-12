@@ -1419,7 +1419,7 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
             .await?;
             let txn = Transaction::new(&table);
             let mut append_action = txn
-                .fast_append(None, vec![])
+                .fast_append(None, None, vec![])
                 .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
             append_action
                 .add_data_files(data_files.clone())
@@ -1428,7 +1428,7 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
                 tracing::error!(error = %err.as_report(), "Failed to apply iceberg table");
                 SinkError::Iceberg(anyhow!(err))
             })?;
-            tx.commit_dyn(self.catalog.as_ref()).await.map_err(|err| {
+            tx.commit(self.catalog.as_ref()).await.map_err(|err| {
                 tracing::error!(error = %err.as_report(), "Failed to commit iceberg table");
                 SinkError::Iceberg(anyhow!(err))
             })

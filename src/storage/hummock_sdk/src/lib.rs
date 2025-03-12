@@ -16,7 +16,6 @@
 #![feature(extract_if)]
 #![feature(hash_extract_if)]
 #![feature(map_many_mut)]
-#![feature(type_alias_impl_trait)]
 #![feature(impl_trait_in_assoc_type)]
 #![feature(let_chains)]
 #![feature(btree_cursors)]
