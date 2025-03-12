@@ -21,6 +21,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, DatumRef, ScalarRefImpl, StructType};
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
+use risingwave_connector_codec::decoder::utils::rust_decimal_to_scaled_bigint;
 use thiserror_ext::AsReport;
 
 use super::{FieldEncodeError, Result as SinkResult, RowEncoder, SerTo};
@@ -546,7 +547,29 @@ fn on_field<D: MaybeData>(
             _ => return no_match_err(),
         },
         DataType::Decimal => match inner {
-            AvroSchema::String => todo!(),
+            AvroSchema::Decimal(decimal_schema) => {
+                maybe.on_base(|s| {
+                    match s.into_decimal() {
+                        risingwave_common::types::Decimal::Normalized(decimal) => {
+                            let (bigint, scale) = rust_decimal_to_scaled_bigint(decimal);
+                            if scale == decimal_schema.scale {
+                                let (_, bytes) = bigint.to_bytes_be();
+                                Ok(Value::Decimal(apache_avro::Decimal::from( bytes.as_slice() )) )
+                            }
+                            else {
+                                Err(
+                                    FieldEncodeError::new(format!("decimal scale mismatch: expect {} (from schema), but got {} (from data)", decimal_schema.scale, scale))
+                                )
+                            }
+                        }
+                        d @ risingwave_common::types::Decimal::NaN | d @ risingwave_common::types::Decimal::NegativeInf | d @ risingwave_common::types::Decimal::PositiveInf => {
+                            Err(
+                                FieldEncodeError::new(format!("Avro Decimal does not support NaN or Inf, but got {}", d))
+                            )
+                        }
+                    }
+                })?
+            }
             _ => return no_match_err(),
         },
         DataType::Jsonb => match inner {
@@ -966,20 +989,24 @@ mod tests {
                 "unicode_test": "Hello, 世界! 🌍"
             }
         }"#;
-        
+
         let input_json = JsonbVal::from_str(complex_json).unwrap();
         let result = on_field(
             &DataType::Jsonb,
             Some(ScalarImpl::Jsonb(input_json.clone())).to_datum_ref(),
             &AvroSchema::parse_str(r#""string""#).unwrap(),
-            &NamesRef::new(&AvroSchema::parse_str(r#""string""#).unwrap()).unwrap()
-        ).unwrap();
-        
+            &NamesRef::new(&AvroSchema::parse_str(r#""string""#).unwrap()).unwrap(),
+        )
+        .unwrap();
+
         // Compare as parsed JSON values to handle key order randomness
         if let Value::String(result_str) = result {
             let expected_json: serde_json::Value = serde_json::from_str(complex_json).unwrap();
             let actual_json: serde_json::Value = serde_json::from_str(&result_str).unwrap();
-            assert_eq!(expected_json, actual_json, "JSON values should be equivalent regardless of key order");
+            assert_eq!(
+                expected_json, actual_json,
+                "JSON values should be equivalent regardless of key order"
+            );
         } else {
             panic!("Expected String value");
         };
