@@ -176,6 +176,7 @@ impl HummockVersionTransaction<'_> {
                 removed_table_ids,
                 vec![], // default
                 0,      // default
+                compact_task.compaction_group_version_id,
             ));
 
             group_deltas.push(group_delta);
@@ -187,6 +188,7 @@ impl HummockVersionTransaction<'_> {
             HashSet::new(), // default
             compact_task.sorted_output_ssts.clone(),
             compact_task.split_weight_by_vnode,
+            compact_task.compaction_group_version_id,
         ));
 
         group_deltas.push(group_delta);
@@ -760,7 +762,10 @@ impl HummockManager {
                 &version.latest_version().state_table_info,
             ) {
                 let target_level_id = compact_task.input.target_level as u32;
-
+                let compaction_group_version_id = version
+                    .latest_version()
+                    .get_compaction_group_levels(compaction_group_id)
+                    .compaction_group_version_id;
                 let compression_algorithm = match compact_task.compression_algorithm.as_str() {
                     "Lz4" => 1,
                     "Zstd" => 2,
@@ -782,6 +787,7 @@ impl HummockManager {
                     base_level: compact_task.base_level as u32,
                     task_status: TaskStatus::Pending,
                     compaction_group_id: group_config.group_id,
+                    compaction_group_version_id,
                     existing_table_ids: member_table_ids.clone(),
                     compression_algorithm,
                     target_file_size: compact_task.target_file_size,
@@ -1215,17 +1221,6 @@ impl HummockManager {
                 }
             }
 
-            let input_sst_ids: HashSet<u64> = compact_task
-                .input_ssts
-                .iter()
-                .flat_map(|level| level.table_infos.iter().map(|sst| sst.sst_id))
-                .collect();
-            let input_level_ids: Vec<u32> = compact_task
-                .input_ssts
-                .iter()
-                .map(|level| level.level_idx)
-                .collect();
-
             let is_success = if let TaskStatus::Success = compact_task.task_status {
                 if let Err(e) = self
                     .report_compaction_sanity_check(&task.object_timestamps)
@@ -1244,16 +1239,16 @@ impl HummockManager {
                         .levels
                         .get(&compact_task.compaction_group_id)
                         .unwrap();
-                    let input_exist = group.check_sst_ids_exist(&input_level_ids, input_sst_ids);
-                    if !input_exist {
+                    let is_compaction_group_version_id_match = group.compaction_group_version_id
+                        == compact_task.compaction_group_version_id;
+                    if !is_compaction_group_version_id_match {
                         compact_task.task_status = TaskStatus::InputOutdatedCanceled;
                         warn!(
                             "The task may be expired because of group split, task:\n {:?}",
                             compact_task_to_string(&compact_task)
                         );
                     }
-
-                    input_exist
+                    is_compaction_group_version_id_match
                 }
             } else {
                 false

@@ -274,6 +274,8 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
             .levels
             .get_many_mut([&parent_group_id, &group_id])
             .map(|res| res.unwrap());
+        parent_levels.compaction_group_version_id += 1;
+        cur_levels.compaction_group_version_id += 1;
         let l0 = &mut parent_levels.l0;
         {
             for sub_level in &mut l0.sub_levels {
@@ -840,6 +842,8 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
             .levels
             .get_many_mut([&parent_group_id, &group_id])
             .map(|res| res.unwrap());
+        parent_levels.compaction_group_version_id += 1;
+        cur_levels.compaction_group_version_id += 1;
 
         let l0 = &mut parent_levels.l0;
         {
@@ -979,24 +983,22 @@ impl Levels {
             inserted_table_infos: insert_table_infos,
             vnode_partition_count,
             removed_table_ids: delete_sst_ids_set,
-            ..
+            compaction_group_version_id,
         } = level_delta;
         let new_vnode_partition_count = *vnode_partition_count;
 
-        if !self.check_sst_ids_exist(&[*level_idx], delete_sst_ids_set.clone()) {
+        if self.compaction_group_version_id != *compaction_group_version_id {
             warn!(
-                "This VersionDelta may be committed by an expired compact task. Please check it. \n
-                    insert_sst_level_id: {}\n,
-                    insert_sub_level_id: {}\n,
-                    insert_table_infos: {:?}\n,
-                    delete_sst_ids_set: {:?}\n",
+                current_compaction_group_version_id = self.compaction_group_version_id,
+                delta_compaction_group_version_id = compaction_group_version_id,
                 level_idx,
                 l0_sub_level_id,
-                insert_table_infos
+                insert_table_infos = ?insert_table_infos
                     .iter()
                     .map(|sst| (sst.sst_id, sst.object_id))
                     .collect_vec(),
-                delete_sst_ids_set,
+                ?delete_sst_ids_set,
+                "This VersionDelta may be committed by an expired compact task. Please check it."
             );
             return;
         }
@@ -1081,28 +1083,6 @@ impl Levels {
                 .sum::<u64>();
         }
     }
-
-    pub fn check_sst_ids_exist(
-        &self,
-        level_idx_to_check: &[u32],
-        mut sst_ids: HashSet<u64>,
-    ) -> bool {
-        for level_idx in level_idx_to_check {
-            if *level_idx == 0 {
-                for level in &self.l0.sub_levels {
-                    level.table_infos.iter().for_each(|table| {
-                        sst_ids.remove(&table.sst_id);
-                    });
-                }
-            } else {
-                let idx = *level_idx as usize - 1;
-                self.levels[idx].table_infos.iter().for_each(|table| {
-                    sst_ids.remove(&table.sst_id);
-                });
-            }
-        }
-        sst_ids.is_empty()
-    }
 }
 
 impl<T, L> HummockVersionCommon<T, L> {
@@ -1140,6 +1120,7 @@ pub fn build_initial_compaction_group_levels(
         group_id,
         parent_group_id: StaticCompactionGroupId::NewCompactionGroup as _,
         member_table_ids: vec![],
+        compaction_group_version_id: 0,
     }
 }
 
@@ -1666,6 +1647,12 @@ mod tests {
                                 .into(),
                             ],
                             0,
+                            version
+                                .levels
+                                .get(&1)
+                                .as_ref()
+                                .unwrap()
+                                .compaction_group_version_id,
                         ))],
                     },
                 ),

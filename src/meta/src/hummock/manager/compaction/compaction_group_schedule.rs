@@ -559,18 +559,13 @@ impl HummockManager {
             .into_iter()
             .for_each(|task_assignment| {
                 if let Some(task) = task_assignment.compact_task.as_ref() {
-                    let input_sst_ids: HashSet<u64> = task
-                        .input_ssts
-                        .iter()
-                        .flat_map(|level| level.table_infos.iter().map(|sst| sst.sst_id))
-                        .collect();
-                    let input_level_ids: Vec<u32> = task
-                        .input_ssts
-                        .iter()
-                        .map(|level| level.level_idx)
-                        .collect();
-                    let need_cancel = !levels.check_sst_ids_exist(&input_level_ids, input_sst_ids);
-                    if need_cancel {
+                    let is_compaction_group_version_id_match = levels.compaction_group_version_id
+                        == task_assignment
+                            .compact_task
+                            .as_ref()
+                            .map(|c| c.compaction_group_version_id)
+                            .unwrap_or_default();
+                    if !is_compaction_group_version_id_match {
                         canceled_tasks.push(ReportTask {
                             task_id: task.task_id,
                             task_status: TaskStatus::ManualCanceled,
