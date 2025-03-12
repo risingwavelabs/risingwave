@@ -388,11 +388,11 @@ mod tests {
             ColumnId::new(1)
         );
 
-        // mismatched data type
+        // mismatched simple data type
         let err = gen
             .generate_simple(Field::new("f64", DataType::Float32))
             .unwrap_err();
-        expect![[r#"incompatible data type change from Float64 to Float32 at path "f64""#]]
+        expect![[r#"column "f64" cannot be altered; only types containing struct can be altered"#]]
             .assert_eq(&err.to_report_string());
 
         // mismatched composite data type
