@@ -299,11 +299,13 @@ impl From<DataTypeName> for PbTypeName {
     }
 }
 
-/// Convenient macros to generate match arms for [`DataType`](crate::types::DataType).
+/// Convenient macros to generate match arms for [`DataType`].
 pub mod data_types {
-    /// Numeric [`DataType`](crate::types::DataType)s supported to be `offset` of `RANGE` frame.
+    use super::DataType;
+
+    /// Numeric [`DataType`]s supported to be `offset` of `RANGE` frame.
     #[macro_export]
-    macro_rules! range_frame_numeric {
+    macro_rules! _range_frame_numeric_data_types {
         () => {
             DataType::Int16
                 | DataType::Int32
@@ -313,11 +315,11 @@ pub mod data_types {
                 | DataType::Decimal
         };
     }
-    pub use range_frame_numeric;
+    pub use _range_frame_numeric_data_types as range_frame_numeric;
 
-    /// Date/time [`DataType`](crate::types::DataType)s supported to be `offset` of `RANGE` frame.
+    /// Date/time [`DataType`]s supported to be `offset` of `RANGE` frame.
     #[macro_export]
-    macro_rules! range_frame_datetime {
+    macro_rules! _range_frame_datetime_data_types {
         () => {
             DataType::Date
                 | DataType::Time
@@ -326,7 +328,49 @@ pub mod data_types {
                 | DataType::Interval
         };
     }
-    pub use range_frame_datetime;
+    pub use _range_frame_datetime_data_types as range_frame_datetime;
+
+    /// Data types that do not have inner fields.
+    #[macro_export]
+    macro_rules! _simple_data_types {
+        () => {
+            DataType::Boolean
+                | DataType::Int16
+                | DataType::Int32
+                | DataType::Int64
+                | DataType::Float32
+                | DataType::Float64
+                | DataType::Decimal
+                | DataType::Date
+                | DataType::Varchar
+                | DataType::Time
+                | DataType::Timestamp
+                | DataType::Timestamptz
+                | DataType::Interval
+                | DataType::Bytea
+                | DataType::Jsonb
+                | DataType::Serial
+                | DataType::Int256
+        };
+    }
+    pub use _simple_data_types as simple;
+
+    /// Data types that have inner fields.
+    #[macro_export]
+    macro_rules! _composite_data_types {
+        () => {
+            DataType::Struct { .. } | DataType::List { .. } | DataType::Map { .. }
+        };
+    }
+    pub use _composite_data_types as composite;
+
+    /// Test that all data types are covered either by `simple!()` or `composite!()`.
+    fn _simple_composite_data_types_exhausted(dt: DataType) {
+        match dt {
+            simple!() => {}
+            composite!() => {}
+        }
+    }
 }
 
 impl DataType {
@@ -399,6 +443,16 @@ impl DataType {
                 | DataType::Float64
                 | DataType::Decimal
         )
+    }
+
+    /// Returns whether the data type does not have inner fields.
+    pub fn is_simple(&self) -> bool {
+        matches!(self, data_types::simple!())
+    }
+
+    /// Returns whether the data type has inner fields.
+    pub fn is_composite(&self) -> bool {
+        matches!(self, data_types::composite!())
     }
 
     pub fn is_array(&self) -> bool {
