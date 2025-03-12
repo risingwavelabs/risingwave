@@ -542,7 +542,7 @@ fn on_field<D: MaybeData>(
         },
         // Group C: experimental
         DataType::Int16 => match inner {
-            AvroSchema::Int => maybe.on_base(|s| Ok(Value::Int(s.into_int32())))?,
+            AvroSchema::Int => maybe.on_base(|s| Ok(Value::Int(s.into_int16() as i32)))?,
             _ => return no_match_err(),
         },
         DataType::Decimal => match inner {
@@ -550,7 +550,9 @@ fn on_field<D: MaybeData>(
             _ => return no_match_err(),
         },
         DataType::Jsonb => match inner {
-            AvroSchema::String => maybe.on_base(|s| Ok(Value::String(s.into_utf8().into())))?,
+            AvroSchema::String => {
+                maybe.on_base(|s| Ok(Value::String(s.into_jsonb().to_string())))?
+            }
             _ => return no_match_err(),
         },
         // Group D: unsupported
@@ -573,8 +575,8 @@ mod tests {
     use risingwave_common::catalog::Field;
     use risingwave_common::row::OwnedRow;
     use risingwave_common::types::{
-        Date, Datum, Interval, ListValue, MapType, MapValue, Scalar, ScalarImpl, StructValue, Time,
-        Timestamptz, ToDatumRef,
+        Date, Datum, Interval, JsonbVal, ListValue, MapType, MapValue, Scalar, ScalarImpl,
+        StructValue, Time, Timestamptz, ToDatumRef,
     };
 
     use super::*;
@@ -780,6 +782,29 @@ mod tests {
         );
 
         test_ok(
+            &DataType::Int16,
+            Some(ScalarImpl::Int16(i16::MAX)),
+            r#""int""#,
+            Value::Int(i16::MAX as i32),
+        );
+
+        test_ok(
+            &DataType::Int16,
+            Some(ScalarImpl::Int16(i16::MIN)),
+            r#""int""#,
+            Value::Int(i16::MIN as i32),
+        );
+
+        test_ok(
+            &DataType::Jsonb,
+            Some(ScalarImpl::Jsonb(
+                JsonbVal::from_str(r#"{"a": 1}"#).unwrap(),
+            )),
+            r#""string""#,
+            Value::String(r#"{"a": 1}"#.into()),
+        );
+
+        test_ok(
             &DataType::Interval,
             Some(ScalarImpl::Interval(Interval::from_month_day_usec(
                 13, 2, 1000000,
@@ -915,6 +940,49 @@ mod tests {
                 ),
             ]),
         );
+
+        // Test complex JSON with nested structures - using serde_json::Value comparison
+        let complex_json = r#"{
+            "person": {
+                "name": "John Doe",
+                "age": 30,
+                "address": {
+                    "street": "123 Main St.",
+                    "city": "New York",
+                    "coordinates": [40.7128, -74.0060]
+                },
+                "contacts": [
+                    {"type": "email", "value": "john@example.com"},
+                    {"type": "phone", "value": "+1-555-123-4567"}
+                ],
+                "active": true,
+                "preferences": {
+                    "notifications": true,
+                    "theme": "dark",
+                    "languages": ["en", "es"],
+                    "lastLogin": null
+                },
+                "tags": ["premium", "verified"],
+                "unicode_test": "Hello, 世界! 🌍"
+            }
+        }"#;
+        
+        let input_json = JsonbVal::from_str(complex_json).unwrap();
+        let result = on_field(
+            &DataType::Jsonb,
+            Some(ScalarImpl::Jsonb(input_json.clone())).to_datum_ref(),
+            &AvroSchema::parse_str(r#""string""#).unwrap(),
+            &NamesRef::new(&AvroSchema::parse_str(r#""string""#).unwrap()).unwrap()
+        ).unwrap();
+        
+        // Compare as parsed JSON values to handle key order randomness
+        if let Value::String(result_str) = result {
+            let expected_json: serde_json::Value = serde_json::from_str(complex_json).unwrap();
+            let actual_json: serde_json::Value = serde_json::from_str(&result_str).unwrap();
+            assert_eq!(expected_json, actual_json, "JSON values should be equivalent regardless of key order");
+        } else {
+            panic!("Expected String value");
+        };
     }
 
     #[test]
