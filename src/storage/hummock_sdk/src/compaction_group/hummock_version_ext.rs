@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
@@ -1348,6 +1349,12 @@ fn level_delete_ssts(
 }
 
 fn level_insert_ssts(operand: &mut Level, insert_table_infos: &Vec<SstableInfo>) {
+    fn display_sstable_infos(ssts: &[impl Borrow<SstableInfo>]) -> String {
+        format!(
+            "sstable ids: {:?}",
+            ssts.iter().map(|s| s.borrow().sst_id).collect_vec()
+        )
+    }
     operand.total_file_size += insert_table_infos
         .iter()
         .map(|sst| sst.sst_size)
@@ -1364,6 +1371,11 @@ fn level_insert_ssts(operand: &mut Level, insert_table_infos: &Vec<SstableInfo>)
         operand
             .table_infos
             .sort_by(|sst1, sst2| sst1.key_range.cmp(&sst2.key_range));
+        assert!(
+            can_concat(&operand.table_infos),
+            "{}",
+            display_sstable_infos(&operand.table_infos)
+        );
     } else if !insert_table_infos.is_empty() {
         let sorted_insert: Vec<_> = insert_table_infos
             .iter()
@@ -1379,6 +1391,18 @@ fn level_insert_ssts(operand: &mut Level, insert_table_infos: &Vec<SstableInfo>)
             || last.key_range.cmp(&operand.table_infos[pos].key_range) == Ordering::Less
         {
             operand.table_infos.splice(pos..pos, sorted_insert);
+            // Validate the inserted SST batch along with the two SSTs that precede and follow it.
+            let validate_range = operand
+                .table_infos
+                .iter()
+                .skip(pos.saturating_sub(1))
+                .take(insert_table_infos.len() + 2)
+                .collect_vec();
+            assert!(
+                can_concat(&validate_range),
+                "{}",
+                display_sstable_infos(&validate_range),
+            );
         } else {
             // If this branch is reached, it indicates some unexpected behavior in compaction.
             // Here we issue a warning and fall back to insert one by one.
@@ -1389,17 +1413,13 @@ fn level_insert_ssts(operand: &mut Level, insert_table_infos: &Vec<SstableInfo>)
                     .partition_point(|b| b.key_range.cmp(&i.key_range) == Ordering::Less);
                 operand.table_infos.insert(pos, i.clone());
             }
+            assert!(
+                can_concat(&operand.table_infos),
+                "{}",
+                display_sstable_infos(&operand.table_infos)
+            );
         }
     }
-    assert!(
-        can_concat(&operand.table_infos),
-        "sstable ids: {:?}",
-        operand
-            .table_infos
-            .iter()
-            .map(|sst| sst.sst_id)
-            .collect_vec()
-    );
 }
 
 pub fn object_size_map(version: &HummockVersion) -> HashMap<HummockSstableObjectId, u64> {
