@@ -126,7 +126,7 @@ impl ValueRowSerdeNew for ColumnAwareSerde {
             }
         });
 
-        let serializer = Serializer::new_new(&column_ids, schema.clone());
+        let serializer = Serializer::new(&column_ids, schema.clone());
         let deserializer = Deserializer::new(&column_ids, schema.into(), column_with_default);
         ColumnAwareSerde {
             serializer,
@@ -160,7 +160,10 @@ mod tests {
         let row3 = OwnedRow::new(vec![Some(Int16(6)), Some(Utf8("abc".into()))]);
         let rows = vec![row1, row2, row3];
         let mut array = vec![];
-        let serializer = column_aware_row_encoding::Serializer::new(&column_ids);
+        let serializer = column_aware_row_encoding::Serializer::new(
+            &column_ids,
+            [DataType::Int16, DataType::Varchar],
+        );
         for row in &rows {
             let row_bytes = serializer.serialize(row);
             array.push(row_bytes);
@@ -202,7 +205,10 @@ mod tests {
     fn test_row_decoding() {
         let column_ids = vec![ColumnId::new(0), ColumnId::new(1)];
         let row1 = OwnedRow::new(vec![Some(Int16(5)), Some(Utf8("abc".into()))]);
-        let serializer = column_aware_row_encoding::Serializer::new(&column_ids);
+        let serializer = column_aware_row_encoding::Serializer::new(
+            &column_ids,
+            [DataType::Int16, DataType::Varchar],
+        );
         let row_bytes = serializer.serialize(row1);
         let data_types = vec![DataType::Int16, DataType::Varchar];
         let deserializer = column_aware_row_encoding::Deserializer::new(
@@ -281,7 +287,10 @@ mod tests {
             Some(Utf8("abc".into())),
             Some(Utf8("ABC".into())),
         ]);
-        let serializer = column_aware_row_encoding::Serializer::new(&column_ids);
+        let serializer = column_aware_row_encoding::Serializer::new(
+            &column_ids,
+            [DataType::Int16, DataType::Varchar, DataType::Varchar],
+        );
         let row_bytes = serializer.serialize(row1);
 
         // no columns is dropped
@@ -317,7 +326,10 @@ mod tests {
             Some(Utf8("abc".into())),
             Some(Utf8("ABC".into())),
         ]);
-        let serializer = column_aware_row_encoding::Serializer::new(&column_ids);
+        let serializer = column_aware_row_encoding::Serializer::new(
+            &column_ids,
+            [DataType::Int16, DataType::Varchar, DataType::Varchar],
+        );
         let row_bytes = serializer.serialize(row1);
 
         let deserializer = column_aware_row_encoding::Deserializer::new(
@@ -340,7 +352,10 @@ mod tests {
             Some(Utf8("abc".into())),
             Some(Utf8("ABC".into())),
         ]);
-        let serializer = column_aware_row_encoding::Serializer::new(&column_ids);
+        let serializer = column_aware_row_encoding::Serializer::new(
+            &column_ids,
+            [DataType::Int16, DataType::Varchar, DataType::Varchar],
+        );
         let row_bytes = serializer.serialize(row1);
 
         // default column of ColumnId::new(3)
