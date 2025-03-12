@@ -155,6 +155,7 @@ pub use sink::SinkExecutor;
 pub use sort::*;
 pub use stateless_simple_agg::StatelessSimpleAggExecutor;
 pub use sync_kv_log_store::SyncedKvLogStoreExecutor;
+pub use sync_kv_log_store::metrics::SyncedKvLogStoreMetrics;
 pub use temporal_join::TemporalJoinExecutor;
 pub use top_n::{
     AppendOnlyGroupTopNExecutor, AppendOnlyTopNExecutor, GroupTopNExecutor, TopNExecutor,

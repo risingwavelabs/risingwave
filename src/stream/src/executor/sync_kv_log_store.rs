@@ -93,19 +93,205 @@ use crate::common::log_store_impl::kv_log_store::state::{
     LogStoreWriteState, new_log_store_state,
 };
 use crate::common::log_store_impl::kv_log_store::{
-    FIRST_SEQ_ID, FlushInfo, KvLogStoreMetrics, ReaderTruncationOffsetType, SeqIdType,
+    FIRST_SEQ_ID, FlushInfo, ReaderTruncationOffsetType, SeqIdType,
 };
 use crate::executor::prelude::*;
+use crate::executor::sync_kv_log_store::metrics::SyncedKvLogStoreMetrics;
 use crate::executor::{
     Barrier, BoxedMessageStream, Message, StreamExecutorError, StreamExecutorResult,
 };
+
+pub mod metrics {
+    use risingwave_common::metrics::{LabelGuardedIntCounter, LabelGuardedIntGauge};
+
+    use crate::common::log_store_impl::kv_log_store::KvLogStoreReadMetrics;
+    use crate::executor::monitor::StreamingMetrics;
+    use crate::task::ActorId;
+
+    #[derive(Clone)]
+    pub struct SyncedKvLogStoreMetrics {
+        // state of the log store
+        pub unclean_state: LabelGuardedIntGauge<4>,
+        pub wait_next_poll_ns: LabelGuardedIntCounter<4>,
+
+        // Write metrics
+        pub storage_write_count: LabelGuardedIntCounter<4>,
+        pub storage_write_size: LabelGuardedIntCounter<4>,
+        pub storage_pause_duration_ns: LabelGuardedIntCounter<4>,
+
+        // Buffer metrics
+        pub buffer_unconsumed_item_count: LabelGuardedIntGauge<4>,
+        pub buffer_unconsumed_row_count: LabelGuardedIntGauge<4>,
+        pub buffer_unconsumed_epoch_count: LabelGuardedIntGauge<4>,
+        pub buffer_unconsumed_min_epoch: LabelGuardedIntGauge<4>,
+        pub buffer_read_count: LabelGuardedIntCounter<4>,
+        pub buffer_read_size: LabelGuardedIntCounter<4>,
+
+        // Read metrics
+        pub total_read_count: LabelGuardedIntCounter<4>,
+        pub total_read_size: LabelGuardedIntCounter<4>,
+        pub persistent_log_read_metrics: KvLogStoreReadMetrics,
+        pub flushed_buffer_read_metrics: KvLogStoreReadMetrics,
+    }
+
+    impl SyncedKvLogStoreMetrics {
+        /// `id`: refers to a unique way to identify the logstore. This can be the sink id,
+        ///       or for joins, it can be the `fragment_id`.
+        /// `name`: refers to the MV / Sink that the log store is associated with.
+        /// `target`: refers to the target of the log store,
+        ///           for instance `MySql` Sink, PG sink, etc...
+        ///           or unaligned join.
+        pub(crate) fn new(
+            metrics: &StreamingMetrics,
+            actor_id: ActorId,
+            id: u32,
+            name: &str,
+            target: &'static str,
+        ) -> Self {
+            let actor_id_str = actor_id.to_string();
+            let id_str = id.to_string();
+            let labels = &[&actor_id_str, target, &id_str, name];
+
+            let unclean_state = metrics
+                .sync_kv_log_store_unclean_state
+                .with_guarded_label_values(labels);
+            let wait_next_poll_ns = metrics
+                .sync_kv_log_store_wait_next_poll_ns
+                .with_guarded_label_values(labels);
+
+            let storage_write_size = metrics
+                .kv_log_store_storage_write_size
+                .with_guarded_label_values(labels);
+            let storage_write_count = metrics
+                .kv_log_store_storage_write_count
+                .with_guarded_label_values(labels);
+            let storage_pause_duration_ns = metrics
+                .sync_kv_log_store_write_pause_duration_ns
+                .with_guarded_label_values(labels);
+
+            let buffer_unconsumed_item_count = metrics
+                .kv_log_store_buffer_unconsumed_item_count
+                .with_guarded_label_values(labels);
+            let buffer_unconsumed_row_count = metrics
+                .kv_log_store_buffer_unconsumed_row_count
+                .with_guarded_label_values(labels);
+            let buffer_unconsumed_epoch_count = metrics
+                .kv_log_store_buffer_unconsumed_epoch_count
+                .with_guarded_label_values(labels);
+            let buffer_unconsumed_min_epoch = metrics
+                .kv_log_store_buffer_unconsumed_min_epoch
+                .with_guarded_label_values(labels);
+            let buffer_read_count = metrics
+                .sync_kv_log_store_buffer_read_count
+                .with_guarded_label_values(labels);
+
+            let buffer_read_size = metrics
+                .sync_kv_log_store_buffer_read_size
+                .with_guarded_label_values(labels);
+
+            let total_read_count = metrics
+                .sync_kv_log_store_total_read_count
+                .with_guarded_label_values(labels);
+
+            let total_read_size = metrics
+                .sync_kv_log_store_total_read_size
+                .with_guarded_label_values(labels);
+
+            const READ_PERSISTENT_LOG: &str = "persistent_log";
+            const READ_FLUSHED_BUFFER: &str = "flushed_buffer";
+
+            let persistent_log_read_size = metrics
+                .kv_log_store_storage_read_size
+                .with_guarded_label_values(&[
+                    &actor_id_str,
+                    target,
+                    &id_str,
+                    name,
+                    READ_PERSISTENT_LOG,
+                ]);
+            let persistent_log_read_count = metrics
+                .kv_log_store_storage_read_count
+                .with_guarded_label_values(&[
+                    &actor_id_str,
+                    target,
+                    &id_str,
+                    name,
+                    READ_PERSISTENT_LOG,
+                ]);
+
+            let flushed_buffer_read_size = metrics
+                .kv_log_store_storage_read_size
+                .with_guarded_label_values(&[
+                    &actor_id_str,
+                    target,
+                    &id_str,
+                    name,
+                    READ_FLUSHED_BUFFER,
+                ]);
+            let flushed_buffer_read_count = metrics
+                .kv_log_store_storage_read_count
+                .with_guarded_label_values(&[
+                    &actor_id_str,
+                    target,
+                    &id_str,
+                    name,
+                    READ_FLUSHED_BUFFER,
+                ]);
+
+            Self {
+                unclean_state,
+                wait_next_poll_ns,
+                storage_write_size,
+                storage_write_count,
+                storage_pause_duration_ns,
+                buffer_unconsumed_item_count,
+                buffer_unconsumed_row_count,
+                buffer_unconsumed_epoch_count,
+                buffer_unconsumed_min_epoch,
+                buffer_read_count,
+                buffer_read_size,
+                total_read_count,
+                total_read_size,
+                persistent_log_read_metrics: KvLogStoreReadMetrics {
+                    storage_read_size: persistent_log_read_size,
+                    storage_read_count: persistent_log_read_count,
+                },
+                flushed_buffer_read_metrics: KvLogStoreReadMetrics {
+                    storage_read_count: flushed_buffer_read_count,
+                    storage_read_size: flushed_buffer_read_size,
+                },
+            }
+        }
+
+        #[cfg(test)]
+        pub(crate) fn for_test() -> Self {
+            SyncedKvLogStoreMetrics {
+                unclean_state: LabelGuardedIntGauge::test_int_gauge(),
+                wait_next_poll_ns: LabelGuardedIntCounter::test_int_counter(),
+                storage_write_count: LabelGuardedIntCounter::test_int_counter(),
+                storage_write_size: LabelGuardedIntCounter::test_int_counter(),
+                storage_pause_duration_ns: LabelGuardedIntCounter::test_int_counter(),
+                buffer_unconsumed_item_count: LabelGuardedIntGauge::test_int_gauge(),
+                buffer_unconsumed_row_count: LabelGuardedIntGauge::test_int_gauge(),
+                buffer_unconsumed_epoch_count: LabelGuardedIntGauge::test_int_gauge(),
+                buffer_unconsumed_min_epoch: LabelGuardedIntGauge::test_int_gauge(),
+                buffer_read_count: LabelGuardedIntCounter::test_int_counter(),
+                buffer_read_size: LabelGuardedIntCounter::test_int_counter(),
+                total_read_count: LabelGuardedIntCounter::test_int_counter(),
+                total_read_size: LabelGuardedIntCounter::test_int_counter(),
+                persistent_log_read_metrics: KvLogStoreReadMetrics::for_test(),
+                flushed_buffer_read_metrics: KvLogStoreReadMetrics::for_test(),
+            }
+        }
+    }
+}
 
 type ReadFlushedChunkFuture = BoxFuture<'static, LogStoreResult<(ChunkId, StreamChunk, u64)>>;
 
 pub struct SyncedKvLogStoreExecutor<S: StateStore> {
     actor_context: ActorContextRef,
     table_id: TableId,
-    metrics: KvLogStoreMetrics,
+    metrics: SyncedKvLogStoreMetrics,
     serde: LogStoreRowSerde,
 
     // Upstream
@@ -123,7 +309,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
     pub(crate) fn new(
         actor_context: ActorContextRef,
         table_id: u32,
-        metrics: KvLogStoreMetrics,
+        metrics: SyncedKvLogStoreMetrics,
         serde: LogStoreRowSerde,
         state_store: S,
         buffer_size: usize,
@@ -325,7 +511,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
 
             let log_store_stream = read_state
                 .read_persisted_log_store(
-                    &self.metrics,
+                    self.metrics.persistent_log_read_metrics.clone(),
                     initial_write_epoch.prev,
                     LogStoreReadStateStreamRangeStart::Unbounded,
                 )
@@ -480,7 +666,12 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                                     vnode_bitmap,
                                     epoch,
                                 );
-                                flush_info.report(&self.metrics);
+                                self.metrics
+                                    .storage_write_count
+                                    .inc_by(flush_info.flush_count as _);
+                                self.metrics
+                                    .storage_write_size
+                                    .inc_by(flush_info.flush_size as _);
                                 write_future_state =
                                     WriteFuture::receive_from_upstream(stream, write_state);
                             }
@@ -529,7 +720,7 @@ impl<S: StateStoreRead> ReadFuture<S> {
         &mut self,
         read_state: &LogStoreReadState<S>,
         buffer: &mut SyncedLogStoreBuffer,
-        metrics: &KvLogStoreMetrics,
+        metrics: &SyncedKvLogStoreMetrics,
     ) -> StreamExecutorResult<(StreamChunk, Option<ReaderTruncationOffsetType>)> {
         match self {
             ReadFuture::ReadingPersistedStream(stream) => {
@@ -620,7 +811,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
     async fn write_barrier<'a>(
         write_state: &'a mut LogStoreWriteState<S::Local>,
         barrier: Barrier,
-        metrics: &KvLogStoreMetrics,
+        metrics: &SyncedKvLogStoreMetrics,
         truncation_offset: Option<ReaderTruncationOffsetType>,
         buffer: &mut SyncedLogStoreBuffer,
     ) -> StreamExecutorResult<LogStorePostSealCurrentEpoch<'a, S::Local>> {
@@ -655,7 +846,12 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
 
         // Apply truncation
         let (flush_info, _) = writer.finish().await?;
-        flush_info.report(metrics);
+        metrics
+            .storage_write_count
+            .inc_by(flush_info.flush_count as _);
+        metrics
+            .storage_write_size
+            .inc_by(flush_info.flush_size as _);
         let post_seal = write_state.seal_current_epoch(barrier.epoch.curr, truncation_offset);
 
         // Add to buffer
@@ -678,7 +874,7 @@ struct SyncedLogStoreBuffer {
     current_size: usize,
     max_size: usize,
     next_chunk_id: ChunkId,
-    metrics: KvLogStoreMetrics,
+    metrics: SyncedKvLogStoreMetrics,
     flushed_count: usize,
 }
 
@@ -858,6 +1054,7 @@ mod tests {
     use crate::common::log_store_impl::kv_log_store::test_utils::{
         check_stream_chunk_eq, gen_test_log_store_table, test_payload_schema,
     };
+    use crate::executor::sync_kv_log_store::metrics::SyncedKvLogStoreMetrics;
     use crate::executor::test_utils::MockSource;
 
     fn init_logger() {
@@ -889,7 +1086,7 @@ mod tests {
         let log_store_executor = SyncedKvLogStoreExecutor::new(
             ActorContext::for_test(123),
             table.id,
-            KvLogStoreMetrics::for_test(),
+            SyncedKvLogStoreMetrics::for_test(),
             LogStoreRowSerde::new(&table, vnodes, pk_info),
             MemoryStateStore::new(),
             10,
@@ -981,7 +1178,7 @@ mod tests {
         let log_store_executor = SyncedKvLogStoreExecutor::new(
             ActorContext::for_test(123),
             table.id,
-            KvLogStoreMetrics::for_test(),
+            SyncedKvLogStoreMetrics::for_test(),
             LogStoreRowSerde::new(&table, vnodes, pk_info),
             MemoryStateStore::new(),
             10,
@@ -1071,7 +1268,7 @@ mod tests {
         let log_store_executor = SyncedKvLogStoreExecutor::new(
             ActorContext::for_test(123),
             table.id,
-            KvLogStoreMetrics::for_test(),
+            SyncedKvLogStoreMetrics::for_test(),
             LogStoreRowSerde::new(&table, vnodes, pk_info),
             MemoryStateStore::new(),
             0,
