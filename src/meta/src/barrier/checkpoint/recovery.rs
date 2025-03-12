@@ -21,9 +21,7 @@ use prometheus::{HistogramTimer, IntCounter};
 use risingwave_common::catalog::DatabaseId;
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
-use risingwave_pb::stream_service::streaming_control_stream_response::{
-    ReportDatabaseFailureResponse, ResetDatabaseResponse,
-};
+use risingwave_pb::stream_service::streaming_control_stream_response::ResetDatabaseResponse;
 use thiserror_ext::AsReport;
 use tracing::{info, warn};
 
@@ -33,6 +31,7 @@ use crate::barrier::checkpoint::{CheckpointControl, DatabaseCheckpointControl};
 use crate::barrier::complete_task::BarrierCompleteOutput;
 use crate::barrier::info::InflightDatabaseInfo;
 use crate::barrier::rpc::ControlStreamManager;
+use crate::barrier::utils::{NodeToCollect, is_valid_after_worker_err};
 use crate::barrier::worker::{
     RetryBackoffFuture, RetryBackoffStrategy, get_retry_backoff_strategy,
 };
@@ -70,12 +69,12 @@ use crate::rpc::metrics::GLOBAL_META_METRICS;
 enum DatabaseRecoveringStage {
     Resetting {
         remaining_workers: HashSet<WorkerId>,
-        reset_workers: HashMap<WorkerId, ResetDatabaseResponse>,
+        reset_resps: HashMap<WorkerId, ResetDatabaseResponse>,
         reset_request_id: u32,
         backoff_future: Option<RetryBackoffFuture>,
     },
     Initializing {
-        remaining_workers: HashSet<WorkerId>,
+        remaining_workers: NodeToCollect,
         database: DatabaseCheckpointControl,
         prev_epoch: u64,
     },
@@ -125,7 +124,7 @@ impl DatabaseRecoveringState {
         Self {
             stage: DatabaseRecoveringStage::Resetting {
                 remaining_workers: Default::default(),
-                reset_workers: Default::default(),
+                reset_resps: Default::default(),
                 reset_request_id: 0,
                 backoff_future: Some(backoff_future),
             },
@@ -145,7 +144,11 @@ impl DatabaseRecoveringState {
         (backoff_future, request_id)
     }
 
-    pub(super) fn barrier_collected(&mut self, resp: BarrierCompleteResponse) {
+    pub(super) fn barrier_collected(
+        &mut self,
+        database_id: DatabaseId,
+        resp: BarrierCompleteResponse,
+    ) {
         match &mut self.stage {
             DatabaseRecoveringStage::Resetting { .. } => {
                 // ignore the collected barrier on resetting or backoff
@@ -155,20 +158,30 @@ impl DatabaseRecoveringState {
                 prev_epoch,
                 ..
             } => {
-                assert!(remaining_workers.remove(&(resp.worker_id as WorkerId)));
+                let worker_id = resp.worker_id as WorkerId;
+                assert!(remaining_workers.remove(&worker_id).is_some());
                 assert_eq!(resp.epoch, *prev_epoch);
+                info!(
+                    ?database_id,
+                    worker_id,
+                    ?remaining_workers,
+                    "initializing database barrier collected"
+                );
             }
         }
     }
 
-    pub(super) fn remaining_workers(&self) -> &HashSet<WorkerId> {
-        match &self.stage {
+    pub(super) fn is_valid_after_worker_err(&mut self, worker_id: WorkerId) -> bool {
+        match &mut self.stage {
             DatabaseRecoveringStage::Resetting {
                 remaining_workers, ..
+            } => {
+                remaining_workers.remove(&worker_id);
+                true
             }
-            | DatabaseRecoveringStage::Initializing {
+            DatabaseRecoveringStage::Initializing {
                 remaining_workers, ..
-            } => remaining_workers,
+            } => is_valid_after_worker_err(remaining_workers, worker_id),
         }
     }
 
@@ -180,7 +193,7 @@ impl DatabaseRecoveringState {
         match &mut self.stage {
             DatabaseRecoveringStage::Resetting {
                 remaining_workers,
-                reset_workers,
+                reset_resps,
                 reset_request_id,
                 ..
             } => {
@@ -195,7 +208,7 @@ impl DatabaseRecoveringState {
                 } else {
                     assert_eq!(resp.reset_request_id, *reset_request_id);
                     assert!(remaining_workers.remove(&worker_id));
-                    reset_workers
+                    reset_resps
                         .try_insert(worker_id, resp)
                         .expect("non-duplicate");
                 }
@@ -210,7 +223,7 @@ impl DatabaseRecoveringState {
         match &mut self.stage {
             DatabaseRecoveringStage::Resetting {
                 remaining_workers,
-                reset_workers,
+                reset_resps,
                 backoff_future: backoff_future_option,
                 ..
             } => {
@@ -226,7 +239,7 @@ impl DatabaseRecoveringState {
                 };
                 if pass_backoff && remaining_workers.is_empty() {
                     return Poll::Ready(RecoveringStateAction::EnterInitializing(take(
-                        reset_workers,
+                        reset_resps,
                     )));
                 }
             }
@@ -301,7 +314,7 @@ impl DatabaseStatusAction<'_, EnterReset> {
                     DatabaseCheckpointControlStatus::Recovering(DatabaseRecoveringState {
                         stage: DatabaseRecoveringStage::Resetting {
                             remaining_workers,
-                            reset_workers: Default::default(),
+                            reset_resps: Default::default(),
                             reset_request_id,
                             backoff_future: None,
                         },
@@ -321,7 +334,7 @@ impl DatabaseStatusAction<'_, EnterReset> {
                     state.metrics.recovery_failure_cnt.inc();
                     state.stage = DatabaseRecoveringStage::Resetting {
                         remaining_workers,
-                        reset_workers: Default::default(),
+                        reset_resps: Default::default(),
                         reset_request_id,
                         backoff_future: Some(backoff_future),
                     };
@@ -334,10 +347,9 @@ impl DatabaseStatusAction<'_, EnterReset> {
 impl CheckpointControl {
     pub(crate) fn on_report_failure(
         &mut self,
-        resp: ReportDatabaseFailureResponse,
+        database_id: DatabaseId,
         control_stream_manager: &mut ControlStreamManager,
     ) -> Option<DatabaseStatusAction<'_, EnterReset>> {
-        let database_id = DatabaseId::new(resp.database_id);
         let database_status = self.databases.get_mut(&database_id).expect("should exist");
         match database_status {
             DatabaseCheckpointControlStatus::Running(_) => {
@@ -356,7 +368,7 @@ impl CheckpointControl {
                     state.metrics.recovery_failure_cnt.inc();
                     state.stage = DatabaseRecoveringStage::Resetting {
                         remaining_workers,
-                        reset_workers: Default::default(),
+                        reset_resps: Default::default(),
                         reset_request_id,
                         backoff_future: Some(backoff_future),
                     };
@@ -422,6 +434,7 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
         };
         match result {
             Ok((remaining_workers, database, prev_epoch)) => {
+                info!(?remaining_workers, database_id = ?self.database_id, "database enter initializing");
                 status.stage = DatabaseRecoveringStage::Initializing {
                     remaining_workers,
                     database,
@@ -429,14 +442,18 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
                 };
             }
             Err(e) => {
-                warn!(database_id = self.database_id.database_id,e = ?e.as_report(), "failed to inject initial barrier");
+                warn!(
+                    database_id = self.database_id.database_id,
+                    e = %e.as_report(),
+                    "failed to inject initial barrier"
+                );
                 let (backoff_future, reset_request_id) = status.next_retry();
                 let remaining_workers =
                     control_stream_manager.reset_database(self.database_id, reset_request_id);
                 status.metrics.recovery_failure_cnt.inc();
                 status.stage = DatabaseRecoveringStage::Resetting {
                     remaining_workers,
-                    reset_workers: Default::default(),
+                    reset_resps: Default::default(),
                     reset_request_id,
                     backoff_future: Some(backoff_future),
                 };
@@ -456,6 +473,7 @@ pub(crate) struct EnterRunning;
 
 impl DatabaseStatusAction<'_, EnterRunning> {
     pub(crate) fn enter(self) {
+        info!(database_id = ?self.database_id, "database enter running");
         let database_status = self
             .control
             .databases
@@ -468,7 +486,7 @@ impl DatabaseStatusAction<'_, EnterRunning> {
             DatabaseCheckpointControlStatus::Recovering(state) => {
                 let temp_place_holder = DatabaseRecoveringStage::Resetting {
                     remaining_workers: Default::default(),
-                    reset_workers: Default::default(),
+                    reset_resps: Default::default(),
                     reset_request_id: 0,
                     backoff_future: None,
                 };
