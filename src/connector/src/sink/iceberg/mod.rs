@@ -14,12 +14,12 @@
 
 mod compaction;
 mod prometheus;
-
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::Debug;
 use std::num::NonZeroU64;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
@@ -1422,7 +1422,7 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
                 .iceberg_sink_has_pre_commit_metadata(&self.db, self.param.sink_id.sink_id())
                 .await?
         {
-            tracing::info!("Re commit");
+            tracing::info!("Icberg sink re commit after recovery occurs.");
             let ordered_metadata_list_by_end_epoch = self
                 .get_pre_commit_info_by_sink_id(&self.db, self.param.sink_id.sink_id())
                 .await?;
@@ -1570,6 +1570,10 @@ impl IcebergSinkCommitter {
             )
             .await?;
         }
+        tracing::info!(
+            "Finish write pre_commit data into system table, sleep 5min before commit into iceberg to meet crash."
+        );
+        tokio::time::sleep(Duration::from_secs(5 * 60)).await;
 
         let data_files = write_results
             .into_iter()
@@ -1622,6 +1626,9 @@ impl IcebergSinkCommitter {
             }
         }
         tracing::info!("Succeeded to commit to iceberg table in epoch {epoch}.");
+
+        tracing::info!("Sleep 5min before delete iceberg system table");
+        tokio::time::sleep(Duration::from_secs(5 * 60)).await;
 
         if self.is_exactly_once {
             self.delete_row_by_sink_id_and_end_epoch(&self.db, self.sink_id, epoch)
