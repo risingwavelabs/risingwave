@@ -45,7 +45,7 @@ use tokio::time::sleep;
 use crate::{assert_eq_with_err_returned as assert_eq, assert_with_err_returned as assert};
 
 pub const CREATE_SOURCE: &str = "create source test_source (id int, name varchar) with (connector = 'test') FORMAT PLAIN ENCODE JSON";
-pub const CREATE_SINK: &str = "create sink test_sink from test_source with (connector = 'test')";
+pub const CREATE_SINK: &str = "create sink test_sink from test_source with (connector = 'test', type = 'upsert')";
 pub const DROP_SINK: &str = "drop sink test_sink";
 pub const DROP_SOURCE: &str = "drop source test_source";
 
