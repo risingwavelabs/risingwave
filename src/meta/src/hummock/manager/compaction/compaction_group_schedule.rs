@@ -20,7 +20,7 @@ use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
-use risingwave_hummock_sdk::compact_task::ReportTask;
+use risingwave_hummock_sdk::compact_task::{ReportTask, is_compaction_task_expired};
 use risingwave_hummock_sdk::compaction_group::{
     StateTableId, StaticCompactionGroupId, group_split,
 };
@@ -559,18 +559,11 @@ impl HummockManager {
             .into_iter()
             .for_each(|task_assignment| {
                 if let Some(task) = task_assignment.compact_task.as_ref() {
-                    let input_sst_ids: HashSet<u64> = task
-                        .input_ssts
-                        .iter()
-                        .flat_map(|level| level.table_infos.iter().map(|sst| sst.sst_id))
-                        .collect();
-                    let input_level_ids: Vec<u32> = task
-                        .input_ssts
-                        .iter()
-                        .map(|level| level.level_idx)
-                        .collect();
-                    let need_cancel = !levels.check_sst_ids_exist(&input_level_ids, input_sst_ids);
-                    if need_cancel {
+                    let is_expired = is_compaction_task_expired(
+                        task.compaction_group_version_id,
+                        levels.compaction_group_version_id,
+                    );
+                    if is_expired {
                         canceled_tasks.push(ReportTask {
                             task_id: task.task_id,
                             task_status: TaskStatus::ManualCanceled,
