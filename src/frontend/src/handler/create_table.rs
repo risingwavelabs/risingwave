@@ -82,6 +82,7 @@ use crate::optimizer::plan_node::{LogicalCdcScan, LogicalSource};
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
 use crate::session::SessionImpl;
+use crate::session::current::notice_to_user;
 use crate::stream_fragmenter::build_graph;
 use crate::utils::OverwriteOptions;
 use crate::{Binder, TableCatalog, WithOptions};
@@ -159,12 +160,9 @@ pub fn bind_sql_columns(
             check_column_name_not_reserved(&name.real_value())?;
         }
 
-        let mut nullable: bool = true;
-        for option in options {
-            if option.option == ColumnOption::NotNull {
-                nullable = false;
-            }
-        }
+        let nullable: bool = !options
+            .iter()
+            .any(|def| matches!(def.option, ColumnOption::NotNull));
 
         columns.push(ColumnCatalog {
             column_desc: ColumnDesc {
@@ -470,6 +468,15 @@ pub(crate) async fn gen_create_table_plan_with_source(
     let with_properties = bind_connector_props(&handler_args, &format_encode, false)?;
     if with_properties.is_shareable_cdc_connector() {
         generated_columns_check_for_cdc_table(&column_defs)?;
+    } else if column_defs.iter().any(|col| {
+        col.options
+            .iter()
+            .any(|def| matches!(def.option, ColumnOption::NotNull))
+    }) {
+        // if non-cdc source
+        notice_to_user(
+            "The table contains columns with NOT NULL constraints. Any rows from upstream violating the constraints will be ignored silently.",
+        );
     }
 
     let db_name: &str = &session.database();
