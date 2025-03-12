@@ -29,7 +29,7 @@ public class Binding {
     static void ensureInitialized() {}
 
     public static native void tracingSlf4jEvent(
-            String threadName, String name, int level, String message);
+            String threadName, String name, int level, String message, String stackTrace);
 
     public static native boolean tracingSlf4jEventEnabled(int level);
 
