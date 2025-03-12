@@ -221,11 +221,13 @@ impl LocalStreamManager {
     pub async fn take_receiver(
         &self,
         database_id: DatabaseId,
+        term_id: String,
         ids: UpDownActorIds,
     ) -> StreamResult<Receiver> {
         self.actor_op_tx
             .send_and_await(|result_sender| LocalActorOperation::TakeReceiver {
                 database_id,
+                term_id,
                 ids,
                 result_sender,
             })
@@ -275,7 +277,11 @@ impl LocalBarrierWorker {
                 .await
         }
         self.actor_manager.env.dml_manager_ref().clear();
-        *self = Self::new(self.actor_manager.clone(), init_request.databases);
+        *self = Self::new(
+            self.actor_manager.clone(),
+            init_request.databases,
+            init_request.term_id,
+        );
     }
 }
 
@@ -775,6 +781,7 @@ impl LocalBarrierWorker {
             &mut self.state.current_shared_context,
             database_id,
             &self.actor_manager,
+            &self.term_id,
         )
         .add_actors(new_actor_infos);
     }

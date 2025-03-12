@@ -33,6 +33,7 @@ use tokio::task::JoinHandle;
 use tokio::time::Instant;
 use tonic::Status;
 use tracing::{Instrument, debug, error, info, warn};
+use uuid::Uuid;
 
 use crate::barrier::checkpoint::{CheckpointControl, CheckpointControlEvent};
 use crate::barrier::complete_task::{BarrierCompleteOutput, CompletingTask};
@@ -90,6 +91,8 @@ pub(super) struct GlobalBarrierWorker<C> {
     sink_manager: SinkCoordinatorManager,
 
     control_stream_manager: ControlStreamManager,
+
+    term_id: String,
 }
 
 impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
@@ -145,6 +148,7 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
             active_streaming_nodes,
             sink_manager,
             control_stream_manager,
+            term_id: "uninitialized".into(),
         }
     }
 
@@ -280,7 +284,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     info!(?changed_worker, "worker changed");
 
                     if let ActiveStreamingWorkerChange::Add(node) | ActiveStreamingWorkerChange::Update(node) = changed_worker {
-                        self.control_stream_manager.add_worker(node, self.checkpoint_control.inflight_infos(), &*self.context).await;
+                        self.control_stream_manager.add_worker(node, self.checkpoint_control.inflight_infos(), self.term_id.clone(), &*self.context).await;
                     }
                 }
 
@@ -335,7 +339,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                     for worker_id in workers {
                                         if !self.control_stream_manager.contains_worker(worker_id) {
                                             let node = self.active_streaming_nodes.current()[&worker_id].clone();
-                                            self.control_stream_manager.try_add_worker(node, entering_initializing.inflight_infos(), &*self.context).await;
+                                            self.control_stream_manager.try_add_worker(node, entering_initializing.inflight_infos(), self.term_id.clone(), &*self.context).await;
                                         }
                                     }
                                     entering_initializing.enter(runtime_info, &mut self.control_stream_manager);
@@ -671,12 +675,14 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
             } = runtime_info_snapshot;
 
             self.sink_manager.reset().await;
+            let term_id = Uuid::new_v4().to_string();
 
             let mut control_stream_manager = ControlStreamManager::new(self.env.clone());
             let reset_start_time = Instant::now();
             let unconnected_worker = control_stream_manager
                 .reset(
                     active_streaming_nodes.current(),
+                    term_id.clone(),
                     &*self.context,
                 )
                 .await;
@@ -756,6 +762,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         unconnected_databases,
                         hummock_version_stats,
                     ),
+                    term_id,
                 )
             };
             if let Err(err) = &recovery_result {
@@ -774,6 +781,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
             self.active_streaming_nodes,
             self.control_stream_manager,
             self.checkpoint_control,
+            self.term_id,
         ) = new_state;
 
         tracing::info!("recovery success");
