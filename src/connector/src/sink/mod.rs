@@ -918,12 +918,6 @@ pub enum SinkError {
     ),
 }
 
-impl From<icelake::Error> for SinkError {
-    fn from(value: icelake::Error) -> Self {
-        SinkError::Iceberg(anyhow!(value))
-    }
-}
-
 impl From<OpendalError> for SinkError {
     fn from(error: OpendalError) -> Self {
         SinkError::File(error.to_report_string())

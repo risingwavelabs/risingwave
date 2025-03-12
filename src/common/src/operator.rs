@@ -12,23 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(trait_alias)]
-#![feature(iterator_try_collect)]
-#![feature(trusted_len)]
-#![feature(buf_read_has_data_left)]
-#![feature(round_char_boundary)]
-#![feature(never_type)]
-#![feature(let_chains)]
-#![expect(clippy::doc_markdown, reason = "FIXME: later")]
+/// Generate a globally unique operator id.
+pub fn unique_operator_id(fragment_id: u32, operator_id: u64) -> u64 {
+    assert!(operator_id <= u32::MAX as u64);
+    ((fragment_id as u64) << 32) + operator_id
+}
 
-pub mod error;
-pub mod error_or_notice;
-pub mod memory_manager;
-pub mod net;
-pub mod pg_extended;
-pub mod pg_field_descriptor;
-pub mod pg_message;
-pub mod pg_protocol;
-pub mod pg_response;
-pub mod pg_server;
-pub mod types;
+/// Generate a globally unique executor id.
+pub fn unique_executor_id(actor_id: u32, operator_id: u64) -> u64 {
+    assert!(operator_id <= u32::MAX as u64);
+    ((actor_id as u64) << 32) + operator_id
+}

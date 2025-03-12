@@ -279,6 +279,7 @@ impl GlobalStreamManager {
                 let version = stream_manager
                     .metadata_manager
                     .wait_streaming_job_finished(
+                        streaming_job.database_id().into(),
                         streaming_job.id() as _,
                     )
                     .await?;

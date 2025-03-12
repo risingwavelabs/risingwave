@@ -29,7 +29,7 @@ use risingwave_common::util::query_log::*;
 use risingwave_common::util::tracing::layer::set_toggle_otel_layer_fn;
 use thiserror_ext::AsReport;
 use tracing::level_filters::LevelFilter as Level;
-use tracing_subscriber::filter::{FilterFn, Targets};
+use tracing_subscriber::filter::Targets;
 use tracing_subscriber::fmt::FormatFields;
 use tracing_subscriber::fmt::format::DefaultFields;
 use tracing_subscriber::fmt::time::OffsetTime;
@@ -289,10 +289,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
             });
 
         let fmt_layer = match deployment {
-            Deployment::Ci => fmt_layer
-                .compact()
-                .with_filter(FilterFn::new(|metadata| metadata.is_event())) // filter-out all span-related info
-                .boxed(),
+            Deployment::Ci => fmt_layer.compact().boxed(),
             Deployment::Cloud => fmt_layer
                 .json()
                 .map_event_format(|e| e.with_current_span(false)) // avoid duplication as there's a span list field
