@@ -32,6 +32,9 @@ use super::{Result, ValueRowDeserializer, ValueRowSerializer};
 use crate::catalog::ColumnId;
 use crate::row::Row;
 use crate::types::{DataType, Datum, ScalarRefImpl, ToDatumRef};
+use crate::util::value_encoding::{
+    deserialize_value as plain_deserialize_scalar, serialize_scalar as plain_serialize_scalar,
+};
 
 mod new_serde {
     use itertools::Itertools;
@@ -39,9 +42,6 @@ mod new_serde {
     use super::*;
     use crate::array::{ListRef, ListValue, MapRef, MapValue, StructRef, StructValue};
     use crate::types::{MapType, ScalarImpl, StructType, data_types};
-    use crate::util::value_encoding::{
-        deserialize_value as plain_deserialize_scalar, serialize_scalar as plain_serialize_scalar,
-    };
 
     fn new_serialize_datum(
         data_type: &DataType,
@@ -244,7 +244,11 @@ where
 {
     fn encode_to(self, data_type: &DataType, data: &mut Vec<u8>) {
         if let Some(v) = self.to_datum_ref() {
-            new_serde::new_serialize_scalar(data_type, v, data);
+            if data_type.can_alter() == Some(true) {
+                new_serde::new_serialize_scalar(data_type, v, data);
+            } else {
+                plain_serialize_scalar(v, data);
+            }
         }
     }
 }
@@ -484,14 +488,14 @@ impl ValueRowDeserializer for Deserializer {
             let Some(&decoded_idx) = self.required_column_ids.get(&id) else {
                 continue;
             };
+            let data_type = &self.schema[decoded_idx];
 
             let datum = if data.is_empty() {
                 None
+            } else if data_type.can_alter() == Some(true) {
+                Some(new_serde::new_deserialize_scalar(data_type, &mut data)?)
             } else {
-                Some(new_serde::new_deserialize_scalar(
-                    &self.schema[decoded_idx],
-                    &mut data,
-                )?)
+                Some(plain_deserialize_scalar(data_type, &mut data)?)
             };
 
             row[decoded_idx] = datum;
