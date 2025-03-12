@@ -1247,7 +1247,7 @@ impl HummockManager {
                             compact_task_to_string(&compact_task)
                         );
                     }
-                    is_expired
+                    !is_expired
                 }
             } else {
                 false
