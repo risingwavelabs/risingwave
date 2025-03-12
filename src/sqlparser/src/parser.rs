@@ -2544,12 +2544,12 @@ impl Parser<'_> {
         })
     }
 
-    pub fn parse_with_version_column(&mut self) -> ModalResult<Option<String>> {
+    pub fn parse_with_version_column(&mut self) -> ModalResult<Option<Ident>> {
         if self.parse_keywords(&[Keyword::WITH, Keyword::VERSION, Keyword::COLUMN]) {
             self.expect_token(&Token::LParen)?;
             let name = self.parse_identifier_non_reserved()?;
             self.expect_token(&Token::RParen)?;
-            Ok(Some(name.value))
+            Ok(Some(name))
         } else {
             Ok(None)
         }
@@ -4354,7 +4354,49 @@ impl Parser<'_> {
             self.expect_token(&Token::RParen)?;
         }
 
-        let statement = self.parse_statement()?;
+        if analyze {
+            fn parse_analyze_target(parser: &mut Parser<'_>) -> ModalResult<Option<AnalyzeTarget>> {
+                if parser.parse_keyword(Keyword::TABLE) {
+                    let table_name = parser.parse_object_name()?;
+                    Ok(Some(AnalyzeTarget::Table(table_name)))
+                } else if parser.parse_keyword(Keyword::INDEX) {
+                    let index_name = parser.parse_object_name()?;
+                    Ok(Some(AnalyzeTarget::Index(index_name)))
+                } else if parser.parse_keywords(&[Keyword::MATERIALIZED, Keyword::VIEW]) {
+                    let view_name = parser.parse_object_name()?;
+                    Ok(Some(AnalyzeTarget::MaterializedView(view_name)))
+                } else if parser.parse_keyword(Keyword::INDEX) {
+                    let index_name = parser.parse_object_name()?;
+                    Ok(Some(AnalyzeTarget::Index(index_name)))
+                } else if parser.parse_keyword(Keyword::SINK) {
+                    let sink_name = parser.parse_object_name()?;
+                    Ok(Some(AnalyzeTarget::Sink(sink_name)))
+                } else if parser.parse_word("ID") {
+                    let job_id = parser.parse_literal_uint()? as u32;
+                    Ok(Some(AnalyzeTarget::Id(job_id)))
+                } else {
+                    Ok(None)
+                }
+            }
+            if let Some(target) = parse_analyze_target(self)? {
+                let statement = Statement::ExplainAnalyzeStreamJob { target };
+                return Ok(statement);
+            }
+        }
+
+        let statement = match self.parse_statement() {
+            Ok(statement) => statement,
+            error @ Err(_) => {
+                return if analyze {
+                    self.expected_at(
+                        *self,
+                        "SINK, TABLE, MATERIALIZED VIEW, INDEX or a statement after ANALYZE",
+                    )
+                } else {
+                    error
+                };
+            }
+        };
         Ok(Statement::Explain {
             analyze,
             statement: Box::new(statement),

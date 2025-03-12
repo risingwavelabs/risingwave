@@ -85,8 +85,8 @@ def _(outer_panels: Panels):
                 "The rate of successful recovery attempts",
                 [
                     panels.target(
-                        f"sum(rate({metric('recovery_latency_count')}[$__rate_interval])) by ({NODE_LABEL})",
-                        "{{%s}}" % NODE_LABEL,
+                        f"sum(rate({metric('recovery_latency_count')}[$__rate_interval])) by ({NODE_LABEL}, recovery_type)",
+                        "{{%s}} ({{recovery_type}})" % NODE_LABEL,
                     )
                 ],
                 ["last"],
@@ -96,8 +96,8 @@ def _(outer_panels: Panels):
                 "Total number of failed reocovery attempts",
                 [
                     panels.target(
-                        f"sum({metric('recovery_failure_cnt')}) by ({NODE_LABEL})",
-                        "{{%s}}" % NODE_LABEL,
+                        f"sum({metric('recovery_failure_cnt')}) by ({NODE_LABEL}, recovery_type)",
+                        "{{%s}} ({{recovery_type}})" % NODE_LABEL,
                     )
                 ],
                 ["last"],
@@ -108,14 +108,14 @@ def _(outer_panels: Panels):
                 [
                     *quantile(
                         lambda quantile, legend: panels.target(
-                            f"histogram_quantile({quantile}, sum(rate({metric('recovery_latency_bucket')}[$__rate_interval])) by (le, {NODE_LABEL}))",
-                            f"recovery latency p{legend}" + " - {{%s}}" % NODE_LABEL,
+                            f"histogram_quantile({quantile}, sum(rate({metric('recovery_latency_bucket')}[$__rate_interval])) by (le, {NODE_LABEL}, recovery_type))",
+                            f"recovery latency p{legend}" + " ({{recovery_type}}) - {{%s}}" % NODE_LABEL,
                         ),
                         [50, 99, "max"],
                     ),
                     panels.target(
-                        f"sum by (le) (rate({metric('recovery_latency_sum')}[$__rate_interval])) / sum by (le) (rate({metric('recovery_latency_count')}[$__rate_interval])) > 0",
-                        "recovery latency avg",
+                        f"sum by (le, recovery_type) (rate({metric('recovery_latency_sum')}[$__rate_interval])) / sum by (le) (rate({metric('recovery_latency_count')}[$__rate_interval])) > 0",
+                        "recovery latency avg {{recovery_type}}",
                     ),
                 ],
                 ["last"],
@@ -128,11 +128,11 @@ def _(outer_panels: Panels):
                 [
                     panels.target(
                         f"{metric('all_barrier_nums')}",
-                        "all_barrier {{database_id}}",
+                        "all_barrier (database {{database_id}})",
                     ),
                     panels.target(
                         f"{metric('in_flight_barrier_nums')}",
-                        "in_flight_barrier {{database_id}}",
+                        "in_flight_barrier (database {{database_id}})",
                     ),
                     panels.target(
                         f"{metric('meta_snapshot_backfill_inflight_barrier_num')}",
@@ -147,15 +147,15 @@ def _(outer_panels: Panels):
                 "the freshness of materialized views.",
                 quantile(
                     lambda quantile, legend: panels.target(
-                        f"histogram_quantile({quantile}, sum(rate({metric('meta_barrier_duration_seconds_bucket')}[$__rate_interval])) by (le))",
-                        f"barrier_latency_p{legend}",
+                        f"histogram_quantile({quantile}, sum(rate({metric('meta_barrier_duration_seconds_bucket')}[$__rate_interval])) by (le, database_id))",
+                        f"barrier_latency_p{legend} " + " (database {{database_id}})",
                     ),
                     [50, 90, 99, 999, "max"],
                 )
                 + [
                     panels.target(
                         f"rate({metric('meta_barrier_duration_seconds_sum')}[$__rate_interval]) / rate({metric('meta_barrier_duration_seconds_count')}[$__rate_interval]) > 0",
-                        "barrier_latency_avg",
+                        "barrier_latency_avg (database {{database_id}})",
                     ),
                 ]
                 + quantile(
@@ -173,7 +173,7 @@ def _(outer_panels: Panels):
                 [
                     panels.target(
                         f"timestamp({metric('last_committed_barrier_time')}) - {metric('last_committed_barrier_time')}",
-                        "barrier_pending_time",
+                        "barrier_pending_time (database {{database_id}})",
                     )
                 ],
             ),
@@ -236,7 +236,7 @@ def _(outer_panels: Panels):
                     ),
                     panels.target(
                         f"sum(rate({metric('recovery_latency_count')}[$__rate_interval])) > bool 0 + sum({metric('recovery_failure_cnt')}) > bool 0",
-                        "Recovery Triggered",
+                        "Recovery Triggered {{recovery_type}}",
                     ),
                     panels.target(
                         f"(({metric('storage_current_version_id')} - {metric('storage_checkpoint_version_id')}) >= bool 100) + "
