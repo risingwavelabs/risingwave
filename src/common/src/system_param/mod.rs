@@ -17,7 +17,7 @@
 //!
 //! To add a new system parameter:
 //! - Add a new field to [`PbSystemParams`] in `meta.proto`.
-//! - Add a new entry to [`for_all_params`] in this file.
+//! - Add a new entry to `for_all_params` in this file.
 //! - Add a new method to [`reader::SystemParamsReader`].
 
 pub mod adaptive_parallelism_strategy;
