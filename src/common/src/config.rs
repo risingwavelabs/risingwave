@@ -622,6 +622,8 @@ pub struct StreamingConfig {
 
     /// Enable async stack tracing through `await-tree` for risectl.
     #[serde(default = "default::streaming::async_stack_trace")]
+    pub async_stack_trace: AsyncStackTraceOption,
+
     #[serde(default, with = "streaming_prefix")]
     #[config_doc(omitted)]
     pub developer: StreamingDeveloperConfig,
