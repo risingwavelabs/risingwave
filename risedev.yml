@@ -988,6 +988,25 @@ profile:
       - use: frontend
       - use: compactor
 
+  ci-2cn-1fe-with-recovery-label:
+    config-path: src/config/ci-recovery.toml
+    steps:
+      - use: minio
+      - use: meta-node
+        meta-backend: env
+      - use: compute-node
+        port: 5687
+        exporter-port: 1222
+        enable-tiered-cache: true
+        resource-group: "default"
+      - use: compute-node
+        port: 5688
+        exporter-port: 1223
+        enable-tiered-cache: true
+        resource-group: "test"
+      - use: frontend
+      - use: compactor
+
   ci-1cn-1fe-user-kafka-with-recovery:
     config-path: src/config/ci-recovery.toml
     steps:

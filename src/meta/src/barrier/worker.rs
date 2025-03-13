@@ -765,6 +765,11 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 if !state_table_committed_epochs.is_empty() {
                     warn!(?state_table_committed_epochs, "unused state table committed epoch in recovery");
                 }
+
+                let a = collected_databases.keys().copied().collect_vec();
+                println!("collect {:?}", a);
+                println!("unconnected databases {:?}", unconnected_databases);
+
                 (
                     active_streaming_nodes,
                     control_stream_manager,
