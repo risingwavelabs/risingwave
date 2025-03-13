@@ -1418,17 +1418,19 @@ impl IcebergSinkCommitter {
 impl SinkCommitCoordinator for IcebergSinkCommitter {
     async fn init(&mut self) -> Result<Option<u64>> {
         if self.is_exactly_once {
+            tracing::info!("Icberg sink coordinator initing");
             if self
                 .iceberg_sink_has_pre_commit_metadata(&self.db, self.param.sink_id.sink_id())
                 .await?
             {
-                tracing::info!("Icberg sink re commit after recovery occurs.");
                 let ordered_metadata_list_by_end_epoch = self
                     .get_pre_commit_info_by_sink_id(&self.db, self.param.sink_id.sink_id())
                     .await?;
 
                 let mut last_recommit_epoch = 0;
-                for (end_epoch, sealized_bytes, snapshot_id) in ordered_metadata_list_by_end_epoch {
+                for (end_epoch, sealized_bytes, snapshot_id, committed) in
+                    ordered_metadata_list_by_end_epoch
+                {
                     let write_results_bytes = deserialize_metadata(sealized_bytes);
                     let mut write_results = vec![];
 
@@ -1436,30 +1438,45 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
                         let write_result = IcebergCommitResult::try_from_sealized_bytes(each)?;
                         write_results.push(write_result);
                     }
-                    // If the snapshot_id corresponding to a batch of files exists in Iceberg, it is considered that this batch of files has been successfully committed to Iceberg.
-                    if self.is_snapshot_id_valid(&self.config, snapshot_id).await? {
-                        // skip
-                        tracing::debug!(
-                            "All pre-commit files have been successfully committed into iceberg and do not need to be committed again."
-                        );
-                        self.delete_row_by_sink_id_and_end_epoch(&self.db, self.sink_id, end_epoch)
+
+                    match (
+                        committed,
+                        self.is_snapshot_id_valid(&self.config, snapshot_id).await?,
+                    ) {
+                        (true, _) => {
+                            tracing::info!(
+                                "All data in log store has been written into external sink, skip"
+                            );
+                        }
+                        (false, true) => {
+                            // skip
+                            tracing::info!(
+                                "All pre-commit files have been successfully committed into iceberg and do not need to be committed again, mark it as committed"
+                            );
+                            self.mark_row_is_committed_by_sink_id_and_end_epoch(
+                                &self.db,
+                                self.sink_id,
+                                end_epoch,
+                            )
                             .await?;
-                    } else {
-                        // recommit
-                        tracing::debug!(
-                            "There are files that were not successfully committed; re-commit these files."
-                        );
-                        self.re_commit(end_epoch, write_results).await?;
+                        }
+                        (false, false) => {
+                            tracing::info!(
+                                "There are files that were not successfully committed; re-commit these files."
+                            );
+                            self.re_commit(end_epoch, write_results).await?;
+                        }
                     }
+
                     last_recommit_epoch = end_epoch;
                 }
                 tracing::info!("Iceberg commit coordinator inited.");
                 return Ok(Some(last_recommit_epoch));
             } else {
                 tracing::info!(
-                    "Recovery occurs, all pre committed data has been written into iceberg, just skip consuming previous log store."
+                    "Recovery occurs and system table is empty, should rewind log store."
                 );
-                return Ok(Some(u64::MAX));
+                return Ok(None);
             }
         }
 
@@ -1579,7 +1596,7 @@ impl IcebergSinkCommitter {
         tracing::info!(
             "Finish write pre_commit data into system table, sleep 5min before commit into iceberg to meet crash."
         );
-        // tokio::time::sleep(Duration::from_secs(5 * 60)).await;
+        tokio::time::sleep(Duration::from_secs(5 * 60)).await;
 
         let data_files = write_results
             .into_iter()
@@ -1633,11 +1650,11 @@ impl IcebergSinkCommitter {
         }
         tracing::info!("Succeeded to commit to iceberg table in epoch {epoch}.");
 
-        // tracing::info!("Sleep 5min before delete iceberg system table");
-        // tokio::time::sleep(Duration::from_secs(5 * 60)).await;
+        tracing::info!("Sleep 5min before delete iceberg system table");
+        tokio::time::sleep(Duration::from_secs(5 * 60)).await;
 
         if self.is_exactly_once {
-            self.delete_row_by_sink_id_and_end_epoch(&self.db, self.sink_id, epoch)
+            self.mark_row_is_committed_by_sink_id_and_end_epoch(&self.db, self.sink_id, epoch)
                 .await?;
             tracing::info!("Succeeded delete pre commit metadata in epoch {epoch}.");
         }
@@ -1653,9 +1670,9 @@ impl IcebergSinkCommitter {
         snapshot_id: i64,
     ) -> Result<()> {
         let m = exactly_once_iceberg_sink::ActiveModel {
-            sink_id: Set(self.sink_id),
-            end_epoch: Set(end_epoch),
-            start_epoch: Set(start_epoch),
+            sink_id: Set(self.sink_id as i32),
+            end_epoch: Set(end_epoch.try_into().unwrap()),
+            start_epoch: Set(start_epoch.try_into().unwrap()),
             metadata: Set(pre_commit_metadata),
             committed: Set(false),
             snapshot_id: Set(snapshot_id),
@@ -1669,44 +1686,36 @@ impl IcebergSinkCommitter {
         }
     }
 
-    async fn delete_row_by_sink_id_and_end_epoch(
+    async fn mark_row_is_committed_by_sink_id_and_end_epoch(
         &self,
         db: &DatabaseConnection,
         sink_id: u32,
         end_epoch: u64,
     ) -> Result<()> {
-        let txn = db.begin().await?;
-        let a = match Entity::update(exactly_once_iceberg_sink::ActiveModel {
-            sink_id: Set(sink_id as _),
-            end_epoch: Set(end_epoch),
+        match Entity::update(exactly_once_iceberg_sink::ActiveModel {
+            sink_id: Set(sink_id as i32),
+            end_epoch: Set(end_epoch.try_into().unwrap()),
             committed: Set(true),
             ..Default::default()
         })
-        // .filter(Column::SinkId.eq(sink_id))
-        // .filter(Column::EndEpoch.eq(end_epoch))
-        .exec(&txn)
+        .exec(db)
         .await
         {
-            Ok(result) => {
-
-
+            Ok(_) => {
                 tracing::info!(
-                    "No item deleted in iceberg exactly once system table, end_epoch = {}.",
+                    "Mark written data status to committed, end_epoch = {}.",
                     end_epoch
                 );
                 Ok(())
             }
             Err(e) => {
                 tracing::error!(
-                    "Error deleting from iceberg exactly once system table: {:?}",
+                    "Error marking item to committed from iceberg exactly once system table: {:?}",
                     e
                 );
                 Err(e.into())
             }
-        };
-
-        txn.commit().await?;
-        return a;
+        }
     }
 
     async fn iceberg_sink_has_pre_commit_metadata(
@@ -1715,7 +1724,7 @@ impl IcebergSinkCommitter {
         sink_id: u32,
     ) -> Result<bool> {
         match exactly_once_iceberg_sink::Entity::find()
-            .filter(exactly_once_iceberg_sink::Column::SinkId.eq(sink_id))
+            .filter(exactly_once_iceberg_sink::Column::SinkId.eq(sink_id as i32))
             .count(db)
             .await
         {
@@ -1734,17 +1743,22 @@ impl IcebergSinkCommitter {
         &self,
         db: &DatabaseConnection,
         sink_id: u32,
-    ) -> Result<Vec<(u64, Vec<u8>, i64)>> {
+    ) -> Result<Vec<(u64, Vec<u8>, i64, bool)>> {
         let models: Vec<Model> = Entity::find()
-            .filter(Column::SinkId.eq(sink_id))
+            .filter(Column::SinkId.eq(sink_id as i32))
             .order_by(Column::EndEpoch, Order::Asc)
             .all(db)
             .await?;
 
-        let mut result: Vec<(u64, Vec<u8>, i64)> = Vec::new();
+        let mut result: Vec<(u64, Vec<u8>, i64, bool)> = Vec::new();
 
         for model in models {
-            result.push((model.end_epoch, model.metadata, model.snapshot_id));
+            result.push((
+                model.end_epoch.try_into().unwrap(),
+                model.metadata,
+                model.snapshot_id,
+                model.committed,
+            ));
         }
 
         Ok(result)

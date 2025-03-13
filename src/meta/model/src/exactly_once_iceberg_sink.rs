@@ -15,14 +15,15 @@
 use sea_orm::entity::prelude::*;
 use sea_orm::{DeriveEntityModel, DeriveRelation, EnumIter};
 
+use crate::{Epoch, SinkId};
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Default)]
 #[sea_orm(table_name = "exactly_once_iceberg_sink_metadata")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
-    pub sink_id: u32,
+    pub sink_id: SinkId,
     #[sea_orm(primary_key, auto_increment = false)]
-    pub end_epoch: u64,
-    pub start_epoch: u64,
+    pub end_epoch: Epoch,
+    pub start_epoch: Epoch,
     pub metadata: ::prost::alloc::vec::Vec<u8>,
     pub snapshot_id: i64,
     pub committed: bool,

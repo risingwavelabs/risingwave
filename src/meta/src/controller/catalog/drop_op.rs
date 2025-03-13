@@ -12,8 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_meta_model::exactly_once_iceberg_sink::{Column, Entity};
 use risingwave_pb::telemetry::PbTelemetryDatabaseObject;
-use sea_orm::DatabaseTransaction;
+use sea_orm::{
+    ColumnTrait, ConnectionTrait, DatabaseConnection, DatabaseTransaction, EntityTrait,
+    QueryFilter, Statement,
+};
 
 use super::*;
 
@@ -27,7 +31,7 @@ impl CatalogController {
         drop_mode: DropMode,
     ) -> MetaResult<(ReleaseContext, NotificationVersion)> {
         let inner = self.inner.write().await;
-        let txn = inner.db.begin().await?;
+        let txn: DatabaseTransaction = inner.db.begin().await?;
         let obj: PartialObject = Object::find_by_id(object_id)
             .into_partial_model()
             .one(&txn)
@@ -86,6 +90,15 @@ impl CatalogController {
             },
         };
         removed_objects.push(obj);
+        if let ObjectType::Sink = object_type {
+            // delete system table for exactly once iceberg sink
+            // todo(wcy-fdu): optimize the logic to be Iceberg unique.
+            if let Err(e) = clean_all_rows_by_sink_id(&inner.db, object_id).await {
+                tracing::error!("Failed to clean rows: {:?}", e);
+                txn.rollback().await?;
+                return Err(e);
+            }
+        }
 
         let mut removed_object_ids: HashSet<_> =
             removed_objects.iter().map(|obj| obj.oid).collect();
@@ -361,5 +374,32 @@ async fn report_drop_object(
             }),
             None,
         );
+    }
+}
+
+async fn clean_all_rows_by_sink_id(db: &DatabaseConnection, sink_id: i32) -> MetaResult<()> {
+    match Entity::delete_many()
+        .filter(Column::SinkId.eq(sink_id))
+        .exec(db)
+        .await
+    {
+        Ok(result) => {
+            let deleted_count = result.rows_affected;
+
+            tracing::info!(
+                "Deleted {} items for sink_id = {} in iceberg exactly once system table.",
+                deleted_count,
+                sink_id
+            );
+            Ok(())
+        }
+        Err(e) => {
+            tracing::error!(
+                "Error deleting records for sink_id = {} from iceberg exactly once system table: {:?}",
+                sink_id,
+                e
+            );
+            Err(e.into())
+        }
     }
 }
