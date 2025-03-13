@@ -1417,44 +1417,48 @@ impl IcebergSinkCommitter {
 #[async_trait::async_trait]
 impl SinkCommitCoordinator for IcebergSinkCommitter {
     async fn init(&mut self) -> Result<Option<u64>> {
-        if self.is_exactly_once
-            && self
+        if self.is_exactly_once {
+            if self
                 .iceberg_sink_has_pre_commit_metadata(&self.db, self.param.sink_id.sink_id())
                 .await?
-        {
-            tracing::info!("Icberg sink re commit after recovery occurs.");
-            let ordered_metadata_list_by_end_epoch = self
-                .get_pre_commit_info_by_sink_id(&self.db, self.param.sink_id.sink_id())
-                .await?;
+            {
+                tracing::info!("Icberg sink re commit after recovery occurs.");
+                let ordered_metadata_list_by_end_epoch = self
+                    .get_pre_commit_info_by_sink_id(&self.db, self.param.sink_id.sink_id())
+                    .await?;
 
-            let mut last_recommit_epoch = 0;
-            for (end_epoch, sealized_bytes, snapshot_id) in ordered_metadata_list_by_end_epoch {
-                let write_results_bytes = deserialize_metadata(sealized_bytes);
-                let mut write_results = vec![];
+                let mut last_recommit_epoch = 0;
+                for (end_epoch, sealized_bytes, snapshot_id) in ordered_metadata_list_by_end_epoch {
+                    let write_results_bytes = deserialize_metadata(sealized_bytes);
+                    let mut write_results = vec![];
 
-                for each in write_results_bytes {
-                    let write_result = IcebergCommitResult::try_from_sealized_bytes(each)?;
-                    write_results.push(write_result);
+                    for each in write_results_bytes {
+                        let write_result = IcebergCommitResult::try_from_sealized_bytes(each)?;
+                        write_results.push(write_result);
+                    }
+                    // If the snapshot_id corresponding to a batch of files exists in Iceberg, it is considered that this batch of files has been successfully committed to Iceberg.
+                    if self.is_snapshot_id_valid(&self.config, snapshot_id).await? {
+                        // skip
+                        tracing::debug!(
+                            "All pre-commit files have been successfully committed into iceberg and do not need to be committed again."
+                        );
+                        self.delete_row_by_sink_id_and_end_epoch(&self.db, self.sink_id, end_epoch)
+                            .await?;
+                    } else {
+                        // recommit
+                        tracing::debug!(
+                            "There are files that were not successfully committed; re-commit these files."
+                        );
+                        self.re_commit(end_epoch, write_results).await?;
+                    }
+                    last_recommit_epoch = end_epoch;
                 }
-                // If the snapshot_id corresponding to a batch of files exists in Iceberg, it is considered that this batch of files has been successfully committed to Iceberg.
-                if self.is_snapshot_id_valid(&self.config, snapshot_id).await? {
-                    // skip
-                    tracing::debug!(
-                        "All pre-commit files have been successfully committed into iceberg and do not need to be committed again."
-                    );
-                    self.delete_row_by_sink_id_and_end_epoch(&self.db, self.sink_id, end_epoch)
-                        .await?;
-                } else {
-                    // recommit
-                    tracing::debug!(
-                        "There are files that were not successfully committed; re-commit these files."
-                    );
-                    self.re_commit(end_epoch, write_results).await?;
-                }
-                last_recommit_epoch = end_epoch;
+                tracing::info!("Iceberg commit coordinator inited.");
+                return Ok(Some(last_recommit_epoch));
+            }else{
+                tracing::info!("Recovery occurs, all pre committed data has been written into iceberg, just skip consuming previous log store.");
+                return Ok(Some(u64::MAX));
             }
-            tracing::info!("Iceberg commit coordinator inited.");
-            return Ok(Some(last_recommit_epoch));
         }
 
         tracing::info!("Iceberg commit coordinator inited.");

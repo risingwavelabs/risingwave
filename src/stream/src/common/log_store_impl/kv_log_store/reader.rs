@@ -394,6 +394,13 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
         start_offset: Option<u64>,
     ) -> LogStoreResult<()> {
         self.rewind_start_offset = start_offset;
+        if let Some(u64::MAX) = start_offset{
+            tracing::info!(
+                "Sink error occurred but all old data in log store has been written into downstrem sink, skip rewind."
+            );
+            self.future_state = KvLogStoreReaderFutureState::Empty;
+            return Ok(());
+        }
         // still consuming persisted state store data
         let persisted_epoch = self
             .truncate_offset
@@ -410,7 +417,7 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
         ) {
             (Some(rewind_start_offset), _, _) => {
                 tracing::info!(
-                    "Sink error occurred. Rebuild the log reader stream from the rewind start offset returned by the coordinator."
+                    "Sink error occurred. rebuild the log reader stream from the rewind start offset returned by the coordinator."
                 );
                 LogStoreReadStateStreamRangeStart::LastPersistedEpoch(rewind_start_offset)
             }
