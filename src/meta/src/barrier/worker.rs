@@ -19,6 +19,7 @@ use std::time::Duration;
 
 use anyhow::anyhow;
 use arc_swap::ArcSwap;
+use futures::TryFutureExt;
 use itertools::Itertools;
 use risingwave_common::catalog::DatabaseId;
 use risingwave_common::system_param::PAUSE_ON_NEXT_BOOTSTRAP_KEY;
@@ -619,6 +620,7 @@ mod retry_strategy {
 
 pub(crate) use retry_strategy::*;
 use risingwave_common::error::tonic::extra::{Score, ScoredError};
+use risingwave_meta_model::WorkerId;
 
 impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
     /// Recovery the whole cluster from the latest epoch.
@@ -699,18 +701,12 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 .await;
             info!(elapsed=?reset_start_time.elapsed(), ?unconnected_worker, "control stream reset");
 
-            let recovery_result: MetaResult<_> = try {
+            {
                 let mut collected_databases = HashMap::new();
                 let mut collecting_databases = HashMap::new();
-                let mut unconnected_databases = HashSet::new();
+                let mut failed_databases = HashSet::new();
                 for (database_id, info) in database_fragment_infos {
-                    if !info.workers().is_disjoint(&unconnected_worker) {
-                        unconnected_databases.insert(database_id);
-                        continue;
-                    }
-
-                    control_stream_manager.add_partial_graph(database_id, None)?;
-                    let (node_to_collect, database, prev_epoch) = control_stream_manager.inject_database_initial_barrier(
+                    let result = control_stream_manager.inject_database_initial_barrier(
                         database_id,
                         info,
                         &mut state_table_committed_epochs,
@@ -720,8 +716,18 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         subscription_infos.remove(&database_id).unwrap_or_default(),
                         is_paused,
                         &hummock_version_stats,
-                    )?;
-                    if !node_to_collect.is_empty() {
+                    );
+                    let (node_to_collect, database, prev_epoch) = match result {
+                        Ok(info) => {
+                            info
+                        }
+                        Err(e) => {
+                            warn!(%database_id, e = %e.as_report(), "failed to inject database initial barrier");
+                            assert!(failed_databases.insert(database_id), "non-duplicate");
+                            continue;
+                        }
+                    };
+                    if !node_to_collect.is_collected() {
                         assert!(collecting_databases.insert(database_id, (node_to_collect, database, prev_epoch)).is_none());
                     } else {
                         warn!(database_id = database_id.database_id, "database has no node to inject initial barrier");
@@ -731,20 +737,44 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 while !collecting_databases.is_empty() {
                     let (worker_id, result) =
                         control_stream_manager.next_response().await;
-                    let resp = result?;
-                    let resp = match resp {
-                        Response::CompleteBarrier(resp) => {
-                            resp
+                    let resp = match result {
+                        Err(e) => {
+                            warn!(worker_id, err = %e.as_report(), "worker node failure during recovery");
+                            for (failed_database_id,_ ) in collecting_databases.extract_if(|_, (node_to_collect, ..)| {
+                                !node_to_collect.is_valid_after_worker_err(worker_id)
+                            }) {
+                                warn!(%failed_database_id, worker_id, "database failed to recovery in global recovery due to worker node err");
+                                assert!(failed_databases.insert(failed_database_id));
+                            }
+                            continue;
                         }
-                        other => {
-                            return Err(anyhow!("expect Response::CollectBarrier but get {:?}", other).into());
+                        Ok(resp) => {
+                            match resp {
+                                Response::CompleteBarrier(resp) => {
+                                    resp
+                                }
+                                Response::ReportDatabaseFailure(resp) => {
+                                    let database_id = DatabaseId::new(resp.database_id);
+                                    if collecting_databases.remove(&database_id).is_some() {
+                                        warn!(%database_id, worker_id, "database reset during global recovery");
+                                        assert!(failed_databases.insert(database_id));
+                                    } else {
+                                        assert!(failed_databases.contains(&database_id));
+                                    }
+                                    continue;
+                                }
+                                other @ (Response::Init(_) | Response::Shutdown(_) | Response::ResetDatabase(_))=> {
+                                    return Err(anyhow!("get unexpected resp {:?}", other).into());
+                                }
+                            }
                         }
                     };
+                    assert_eq!(worker_id, resp.worker_id as WorkerId);
                     let database_id = DatabaseId::new(resp.database_id);
                     let (node_to_collect, _, prev_epoch) = collecting_databases.get_mut(&database_id).expect("should exist");
                     assert_eq!(resp.epoch, *prev_epoch);
-                    assert!(node_to_collect.remove(&worker_id).is_some());
-                    if node_to_collect.is_empty() {
+                    node_to_collect.collect_resp(resp);
+                    if node_to_collect.is_collected() {
                         let (_, database, _) = collecting_databases.remove(&database_id).expect("should exist");
                         assert!(collected_databases.insert(database_id, database).is_none());
                     }
@@ -765,23 +795,23 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 if !state_table_committed_epochs.is_empty() {
                     warn!(?state_table_committed_epochs, "unused state table committed epoch in recovery");
                 }
-                (
+                let checkpoint_control = CheckpointControl::recover(
+                    collected_databases,
+                    failed_databases,
+                    &mut control_stream_manager,
+                    hummock_version_stats,
+                );
+                Ok((
                     active_streaming_nodes,
                     control_stream_manager,
-                    CheckpointControl::new(
-                        collected_databases,
-                        unconnected_databases,
-                        hummock_version_stats,
-                    ),
+                    checkpoint_control,
                     term_id,
-                )
-            };
-            if let Err(err) = &recovery_result {
-                tracing::error!(error = %err.as_report(), "recovery failed");
-                GLOBAL_META_METRICS.recovery_failure_cnt.with_label_values(&["global"]).inc();
+                ))
             }
-            recovery_result
-        })
+        }.inspect_err(|err: &MetaError| {
+            tracing::error!(error = %err.as_report(), "recovery failed");
+            GLOBAL_META_METRICS.recovery_failure_cnt.with_label_values(&["global"]).inc();
+        }))
             .instrument(tracing::info_span!("recovery_attempt"))
             .await
             .expect("Retry until recovery success.");

@@ -61,9 +61,10 @@ pub(crate) struct CheckpointControl {
 }
 
 impl CheckpointControl {
-    pub(crate) fn new(
+    pub(crate) fn recover(
         databases: impl IntoIterator<Item = (DatabaseId, DatabaseCheckpointControl)>,
-        unconnected_databases: HashSet<DatabaseId>,
+        failed_databases: HashSet<DatabaseId>,
+        control_stream_manager: &mut ControlStreamManager,
         hummock_version_stats: HummockVersionStats,
     ) -> Self {
         Self {
@@ -75,11 +76,11 @@ impl CheckpointControl {
                         DatabaseCheckpointControlStatus::Running(control),
                     )
                 })
-                .chain(unconnected_databases.into_iter().map(|database_id| {
+                .chain(failed_databases.into_iter().map(|database_id| {
                     (
                         database_id,
                         DatabaseCheckpointControlStatus::Recovering(
-                            DatabaseRecoveringState::resetting(database_id),
+                            DatabaseRecoveringState::resetting(database_id, control_stream_manager),
                         ),
                     )
                 }))
