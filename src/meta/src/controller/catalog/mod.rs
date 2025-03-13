@@ -144,6 +144,7 @@ impl CatalogController {
             inner: RwLock::new(CatalogControllerInner {
                 db: meta_store.conn,
                 creating_table_finish_notifier: HashMap::new(),
+                dropped_tables: HashMap::new(),
             }),
         };
 
@@ -171,6 +172,8 @@ pub struct CatalogControllerInner {
     #[expect(clippy::type_complexity)]
     pub creating_table_finish_notifier:
         HashMap<DatabaseId, HashMap<ObjectId, Vec<Sender<Result<NotificationVersion, String>>>>>,
+    /// Tables have been dropped from the meta store, but the corresponding barrier remains unfinished.
+    pub dropped_tables: HashMap<TableId, PbTable>,
 }
 
 impl CatalogController {
@@ -591,6 +594,14 @@ impl CatalogController {
 
         Ok(version)
     }
+
+    pub async fn complete_dropped_tables(
+        &self,
+        table_ids: impl Iterator<Item = TableId>,
+    ) -> Vec<PbTable> {
+        let mut inner = self.inner.write().await;
+        inner.complete_dropped_tables(table_ids)
+    }
 }
 
 /// `CatalogStats` is a struct to store the statistics of all catalogs.
@@ -968,5 +979,24 @@ impl CatalogControllerInner {
             .all(&self.db)
             .await?;
         Ok(table_ids)
+    }
+
+    /// Since the tables have been dropped from both meta store and streaming jobs, this method removes those table copies.
+    /// Returns the removed table copies.
+    pub(crate) fn complete_dropped_tables(
+        &mut self,
+        table_ids: impl Iterator<Item = TableId>,
+    ) -> Vec<PbTable> {
+        table_ids
+            .filter_map(|table_id| {
+                self.dropped_tables.remove(&table_id).map_or_else(
+                    || {
+                        tracing::warn!(table_id, "table not found");
+                        None
+                    },
+                    Some,
+                )
+            })
+            .collect()
     }
 }
