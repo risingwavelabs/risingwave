@@ -24,7 +24,7 @@ const MAX_HEARTBEAT_INTERVAL_SEC: u64 = 1000;
 
 #[tokio::test]
 async fn test_isolation_simple_two_databases() -> Result<()> {
-    let (mut cluster, mut session) = prepare_isolation_env().await?;
+    let (cluster, mut session) = prepare_isolation_env().await?;
 
     session.run("use group1").await?;
     session.run("create table t1 (v int);").await?;
@@ -62,7 +62,7 @@ async fn test_isolation_simple_two_databases() -> Result<()> {
 
 #[tokio::test]
 async fn test_isolation_simple_two_databases_join() -> Result<()> {
-    let (mut cluster, mut session) = prepare_isolation_env().await?;
+    let (cluster, mut session) = prepare_isolation_env().await?;
 
     session.run("use group1").await?;
     session.run("create table t1 (v int);").await?;
@@ -103,51 +103,125 @@ async fn test_isolation_simple_two_databases_join() -> Result<()> {
 
     session.run("use group2").await?;
     session
-        .run("insert into t2 select * from generate_series(51, 70)")
+        .run("insert into t2 select * from generate_series(51, 120)")
         .await?;
-
-    // flush
 
     session
         .run("select max(v) from t2")
         .await?
-        .assert_result_eq("70");// but 50
+        .assert_result_eq("120");
 
-    // sleep(Duration::from_secs(100)).await;
-    // // session.run("flush").await?;
+    session
+        .run("select count(*) from mv_join;")
+        .await?
+        .assert_result_eq("100");
+
+    cluster.simple_restart_nodes(["compute-1"]).await;
+
+    sleep(Duration::from_secs(MAX_HEARTBEAT_INTERVAL_SEC * 2)).await;
+
+    session.run("use group1").await?;
+    session
+        .run("insert into t1 select * from generate_series(101, 110);")
+        .await?;
+
+    session.run("use group2").await?;
+
+    // flush is only oriented to the current database, so flush is required here
+    session.run("flush").await?;
+
+    session
+        .run("select count(*) from mv_join;")
+        .await?
+        .assert_result_eq("110");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_isolation_simple_two_databases_join_in_other() -> Result<()> {
+    let (cluster, mut session) = prepare_isolation_env().await?;
+
+    // group1
+    session.run("use group1").await?;
+    session.run("create table t1 (v int);").await?;
+    session
+        .run("insert into t1 select * from generate_series(1, 100);")
+        .await?;
+    session
+        .run("create subscription sub1 from t1 with(retention = '1D');")
+        .await?;
+
+    // group2
+    session.run("use group2").await?;
+    session.run("create table t2 (v int);").await?;
+
+    session
+        .run("insert into t2 select * from generate_series(1, 50);")
+        .await?;
+    session
+        .run("create subscription sub2 from t2 with(retention = '1D');")
+        .await?;
+
+    // group3
+    session.run("use group3").await?;
+    session
+        .run("create materialized view mv_join as select t2.v as v from group1.public.t1 join group2.public.t2 on t1.v = t2.v;")
+        .await?;
+
+    session
+        .run("select count(*) from mv_join;")
+        .await?
+        .assert_result_eq("50");
+
+    cluster.simple_kill_nodes(["compute-1", "compute-3"]).await;
+
+    session.run("use group1").await?;
+
+    // should fail
+    assert!(session.run("insert into t1 values (1)").await.is_err());
+
+    // should fail
+    assert!(session.run("flush").await.is_err());
+
+    println!("1");
+    session.run("use group2").await?;
+    session
+        .run("insert into t2 select * from generate_series(51, 120)")
+        .await?;
+
+    session.run("flush").await?;
+
+    cluster.simple_restart_nodes(["compute-1"]).await;
+
+    sleep(Duration::from_secs(MAX_HEARTBEAT_INTERVAL_SEC * 2)).await;
+    sleep(Duration::from_secs(MAX_HEARTBEAT_INTERVAL_SEC * 2)).await;
+
+    println!("1.1");
+    sleep(Duration::from_secs(MAX_HEARTBEAT_INTERVAL_SEC * 2)).await;
+
+
+    println!("1.2");
+    session.run("use group1").await?;
+
+    println!("1.3");
+    // failed
+    session
+        .run("insert into t1 select * from generate_series(101, 110);")
+        .await?;
+
+    // println!("2");
     //
-    // println!("123");
+    // cluster.simple_restart_nodes(["compute-3"]).await;
+    //
+    // sleep(Duration::from_secs(MAX_HEARTBEAT_INTERVAL_SEC * 2)).await;
+    //
+    // session.run("use group3").await?;
     //
     // session
     //     .run("select count(*) from mv_join;")
     //     .await?
-    //     .assert_result_eq("50");
-
-    // cluster.simple_kill_nodes(["compute-1"]).await;
-    //
-    // session.run("use group1").await?;
-    //
-    // // should fail
-    // assert!(
-    //     session
-    //         .run("insert into t1 select * from generate_series(1, 100);")
-    //         .await
-    //         .is_err()
-    // );
-    //
-    // session.run("use group2").await?;
-    // session
-    //     .run("insert into t2 select * from generate_series(1, 100);")
-    //     .await?;
-    //
-    // cluster.simple_restart_nodes(["compute-1"]).await;
-    //
-    // sleep(Duration::from_secs(MAX_HEARTBEAT_INTERVAL_SEC)).await;
-    //
-    // session.run("use group1").await?;
-    // session
-    //     .run("insert into t1 select * from generate_series(1, 100);")
-    //     .await?;
+    //     .assert_result_eq("110");
 
     Ok(())
 }
@@ -176,7 +250,7 @@ async fn prepare_isolation_env() -> Result<(Cluster, Session)> {
         .run("create database group3 with resource_group='group3'")
         .await?;
 
-    // session.run("set rw_implicit_flush = true;").await?;
+    session.run("set rw_implicit_flush = true;").await?;
 
     Ok((cluster, session))
 }
