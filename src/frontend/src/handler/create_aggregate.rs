@@ -39,7 +39,13 @@ pub async fn handle_create_aggregate(
         Some(lang) => {
             let lang = lang.real_value().to_lowercase();
             match &*lang {
-                "python" | "javascript" => lang,
+                "javascript" => lang,
+                "python" => {
+                    return Err(ErrorCode::InvalidParameterValue(
+                        "language python is temporarily disabled".to_owned(),
+                    )
+                    .into())
+                }
                 _ => {
                     return Err(ErrorCode::InvalidParameterValue(format!(
                         "language {} is not supported",
