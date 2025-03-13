@@ -1044,10 +1044,22 @@ impl SyncedLogStoreBuffer {
     }
 
     fn pop_front(&mut self) -> Option<(u64, LogStoreBufferItem)> {
-        let item = self.buffer.pop_front();
-        match &item {
-            Some((_, LogStoreBufferItem::Flushed { .. })) => {
-                self.flushed_count -= 1;
+        let mut item = self.buffer.pop_front();
+        match &mut item {
+            Some((epoch, LogStoreBufferItem::Flushed { start_seq_id, end_seq_id, vnode_bitmap, chunk_id })) => {
+                let end_seq_id_bound = *start_seq_id + 256;
+                if *end_seq_id > end_seq_id_bound {
+                    let new_item = LogStoreBufferItem::Flushed {
+                        start_seq_id: end_seq_id_bound + 1,
+                        end_seq_id: *end_seq_id,
+                        vnode_bitmap: vnode_bitmap.clone(),
+                        chunk_id: *chunk_id,
+                    };
+                    *end_seq_id = end_seq_id_bound;
+                    self.buffer.push_front((*epoch, new_item));
+                } else {
+                    self.flushed_count -= 1;
+                }
             }
             Some((_, LogStoreBufferItem::StreamChunk { chunk, .. })) => {
                 self.current_size -= chunk.cardinality();
