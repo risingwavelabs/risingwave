@@ -1578,12 +1578,11 @@ mod test {
 
     use risingwave_common::array::arrow::arrow_schema_iceberg::FieldRef as ArrowFieldRef;
     use risingwave_common::catalog::Field;
-    use risingwave_common::types::{MapType, StructType};
+    use risingwave_common::types::{DataType, MapType, StructType};
 
     use crate::connector_common::IcebergCommon;
     use crate::sink::decouple_checkpoint_log_sink::DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE;
     use crate::sink::iceberg::IcebergConfig;
-    use crate::source::DataType;
 
     #[test]
     fn test_compatible_arrow_schema() {
