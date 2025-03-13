@@ -85,7 +85,7 @@ async fn do_handle_explain(
                     source_watermarks,
                     append_only,
                     on_conflict,
-                    with_version_column,
+                    with_version_column.map(|x| x.real_value()),
                     include_column_options,
                     webhook_info,
                     risingwave_common::catalog::Engine::Hummock,
@@ -292,6 +292,8 @@ pub async fn handle_explain(
     analyze: bool,
 ) -> Result<RwPgResponse> {
     if analyze {
+        // NOTE(kwannoel): This path is for explain analyze on stream and batch queries.
+        // For existing stream jobs, see the handler module `explain_analyze` instead.
         bail_not_implemented!(issue = 4856, "explain analyze");
     }
     if options.trace && options.explain_format == ExplainFormat::Json {

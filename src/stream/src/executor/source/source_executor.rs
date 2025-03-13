@@ -229,12 +229,12 @@ impl<S: StateStore> SourceExecutor<S> {
 
     /// - `should_trim_state`: whether to trim state for dropped splits.
     ///
-    ///    For scaling, the connector splits can be migrated to other actors, but
-    ///    won't be added or removed. Actors should not trim states for splits that
-    ///    are moved to other actors.
+    ///   For scaling, the connector splits can be migrated to other actors, but
+    ///   won't be added or removed. Actors should not trim states for splits that
+    ///   are moved to other actors.
     ///
-    ///    For source split change, split will not be migrated and we can trim states
-    ///    for deleted splits.
+    ///   For source split change, split will not be migrated and we can trim states
+    ///   for deleted splits.
     async fn apply_split_change_after_yield_barrier<const BIASED: bool>(
         &mut self,
         barrier_epoch: EpochPair,

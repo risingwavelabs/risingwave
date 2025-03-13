@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::iter::repeat;
 use std::sync::Arc;
 
 use anyhow::Context;
@@ -150,7 +149,7 @@ impl InsertExecutor {
             // If the user does not specify the primary key, then we need to add a column as the
             // primary key.
             if let Some(row_id_index) = self.row_id_index {
-                let row_id_col = SerialArray::from_iter(repeat(None).take(cap));
+                let row_id_col = SerialArray::from_iter(std::iter::repeat_n(None, cap));
                 columns.insert(row_id_index, Arc::new(row_id_col.into()))
             }
 

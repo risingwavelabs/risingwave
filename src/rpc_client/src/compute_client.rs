@@ -119,6 +119,7 @@ impl ComputeClient {
         up_fragment_id: u32,
         down_fragment_id: u32,
         database_id: DatabaseId,
+        term_id: String,
     ) -> Result<(
         Streaming<GetStreamResponse>,
         mpsc::UnboundedSender<permits::Value>,
@@ -137,6 +138,7 @@ impl ComputeClient {
                     up_fragment_id,
                     down_fragment_id,
                     database_id: database_id.database_id,
+                    term_id,
                 })),
             },
         ))

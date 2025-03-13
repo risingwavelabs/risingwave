@@ -91,6 +91,7 @@ pub mod drop_table;
 pub mod drop_user;
 mod drop_view;
 pub mod explain;
+pub mod explain_analyze_stream_job;
 pub mod extended_handle;
 pub mod fetch_cursor;
 mod flush;
@@ -264,6 +265,10 @@ pub async fn handle(
             analyze,
             options,
         } => explain::handle_explain(handler_args, *statement, options, analyze).await,
+        Statement::ExplainAnalyzeStreamJob { target } => {
+            explain_analyze_stream_job::handle_explain_analyze_stream_job(handler_args, target)
+                .await
+        }
         Statement::CreateSource { stmt } => {
             create_source::handle_create_source(handler_args, stmt).await
         }
@@ -379,7 +384,7 @@ pub async fn handle(
                     columns,
                     append_only,
                     on_conflict,
-                    with_version_column,
+                    with_version_column.map(|x| x.real_value()),
                     engine,
                 )
                 .await;
@@ -396,7 +401,7 @@ pub async fn handle(
                 source_watermarks,
                 append_only,
                 on_conflict,
-                with_version_column,
+                with_version_column.map(|x| x.real_value()),
                 cdc_table_info,
                 include_column_options,
                 webhook_info,

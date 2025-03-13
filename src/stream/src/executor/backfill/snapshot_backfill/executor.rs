@@ -466,7 +466,7 @@ impl<'a> UpstreamBuffer<'a, ConsumingSnapshot> {
     }
 }
 
-impl<'a, S> UpstreamBuffer<'a, S> {
+impl<S> UpstreamBuffer<'_, S> {
     fn can_consume_upstream(&self) -> bool {
         self.is_polling_epoch_data || self.pending_epoch_lag() < self.max_pending_epoch_lag
     }
@@ -523,7 +523,7 @@ impl<'a, S> UpstreamBuffer<'a, S> {
     }
 }
 
-impl<'a> UpstreamBuffer<'a, ConsumingLogStore> {
+impl UpstreamBuffer<'_, ConsumingLogStore> {
     async fn next_checkpoint_barrier(
         &mut self,
     ) -> StreamExecutorResult<Option<Vec<DispatcherBarrier>>> {
@@ -563,7 +563,7 @@ impl<'a> UpstreamBuffer<'a, ConsumingLogStore> {
     }
 }
 
-impl<'a, S> UpstreamBuffer<'a, S> {
+impl<S> UpstreamBuffer<'_, S> {
     /// Run a future while concurrently polling the upstream so that the upstream
     /// won't be back-pressured.
     async fn run_future<T, E: Into<StreamExecutorError>>(
