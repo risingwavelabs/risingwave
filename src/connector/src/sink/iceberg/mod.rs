@@ -20,6 +20,7 @@ use std::fmt::Debug;
 use std::num::NonZeroU64;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
@@ -1357,7 +1358,7 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
 
         let txn = Transaction::new(&self.table);
         let mut append_action = txn
-            .fast_append(None, vec![])
+            .fast_append(None, None, vec![])
             .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
         append_action
             .add_data_files(data_files)

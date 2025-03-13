@@ -183,7 +183,6 @@ impl MetaReportCreator {
 
 #[async_trait::async_trait]
 impl TelemetryReportCreator for MetaReportCreator {
-    #[expect(refining_impl_trait)]
     async fn create_report(
         &self,
         tracking_id: String,
