@@ -16,9 +16,9 @@ use risingwave_common::license::LicenseManager;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManagerRef;
 use risingwave_common_service::ObserverState;
 use risingwave_pb::catalog::Table;
+use risingwave_pb::meta::SubscribeResponse;
 use risingwave_pb::meta::object::PbObjectInfo;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use risingwave_pb::meta::SubscribeResponse;
 use risingwave_storage::compaction_catalog_manager::CompactionCatalogManagerRef;
 
 pub struct CompactorObserverNode {

@@ -704,3 +704,155 @@ query R
 SELECT abs(acosd(1) - 0.0) < 1e-14
 ----
 t
+
+query R
+SELECT atand(0)
+----
+0
+
+query R
+SELECT atand(1)
+----
+45
+
+query R
+SELECT atand(-1)
+----
+-45
+
+query R
+SELECT atand('Inf')
+----
+90
+
+query R
+SELECT atand('-Inf')
+----
+-90
+
+query R
+SELECT atand('NaN')
+----
+NaN
+
+query R
+SELECT atand(10)
+----
+84.28940686250037
+
+query R
+SELECT atand(-10)
+----
+-84.28940686250037
+
+
+query R
+SELECT atand(45)
+----
+88.72696997994329
+
+query R
+SELECT atand(-45)
+----
+-88.72696997994329
+
+query R
+SELECT abs(atand(-0.75) - (-36.86989764584402)) < 1e-14;
+----
+t
+
+query R
+SELECT abs(atand(-0.5) - (-26.56505117707799)) < 1e-14;
+----
+t
+
+query R
+SELECT abs(atand(-0.25) - (-14.036243467926479)) < 1e-14;
+----
+t
+
+query R
+SELECT abs(atand(0.25) - 14.036243467926479) < 1e-14;
+----
+t
+
+query R
+SELECT abs(atand(0.5) - 26.56505117707799) < 1e-14;
+----
+t
+
+query R
+SELECT abs(atand(0.75) - 36.86989764584402) < 1e-14;
+----
+t
+
+query R
+SELECT abs(atand(2) - 63.43494882292201) < 1e-14;
+----
+t
+
+query R
+SELECT atan2d(1, 0);
+----
+90
+
+query R
+SELECT atan2d(-1, 0);
+----
+-90
+
+query R
+SELECT atan2d(0, 1);
+----
+0
+
+query R
+SELECT atan2d(0, -1);
+----
+180
+
+query R
+SELECT atan2d('NaN', 0);
+----
+NaN
+
+query R
+SELECT atan2d(0, 10);
+----
+0
+
+query R
+SELECT atan2d(10, 0);
+----
+90
+
+query R
+SELECT atan2d(0, -10);
+----
+180
+
+query R
+SELECT atan2d(-10, 0);
+----
+-90
+
+query R
+SELECT atan2d('Inf', 0);
+----
+90
+
+query R
+SELECT atan2d('-Inf', 0);
+----
+-90
+
+
+query R
+SELECT atan2d(0, 'Inf');
+----
+0
+
+query R
+SELECT atan2d(0, '-Inf');
+----
+180

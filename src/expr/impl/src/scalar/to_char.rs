@@ -19,7 +19,7 @@ use aho_corasick::{AhoCorasick, AhoCorasickBuilder};
 use chrono::format::{Item, StrftimeItems};
 use chrono::{Datelike, NaiveDate};
 use risingwave_common::types::{Interval, Timestamp, Timestamptz};
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_expr::{ExprError, Result, function};
 
 use super::timestamptz::time_zone_err;
 use crate::scalar::arithmetic_op::timestamp_interval_add;

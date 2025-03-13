@@ -19,7 +19,7 @@ use risingwave_sqlparser::ast::{ObjectName, OperateFunctionArg};
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::error::{ErrorCode, Result};
-use crate::{bind_data_type, Binder};
+use crate::{Binder, bind_data_type};
 
 // Steps for validation:
 // 1. Check permission to alter original object.
@@ -188,50 +188,4 @@ pub async fn handle_alter_set_schema(
         .await?;
 
     Ok(RwPgResponse::empty_result(stmt_type))
-}
-
-#[cfg(test)]
-pub mod tests {
-    use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
-
-    use crate::catalog::root_catalog::SchemaPath;
-    use crate::test_utils::LocalFrontend;
-
-    #[tokio::test]
-    async fn test_alter_set_schema_handler() {
-        let frontend = LocalFrontend::new(Default::default()).await;
-        let session = frontend.session_ref();
-
-        let sql = "CREATE TABLE test_table (u INT, v INT);";
-        frontend.run_sql(sql).await.unwrap();
-
-        let sql = "CREATE SCHEMA test_schema;";
-        frontend.run_sql(sql).await.unwrap();
-
-        let get_table = |schema_name| {
-            let catalog_reader = session.env().catalog_reader().read_guard();
-            let schema_path = SchemaPath::Name(schema_name);
-            catalog_reader
-                .get_created_table_by_name(DEFAULT_DATABASE_NAME, schema_path, "test_table")
-                .unwrap()
-                .0
-                .clone()
-        };
-
-        let get_schema_name_by_table_id = |table_id| {
-            let catalog_reader = session.env().catalog_reader().read_guard();
-            catalog_reader
-                .get_schema_by_table_id(DEFAULT_DATABASE_NAME, &table_id)
-                .unwrap()
-                .name()
-        };
-
-        let old_schema_name = get_schema_name_by_table_id(get_table(DEFAULT_SCHEMA_NAME).id);
-        assert_eq!(old_schema_name, "public");
-
-        let sql = "ALTER TABLE test_table SET SCHEMA test_schema;";
-        frontend.run_sql(sql).await.unwrap();
-        let new_schema_name = get_schema_name_by_table_id(get_table("test_schema").id);
-        assert_eq!(new_schema_name, "test_schema");
-    }
 }

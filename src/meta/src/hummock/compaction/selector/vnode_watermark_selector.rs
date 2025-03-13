@@ -16,17 +16,18 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 
 use risingwave_common::catalog::TableId;
+use risingwave_hummock_sdk::HummockCompactionTaskId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     safe_epoch_read_table_watermarks_impl, safe_epoch_table_watermarks_impl,
 };
-use risingwave_hummock_sdk::table_watermark::{ReadTableWatermark, TableWatermarks};
-use risingwave_hummock_sdk::version::HummockVersionStateTableInfo;
-use risingwave_hummock_sdk::HummockCompactionTaskId;
+use risingwave_hummock_sdk::table_watermark::{
+    ReadTableWatermark, TableWatermarks, WatermarkSerdeType,
+};
 use risingwave_pb::hummock::compact_task::TaskType;
 
 use crate::hummock::compaction::picker::VnodeWatermarkCompactionPicker;
 use crate::hummock::compaction::selector::{CompactionSelectorContext, DynamicLevelSelectorCore};
-use crate::hummock::compaction::{create_compaction_task, CompactionSelector, CompactionTask};
+use crate::hummock::compaction::{CompactionSelector, CompactionTask, create_compaction_task};
 #[derive(Default)]
 pub struct VnodeWatermarkCompactionSelector {}
 
@@ -42,7 +43,7 @@ impl CompactionSelector for VnodeWatermarkCompactionSelector {
             level_handlers,
             developer_config,
             table_watermarks,
-            state_table_info,
+            state_table_info: _,
             member_table_ids,
             ..
         } = context;
@@ -50,9 +51,10 @@ impl CompactionSelector for VnodeWatermarkCompactionSelector {
             DynamicLevelSelectorCore::new(group.compaction_config.clone(), developer_config);
         let ctx = dynamic_level_core.calculate_level_base_size(levels);
         let mut picker = VnodeWatermarkCompactionPicker::new();
-        let table_watermarks =
-            safe_epoch_read_table_watermarks(table_watermarks, state_table_info, member_table_ids);
-        let compaction_input = picker.pick_compaction(levels, level_handlers, &table_watermarks)?;
+        let pk_table_watermarks =
+            safe_epoch_read_table_watermarks(table_watermarks, member_table_ids);
+        let compaction_input =
+            picker.pick_compaction(levels, level_handlers, &pk_table_watermarks)?;
         compaction_input.add_pending_task(task_id, level_handlers);
         Some(create_compaction_task(
             dynamic_level_core.get_config(),
@@ -73,15 +75,25 @@ impl CompactionSelector for VnodeWatermarkCompactionSelector {
 
 fn safe_epoch_read_table_watermarks(
     table_watermarks: &HashMap<TableId, Arc<TableWatermarks>>,
-    state_table_info: &HummockVersionStateTableInfo,
     member_table_ids: &BTreeSet<TableId>,
 ) -> BTreeMap<TableId, ReadTableWatermark> {
-    safe_epoch_read_table_watermarks_impl(&safe_epoch_table_watermarks_impl(
-        table_watermarks,
-        state_table_info,
-        &member_table_ids
-            .iter()
-            .map(TableId::table_id)
-            .collect::<Vec<_>>(),
-    ))
+    safe_epoch_read_table_watermarks_impl(
+        safe_epoch_table_watermarks_impl(
+            table_watermarks,
+            &member_table_ids
+                .iter()
+                .map(TableId::table_id)
+                .collect::<Vec<_>>(),
+        )
+        .into_iter()
+        .filter(|(_table_id, table_watermarks)| {
+            {
+                matches!(
+                    table_watermarks.watermark_type,
+                    WatermarkSerdeType::PkPrefix
+                )
+            }
+        })
+        .collect(),
+    )
 }

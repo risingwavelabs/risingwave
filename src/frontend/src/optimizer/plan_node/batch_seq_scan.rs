@@ -13,14 +13,14 @@
 // limitations under the License.
 
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::util::scan_range::{is_full_range, ScanRange};
-use risingwave_pb::batch_plan::plan_node::NodeBody;
+use risingwave_common::util::scan_range::{ScanRange, is_full_range};
 use risingwave_pb::batch_plan::RowSeqScanNode;
+use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_sqlparser::ast::AsOf;
 
 use super::batch::prelude::*;
-use super::utils::{childless_record, scan_ranges_as_strs, to_pb_time_travel_as_of, Distill};
-use super::{generic, ExprRewritable, PlanBase, PlanRef, ToDistributedBatch};
+use super::utils::{Distill, childless_record, scan_ranges_as_strs, to_pb_time_travel_as_of};
+use super::{ExprRewritable, PlanBase, PlanRef, ToDistributedBatch, generic};
 use crate::catalog::ColumnId;
 use crate::error::Result;
 use crate::expr::{ExprRewriter, ExprVisitor};

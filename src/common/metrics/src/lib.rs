@@ -21,9 +21,9 @@ use hytra::TrAdder;
 use prometheus::core::{Atomic, AtomicU64, GenericCounter, GenericGauge};
 use prometheus::register_int_counter_with_registry;
 use tracing::Subscriber;
+use tracing_subscriber::Layer;
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
-use tracing_subscriber::Layer;
 
 mod error_metrics;
 mod gauge_ext;

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
 use std::fmt::Debug;
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
@@ -20,12 +21,16 @@ use enum_as_inner::EnumAsInner;
 use foyer::{
     DirectFsDeviceOptions, Engine, HybridCacheBuilder, LargeEngineOptions, RateLimitPicker,
 };
+use futures::FutureExt;
+use futures::future::BoxFuture;
 use mixtrics::registry::prometheus::PrometheusMetricsRegistry;
+use risingwave_common::catalog::TableId;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common_service::RpcNotificationClient;
-use risingwave_hummock_sdk::HummockSstableObjectId;
+use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId, SyncResult};
 use risingwave_object_store::object::build_remote_object_store;
 
+use crate::StateStore;
 use crate::compaction_catalog_manager::{CompactionCatalogManager, RemoteTableAccessor};
 use crate::error::StorageResult;
 use crate::hummock::hummock_meta_client::MonitoredHummockMetaClient;
@@ -33,14 +38,13 @@ use crate::hummock::{
     Block, BlockCacheEventListener, HummockError, HummockStorage, RecentFilter, Sstable,
     SstableBlockIndex, SstableStore, SstableStoreConfig,
 };
-use crate::memory::sled::SledStateStore;
 use crate::memory::MemoryStateStore;
+use crate::memory::sled::SledStateStore;
 use crate::monitor::{
-    CompactorMetrics, HummockStateStoreMetrics, MonitoredStateStore as Monitored,
-    MonitoredStorageMetrics, ObjectStoreMetrics,
+    CompactorMetrics, HummockStateStoreMetrics, MonitoredStateStore, MonitoredStorageMetrics,
+    ObjectStoreMetrics,
 };
 use crate::opts::StorageOpts;
-use crate::StateStore;
 
 static FOYER_METRICS_REGISTRY: LazyLock<Box<PrometheusMetricsRegistry>> = LazyLock::new(|| {
     Box::new(PrometheusMetricsRegistry::new(
@@ -67,8 +71,45 @@ mod opaque_type {
         may_dynamic_dispatch(state_store)
     }
 }
-use opaque_type::{hummock, in_memory, sled};
 pub use opaque_type::{HummockStorageType, MemoryStateStoreType, SledStateStoreType};
+use opaque_type::{hummock, in_memory, sled};
+
+#[cfg(feature = "hm-trace")]
+type Monitored<S> = MonitoredStateStore<crate::monitor::traced_store::TracedStateStore<S>>;
+
+#[cfg(not(feature = "hm-trace"))]
+type Monitored<S> = MonitoredStateStore<S>;
+
+fn monitored<S: StateStore>(
+    state_store: S,
+    storage_metrics: Arc<MonitoredStorageMetrics>,
+) -> Monitored<S> {
+    let inner = {
+        #[cfg(feature = "hm-trace")]
+        {
+            crate::monitor::traced_store::TracedStateStore::new_global(state_store)
+        }
+        #[cfg(not(feature = "hm-trace"))]
+        {
+            state_store
+        }
+    };
+    inner.monitored(storage_metrics)
+}
+
+fn inner<S>(state_store: &Monitored<S>) -> &S {
+    let inner = state_store.inner();
+    {
+        #[cfg(feature = "hm-trace")]
+        {
+            inner.inner()
+        }
+        #[cfg(not(feature = "hm-trace"))]
+        {
+            inner
+        }
+    }
+}
 
 /// The type erased [`StateStore`].
 #[derive(Clone, EnumAsInner)]
@@ -138,7 +179,7 @@ impl StateStoreImpl {
         storage_metrics: Arc<MonitoredStorageMetrics>,
     ) -> Self {
         // The specific type of MemoryStateStoreType in deducted here.
-        Self::MemoryStateStore(in_memory(state_store).monitored(storage_metrics))
+        Self::MemoryStateStore(monitored(in_memory(state_store), storage_metrics))
     }
 
     pub fn hummock(
@@ -146,14 +187,14 @@ impl StateStoreImpl {
         storage_metrics: Arc<MonitoredStorageMetrics>,
     ) -> Self {
         // The specific type of HummockStateStoreType in deducted here.
-        Self::HummockStateStore(hummock(state_store).monitored(storage_metrics))
+        Self::HummockStateStore(monitored(hummock(state_store), storage_metrics))
     }
 
     pub fn sled(
         state_store: SledStateStore,
         storage_metrics: Arc<MonitoredStorageMetrics>,
     ) -> Self {
-        Self::SledStateStore(sled(state_store).monitored(storage_metrics))
+        Self::SledStateStore(monitored(sled(state_store), storage_metrics))
     }
 
     pub fn shared_in_memory_store(storage_metrics: Arc<MonitoredStorageMetrics>) -> Self {
@@ -170,7 +211,7 @@ impl StateStoreImpl {
     pub fn as_hummock(&self) -> Option<&HummockStorage> {
         match self {
             StateStoreImpl::HummockStateStore(hummock) => {
-                Some(hummock.inner().as_hummock().expect("should be hummock"))
+                Some(inner(hummock).as_hummock().expect("should be hummock"))
             }
             _ => None,
         }
@@ -237,8 +278,8 @@ pub mod verify {
     use bytes::Bytes;
     use risingwave_common::bitmap::Bitmap;
     use risingwave_common::hash::VirtualNode;
-    use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
     use risingwave_hummock_sdk::HummockReadEpoch;
+    use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
     use tracing::log::warn;
 
     use crate::error::StorageResult;
@@ -272,7 +313,7 @@ pub mod verify {
         pub _phantom: PhantomData<T>,
     }
 
-    impl<A: AsHummock, E> AsHummock for VerifyStateStore<A, E> {
+    impl<A: AsHummock, E: AsHummock> AsHummock for VerifyStateStore<A, E> {
         fn as_hummock(&self) -> Option<&HummockStorage> {
             self.actual.as_hummock()
         }
@@ -285,15 +326,15 @@ pub mod verify {
         async fn get_keyed_row(
             &self,
             key: TableKey<Bytes>,
-            epoch: u64,
+
             read_options: ReadOptions,
         ) -> StorageResult<Option<StateStoreKeyedRow>> {
             let actual = self
                 .actual
-                .get_keyed_row(key.clone(), epoch, read_options.clone())
+                .get_keyed_row(key.clone(), read_options.clone())
                 .await;
             if let Some(expected) = &self.expected {
-                let expected = expected.get_keyed_row(key, epoch, read_options).await;
+                let expected = expected.get_keyed_row(key, read_options).await;
                 assert_result_eq(&actual, &expected);
             }
             actual
@@ -305,16 +346,16 @@ pub mod verify {
         fn iter(
             &self,
             key_range: TableKeyRange,
-            epoch: u64,
+
             read_options: ReadOptions,
         ) -> impl Future<Output = StorageResult<Self::Iter>> + '_ {
             async move {
                 let actual = self
                     .actual
-                    .iter(key_range.clone(), epoch, read_options.clone())
+                    .iter(key_range.clone(), read_options.clone())
                     .await?;
                 let expected = if let Some(expected) = &self.expected {
-                    Some(expected.iter(key_range, epoch, read_options).await?)
+                    Some(expected.iter(key_range, read_options).await?)
                 } else {
                     None
                 };
@@ -327,16 +368,16 @@ pub mod verify {
         fn rev_iter(
             &self,
             key_range: TableKeyRange,
-            epoch: u64,
+
             read_options: ReadOptions,
         ) -> impl Future<Output = StorageResult<Self::RevIter>> + '_ {
             async move {
                 let actual = self
                     .actual
-                    .rev_iter(key_range.clone(), epoch, read_options.clone())
+                    .rev_iter(key_range.clone(), read_options.clone())
                     .await?;
                 let expected = if let Some(expected) = &self.expected {
-                    Some(expected.rev_iter(key_range, epoch, read_options).await?)
+                    Some(expected.rev_iter(key_range, read_options).await?)
                 } else {
                     None
                 };
@@ -535,12 +576,12 @@ pub mod verify {
             ret
         }
 
-        fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
-            let ret = self.actual.update_vnode_bitmap(vnodes.clone());
+        async fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> StorageResult<Arc<Bitmap>> {
+            let ret = self.actual.update_vnode_bitmap(vnodes.clone()).await?;
             if let Some(expected) = &mut self.expected {
-                assert_eq!(ret, expected.update_vnode_bitmap(vnodes));
+                assert_eq!(ret, expected.update_vnode_bitmap(vnodes).await?);
             }
-            ret
+            Ok(ret)
         }
 
         fn get_table_watermark(&self, vnode: VirtualNode) -> Option<Bytes> {
@@ -562,6 +603,7 @@ pub mod verify {
 
     impl<A: StateStore, E: StateStore> StateStore for VerifyStateStore<A, E> {
         type Local = VerifyStateStore<A::Local, E::Local>;
+        type ReadSnapshot = VerifyStateStore<A::ReadSnapshot, E::ReadSnapshot>;
 
         fn try_wait_epoch(
             &self,
@@ -582,6 +624,23 @@ pub mod verify {
                 expected,
                 _phantom: PhantomData::<()>,
             }
+        }
+
+        async fn new_read_snapshot(
+            &self,
+            epoch: HummockReadEpoch,
+            options: NewReadSnapshotOptions,
+        ) -> StorageResult<Self::ReadSnapshot> {
+            let expected = if let Some(expected) = &self.expected {
+                Some(expected.new_read_snapshot(epoch, options).await?)
+            } else {
+                None
+            };
+            Ok(VerifyStateStore {
+                actual: self.actual.new_read_snapshot(epoch, options).await?,
+                expected,
+                _phantom: PhantomData::<()>,
+            })
         }
     }
 
@@ -761,12 +820,16 @@ impl StateStoreImpl {
             }
 
             "in_memory" | "in-memory" => {
-                tracing::warn!("In-memory state store should never be used in end-to-end benchmarks or production environment. Scaling and recovery are not supported.");
+                tracing::warn!(
+                    "In-memory state store should never be used in end-to-end benchmarks or production environment. Scaling and recovery are not supported."
+                );
                 StateStoreImpl::shared_in_memory_store(storage_metrics.clone())
             }
 
             sled if sled.starts_with("sled://") => {
-                tracing::warn!("sled state store should never be used in end-to-end benchmarks or production environment. Scaling and recovery are not supported.");
+                tracing::warn!(
+                    "sled state store should never be used in end-to-end benchmarks or production environment. Scaling and recovery are not supported."
+                );
                 let path = sled.strip_prefix("sled://").unwrap();
                 StateStoreImpl::sled(SledStateStore::new(path), storage_metrics.clone())
             }
@@ -778,8 +841,22 @@ impl StateStoreImpl {
     }
 }
 
-pub trait AsHummock {
+pub trait AsHummock: Send + Sync {
     fn as_hummock(&self) -> Option<&HummockStorage>;
+
+    fn sync(
+        &self,
+        sync_table_epochs: Vec<(HummockEpoch, HashSet<TableId>)>,
+    ) -> BoxFuture<'_, StorageResult<SyncResult>> {
+        async move {
+            if let Some(hummock) = self.as_hummock() {
+                hummock.sync(sync_table_epochs).await
+            } else {
+                Ok(SyncResult::default())
+            }
+        }
+        .boxed()
+    }
 }
 
 impl AsHummock for HummockStorage {
@@ -809,8 +886,8 @@ mod dyn_state_store {
     use bytes::Bytes;
     use risingwave_common::bitmap::Bitmap;
     use risingwave_common::hash::VirtualNode;
-    use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
     use risingwave_hummock_sdk::HummockReadEpoch;
+    use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
 
     use crate::error::StorageResult;
     use crate::hummock::HummockStorage;
@@ -850,21 +927,21 @@ mod dyn_state_store {
         async fn get_keyed_row(
             &self,
             key: TableKey<Bytes>,
-            epoch: u64,
+
             read_options: ReadOptions,
         ) -> StorageResult<Option<StateStoreKeyedRow>>;
 
         async fn iter(
             &self,
             key_range: TableKeyRange,
-            epoch: u64,
+
             read_options: ReadOptions,
         ) -> StorageResult<BoxStateStoreReadIter>;
 
         async fn rev_iter(
             &self,
             key_range: TableKeyRange,
-            epoch: u64,
+
             read_options: ReadOptions,
         ) -> StorageResult<BoxStateStoreReadIter>;
     }
@@ -887,30 +964,28 @@ mod dyn_state_store {
         async fn get_keyed_row(
             &self,
             key: TableKey<Bytes>,
-            epoch: u64,
+
             read_options: ReadOptions,
         ) -> StorageResult<Option<StateStoreKeyedRow>> {
-            self.get_keyed_row(key, epoch, read_options).await
+            self.get_keyed_row(key, read_options).await
         }
 
         async fn iter(
             &self,
             key_range: TableKeyRange,
-            epoch: u64,
+
             read_options: ReadOptions,
         ) -> StorageResult<BoxStateStoreReadIter> {
-            Ok(Box::new(self.iter(key_range, epoch, read_options).await?))
+            Ok(Box::new(self.iter(key_range, read_options).await?))
         }
 
         async fn rev_iter(
             &self,
             key_range: TableKeyRange,
-            epoch: u64,
+
             read_options: ReadOptions,
         ) -> StorageResult<BoxStateStoreReadIter> {
-            Ok(Box::new(
-                self.rev_iter(key_range, epoch, read_options).await?,
-            ))
+            Ok(Box::new(self.rev_iter(key_range, read_options).await?))
         }
     }
 
@@ -979,7 +1054,7 @@ mod dyn_state_store {
 
         fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions);
 
-        fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap>;
+        async fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> StorageResult<Arc<Bitmap>>;
 
         fn get_table_watermark(&self, vnode: VirtualNode) -> Option<Bytes>;
     }
@@ -1053,8 +1128,8 @@ mod dyn_state_store {
             self.seal_current_epoch(next_epoch, opts)
         }
 
-        fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
-            self.update_vnode_bitmap(vnodes)
+        async fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> StorageResult<Arc<Bitmap>> {
+            self.update_vnode_bitmap(vnodes).await
         }
 
         fn get_table_watermark(&self, vnode: VirtualNode) -> Option<Bytes> {
@@ -1141,8 +1216,8 @@ mod dyn_state_store {
             (*self.0).seal_current_epoch(next_epoch, opts)
         }
 
-        fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
-            (*self.0).update_vnode_bitmap(vnodes)
+        async fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> StorageResult<Arc<Bitmap>> {
+            (*self.0).update_vnode_bitmap(vnodes).await
         }
     }
 
@@ -1157,6 +1232,11 @@ mod dyn_state_store {
         ) -> StorageResult<()>;
 
         async fn new_local(&self, option: NewLocalOptions) -> BoxDynLocalStateStore;
+        async fn new_read_snapshot(
+            &self,
+            epoch: HummockReadEpoch,
+            options: NewReadSnapshotOptions,
+        ) -> StorageResult<StateStoreReadDynRef>;
     }
 
     #[async_trait::async_trait]
@@ -1171,6 +1251,16 @@ mod dyn_state_store {
 
         async fn new_local(&self, option: NewLocalOptions) -> BoxDynLocalStateStore {
             StateStorePointer(Box::new(self.new_local(option).await))
+        }
+
+        async fn new_read_snapshot(
+            &self,
+            epoch: HummockReadEpoch,
+            options: NewReadSnapshotOptions,
+        ) -> StorageResult<StateStoreReadDynRef> {
+            Ok(StateStorePointer(Arc::new(
+                self.new_read_snapshot(epoch, options).await?,
+            )))
         }
     }
 
@@ -1188,7 +1278,6 @@ mod dyn_state_store {
         };
     }
 
-    state_store_pointer_dyn_as_ref!(Arc<dyn DynStateStore>, DynStateStoreRead);
     state_store_pointer_dyn_as_ref!(Arc<dyn DynStateStoreRead>, DynStateStoreRead);
 
     #[derive(Clone)]
@@ -1204,28 +1293,28 @@ mod dyn_state_store {
         fn get_keyed_row(
             &self,
             key: TableKey<Bytes>,
-            epoch: u64,
+
             read_options: ReadOptions,
         ) -> impl Future<Output = StorageResult<Option<StateStoreKeyedRow>>> + Send + '_ {
-            self.as_ref().get_keyed_row(key, epoch, read_options)
+            self.as_ref().get_keyed_row(key, read_options)
         }
 
         fn iter(
             &self,
             key_range: TableKeyRange,
-            epoch: u64,
+
             read_options: ReadOptions,
         ) -> impl Future<Output = StorageResult<Self::Iter>> + '_ {
-            self.as_ref().iter(key_range, epoch, read_options)
+            self.as_ref().iter(key_range, read_options)
         }
 
         fn rev_iter(
             &self,
             key_range: TableKeyRange,
-            epoch: u64,
+
             read_options: ReadOptions,
         ) -> impl Future<Output = StorageResult<Self::RevIter>> + '_ {
-            self.as_ref().rev_iter(key_range, epoch, read_options)
+            self.as_ref().rev_iter(key_range, read_options)
         }
     }
 
@@ -1246,10 +1335,7 @@ mod dyn_state_store {
         }
     }
 
-    pub trait DynStateStore:
-        DynStateStoreRead + DynStateStoreReadLog + DynStateStoreExt + AsHummock
-    {
-    }
+    pub trait DynStateStore: DynStateStoreReadLog + DynStateStoreExt + AsHummock {}
 
     impl AsHummock for StateStoreDynRef {
         fn as_hummock(&self) -> Option<&HummockStorage> {
@@ -1257,13 +1343,11 @@ mod dyn_state_store {
         }
     }
 
-    impl<S: DynStateStoreRead + DynStateStoreReadLog + DynStateStoreExt + AsHummock> DynStateStore
-        for S
-    {
-    }
+    impl<S: DynStateStoreReadLog + DynStateStoreExt + AsHummock> DynStateStore for S {}
 
     impl StateStore for StateStoreDynRef {
         type Local = BoxDynLocalStateStore;
+        type ReadSnapshot = StateStoreReadDynRef;
 
         fn try_wait_epoch(
             &self,
@@ -1278,6 +1362,14 @@ mod dyn_state_store {
             option: NewLocalOptions,
         ) -> impl Future<Output = Self::Local> + Send + '_ {
             (*self.0).new_local(option)
+        }
+
+        async fn new_read_snapshot(
+            &self,
+            epoch: HummockReadEpoch,
+            options: NewReadSnapshotOptions,
+        ) -> StorageResult<Self::ReadSnapshot> {
+            (*self.0).new_read_snapshot(epoch, options).await
         }
     }
 }

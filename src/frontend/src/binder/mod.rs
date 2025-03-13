@@ -47,7 +47,7 @@ mod values;
 pub use bind_context::{BindContext, Clause, LateralBindContext};
 pub use create_view::BoundCreateView;
 pub use delete::BoundDelete;
-pub use expr::{bind_data_type, bind_struct_field};
+pub use expr::bind_data_type;
 pub use insert::BoundInsert;
 use pgwire::pg_server::{Session, SessionId};
 pub use query::BoundQuery;
@@ -65,10 +65,11 @@ pub use values::BoundValues;
 use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::schema_catalog::SchemaCatalog;
-use crate::catalog::{CatalogResult, TableId, ViewId};
+use crate::catalog::{CatalogResult, DatabaseId, TableId, ViewId};
 use crate::error::ErrorCode;
 use crate::expr::ExprImpl;
 use crate::session::{AuthContext, SessionImpl, TemporarySourceManager};
+use crate::user::user_service::UserInfoReadGuard;
 
 pub type ShareId = usize;
 
@@ -88,7 +89,9 @@ enum BindFor {
 pub struct Binder {
     // TODO: maybe we can only lock the database, but not the whole catalog.
     catalog: CatalogReadGuard,
+    user: UserInfoReadGuard,
     db_name: String,
+    database_id: DatabaseId,
     session_id: SessionId,
     context: BindContext,
     auth_context: Arc<AuthContext>,
@@ -145,7 +148,7 @@ pub struct SecureCompareContext {
     /// The column name to store the whole payload in `JSONB`, but during validation it will be used as `bytea`
     pub column_name: String,
     /// The secret (usually a token provided by the webhook source user) to validate the calls
-    pub secret_name: String,
+    pub secret_name: Option<String>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -328,7 +331,9 @@ impl Binder {
     ) -> Binder {
         Binder {
             catalog: session.env().catalog_reader().read_guard(),
+            user: session.env().user_info_reader().read_guard(),
             db_name: session.database(),
+            database_id: session.database_id(),
             session_id: session.id(),
             context: BindContext::new(),
             auth_context: session.auth_context(),

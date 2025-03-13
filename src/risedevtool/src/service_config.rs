@@ -37,6 +37,7 @@ pub struct ComputeNodeConfig {
     pub provide_aws_s3: Option<Vec<AwsS3Config>>,
     pub provide_tempo: Option<Vec<TempoConfig>>,
     pub user_managed: bool,
+    pub resource_group: String,
 
     pub total_memory_bytes: usize,
     pub parallelism: usize,
@@ -432,7 +433,7 @@ pub enum ServiceConfig {
     SqlServer(SqlServerConfig),
 }
 
-#[derive(PartialEq, Eq, Hash)]
+#[derive(PartialEq, Eq, Hash, Debug)]
 pub enum TaskGroup {
     RisingWave,
     Observability,
@@ -559,7 +560,7 @@ mod string {
     use std::fmt::Display;
     use std::str::FromStr;
 
-    use serde::{de, Deserialize, Deserializer, Serializer};
+    use serde::{Deserialize, Deserializer, Serializer, de};
 
     pub fn serialize<T, S>(value: &T, serializer: S) -> Result<S::Ok, S::Error>
     where

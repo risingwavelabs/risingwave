@@ -16,21 +16,18 @@ use std::collections::HashSet;
 
 use either::Either;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::acl::AclMode;
 use risingwave_common::catalog::{FunctionId, ObjectId, TableId};
 use risingwave_pb::catalog::PbTable;
 use risingwave_sqlparser::ast::{EmitMode, Ident, ObjectName, Query};
 
-use super::privilege::resolve_relation_privileges;
 use super::RwPgResponse;
 use crate::binder::{Binder, BoundQuery, BoundSetExpr};
-use crate::catalog::check_valid_column_name;
+use crate::catalog::check_column_name_not_reserved;
 use crate::error::ErrorCode::ProtocolError;
 use crate::error::{ErrorCode, Result, RwError};
-use crate::handler::privilege::resolve_query_privileges;
 use crate::handler::HandlerArgs;
-use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::Explain;
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, RelationCollectorVisitor};
 use crate::planner::Planner;
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
@@ -54,13 +51,12 @@ pub(super) fn parse_column_names(columns: &[Ident]) -> Option<Vec<String>> {
 /// should guarantee that the column names number are consistent with the query.
 pub(super) fn get_column_names(
     bound: &BoundQuery,
-    session: &SessionImpl,
     columns: Vec<Ident>,
 ) -> Result<Option<Vec<String>>> {
     let col_names = parse_column_names(&columns);
     if let BoundSetExpr::Select(select) = &bound.body {
         // `InputRef`'s alias will be implicitly assigned in `bind_project`.
-        // If user provide columns name (col_names.is_some()), we don't need alias.
+        // If user provides columns name (col_names.is_some()), we don't need alias.
         // For other expressions (col_names.is_none()), we require the user to explicitly assign an
         // alias.
         if col_names.is_none() {
@@ -72,11 +68,6 @@ pub(super) fn get_column_names(
                 .into());
                 }
             }
-        }
-        if let Some(relation) = &select.from {
-            let mut check_items = Vec::new();
-            resolve_relation_privileges(relation, AclMode::Select, &mut check_items);
-            session.check_privileges(&check_items)?;
         }
     }
 
@@ -117,10 +108,7 @@ pub fn gen_create_mv_plan_bound(
 
     let definition = context.normalized_sql().to_owned();
 
-    let check_items = resolve_query_privileges(&query);
-    session.check_privileges(&check_items)?;
-
-    let col_names = get_column_names(&query, session, columns)?;
+    let col_names = get_column_names(&query, columns)?;
 
     let emit_on_window_close = emit_mode == Some(EmitMode::OnWindowClose);
     if emit_on_window_close {
@@ -131,13 +119,18 @@ pub fn gen_create_mv_plan_bound(
     plan_root.set_req_dist_as_same_as_req_order();
     if let Some(col_names) = col_names {
         for name in &col_names {
-            check_valid_column_name(name)?;
+            check_column_name_not_reserved(name)?;
         }
         plan_root.set_out_names(col_names)?;
     }
-    let materialize =
-        plan_root.gen_materialize_plan(table_name, definition, emit_on_window_close)?;
-    let mut table = materialize.table().to_prost(schema_id, database_id);
+    let materialize = plan_root.gen_materialize_plan(
+        database_id,
+        schema_id,
+        table_name,
+        definition,
+        emit_on_window_close,
+    )?;
+    let mut table = materialize.table().to_prost();
 
     let plan: PlanRef = materialize.into();
 
@@ -286,12 +279,12 @@ pub mod tests {
 
     use pgwire::pg_response::StatementType::CREATE_MATERIALIZED_VIEW;
     use risingwave_common::catalog::{
-        DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, ROWID_PREFIX, RW_TIMESTAMP_COLUMN_NAME,
+        DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, ROW_ID_COLUMN_NAME, RW_TIMESTAMP_COLUMN_NAME,
     };
     use risingwave_common::types::{DataType, StructType};
 
     use crate::catalog::root_catalog::SchemaPath;
-    use crate::test_utils::{create_proto_file, LocalFrontend, PROTO_FILE_DATA};
+    use crate::test_utils::{LocalFrontend, PROTO_FILE_DATA, create_proto_file};
 
     #[tokio::test]
     async fn test_create_mv_handler() {
@@ -336,7 +329,7 @@ pub mod tests {
         ])
         .into();
         let expected_columns = maplit::hashmap! {
-            ROWID_PREFIX => DataType::Serial,
+            ROW_ID_COLUMN_NAME => DataType::Serial,
             "country" => StructType::new(
                  vec![("address", DataType::Varchar),("city", city_type),("zipcode", DataType::Varchar)],
             ).into(),

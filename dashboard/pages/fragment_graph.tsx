@@ -135,7 +135,7 @@ function buildPlanNodeDependency(
   return d3.hierarchy({
     name: dispatcherName,
     actorIds: fragment.actors.map((a) => a.actorId.toString()),
-    children: firstActor.nodes ? [hierarchyActorNode(firstActor.nodes)] : [],
+    children: fragment.nodes ? [hierarchyActorNode(fragment.nodes)] : [],
     operatorId: "dispatcher",
     node: dispatcherNode,
   })
@@ -173,16 +173,11 @@ function buildFragmentDependencyAsEdges(
     const parentIds = new Set<number>()
     const externalParentIds = new Set<number>()
 
-    for (const actor of fragment.actors) {
-      for (const upstreamActorId of actor.upstreamActorId) {
-        const upstreamFragmentId = actorToFragmentMapping.get(upstreamActorId)
-        if (upstreamFragmentId) {
-          parentIds.add(upstreamFragmentId)
-        } else {
-          for (const m of findMergeNodes(actor.nodes!)) {
-            externalParentIds.add(m.upstreamFragmentId)
-          }
-        }
+    for (const upstreamFragmentId of fragment.upstreamFragmentIds) {
+      if (fragments.fragments[upstreamFragmentId]) {
+        parentIds.add(upstreamFragmentId)
+      } else {
+        externalParentIds.add(upstreamFragmentId)
       }
     }
     nodes.push({

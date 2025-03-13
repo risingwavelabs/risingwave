@@ -23,7 +23,7 @@ use super::bind_context::Clause;
 use super::statement::RewriteExprsRecursive;
 use crate::binder::Binder;
 use crate::error::{ErrorCode, Result};
-use crate::expr::{align_types, CorrelatedId, Depth, ExprImpl};
+use crate::expr::{CorrelatedId, Depth, ExprImpl, align_types};
 
 #[derive(Debug, Clone)]
 pub struct BoundValues {

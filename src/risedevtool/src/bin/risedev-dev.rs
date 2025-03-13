@@ -22,17 +22,17 @@ use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use console::style;
 use fs_err::OpenOptions;
 use indicatif::{MultiProgress, ProgressBar};
 use risedev::util::{begin_spin, complete_spin, fail_spin};
 use risedev::{
-    generate_risedev_env, preflight_check, CompactorService, ComputeNodeService, ConfigExpander,
-    ConfigureTmuxTask, DummyService, EnsureStopService, ExecuteContext, FrontendService,
-    GrafanaService, KafkaService, MetaNodeService, MinioService, MySqlService, PostgresService,
-    PrometheusService, PubsubService, RedisService, SchemaRegistryService, ServiceConfig,
-    SqlServerService, SqliteConfig, Task, TaskGroup, TempoService, RISEDEV_NAME,
+    CompactorService, ComputeNodeService, ConfigExpander, ConfigureTmuxTask, DummyService,
+    EnsureStopService, ExecuteContext, FrontendService, GrafanaService, KafkaService,
+    MetaNodeService, MinioService, MySqlService, PostgresService, PrometheusService, PubsubService,
+    RISEDEV_NAME, RedisService, SchemaRegistryService, ServiceConfig, SqlServerService,
+    SqliteConfig, Task, TaskGroup, TempoService, generate_risedev_env, preflight_check,
 };
 use sqlx::mysql::MySqlConnectOptions;
 use sqlx::postgres::PgConnectOptions;
@@ -355,6 +355,7 @@ fn task_main(
     Ok((stat, log_buffer))
 }
 
+#[derive(Debug)]
 struct TaskResult {
     id: String,
     time: Duration,
@@ -396,7 +397,15 @@ impl TaskScheduler {
             }));
         }
         for handle in handles {
-            for TaskResult { id, time, log } in handle.join().unwrap()? {
+            let join_res = handle.join();
+            let Ok(res) = join_res else {
+                let panic = join_res.unwrap_err();
+                anyhow::bail!(
+                    "failed to join thread, likely panicked: {}",
+                    panic_message::panic_message(&panic)
+                );
+            };
+            for TaskResult { id, time, log } in res? {
                 stats.push((id, time));
                 write!(logger, "{}", log)?;
             }

@@ -12,7 +12,7 @@ anyhow = "1"
 apache-avro = { workspace = true }
 assert_matches = "1"
 async-compression = { version = "0.4.5", features = ["gzip", "tokio"] }
-async-nats = "0.38"
+async-nats = "0.39"
 async-trait = "0.1"
 auto_enums = { workspace = true }
 auto_impl = "1"
@@ -25,7 +25,6 @@ aws-sdk-emrserverless = "1.50.0"
 aws-sdk-glue = { workspace = true }
 aws-sdk-kinesis = { workspace = true }
 aws-sdk-s3 = { workspace = true }
-aws-smithy-http = { workspace = true }
 aws-smithy-runtime-api = { workspace = true }
 aws-smithy-types = { workspace = true }
 aws-smithy-types-convert = { version = "0.60.1", features = ["convert-chrono"] }
@@ -59,7 +58,6 @@ google-cloud-pubsub = "0.30"
 iceberg = { workspace = true }
 iceberg-catalog-glue = { workspace = true }
 iceberg-catalog-rest = { workspace = true }
-icelake = { workspace = true }
 indexmap = { version = "2.7.0", features = ["serde"] }
 itertools = { workspace = true }
 jni = { version = "0.21.1", features = ["invocation"] }
@@ -105,7 +103,7 @@ rdkafka = { workspace = true, features = [
     "gssapi",
     "zstd",
 ] }
-redis = { version = "0.25", features = ["aio", "tokio-comp", "async-std-comp","cluster-async"] }
+redis = { version = "0.28", features = ["aio", "tokio-comp", "async-std-comp","cluster-async","geospatial"] }
 regex = "1.4"
 reqwest = { version = "0.12.2", features = ["json", "stream"] }
 risingwave_common = { workspace = true }
@@ -121,6 +119,7 @@ rustls-native-certs = "0.8"
 rustls-pemfile = "2"
 rustls-pki-types = "1"
 rw_futures_util = { workspace = true }
+scopeguard = "1"
 sea-schema = { version = "0.16", default-features = false, features = [
     "discovery",
     "sqlx-postgres",
@@ -137,7 +136,6 @@ strum = "0.26"
 strum_macros = "0.26"
 tempfile = "3"
 thiserror = "1"
-
 thiserror-ext = { workspace = true }
 # To easiy get the type_name and impl IntoSql for rust_decimal, we fork the crate.
 # Another reason is that we are planning to refactor their IntoSql trait to allow specifying the type to convert.

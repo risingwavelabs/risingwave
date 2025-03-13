@@ -17,8 +17,8 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use parking_lot::RwLock;
-use risingwave_pb::meta::event_log::{Event as PbEvent, Event};
 use risingwave_pb::meta::EventLog as PbEventLog;
+use risingwave_pb::meta::event_log::{Event as PbEvent, Event};
 use tokio::task::JoinHandle;
 
 pub type EventLogManagerRef = Arc<EventLogManger>;

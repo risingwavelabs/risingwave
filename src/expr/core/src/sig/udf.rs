@@ -18,7 +18,8 @@
 //!
 //! See expr/impl/src/udf for the implementations.
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
+use educe::Educe;
 use enum_as_inner::EnumAsInner;
 use futures::stream::BoxStream;
 use risingwave_common::array::arrow::arrow_array_udf::{ArrayRef, BooleanArray, RecordBatch};
@@ -65,24 +66,26 @@ pub struct UdfImplDescriptor {
     /// Creates a function from options.
     ///
     /// This function will be called when `create function` statement is executed on the frontend.
-    pub create_fn: fn(opts: CreateFunctionOptions<'_>) -> Result<CreateFunctionOutput>,
+    pub create_fn: fn(opts: CreateOptions<'_>) -> Result<CreateFunctionOutput>,
 
     /// Builds UDF runtime from verified options.
     ///
     /// This function will be called before the UDF is executed on the backend.
-    pub build_fn: fn(opts: UdfOptions<'_>) -> Result<Box<dyn UdfImpl>>,
+    pub build_fn: fn(opts: BuildOptions<'_>) -> Result<Box<dyn UdfImpl>>,
 }
 
 /// Options for creating a function.
 ///
 /// These information are parsed from `CREATE FUNCTION` statement.
 /// Implementations should verify the options and return a `CreateFunctionOutput` in `create_fn`.
-pub struct CreateFunctionOptions<'a> {
+pub struct CreateOptions<'a> {
     pub kind: UdfKind,
+    /// The function name registered in RisingWave.
     pub name: &'a str,
     pub arg_names: &'a [String],
     pub arg_types: &'a [DataType],
     pub return_type: &'a DataType,
+    /// The function name on the remote side / in the source code, currently only used for external UDF.
     pub as_: Option<&'a str>,
     pub using_link: Option<&'a str>,
     pub using_base64_decoded: Option<&'a [u8]>,
@@ -90,21 +93,29 @@ pub struct CreateFunctionOptions<'a> {
 
 /// Output of creating a function.
 pub struct CreateFunctionOutput {
-    pub identifier: String,
+    /// The name for identifying the function in the UDF runtime.
+    pub name_in_runtime: String,
     pub body: Option<String>,
     pub compressed_binary: Option<Vec<u8>>,
 }
 
 /// Options for building a UDF runtime.
-pub struct UdfOptions<'a> {
+#[derive(Educe)]
+#[educe(Debug)]
+pub struct BuildOptions<'a> {
     pub kind: UdfKind,
     pub body: Option<&'a str>,
+    #[educe(Debug(ignore))]
     pub compressed_binary: Option<&'a [u8]>,
     pub link: Option<&'a str>,
-    pub identifier: &'a str,
+    pub name_in_runtime: &'a str,
     pub arg_names: &'a [String],
+    pub arg_types: &'a [DataType],
     pub return_type: &'a DataType,
     pub always_retry_on_network_error: bool,
+    pub language: &'a str,
+    pub is_async: Option<bool>,
+    pub is_batched: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumAsInner)]
@@ -127,12 +138,12 @@ pub trait UdfImpl: std::fmt::Debug + Send + Sync {
     ) -> Result<BoxStream<'a, Result<RecordBatch>>>;
 
     /// For aggregate function, create the initial state.
-    fn call_agg_create_state(&self) -> Result<ArrayRef> {
+    async fn call_agg_create_state(&self) -> Result<ArrayRef> {
         bail!("aggregate function is not supported");
     }
 
     /// For aggregate function, accumulate or retract the state.
-    fn call_agg_accumulate_or_retract(
+    async fn call_agg_accumulate_or_retract(
         &self,
         _state: &ArrayRef,
         _ops: &BooleanArray,
@@ -142,7 +153,7 @@ pub trait UdfImpl: std::fmt::Debug + Send + Sync {
     }
 
     /// For aggregate function, get aggregate result from the state.
-    fn call_agg_finish(&self, _state: &ArrayRef) -> Result<ArrayRef> {
+    async fn call_agg_finish(&self, _state: &ArrayRef) -> Result<ArrayRef> {
         bail!("aggregate function is not supported");
     }
 

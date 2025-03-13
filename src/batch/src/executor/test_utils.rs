@@ -20,8 +20,8 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 
 use super::{
-    register_executor, BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor,
-    ExecutorBuilder,
+    BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
+    register_executor,
 };
 use crate::error::{BatchError, Result};
 use crate::exchange_source::ExchangeSource;

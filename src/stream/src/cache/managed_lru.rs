@@ -16,8 +16,8 @@ use std::alloc::{Allocator, Global};
 use std::borrow::Borrow;
 use std::hash::{BuildHasher, Hash};
 use std::ops::{Deref, DerefMut};
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 use risingwave_common::lru::{LruCache, RandomState};
 use risingwave_common::metrics::LabelGuardedIntGauge;

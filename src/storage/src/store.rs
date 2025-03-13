@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::min;
 use std::default::Default;
 use std::fmt::{Debug, Formatter};
 use std::future::Future;
@@ -28,9 +27,11 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::{Epoch, EpochPair};
-use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange};
-use risingwave_hummock_sdk::table_watermark::{VnodeWatermark, WatermarkDirection};
 use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange};
+use risingwave_hummock_sdk::table_watermark::{
+    VnodeWatermark, WatermarkDirection, WatermarkSerdeType,
+};
 use risingwave_hummock_trace::{
     TracedInitOptions, TracedNewLocalOptions, TracedOpConsistencyLevel, TracedPrefetchOptions,
     TracedReadOptions, TracedSealCurrentEpochOptions, TracedTryWaitEpochOptions,
@@ -265,7 +266,6 @@ pub trait StateStoreRead: StaticSendSync {
     fn get_keyed_row(
         &self,
         key: TableKey<Bytes>,
-        epoch: u64,
         read_options: ReadOptions,
     ) -> impl StorageFuture<'_, Option<StateStoreKeyedRow>>;
 
@@ -275,10 +275,9 @@ pub trait StateStoreRead: StaticSendSync {
     fn get(
         &self,
         key: TableKey<Bytes>,
-        epoch: u64,
         read_options: ReadOptions,
     ) -> impl StorageFuture<'_, Option<Bytes>> {
-        self.get_keyed_row(key, epoch, read_options)
+        self.get_keyed_row(key, read_options)
             .map_ok(|v| v.map(|(_, v)| v))
     }
 
@@ -290,55 +289,14 @@ pub trait StateStoreRead: StaticSendSync {
     fn iter(
         &self,
         key_range: TableKeyRange,
-        epoch: u64,
         read_options: ReadOptions,
     ) -> impl StorageFuture<'_, Self::Iter>;
 
     fn rev_iter(
         &self,
         key_range: TableKeyRange,
-        epoch: u64,
         read_options: ReadOptions,
     ) -> impl StorageFuture<'_, Self::RevIter>;
-}
-
-pub trait StateStoreReadExt: StaticSendSync {
-    /// Scans `limit` number of keys from a key range. If `limit` is `None`, scans all elements.
-    /// Internally, `prefix_hint` will be used to for checking `bloom_filter` and
-    /// `full_key_range` used for iter.
-    /// The result is based on a snapshot corresponding to the given `epoch`.
-    ///
-    ///
-    /// By default, this simply calls `StateStore::iter` to fetch elements.
-    fn scan(
-        &self,
-        key_range: TableKeyRange,
-        epoch: u64,
-        limit: Option<usize>,
-        read_options: ReadOptions,
-    ) -> impl StorageFuture<'_, Vec<StateStoreKeyedRow>>;
-}
-
-impl<S: StateStoreRead> StateStoreReadExt for S {
-    async fn scan(
-        &self,
-        key_range: TableKeyRange,
-        epoch: u64,
-        limit: Option<usize>,
-        mut read_options: ReadOptions,
-    ) -> StorageResult<Vec<StateStoreKeyedRow>> {
-        if limit.is_some() {
-            read_options.prefetch_options.prefetch = false;
-        }
-        const MAX_INITIAL_CAP: usize = 1024;
-        let limit = limit.unwrap_or(usize::MAX);
-        let mut ret = Vec::with_capacity(min(limit, MAX_INITIAL_CAP));
-        let mut iter = self.iter(key_range, epoch, read_options).await?;
-        while let Some((key, value)) = iter.try_next().await? {
-            ret.push((key.copy_into(), Bytes::copy_from_slice(value)))
-        }
-        Ok(ret)
-    }
 }
 
 #[derive(Clone)]
@@ -369,8 +327,14 @@ impl From<TryWaitEpochOptions> for TracedTryWaitEpochOptions {
     }
 }
 
-pub trait StateStore: StateStoreRead + StateStoreReadLog + StaticSendSync + Clone {
+#[derive(Clone, Copy)]
+pub struct NewReadSnapshotOptions {
+    pub table_id: TableId,
+}
+
+pub trait StateStore: StateStoreReadLog + StaticSendSync + Clone {
     type Local: LocalStateStore;
+    type ReadSnapshot: StateStoreRead + Clone;
 
     /// If epoch is `Committed`, we will wait until the epoch is committed and its data is ready to
     /// read. If epoch is `Current`, we will only check if the data can be read with this epoch.
@@ -386,13 +350,19 @@ pub trait StateStore: StateStoreRead + StateStoreReadLog + StaticSendSync + Clon
     }
 
     fn new_local(&self, option: NewLocalOptions) -> impl Future<Output = Self::Local> + Send + '_;
+
+    fn new_read_snapshot(
+        &self,
+        epoch: HummockReadEpoch,
+        options: NewReadSnapshotOptions,
+    ) -> impl StorageFuture<'_, Self::ReadSnapshot>;
 }
 
 /// A state store that is dedicated for streaming operator, which only reads the uncommitted data
 /// written by itself. Each local state store is not `Clone`, and is owned by a streaming state
 /// table.
 pub trait LocalStateStore: StaticSendSync {
-    type FlushedSnapshotReader: StateStoreRead + Clone;
+    type FlushedSnapshotReader: StateStoreRead;
     type Iter<'a>: StateStoreIter + 'a;
     type RevIter<'a>: StateStoreIter + 'a;
 
@@ -460,7 +430,7 @@ pub trait LocalStateStore: StaticSendSync {
 
     // Updates the vnode bitmap corresponding to the local state store
     // Returns the previous vnode bitmap
-    fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap>;
+    fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> impl StorageFuture<'_, Arc<Bitmap>>;
 }
 
 /// If `prefetch` is true, prefetch will be enabled. Prefetching may increase the memory
@@ -785,25 +755,31 @@ impl From<TracedInitOptions> for InitOptions {
 
 #[derive(Clone, Debug)]
 pub struct SealCurrentEpochOptions {
-    pub table_watermarks: Option<(WatermarkDirection, Vec<VnodeWatermark>)>,
+    pub table_watermarks: Option<(WatermarkDirection, Vec<VnodeWatermark>, WatermarkSerdeType)>,
     pub switch_op_consistency_level: Option<OpConsistencyLevel>,
 }
 
 impl From<SealCurrentEpochOptions> for TracedSealCurrentEpochOptions {
     fn from(value: SealCurrentEpochOptions) -> Self {
         TracedSealCurrentEpochOptions {
-            table_watermarks: value.table_watermarks.map(|(direction, watermarks)| {
-                (
-                    direction == WatermarkDirection::Ascending,
-                    watermarks
-                        .into_iter()
-                        .map(|watermark| {
-                            let pb_watermark = PbVnodeWatermark::from(watermark);
-                            Message::encode_to_vec(&pb_watermark)
-                        })
-                        .collect(),
-                )
-            }),
+            table_watermarks: value.table_watermarks.map(
+                |(direction, watermarks, watermark_type)| {
+                    (
+                        direction == WatermarkDirection::Ascending,
+                        watermarks
+                            .into_iter()
+                            .map(|watermark| {
+                                let pb_watermark = PbVnodeWatermark::from(watermark);
+                                Message::encode_to_vec(&pb_watermark)
+                            })
+                            .collect(),
+                        match watermark_type {
+                            WatermarkSerdeType::NonPkPrefix => true,
+                            WatermarkSerdeType::PkPrefix => false,
+                        },
+                    )
+                },
+            ),
             switch_op_consistency_level: value
                 .switch_op_consistency_level
                 .map(|level| matches!(level, OpConsistencyLevel::ConsistentOldValue { .. })),
@@ -814,23 +790,30 @@ impl From<SealCurrentEpochOptions> for TracedSealCurrentEpochOptions {
 impl From<TracedSealCurrentEpochOptions> for SealCurrentEpochOptions {
     fn from(value: TracedSealCurrentEpochOptions) -> SealCurrentEpochOptions {
         SealCurrentEpochOptions {
-            table_watermarks: value.table_watermarks.map(|(is_ascending, watermarks)| {
-                (
-                    if is_ascending {
-                        WatermarkDirection::Ascending
-                    } else {
-                        WatermarkDirection::Descending
-                    },
-                    watermarks
-                        .into_iter()
-                        .map(|serialized_watermark| {
-                            Message::decode(serialized_watermark.as_slice())
-                                .map(|pb: PbVnodeWatermark| VnodeWatermark::from(pb))
-                                .expect("should not failed")
-                        })
-                        .collect(),
-                )
-            }),
+            table_watermarks: value.table_watermarks.map(
+                |(is_ascending, watermarks, is_non_pk_prefix)| {
+                    (
+                        if is_ascending {
+                            WatermarkDirection::Ascending
+                        } else {
+                            WatermarkDirection::Descending
+                        },
+                        watermarks
+                            .into_iter()
+                            .map(|serialized_watermark| {
+                                Message::decode(serialized_watermark.as_slice())
+                                    .map(|pb: PbVnodeWatermark| VnodeWatermark::from(pb))
+                                    .expect("should not failed")
+                            })
+                            .collect(),
+                        if is_non_pk_prefix {
+                            WatermarkSerdeType::NonPkPrefix
+                        } else {
+                            WatermarkSerdeType::PkPrefix
+                        },
+                    )
+                },
+            ),
             switch_op_consistency_level: value.switch_op_consistency_level.map(|enable| {
                 if enable {
                     OpConsistencyLevel::ConsistentOldValue {

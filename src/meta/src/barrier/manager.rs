@@ -24,14 +24,15 @@ use risingwave_pb::meta::PbRecoveryStatus;
 use tokio::sync::mpsc::unbounded_channel;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
+use tracing::warn;
 
+use crate::MetaResult;
 use crate::barrier::worker::GlobalBarrierWorker;
-use crate::barrier::{schedule, BarrierManagerRequest, BarrierManagerStatus, RecoveryReason};
+use crate::barrier::{BarrierManagerRequest, BarrierManagerStatus, RecoveryReason, schedule};
 use crate::hummock::HummockManagerRef;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{MetaSrvEnv, MetadataManager};
 use crate::stream::{ScaleControllerRef, SourceManagerRef};
-use crate::MetaResult;
 
 pub struct GlobalBarrierManager {
     status: Arc<ArcSwap<BarrierManagerStatus>>,
@@ -58,10 +59,13 @@ impl GlobalBarrierManager {
             .metadata_manager
             .catalog_controller
             .list_background_creating_mviews(true)
-            .await
-            .unwrap();
+            .await?;
         for mview in mviews {
             if let Entry::Vacant(e) = ddl_progress.entry(mview.table_id as _) {
+                warn!(
+                    job_id = mview.table_id,
+                    "background job has no ddl progress"
+                );
                 e.insert(DdlProgress {
                     id: mview.table_id as u64,
                     statement: mview.definition,

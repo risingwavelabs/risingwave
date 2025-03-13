@@ -19,12 +19,12 @@ use risingwave_pb::plan_common::JoinType;
 
 use super::{BoxedRule, Rule};
 use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
+use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::generic::{Agg, GenericPlanRef};
 use crate::optimizer::plan_node::{
     LogicalApply, LogicalJoin, LogicalProject, LogicalScan, LogicalShare, PlanTreeNodeBinary,
     PlanTreeNodeUnary,
 };
-use crate::optimizer::PlanRef;
 use crate::utils::{ColIndexMapping, Condition};
 
 /// General Unnesting based on the paper Unnesting Arbitrary Queries:

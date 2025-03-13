@@ -291,7 +291,7 @@ impl<S: StateStore> DistinctDeduplicater<S> {
 mod tests {
     use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
     use risingwave_common::test_prelude::StreamChunkTestExt;
-    use risingwave_common::util::epoch::{test_epoch, EpochPair};
+    use risingwave_common::util::epoch::{EpochPair, test_epoch};
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
 
@@ -423,7 +423,7 @@ mod tests {
 
         epoch.inc_for_test();
         for table in dedup_tables.values_mut() {
-            table.commit(epoch).await.unwrap();
+            table.commit_for_test(epoch).await.unwrap();
         }
 
         // --- chunk 2 ---
@@ -464,7 +464,7 @@ mod tests {
 
         epoch.inc_for_test();
         for table in dedup_tables.values_mut() {
-            table.commit(epoch).await.unwrap();
+            table.commit_for_test(epoch).await.unwrap();
         }
 
         drop(deduplicater);
@@ -530,7 +530,7 @@ mod tests {
 
         epoch.inc_for_test();
         for table in dedup_tables.values_mut() {
-            table.commit(epoch).await.unwrap();
+            table.commit_for_test(epoch).await.unwrap();
         }
     }
 
@@ -606,7 +606,7 @@ mod tests {
 
         epoch.inc_for_test();
         for table in dedup_tables.values_mut() {
-            table.commit(epoch).await.unwrap();
+            table.commit_for_test(epoch).await.unwrap();
         }
 
         let chunk = StreamChunk::from_pretty(
@@ -657,7 +657,7 @@ mod tests {
 
         epoch.inc_for_test();
         for table in dedup_tables.values_mut() {
-            table.commit(epoch).await.unwrap();
+            table.commit_for_test(epoch).await.unwrap();
         }
     }
 }

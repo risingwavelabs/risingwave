@@ -15,7 +15,7 @@
 use std::sync::LazyLock;
 
 use bytes::{BufMut, Bytes, BytesMut};
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_storage::hummock::{
     Block, BlockBuilder, BlockBuilderOptions, BlockHolder, BlockIterator, CompressionAlgorithm,

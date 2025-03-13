@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, Weak};
 use std::time::Duration;
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use async_trait::async_trait;
 use moka::future::Cache as MokaCache;
 use moka::ops::compute::Op;
@@ -28,13 +28,13 @@ use risingwave_common::bail;
 use risingwave_common::metrics::LabelGuardedIntGauge;
 
 use crate::error::{ConnectorError, ConnectorResult};
+use crate::source::SourceEnumeratorContextRef;
 use crate::source::base::SplitEnumerator;
 use crate::source::kafka::split::KafkaSplit;
 use crate::source::kafka::{
-    KafkaConnectionProps, KafkaContextCommon, KafkaProperties, RwConsumerContext,
-    KAFKA_ISOLATION_LEVEL,
+    KAFKA_ISOLATION_LEVEL, KafkaConnectionProps, KafkaContextCommon, KafkaProperties,
+    RwConsumerContext,
 };
-use crate::source::SourceEnumeratorContextRef;
 
 type KafkaConsumer = BaseConsumer<RwConsumerContext>;
 type KafkaAdmin = AdminClient<RwConsumerContext>;

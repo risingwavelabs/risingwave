@@ -51,7 +51,7 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                     Format::Canal => vec![Encode::Json],
                 ),
                 KINESIS_CONNECTOR => hashmap!(
-                    Format::Plain => vec![Encode::Json, Encode::Protobuf, Encode::Avro, Encode::Bytes],
+                    Format::Plain => vec![Encode::Json, Encode::Protobuf, Encode::Avro, Encode::Bytes, Encode::Csv],
                     Format::Upsert => vec![Encode::Json, Encode::Avro],
                     Format::Debezium => vec![Encode::Json],
                     Format::Maxwell => vec![Encode::Json],
@@ -70,9 +70,6 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                 DATAGEN_CONNECTOR => hashmap!(
                     Format::Native => vec![Encode::Native],
                     Format::Plain => vec![Encode::Bytes, Encode::Json],
-                ),
-                LEGACY_S3_CONNECTOR => hashmap!(
-                    Format::Plain => vec![Encode::Csv, Encode::Json],
                 ),
                 OPENDAL_S3_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Csv, Encode::Json, Encode::Parquet],

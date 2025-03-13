@@ -28,17 +28,17 @@ use risingwave_rpc_client::{
 };
 use sea_orm::EntityTrait;
 
+use crate::MetaResult;
+use crate::controller::SqlMetaStore;
 use crate::controller::id::{
     IdGeneratorManager as SqlIdGeneratorManager, IdGeneratorManagerRef as SqlIdGeneratorManagerRef,
 };
 use crate::controller::session_params::{SessionParamsController, SessionParamsControllerRef};
 use crate::controller::system_param::{SystemParamsController, SystemParamsControllerRef};
-use crate::controller::SqlMetaStore;
 use crate::hummock::sequence::SequenceGenerator;
-use crate::manager::event_log::{start_event_log_manager, EventLogManagerRef};
+use crate::manager::event_log::{EventLogManagerRef, start_event_log_manager};
 use crate::manager::{IdleManager, IdleManagerRef, NotificationManager, NotificationManagerRef};
 use crate::model::ClusterId;
-use crate::MetaResult;
 
 /// [`MetaSrvEnv`] is the global environment in Meta service. The instance will be shared by all
 /// kind of managers inside Meta.

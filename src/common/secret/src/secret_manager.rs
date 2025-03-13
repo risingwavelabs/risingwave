@@ -17,17 +17,17 @@ use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
 
-use anyhow::{anyhow, Context};
-use parking_lot::lock_api::RwLockReadGuard;
+use anyhow::{Context, anyhow};
 use parking_lot::RwLock;
+use parking_lot::lock_api::RwLockReadGuard;
 use prost::Message;
 use risingwave_pb::catalog::PbSecret;
-use risingwave_pb::secret::secret_ref::RefAsType;
 use risingwave_pb::secret::PbSecretRef;
+use risingwave_pb::secret::secret_ref::RefAsType;
 use thiserror_ext::AsReport;
 
-use super::error::{SecretError, SecretResult};
 use super::SecretId;
+use super::error::{SecretError, SecretResult};
 
 static INSTANCE: std::sync::OnceLock<LocalSecretManager> = std::sync::OnceLock::new();
 
@@ -207,7 +207,7 @@ impl LocalSecretManager {
         let secret_value = match Self::get_pb_secret_backend(pb_secret_bytes)? {
             risingwave_pb::secret::secret::SecretBackend::Meta(backend) => backend.value.clone(),
             risingwave_pb::secret::secret::SecretBackend::HashicorpVault(_) => {
-                return Err(anyhow!("hashicorp_vault backend is not implemented yet").into())
+                return Err(anyhow!("hashicorp_vault backend is not implemented yet").into());
             }
         };
         Ok(secret_value)

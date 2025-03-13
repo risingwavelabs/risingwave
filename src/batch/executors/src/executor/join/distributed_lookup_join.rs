@@ -27,19 +27,20 @@ use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::scan_range::ScanRange;
-use risingwave_expr::expr::{build_from_prost, BoxedExpression};
+use risingwave_expr::expr::{BoxedExpression, build_from_prost};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_storage::store::PrefetchOptions;
-use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::TableIter;
-use risingwave_storage::{dispatch_state_store, StateStore};
+use risingwave_storage::table::batch_table::BatchTable;
+use risingwave_storage::{StateStore, dispatch_state_store};
 
+use super::AsOfDesc;
 use crate::error::Result;
 use crate::executor::join::JoinType;
 use crate::executor::{
-    unix_timestamp_sec_to_epoch, AsOf, BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder,
-    BufferChunkExecutor, Executor, ExecutorBuilder, LookupExecutorBuilder, LookupJoinBase,
+    AsOf, BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, BufferChunkExecutor, Executor,
+    ExecutorBuilder, LookupExecutorBuilder, LookupJoinBase, unix_timestamp_sec_to_epoch,
 };
 
 /// Distributed Lookup Join Executor.
@@ -187,6 +188,11 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
 
         let chunk_size = source.context().get_config().developer.chunk_size;
 
+        let asof_desc = distributed_lookup_join_node
+            .asof_desc
+            .map(|desc| AsOfDesc::from_protobuf(&desc))
+            .transpose()?;
+
         let column_ids = inner_side_column_ids
             .iter()
             .copied()
@@ -197,7 +203,7 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
         let vnodes = Some(Bitmap::ones(table_desc.vnode_count()).into());
 
         dispatch_state_store!(source.context().state_store(), state_store, {
-            let table = StorageTable::new_partial(state_store, column_ids, vnodes, table_desc);
+            let table = BatchTable::new_partial(state_store, column_ids, vnodes, table_desc);
             let inner_side_builder = InnerSideExecutorBuilder::new(
                 outer_side_key_types,
                 inner_side_key_types.clone(),
@@ -225,6 +231,7 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
                 schema: actual_schema,
                 output_indices,
                 chunk_size,
+                asof_desc,
                 identity: identity.clone(),
                 shutdown_rx: source.shutdown_rx().clone(),
                 mem_ctx: source.context().create_executor_mem_context(&identity),
@@ -249,6 +256,7 @@ struct DistributedLookupJoinExecutorArgs {
     schema: Schema,
     output_indices: Vec<usize>,
     chunk_size: usize,
+    asof_desc: Option<AsOfDesc>,
     identity: String,
     shutdown_rx: ShutdownToken,
     mem_ctx: MemoryContext,
@@ -274,6 +282,7 @@ impl HashKeyDispatcher for DistributedLookupJoinExecutorArgs {
                 schema: self.schema,
                 output_indices: self.output_indices,
                 chunk_size: self.chunk_size,
+                asof_desc: self.asof_desc,
                 identity: self.identity,
                 shutdown_rx: self.shutdown_rx,
                 mem_ctx: self.mem_ctx,
@@ -294,7 +303,7 @@ struct InnerSideExecutorBuilder<S: StateStore> {
     lookup_prefix_len: usize,
     epoch: BatchQueryEpoch,
     row_list: Vec<OwnedRow>,
-    table: StorageTable<S>,
+    table: BatchTable<S>,
     chunk_size: usize,
 }
 
@@ -305,7 +314,7 @@ impl<S: StateStore> InnerSideExecutorBuilder<S> {
         lookup_prefix_len: usize,
         epoch: BatchQueryEpoch,
         row_list: Vec<OwnedRow>,
-        table: StorageTable<S>,
+        table: BatchTable<S>,
         chunk_size: usize,
     ) -> Self {
         Self {

@@ -101,7 +101,7 @@ IcebergProperties:
     required: false
   - name: warehouse.path
     field_type: String
-    comments: Path of iceberg warehouse, only applicable in storage catalog.
+    comments: Path of iceberg warehouse.
     required: false
   - name: glue.id
     field_type: String
@@ -111,9 +111,7 @@ IcebergProperties:
     required: false
   - name: catalog.name
     field_type: String
-    comments: |-
-      Catalog name, can be omitted for storage catalog, but
-      must be set for other catalogs.
+    comments: Catalog name, default value is risingwave.
     required: false
   - name: catalog.uri
     field_type: String
@@ -156,7 +154,7 @@ IcebergProperties:
     default: Default::default
   - name: enable_config_load
     field_type: bool
-    comments: enable config load currently is used by iceberg engine, so it only support jdbc catalog.
+    comments: enable config load.
     required: false
     default: Default::default
   - name: catalog.jdbc.user
@@ -429,6 +427,9 @@ KafkaProperties:
     required: false
     alias:
     - profile
+  - name: aws.msk.signer_timeout_sec
+    field_type: u64
+    required: false
 KinesisProperties:
   fields:
   - name: scan.startup.mode
@@ -479,33 +480,6 @@ KinesisProperties:
     required: false
     alias:
     - kinesis.assumerole.external_id
-LegacyS3Properties:
-  fields:
-  - name: s3.region_name
-    field_type: String
-    required: true
-  - name: s3.bucket_name
-    field_type: String
-    required: true
-  - name: match_pattern
-    field_type: String
-    required: false
-    default: Default::default
-  - name: s3.credentials.access
-    field_type: String
-    required: false
-    default: Default::default
-  - name: s3.credentials.secret
-    field_type: String
-    required: false
-    default: Default::default
-  - name: s3.endpoint_url
-    field_type: String
-    required: false
-  - name: compression_format
-    field_type: CompressionFormat
-    required: false
-    default: Default::default
 MongodbCommon:
   fields:
   - name: mongodb.url
@@ -1080,6 +1054,9 @@ PulsarProperties:
     required: false
     alias:
     - profile
+  - name: aws.msk.signer_timeout_sec
+    field_type: u64
+    required: false
   - name: iceberg.enabled
     field_type: bool
     required: false

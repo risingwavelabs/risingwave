@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::mem::take;
 
 use risingwave_common::catalog::TableId;
@@ -22,16 +22,16 @@ use risingwave_meta_model::ObjectId;
 use risingwave_pb::catalog::CreateType;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
-use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 use risingwave_pb::stream_service::PbBarrierCompleteResponse;
+use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 
+use crate::MetaResult;
 use crate::barrier::info::BarrierInfo;
 use crate::barrier::{
     Command, CreateStreamingJobCommandInfo, CreateStreamingJobType, ReplaceStreamJobPlan,
 };
 use crate::manager::{MetadataManager, StreamingJobType};
 use crate::model::{ActorId, BackfillUpstreamType, StreamJobFragments};
-use crate::MetaResult;
 
 type ConsumedRows = u64;
 
@@ -320,7 +320,7 @@ impl CreateMviewProgressTracker {
             let progress = Self::recover_progress(
                 states,
                 backfill_upstream_types,
-                table_fragments.dependent_table_ids(),
+                table_fragments.upstream_table_counts(),
                 definition,
                 version_stats,
             );
@@ -429,7 +429,7 @@ impl CreateMviewProgressTracker {
         version_stats: &HummockVersionStats,
     ) -> Vec<TrackingJob> {
         let new_tracking_job_info =
-            if let Some(Command::CreateStreamingJob { info, job_type }) = command {
+            if let Some(Command::CreateStreamingJob { info, job_type, .. }) = command {
                 match job_type {
                     CreateStreamingJobType::Normal => Some((info, None)),
                     CreateStreamingJobType::SinkIntoTable(replace_stream_job) => {
@@ -519,8 +519,6 @@ impl CreateMviewProgressTracker {
 
         let CreateStreamingJobCommandInfo {
             stream_job_fragments: table_fragments,
-            upstream_root_actors,
-            dispatchers,
             definition,
             job_type,
             create_type,
@@ -528,29 +526,9 @@ impl CreateMviewProgressTracker {
         } = &info;
 
         let creating_mv_id = table_fragments.stream_job_id();
-
-        let (upstream_mv_count, upstream_total_key_count, job_type, create_type) = {
-            // Keep track of how many times each upstream MV appears.
-            let mut upstream_mv_count = HashMap::new();
-            for (table_id, actors) in upstream_root_actors {
-                assert!(!actors.is_empty());
-                let dispatch_count: usize = dispatchers
-                    .iter()
-                    .filter(|(upstream_actor_id, _)| actors.contains(upstream_actor_id))
-                    .map(|(_, v)| v.len())
-                    .sum();
-                upstream_mv_count.insert(*table_id, dispatch_count / actors.len());
-            }
-
-            let upstream_total_key_count: u64 =
-                calculate_total_key_count(&upstream_mv_count, version_stats);
-            (
-                upstream_mv_count,
-                upstream_total_key_count,
-                job_type,
-                create_type,
-            )
-        };
+        let upstream_mv_count = table_fragments.upstream_table_counts();
+        let upstream_total_key_count: u64 =
+            calculate_total_key_count(&upstream_mv_count, version_stats);
 
         for (actor, _backfill_upstream_type) in &actors {
             self.actor_map.insert(*actor, creating_mv_id);

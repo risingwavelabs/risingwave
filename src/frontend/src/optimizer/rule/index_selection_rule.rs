@@ -63,16 +63,16 @@ use risingwave_sqlparser::ast::AsOf;
 use super::{BoxedRule, Rule};
 use crate::catalog::IndexCatalog;
 use crate::expr::{
-    to_conjunctions, to_disjunctions, Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor,
-    FunctionCall, InputRef,
+    Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef, to_conjunctions,
+    to_disjunctions,
 };
+use crate::optimizer::PlanRef;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
-    generic, ColumnPruningContext, LogicalJoin, LogicalScan, LogicalUnion, PlanTreeNode,
-    PlanTreeNodeBinary, PredicatePushdown, PredicatePushdownContext,
+    ColumnPruningContext, LogicalJoin, LogicalScan, LogicalUnion, PlanTreeNode, PlanTreeNodeBinary,
+    PredicatePushdown, PredicatePushdownContext, generic,
 };
-use crate::optimizer::PlanRef;
 use crate::utils::Condition;
 
 const INDEX_MAX_LEN: usize = 5;

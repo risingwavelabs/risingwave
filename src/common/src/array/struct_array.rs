@@ -28,8 +28,8 @@ use crate::array::ArrayRef;
 use crate::bitmap::{Bitmap, BitmapBuilder};
 use crate::error::BoxedError;
 use crate::types::{
-    hash_datum, DataType, Datum, DatumRef, DefaultOrd, Scalar, ScalarImpl, StructType, ToDatumRef,
-    ToText,
+    DataType, Datum, DatumRef, DefaultOrd, Scalar, ScalarImpl, StructType, ToDatumRef, ToText,
+    hash_datum,
 };
 use crate::util::iter_util::{ZipEqDebug, ZipEqFast};
 use crate::util::memcmp_encoding;

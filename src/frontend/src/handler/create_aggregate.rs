@@ -15,13 +15,13 @@
 use anyhow::Context;
 use either::Either;
 use risingwave_common::catalog::FunctionId;
-use risingwave_expr::sig::{CreateFunctionOptions, UdfKind};
-use risingwave_pb::catalog::function::{AggregateFunction, Kind};
+use risingwave_expr::sig::{CreateOptions, UdfKind};
 use risingwave_pb::catalog::Function;
+use risingwave_pb::catalog::function::{AggregateFunction, Kind};
 use risingwave_sqlparser::ast::DataType as AstDataType;
 
 use super::*;
-use crate::{bind_data_type, Binder};
+use crate::{Binder, bind_data_type};
 
 pub async fn handle_create_aggregate(
     handler_args: HandlerArgs,
@@ -46,7 +46,7 @@ pub async fn handle_create_aggregate(
                         "language {} is not supported",
                         lang
                     ))
-                    .into())
+                    .into());
                 }
             }
         }
@@ -95,7 +95,7 @@ pub async fn handle_create_aggregate(
     };
     let base64_decoded = match &params.using {
         Some(CreateFunctionUsing::Base64(encoded)) => {
-            use base64::prelude::{Engine, BASE64_STANDARD};
+            use base64::prelude::{BASE64_STANDARD, Engine};
             let bytes = BASE64_STANDARD
                 .decode(encoded)
                 .context("invalid base64 encoding")?;
@@ -105,7 +105,7 @@ pub async fn handle_create_aggregate(
     };
 
     let create_fn = risingwave_expr::sig::find_udf_impl(&language, None, link)?.create_fn;
-    let output = create_fn(CreateFunctionOptions {
+    let output = create_fn(CreateOptions {
         kind: UdfKind::Aggregate,
         name: &function_name,
         arg_names: &arg_names,
@@ -127,12 +127,14 @@ pub async fn handle_create_aggregate(
         return_type: Some(return_type.into()),
         language,
         runtime,
-        identifier: Some(output.identifier),
+        name_in_runtime: Some(output.name_in_runtime),
         link: link.map(|s| s.to_owned()),
         body: output.body,
         compressed_binary: output.compressed_binary,
         owner: session.user_id(),
         always_retry_on_network_error: false,
+        is_async: None,
+        is_batched: None,
     };
 
     let catalog_writer = session.catalog_writer()?;

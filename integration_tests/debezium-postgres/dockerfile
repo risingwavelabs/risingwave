@@ -1,10 +1,10 @@
 FROM quay.io/debezium/connect:2.5.0.Final
 
-ENV AVRO_PLUGION_DIR=$KAFKA_CONNECT_PLUGINS_DIR/confluent-avro-plugin
+ENV AVRO_PLUGIN_DIR=$KAFKA_CONNECT_PLUGINS_DIR/confluent-avro-plugin
 
 ARG CONFLUENT_PLUGIN_VERSION=5.3.0
 
-RUN mkdir $AVRO_PLUGION_DIR && cd $AVRO_PLUGION_DIR && \
+RUN mkdir $AVRO_PLUGIN_DIR && cd $AVRO_PLUGIN_DIR && \
   curl -sO https://packages.confluent.io/maven/io/confluent/kafka-connect-avro-converter/$CONFLUENT_PLUGIN_VERSION/kafka-connect-avro-converter-$CONFLUENT_PLUGIN_VERSION.jar && \
   curl -sO https://packages.confluent.io/maven/io/confluent/kafka-connect-avro-data/$CONFLUENT_PLUGIN_VERSION/kafka-connect-avro-data-$CONFLUENT_PLUGIN_VERSION.jar && \
   curl -sO https://packages.confluent.io/maven/io/confluent/common-config/$CONFLUENT_PLUGIN_VERSION/common-config-$CONFLUENT_PLUGIN_VERSION.jar && \

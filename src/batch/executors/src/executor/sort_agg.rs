@@ -20,7 +20,7 @@ use risingwave_common::array::{Array, ArrayBuilderImpl, ArrayImpl, DataChunk, St
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::aggregate::{AggCall, AggregateState, BoxedAggregateFunction};
-use risingwave_expr::expr::{build_from_prost, BoxedExpression};
+use risingwave_expr::expr::{BoxedExpression, build_from_prost};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::error::{BatchError, Result};

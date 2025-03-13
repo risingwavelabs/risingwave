@@ -20,6 +20,7 @@ use risingwave_common::util::sort_util::ColumnOrder;
 use super::top_n_cache::TopNStaging;
 use super::utils::*;
 use super::{ManagedTopNState, TopNCache, TopNCacheTrait};
+use crate::common::table::state_table::StateTablePostCommit;
 use crate::executor::prelude::*;
 
 /// `TopNExecutor` works with input with modification, it keeps all the data
@@ -127,6 +128,8 @@ impl<S: StateStore, const WITH_TIES: bool> TopNExecutorBase for InnerTopNExecuto
 where
     TopNCache<WITH_TIES>: TopNCacheTrait,
 {
+    type State = S;
+
     async fn apply_chunk(
         &mut self,
         chunk: StreamChunk,
@@ -173,7 +176,10 @@ where
         Ok(chunk_builder.take())
     }
 
-    async fn flush_data(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
+    async fn flush_data(
+        &mut self,
+        epoch: EpochPair,
+    ) -> StreamExecutorResult<StateTablePostCommit<'_, S>> {
         self.managed_state.flush(epoch).await
     }
 
@@ -202,8 +208,8 @@ mod tests {
     use risingwave_common::util::sort_util::OrderType;
 
     use super::*;
-    use crate::executor::test_utils::top_n_executor::create_in_memory_state_table;
     use crate::executor::test_utils::MockSource;
+    use crate::executor::test_utils::top_n_executor::create_in_memory_state_table;
     use crate::executor::{Barrier, Message};
 
     mod test1 {
@@ -623,8 +629,8 @@ mod tests {
         use risingwave_storage::memory::MemoryStateStore;
 
         use super::*;
-        use crate::executor::test_utils::top_n_executor::create_in_memory_state_table_from_state_store;
         use crate::executor::test_utils::StreamExecutorTestExt;
+        use crate::executor::test_utils::top_n_executor::create_in_memory_state_table_from_state_store;
         fn create_source_new() -> Executor {
             let mut chunks = vec![
                 StreamChunk::from_pretty(
@@ -715,10 +721,10 @@ mod tests {
                 ],
             };
             MockSource::with_messages(vec![
-                Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
                 Message::Chunk(std::mem::take(&mut chunks[0])),
                 Message::Chunk(std::mem::take(&mut chunks[1])),
-                Message::Barrier(Barrier::new_test_barrier(test_epoch(4))),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
             ])
             .into_executor(schema, pk_indices())
         }
@@ -907,8 +913,8 @@ mod tests {
         use risingwave_storage::memory::MemoryStateStore;
 
         use super::*;
-        use crate::executor::test_utils::top_n_executor::create_in_memory_state_table_from_state_store;
         use crate::executor::test_utils::StreamExecutorTestExt;
+        use crate::executor::test_utils::top_n_executor::create_in_memory_state_table_from_state_store;
 
         fn create_source() -> Executor {
             let mut chunks = vec![
@@ -1095,10 +1101,10 @@ mod tests {
                 ],
             };
             MockSource::with_messages(vec![
-                Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
                 Message::Chunk(std::mem::take(&mut chunks[0])),
                 Message::Chunk(std::mem::take(&mut chunks[1])),
-                Message::Barrier(Barrier::new_test_barrier(test_epoch(4))),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
             ])
             .into_executor(schema, pk_indices())
         }

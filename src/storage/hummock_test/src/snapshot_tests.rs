@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 // Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,27 +11,30 @@ use std::collections::HashSet;
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
+use std::collections::HashSet;
 use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::Bytes;
 use foyer::CacheHint;
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::util::epoch::{test_epoch, EpochExt};
-use risingwave_hummock_sdk::key::prefixed_range_with_vnode;
+use risingwave_common::util::epoch::{EpochExt, test_epoch};
 use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_hummock_sdk::key::prefixed_range_with_vnode;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
+use risingwave_storage::StateStore;
+use risingwave_storage::hummock::test_utils::*;
 use risingwave_storage::hummock::{CachePolicy, HummockStorage};
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{
     LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions, SealCurrentEpochOptions,
-    StateStoreRead, TryWaitEpochOptions, WriteOptions,
+    TryWaitEpochOptions, WriteOptions,
 };
-use risingwave_storage::StateStore;
 
 use crate::local_state_store_test_utils::LocalStateStoreTestExt;
-use crate::test_utils::{gen_key_from_bytes, with_hummock_storage, TestIngestBatch};
+use crate::test_utils::{TestIngestBatch, gen_key_from_bytes, with_hummock_storage};
 
 macro_rules! assert_count_range_scan {
     (

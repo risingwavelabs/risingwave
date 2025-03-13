@@ -16,11 +16,11 @@ use std::collections::HashMap;
 use std::pin::pin;
 use std::time::{Duration, Instant, SystemTime};
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use aws_credential_types::provider::SharedCredentialsProvider;
+use aws_sdk_emrserverless::Client;
 use aws_sdk_emrserverless::types::builders::SparkSubmitBuilder;
 use aws_sdk_emrserverless::types::{JobDriver, JobRunState};
-use aws_sdk_emrserverless::Client;
 use aws_types::region::Region;
 use futures::future::select;
 use itertools::Itertools;
@@ -186,6 +186,7 @@ fn get_catalog_config(config: &IcebergConfig) -> anyhow::Result<HashMap<String, 
     }
 }
 
+#[expect(dead_code)]
 pub fn spawn_compaction_client(
     config: &IcebergConfig,
 ) -> anyhow::Result<(mpsc::UnboundedSender<()>, oneshot::Sender<()>)> {

@@ -23,10 +23,10 @@ use risingwave_pb::batch_plan::iceberg_scan_node::IcebergScanType;
 use super::{ApplyResult, BoxedRule, FallibleRule};
 use crate::error::Result;
 use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
+use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::utils::to_iceberg_time_travel_as_of;
 use crate::optimizer::plan_node::{LogicalIcebergScan, LogicalJoin, LogicalSource};
-use crate::optimizer::PlanRef;
 use crate::utils::{Condition, FRONTEND_RUNTIME};
 
 pub struct SourceToIcebergScanRule {}

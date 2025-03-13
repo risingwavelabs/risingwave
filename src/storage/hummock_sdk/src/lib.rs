@@ -23,6 +23,8 @@
 #![feature(strict_overflow_ops)]
 
 mod key_cmp;
+
+use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
@@ -30,7 +32,7 @@ use std::ops::{Add, Sub};
 
 pub use key_cmp::*;
 use risingwave_common::util::epoch::EPOCH_SPILL_TIME_MASK;
-use risingwave_pb::common::{batch_query_epoch, BatchQueryEpoch};
+use risingwave_pb::common::{BatchQueryEpoch, batch_query_epoch};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sstable_info::SstableInfo;
 use tracing::warn;
@@ -297,12 +299,13 @@ impl SstObjectIdRange {
     }
 }
 
-pub fn can_concat(ssts: &[SstableInfo]) -> bool {
+pub fn can_concat(ssts: &[impl Borrow<SstableInfo>]) -> bool {
     let len = ssts.len();
     for i in 1..len {
         if ssts[i - 1]
+            .borrow()
             .key_range
-            .compare_right_with(&ssts[i].key_range.left)
+            .compare_right_with(&ssts[i].borrow().key_range.left)
             != Ordering::Less
         {
             return false;

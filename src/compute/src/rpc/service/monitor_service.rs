@@ -28,18 +28,18 @@ use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_jni_core::jvm_runtime::dump_jvm_stack_traces;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorService;
 use risingwave_pb::monitor_service::{
-    AnalyzeHeapRequest, AnalyzeHeapResponse, ChannelStats, FragmentStats, GetStreamingStatsRequest,
-    GetStreamingStatsResponse, HeapProfilingRequest, HeapProfilingResponse,
-    ListHeapProfilingRequest, ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse,
-    RelationStats, StackTraceRequest, StackTraceResponse, TieredCacheTracingRequest,
-    TieredCacheTracingResponse,
+    AnalyzeHeapRequest, AnalyzeHeapResponse, ChannelStats, FragmentStats, GetProfileStatsRequest,
+    GetProfileStatsResponse, GetStreamingStatsRequest, GetStreamingStatsResponse,
+    HeapProfilingRequest, HeapProfilingResponse, ListHeapProfilingRequest,
+    ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse, RelationStats,
+    StackTraceRequest, StackTraceResponse, TieredCacheTracingRequest, TieredCacheTracingResponse,
 };
 use risingwave_rpc_client::error::ToTonicStatus;
 use risingwave_storage::hummock::compactor::await_tree_key::Compaction;
 use risingwave_storage::hummock::{Block, Sstable, SstableBlockIndex};
 use risingwave_stream::executor::monitor::global_streaming_metrics;
-use risingwave_stream::task::await_tree_key::{Actor, BarrierAwait};
 use risingwave_stream::task::LocalStreamManager;
+use risingwave_stream::task::await_tree_key::{Actor, BarrierAwait};
 use thiserror_ext::AsReport;
 use tonic::{Code, Request, Response, Status};
 
@@ -288,6 +288,24 @@ impl MonitorService for MonitorServiceImpl {
         Ok(Response::new(AnalyzeHeapResponse { result: file }))
     }
 
+    async fn get_profile_stats(
+        &self,
+        request: Request<GetProfileStatsRequest>,
+    ) -> Result<Response<GetProfileStatsResponse>, Status> {
+        let metrics = global_streaming_metrics(MetricLevel::Info);
+        let operator_ids = &request.into_inner().operator_ids;
+        let stream_node_output_row_count = metrics
+            .mem_stream_node_output_row_count
+            .collect(operator_ids);
+        let stream_node_output_blocking_duration_ms = metrics
+            .mem_stream_node_output_blocking_duration_ms
+            .collect(operator_ids);
+        Ok(Response::new(GetProfileStatsResponse {
+            stream_node_output_row_count,
+            stream_node_output_blocking_duration_ms,
+        }))
+    }
+
     #[cfg_attr(coverage, coverage(off))]
     async fn get_streaming_stats(
         &self,
@@ -513,8 +531,8 @@ impl MonitorService for MonitorServiceImpl {
 pub use grpc_middleware::*;
 
 pub mod grpc_middleware {
-    use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::task::{Context, Poll};
 
     use either::Either;

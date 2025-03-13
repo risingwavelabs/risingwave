@@ -15,7 +15,6 @@
 pub use {Source as SourceModel, Table as TableModel};
 
 pub use super::actor::Entity as Actor;
-pub use super::actor_dispatcher::Entity as ActorDispatcher;
 pub use super::catalog_version::Entity as CatalogVersion;
 pub use super::cluster::Entity as Cluster;
 pub use super::compaction_config::Entity as CompactionConfig;
@@ -24,6 +23,7 @@ pub use super::compaction_task::Entity as CompactionTask;
 pub use super::connection::Entity as Connection;
 pub use super::database::Entity as Database;
 pub use super::fragment::Entity as Fragment;
+pub use super::fragment_relation::Entity as FragmentRelation;
 pub use super::function::Entity as Function;
 pub use super::hummock_pinned_snapshot::Entity as HummockPinnedSnapshot;
 pub use super::hummock_pinned_version::Entity as HummockPinnedVersion;

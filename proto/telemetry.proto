@@ -102,6 +102,9 @@ message MetaReport {
 
   // The object store media type obtained from ObjectStore::store_media_type
   string object_store_media_type = 8;
+
+  // The connector usage of the cluster
+  string connector_usage_json_str = 9;
 }
 
 enum PlanOptimization {
