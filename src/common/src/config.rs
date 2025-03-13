@@ -164,6 +164,10 @@ pub struct RwConfig {
     #[config_doc(nested)]
     pub system: SystemConfig,
 
+    #[serde(default)]
+    #[config_doc(nested)]
+    pub udf: UdfConfig,
+
     #[serde(flatten)]
     #[config_doc(omitted)]
     pub unrecognized: Unrecognized<Self>,
@@ -649,6 +653,21 @@ pub struct FrontendConfig {
     /// A query of size exceeding this threshold will always be rejected due to memory constraints.
     #[serde(default = "default::frontend::max_single_query_size_bytes")]
     pub max_single_query_size_bytes: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
+pub struct UdfConfig {
+    /// Allow embedded Python UDFs to be created.
+    #[serde(default = "default::udf::enable_embedded_python_udf")]
+    pub enable_embedded_python_udf: bool,
+
+    /// Allow embedded JS UDFs to be created.
+    #[serde(default = "default::udf::enable_embedded_javascript_udf")]
+    pub enable_embedded_javascript_udf: bool,
+
+    /// Allow embedded WASM UDFs to be created.
+    #[serde(default = "default::udf::enable_embedded_wasm_udf")]
+    pub enable_embedded_wasm_udf: bool,
 }
 
 /// The section `[streaming]` in `risingwave.toml`.
@@ -2252,6 +2271,20 @@ pub mod default {
 
         pub fn max_single_query_size_bytes() -> u64 {
             1024 * 1024 * 1024
+        }
+    }
+
+    pub mod udf {
+        pub fn enable_embedded_python_udf() -> bool {
+            false
+        }
+
+        pub fn enable_embedded_javascript_udf() -> bool {
+            true
+        }
+
+        pub fn enable_embedded_wasm_udf() -> bool {
+            true
         }
     }
 
