@@ -881,9 +881,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c804d310735f80b04e818b62e83b450f4cf1e246b970ca605ef46f99d4480c1b"
 dependencies = [
  "anyhow",
- "arrow-array 53.2.0",
- "arrow-buffer 53.2.0",
- "arrow-schema 53.2.0",
+ "arrow-array 54.2.1",
+ "arrow-buffer 54.2.1",
+ "arrow-schema 54.2.1",
  "atomic-time",
  "futures-util",
  "reqwest 0.12.4",
@@ -899,10 +899,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6a946b648352e6226d35801441c3e06b90e3757634ff34f3017b14e019260dfe"
 dependencies = [
  "anyhow",
- "arrow-array 53.2.0",
- "arrow-buffer 53.2.0",
- "arrow-ipc 53.2.0",
- "arrow-schema 53.2.0",
+ "arrow-array 54.2.1",
+ "arrow-buffer 54.2.1",
+ "arrow-ipc 54.2.1",
+ "arrow-schema 54.2.1",
  "pyo3",
  "pyo3-build-config",
 ]
@@ -914,9 +914,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f4ce3bb9df64ed6e1a66d628344f85a79e2a8d124866b3c8587ad1c1f73eb4ae"
 dependencies = [
  "anyhow",
- "arrow-array 53.2.0",
- "arrow-ipc 53.2.0",
- "arrow-schema 53.2.0",
+ "arrow-array 54.2.1",
+ "arrow-ipc 54.2.1",
+ "arrow-schema 54.2.1",
  "async-trait",
  "base64 0.22.0",
  "genawaiter2",
@@ -14464,9 +14464,9 @@ dependencies = [
 
 [[package]]
 name = "tinyvec"
-version = "1.8.0"
+version = "1.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "445e881f4f6d382d5f27c034e25eb92edd7c784ceab92a0937db7f2e9471b938"
+checksum = "09b3661f17e86524eccd4371ab0429194e0d7c008abb45f7a7495b1719463c71"
 dependencies = [
  "tinyvec_macros",
 ]
