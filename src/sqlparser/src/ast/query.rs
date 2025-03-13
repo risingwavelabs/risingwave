@@ -347,7 +347,7 @@ impl fmt::Display for Cte {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum CteInner {
-    Query(Query),
+    Query(Box<Query>),
     ChangeLog(ObjectName),
 }
 

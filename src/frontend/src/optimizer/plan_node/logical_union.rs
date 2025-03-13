@@ -259,7 +259,7 @@ impl ToStream for LogicalUnion {
                 for (key, val) in max_types_counter {
                     let _ = types_offset.insert(key.clone(), offset);
                     offset += val;
-                    merged_stream_key_types.extend(std::iter::repeat(key.clone()).take(val));
+                    merged_stream_key_types.extend(std::iter::repeat_n(key.clone(), val));
                 }
 
                 (merged_stream_key_types, types_offset)

@@ -1706,9 +1706,11 @@ impl Compaction {
         self.compact_task_assignment
             .iter()
             .filter_map(|(_, assignment)| {
-                if assignment.compact_task.as_ref().map_or(false, |task| {
-                    task.compaction_group_id == compaction_group_id
-                }) {
+                if assignment
+                    .compact_task
+                    .as_ref()
+                    .is_some_and(|task| task.compaction_group_id == compaction_group_id)
+                {
                     Some(CompactTaskAssignment {
                         compact_task: assignment.compact_task.clone(),
                         context_id: assignment.context_id,
@@ -1781,7 +1783,7 @@ fn too_many_l0_file_count(levels: &Levels, compaction_config: &CompactionConfig)
 }
 
 fn too_many_l0_partition_count(levels: &Levels, compaction_config: &CompactionConfig) -> bool {
-    levels.l0.sub_levels.first().map_or(false, |l| {
+    levels.l0.sub_levels.first().is_some_and(|l| {
         l.table_infos.len()
             > compaction_config
                 .emergency_level0_sub_level_partition

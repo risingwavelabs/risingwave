@@ -12,14 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(async_closure)]
 #![allow(clippy::derive_partial_eq_without_eq)]
 #![feature(map_try_insert)]
 #![feature(negative_impls)]
 #![feature(coroutines)]
 #![feature(proc_macro_hygiene, stmt_expr_attributes)]
 #![feature(trait_alias)]
-#![feature(extract_if)]
 #![feature(if_let_guard)]
 #![feature(let_chains)]
 #![feature(assert_matches)]
