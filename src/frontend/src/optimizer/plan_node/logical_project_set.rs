@@ -204,7 +204,6 @@ impl PlanTreeNodeUnary for LogicalProjectSet {
         Self::new(input, self.select_list().clone())
     }
 
-    #[must_use]
     fn rewrite_with_input(
         &self,
         input: PlanRef,

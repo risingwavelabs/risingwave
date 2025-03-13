@@ -21,6 +21,25 @@ create table shipments (
  slot.name = 'shipments'
 );
 
+# invalid not null
+statement error CDC table with NOT NULL constraint is not supported
+create table shipments (
+  shipment_id INTEGER,
+  order_id INTEGER,
+  origin STRING,
+  destination STRING NOT NULL,
+  is_arrived boolean NOT NULL,
+ PRIMARY KEY (shipment_id)
+) with (
+ connector = 'postgres-cdc',
+ hostname = '${PGHOST:localhost}',
+ port = '${PGPORT:5432}',
+ username = '${PGUSER:$USER}',
+ password = '${PGPASSWORD:}',
+ database.name = '${PGDATABASE:postgres}',
+ table.name = 'shipments',
+ slot.name = 'shipments'
+);
 
 # invalid password
 statement error

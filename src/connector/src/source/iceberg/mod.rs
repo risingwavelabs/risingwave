@@ -296,7 +296,7 @@ impl IcebergSplitEnumerator {
     pub async fn list_splits_batch(
         &self,
         schema: Schema,
-        time_travel_info: Option<IcebergTimeTravelInfo>,
+        time_traval_info: Option<IcebergTimeTravelInfo>,
         batch_parallelism: usize,
         iceberg_scan_type: IcebergScanType,
         predicate: IcebergPredicate,
@@ -305,7 +305,7 @@ impl IcebergSplitEnumerator {
             bail!("Batch parallelism is 0. Cannot split the iceberg files.");
         }
         let table = self.config.load_table().await?;
-        let snapshot_id = Self::get_snapshot_id(&table, time_travel_info)?;
+        let snapshot_id = Self::get_snapshot_id(&table, time_traval_info)?;
         if snapshot_id.is_none() {
             // If there is no snapshot, we will return a mock `IcebergSplit` with empty files.
             return Ok(vec![IcebergSplit::empty(iceberg_scan_type)]);

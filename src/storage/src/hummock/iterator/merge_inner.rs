@@ -271,7 +271,7 @@ where
     }
 
     fn is_valid(&self) -> bool {
-        self.heap.peek().map_or(false, |n| n.iter.is_valid())
+        self.heap.peek().is_some_and(|n| n.iter.is_valid())
     }
 
     async fn rewind(&mut self) -> HummockResult<()> {

@@ -907,7 +907,7 @@ mod dyn_state_store {
     }
 
     pub type BoxStateStoreIter<'a, T> = Box<dyn DynStateStoreIter<T> + 'a>;
-    impl<'a, T: IterItem> StateStoreIter<T> for BoxStateStoreIter<'a, T> {
+    impl<T: IterItem> StateStoreIter<T> for BoxStateStoreIter<'_, T> {
         fn try_next(
             &mut self,
         ) -> impl Future<Output = StorageResult<Option<T::ItemRef<'_>>>> + Send + '_ {
