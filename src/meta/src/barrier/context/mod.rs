@@ -25,7 +25,6 @@ use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_service::streaming_control_stream_request::PbInitRequest;
 use risingwave_rpc_client::StreamingControlHandle;
 
-use crate::MetaResult;
 use crate::barrier::command::CommandContext;
 use crate::barrier::progress::TrackingJob;
 use crate::barrier::schedule::{MarkReadyOptions, ScheduledBarriers};
@@ -36,6 +35,7 @@ use crate::barrier::{
 use crate::hummock::{CommitEpochInfo, HummockManagerRef};
 use crate::manager::{MetaSrvEnv, MetadataManager};
 use crate::stream::{ScaleControllerRef, SourceManagerRef};
+use crate::MetaResult;
 
 pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
     fn commit_epoch(

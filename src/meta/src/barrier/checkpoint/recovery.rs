@@ -36,8 +36,8 @@ use crate::barrier::worker::{
     get_retry_backoff_strategy, RetryBackoffFuture, RetryBackoffStrategy,
 };
 use crate::barrier::{DatabaseRuntimeInfoSnapshot, InflightSubscriptionInfo};
-use crate::MetaResult;
 use crate::rpc::metrics::GLOBAL_META_METRICS;
+use crate::MetaResult;
 
 /// We can treat each database as a state machine of 3 states: `Running`, `Resetting` and `Initializing`.
 /// The state transition can be triggered when receiving 3 variants of response: `ReportDatabaseFailure`, `BarrierComplete`, `DatabaseReset`.

@@ -32,7 +32,6 @@ use tokio::sync::oneshot;
 use tokio::time::{sleep, Instant};
 use tracing::warn;
 
-use crate::MetaResult;
 use crate::barrier::Reschedule;
 use crate::controller::catalog::CatalogControllerRef;
 use crate::controller::cluster::{ClusterControllerRef, StreamingClusterInfo, WorkerExtraInfo};
@@ -43,6 +42,7 @@ use crate::model::{
 };
 use crate::stream::SplitAssignment;
 use crate::telemetry::MetaTelemetryJobDesc;
+use crate::MetaResult;
 
 #[derive(Clone)]
 pub struct MetadataManager {
