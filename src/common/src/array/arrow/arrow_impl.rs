@@ -1428,7 +1428,6 @@ impl From<&arrow_array::Decimal256Array> for Int256Array {
 ///   - Arrow's `UInt32` matches with RisingWave's `Int64`.
 ///   - Arrow's `UInt64` matches with RisingWave's `Decimal`.
 /// - Arrow's `Float16` matches with RisingWave's `Float32`.
-
 pub fn is_parquet_schema_match_source_schema(
     arrow_data_type: &arrow_schema::DataType,
     rw_data_type: &crate::types::DataType,
