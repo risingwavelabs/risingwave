@@ -32,10 +32,12 @@ use super::{Result, ValueRowDeserializer, ValueRowSerializer};
 use crate::catalog::ColumnId;
 use crate::row::Row;
 use crate::types::{DataType, Datum, ScalarRefImpl, ToDatumRef};
-use crate::util::value_encoding::{
-    deserialize_value as plain_deserialize_scalar, serialize_scalar as plain_serialize_scalar,
-};
+use crate::util::value_encoding as plain;
 
+/// Serialize and deserialize functions that recursively use [`ColumnAwareSerde`] for nested fields
+/// of composite types.
+///
+/// Only for column with types that can be altered ([`DataType::can_alter`]).
 mod new_serde {
     use itertools::Itertools;
 
@@ -43,6 +45,9 @@ mod new_serde {
     use crate::array::{ListRef, ListValue, MapRef, MapValue, StructRef, StructValue};
     use crate::types::{MapType, ScalarImpl, StructType, data_types};
 
+    // --- serialize ---
+
+    // Copy of `plain` but call `new_` for the scalar.
     fn new_serialize_datum(
         data_type: &DataType,
         datum_ref: impl ToDatumRef,
@@ -56,17 +61,22 @@ mod new_serde {
         }
     }
 
+    // Different logic from `plain`:
+    //
+    // Recursively construct a new column-aware `Serializer` for nested fields.
     fn new_serialize_struct(struct_type: &StructType, value: StructRef<'_>, buf: &mut impl BufMut) {
         let serializer = super::Serializer::new(
             &struct_type.ids().unwrap().collect_vec(), // TODO: avoid this clone
             struct_type.types().cloned(),              // TODO: avoid this clone
         );
 
+        // `StructRef` is interpreted as a `Row` here.
         let bytes = serializer.serialize(value); // TODO: serialize into the buf directly
         buf.put_u32_le(bytes.len() as _);
         buf.put_slice(&bytes);
     }
 
+    // Copy of `plain` but call `new_` for the elements.
     fn new_serialize_list(inner_type: &DataType, value: ListRef<'_>, buf: &mut impl BufMut) {
         let elems = value.iter();
         buf.put_u32_le(elems.len() as u32);
@@ -76,8 +86,10 @@ mod new_serde {
         });
     }
 
-    // We don't reuse the serialization of `struct<k, v>[]` for map, as it introduces unnecessary
-    // overhead for column ids of `struct<k, v>`, which cannot accommodate schema changes.
+    // Different logic from `plain`:
+    //
+    // We don't reuse the serialization of `struct<k, v>[]` for map, as it introduces overhead
+    // for column ids of `struct<k, v>`. It's unnecessary because the shape of the map is fixed.
     fn new_serialize_map(map_type: &MapType, value: MapRef<'_>, buf: &mut impl BufMut) {
         let elems = value.iter();
         buf.put_u32_le(elems.len() as u32);
@@ -88,6 +100,7 @@ mod new_serde {
         });
     }
 
+    // Copy of `plain` but call `new_` for composite types.
     pub fn new_serialize_scalar(
         data_type: &DataType,
         value: ScalarRefImpl<'_>,
@@ -98,12 +111,13 @@ mod new_serde {
             ScalarRefImpl::List(l) => new_serialize_list(data_type.as_list(), l, buf),
             ScalarRefImpl::Map(m) => new_serialize_map(data_type.as_map(), m, buf),
 
-            _ => plain_serialize_scalar(value, buf),
+            _ => plain::serialize_scalar(value, buf),
         }
     }
 
     // --- deserialize ---
 
+    // Copy of `plain` but call `new_` for the scalar.
     fn new_inner_deserialize_datum(data: &mut &[u8], ty: &DataType) -> Result<Datum> {
         let null_tag = data.get_u8();
         match null_tag {
@@ -113,6 +127,9 @@ mod new_serde {
         }
     }
 
+    // Different logic from `plain`:
+    //
+    // Recursively construct a new column-aware `Deserializer` for nested fields.
     fn new_deserialize_struct(struct_def: &StructType, data: &mut &[u8]) -> Result<ScalarImpl> {
         let deserializer = super::Deserializer::new(
             &struct_def.ids().unwrap().collect_vec(), // TODO: avoid this clone
@@ -128,6 +145,7 @@ mod new_serde {
         Ok(ScalarImpl::Struct(StructValue::new(fields)))
     }
 
+    // Copy of `plain` but call `new_` for the elements.
     fn new_deserialize_list(item_type: &DataType, data: &mut &[u8]) -> Result<ScalarImpl> {
         let len = data.get_u32_le();
         let mut builder = item_type.create_array_builder(len as usize);
@@ -137,6 +155,10 @@ mod new_serde {
         Ok(ScalarImpl::List(ListValue::new(builder.finish())))
     }
 
+    // Different logic from `plain`:
+    //
+    // We don't reuse the deserialization of `struct<k, v>[]` for map, as it introduces overhead
+    // for column ids of `struct<k, v>`. It's unnecessary because the shape of the map is fixed.
     fn new_deserialize_map(map_type: &MapType, data: &mut &[u8]) -> Result<ScalarImpl> {
         let len = data.get_u32_le();
         let mut builder = map_type
@@ -154,13 +176,14 @@ mod new_serde {
         ))))
     }
 
+    // Copy of `plain` but call `new_` for composite types.
     pub fn new_deserialize_scalar(ty: &DataType, data: &mut &[u8]) -> Result<ScalarImpl> {
         Ok(match ty {
             DataType::Struct(struct_def) => new_deserialize_struct(struct_def, data)?,
             DataType::List(item_type) => new_deserialize_list(item_type, data)?,
             DataType::Map(map_type) => new_deserialize_map(map_type, data)?,
 
-            data_types::simple!() => plain_deserialize_scalar(ty, data)?,
+            data_types::simple!() => plain::deserialize_value(ty, data)?,
         })
     }
 }
@@ -244,10 +267,11 @@ where
 {
     fn encode_to(self, data_type: &DataType, data: &mut Vec<u8>) {
         if let Some(v) = self.to_datum_ref() {
+            // Use different encoding logic for alterable types.
             if data_type.can_alter() == Some(true) {
                 new_serde::new_serialize_scalar(data_type, v, data);
             } else {
-                plain_serialize_scalar(v, data);
+                plain::serialize_scalar(v, data);
             }
         }
     }
@@ -255,6 +279,7 @@ where
 
 impl Encode for Option<&[u8]> {
     fn encode_to(self, _data_type: &DataType, data: &mut Vec<u8>) {
+        // Already encoded, just copy the bytes.
         if let Some(v) = self {
             data.extend(v);
         }
@@ -320,10 +345,7 @@ pub struct Serializer {
 
 impl Serializer {
     /// Create a new `Serializer` with given `column_ids` and `data_types`.
-    pub fn new(
-        column_ids: &[ColumnId],
-        data_types: impl IntoIterator<Item = DataType>,
-    ) -> Self {
+    pub fn new(column_ids: &[ColumnId], data_types: impl IntoIterator<Item = DataType>) -> Self {
         // currently we hard-code ColumnId as i32
         let mut encoded_column_ids = Vec::with_capacity(column_ids.len() * 4);
         for id in column_ids {
@@ -482,7 +504,7 @@ impl ValueRowDeserializer for Deserializer {
             } else if data_type.can_alter() == Some(true) {
                 Some(new_serde::new_deserialize_scalar(data_type, &mut data)?)
             } else {
-                Some(plain_deserialize_scalar(data_type, &mut data)?)
+                Some(plain::deserialize_value(data_type, &mut data)?)
             };
 
             row[decoded_idx] = datum;
