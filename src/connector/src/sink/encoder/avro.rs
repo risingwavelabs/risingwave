@@ -553,6 +553,7 @@ fn on_field<D: MaybeData>(
                         risingwave_common::types::Decimal::Normalized(decimal) => {
                             let (bigint, scale) = rust_decimal_to_scaled_bigint(decimal);
                             if scale == decimal_schema.scale {
+                                // avro decimal can only construct from bytes and convert to bigint inner by `BigInt::from_signed_bytes_be`
                                 let (_, bytes) = bigint.to_bytes_be();
                                 Ok(Value::Decimal(apache_avro::Decimal::from( bytes.as_slice() )) )
                             }
