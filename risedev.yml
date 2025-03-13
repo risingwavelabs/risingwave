@@ -117,8 +117,8 @@ profile:
       - use: postgres
         port: 8432
         user: postgres
-        password: postgres
-        database: metadata
+        # password: postgres
+        # database: metadata
       - use: meta-node
         meta-backend: postgres
       - use: compute-node
@@ -126,8 +126,8 @@ profile:
       - use: compactor
       - use: prometheus
       - use: grafana
-      - use: kafka
-        persist-data: true
+      # - use: kafka
+      #   persist-data: true
 
   standalone-full-peripherals:
     steps:

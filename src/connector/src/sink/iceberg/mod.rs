@@ -69,7 +69,7 @@ use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
 use sea_orm::{
     ColumnTrait, DatabaseConnection, EntityTrait, Order, PaginatorTrait, QueryFilter, QueryOrder,
-    Set,
+    Set, TransactionTrait,
 };
 use serde_derive::Deserialize;
 use serde_json::from_value;
@@ -1455,8 +1455,10 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
                 }
                 tracing::info!("Iceberg commit coordinator inited.");
                 return Ok(Some(last_recommit_epoch));
-            }else{
-                tracing::info!("Recovery occurs, all pre committed data has been written into iceberg, just skip consuming previous log store.");
+            } else {
+                tracing::info!(
+                    "Recovery occurs, all pre committed data has been written into iceberg, just skip consuming previous log store."
+                );
                 return Ok(Some(u64::MAX));
             }
         }
@@ -1577,7 +1579,7 @@ impl IcebergSinkCommitter {
         tracing::info!(
             "Finish write pre_commit data into system table, sleep 5min before commit into iceberg to meet crash."
         );
-        tokio::time::sleep(Duration::from_secs(5 * 60)).await;
+        // tokio::time::sleep(Duration::from_secs(5 * 60)).await;
 
         let data_files = write_results
             .into_iter()
@@ -1631,8 +1633,8 @@ impl IcebergSinkCommitter {
         }
         tracing::info!("Succeeded to commit to iceberg table in epoch {epoch}.");
 
-        tracing::info!("Sleep 5min before delete iceberg system table");
-        tokio::time::sleep(Duration::from_secs(5 * 60)).await;
+        // tracing::info!("Sleep 5min before delete iceberg system table");
+        // tokio::time::sleep(Duration::from_secs(5 * 60)).await;
 
         if self.is_exactly_once {
             self.delete_row_by_sink_id_and_end_epoch(&self.db, self.sink_id, epoch)
@@ -1673,26 +1675,25 @@ impl IcebergSinkCommitter {
         sink_id: u32,
         end_epoch: u64,
     ) -> Result<()> {
-        match Entity::delete_many()
-            .filter(Column::SinkId.eq(sink_id))
-            .filter(Column::EndEpoch.eq(end_epoch))
-            .exec(db)
-            .await
+        let txn = db.begin().await?;
+        let a = match Entity::update(exactly_once_iceberg_sink::ActiveModel {
+            sink_id: Set(sink_id as _),
+            end_epoch: Set(end_epoch),
+            committed: Set(true),
+            ..Default::default()
+        })
+        // .filter(Column::SinkId.eq(sink_id))
+        // .filter(Column::EndEpoch.eq(end_epoch))
+        .exec(&txn)
+        .await
         {
             Ok(result) => {
-                let deleted_count = result.rows_affected;
 
-                if deleted_count == 0 {
-                    tracing::info!(
-                        "No item deleted in iceberg exactly once system table, end_epoch = {}.",
-                        end_epoch
-                    );
-                } else {
-                    tracing::info!(
-                        "Deleted item in iceberg exactly once system table, end_epoch = {}.",
-                        end_epoch
-                    );
-                }
+
+                tracing::info!(
+                    "No item deleted in iceberg exactly once system table, end_epoch = {}.",
+                    end_epoch
+                );
                 Ok(())
             }
             Err(e) => {
@@ -1702,7 +1703,10 @@ impl IcebergSinkCommitter {
                 );
                 Err(e.into())
             }
-        }
+        };
+
+        txn.commit().await?;
+        return a;
     }
 
     async fn iceberg_sink_has_pre_commit_metadata(
