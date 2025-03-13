@@ -119,7 +119,14 @@ enable_barrier_read = false
 statement_timeout_in_sec = 3600
 frontend_compute_runtime_worker_threads = 4
 mask_worker_temporary_secs = 30
-redact_sql_option_keywords = ["credential", "key", "password", "private", "secret", "token"]
+redact_sql_option_keywords = [
+    "credential",
+    "key",
+    "password",
+    "private",
+    "secret",
+    "token",
+]
 enable_spill = true
 
 [batch.developer]
@@ -305,3 +312,8 @@ license_key = ""
 time_travel_retention_ms = 600000
 adaptive_parallelism_strategy = "Auto"
 per_database_isolation = true
+
+[udf]
+enable_embedded_python_udf = false
+enable_embedded_javascript_udf = true
+enable_embedded_wasm_udf = true
