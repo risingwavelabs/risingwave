@@ -69,7 +69,7 @@ members = [
     "src/utils/workspace-config",
     "src/workspace-hack",
 ]
-exclude = ["e2e_test/udf/wasm", "lints"]
+exclude = ["e2e_test/source_inline/pubsub", "e2e_test/udf/wasm", "lints"]
 resolver = "2"
 
 [workspace.package]
@@ -306,6 +306,11 @@ mixed_attributes_style = "allow"
 too_long_first_doc_paragraph = "allow"
 str_to_string = "warn"
 string_to_string = "warn"
+
+# TODO: this makes sense, but it's too noisy for now (2025-03-10)
+large_enum_variant = "allow"
+# TODO: this makes sense, but it's too noisy for now (2025-03-10)
+result_large_err = "allow"
 
 [workspace.lints.rustdoc]
 private_intra_doc_links = "allow"

@@ -1154,7 +1154,9 @@ impl CatalogController {
                 }
 
                 if let Some(sink_id) = dropping_sink_id {
-                    let drained = incoming_sinks.extract_if(|id| *id == sink_id).collect_vec();
+                    let drained = incoming_sinks
+                        .extract_if(.., |id| *id == sink_id)
+                        .collect_vec();
                     debug_assert_eq!(drained, vec![sink_id]);
                 }
 

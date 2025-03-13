@@ -831,7 +831,7 @@ pub(super) fn merge_node_rpc_errors<E: Error + Send + Sync + 'static>(
     if let Some(max_score) = max_score {
         let mut errors = errors;
         let max_scored = errors
-            .extract_if(|(_, e)| request_value::<Score>(e) == Some(max_score))
+            .extract_if(.., |(_, e)| request_value::<Score>(e) == Some(max_score))
             .next()
             .unwrap();
 

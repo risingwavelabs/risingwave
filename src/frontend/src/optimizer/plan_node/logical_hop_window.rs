@@ -160,7 +160,6 @@ impl PlanTreeNodeUnary for LogicalHopWindow {
         )
     }
 
-    #[must_use]
     fn rewrite_with_input(
         &self,
         input: PlanRef,

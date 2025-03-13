@@ -1227,15 +1227,11 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         } else {
             // check if need state cleaning
             for (column_idx, watermark) in useful_state_clean_columns {
-                if matched_row
-                    .row
-                    .datum_at(*column_idx)
-                    .map_or(false, |scalar| {
-                        scalar
-                            .default_cmp(&watermark.val.as_scalar_ref_impl())
-                            .is_lt()
-                    })
-                {
+                if matched_row.row.datum_at(*column_idx).is_some_and(|scalar| {
+                    scalar
+                        .default_cmp(&watermark.val.as_scalar_ref_impl())
+                        .is_lt()
+                }) {
                     need_state_clean = true;
                     break;
                 }

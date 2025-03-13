@@ -187,6 +187,7 @@ impl ParquetParser {
     }
 }
 
+#[allow(clippy::doc_overindented_list_items)]
 /// Retrieves the total number of rows in the specified Parquet file.
 ///
 /// This function constructs an `OpenDAL` operator using the information
