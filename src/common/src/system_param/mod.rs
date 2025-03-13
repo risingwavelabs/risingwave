@@ -17,7 +17,7 @@
 //!
 //! To add a new system parameter:
 //! - Add a new field to [`PbSystemParams`] in `meta.proto`.
-//! - Add a new entry to `for_all_undeprecated_params` in this file.
+//! - Add a new entry to `for_all_params` in this file.
 //! - Add a new method to [`reader::SystemParamsReader`].
 
 pub mod adaptive_parallelism_strategy;
@@ -95,6 +95,7 @@ macro_rules! for_all_params {
             { license_key,                              risingwave_license::LicenseKey, Some(Default::default()),       true,   "The license key to activate enterprise features.", },
             { time_travel_retention_ms,                 u64,                            Some(600000_u64),               true,   "The data retention period for time travel.", },
             { adaptive_parallelism_strategy,            risingwave_common::system_param::AdaptiveParallelismStrategy,   Some(Default::default()),       true,   "The strategy for Adaptive Parallelism.", },
+            { per_database_isolation,                   bool,                           Some(true),                     true,   "Whether per database isolation is enabled", },
         }
     };
 }
@@ -466,6 +467,7 @@ mod tests {
             (LICENSE_KEY_KEY, "foo"),
             (TIME_TRAVEL_RETENTION_MS_KEY, "0"),
             (ADAPTIVE_PARALLELISM_STRATEGY_KEY, "Auto"),
+            (PER_DATABASE_ISOLATION_KEY, "true"),
             ("a_deprecated_param", "foo"),
         ];
 
