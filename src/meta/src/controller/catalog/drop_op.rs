@@ -17,8 +17,6 @@ use risingwave_pb::telemetry::PbTelemetryDatabaseObject;
 use sea_orm::DatabaseTransaction;
 
 use super::*;
-
-use super::*;
 impl CatalogController {
     // Drop all kinds of objects including databases,
     // schemas, relations, connections, functions, etc.
