@@ -370,7 +370,7 @@ impl HummockIterator for SstableIterator {
     }
 
     fn is_valid(&self) -> bool {
-        self.block_iter.as_ref().map_or(false, |i| i.is_valid())
+        self.block_iter.as_ref().is_some_and(|i| i.is_valid())
     }
 
     async fn rewind(&mut self) -> HummockResult<()> {

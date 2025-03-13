@@ -12,10 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(async_closure)]
-#![feature(extract_if)]
-#![feature(hash_extract_if)]
-#![feature(map_many_mut)]
 #![feature(type_alias_impl_trait)]
 #![feature(impl_trait_in_assoc_type)]
 #![feature(let_chains)]
@@ -23,6 +19,8 @@
 #![feature(strict_overflow_ops)]
 
 mod key_cmp;
+
+use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
@@ -297,12 +295,13 @@ impl SstObjectIdRange {
     }
 }
 
-pub fn can_concat(ssts: &[SstableInfo]) -> bool {
+pub fn can_concat(ssts: &[impl Borrow<SstableInfo>]) -> bool {
     let len = ssts.len();
     for i in 1..len {
         if ssts[i - 1]
+            .borrow()
             .key_range
-            .compare_right_with(&ssts[i].key_range.left)
+            .compare_right_with(&ssts[i].borrow().key_range.left)
             != Ordering::Less
         {
             return false;

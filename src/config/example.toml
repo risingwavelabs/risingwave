@@ -169,6 +169,7 @@ stream_enable_shared_source = true
 stream_switch_jdbc_pg_to_native = false
 stream_max_barrier_batch_size = 1024
 stream_hash_join_entry_state_max_rows = 30000
+stream_enable_explain_analyze_stats = true
 
 [storage]
 share_buffers_sync_parallelism = 1
@@ -303,3 +304,4 @@ enable_tracing = false
 license_key = ""
 time_travel_retention_ms = 600000
 adaptive_parallelism_strategy = "Auto"
+per_database_isolation = true

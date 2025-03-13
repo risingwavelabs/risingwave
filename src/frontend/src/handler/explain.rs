@@ -292,6 +292,8 @@ pub async fn handle_explain(
     analyze: bool,
 ) -> Result<RwPgResponse> {
     if analyze {
+        // NOTE(kwannoel): This path is for explain analyze on stream and batch queries.
+        // For existing stream jobs, see the handler module `explain_analyze` instead.
         bail_not_implemented!(issue = 4856, "explain analyze");
     }
     if options.trace && options.explain_format == ExplainFormat::Json {

@@ -50,6 +50,7 @@ use sea_orm::{
     IntoSimpleExpr, JoinType, ModelTrait, NotSet, PaginatorTrait, QueryFilter, QuerySelect,
     RelationTrait, TransactionTrait,
 };
+use thiserror_ext::AsReport;
 
 use crate::barrier::{ReplaceStreamJobPlan, Reschedule};
 use crate::controller::ObjectModel;
@@ -620,21 +621,21 @@ impl CatalogController {
             Object::delete_by_id(source_id).exec(&txn).await?;
         }
 
+        let err = if is_cancelled {
+            MetaError::cancelled(format!("streaming job {job_id} is cancelled"))
+        } else {
+            MetaError::catalog_id_not_found("stream job", format!("streaming job {job_id} failed"))
+        };
+        let abort_reason = format!("streaing job aborted {}", err.as_report());
         for tx in inner
             .creating_table_finish_notifier
-            .remove(&job_id)
+            .get_mut(&database_id)
+            .map(|creating_tables| creating_tables.remove(&job_id).into_iter())
             .into_iter()
             .flatten()
+            .flatten()
         {
-            let err = if is_cancelled {
-                MetaError::cancelled(format!("streaming job {job_id} is cancelled"))
-            } else {
-                MetaError::catalog_id_not_found(
-                    "stream job",
-                    format!("streaming job {job_id} failed"),
-                )
-            };
-            let _ = tx.send(Err(err));
+            let _ = tx.send(Err(abort_reason.clone()));
         }
         txn.commit().await?;
 
@@ -1028,11 +1029,16 @@ impl CatalogController {
                 )
                 .await;
         }
-        if let Some(txs) = inner.creating_table_finish_notifier.remove(&job_id) {
-            for tx in txs {
-                let _ = tx.send(Ok(version));
-            }
-        }
+        inner
+            .creating_table_finish_notifier
+            .values_mut()
+            .for_each(|creating_tables| {
+                if let Some(txs) = creating_tables.remove(&job_id) {
+                    for tx in txs {
+                        let _ = tx.send(Ok(version));
+                    }
+                }
+            });
 
         Ok(())
     }
@@ -1148,7 +1154,9 @@ impl CatalogController {
                 }
 
                 if let Some(sink_id) = dropping_sink_id {
-                    let drained = incoming_sinks.extract_if(|id| *id == sink_id).collect_vec();
+                    let drained = incoming_sinks
+                        .extract_if(.., |id| *id == sink_id)
+                        .collect_vec();
                     debug_assert_eq!(drained, vec![sink_id]);
                 }
 

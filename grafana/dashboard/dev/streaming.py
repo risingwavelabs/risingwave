@@ -223,15 +223,15 @@ def _(outer_panels: Panels):
                     "congestion.",
                     quantile(
                         lambda quantile, legend: panels.target(
-                            f"histogram_quantile({quantile}, sum(rate({metric('meta_barrier_send_duration_seconds_bucket')}[$__rate_interval])) by (le))",
-                            f"barrier_send_latency_p{legend}",
+                            f"histogram_quantile({quantile}, sum(rate({metric('meta_barrier_send_duration_seconds_bucket')}[$__rate_interval])) by (le, database_id))",
+                            f"barrier_send_latency_p{legend}" + " {{database_id}}",
                         ),
                         [50, 90, 99, 999, "max"],
                     )
                     + [
                         panels.target(
                             f"rate({metric('meta_barrier_send_duration_seconds_sum')}[$__rate_interval]) / rate({metric('meta_barrier_send_duration_seconds_count')}[$__rate_interval]) > 0",
-                            "barrier_send_latency_avg",
+                            "barrier_send_latency_avg {{database_id}}",
                         ),
                     ],
                 ),
