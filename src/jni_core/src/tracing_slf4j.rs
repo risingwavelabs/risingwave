@@ -29,6 +29,7 @@ pub(crate) extern "system" fn Java_com_risingwave_java_binding_Binding_tracingSl
     class_name: JString<'_>,
     level: jint,
     message: JString<'_>,
+    stack_trace: JString<'_>,
 ) {
     execute_and_catch(env, move |env| {
         let thread_name = env.get_string(&thread_name)?;
@@ -40,6 +41,14 @@ pub(crate) extern "system" fn Java_com_risingwave_java_binding_Binding_tracingSl
         let message = env.get_string(&message)?;
         let message: Cow<'_, str> = (&message).into();
 
+        let stack_trace = if stack_trace.is_null() {
+            None
+        } else {
+            Some(env.get_string(&stack_trace)?)
+        };
+        let stack_trace: Option<Cow<'_, str>> = stack_trace.as_ref().map(|c| c.into());
+        let stack_trace: Option<&str> = stack_trace.as_deref();
+
         macro_rules! event {
             ($lvl:expr) => {
                 tracing::event!(
@@ -47,6 +56,7 @@ pub(crate) extern "system" fn Java_com_risingwave_java_binding_Binding_tracingSl
                     $lvl,
                     thread = &*thread_name,
                     class = &*class_name,
+                    error = stack_trace,
                     "{message}",
                 )
             };
