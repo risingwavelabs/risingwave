@@ -14,10 +14,7 @@
 
 use risingwave_meta_model::exactly_once_iceberg_sink::{Column, Entity};
 use risingwave_pb::telemetry::PbTelemetryDatabaseObject;
-use sea_orm::{
-    ColumnTrait, ConnectionTrait, DatabaseConnection, DatabaseTransaction, EntityTrait,
-    QueryFilter, Statement,
-};
+use sea_orm::{ColumnTrait, DatabaseConnection, DatabaseTransaction, EntityTrait, QueryFilter};
 
 use super::*;
 

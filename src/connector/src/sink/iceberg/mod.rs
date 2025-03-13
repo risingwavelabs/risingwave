@@ -69,7 +69,7 @@ use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
 use sea_orm::{
     ColumnTrait, DatabaseConnection, EntityTrait, Order, PaginatorTrait, QueryFilter, QueryOrder,
-    Set, TransactionTrait,
+    Set,
 };
 use serde_derive::Deserialize;
 use serde_json::from_value;
@@ -1656,7 +1656,10 @@ impl IcebergSinkCommitter {
         if self.is_exactly_once {
             self.mark_row_is_committed_by_sink_id_and_end_epoch(&self.db, self.sink_id, epoch)
                 .await?;
-            tracing::info!("Succeeded delete pre commit metadata in epoch {epoch}.");
+            tracing::info!("Succeeded mark pre commit metadata in epoch {epoch} to deleted.");
+            self.delete_row_by_sink_id_and_end_epoch(&self.db, self.sink_id, epoch)
+                .await?;
+            tracing::info!("Succeeded delete pre commit metadata less than epoch {epoch}.");
         }
         Ok(())
     }
@@ -1711,6 +1714,45 @@ impl IcebergSinkCommitter {
             Err(e) => {
                 tracing::error!(
                     "Error marking item to committed from iceberg exactly once system table: {:?}",
+                    e
+                );
+                Err(e.into())
+            }
+        }
+    }
+
+    async fn delete_row_by_sink_id_and_end_epoch(
+        &self,
+        db: &DatabaseConnection,
+        sink_id: u32,
+        end_epoch: u64,
+    ) -> Result<()> {
+        let end_epoch_i64: i64 = end_epoch.try_into().unwrap();
+        match Entity::delete_many()
+            .filter(Column::SinkId.eq(sink_id))
+            .filter(Column::EndEpoch.lt(end_epoch_i64))
+            .exec(db)
+            .await
+        {
+            Ok(result) => {
+                let deleted_count = result.rows_affected;
+
+                if deleted_count == 0 {
+                    tracing::info!(
+                        "No item deleted in iceberg exactly once system table, end_epoch < {}.",
+                        end_epoch
+                    );
+                } else {
+                    tracing::info!(
+                        "Deleted item in iceberg exactly once system table, end_epoch < {}.",
+                        end_epoch
+                    );
+                }
+                Ok(())
+            }
+            Err(e) => {
+                tracing::error!(
+                    "Error deleting from iceberg exactly once system table: {:?}",
                     e
                 );
                 Err(e.into())
