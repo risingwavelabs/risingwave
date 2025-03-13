@@ -758,6 +758,9 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                     if collecting_databases.remove(&database_id).is_some() {
                                         warn!(%database_id, worker_id, "database reset during global recovery");
                                         assert!(failed_databases.insert(database_id));
+                                    } else if collected_databases.remove(&database_id).is_some() {
+                                        warn!(%database_id, worker_id, "database initialized but later reset during global recovery");
+                                        assert!(failed_databases.insert(database_id));
                                     } else {
                                         assert!(failed_databases.contains(&database_id));
                                     }
