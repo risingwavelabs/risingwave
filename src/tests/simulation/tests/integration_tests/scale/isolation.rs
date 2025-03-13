@@ -194,34 +194,24 @@ async fn test_isolation_simple_two_databases_join_in_other() -> Result<()> {
 
     cluster.simple_restart_nodes(["compute-1"]).await;
 
-    sleep(Duration::from_secs(MAX_HEARTBEAT_INTERVAL_SEC * 2)).await;
-    sleep(Duration::from_secs(MAX_HEARTBEAT_INTERVAL_SEC * 2)).await;
+    sleep(Duration::from_secs(MAX_HEARTBEAT_INTERVAL_SEC)).await;
 
-    println!("1.1");
-    sleep(Duration::from_secs(MAX_HEARTBEAT_INTERVAL_SEC * 2)).await;
-
-
-    println!("1.2");
     session.run("use group1").await?;
 
-    println!("1.3");
-    // failed
     session
         .run("insert into t1 select * from generate_series(101, 110);")
         .await?;
 
-    // println!("2");
-    //
-    // cluster.simple_restart_nodes(["compute-3"]).await;
-    //
-    // sleep(Duration::from_secs(MAX_HEARTBEAT_INTERVAL_SEC * 2)).await;
-    //
-    // session.run("use group3").await?;
-    //
-    // session
-    //     .run("select count(*) from mv_join;")
-    //     .await?
-    //     .assert_result_eq("110");
+    cluster.simple_restart_nodes(["compute-3"]).await;
+
+    sleep(Duration::from_secs(MAX_HEARTBEAT_INTERVAL_SEC)).await;
+
+    session.run("use group3").await?;
+
+    session
+        .run("select count(*) from mv_join;")
+        .await?
+        .assert_result_eq("110");
 
     Ok(())
 }
