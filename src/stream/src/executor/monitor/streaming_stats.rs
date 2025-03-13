@@ -187,7 +187,8 @@ pub struct StreamingMetrics {
     pub sync_kv_log_store_buffer_read_size: LabelGuardedIntCounterVec<4>,
     pub sync_kv_log_store_buffer_read_count: LabelGuardedIntCounterVec<4>,
     pub sync_kv_log_store_write_pause_duration_ns: LabelGuardedIntCounterVec<4>,
-    pub sync_kv_log_store_unclean_state: LabelGuardedIntGaugeVec<4>,
+    pub sync_kv_log_store_unclean_state: LabelGuardedIntCounterVec<4>,
+    pub sync_kv_log_store_clean_state: LabelGuardedIntCounterVec<4>,
     pub sync_kv_log_store_wait_next_poll_ns: LabelGuardedIntCounterVec<4>,
     pub sync_kv_log_store_storage_write_count: LabelGuardedIntCounterVec<4>,
     pub sync_kv_log_store_storage_write_size: LabelGuardedIntCounterVec<4>,
@@ -930,16 +931,24 @@ impl StreamingMetrics {
 
         let sync_kv_log_store_write_pause_duration_ns =
             register_guarded_int_counter_vec_with_registry!(
-                "sync_kv_log_store_write_pause_duration_ms",
+                "sync_kv_log_store_write_pause_duration_ns",
                 "Duration (ns) of sync_kv log store write pause",
                 &["actor_id", "target", "fragment_id", "relation"],
                 registry
             )
             .unwrap();
 
-        let sync_kv_log_store_unclean_state = register_guarded_int_gauge_vec_with_registry!(
+        let sync_kv_log_store_unclean_state = register_guarded_int_counter_vec_with_registry!(
             "sync_kv_log_store_unclean_state",
-            "Unclean state of sync_kv log store",
+            "clean->unclean state transition for sync_kv log store",
+            &["actor_id", "target", "fragment_id", "relation"],
+            registry
+        )
+        .unwrap();
+
+        let sync_kv_log_store_clean_state = register_guarded_int_counter_vec_with_registry!(
+            "sync_kv_log_store_clean_state",
+            "unclean->clean state transition for sync_kv log store",
             &["actor_id", "target", "fragment_id", "relation"],
             registry
         )
@@ -1309,6 +1318,7 @@ impl StreamingMetrics {
             sync_kv_log_store_buffer_read_count,
             sync_kv_log_store_write_pause_duration_ns,
             sync_kv_log_store_unclean_state,
+            sync_kv_log_store_clean_state,
             sync_kv_log_store_wait_next_poll_ns,
             sync_kv_log_store_storage_write_count,
             sync_kv_log_store_storage_write_size,

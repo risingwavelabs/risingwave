@@ -33,6 +33,7 @@ from . import kafka_metrics as _
 from . import network_connection as _
 from . import iceberg_metrics as _
 from . import udf as _
+from . import sync_logstore_metrics as _
 
 
 def generate_panels(panels: Panels):
