@@ -84,6 +84,7 @@ message StreamingControlStreamRequest {
 
   message InitRequest {
     repeated DatabaseInitialPartialGraph databases = 1;
+    string term_id = 2;
   }
 
   message CreatePartialGraphRequest {
