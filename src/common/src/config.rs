@@ -661,7 +661,7 @@ pub struct UdfConfig {
     #[serde(default = "default::udf::enable_embedded_python_udf")]
     pub enable_embedded_python_udf: bool,
 
-    /// Allow embedded JavaScript UDFs to be created.
+    /// Allow embedded JS UDFs to be created.
     #[serde(default = "default::udf::enable_embedded_javascript_udf")]
     pub enable_embedded_javascript_udf: bool,
 
