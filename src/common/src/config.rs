@@ -160,6 +160,10 @@ pub struct RwConfig {
     #[config_doc(nested)]
     pub system: SystemConfig,
 
+    #[serde(default)]
+    #[config_doc(nested)]
+    pub udf: UdfConfig,
+
     #[serde(flatten)]
     #[config_doc(omitted)]
     pub unrecognized: Unrecognized<Self>,
@@ -589,6 +593,21 @@ pub struct BatchConfig {
     pub enable_spill: bool,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
+pub struct UdfConfig {
+    /// Allow embedded Python UDFs to be created.
+    #[serde(default = "default::udf::enable_embedded_python_udf")]
+    pub enable_embedded_python_udf: bool,
+
+    /// Allow embedded JS UDFs to be created.
+    #[serde(default = "default::udf::enable_embedded_javascript_udf")]
+    pub enable_embedded_javascript_udf: bool,
+
+    /// Allow embedded WASM UDFs to be created.
+    #[serde(default = "default::udf::enable_embedded_wasm_udf")]
+    pub enable_embedded_wasm_udf: bool,
+}
+
 /// The section `[streaming]` in `risingwave.toml`.
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct StreamingConfig {
@@ -603,8 +622,6 @@ pub struct StreamingConfig {
 
     /// Enable async stack tracing through `await-tree` for risectl.
     #[serde(default = "default::streaming::async_stack_trace")]
-    pub async_stack_trace: AsyncStackTraceOption,
-
     #[serde(default, with = "streaming_prefix")]
     #[config_doc(omitted)]
     pub developer: StreamingDeveloperConfig,
@@ -2095,6 +2112,20 @@ pub mod default {
             .into_iter()
             .map(str::to_string)
             .collect()
+        }
+    }
+
+    pub mod udf {
+        pub fn enable_embedded_python_udf() -> bool {
+            false
+        }
+
+        pub fn enable_embedded_javascript_udf() -> bool {
+            true
+        }
+
+        pub fn enable_embedded_wasm_udf() -> bool {
+            true
         }
     }
 
