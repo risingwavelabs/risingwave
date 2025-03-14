@@ -1379,7 +1379,7 @@ where
 
     /// Get the row from a state table with only 1 row.
     pub async fn get_from_one_row_table(&self) -> StreamExecutorResult<Option<OwnedRow>> {
-        self.get_row(None)
+        self.get_row(None).await
     }
 
     /// Get the row from a state table with only 1 row, and the row has only 1 col.
