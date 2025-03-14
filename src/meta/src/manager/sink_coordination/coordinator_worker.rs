@@ -165,7 +165,10 @@ impl CoordinationHandleManager {
         .await
     }
 
-    async fn next_commit_request(&mut self) -> anyhow::Result<(usize, Bitmap, u64, SinkMetadata)> {
+    async fn next_commit_request(
+        &mut self,
+        log_store_rewind_start_epoch: Option<u64>,
+    ) -> anyhow::Result<(usize, Bitmap, u64, SinkMetadata)> {
         loop {
             select! {
                 handle = self.request_rx.recv() => {
@@ -173,7 +176,7 @@ impl CoordinationHandleManager {
                     if handle.param() != &self.param {
                         warn!(prev_param = ?self.param, new_param = ?handle.param(), "sink param mismatch");
                     }
-                    handle.start()?;
+                    handle.start(log_store_rewind_start_epoch)?;
                     let handle_id = self.next_handle_id;
                     self.next_handle_id += 1;
                     self.writer_handles.insert(handle_id, handle);
@@ -252,10 +255,12 @@ impl CoordinatorWorker {
         &mut self,
         mut coordinator: impl SinkCommitCoordinator,
     ) -> anyhow::Result<()> {
-        coordinator.init().await?;
+        let log_store_rewind_start_epoch = coordinator.init().await?;
         loop {
-            let (handle_id, vnode_bitmap, epoch, metadata) =
-                self.handle_manager.next_commit_request().await?;
+            let (handle_id, vnode_bitmap, epoch, metadata) = self
+                .handle_manager
+                .next_commit_request(log_store_rewind_start_epoch)
+                .await?;
             self.pending_epochs
                 .entry(epoch)
                 .or_insert_with(|| EpochCommitRequests::new(epoch))

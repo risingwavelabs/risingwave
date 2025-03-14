@@ -325,10 +325,12 @@ impl Sink for DeltaLakeSink {
                 "commit_checkpoint_interval should be greater than 0, and it should be checked in config validation",
             );
 
+        let log_store_rewind_start_epoch = writer.log_store_rewind_start_epoch;
         Ok(DecoupleCheckpointLogSinkerOf::new(
             writer,
             metrics,
             commit_checkpoint_interval,
+            log_store_rewind_start_epoch,
         ))
     }
 
@@ -496,9 +498,9 @@ pub struct DeltaLakeSinkCommitter {
 
 #[async_trait::async_trait]
 impl SinkCommitCoordinator for DeltaLakeSinkCommitter {
-    async fn init(&mut self) -> Result<()> {
+    async fn init(&mut self) -> crate::sink::Result<Option<u64>> {
         tracing::info!("DeltaLake commit coordinator inited.");
-        Ok(())
+        Ok(None)
     }
 
     async fn commit(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()> {
