@@ -43,8 +43,8 @@ use risingwave_pb::stream_service::streaming_control_stream_request::{
     RemovePartialGraphRequest, ResetDatabaseRequest,
 };
 use risingwave_pb::stream_service::{
-    InjectBarrierRequest, StreamingControlStreamRequest, streaming_control_stream_request,
-    streaming_control_stream_response,
+    BarrierCompleteResponse, InjectBarrierRequest, StreamingControlStreamRequest,
+    streaming_control_stream_request, streaming_control_stream_response,
 };
 use risingwave_rpc_client::StreamingControlHandle;
 use thiserror_ext::AsReport;
@@ -58,7 +58,7 @@ use crate::barrier::checkpoint::{BarrierWorkerState, DatabaseCheckpointControl};
 use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl};
 use crate::barrier::info::{BarrierInfo, InflightDatabaseInfo};
 use crate::barrier::progress::CreateMviewProgressTracker;
-use crate::barrier::utils::NodeToCollect;
+use crate::barrier::utils::{NodeToCollect, is_valid_after_worker_err};
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::manager::MetaSrvEnv;
 use crate::model::{
@@ -357,6 +357,31 @@ impl ControlStreamManager {
     }
 }
 
+#[derive(Debug)]
+pub(super) struct DatabaseInitialBarrierCollector {
+    database_id: DatabaseId,
+    node_to_collect: NodeToCollect,
+}
+
+impl DatabaseInitialBarrierCollector {
+    pub(super) fn is_collected(&self) -> bool {
+        self.node_to_collect.is_empty()
+    }
+
+    pub(super) fn collect_resp(&mut self, resp: BarrierCompleteResponse) {
+        assert_eq!(self.database_id.database_id, resp.database_id);
+        assert!(
+            self.node_to_collect
+                .remove(&(resp.worker_id as _))
+                .is_some()
+        );
+    }
+
+    pub(super) fn is_valid_after_worker_err(&mut self, worker_id: WorkerId) -> bool {
+        is_valid_after_worker_err(&mut self.node_to_collect, worker_id)
+    }
+}
+
 impl ControlStreamManager {
     /// Extract information from the loaded runtime barrier worker snapshot info, and inject the initial barrier.
     ///
@@ -375,7 +400,12 @@ impl ControlStreamManager {
         subscription_info: InflightSubscriptionInfo,
         is_paused: bool,
         hummock_version_stats: &HummockVersionStats,
-    ) -> MetaResult<(NodeToCollect, DatabaseCheckpointControl, u64)> {
+    ) -> MetaResult<(
+        DatabaseInitialBarrierCollector,
+        DatabaseCheckpointControl,
+        u64,
+    )> {
+        self.add_partial_graph(database_id, None);
         let source_split_assignments = info
             .fragment_infos()
             .flat_map(|info| info.actors.keys())
@@ -484,7 +514,10 @@ impl ControlStreamManager {
         let new_epoch = barrier_info.curr_epoch;
         let state = BarrierWorkerState::recovery(new_epoch, info, subscription_info, is_paused);
         Ok((
-            node_to_collect,
+            DatabaseInitialBarrierCollector {
+                database_id,
+                node_to_collect,
+            },
             DatabaseCheckpointControl::recovery(
                 database_id,
                 tracker,
@@ -698,10 +731,11 @@ impl ControlStreamManager {
         &mut self,
         database_id: DatabaseId,
         creating_job_id: Option<TableId>,
-    ) -> MetaResult<()> {
+    ) {
         let partial_graph_id = to_partial_graph_id(creating_job_id);
-        self.nodes.iter().try_for_each(|(_, node)| {
-            node.handle
+        self.nodes.iter().for_each(|(_, node)| {
+            if node
+                .handle
                 .request_sender
                 .send(StreamingControlStreamRequest {
                     request: Some(
@@ -712,10 +746,10 @@ impl ControlStreamManager {
                             },
                         ),
                     ),
-                })
-                .map_err(|_| anyhow!("failed to add partial graph"))
-        })?;
-        Ok(())
+                }).is_err() {
+                warn!(%database_id, ?creating_job_id, worker_id = node.worker.id, "fail to add partial graph to worker")
+            }
+        });
     }
 
     pub(super) fn remove_partial_graph(
