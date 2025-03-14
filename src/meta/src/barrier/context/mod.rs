@@ -27,7 +27,7 @@ use risingwave_rpc_client::StreamingControlHandle;
 
 use crate::barrier::command::CommandContext;
 use crate::barrier::progress::TrackingJob;
-use crate::barrier::schedule::ScheduledBarriers;
+use crate::barrier::schedule::{MarkReadyOptions, ScheduledBarriers};
 use crate::barrier::{
     BarrierManagerStatus, BarrierWorkerRuntimeInfoSnapshot, DatabaseRuntimeInfoSnapshot,
     RecoveryReason, Scheduled,
@@ -35,7 +35,7 @@ use crate::barrier::{
 use crate::hummock::{CommitEpochInfo, HummockManagerRef};
 use crate::manager::{MetaSrvEnv, MetadataManager};
 use crate::stream::{ScaleControllerRef, SourceManagerRef};
-use crate::{MetaError, MetaResult};
+use crate::MetaResult;
 
 pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
     fn commit_epoch(
@@ -49,14 +49,14 @@ pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
         database_id: Option<DatabaseId>,
         recovery_reason: RecoveryReason,
     );
-    fn mark_ready(&self, database_id: Option<DatabaseId>);
+    fn mark_ready(&self, options: MarkReadyOptions);
 
     fn post_collect_command<'a>(
         &'a self,
         command: &'a CommandContext,
     ) -> impl Future<Output = MetaResult<()>> + Send + 'a;
 
-    async fn notify_creating_job_failed(&self, err: &MetaError);
+    async fn notify_creating_job_failed(&self, database_id: Option<DatabaseId>, err: String);
 
     fn finish_creating_job(
         &self,

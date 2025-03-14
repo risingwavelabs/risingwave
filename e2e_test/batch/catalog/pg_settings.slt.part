@@ -16,6 +16,7 @@ postmaster enable_tracing
 postmaster license_key
 postmaster max_concurrent_creating_streaming_jobs
 postmaster pause_on_next_bootstrap
+postmaster per_database_isolation
 postmaster time_travel_retention_ms
 user application_name
 user backfill_rate_limit
