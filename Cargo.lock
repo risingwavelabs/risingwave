@@ -10796,6 +10796,7 @@ dependencies = [
  "prometheus",
  "prost 0.13.4",
  "rand 0.8.5",
+ "regex",
  "risingwave_batch",
  "risingwave_batch_executors",
  "risingwave_common",
