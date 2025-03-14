@@ -534,7 +534,7 @@ mod tests {
         )
         .await;
         let state_table_r = StateTable::from_table_catalog(
-            &gen_pbtable(TableId::new(1), column_descs, order_types, pk_indices, 0),
+            &gen_pbtable(TableId::new(1), column_descs, vec![], vec![], 0),
             mem_state,
             None,
         )
