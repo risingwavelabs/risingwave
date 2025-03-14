@@ -139,8 +139,8 @@ def _(outer_panels: Panels):
                             "clean {{fragment_id}} {{relation}}",
                         ),
                         panels.target(
-                            f"sum({metric('sync_kv_log_store_unclean_state')}) - sum({metric('sync_kv_log_store_clean_state')}) by (fragment_id, relation)",
-                            "current {{fragment_id}} {{relation}}",
+                            f"sum({metric('sync_kv_log_store_unclean_state')}) by (fragment_id, relation) - sum({metric('sync_kv_log_store_clean_state')}) by (fragment_id, relation)",
+                            "current state {{fragment_id}} {{relation}}",
                         ),
                     ]
                 ),
