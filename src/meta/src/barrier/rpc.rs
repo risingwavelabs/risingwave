@@ -405,7 +405,7 @@ impl ControlStreamManager {
         DatabaseCheckpointControl,
         u64,
     )> {
-        self.add_partial_graph(database_id, None)?;
+        self.add_partial_graph(database_id, None);
         let source_split_assignments = info
             .fragment_infos()
             .flat_map(|info| info.actors.keys())
@@ -731,10 +731,11 @@ impl ControlStreamManager {
         &mut self,
         database_id: DatabaseId,
         creating_job_id: Option<TableId>,
-    ) -> MetaResult<()> {
+    ) {
         let partial_graph_id = to_partial_graph_id(creating_job_id);
-        self.nodes.iter().try_for_each(|(_, node)| {
-            node.handle
+        self.nodes.iter().for_each(|(_, node)| {
+            if node
+                .handle
                 .request_sender
                 .send(StreamingControlStreamRequest {
                     request: Some(
@@ -745,10 +746,10 @@ impl ControlStreamManager {
                             },
                         ),
                     ),
-                })
-                .map_err(|_| anyhow!("failed to add partial graph"))
-        })?;
-        Ok(())
+                }).is_err() {
+                warn!(%database_id, ?creating_job_id, worker_id = node.worker.id, "fail to add partial graph to worker")
+            }
+        });
     }
 
     pub(super) fn remove_partial_graph(

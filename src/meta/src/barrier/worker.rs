@@ -432,8 +432,34 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     if self
                         .checkpoint_control
                         .can_inject_barrier(self.in_flight_barrier_nums) => {
-                    if let Err(e) = self.checkpoint_control.handle_new_barrier(new_barrier, &mut self.control_stream_manager) {
-                        self.failure_recovery(e).await;
+                    if let Some(failed_databases) = self.checkpoint_control.handle_new_barrier(new_barrier, &mut self.control_stream_manager)
+                        && !failed_databases.is_empty() {
+                        if !self.enable_recovery {
+                            panic!(
+                                "failed to inject barrier for some databases but recovery not enabled: {:?}",
+                                failed_databases.iter().map(|(database_id, e)| (database_id, e.as_report())).collect_vec()
+                            );
+                        }
+                        let result: MetaResult<_> = try {
+                            if !self.enable_per_database_isolation {
+                                let errs = failed_databases.iter().map(|(database_id, e)| (database_id, e.as_report())).collect_vec();
+                                let err = anyhow!("failed to inject barrier for databases: {:?}", errs);
+                                Err(err)?;
+                            } else {
+                                for (database_id, err) in failed_databases {
+                                    if let Some(entering_recovery) = self.checkpoint_control.on_report_failure(database_id, &mut self.control_stream_manager) {
+                                        warn!(%database_id, e = %err.as_report(),"database entering recovery on inject failure");
+                                        self.context.abort_and_mark_blocked(Some(database_id), RecoveryReason::Failover(anyhow!("inject barrier failure: {}", err.as_report()).into()));
+                                        // TODO: add log on blocking time
+                                        let output = self.completing_task.wait_completing_task().await?;
+                                        entering_recovery.enter(output, &mut self.control_stream_manager);
+                                    }
+                                }
+                            }
+                        };
+                        if let Err(e) = result {
+                            self.failure_recovery(e).await;
+                        }
                     }
                 }
             }
