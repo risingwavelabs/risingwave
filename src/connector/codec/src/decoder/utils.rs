@@ -33,9 +33,26 @@ pub fn scaled_bigint_to_rust_decimal(
     ))
 }
 
+fn to_negative_signed_bytes_be(bytes: &mut Vec<u8>) {
+    let first_byte = bytes.first().cloned().unwrap_or(0);
+    if first_byte > 0x7f {
+        bytes.insert(0, 0);
+    }
+
+    // Perform two's complement for negative numbers
+    let mut carry = true;
+    for d in bytes.iter_mut().rev() {
+        // Start from least significant byte
+        *d = !*d; // NOT operation
+        if carry {
+            *d = d.wrapping_add(1);
+            carry = *d == 0;
+        }
+    }
+}
+
 /// Converts a Rust Decimal back to a `BigInt` with scale for Avro encoding
-pub fn rust_decimal_to_scaled_bigint(decimal: rust_decimal::Decimal) -> (BigInt, usize) {
-    let scale = decimal.scale() as usize;
+pub fn rust_decimal_to_scaled_bigint(decimal: rust_decimal::Decimal) -> Vec<u8> {
     let negative = decimal.is_sign_negative();
 
     // Extract the parts
@@ -45,23 +62,17 @@ pub fn rust_decimal_to_scaled_bigint(decimal: rust_decimal::Decimal) -> (BigInt,
     decimal_bytes.reverse();
 
     // Concatenate bytes from hi, mid, and lo in big-endian order
-    let mut bytes = Vec::with_capacity(12);
+    let mut bytes: Vec<u8> = Vec::with_capacity(13);
+    bytes.push(0); // sign
     bytes.extend_from_slice(&decimal_bytes[0..4]); // hi
     bytes.extend_from_slice(&decimal_bytes[4..8]); // mid
     bytes.extend_from_slice(&decimal_bytes[8..12]); // lo
 
-    // Trim leading zeros
-    let first_non_zero = bytes.iter().position(|&x| x != 0).unwrap_or(bytes.len());
-    bytes = bytes[first_non_zero..].to_vec();
+    if negative {
+        to_negative_signed_bytes_be(&mut bytes);
+    }
 
-    // Create BigInt with correct sign
-    let bigint = if bytes.is_empty() {
-        BigInt::from(0)
-    } else {
-        BigInt::from_bytes_be(if negative { Sign::Minus } else { Sign::Plus }, &bytes)
-    };
-
-    (bigint, scale)
+    bytes
 }
 
 fn extract_decimal(bytes: Vec<u8>) -> AccessResult<(u32, u32, u32)> {
@@ -161,16 +172,12 @@ mod tests {
 
     fn test_conversion(bigint: BigInt, scale: usize) {
         let decimal = scaled_bigint_to_rust_decimal(bigint.clone(), scale).unwrap();
-        let (bigint_back, scale_back) = rust_decimal_to_scaled_bigint(decimal);
+        let bytes_be = rust_decimal_to_scaled_bigint(decimal);
+        let bigint_back = BigInt::from_signed_bytes_be(&bytes_be);
         assert_eq!(
             bigint, bigint_back,
             "BigInt conversion failed for value: {}",
             bigint
-        );
-        assert_eq!(
-            scale, scale_back,
-            "Scale conversion failed for scale: {}",
-            scale
         );
     }
 }

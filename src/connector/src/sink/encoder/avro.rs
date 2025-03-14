@@ -551,15 +551,15 @@ fn on_field<D: MaybeData>(
                 maybe.on_base(|s| {
                     match s.into_decimal() {
                         risingwave_common::types::Decimal::Normalized(decimal) => {
-                            let (bigint, scale) = rust_decimal_to_scaled_bigint(decimal);
-                            if scale == decimal_schema.scale {
+                            let data_scale = decimal.scale() as usize;
+                            let signed_bigint_bytes = rust_decimal_to_scaled_bigint(decimal);
+                            if data_scale == decimal_schema.scale {
                                 // avro decimal can only construct from bytes and convert to bigint inner by `BigInt::from_signed_bytes_be`
-                                let (_, bytes) = bigint.to_bytes_be();
-                                Ok(Value::Decimal(apache_avro::Decimal::from( bytes.as_slice() )) )
+                                Ok(Value::Decimal(apache_avro::Decimal::from( &signed_bigint_bytes )) )
                             }
                             else {
                                 Err(
-                                    FieldEncodeError::new(format!("decimal scale mismatch: expect {} (from schema), but got {} (from data)", decimal_schema.scale, scale))
+                                    FieldEncodeError::new(format!("decimal scale mismatch: expect {} (from schema), but got {} (from data)", decimal_schema.scale, data_scale))
                                 )
                             }
                         }
