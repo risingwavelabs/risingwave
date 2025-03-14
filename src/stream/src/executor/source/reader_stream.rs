@@ -77,7 +77,7 @@ impl StreamReaderBuilder {
                             Err(e) => {
                                 tracing::error!(
                                     target: "auto_schema_change",
-                                    error = ?e.as_report(), "schema change error");
+                                    error = %e.as_report(), "schema change error");
                                 finish_tx.send(()).unwrap();
                             }
                         }
@@ -179,7 +179,13 @@ impl StreamReaderBuilder {
                 if is_initial_build {
                     return Err(StreamExecutorError::connector_error(e));
                 } else {
-                    tracing::warn!(error = ?e.as_report(), "build stream source reader error, retry in 1s");
+                    tracing::warn!(
+                        error = %e.as_report(),
+                        source_name = self.source_name,
+                        source_id = self.source_id.table_id,
+                        actor_id = self.actor_ctx.id,
+                        "build stream source reader error, retry in 1s"
+                    );
                     tokio::time::sleep(Duration::from_secs(1)).await;
                     continue 'build_consume_loop;
                 }
@@ -201,7 +207,13 @@ impl StreamReaderBuilder {
                         yield (msg, latest_splits_info.clone());
                     }
                     Err(e) => {
-                        tracing::warn!(error = ?e.as_report(), "stream source reader error");
+                        tracing::warn!(
+                            error = %e.as_report(),
+                            source_name = self.source_name,
+                            source_id = self.source_id.table_id,
+                            actor_id = self.actor_ctx.id,
+                            "stream source reader error"
+                        );
                         break 'consume;
                     }
                 }

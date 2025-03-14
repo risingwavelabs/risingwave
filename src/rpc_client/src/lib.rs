@@ -20,7 +20,6 @@
 #![feature(associated_type_defaults)]
 #![feature(coroutines)]
 #![feature(iterator_try_collect)]
-#![feature(hash_extract_if)]
 #![feature(try_blocks)]
 #![feature(let_chains)]
 #![feature(impl_trait_in_assoc_type)]
@@ -31,7 +30,6 @@
 use std::any::type_name;
 use std::fmt::{Debug, Formatter};
 use std::future::Future;
-use std::iter::repeat;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -81,7 +79,7 @@ pub trait RpcClient: Send + Sync + 'static + Clone {
     async fn new_client(host_addr: HostAddr) -> Result<Self>;
 
     async fn new_clients(host_addr: HostAddr, size: usize) -> Result<Arc<Vec<Self>>> {
-        try_join_all(repeat(host_addr).take(size).map(Self::new_client))
+        try_join_all(std::iter::repeat_n(host_addr, size).map(Self::new_client))
             .await
             .map(Arc::new)
     }

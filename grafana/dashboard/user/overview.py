@@ -55,15 +55,15 @@ def _(panels: Panels):
             "the freshness of materialized views.",
             quantile(
                 lambda quantile, legend: panels.target(
-                    f"histogram_quantile({quantile}, sum(rate({metric('meta_barrier_duration_seconds_bucket')}[$__rate_interval])) by (le))",
-                    f"barrier_latency_p{legend}",
+                    f"histogram_quantile({quantile}, sum(rate({metric('meta_barrier_duration_seconds_bucket')}[$__rate_interval])) by (le, database_id))",
+                    f"barrier_latency_p{legend}" + " (database {{database_id}})",
                 ),
                 [50, 99],
             )
             + [
                 panels.target(
                     f"rate({metric('meta_barrier_duration_seconds_sum')}[$__rate_interval]) / rate({metric('meta_barrier_duration_seconds_count')}[$__rate_interval]) > 0",
-                    "barrier_latency_avg",
+                    "barrier_latency_avg (database {{database_id}})",
                 ),
             ],
         ),
@@ -91,7 +91,7 @@ def _(panels: Panels):
                 ),
                 panels.target(
                     f"sum(rate({metric('recovery_latency_count')}[$__rate_interval])) > bool 0 + sum({metric('recovery_failure_cnt')}) > bool 0",
-                    "Recovery Triggered",
+                    "Recovery Triggered {{recovery_type}}",
                 ),
                 panels.target(
                     f"(({metric('storage_current_version_id')} - {metric('storage_checkpoint_version_id')}) >= bool 100) + "

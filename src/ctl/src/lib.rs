@@ -13,7 +13,6 @@
 // limitations under the License.
 
 #![feature(let_chains)]
-#![feature(hash_extract_if)]
 
 use anyhow::Result;
 use clap::{Args, Parser, Subcommand};

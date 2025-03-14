@@ -111,8 +111,8 @@ impl CreateSource for DefaultCreateSource {
                                 worker
                                     .host
                                     .as_ref()
-                                    .map_or(false, |h| HostAddr::from(h) == peer_addr)
-                                    && worker.property.as_ref().map_or(false, |p| p.is_serving)
+                                    .is_some_and(|h| HostAddr::from(h) == peer_addr)
+                                    && worker.property.as_ref().is_some_and(|p| p.is_serving)
                             })
                     {
                         let duration = Duration::from_secs(std::cmp::max(

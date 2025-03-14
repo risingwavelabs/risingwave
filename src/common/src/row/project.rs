@@ -31,7 +31,7 @@ impl<R: Row> PartialEq for Project<'_, R> {
 }
 impl<R: Row> Eq for Project<'_, R> {}
 
-impl<'i, R: Row> Row for Project<'i, R> {
+impl<R: Row> Row for Project<'_, R> {
     #[inline]
     fn datum_at(&self, index: usize) -> DatumRef<'_> {
         // SAFETY: we have checked that `self.indices` are all valid in `new`.

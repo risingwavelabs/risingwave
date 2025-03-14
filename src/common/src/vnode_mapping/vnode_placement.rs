@@ -40,7 +40,7 @@ pub fn place_vnode(
     // by worker slot id in each group.
     let mut worker_slots: LinkedList<_> = workers
         .iter()
-        .filter(|w| w.property.as_ref().map_or(false, |p| p.is_serving))
+        .filter(|w| w.property.as_ref().is_some_and(|p| p.is_serving))
         .sorted_by_key(|w| w.id)
         .map(|w| (0..w.compute_node_parallelism()).map(|idx| WorkerSlotId::new(w.id, idx)))
         .collect();

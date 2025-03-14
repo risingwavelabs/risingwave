@@ -195,14 +195,14 @@ mod tests {
 
     use risingwave_common::catalog::{CDC_SOURCE_COLUMN_NUM, ColumnCatalog, ColumnDesc, ColumnId};
     use risingwave_common::row::Row;
-    use risingwave_common::types::Timestamptz;
+    use risingwave_common::types::{DataType, Timestamptz};
     use risingwave_pb::plan_common::{
         AdditionalColumn, AdditionalColumnTimestamp, additional_column,
     };
 
     use super::*;
     use crate::parser::{JsonProperties, SourceStreamChunkBuilder, TransactionControl};
-    use crate::source::{ConnectorProperties, DataType, SourceCtrlOpts};
+    use crate::source::{ConnectorProperties, SourceCtrlOpts};
 
     #[tokio::test]
     async fn test_parse_transaction_metadata() {
