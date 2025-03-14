@@ -20,8 +20,9 @@ use std::sync::Arc;
 use arrow_array::ArrayRef;
 use num_traits::abs;
 
-pub use super::arrow_53::{
+pub use super::arrow_54::{
     FromArrow, ToArrow, arrow_array, arrow_buffer, arrow_cast, arrow_schema,
+    is_parquet_schema_match_source_schema,
 };
 use crate::array::{Array, ArrayError, ArrayImpl, DataChunk, DataType, DecimalArray};
 use crate::types::StructType;

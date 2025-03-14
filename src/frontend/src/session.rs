@@ -47,7 +47,7 @@ use risingwave_common::catalog::{
     DEFAULT_DATABASE_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID,
 };
 use risingwave_common::config::{
-    BatchConfig, FrontendConfig, MetaConfig, MetricLevel, StreamingConfig, load_config,
+    BatchConfig, FrontendConfig, MetaConfig, MetricLevel, StreamingConfig, UdfConfig, load_config,
 };
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::secret::LocalSecretManager;
@@ -166,6 +166,7 @@ pub(crate) struct FrontendEnv {
     #[expect(dead_code)]
     meta_config: MetaConfig,
     streaming_config: StreamingConfig,
+    udf_config: UdfConfig,
 
     /// Track creating streaming jobs, used to cancel creating streaming job when cancel request
     /// received.
@@ -247,6 +248,7 @@ impl FrontendEnv {
             frontend_config: FrontendConfig::default(),
             meta_config: MetaConfig::default(),
             streaming_config: StreamingConfig::default(),
+            udf_config: UdfConfig::default(),
             source_metrics: Arc::new(SourceMetrics::default()),
             spill_metrics: BatchSpillMetrics::for_test(),
             creating_streaming_job_tracker: Arc::new(creating_streaming_tracker),
@@ -489,6 +491,7 @@ impl FrontendEnv {
                 frontend_config: config.frontend,
                 meta_config: config.meta,
                 streaming_config: config.streaming,
+                udf_config: config.udf,
                 source_metrics,
                 creating_streaming_job_tracker,
                 compute_runtime,
@@ -571,6 +574,10 @@ impl FrontendEnv {
 
     pub fn streaming_config(&self) -> &StreamingConfig {
         &self.streaming_config
+    }
+
+    pub fn udf_config(&self) -> &UdfConfig {
+        &self.udf_config
     }
 
     pub fn source_metrics(&self) -> Arc<SourceMetrics> {
