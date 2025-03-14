@@ -286,3 +286,8 @@ pause_on_next_bootstrap = false
 enable_tracing = false
 license_key = ""
 time_travel_retention_ms = 600000
+
+[udf]
+enable_embedded_python_udf = false
+enable_embedded_javascript_udf = true
+enable_embedded_wasm_udf = true
