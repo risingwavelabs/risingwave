@@ -140,7 +140,7 @@ mod new_serde {
 
         let (struct_data, remaining) = data.split_at(encoded_len);
         *data = remaining;
-        let fields = deserializer.deserialize(&struct_data)?;
+        let fields = deserializer.deserialize(struct_data)?;
 
         Ok(ScalarImpl::Struct(StructValue::new(fields)))
     }
