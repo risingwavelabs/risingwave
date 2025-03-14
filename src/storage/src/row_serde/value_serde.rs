@@ -439,8 +439,8 @@ mod tests {
                 12, 0, 0, 0, // field id = 12 "f3"
                 0, // offset 11 = 0
                 4, // offset 12 = 4
-                6, // "f2": i32 = 6
-                0, 0, 0, 1, // "f3": bool = true
+                6, 0, 0, 0, // "f2": i32 = 6
+                1, // "f3": bool = true
             ]
         );
 
