@@ -327,15 +327,18 @@ pub mod tests {
             ("address", DataType::Varchar),
             ("zipcode", DataType::Varchar),
         ])
+        // .with_ids([5, 6].map(ColumnId::new))
         .into();
         let expected_columns = maplit::hashmap! {
             ROW_ID_COLUMN_NAME => DataType::Serial,
             "country" => StructType::new(
                  vec![("address", DataType::Varchar),("city", city_type),("zipcode", DataType::Varchar)],
-            ).into(),
+            )
+            // .with_ids([3, 4, 7].map(ColumnId::new))
+            .into(),
             RW_TIMESTAMP_COLUMN_NAME => DataType::Timestamptz,
         };
-        assert_eq!(columns, expected_columns);
+        assert_eq!(columns, expected_columns, "{columns:#?}");
     }
 
     /// When creating MV, a unique column name must be specified for each column
