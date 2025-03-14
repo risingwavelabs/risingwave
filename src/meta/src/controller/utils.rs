@@ -1780,6 +1780,109 @@ where
     Ok(())
 }
 
+pub(crate) async fn resolve_streaming_job_infos<C>(
+    txn: &C,
+    job_ids: HashSet<ObjectId>,
+) -> MetaResult<HashMap<ObjectId, (streaming_job::Model, Option<String>)>>
+where
+    C: ConnectionTrait,
+{
+    let mut definitions = resolve_streaming_job_definitions(txn, &job_ids).await?;
+
+    let streaming_jobs = StreamingJob::find()
+        .filter(streaming_job::Column::JobId.is_in(job_ids))
+        .all(txn)
+        .await?;
+
+    Ok(streaming_jobs
+        .into_iter()
+        .map(|job| {
+            let job_id = job.job_id;
+            (job_id, (job, definitions.remove(&job_id)))
+        })
+        .collect())
+}
+
+pub(crate) async fn resolve_streaming_job_info<C>(
+    txn: &C,
+    job_id: ObjectId,
+) -> MetaResult<(streaming_job::Model, Option<String>)>
+where
+    C: ConnectionTrait,
+{
+    let job = StreamingJob::find()
+        .one(txn)
+        .await?
+        .ok_or_else(|| MetaError::catalog_id_not_found("job_id", job_id))?;
+
+    let mut definitions = resolve_streaming_job_definitions(txn, &HashSet::from([job_id])).await?;
+
+    let definition = definitions.remove(&job_id);
+
+    Ok((job, definition))
+}
+
+pub(crate) async fn resolve_streaming_job_definitions<C>(
+    txn: &C,
+    job_ids: &HashSet<ObjectId>,
+) -> MetaResult<HashMap<ObjectId, String>>
+where
+    C: ConnectionTrait,
+{
+    let job_ids = job_ids.iter().cloned().collect_vec();
+
+    // including table, materialized view, index
+    let common_job_definitions: Vec<(ObjectId, String)> = Table::find()
+        .select_only()
+        .columns([
+            table::Column::TableId,
+            #[cfg(not(debug_assertions))]
+            table::Column::Name,
+            #[cfg(debug_assertions)]
+            table::Column::Definition,
+        ])
+        .filter(table::Column::TableId.is_in(job_ids.clone()))
+        .into_tuple()
+        .all(txn)
+        .await?;
+
+    let sink_definitions: Vec<(ObjectId, String)> = Sink::find()
+        .select_only()
+        .columns([
+            sink::Column::SinkId,
+            #[cfg(not(debug_assertions))]
+            sink::Column::Name,
+            #[cfg(debug_assertions)]
+            sink::Column::Definition,
+        ])
+        .filter(sink::Column::SinkId.is_in(job_ids.clone()))
+        .into_tuple()
+        .all(txn)
+        .await?;
+
+    let source_definitions: Vec<(ObjectId, String)> = Source::find()
+        .select_only()
+        .columns([
+            source::Column::SourceId,
+            #[cfg(not(debug_assertions))]
+            source::Column::Name,
+            #[cfg(debug_assertions)]
+            source::Column::Definition,
+        ])
+        .filter(source::Column::SourceId.is_in(job_ids.clone()))
+        .into_tuple()
+        .all(txn)
+        .await?;
+
+    let definitions: HashMap<ObjectId, String> = common_job_definitions
+        .into_iter()
+        .chain(sink_definitions.into_iter())
+        .chain(source_definitions.into_iter())
+        .collect();
+
+    Ok(definitions)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
