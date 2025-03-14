@@ -1377,6 +1377,34 @@ where
         Ok(stream.map_ok(|(_, row)| row))
     }
 
+    /// Get the row from a state table with only 1 row.
+    pub async fn get_from_one_row_table(&self) -> StreamExecutorResult<Option<OwnedRow>> {
+        let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Unbounded, Unbounded);
+        let stream = self
+            .iter_with_prefix(row::empty(), sub_range, Default::default())
+            .await?;
+        pin_mut!(stream);
+
+        if let Some(res) = stream.next().await {
+            let value = res?.into_owned_row();
+            assert!(stream.next().await.is_none());
+            Ok(Some(value))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Get the row from a state table with only 1 row, and the row has only 1 col.
+    ///
+    /// `None` can mean either the row is never persisted, or is a persisted `NULL`,
+    /// which does not matter in the use case.
+    pub async fn get_from_one_value_table(&self) -> StreamExecutorResult<Option<ScalarImpl>> {
+        Ok(self
+            .get_from_one_row_table()
+            .await?
+            .and_then(|row| row[0].clone()))
+    }
+
     pub async fn iter_keyed_row_with_prefix(
         &self,
         pk_prefix: impl Row,
