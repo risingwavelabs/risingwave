@@ -734,7 +734,7 @@ impl SplitImpl {
     }
 }
 
-pub type DataType = risingwave_common::types::DataType;
+use risingwave_common::types::DataType;
 
 #[derive(Clone, Debug)]
 pub struct Column {
