@@ -16,12 +16,14 @@ use std::collections::{BTreeMap, HashMap};
 use std::ffi::CString;
 use std::fs;
 use std::path::Path;
+use std::sync::LazyLock;
 use std::time::Duration;
 
 use foyer::{HybridCache, TracingOptions};
 use itertools::Itertools;
 use prometheus::core::Collector;
 use prometheus::proto::Metric;
+use regex::Regex;
 use risingwave_common::config::{MetricLevel, ServerConfig};
 use risingwave_common_heap_profiling::{AUTO_DUMP_SUFFIX, COLLAPSED_SUFFIX, MANUALLY_DUMP_SUFFIX};
 use risingwave_hummock_sdk::HummockSstableObjectId;
@@ -70,6 +72,39 @@ impl MonitorServiceImpl {
     }
 }
 
+static REPLACE_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    const REGEX_STR: &str = r"consume_log \(sink_id (?<sink_id>\d+)\) \[!!! ";
+    Regex::new(REGEX_STR).unwrap()
+});
+
+fn rewrite_false_positive_consume_log_entry(trace: String) -> String {
+    // transform:
+    //  consume_log (sink_id 346) [!!! 3490.450s]
+    // into:
+    //  consume_log (sink_id 346) [3490.450s]
+    REPLACE_REGEX
+        .replace_all(&trace, r"consume_log (sink_id $sink_id) [")
+        .into_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::rpc::service::monitor_service::{
+        REPLACE_REGEX, rewrite_false_positive_consume_log_entry,
+    };
+
+    #[test]
+    fn test_rewrite_false_positive_consume_log_entry() {
+        assert!(REPLACE_REGEX.is_match("consume_log (sink_id 346) [!!! 3490.450s]"));
+        assert_eq!(
+            "consume_log (sink_id 346) [3490.450s]",
+            &rewrite_false_positive_consume_log_entry(
+                "consume_log (sink_id 346) [!!! 3490.450s]".into()
+            )
+        );
+    }
+}
+
 #[async_trait::async_trait]
 impl MonitorService for MonitorServiceImpl {
     #[cfg_attr(coverage, coverage(off))]
@@ -82,7 +117,7 @@ impl MonitorService for MonitorServiceImpl {
         let actor_traces = if let Some(reg) = self.stream_mgr.await_tree_reg() {
             reg.collect::<Actor>()
                 .into_iter()
-                .map(|(k, v)| (k.0, v.to_string()))
+                .map(|(k, v)| (k.0, rewrite_false_positive_consume_log_entry(v.to_string())))
                 .collect()
         } else {
             Default::default()
