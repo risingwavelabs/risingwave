@@ -18,7 +18,7 @@ use futures::stream;
 use risingwave_common::array::{Array, ArrayImpl, Op};
 use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::hash::VnodeBitmapExt;
-use risingwave_common::row::{OwnedRow, once};
+use risingwave_common::row::once;
 use risingwave_common::types::{DefaultOrd, ToDatumRef, ToOwnedDatum};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::{
