@@ -471,6 +471,10 @@ impl BarrierKind {
         matches!(self, BarrierKind::Checkpoint(_))
     }
 
+    pub fn is_initial(&self) -> bool {
+        matches!(self, BarrierKind::Initial)
+    }
+
     pub fn as_str_name(&self) -> &'static str {
         match self {
             BarrierKind::Initial => "Initial",

@@ -20,6 +20,7 @@ use std::time::Duration;
 use risingwave_common::hash::ActorId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::hummock::HummockVersionStats;
+use risingwave_pb::stream_plan::barrier::PbBarrierKind;
 use risingwave_pb::stream_service::barrier_complete_response::{
     CreateMviewProgress, PbCreateMviewProgress,
 };
@@ -36,7 +37,7 @@ pub(super) struct CreateMviewLogStoreProgressTracker {
 }
 
 impl CreateMviewLogStoreProgressTracker {
-    fn new(actors: impl Iterator<Item = ActorId>, pending_barrier_lag: u64) -> Self {
+    pub(super) fn new(actors: impl Iterator<Item = ActorId>, pending_barrier_lag: u64) -> Self {
         Self {
             ongoing_actors: HashMap::from_iter(actors.map(|actor| (actor, pending_barrier_lag))),
             finished_actors: HashSet::new(),
@@ -211,7 +212,11 @@ impl CreatingStreamingJobStatus {
                 vec![CreatingStreamingJobStatus::new_fake_barrier(
                     prev_epoch_fake_physical_time,
                     pending_non_checkpoint_barriers,
-                    barrier_info.kind.is_checkpoint(),
+                    if barrier_info.kind.is_checkpoint() {
+                        PbBarrierKind::Checkpoint
+                    } else {
+                        PbBarrierKind::Barrier
+                    },
                 )]
             }
             CreatingStreamingJobStatus::ConsumingLogStore {
@@ -231,7 +236,7 @@ impl CreatingStreamingJobStatus {
     pub(super) fn new_fake_barrier(
         prev_epoch_fake_physical_time: &mut u64,
         pending_non_checkpoint_barriers: &mut Vec<u64>,
-        is_checkpoint: bool,
+        kind: PbBarrierKind,
     ) -> BarrierInfo {
         {
             {
@@ -241,10 +246,18 @@ impl CreatingStreamingJobStatus {
                 let curr_epoch =
                     TracedEpoch::new(Epoch::from_physical_time(*prev_epoch_fake_physical_time));
                 pending_non_checkpoint_barriers.push(prev_epoch.value().0);
-                let kind = if is_checkpoint {
-                    BarrierKind::Checkpoint(take(pending_non_checkpoint_barriers))
-                } else {
-                    BarrierKind::Barrier
+                let kind = match kind {
+                    PbBarrierKind::Unspecified => {
+                        unreachable!()
+                    }
+                    PbBarrierKind::Initial => {
+                        pending_non_checkpoint_barriers.clear();
+                        BarrierKind::Initial
+                    }
+                    PbBarrierKind::Barrier => BarrierKind::Barrier,
+                    PbBarrierKind::Checkpoint => {
+                        BarrierKind::Checkpoint(take(pending_non_checkpoint_barriers))
+                    }
                 };
                 BarrierInfo {
                     prev_epoch,

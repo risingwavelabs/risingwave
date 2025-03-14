@@ -100,10 +100,6 @@ impl InflightDatabaseInfo {
         self.jobs.values().flat_map(|job| job.fragment_infos())
     }
 
-    pub fn job_ids(&self) -> impl Iterator<Item = TableId> + '_ {
-        self.jobs.keys().cloned()
-    }
-
     pub fn contains_job(&self, job_id: TableId) -> bool {
         self.jobs.contains_key(&job_id)
     }
@@ -134,36 +130,6 @@ impl InflightDatabaseInfo {
         Self {
             jobs: Default::default(),
             fragment_location: Default::default(),
-        }
-    }
-
-    /// Resolve inflight actor info from given nodes and actors that are loaded from meta store. It will be used during recovery to rebuild all streaming actors.
-    pub fn new<I: Iterator<Item = (FragmentId, InflightFragmentInfo)>>(
-        fragment_infos: impl Iterator<Item = (TableId, I)>,
-    ) -> Self {
-        let mut fragment_location = HashMap::new();
-        let mut jobs = HashMap::new();
-
-        for (job_id, job_fragment_info) in fragment_infos {
-            let job_fragment_info: HashMap<_, _> = job_fragment_info.collect();
-            assert!(!job_fragment_info.is_empty());
-            for fragment_id in job_fragment_info.keys() {
-                fragment_location
-                    .try_insert(*fragment_id, job_id)
-                    .expect("no duplicate");
-            }
-            jobs.insert(
-                job_id,
-                InflightStreamingJobInfo {
-                    job_id,
-                    fragment_infos: job_fragment_info,
-                },
-            );
-        }
-        assert!(!jobs.is_empty());
-        Self {
-            jobs,
-            fragment_location,
         }
     }
 
@@ -511,18 +477,19 @@ impl InflightFragmentInfo {
                 .any(|actor| (actor.worker_id) == worker_id)
         })
     }
+
+    pub(crate) fn workers(infos: impl IntoIterator<Item = &Self>) -> HashSet<WorkerId> {
+        infos
+            .into_iter()
+            .flat_map(|info| info.actors.values())
+            .map(|actor| actor.worker_id)
+            .collect()
+    }
 }
 
 impl InflightDatabaseInfo {
     pub fn contains_worker(&self, worker_id: WorkerId) -> bool {
         InflightFragmentInfo::contains_worker(self.fragment_infos(), worker_id)
-    }
-
-    pub(crate) fn workers(&self) -> HashSet<WorkerId> {
-        self.fragment_infos()
-            .flat_map(|info| info.actors.values())
-            .map(|actor| actor.worker_id)
-            .collect()
     }
 
     pub fn existing_table_ids(&self) -> impl Iterator<Item = TableId> + '_ {
