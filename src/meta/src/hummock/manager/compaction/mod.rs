@@ -655,6 +655,7 @@ impl HummockManager {
             &mut versioning.current_version,
             &mut versioning.hummock_version_deltas,
             self.env.notification_manager(),
+            None,
             &self.metrics,
         );
         // Apply stats changes.
@@ -1178,6 +1179,7 @@ impl HummockManager {
             &mut versioning.current_version,
             &mut versioning.hummock_version_deltas,
             self.env.notification_manager(),
+            None,
             &self.metrics,
         );
 
