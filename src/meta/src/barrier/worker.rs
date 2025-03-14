@@ -343,7 +343,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                     runtime_info.validate(database_id, &self.active_streaming_nodes).inspect_err(|e| {
                                         warn!(database_id = database_id.database_id, err = ?e.as_report(), ?runtime_info, "reloaded database runtime info failed to validate");
                                     })?;
-                                    let workers = runtime_info.database_fragment_info.workers();
+                                    let workers = InflightFragmentInfo::workers(runtime_info.job_infos.values().flat_map(|job| job.fragment_infos()));
                                     for worker_id in workers {
                                         if !self.control_stream_manager.contains_worker(worker_id) {
                                             let node = self.active_streaming_nodes.current()[&worker_id].clone();
@@ -651,6 +651,8 @@ use risingwave_common::error::tonic::extra::{Score, ScoredError};
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::meta::event_log::{Event, EventRecovery};
 
+use crate::controller::fragment::InflightFragmentInfo;
+
 impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
     /// Recovery the whole cluster from the latest epoch.
     ///
@@ -713,8 +715,9 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
             })?;
             let BarrierWorkerRuntimeInfoSnapshot {
                 active_streaming_nodes,
-                database_fragment_infos,
+                database_job_infos,
                 mut state_table_committed_epochs,
+                mut state_table_log_epochs,
                 mut subscription_infos,
                 mut stream_actors,
                 mut source_splits,
@@ -740,11 +743,12 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 let mut collected_databases = HashMap::new();
                 let mut collecting_databases = HashMap::new();
                 let mut failed_databases = HashSet::new();
-                for (database_id, info) in database_fragment_infos {
+                for (database_id, jobs) in database_job_infos {
                     let result = control_stream_manager.inject_database_initial_barrier(
                         database_id,
-                        info,
+                        jobs,
                         &mut state_table_committed_epochs,
+                        &mut state_table_log_epochs,
                         &mut stream_actors,
                         &mut source_splits,
                         &mut background_jobs,

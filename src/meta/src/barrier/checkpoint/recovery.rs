@@ -432,8 +432,9 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
             },
         };
         let DatabaseRuntimeInfoSnapshot {
-            database_fragment_info,
+            job_infos,
             mut state_table_committed_epochs,
+            mut state_table_log_epochs,
             subscription_info,
             mut stream_actors,
             mut source_splits,
@@ -442,8 +443,9 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
         let result: MetaResult<_> = try {
             control_stream_manager.inject_database_initial_barrier(
                 self.database_id,
-                database_fragment_info,
+                job_infos,
                 &mut state_table_committed_epochs,
+                &mut state_table_log_epochs,
                 &mut stream_actors,
                 &mut source_splits,
                 &mut background_jobs,
