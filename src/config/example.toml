@@ -293,6 +293,7 @@ pause_on_next_bootstrap = false
 enable_tracing = false
 license_key = ""
 time_travel_retention_ms = 600000
+per_database_isolation = true
 
 [udf]
 enable_embedded_python_udf = false

@@ -212,4 +212,10 @@ where
             .time_travel_retention_ms
             .unwrap_or_else(default::time_travel_retention_ms)
     }
+
+    fn per_database_isolation(&self) -> <bool as ParamValue>::Borrowed<'_> {
+        self.inner()
+            .per_database_isolation
+            .unwrap_or_else(default::per_database_isolation)
+    }
 }

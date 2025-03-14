@@ -1105,6 +1105,7 @@ mod tests {
                 test_env.shared_context.database_id,
                 Arc::new(StreamingMetrics::unused()),
                 BATCHED_PERMITS,
+                "for_test".into(),
             )
         };
 

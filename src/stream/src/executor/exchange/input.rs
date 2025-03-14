@@ -166,6 +166,7 @@ use risingwave_common::catalog::DatabaseId;
 impl RemoteInput {
     /// Create a remote input from compute client and related info. Should provide the corresponding
     /// compute client of where the actor is placed.
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         client_pool: ComputeClientPool,
         upstream_addr: HostAddr,
@@ -174,6 +175,7 @@ impl RemoteInput {
         database_id: DatabaseId,
         metrics: Arc<StreamingMetrics>,
         batched_permits: usize,
+        term_id: String,
     ) -> Self {
         let actor_id = up_down_ids.0;
 
@@ -187,6 +189,7 @@ impl RemoteInput {
                 database_id,
                 metrics,
                 batched_permits,
+                term_id,
             ),
         }
     }
@@ -210,6 +213,7 @@ mod remote_input {
 
     pub(super) type RemoteInputStreamInner = impl crate::executor::DispatcherMessageStream;
 
+    #[expect(clippy::too_many_arguments)]
     pub(super) fn run(
         client_pool: ComputeClientPool,
         upstream_addr: HostAddr,
@@ -218,6 +222,7 @@ mod remote_input {
         database_id: DatabaseId,
         metrics: Arc<StreamingMetrics>,
         batched_permits_limit: usize,
+        term_id: String,
     ) -> RemoteInputStreamInner {
         run_inner(
             client_pool,
@@ -227,9 +232,11 @@ mod remote_input {
             database_id,
             metrics,
             batched_permits_limit,
+            term_id,
         )
     }
 
+    #[expect(clippy::too_many_arguments)]
     #[try_stream(ok = DispatcherMessage, error = StreamExecutorError)]
     async fn run_inner(
         client_pool: ComputeClientPool,
@@ -239,6 +246,7 @@ mod remote_input {
         database_id: DatabaseId,
         metrics: Arc<StreamingMetrics>,
         batched_permits_limit: usize,
+        term_id: String,
     ) {
         let client = client_pool.get_by_addr(upstream_addr).await?;
         let (stream, permits_tx) = client
@@ -248,6 +256,7 @@ mod remote_input {
                 up_down_frag.0,
                 up_down_frag.1,
                 database_id,
+                term_id,
             )
             .await?;
 
@@ -352,6 +361,7 @@ pub(crate) fn new_input(
             context.database_id,
             metrics,
             context.config.developer.exchange_batched_permits,
+            context.term_id(),
         )
         .boxed_input()
     };
