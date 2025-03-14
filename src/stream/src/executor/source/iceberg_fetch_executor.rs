@@ -12,41 +12,37 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::marker::PhantomData;
+use std::collections::HashMap;
 use std::ops::Bound;
 
+use anyhow::Context;
 use either::Either;
 use futures::{StreamExt, TryStreamExt, stream};
 use futures_async_stream::try_stream;
-use risingwave_common::catalog::{ColumnId, TableId};
+use iceberg::scan::FileScanTask;
+use itertools::Itertools;
+use risingwave_common::array::{DataChunk, Op, SerialArray};
+use risingwave_common::bitmap::Bitmap;
+use risingwave_common::catalog::{
+    ColumnId, ICEBERG_FILE_PATH_COLUMN_NAME, ICEBERG_FILE_POS_COLUMN_NAME, ROW_ID_COLUMN_NAME,
+    TableId,
+};
 use risingwave_common::hash::VnodeBitmapExt;
-use risingwave_common::types::ScalarRef;
-use risingwave_connector::parser::EncodingProperties;
-use risingwave_connector::parser::parquet_parser::get_total_row_nums_for_parquet_file;
-use risingwave_connector::source::filesystem::OpendalFsSplit;
-use risingwave_connector::source::filesystem::opendal_source::{
-    OpendalAzblob, OpendalGcs, OpendalPosixFs, OpendalS3, OpendalSource,
-};
+use risingwave_common::types::{JsonbVal, ScalarRef, Serial};
+use risingwave_connector::source::iceberg::{IcebergScanOpts, scan_task_to_chunk};
 use risingwave_connector::source::reader::desc::SourceDesc;
-use risingwave_connector::source::{
-    BoxSourceChunkStream, SourceContext, SourceCtrlOpts, SplitImpl, SplitMetaData,
-};
+use risingwave_connector::source::{SourceContext, SourceCtrlOpts};
 use risingwave_storage::store::PrefetchOptions;
 use thiserror_ext::AsReport;
 
-use super::{
-    SourceStateTableHandler, StreamSourceCore, apply_rate_limit, get_split_offset_col_idx,
-    get_split_offset_mapping_from_chunk, prune_additional_cols,
-};
+use super::{SourceStateTableHandler, StreamSourceCore, prune_additional_cols};
 use crate::common::rate_limit::limited_chunk_size;
 use crate::executor::prelude::*;
 use crate::executor::stream_reader::StreamReaderWithPause;
 
 const SPLIT_BATCH_SIZE: usize = 1000;
 
-type SplitBatch = Option<Vec<SplitImpl>>;
-
-pub struct FsFetchExecutor<S: StateStore, Src: OpendalSource> {
+pub struct IcebergFetchExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
 
     /// Streaming source for external
@@ -57,11 +53,9 @@ pub struct FsFetchExecutor<S: StateStore, Src: OpendalSource> {
 
     /// Rate limit in rows/s.
     rate_limit_rps: Option<u32>,
-
-    _marker: PhantomData<Src>,
 }
 
-impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
+impl<S: StateStore> IcebergFetchExecutor<S> {
     pub fn new(
         actor_ctx: ActorContextRef,
         stream_source_core: StreamSourceCore<S>,
@@ -73,7 +67,6 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
             stream_source_core: Some(stream_source_core),
             upstream: Some(upstream),
             rate_limit_rps,
-            _marker: PhantomData,
         }
     }
 
@@ -82,8 +75,8 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
         state_store_handler: &SourceStateTableHandler<S>,
         column_ids: Vec<ColumnId>,
         source_ctx: SourceContext,
-        source_desc: &SourceDesc,
-        stream: &mut StreamReaderWithPause<BIASED, StreamChunk>,
+        source_desc: SourceDesc,
+        stream: &mut StreamReaderWithPause<BIASED, Vec<StreamChunk>>,
         rate_limit_rps: Option<u32>,
     ) -> StreamExecutorResult<()> {
         let mut batch = Vec::with_capacity(SPLIT_BATCH_SIZE);
@@ -98,33 +91,13 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                 )
                 .await?;
             pin_mut!(table_iter);
-            let properties = source_desc.source.config.clone();
             while let Some(item) = table_iter.next().await {
                 let row = item?;
-                let split = match row.datum_at(1) {
-                    Some(ScalarRefImpl::Jsonb(jsonb_ref)) => match properties {
-                        risingwave_connector::source::ConnectorProperties::Gcs(_) => {
-                            let split: OpendalFsSplit<OpendalGcs> =
-                                OpendalFsSplit::restore_from_json(jsonb_ref.to_owned_scalar())?;
-                            SplitImpl::from(split)
-                        }
-                        risingwave_connector::source::ConnectorProperties::OpendalS3(_) => {
-                            let split: OpendalFsSplit<OpendalS3> =
-                                OpendalFsSplit::restore_from_json(jsonb_ref.to_owned_scalar())?;
-                            SplitImpl::from(split)
-                        }
-                        risingwave_connector::source::ConnectorProperties::Azblob(_) => {
-                            let split: OpendalFsSplit<OpendalAzblob> =
-                                OpendalFsSplit::restore_from_json(jsonb_ref.to_owned_scalar())?;
-                            SplitImpl::from(split)
-                        }
-                        risingwave_connector::source::ConnectorProperties::PosixFs(_) => {
-                            let split: OpendalFsSplit<OpendalPosixFs> =
-                                OpendalFsSplit::restore_from_json(jsonb_ref.to_owned_scalar())?;
-                            SplitImpl::from(split)
-                        }
-                        _ => unreachable!(),
-                    },
+                let split: FileScanTask = match row.datum_at(1) {
+                    Some(ScalarRefImpl::Jsonb(jsonb_ref)) => {
+                        serde_json::from_value(jsonb_ref.to_owned_scalar().take())
+                            .with_context(|| format!("invalid state: {:?}", jsonb_ref))?
+                    }
                     _ => unreachable!(),
                 };
                 batch.push(split);
@@ -142,10 +115,9 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                 column_ids,
                 source_ctx,
                 source_desc,
-                Some(batch),
+                batch,
                 rate_limit_rps,
             )
-            .await?
             .map_err(StreamExecutorError::connector_error);
             stream.replace_data_stream(batch_reader);
         }
@@ -153,19 +125,51 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
         Ok(())
     }
 
+    #[try_stream(ok = Vec<StreamChunk>, error = StreamExecutorError)]
     async fn build_batched_stream_reader(
-        column_ids: Vec<ColumnId>,
-        source_ctx: SourceContext,
-        source_desc: &SourceDesc,
-        batch: SplitBatch,
-        rate_limit_rps: Option<u32>,
-    ) -> StreamExecutorResult<BoxSourceChunkStream> {
-        let (stream, _) = source_desc
-            .source
-            .build_stream(batch, column_ids, Arc::new(source_ctx), false)
-            .await
-            .map_err(StreamExecutorError::connector_error)?;
-        Ok(apply_rate_limit(stream, rate_limit_rps).boxed())
+        _column_ids: Vec<ColumnId>,
+        _source_ctx: SourceContext,
+        source_desc: SourceDesc,
+        batch: Vec<FileScanTask>,
+        _rate_limit_rps: Option<u32>,
+    ) {
+        // let (stream, _) = source_desc
+        //     .source
+        //     .build_stream(batch, column_ids, Arc::new(source_ctx), false)
+        //     .await
+        //     .map_err(StreamExecutorError::connector_error)?;
+        // Ok(apply_rate_limit(stream, rate_limit_rps).boxed())
+        let properties = source_desc.source.config.clone();
+        let properties = match properties {
+            risingwave_connector::source::ConnectorProperties::Iceberg(iceberg_properties) => {
+                iceberg_properties
+            }
+            _ => unreachable!(),
+        };
+        let table = properties.load_table().await?;
+
+        for task in batch {
+            let mut chunks = vec![];
+            #[for_await]
+            for chunk in scan_task_to_chunk(
+                table.clone(),
+                task,
+                IcebergScanOpts {
+                    batch_size: 1024,
+                    need_seq_num: true,
+                    need_file_path_and_pos: true,
+                },
+                None,
+            ) {
+                let chunk = chunk?;
+                chunks.push(StreamChunk::from_parts(
+                    itertools::repeat_n(Op::Insert, chunk.cardinality()).collect_vec(),
+                    chunk,
+                ));
+            }
+            // We yield one chunk for each file now, because iceberg-rs doesn't support read part of a file now.
+            yield chunks;
+        }
     }
 
     fn build_source_ctx(
@@ -207,16 +211,34 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
             .build()
             .map_err(StreamExecutorError::connector_error)?;
 
-        let (Some(split_idx), Some(offset_idx)) = get_split_offset_col_idx(&source_desc.columns)
-        else {
-            unreachable!("Partition and offset columns must be set.");
-        };
+        let file_path_idx = source_desc
+            .columns
+            .iter()
+            .position(|c| c.name == ICEBERG_FILE_PATH_COLUMN_NAME)
+            .unwrap();
+        let file_pos_idx = source_desc
+            .columns
+            .iter()
+            .position(|c| c.name == ICEBERG_FILE_POS_COLUMN_NAME)
+            .unwrap();
+        // TODO: currently we generate row_id here. If for risingwave iceberg table engine, maybe we can use _risingwave_iceberg_row_id instead.
+        let row_id_idx = source_desc
+            .columns
+            .iter()
+            .position(|c| c.name == ROW_ID_COLUMN_NAME)
+            .unwrap();
+        println!(
+            "source_desc.columns: {:#?}, file_path_idx: {}, file_pos_idx: {}, row_id_idx: {}",
+            source_desc.columns, file_path_idx, file_pos_idx, row_id_idx
+        );
         // Initialize state table.
         state_store_handler.init_epoch(first_epoch).await?;
 
         let mut splits_on_fetch: usize = 0;
-        let mut stream =
-            StreamReaderWithPause::<true, StreamChunk>::new(upstream, stream::pending().boxed());
+        let mut stream = StreamReaderWithPause::<true, Vec<StreamChunk>>::new(
+            upstream,
+            stream::pending().boxed(),
+        );
 
         if is_pause_on_startup {
             stream.pause_stream();
@@ -230,7 +252,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
             &state_store_handler, // move into the function
             core.column_ids.clone(),
             self.build_source_ctx(&source_desc, core.source_id, &core.source_name),
-            &source_desc,
+            source_desc.clone(),
             &mut stream,
             self.rate_limit_rps,
         )
@@ -248,6 +270,8 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                         Either::Left(msg) => {
                             match msg {
                                 Message::Barrier(barrier) => {
+                                    let mut need_rebuild_reader = false;
+
                                     if let Some(mutation) = barrier.mutation.as_deref() {
                                         match mutation {
                                             Mutation::Pause => stream.pause_stream(),
@@ -257,13 +281,13 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                                     actor_to_apply.get(&self.actor_ctx.id)
                                                     && *new_rate_limit != self.rate_limit_rps
                                                 {
-                                                    tracing::info!(
+                                                    tracing::debug!(
                                                         "updating rate limit from {:?} to {:?}",
                                                         self.rate_limit_rps,
                                                         *new_rate_limit
                                                     );
                                                     self.rate_limit_rps = *new_rate_limit;
-                                                    splits_on_fetch = 0;
+                                                    need_rebuild_reader = true;
                                                 }
                                             }
                                             _ => (),
@@ -288,7 +312,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                         }
                                     }
 
-                                    if splits_on_fetch == 0 {
+                                    if splits_on_fetch == 0 || need_rebuild_reader {
                                         Self::replace_with_new_batch_reader(
                                             &mut splits_on_fetch,
                                             &state_store_handler,
@@ -298,7 +322,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                                 core.source_id,
                                                 &core.source_name,
                                             ),
-                                            &source_desc,
+                                            source_desc.clone(),
                                             &mut stream,
                                             self.rate_limit_rps,
                                         )
@@ -308,100 +332,94 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                 // Receiving file assignments from upstream list executor,
                                 // store into state table.
                                 Message::Chunk(chunk) => {
-                                    // For Parquet encoding, the offset indicates the current row being read.
-                                    // Therefore, to determine if the end of a Parquet file has been reached, we need to compare its offset with the total number of rows.
-                                    // We directly obtain the total row count and set the size in `OpendalFsSplit` to this value.
-                                    let file_assignment = if let EncodingProperties::Parquet =
-                                        source_desc.source.parser_config.encoding_config
-                                    {
-                                        let filename_list: Vec<_> = chunk
-                                            .data_chunk()
-                                            .rows()
-                                            .map(|row| {
-                                                let filename = row.datum_at(0).unwrap().into_utf8();
-                                                filename.to_owned()
-                                            })
-                                            .collect();
-                                        let mut parquet_file_assignment = vec![];
-                                        for filename in &filename_list {
-                                            let total_row_num =
-                                                get_total_row_nums_for_parquet_file(
-                                                    filename,
-                                                    source_desc.clone(),
-                                                )
-                                                .await?;
-                                            parquet_file_assignment.push(
-                                                OpendalFsSplit::<Src>::new(
-                                                    filename.to_owned(),
-                                                    0,
-                                                    total_row_num - 1, // -1 because offset start from 0.
-                                                ),
-                                            )
-                                        }
-                                        parquet_file_assignment
-                                    } else {
-                                        chunk
-                                            .data_chunk()
-                                            .rows()
-                                            .map(|row| {
-                                                let filename = row.datum_at(0).unwrap().into_utf8();
-
-                                                let size = row.datum_at(2).unwrap().into_int64();
-                                                OpendalFsSplit::<Src>::new(
-                                                    filename.to_owned(),
-                                                    0,
-                                                    size as usize,
-                                                )
-                                            })
-                                            .collect()
-                                    };
-                                    state_store_handler.set_states(file_assignment).await?;
+                                    let jsonb_values: Vec<(String, JsonbVal)> = chunk
+                                        .data_chunk()
+                                        .rows()
+                                        .map(|row| {
+                                            let file_name = row.datum_at(0).unwrap().into_utf8();
+                                            let split = row.datum_at(1).unwrap().into_jsonb();
+                                            (file_name.to_owned(), split.to_owned_scalar())
+                                        })
+                                        .collect();
+                                    state_store_handler.set_states_json(jsonb_values).await?;
                                     state_store_handler.try_flush().await?;
                                 }
                                 Message::Watermark(_) => unreachable!(),
                             }
                         }
                         // StreamChunk from FsSourceReader, and the reader reads only one file.
-                        Either::Right(chunk) => {
-                            let mapping =
-                                get_split_offset_mapping_from_chunk(&chunk, split_idx, offset_idx)
-                                    .unwrap();
-                            debug_assert_eq!(mapping.len(), 1);
-                            if let Some((split_id, offset)) = mapping.into_iter().next() {
-                                let row = state_store_handler
-                                    .get(&split_id)
-                                    .await?
-                                    .expect("The fs_split should be in the state table.");
-                                let fs_split = match row.datum_at(1) {
-                                    Some(ScalarRefImpl::Jsonb(jsonb_ref)) => {
-                                        OpendalFsSplit::<Src>::restore_from_json(
-                                            jsonb_ref.to_owned_scalar(),
-                                        )?
-                                    }
-                                    _ => unreachable!(),
-                                };
-                                // FIXME(rc): Here we compare `offset` with `fs_split.size` to determine
-                                // whether the file is finished, where the `offset` is the starting position
-                                // of the NEXT message line in the file. However, In other source connectors,
-                                // we use the word `offset` to represent the offset of the current message.
-                                // We have to be careful about this semantical inconsistency.
-                                if offset.parse::<usize>().unwrap() >= fs_split.size {
-                                    splits_on_fetch -= 1;
-                                    state_store_handler.delete(&split_id).await?;
-                                } else {
-                                    state_store_handler
-                                        .set(&split_id, fs_split.encode_to_json())
-                                        .await?;
+                        Either::Right(chunks) => {
+                            for chunk in chunks {
+                                println!(
+                                    "chunk:\n {:}, file_path_idx: {}, file_pos_idx: {}",
+                                    chunk.to_pretty(),
+                                    file_path_idx,
+                                    file_pos_idx
+                                );
+                                // let mapping =
+                                //     get_split_offset_mapping_from_chunk(&chunk, split_idx, offset_idx)
+                                //         .unwrap();
+                                let mut mapping = HashMap::new();
+                                // All rows (including those visible or invisible) will be used to update the source offset.
+                                // TODO: maybe we can get offset separately, instead of in the chunk.
+                                for i in 0..chunk.capacity() {
+                                    let (_, row, _) = chunk.row_at(i);
+                                    let file_path: Arc<str> =
+                                        row.datum_at(file_path_idx).unwrap().into_utf8().into();
+                                    let file_pos = row.datum_at(file_pos_idx).unwrap().into_int64();
+                                    mapping.insert(file_path, file_pos.to_owned());
                                 }
-                            }
+                                debug_assert_eq!(mapping.len(), 1);
+                                if let Some((file_path, _file_pos)) = mapping.into_iter().next() {
+                                    let row = state_store_handler
+                                        .get(&file_path)
+                                        .await?
+                                        .expect("The fs_split should be in the state table.");
+                                    let _fs_split: FileScanTask = match row.datum_at(1) {
+                                        Some(ScalarRefImpl::Jsonb(jsonb_ref)) => {
+                                            serde_json::from_value(
+                                                jsonb_ref.to_owned_scalar().take(),
+                                            )
+                                            .with_context(|| {
+                                                format!("invalid state: {:?}", jsonb_ref)
+                                            })?
+                                        }
+                                        _ => unreachable!(),
+                                    };
 
-                            let chunk = prune_additional_cols(
-                                &chunk,
-                                split_idx,
-                                offset_idx,
-                                &source_desc.columns,
-                            );
-                            yield Message::Chunk(chunk);
+                                    // TODO: support persist progress after supporting reading part of a file.
+                                    if true {
+                                        splits_on_fetch -= 1;
+                                        state_store_handler.delete(&file_path).await?;
+                                    }
+                                }
+
+                                let chunk = prune_additional_cols(
+                                    &chunk,
+                                    file_path_idx,
+                                    file_pos_idx,
+                                    &source_desc.columns,
+                                );
+                                // pad row_id
+                                let (chunk, op) = chunk.into_parts();
+                                let (mut columns, visibility) = chunk.into_parts();
+                                columns.insert(
+                                    row_id_idx,
+                                    Arc::new(
+                                        SerialArray::from_iter_bitmap(
+                                            itertools::repeat_n(Serial::from(0), columns[0].len()),
+                                            Bitmap::ones(columns[0].len()),
+                                        )
+                                        .into(),
+                                    ),
+                                );
+                                let chunk = StreamChunk::from_parts(
+                                    op,
+                                    DataChunk::from_parts(columns.into(), visibility),
+                                );
+
+                                yield Message::Chunk(chunk);
+                            }
                         }
                     }
                 }
@@ -410,21 +428,21 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
     }
 }
 
-impl<S: StateStore, Src: OpendalSource> Execute for FsFetchExecutor<S, Src> {
+impl<S: StateStore> Execute for IcebergFetchExecutor<S> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.into_stream().boxed()
     }
 }
 
-impl<S: StateStore, Src: OpendalSource> Debug for FsFetchExecutor<S, Src> {
+impl<S: StateStore> Debug for IcebergFetchExecutor<S> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         if let Some(core) = &self.stream_source_core {
-            f.debug_struct("FsFetchExecutor")
+            f.debug_struct("IcebergFetchExecutor")
                 .field("source_id", &core.source_id)
                 .field("column_ids", &core.column_ids)
                 .finish()
         } else {
-            f.debug_struct("FsFetchExecutor").finish()
+            f.debug_struct("IcebergFetchExecutor").finish()
         }
     }
 }

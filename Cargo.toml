@@ -151,12 +151,12 @@ otlp-embedded = { git = "https://github.com/risingwavelabs/otlp-embedded", rev =
 prost = { version = "0.13" }
 prost-build = { version = "0.13" }
 # branch dev_rebase_main_20250307
-iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "5f9109880438418d7691b1a2c0ac1fa0b5c288fb", features = [
+iceberg = { path = "../iceberg-rust/crates/iceberg", features = [
     "storage-s3",
     "storage-gcs",
 ] }
-iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "5f9109880438418d7691b1a2c0ac1fa0b5c288fb" }
-iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "5f9109880438418d7691b1a2c0ac1fa0b5c288fb" }
+iceberg-catalog-rest = { path = "../iceberg-rust/crates/catalog/rest" }
+iceberg-catalog-glue = { path = "../iceberg-rust/crates/catalog/glue" }
 opendal = "0.49"
 # used only by arrow-udf-flight
 arrow-flight = "53"
