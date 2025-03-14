@@ -4,7 +4,7 @@ use crate::model::FragmentId;
 
 /// This is the "global" `fragment_id`.
 /// The local `fragment_id` is namespaced by the `fragment_id`.
-pub(crate) type ActorId = u64;
+pub(crate) type ActorId = u32;
 
 #[derive(Clone, Debug)]
 pub(crate) struct BackfillNode {
@@ -32,7 +32,7 @@ pub(crate) struct BackfillOrderState {
 }
 
 impl BackfillOrderState {
-    fn finish_actor(&mut self, actor_id: ActorId) -> Vec<FragmentId> {
+    pub(crate) fn finish_actor(&mut self, actor_id: ActorId) -> Vec<FragmentId> {
         // Find the fragment_id of the actor.
         let fragment_id = self.actor_to_fragment_id.get(&actor_id).unwrap();
         // Decrease the remaining_actor_count of the operator.
@@ -45,7 +45,7 @@ impl BackfillOrderState {
         vec![]
     }
 
-    fn finish_fragment(&mut self, fragment_id: FragmentId) -> Vec<FragmentId> {
+    pub(crate) fn finish_fragment(&mut self, fragment_id: FragmentId) -> Vec<FragmentId> {
         let mut newly_scheduled = vec![];
         // Decrease the remaining_dependency_count of the children.
         // If the remaining_dependency_count is 0, add the child to the current_backfill_nodes.

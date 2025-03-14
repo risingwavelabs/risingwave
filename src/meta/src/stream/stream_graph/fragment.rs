@@ -33,12 +33,16 @@ use risingwave_common::util::stream_graph_visitor::{
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::ddl_service::TableJobType;
+use risingwave_pb::stream_plan::backfill_order_strategy::Strategy;
 use risingwave_pb::stream_plan::stream_fragment_graph::{
     Parallelism, StreamFragment, StreamFragmentEdge as StreamFragmentEdgeProto,
 };
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{BackfillOrderStrategy, DispatchStrategy, DispatcherType, FragmentTypeFlag, StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamScanNode, StreamScanType, BackfillOrderUnspecified};
-use risingwave_pb::stream_plan::backfill_order_strategy::Strategy;
+use risingwave_pb::stream_plan::{
+    BackfillOrderStrategy, BackfillOrderUnspecified, DispatchStrategy, DispatcherType,
+    FragmentTypeFlag, StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamScanNode,
+    StreamScanType,
+};
 
 use crate::MetaResult;
 use crate::barrier::SnapshotBackfillInfo;
@@ -446,9 +450,12 @@ impl StreamFragmentGraph {
         };
 
         let max_parallelism = proto.max_parallelism as usize;
-        let backfill_order_strategy = proto.backfill_order_strategy.unwrap_or_else(|| BackfillOrderStrategy {
-            strategy: Some(Strategy::Unspecified(BackfillOrderUnspecified {}))
-        });
+        let backfill_order_strategy =
+            proto
+                .backfill_order_strategy
+                .unwrap_or(BackfillOrderStrategy {
+                    strategy: Some(Strategy::Unspecified(BackfillOrderUnspecified {})),
+                });
 
         Ok(Self {
             fragments,
