@@ -1,0 +1,27 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table my_table (
+    a int,
+    b int[],
+    c map(varchar, int[])
+    -- more types can be altered
+);
+
+statement ok
+insert into my_table values (1, array[1, 2], map{'a': array[1, 2]});
+
+query TTT
+select * from my_table;
+----
+1	{1,2}	{a:{1,2}}
+
+statement error only types containing struct can be altered
+alter table my_table alter column a type double;
+
+statement error only types containing struct can be altered
+alter table my_table alter column b type double[];
+
+statement ok
+drop table my_table;
