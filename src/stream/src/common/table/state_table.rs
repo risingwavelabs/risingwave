@@ -1379,19 +1379,7 @@ where
 
     /// Get the row from a state table with only 1 row.
     pub async fn get_from_one_row_table(&self) -> StreamExecutorResult<Option<OwnedRow>> {
-        let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Unbounded, Unbounded);
-        let stream = self
-            .iter_with_prefix(row::empty(), sub_range, Default::default())
-            .await?;
-        pin_mut!(stream);
-
-        if let Some(res) = stream.next().await {
-            let value = res?.into_owned_row();
-            assert!(stream.next().await.is_none());
-            Ok(Some(value))
-        } else {
-            Ok(None)
-        }
+        self.get_row(None)
     }
 
     /// Get the row from a state table with only 1 row, and the row has only 1 col.
