@@ -12,9 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Bound;
-use std::ops::Bound::Unbounded;
-
 use itertools::Itertools;
 use risingwave_common::array::Op;
 use risingwave_common::row;
@@ -144,20 +141,7 @@ impl<S: StateStore> NowExecutor<S> {
                     yield Message::Barrier(barrier);
                     // Handle the initial barrier.
                     state_table.init_epoch(first_epoch).await?;
-                    let state_row = {
-                        let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) =
-                            &(Unbounded, Unbounded);
-                        let data_iter = state_table
-                            .iter_with_prefix(row::empty(), sub_range, Default::default())
-                            .await?;
-                        pin_mut!(data_iter);
-                        if let Some(keyed_row) = data_iter.next().await {
-                            Some(keyed_row?)
-                        } else {
-                            None
-                        }
-                    };
-                    last_timestamp = state_row.and_then(|row| row[0].clone());
+                    last_timestamp = state_table.get_from_one_value_table().await?;
                     paused = is_pause_on_startup;
                     initialized = true;
                 } else {

@@ -1377,6 +1377,22 @@ where
         Ok(stream.map_ok(|(_, row)| row))
     }
 
+    /// Get the row from a state table with only 1 row.
+    pub async fn get_from_one_row_table(&self) -> StreamExecutorResult<Option<OwnedRow>> {
+        self.get_row(row::empty()).await
+    }
+
+    /// Get the row from a state table with only 1 row, and the row has only 1 col.
+    ///
+    /// `None` can mean either the row is never persisted, or is a persisted `NULL`,
+    /// which does not matter in the use case.
+    pub async fn get_from_one_value_table(&self) -> StreamExecutorResult<Option<ScalarImpl>> {
+        Ok(self
+            .get_from_one_row_table()
+            .await?
+            .and_then(|row| row[0].clone()))
+    }
+
     pub async fn iter_keyed_row_with_prefix(
         &self,
         pk_prefix: impl Row,
