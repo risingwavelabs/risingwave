@@ -1635,9 +1635,6 @@ impl DdlController {
             .await?;
 
         if snapshot_backfill_info.is_some() {
-            if stream_job.create_type() == CreateType::Background {
-                return Err(anyhow!("snapshot_backfill must be used as Foreground mode").into());
-            }
             match stream_job {
                 StreamingJob::MaterializedView(_)
                 | StreamingJob::Sink(_, _)

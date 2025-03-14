@@ -28,9 +28,8 @@ use tracing::{debug, info, warn};
 
 use super::BarrierWorkerRuntimeInfoSnapshot;
 use crate::barrier::context::GlobalBarrierWorkerContextImpl;
-use crate::barrier::info::InflightDatabaseInfo;
+use crate::barrier::info::InflightStreamingJobInfo;
 use crate::barrier::{DatabaseRuntimeInfoSnapshot, InflightSubscriptionInfo};
-use crate::controller::fragment::InflightFragmentInfo;
 use crate::manager::ActiveStreamingWorkerNodes;
 use crate::model::{ActorId, StreamActor, StreamJobFragments, TableParallelism};
 use crate::stream::{
@@ -97,7 +96,7 @@ impl GlobalBarrierWorkerContextImpl {
     async fn resolve_graph_info(
         &self,
         database_id: Option<DatabaseId>,
-    ) -> MetaResult<HashMap<DatabaseId, InflightDatabaseInfo>> {
+    ) -> MetaResult<HashMap<DatabaseId, HashMap<TableId, InflightStreamingJobInfo>>> {
         let database_id = database_id.map(|database_id| database_id.database_id as _);
         let all_actor_infos = self
             .metadata_manager
@@ -107,22 +106,28 @@ impl GlobalBarrierWorkerContextImpl {
 
         Ok(all_actor_infos
             .into_iter()
-            .map(|(loaded_database_id, actor_infos)| {
+            .map(|(loaded_database_id, job_fragment_infos)| {
                 if let Some(database_id) = database_id {
                     assert_eq!(database_id, loaded_database_id);
                 }
                 (
                     DatabaseId::new(loaded_database_id as _),
-                    InflightDatabaseInfo::new(actor_infos.into_iter().map(
-                        |(job_id, actor_infos)| {
+                    job_fragment_infos
+                        .into_iter()
+                        .map(|(job_id, fragment_infos)| {
+                            let job_id = TableId::new(job_id as _);
                             (
-                                TableId::new(job_id as _),
-                                actor_infos
-                                    .into_iter()
-                                    .map(|(fragment_id, info)| (fragment_id as _, info)),
+                                job_id,
+                                InflightStreamingJobInfo {
+                                    job_id,
+                                    fragment_infos: fragment_infos
+                                        .into_iter()
+                                        .map(|(fragment_id, info)| (fragment_id as _, info))
+                                        .collect(),
+                                },
                             )
-                        },
-                    )),
+                        })
+                        .collect(),
                 )
             })
             .collect())
@@ -250,23 +255,36 @@ impl GlobalBarrierWorkerContextImpl {
                     let info = info;
 
                     self.purge_state_table_from_hummock(
-                        &InflightFragmentInfo::existing_table_ids(
-                            info.values().flat_map(|database| database.fragment_infos()),
-                        )
-                        .collect(),
+                        &info
+                            .values()
+                            .flatten()
+                            .flat_map(|(_, job)| job.existing_table_ids())
+                            .collect(),
                     )
                     .await
                     .context("purge state table from hummock")?;
 
-                    let state_table_committed_epochs: HashMap<_, _> = self
+                    let (state_table_committed_epochs, state_table_log_epochs) = self
                         .hummock_manager
                         .on_current_version(|version| {
-                            version
-                                .state_table_info
-                                .info()
-                                .iter()
-                                .map(|(table_id, info)| (*table_id, info.committed_epoch))
-                                .collect()
+                            (
+                                version
+                                    .state_table_info
+                                    .info()
+                                    .iter()
+                                    .map(|(table_id, info)| (*table_id, info.committed_epoch))
+                                    .collect(),
+                                version
+                                    .table_change_log
+                                    .iter()
+                                    .map(|(table_id, change_log)| {
+                                        (
+                                            *table_id,
+                                            change_log.epoch_groups().cloned().collect_vec(),
+                                        )
+                                    })
+                                    .collect(),
+                            )
                         })
                         .await;
 
@@ -295,7 +313,8 @@ impl GlobalBarrierWorkerContextImpl {
                         .catalog_controller
                         .get_fragment_downstream_relations(
                             info.values()
-                                .flat_map(|database| database.fragment_infos())
+                                .flatten()
+                                .flat_map(|(_, job)| job.fragment_infos())
                                 .map(|fragment| fragment.fragment_id as _)
                                 .collect(),
                         )
@@ -322,8 +341,9 @@ impl GlobalBarrierWorkerContextImpl {
                     let source_splits = self.source_manager.list_assignments().await;
                     Ok(BarrierWorkerRuntimeInfoSnapshot {
                         active_streaming_nodes,
-                        database_fragment_infos: info,
+                        database_job_infos: info,
                         state_table_committed_epochs,
+                        state_table_log_epochs,
                         subscription_infos,
                         stream_actors,
                         fragment_relations,
@@ -375,7 +395,7 @@ impl GlobalBarrierWorkerContextImpl {
             let jobs = background_jobs;
             let mut background_jobs = HashMap::new();
             for (definition, stream_job_fragments) in jobs {
-                if !info.contains_job(stream_job_fragments.stream_job_id()) {
+                if !info.contains_key(&stream_job_fragments.stream_job_id()) {
                     continue;
                 }
                 if stream_job_fragments
@@ -402,15 +422,24 @@ impl GlobalBarrierWorkerContextImpl {
             background_jobs
         };
 
-        let state_table_committed_epochs: HashMap<_, _> = self
+        let (state_table_committed_epochs, state_table_log_epochs) = self
             .hummock_manager
             .on_current_version(|version| {
-                version
-                    .state_table_info
-                    .info()
-                    .iter()
-                    .map(|(table_id, info)| (*table_id, info.committed_epoch))
-                    .collect()
+                (
+                    version
+                        .state_table_info
+                        .info()
+                        .iter()
+                        .map(|(table_id, info)| (*table_id, info.committed_epoch))
+                        .collect(),
+                    version
+                        .table_change_log
+                        .iter()
+                        .map(|(table_id, change_log)| {
+                            (*table_id, change_log.epoch_groups().cloned().collect())
+                        })
+                        .collect(),
+                )
             })
             .await;
 
@@ -435,7 +464,8 @@ impl GlobalBarrierWorkerContextImpl {
             .metadata_manager
             .catalog_controller
             .get_fragment_downstream_relations(
-                info.fragment_infos()
+                info.values()
+                    .flatten()
                     .map(|fragment| fragment.fragment_id as _)
                     .collect(),
             )
@@ -449,8 +479,9 @@ impl GlobalBarrierWorkerContextImpl {
         // get split assignments for all actors
         let source_splits = self.source_manager.list_assignments().await;
         Ok(Some(DatabaseRuntimeInfoSnapshot {
-            database_fragment_info: info,
+            job_infos: info,
             state_table_committed_epochs,
+            state_table_log_epochs,
             subscription_info,
             stream_actors,
             fragment_relations,
@@ -468,7 +499,7 @@ impl GlobalBarrierWorkerContextImpl {
     async fn migrate_actors(
         &self,
         active_nodes: &mut ActiveStreamingWorkerNodes,
-    ) -> MetaResult<HashMap<DatabaseId, InflightDatabaseInfo>> {
+    ) -> MetaResult<HashMap<DatabaseId, HashMap<TableId, InflightStreamingJobInfo>>> {
         let mgr = &self.metadata_manager;
 
         // all worker slots used by actors
