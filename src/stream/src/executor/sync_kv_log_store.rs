@@ -533,11 +533,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
 
             let mut log_store_stream = tokio_stream::StreamExt::peekable(log_store_stream);
             let mut clean_state = log_store_stream.peek().await.is_none();
-            if clean_state {
-                self.metrics.clean_state.inc();
-            } else {
-                self.metrics.unclean_state.inc();
-            }
+
 
             let mut read_future_state = ReadFuture::ReadingPersistedStream(log_store_stream);
 
