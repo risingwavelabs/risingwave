@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use itertools::Itertools;
 use risingwave_common::bail;
@@ -60,10 +60,6 @@ pub struct ColumnIdGenerator {
     ///
     /// For a new table, this is empty.
     existing: Existing,
-
-    /// Columns whose data type cannot be altered because they are not composite, or they were
-    /// persisted with legacy encoding, i.e., the `field_ids` are unset for struct data type.
-    unalterable_columns: HashSet<String>,
 
     /// The next column ID to generate, used for new columns that do not exist in `existing`.
     next_column_id: ColumnId,
@@ -122,7 +118,6 @@ impl ColumnIdGenerator {
         }
 
         let mut existing = Existing::new();
-        let mut unalterable_columns = HashSet::new();
 
         // Collect all existing fields into `existing`.
         for col in original.columns() {
@@ -133,16 +128,12 @@ impl ColumnIdGenerator {
                 col.column_id(),
                 col.data_type().clone(),
             );
-            if col.data_type().can_alter() != Some(true) {
-                unalterable_columns.insert(col.name().to_owned());
-            }
         }
 
         let version = original.version().expect("version field not set");
 
         Self {
             existing,
-            unalterable_columns,
             next_column_id: version.next_column_id,
             version_id: version.version_id + 1,
         }
@@ -152,7 +143,6 @@ impl ColumnIdGenerator {
     pub fn new_initial() -> Self {
         Self {
             existing: Existing::new(),
-            unalterable_columns: HashSet::new(),
             next_column_id: ColumnId::first_user_column(),
             version_id: INITIAL_TABLE_VERSION_ID,
         }
@@ -165,26 +155,25 @@ impl ColumnIdGenerator {
     pub fn generate(&mut self, col: &mut ColumnCatalog) -> Result<()> {
         let mut path = vec![Segment::Field(col.name().to_owned())];
 
-        if self.unalterable_columns.contains(col.name()) {
-            let (original_column_id, original_data_type) = self.existing.get(&path).unwrap();
-
-            // For column with legacy encoding, ensure the data type is not changed.
-            if original_data_type != col.data_type() {
-                match original_data_type {
-                    data_types::simple!() => bail!(
-                        "column \"{}\" cannot be altered; only composite types can be altered",
-                        col.name()
-                    ),
-                    data_types::composite!() => bail!(
+        if let Some((original_column_id, original_data_type)) = self.existing.get(&path) {
+            if original_data_type == col.data_type() {
+                // Only update the top-level column ID, without traversing nested fields.
+                col.column_desc.column_id = *original_column_id;
+                return Ok(());
+            } else {
+                // Check if the column can be altered.
+                match original_data_type.can_alter() {
+                    Some(true) => { /* pass */ }
+                    Some(false) => bail!(
                         "column \"{}\" was persisted with legacy encoding thus cannot be altered, \
                          consider dropping and readding the column",
                         col.name()
                     ),
+                    None => bail!(
+                        "column \"{}\" cannot be altered; only types containing struct can be altered",
+                        col.name()
+                    ),
                 }
-            } else {
-                // Only update the top-level column ID, without traversing nested fields.
-                col.column_desc.column_id = *original_column_id;
-                return Ok(());
             }
         }
 
