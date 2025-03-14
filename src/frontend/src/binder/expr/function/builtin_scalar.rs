@@ -226,7 +226,7 @@ impl Binder {
                 ("make_time", raw_call(ExprType::MakeTime)),
                 ("make_timestamp", raw_call(ExprType::MakeTimestamp)),
                 ("make_timestamptz", raw_call(ExprType::MakeTimestamptz)),
-                ("timezone", rewrite(ExprType::AtTimeZone, |mut inputs|{
+                ("timezone", rewrite(ExprType::AtTimeZone, |mut inputs| {
                     if inputs.len() == 2 {
                         inputs.swap(0, 1);
                         Ok(inputs)
@@ -305,7 +305,7 @@ impl Binder {
                 ("encrypt", raw_call(ExprType::Encrypt)),
                 ("decrypt", raw_call(ExprType::Decrypt)),
                 ("hmac", raw_call(ExprType::Hmac)),
-                ("secure_compare",raw_call(ExprType::SecureCompare)),
+                ("secure_compare", raw_call(ExprType::SecureCompare)),
                 ("left", raw_call(ExprType::Left)),
                 ("right", raw_call(ExprType::Right)),
                 ("inet_aton", raw_call(ExprType::InetAton)),
@@ -351,7 +351,7 @@ impl Binder {
                         inputs[0].ensure_array_type()?;
 
                         let n = inputs[0].return_type().array_ndims()
-                                .try_into().map_err(|_| ErrorCode::BindError("array_ndims integer overflow".into()))?;
+                            .try_into().map_err(|_| ErrorCode::BindError("array_ndims integer overflow".into()))?;
                         Ok(ExprImpl::literal_int(n))
                     })),
                 ),
@@ -414,7 +414,7 @@ impl Binder {
                 ("jsonb_populate_map", raw_call(ExprType::JsonbPopulateMap)),
                 // map
                 ("map_from_entries", raw_call(ExprType::MapFromEntries)),
-                ("map_access",raw_call(ExprType::MapAccess)),
+                ("map_access", raw_call(ExprType::MapAccess)),
                 ("map_keys", raw_call(ExprType::MapKeys)),
                 ("map_values", raw_call(ExprType::MapValues)),
                 ("map_entries", raw_call(ExprType::MapEntries)),
@@ -451,8 +451,8 @@ impl Binder {
                 }))),
                 ("current_schemas", raw(|binder, mut inputs| {
                     let no_match_err = ErrorCode::ExprError(
-                            "No function matches the given name and argument types. You might need to add explicit type casts.".into()
-                        );
+                        "No function matches the given name and argument types. You might need to add explicit type casts.".into()
+                    );
                     if inputs.len() != 1 {
                         return Err(no_match_err.into());
                     }
@@ -505,26 +505,26 @@ impl Binder {
                 ("pg_get_indexdef", raw_call(ExprType::PgGetIndexdef)),
                 ("pg_get_viewdef", raw_call(ExprType::PgGetViewdef)),
                 ("pg_index_column_has_property", raw_call(ExprType::PgIndexColumnHasProperty)),
-                ("pg_relation_size", raw(|_binder, mut inputs|{
+                ("pg_relation_size", raw(|_binder, mut inputs| {
                     if inputs.is_empty() {
                         return Err(ErrorCode::ExprError(
                             "function pg_relation_size() does not exist".into(),
                         )
-                        .into());
+                            .into());
                     }
                     inputs[0].cast_to_regclass_mut()?;
                     Ok(FunctionCall::new(ExprType::PgRelationSize, inputs)?.into())
                 })),
                 ("pg_get_serial_sequence", raw_literal(ExprImpl::literal_null(DataType::Varchar))),
-                ("pg_table_size", guard_by_len(1, raw(|_binder, mut inputs|{
+                ("pg_table_size", guard_by_len(1, raw(|_binder, mut inputs| {
                     inputs[0].cast_to_regclass_mut()?;
                     Ok(FunctionCall::new(ExprType::PgRelationSize, inputs)?.into())
                 }))),
-                ("pg_indexes_size", guard_by_len(1, raw(|_binder, mut inputs|{
+                ("pg_indexes_size", guard_by_len(1, raw(|_binder, mut inputs| {
                     inputs[0].cast_to_regclass_mut()?;
                     Ok(FunctionCall::new(ExprType::PgIndexesSize, inputs)?.into())
                 }))),
-                ("pg_get_expr", raw(|_binder, inputs|{
+                ("pg_get_expr", raw(|_binder, inputs| {
                     if inputs.len() == 2 || inputs.len() == 3 {
                         // TODO: implement pg_get_expr rather than just return empty as an workaround.
                         Ok(ExprImpl::literal_varchar("".into()))
@@ -532,7 +532,7 @@ impl Binder {
                         Err(ErrorCode::ExprError(
                             "Too many/few arguments for pg_catalog.pg_get_expr()".into(),
                         )
-                        .into())
+                            .into())
                     }
                 })),
                 ("pg_my_temp_schema", guard_by_len(0, raw(|_binder, _inputs| {
@@ -552,7 +552,7 @@ impl Binder {
                         return Err(ErrorCode::ExprError(
                             "Only literal is supported in `setting_name`.".into(),
                         )
-                        .into());
+                            .into());
                     };
                     let session_config = binder.session_config.read();
                     Ok(ExprImpl::literal_varchar(session_config.get(input.as_ref())?))
@@ -564,7 +564,7 @@ impl Binder {
                         return Err(ErrorCode::ExprError(
                             "Only string literal is supported in `setting_name`.".into(),
                         )
-                        .into());
+                            .into());
                     };
 
                     let new_value = if let ExprImpl::Literal(literal) = &inputs[1] && let Some(ScalarImpl::Utf8(input)) = literal.get_data() {
@@ -573,7 +573,7 @@ impl Binder {
                         return Err(ErrorCode::ExprError(
                             "Only string literal is supported in `setting_name`.".into(),
                         )
-                        .into());
+                            .into());
                     };
 
                     let is_local = if let ExprImpl::Literal(literal) = &inputs[2] && let Some(ScalarImpl::Bool(input)) = literal.get_data() {
@@ -582,20 +582,20 @@ impl Binder {
                         return Err(ErrorCode::ExprError(
                             "Only bool literal is supported in `is_local`.".into(),
                         )
-                        .into());
+                            .into());
                     };
 
                     if *is_local {
                         return Err(ErrorCode::ExprError(
                             "`is_local = true` is not supported now.".into(),
                         )
-                        .into());
+                            .into());
                     }
 
                     let mut session_config = binder.session_config.write();
 
                     // TODO: report session config changes if necessary.
-                    session_config.set(setting_name, new_value.to_string(), &mut())?;
+                    session_config.set(setting_name, new_value.to_string(), &mut ())?;
 
                     Ok(ExprImpl::literal_varchar(new_value.to_string()))
                 }))),
@@ -606,7 +606,7 @@ impl Binder {
                 ("pg_get_partkeydef", raw_literal(ExprImpl::literal_null(DataType::Varchar))),
                 ("pg_encoding_to_char", raw_literal(ExprImpl::literal_varchar("UTF8".into()))),
                 ("has_database_privilege", raw_literal(ExprImpl::literal_bool(true))),
-                ("has_table_privilege", raw(|binder, mut inputs|{
+                ("has_table_privilege", raw(|binder, mut inputs| {
                     if inputs.len() == 2 {
                         inputs.insert(0, ExprImpl::literal_varchar(binder.auth_context.user_name.clone()));
                     }
@@ -619,10 +619,10 @@ impl Binder {
                         Err(ErrorCode::ExprError(
                             "Too many/few arguments for pg_catalog.has_table_privilege()".into(),
                         )
-                        .into())
+                            .into())
                     }
                 })),
-                ("has_any_column_privilege", raw(|binder, mut inputs|{
+                ("has_any_column_privilege", raw(|binder, mut inputs| {
                     if inputs.len() == 2 {
                         inputs.insert(0, ExprImpl::literal_varchar(binder.auth_context.user_name.clone()));
                     }
@@ -635,10 +635,10 @@ impl Binder {
                         Err(ErrorCode::ExprError(
                             "Too many/few arguments for pg_catalog.has_any_column_privilege()".into(),
                         )
-                        .into())
+                            .into())
                     }
                 })),
-                ("has_schema_privilege", raw(|binder, mut inputs|{
+                ("has_schema_privilege", raw(|binder, mut inputs| {
                     if inputs.len() == 2 {
                         inputs.insert(0, ExprImpl::literal_varchar(binder.auth_context.user_name.clone()));
                     }
@@ -648,7 +648,20 @@ impl Binder {
                         Err(ErrorCode::ExprError(
                             "Too many/few arguments for pg_catalog.has_schema_privilege()".into(),
                         )
-                        .into())
+                            .into())
+                    }
+                })),
+                ("has_function_privilege", raw(|binder, mut inputs| {
+                    if inputs.len() == 2 {
+                        inputs.insert(0, ExprImpl::literal_varchar(binder.auth_context.user_name.clone()));
+                    }
+                    if inputs.len() == 3 {
+                        Ok(FunctionCall::new(ExprType::HasFunctionPrivilege, inputs)?.into())
+                    } else {
+                        Err(ErrorCode::ExprError(
+                            "Too many/few arguments for pg_catalog.has_function_privilege()".into(),
+                        )
+                            .into())
                     }
                 })),
                 ("pg_stat_get_numscans", raw_literal(ExprImpl::literal_bigint(0))),
@@ -657,16 +670,16 @@ impl Binder {
                     Ok(ExprImpl::literal_int(binder.session_id.0))
                 })),
                 ("pg_cancel_backend", guard_by_len(1, raw(|_binder, _inputs| {
-                        // TODO: implement real cancel rather than just return false as an workaround.
-                        Ok(ExprImpl::literal_bool(false))
+                    // TODO: implement real cancel rather than just return false as an workaround.
+                    Ok(ExprImpl::literal_bool(false))
                 }))),
-                ("pg_terminate_backend", guard_by_len(1, raw(|_binder, _inputs|{
-                        // TODO: implement real terminate rather than just return false as an
-                        // workaround.
-                        Ok(ExprImpl::literal_bool(false))
+                ("pg_terminate_backend", guard_by_len(1, raw(|_binder, _inputs| {
+                    // TODO: implement real terminate rather than just return false as an
+                    // workaround.
+                    Ok(ExprImpl::literal_bool(false))
                 }))),
                 ("pg_tablespace_location", guard_by_len(1, raw_literal(ExprImpl::literal_null(DataType::Varchar)))),
-                ("pg_postmaster_start_time", guard_by_len(0, raw(|_binder, _inputs|{
+                ("pg_postmaster_start_time", guard_by_len(0, raw(|_binder, _inputs| {
                     let server_start_time = risingwave_variables::get_server_start_time();
                     let datum = server_start_time.map(Timestamptz::from).map(ScalarImpl::from);
                     let literal = Literal::new(datum, DataType::Timestamptz);
@@ -702,8 +715,8 @@ impl Binder {
                     inputs[0].clone().cast_explicit(DataType::Date).map_err(Into::into)
                 }))),
             ]
-            .into_iter()
-            .collect()
+                .into_iter()
+                .collect()
         });
 
         static FUNCTIONS_BKTREE: LazyLock<BKTree<&str>> = LazyLock::new(|| {
@@ -774,7 +787,7 @@ impl Binder {
                 Please please refer to https://www.risingwave.dev/docs/current/sql-pattern-temporal-filters/ for more information",
                 self.context.clause
             ))
-            .into());
+                .into());
         }
         if matches!(self.context.clause, Some(Clause::GeneratedColumn)) {
             return Err(ErrorCode::InvalidInputSyntax(
@@ -791,7 +804,7 @@ impl Binder {
             return Err(ErrorCode::InvalidInputSyntax(
                 "Function `PROCTIME()` is only allowed in CREATE TABLE/SOURCE. Is `NOW()` what you want?".to_owned(),
             )
-            .into());
+                .into());
         }
         Ok(())
     }

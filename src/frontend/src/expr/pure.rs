@@ -299,7 +299,8 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::MakeTimestamptz
             | Type::PgIsInRecovery
             | Type::RwRecoveryStatus
-            | Type::PgTableIsVisible => self.impure = true,
+            | Type::PgTableIsVisible
+            | Type::HasFunctionPrivilege => self.impure = true,
         }
     }
 }

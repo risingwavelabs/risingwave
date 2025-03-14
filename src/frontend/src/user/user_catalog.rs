@@ -80,14 +80,14 @@ impl UserCatalog {
         match object {
             Object::DatabaseId(id) => self.database_acls.entry(id),
             Object::SchemaId(id) => self.schema_acls.entry(id),
-            Object::TableId(id) => self.object_acls.entry(id),
-            Object::SourceId(id) => self.object_acls.entry(id),
-            Object::SinkId(id) => self.object_acls.entry(id),
-            Object::ViewId(id) => self.object_acls.entry(id),
-            Object::FunctionId(_) => {
-                unreachable!("grant privilege on function is not supported yet.")
-            }
-            _ => unreachable!(""),
+            Object::TableId(id)
+            | Object::SourceId(id)
+            | Object::SinkId(id)
+            | Object::ViewId(id)
+            | Object::FunctionId(id)
+            | Object::SubscriptionId(id)
+            | Object::ConnectionId(id)
+            | Object::SecretId(id) => self.object_acls.entry(id),
         }
     }
 
@@ -95,14 +95,14 @@ impl UserCatalog {
         match object {
             Object::DatabaseId(id) => self.database_acls.get(id),
             Object::SchemaId(id) => self.schema_acls.get(id),
-            Object::TableId(id) => self.object_acls.get(id),
-            Object::SourceId(id) => self.object_acls.get(id),
-            Object::SinkId(id) => self.object_acls.get(id),
-            Object::ViewId(id) => self.object_acls.get(id),
-            Object::FunctionId(_) => {
-                unreachable!("grant privilege on function is not supported yet.")
-            }
-            _ => unreachable!("unexpected object type."),
+            Object::TableId(id)
+            | Object::SourceId(id)
+            | Object::SinkId(id)
+            | Object::ViewId(id)
+            | Object::FunctionId(id)
+            | Object::SubscriptionId(id)
+            | Object::ConnectionId(id)
+            | Object::SecretId(id) => self.object_acls.get(id),
         }
     }
 

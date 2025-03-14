@@ -330,6 +330,7 @@ impl Strong {
             | ExprType::RwRecoveryStatus
             | ExprType::IcebergTransform
             | ExprType::HasTablePrivilege
+            | ExprType::HasFunctionPrivilege
             | ExprType::HasAnyColumnPrivilege
             | ExprType::HasSchemaPrivilege
             | ExprType::InetAton

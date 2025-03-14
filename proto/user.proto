@@ -64,6 +64,8 @@ message GrantPrivilege {
     uint32 view_id = 6;
     uint32 function_id = 7;
     uint32 subscription_id = 8;
+    uint32 connection_id = 9;
+    uint32 secret_id = 10;
   }
   repeated ActionWithGrantOption action_with_opts = 20;
 }
