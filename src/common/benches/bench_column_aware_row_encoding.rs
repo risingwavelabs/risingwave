@@ -68,13 +68,13 @@ fn bench_column_aware_encoding_16_columns(c: &mut Criterion) {
         .collect::<Vec<_>>();
 
     c.bench_function("column_aware_row_encoding_16_columns_encode", |b| {
-        let serializer = Serializer::new(&column_ids[..]);
+        let serializer = Serializer::new(&column_ids[..], data_types.iter().cloned());
         b.iter(|| {
             black_box(serializer.serialize(&row));
         });
     });
 
-    let serializer = Serializer::new(&column_ids[..]);
+    let serializer = Serializer::new(&column_ids[..], data_types.iter().cloned());
     let encoded = serializer.serialize(&row);
 
     c.bench_function("column_aware_row_encoding_16_columns_decode", |b| {
@@ -109,13 +109,13 @@ fn bench_column_aware_encoding_4_columns(c: &mut Criterion) {
         .collect::<Vec<_>>();
 
     c.bench_function("column_aware_row_encoding_4_columns_encode", |b| {
-        let serializer = Serializer::new(&column_ids[..]);
+        let serializer = Serializer::new(&column_ids[..], data_types.iter().cloned());
         b.iter(|| {
             black_box(serializer.serialize(&row));
         });
     });
 
-    let serializer = Serializer::new(&column_ids[..]);
+    let serializer = Serializer::new(&column_ids[..], data_types.iter().cloned());
     let encoded = serializer.serialize(&row);
 
     c.bench_function("column_aware_row_encoding_4_columns_decode", |b| {

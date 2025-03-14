@@ -24,9 +24,169 @@ use std::sync::Arc;
 
 use ahash::HashMap;
 use bitfield_struct::bitfield;
+use bytes::{Buf, BufMut};
+use rw_iter_util::ZipEqDebug;
 
-use super::*;
+use super::error::ValueEncodingError;
+use super::{Result, ValueRowDeserializer, ValueRowSerializer};
 use crate::catalog::ColumnId;
+use crate::row::Row;
+use crate::types::{DataType, Datum, ScalarRefImpl, ToDatumRef};
+use crate::util::value_encoding as plain;
+
+/// Serialize and deserialize functions that recursively use [`ColumnAwareSerde`] for nested fields
+/// of composite types.
+///
+/// Only for column with types that can be altered ([`DataType::can_alter`]).
+mod new_serde {
+    use itertools::Itertools;
+
+    use super::*;
+    use crate::array::{ListRef, ListValue, MapRef, MapValue, StructRef, StructValue};
+    use crate::types::{MapType, ScalarImpl, StructType, data_types};
+
+    // --- serialize ---
+
+    // Copy of `plain` but call `new_` for the scalar.
+    fn new_serialize_datum(
+        data_type: &DataType,
+        datum_ref: impl ToDatumRef,
+        buf: &mut impl BufMut,
+    ) {
+        if let Some(d) = datum_ref.to_datum_ref() {
+            buf.put_u8(1);
+            new_serialize_scalar(data_type, d, buf)
+        } else {
+            buf.put_u8(0);
+        }
+    }
+
+    // Different logic from `plain`:
+    //
+    // Recursively construct a new column-aware `Serializer` for nested fields.
+    fn new_serialize_struct(struct_type: &StructType, value: StructRef<'_>, buf: &mut impl BufMut) {
+        let serializer = super::Serializer::new(
+            &struct_type.ids().unwrap().collect_vec(), // TODO: avoid this clone
+            struct_type.types().cloned(),              // TODO: avoid this clone
+        );
+
+        // `StructRef` is interpreted as a `Row` here.
+        let bytes = serializer.serialize(value); // TODO: serialize into the buf directly
+        buf.put_u32_le(bytes.len() as _);
+        buf.put_slice(&bytes);
+    }
+
+    // Copy of `plain` but call `new_` for the elements.
+    fn new_serialize_list(inner_type: &DataType, value: ListRef<'_>, buf: &mut impl BufMut) {
+        let elems = value.iter();
+        buf.put_u32_le(elems.len() as u32);
+
+        elems.for_each(|field_value| {
+            new_serialize_datum(inner_type, field_value, buf);
+        });
+    }
+
+    // Different logic from `plain`:
+    //
+    // We don't reuse the serialization of `struct<k, v>[]` for map, as it introduces overhead
+    // for column ids of `struct<k, v>`. It's unnecessary because the shape of the map is fixed.
+    fn new_serialize_map(map_type: &MapType, value: MapRef<'_>, buf: &mut impl BufMut) {
+        let elems = value.iter();
+        buf.put_u32_le(elems.len() as u32);
+
+        elems.for_each(|(k, v)| {
+            new_serialize_scalar(map_type.key(), k, buf);
+            new_serialize_datum(map_type.value(), v, buf);
+        });
+    }
+
+    // Copy of `plain` but call `new_` for composite types.
+    pub fn new_serialize_scalar(
+        data_type: &DataType,
+        value: ScalarRefImpl<'_>,
+        buf: &mut impl BufMut,
+    ) {
+        match value {
+            ScalarRefImpl::Struct(s) => new_serialize_struct(data_type.as_struct(), s, buf),
+            ScalarRefImpl::List(l) => new_serialize_list(data_type.as_list(), l, buf),
+            ScalarRefImpl::Map(m) => new_serialize_map(data_type.as_map(), m, buf),
+
+            _ => plain::serialize_scalar(value, buf),
+        }
+    }
+
+    // --- deserialize ---
+
+    // Copy of `plain` but call `new_` for the scalar.
+    fn new_inner_deserialize_datum(data: &mut &[u8], ty: &DataType) -> Result<Datum> {
+        let null_tag = data.get_u8();
+        match null_tag {
+            0 => Ok(None),
+            1 => Some(new_deserialize_scalar(ty, data)).transpose(),
+            _ => Err(ValueEncodingError::InvalidTagEncoding(null_tag)),
+        }
+    }
+
+    // Different logic from `plain`:
+    //
+    // Recursively construct a new column-aware `Deserializer` for nested fields.
+    fn new_deserialize_struct(struct_def: &StructType, data: &mut &[u8]) -> Result<ScalarImpl> {
+        let deserializer = super::Deserializer::new(
+            &struct_def.ids().unwrap().collect_vec(), // TODO: avoid this clone
+            struct_def.types().cloned().collect_vec().into(), // TODO: avoid this clone
+            std::iter::empty(),
+        );
+        let encoded_len = data.get_u32_le() as usize;
+
+        let (struct_data, remaining) = data.split_at(encoded_len);
+        *data = remaining;
+        let fields = deserializer.deserialize(struct_data)?;
+
+        Ok(ScalarImpl::Struct(StructValue::new(fields)))
+    }
+
+    // Copy of `plain` but call `new_` for the elements.
+    fn new_deserialize_list(item_type: &DataType, data: &mut &[u8]) -> Result<ScalarImpl> {
+        let len = data.get_u32_le();
+        let mut builder = item_type.create_array_builder(len as usize);
+        for _ in 0..len {
+            builder.append(new_inner_deserialize_datum(data, item_type)?);
+        }
+        Ok(ScalarImpl::List(ListValue::new(builder.finish())))
+    }
+
+    // Different logic from `plain`:
+    //
+    // We don't reuse the deserialization of `struct<k, v>[]` for map, as it introduces overhead
+    // for column ids of `struct<k, v>`. It's unnecessary because the shape of the map is fixed.
+    fn new_deserialize_map(map_type: &MapType, data: &mut &[u8]) -> Result<ScalarImpl> {
+        let len = data.get_u32_le();
+        let mut builder = map_type
+            .clone() // FIXME: clone type everytime here is inefficient
+            .into_struct()
+            .create_array_builder(len as usize);
+        for _ in 0..len {
+            let key = new_deserialize_scalar(map_type.key(), data)?;
+            let value = new_inner_deserialize_datum(data, map_type.value())?;
+            let entry = StructValue::new(vec![Some(key), value]);
+            builder.append(Some(ScalarImpl::Struct(entry)));
+        }
+        Ok(ScalarImpl::Map(MapValue::from_entries(ListValue::new(
+            builder.finish(),
+        ))))
+    }
+
+    // Copy of `plain` but call `new_` for composite types.
+    pub fn new_deserialize_scalar(ty: &DataType, data: &mut &[u8]) -> Result<ScalarImpl> {
+        Ok(match ty {
+            DataType::Struct(struct_def) => new_deserialize_struct(struct_def, data)?,
+            DataType::List(item_type) => new_deserialize_list(item_type, data)?,
+            DataType::Map(map_type) => new_deserialize_map(map_type, data)?,
+
+            data_types::simple!() => plain::deserialize_value(ty, data)?,
+        })
+    }
+}
 
 /// The width of the offset of the encoded data, i.e., how many bytes are used to represent the offset.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -98,22 +258,28 @@ struct RowEncoding {
 
 /// A trait unifying [`ToDatumRef`] and already encoded bytes.
 trait Encode {
-    fn encode_to(self, data: &mut Vec<u8>);
+    fn encode_to(self, data_type: &DataType, data: &mut Vec<u8>);
 }
 
 impl<T> Encode for T
 where
     T: ToDatumRef,
 {
-    fn encode_to(self, data: &mut Vec<u8>) {
+    fn encode_to(self, data_type: &DataType, data: &mut Vec<u8>) {
         if let Some(v) = self.to_datum_ref() {
-            serialize_scalar(v, data);
+            // Use different encoding logic for alterable types.
+            if data_type.can_alter() == Some(true) {
+                new_serde::new_serialize_scalar(data_type, v, data);
+            } else {
+                plain::serialize_scalar(v, data);
+            }
         }
     }
 }
 
 impl Encode for Option<&[u8]> {
-    fn encode_to(self, data: &mut Vec<u8>) {
+    fn encode_to(self, _data_type: &DataType, data: &mut Vec<u8>) {
+        // Already encoded, just copy the bytes.
         if let Some(v) = self {
             data.extend(v);
         }
@@ -154,16 +320,16 @@ impl RowEncoding {
         }
     }
 
-    fn encode<T: Encode>(&mut self, datums: impl IntoIterator<Item = T>) {
+    fn encode<T: Encode>(&mut self, datums: impl IntoIterator<Item = T>, data_types: &[DataType]) {
         debug_assert!(
             self.buf.is_empty(),
             "should not encode one RowEncoding object multiple times."
         );
         let datums = datums.into_iter();
         let mut offset_usize = Vec::with_capacity(datums.size_hint().0);
-        for datum in datums {
+        for (datum, data_type) in datums.zip_eq_debug(data_types) {
             offset_usize.push(self.buf.len());
-            datum.encode_to(&mut self.buf);
+            datum.encode_to(data_type, &mut self.buf);
         }
         self.set_offsets(&offset_usize);
     }
@@ -174,27 +340,31 @@ impl RowEncoding {
 #[derive(Clone)]
 pub struct Serializer {
     encoded_column_ids: Vec<u8>,
-    datum_num: u32,
+    data_types: Vec<DataType>,
 }
 
 impl Serializer {
-    /// Create a new `Serializer` with current `column_ids`
-    pub fn new(column_ids: &[ColumnId]) -> Self {
+    /// Create a new `Serializer` with given `column_ids` and `data_types`.
+    pub fn new(column_ids: &[ColumnId], data_types: impl IntoIterator<Item = DataType>) -> Self {
         // currently we hard-code ColumnId as i32
         let mut encoded_column_ids = Vec::with_capacity(column_ids.len() * 4);
         for id in column_ids {
             encoded_column_ids.put_i32_le(id.get_id());
         }
-        let datum_num = column_ids.len() as u32;
+
         Self {
             encoded_column_ids,
-            datum_num,
+            data_types: data_types.into_iter().collect(),
         }
+    }
+
+    fn datum_num(&self) -> usize {
+        self.encoded_column_ids.len() / 4
     }
 
     fn serialize_raw<T: Encode>(&self, datums: impl IntoIterator<Item = T>) -> Vec<u8> {
         let mut encoding = RowEncoding::new();
-        encoding.encode(datums);
+        encoding.encode(datums, &self.data_types);
         self.finish(encoding)
     }
 
@@ -203,7 +373,7 @@ impl Serializer {
             5 + self.encoded_column_ids.len() + encoding.offsets.len() + encoding.buf.len(), /* 5 comes from u8+u32 */
         );
         row_bytes.put_u8(encoding.header.into_bits());
-        row_bytes.put_u32_le(self.datum_num);
+        row_bytes.put_u32_le(self.datum_num() as u32);
         row_bytes.extend(&self.encoded_column_ids);
         row_bytes.extend(&encoding.offsets);
         row_bytes.extend(&encoding.buf);
@@ -215,7 +385,7 @@ impl Serializer {
 impl ValueRowSerializer for Serializer {
     /// Serialize a row under the schema of the Serializer
     fn serialize(&self, row: impl Row) -> Vec<u8> {
-        assert_eq!(row.len(), self.datum_num as usize);
+        assert_eq!(row.len(), self.datum_num());
         self.serialize_raw(row.iter())
     }
 }
@@ -327,11 +497,14 @@ impl ValueRowDeserializer for Deserializer {
             let Some(&decoded_idx) = self.required_column_ids.get(&id) else {
                 continue;
             };
+            let data_type = &self.schema[decoded_idx];
 
             let datum = if data.is_empty() {
                 None
+            } else if data_type.can_alter() == Some(true) {
+                Some(new_serde::new_deserialize_scalar(data_type, &mut data)?)
             } else {
-                Some(deserialize_value(&self.schema[decoded_idx], &mut data)?)
+                Some(plain::deserialize_value(data_type, &mut data)?)
             };
 
             row[decoded_idx] = datum;
@@ -363,6 +536,7 @@ impl ValueRowDeserializer for ColumnAwareSerde {
 
 /// Deserializes row `encoded_bytes`, drops columns not in `valid_column_ids`, serializes and returns.
 /// If no column is dropped, returns None.
+// TODO: we only support trimming dropped top-level columns here; also support nested fields.
 pub fn try_drop_invalid_columns(
     encoded_bytes: &[u8],
     valid_column_ids: &HashSet<i32>,
@@ -386,6 +560,10 @@ pub fn try_drop_invalid_columns(
         }
     }
 
-    let row_bytes = Serializer::new(&column_ids).serialize_raw(datums);
+    // Data types are only needed when we are actually serializing. But we have encoded data here.
+    // Simple pass dummy data types.
+    let dummy_data_types = vec![DataType::Boolean; column_ids.len()];
+
+    let row_bytes = Serializer::new(&column_ids, dummy_data_types).serialize_raw(datums);
     Some(row_bytes)
 }
