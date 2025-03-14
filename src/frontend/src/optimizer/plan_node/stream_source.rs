@@ -16,12 +16,15 @@ use std::rc::Rc;
 
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
+use risingwave_common::catalog::Field;
+use risingwave_common::types::DataType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{PbStreamSource, SourceNode};
 
 use super::stream::prelude::*;
-use super::utils::{Distill, childless_record};
+use super::utils::{Distill, TableCatalogBuilder, childless_record};
 use super::{ExprRewritable, PlanBase, StreamNode, generic};
+use crate::TableCatalog;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::column_names_pretty;
@@ -51,6 +54,20 @@ impl StreamSource {
     pub fn source_catalog(&self) -> Option<Rc<SourceCatalog>> {
         self.core.catalog.clone()
     }
+
+    fn infer_internal_table_catalog(&self) -> TableCatalog {
+        if !self.core.is_iceberg_connector() {
+            generic::Source::infer_internal_table_catalog(false)
+        } else {
+            // iceberg list node (singleton) stores last_snapshot (just 1 row, no pk)
+            let mut builder = TableCatalogBuilder::default();
+            builder.add_column(&Field {
+                data_type: DataType::Int64,
+                name: "last_snapshot".to_owned(),
+            });
+            builder.build(vec![], 0)
+        }
+    }
 }
 
 impl_plan_tree_node_for_leaf! { StreamSource }
@@ -78,7 +95,7 @@ impl StreamNode for StreamSource {
                 source_id: source_catalog.id,
                 source_name: source_catalog.name.clone(),
                 state_table: Some(
-                    generic::Source::infer_internal_table_catalog(false)
+                    self.infer_internal_table_catalog()
                         .with_id(state.gen_table_id_wrapped())
                         .to_internal_table_prost(),
                 ),

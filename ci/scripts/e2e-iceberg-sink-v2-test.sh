@@ -39,6 +39,7 @@ echo "--- Running tests"
 # Don't remove the `--quiet` option since poetry has a bug when printing output, see
 # https://github.com/python-poetry/poetry/issues/3412
 poetry update --quiet
+poetry run python main.py -t ./test_case/iceberg_source_streaming.toml
 poetry run python main.py -t ./test_case/no_partition_append_only.toml
 poetry run python main.py -t ./test_case/no_partition_upsert.toml
 poetry run python main.py -t ./test_case/partition_append_only.toml
@@ -53,6 +54,7 @@ poetry run python main.py -t ./test_case/iceberg_source_all_delete.toml
 poetry run python main.py -t ./test_case/iceberg_source_explain_for_delete.toml
 poetry run python main.py -t ./test_case/iceberg_predicate_pushdown.toml
 poetry run python main.py -t ./test_case/iceberg_connection.toml
+# TODO: refactor test script
 
 echo "--- Running benchmarks"
 poetry run python main.py -t ./benches/predicate_pushdown.toml

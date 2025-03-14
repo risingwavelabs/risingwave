@@ -418,6 +418,10 @@ impl ColumnCatalog {
             )),
         ]
     }
+
+    pub fn is_row_id_column(&self) -> bool {
+        self.column_desc.column_id == ROW_ID_COLUMN_ID
+    }
 }
 
 impl From<PbColumnCatalog> for ColumnCatalog {

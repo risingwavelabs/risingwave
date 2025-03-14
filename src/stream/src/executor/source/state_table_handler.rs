@@ -31,7 +31,7 @@ use risingwave_common::row;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{JsonbVal, ScalarImpl, ScalarRef, ScalarRefImpl};
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_connector::source::{SplitId, SplitImpl, SplitMetaData};
+use risingwave_connector::source::{SplitImpl, SplitMetaData};
 use risingwave_pb::catalog::PbTable;
 use risingwave_storage::StateStore;
 
@@ -67,19 +67,19 @@ impl<S: StateStore> SourceStateTableHandler<S> {
         self.state_table.init_epoch(epoch).await
     }
 
-    fn string_to_scalar(rhs: impl Into<String>) -> ScalarImpl {
-        ScalarImpl::Utf8(rhs.into().into_boxed_str())
+    fn str_to_scalar_ref(s: &str) -> ScalarRefImpl<'_> {
+        ScalarRefImpl::Utf8(s)
     }
 
-    pub(crate) async fn get(&self, key: SplitId) -> StreamExecutorResult<Option<OwnedRow>> {
+    pub(crate) async fn get(&self, key: &str) -> StreamExecutorResult<Option<OwnedRow>> {
         self.state_table
-            .get_row(row::once(Some(Self::string_to_scalar(key.deref()))))
+            .get_row(row::once(Some(Self::str_to_scalar_ref(key))))
             .await
     }
 
-    pub async fn set(&mut self, key: SplitId, value: JsonbVal) -> StreamExecutorResult<()> {
+    pub async fn set(&mut self, key: &str, value: JsonbVal) -> StreamExecutorResult<()> {
         let row = [
-            Some(Self::string_to_scalar(key.deref())),
+            Some(Self::str_to_scalar_ref(key).into_scalar_impl()),
             Some(ScalarImpl::Jsonb(value)),
         ];
         match self.get(key).await? {
@@ -93,7 +93,7 @@ impl<S: StateStore> SourceStateTableHandler<S> {
         Ok(())
     }
 
-    pub async fn delete(&mut self, key: SplitId) -> StreamExecutorResult<()> {
+    pub async fn delete(&mut self, key: &str) -> StreamExecutorResult<()> {
         if let Some(prev_row) = self.get(key).await? {
             self.state_table.delete(prev_row);
         }
@@ -106,8 +106,18 @@ impl<S: StateStore> SourceStateTableHandler<S> {
         SS: SplitMetaData,
     {
         for split_impl in states {
-            self.set(split_impl.id(), split_impl.encode_to_json())
+            self.set(split_impl.id().deref(), split_impl.encode_to_json())
                 .await?;
+        }
+        Ok(())
+    }
+
+    pub async fn set_states_json(
+        &mut self,
+        states: impl IntoIterator<Item = (String, JsonbVal)>,
+    ) -> StreamExecutorResult<()> {
+        for (key, value) in states {
+            self.set(&key, value).await?;
         }
         Ok(())
     }
@@ -115,7 +125,7 @@ impl<S: StateStore> SourceStateTableHandler<S> {
     pub async fn trim_state(&mut self, to_trim: &[SplitImpl]) -> StreamExecutorResult<()> {
         for split in to_trim {
             tracing::info!("trimming source state for split {}", split.id());
-            self.delete(split.id()).await?;
+            self.delete(&split.id()).await?;
         }
 
         Ok(())
@@ -133,6 +143,10 @@ impl<S: StateStore> SourceStateTableHandler<S> {
 
     pub fn state_table(&self) -> &StateTable<S> {
         &self.state_table
+    }
+
+    pub fn state_table_mut(&mut self) -> &mut StateTable<S> {
+        &mut self.state_table
     }
 
     pub async fn try_flush(&mut self) -> StreamExecutorResult<()> {
@@ -162,7 +176,7 @@ impl<S: StateStore> SourceStateTableCommittedReader<'_, S> {
         &self,
         stream_source_split: &SplitImpl,
     ) -> StreamExecutorResult<Option<SplitImpl>> {
-        Ok(match self.handle.get(stream_source_split.id()).await? {
+        Ok(match self.handle.get(&stream_source_split.id()).await? {
             None => None,
             Some(row) => match row.datum_at(1) {
                 Some(ScalarRefImpl::Jsonb(jsonb_ref)) => {
