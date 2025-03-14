@@ -28,6 +28,7 @@ use crate::optimizer::plan_node::{ExprRewritable, StreamNode, generic};
 use crate::optimizer::property::{Distribution, MonotonicityMap, WatermarkColumns};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
+/// Fetch files from filesystem/s3/iceberg.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamFsFetch {
     pub base: PlanBase<Stream>,

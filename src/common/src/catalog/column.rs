@@ -418,6 +418,18 @@ impl ColumnCatalog {
             )),
         ]
     }
+
+    pub fn is_row_id_column(&self) -> bool {
+        self.column_desc.column_id == ROW_ID_COLUMN_ID
+    }
+
+    // Partition
+    // pub fn is_source_partition_or_offset_column(&self) -> bool {
+    //     self.column_desc
+    //         .additional_column
+    //         .column_type
+    //         .is_some_and(|col| matches!(col, ColumnType::Offset(_) | ColumnType::Partition(_)))
+    // }
 }
 
 impl From<PbColumnCatalog> for ColumnCatalog {
