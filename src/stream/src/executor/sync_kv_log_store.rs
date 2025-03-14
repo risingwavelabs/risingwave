@@ -661,29 +661,15 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                                             chunk,
                                             epoch,
                                         ) {
-                                            if clean_state {
-                                                tracing::trace!(
-                                                    "Pausing stream due to buffer full"
-                                                );
-                                                write_future_state = WriteFuture::paused(
-                                                    self.pause_duration_ms,
-                                                    Message::Chunk(chunk_to_flush),
-                                                    stream,
-                                                    write_state,
-                                                );
-                                                clean_state = false;
-                                                self.metrics.unclean_state.inc();
-                                            } else {
-                                                seq_id = new_seq_id;
-                                                write_future_state = WriteFuture::flush_chunk(
-                                                    stream,
-                                                    write_state,
-                                                    chunk_to_flush,
-                                                    epoch,
-                                                    start_seq_id,
-                                                    end_seq_id,
-                                                );
-                                            }
+                                            seq_id = new_seq_id;
+                                            write_future_state = WriteFuture::flush_chunk(
+                                                stream,
+                                                write_state,
+                                                chunk_to_flush,
+                                                epoch,
+                                                start_seq_id,
+                                                end_seq_id,
+                                            );
                                         } else {
                                             seq_id = new_seq_id;
                                             write_future_state = WriteFuture::receive_from_upstream(
@@ -728,6 +714,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                         if !clean_state
                             && matches!(read_future_state, ReadFuture::Idle)
                             && buffer.no_flushed_items()
+                            && buffer.is_empty()
                         {
                             clean_state = true;
                             self.metrics.clean_state.inc();
