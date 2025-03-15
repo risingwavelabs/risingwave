@@ -85,7 +85,7 @@ async fn do_handle_explain(
                     source_watermarks,
                     append_only,
                     on_conflict,
-                    with_version_column,
+                    with_version_column.map(|x| x.real_value()),
                     include_column_options,
                     webhook_info,
                     risingwave_common::catalog::Engine::Hummock,
