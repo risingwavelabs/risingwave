@@ -14,7 +14,6 @@
 
 use std::collections::{HashMap, HashSet};
 use std::mem::{replace, take};
-use std::sync::LazyLock;
 use std::task::{Context, Poll};
 
 use futures::FutureExt;
@@ -269,12 +268,7 @@ impl DatabaseRecoveringState {
             DatabaseRecoveringStage::Initializing {
                 initial_barrier_collector,
                 ..
-            } => Some((initial_barrier_collector.database_state(), {
-                static EMPTY_CREATING_JOBS: LazyLock<
-                    HashMap<TableId, CreatingStreamingJobControl>,
-                > = LazyLock::new(HashMap::new);
-                &EMPTY_CREATING_JOBS
-            })),
+            } => Some(initial_barrier_collector.database_state()),
         }
     }
 }
