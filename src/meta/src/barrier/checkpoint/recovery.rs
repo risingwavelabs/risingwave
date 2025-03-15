@@ -27,10 +27,11 @@ use tracing::{info, warn};
 
 use crate::MetaResult;
 use crate::barrier::checkpoint::control::DatabaseCheckpointControlStatus;
-use crate::barrier::checkpoint::{BarrierWorkerState, CheckpointControl};
+use crate::barrier::checkpoint::{CheckpointControl, DatabaseCheckpointControl};
 use crate::barrier::complete_task::BarrierCompleteOutput;
 use crate::barrier::info::InflightDatabaseInfo;
-use crate::barrier::rpc::{ControlStreamManager, DatabaseInitialBarrierCollector};
+use crate::barrier::rpc::ControlStreamManager;
+use crate::barrier::utils::{NodeToCollect, is_valid_after_worker_err};
 use crate::barrier::worker::{
     RetryBackoffFuture, RetryBackoffStrategy, get_retry_backoff_strategy,
 };
@@ -73,7 +74,9 @@ enum DatabaseRecoveringStage {
         backoff_future: Option<RetryBackoffFuture>,
     },
     Initializing {
-        initial_barrier_collector: DatabaseInitialBarrierCollector,
+        remaining_workers: NodeToCollect,
+        database: DatabaseCheckpointControl,
+        prev_epoch: u64,
     },
 }
 
@@ -157,14 +160,17 @@ impl DatabaseRecoveringState {
                 // ignore the collected barrier on resetting or backoff
             }
             DatabaseRecoveringStage::Initializing {
-                initial_barrier_collector,
+                remaining_workers,
+                prev_epoch,
+                ..
             } => {
                 let worker_id = resp.worker_id as WorkerId;
-                initial_barrier_collector.collect_resp(resp);
+                assert!(remaining_workers.remove(&worker_id).is_some());
+                assert_eq!(resp.epoch, *prev_epoch);
                 info!(
                     ?database_id,
                     worker_id,
-                    remaining_workers = ?initial_barrier_collector,
+                    ?remaining_workers,
                     "initializing database barrier collected"
                 );
             }
@@ -180,9 +186,8 @@ impl DatabaseRecoveringState {
                 true
             }
             DatabaseRecoveringStage::Initializing {
-                initial_barrier_collector,
-                ..
-            } => initial_barrier_collector.is_valid_after_worker_err(worker_id),
+                remaining_workers, ..
+            } => is_valid_after_worker_err(remaining_workers, worker_id),
         }
     }
 
@@ -245,10 +250,9 @@ impl DatabaseRecoveringState {
                 }
             }
             DatabaseRecoveringStage::Initializing {
-                initial_barrier_collector,
-                ..
+                remaining_workers, ..
             } => {
-                if initial_barrier_collector.is_collected() {
+                if remaining_workers.is_empty() {
                     return Poll::Ready(RecoveringStateAction::EnterRunning);
                 }
             }
@@ -256,13 +260,10 @@ impl DatabaseRecoveringState {
         Poll::Pending
     }
 
-    pub(super) fn database_state(&self) -> Option<&BarrierWorkerState> {
+    pub(super) fn checkpoint_control(&self) -> Option<&DatabaseCheckpointControl> {
         match &self.stage {
             DatabaseRecoveringStage::Resetting { .. } => None,
-            DatabaseRecoveringStage::Initializing {
-                initial_barrier_collector,
-                ..
-            } => Some(initial_barrier_collector.database_state()),
+            DatabaseRecoveringStage::Initializing { database, .. } => Some(database),
         }
     }
 }
@@ -424,6 +425,7 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
             mut background_jobs,
         } = runtime_info;
         let result: MetaResult<_> = try {
+            control_stream_manager.add_partial_graph(self.database_id, None);
             control_stream_manager.inject_database_initial_barrier(
                 self.database_id,
                 database_fragment_info,
@@ -437,10 +439,12 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
             )?
         };
         match result {
-            Ok(initial_barrier_collector) => {
-                info!(node_to_collect = ?initial_barrier_collector, database_id = ?self.database_id, "database enter initializing");
+            Ok((remaining_workers, database, prev_epoch)) => {
+                info!(?remaining_workers, database_id = ?self.database_id, "database enter initializing");
                 status.stage = DatabaseRecoveringStage::Initializing {
-                    initial_barrier_collector,
+                    remaining_workers,
+                    database,
+                    prev_epoch,
                 };
             }
             Err(e) => {
@@ -507,11 +511,12 @@ impl DatabaseStatusAction<'_, EnterRunning> {
                         unreachable!("can only enter running during initializing")
                     }
                     DatabaseRecoveringStage::Initializing {
-                        initial_barrier_collector,
+                        remaining_workers,
+                        database,
+                        ..
                     } => {
-                        *database_status = DatabaseCheckpointControlStatus::Running(
-                            initial_barrier_collector.finish(),
-                        );
+                        assert!(remaining_workers.is_empty());
+                        *database_status = DatabaseCheckpointControlStatus::Running(database);
                     }
                 }
             }
