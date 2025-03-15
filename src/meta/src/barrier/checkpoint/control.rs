@@ -427,12 +427,13 @@ impl CheckpointControl {
         &self,
     ) -> impl Iterator<Item = (DatabaseId, &InflightSubscriptionInfo, &InflightDatabaseInfo)> + '_
     {
+        // TODO: should consider the inflight infos of creating snapshot backfill jobs
         self.databases.iter().flat_map(|(database_id, database)| {
-            database.checkpoint_control().map(|database| {
+            database.database_state().map(|database_state| {
                 (
                     *database_id,
-                    &database.state.inflight_subscription_info,
-                    &database.state.inflight_graph_info,
+                    &database_state.inflight_subscription_info,
+                    &database_state.inflight_graph_info,
                 )
             })
         })
@@ -520,10 +521,10 @@ impl DatabaseCheckpointControlStatus {
         }
     }
 
-    fn checkpoint_control(&self) -> Option<&DatabaseCheckpointControl> {
+    fn database_state(&self) -> Option<&BarrierWorkerState> {
         match self {
-            DatabaseCheckpointControlStatus::Running(control) => Some(control),
-            DatabaseCheckpointControlStatus::Recovering(state) => state.checkpoint_control(),
+            DatabaseCheckpointControlStatus::Running(control) => Some(&control.state),
+            DatabaseCheckpointControlStatus::Recovering(state) => state.database_state(),
         }
     }
 

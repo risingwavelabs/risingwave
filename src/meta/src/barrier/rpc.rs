@@ -14,6 +14,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
+use std::fmt::{Debug, Formatter};
 use std::future::poll_fn;
 use std::task::{Context, Poll};
 use std::time::Duration;
@@ -357,10 +358,21 @@ impl ControlStreamManager {
     }
 }
 
-#[derive(Debug)]
 pub(super) struct DatabaseInitialBarrierCollector {
     database_id: DatabaseId,
     node_to_collect: NodeToCollect,
+    database_state: BarrierWorkerState,
+    create_mview_tracker: CreateMviewProgressTracker,
+    committed_epoch: u64,
+}
+
+impl Debug for DatabaseInitialBarrierCollector {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DatabaseInitialBarrierCollector")
+            .field("database_id", &self.database_id)
+            .field("node_to_collect", &self.node_to_collect)
+            .finish()
+    }
 }
 
 impl DatabaseInitialBarrierCollector {
@@ -368,13 +380,28 @@ impl DatabaseInitialBarrierCollector {
         self.node_to_collect.is_empty()
     }
 
+    pub(super) fn database_state(&self) -> &BarrierWorkerState {
+        &self.database_state
+    }
+
     pub(super) fn collect_resp(&mut self, resp: BarrierCompleteResponse) {
         assert_eq!(self.database_id.database_id, resp.database_id);
+        assert_eq!(resp.epoch, self.committed_epoch);
         assert!(
             self.node_to_collect
                 .remove(&(resp.worker_id as _))
                 .is_some()
         );
+    }
+
+    pub(super) fn finish(self) -> DatabaseCheckpointControl {
+        assert!(self.is_collected());
+        DatabaseCheckpointControl::recovery(
+            self.database_id,
+            self.create_mview_tracker,
+            self.database_state,
+            self.committed_epoch,
+        )
     }
 
     pub(super) fn is_valid_after_worker_err(&mut self, worker_id: WorkerId) -> bool {
@@ -384,11 +411,6 @@ impl DatabaseInitialBarrierCollector {
 
 impl ControlStreamManager {
     /// Extract information from the loaded runtime barrier worker snapshot info, and inject the initial barrier.
-    ///
-    /// Return:
-    ///  - the worker nodes that need to wait for initial barrier collection
-    ///  - the extracted database information
-    ///  - the `prev_epoch` of the initial barrier
     pub(super) fn inject_database_initial_barrier(
         &mut self,
         database_id: DatabaseId,
@@ -400,11 +422,7 @@ impl ControlStreamManager {
         subscription_info: InflightSubscriptionInfo,
         is_paused: bool,
         hummock_version_stats: &HummockVersionStats,
-    ) -> MetaResult<(
-        DatabaseInitialBarrierCollector,
-        DatabaseCheckpointControl,
-        u64,
-    )> {
+    ) -> MetaResult<DatabaseInitialBarrierCollector> {
         self.add_partial_graph(database_id, None);
         let source_split_assignments = info
             .fragment_infos()
@@ -511,21 +529,17 @@ impl ControlStreamManager {
             "inject initial barrier"
         );
 
+        let committed_epoch = barrier_info.prev_epoch();
         let new_epoch = barrier_info.curr_epoch;
-        let state = BarrierWorkerState::recovery(new_epoch, info, subscription_info, is_paused);
-        Ok((
-            DatabaseInitialBarrierCollector {
-                database_id,
-                node_to_collect,
-            },
-            DatabaseCheckpointControl::recovery(
-                database_id,
-                tracker,
-                state,
-                barrier_info.prev_epoch.value().0,
-            ),
-            barrier_info.prev_epoch.value().0,
-        ))
+        let database_state =
+            BarrierWorkerState::recovery(new_epoch, info, subscription_info, is_paused);
+        Ok(DatabaseInitialBarrierCollector {
+            database_id,
+            node_to_collect,
+            database_state,
+            create_mview_tracker: tracker,
+            committed_epoch,
+        })
     }
 
     pub(super) fn inject_command_ctx_barrier(

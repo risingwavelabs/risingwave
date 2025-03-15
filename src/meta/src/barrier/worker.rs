@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::mem::replace;
 use std::sync::Arc;
@@ -743,9 +744,9 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         is_paused,
                         &hummock_version_stats,
                     );
-                    let (node_to_collect, database, prev_epoch) = match result {
-                        Ok(info) => {
-                            info
+                    let initial_barrier_collector = match result {
+                        Ok(initial_barrier_collector) => {
+                            initial_barrier_collector
                         }
                         Err(e) => {
                             warn!(%database_id, e = %e.as_report(), "failed to inject database initial barrier");
@@ -753,11 +754,11 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                             continue;
                         }
                     };
-                    if !node_to_collect.is_collected() {
-                        assert!(collecting_databases.insert(database_id, (node_to_collect, database, prev_epoch)).is_none());
+                    if !initial_barrier_collector.is_collected() {
+                        assert!(collecting_databases.insert(database_id, initial_barrier_collector).is_none());
                     } else {
                         warn!(database_id = database_id.database_id, "database has no node to inject initial barrier");
-                        assert!(collected_databases.insert(database_id, database).is_none());
+                        assert!(collected_databases.insert(database_id, initial_barrier_collector.finish()).is_none());
                     }
                 }
                 while !collecting_databases.is_empty() {
@@ -766,7 +767,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     let resp = match result {
                         Err(e) => {
                             warn!(worker_id, err = %e.as_report(), "worker node failure during recovery");
-                            for (failed_database_id,_ ) in collecting_databases.extract_if(|_, (node_to_collect, ..)| {
+                            for (failed_database_id,_ ) in collecting_databases.extract_if(|_, node_to_collect| {
                                 !node_to_collect.is_valid_after_worker_err(worker_id)
                             }) {
                                 warn!(%failed_database_id, worker_id, "database failed to recovery in global recovery due to worker node err");
@@ -800,12 +801,14 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     };
                     assert_eq!(worker_id, resp.worker_id as WorkerId);
                     let database_id = DatabaseId::new(resp.database_id);
-                    let (node_to_collect, _, prev_epoch) = collecting_databases.get_mut(&database_id).expect("should exist");
-                    assert_eq!(resp.epoch, *prev_epoch);
+                    let Entry::Occupied(mut entry) = collecting_databases.entry(database_id) else {
+                        unreachable!("should exist")
+                    };
+                    let node_to_collect = entry.get_mut();
                     node_to_collect.collect_resp(resp);
                     if node_to_collect.is_collected() {
-                        let (_, database, _) = collecting_databases.remove(&database_id).expect("should exist");
-                        assert!(collected_databases.insert(database_id, database).is_none());
+                        let node_to_collect = entry.remove();
+                        assert!(collected_databases.insert(database_id, node_to_collect.finish()).is_none());
                     }
                 }
                 debug!("collected initial barrier");
