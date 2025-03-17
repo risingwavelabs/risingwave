@@ -733,6 +733,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 let mut collecting_databases = HashMap::new();
                 let mut failed_databases = HashSet::new();
                 for (database_id, info) in database_fragment_infos {
+                    control_stream_manager.add_partial_graph(database_id, None);
                     let result = control_stream_manager.inject_database_initial_barrier(
                         database_id,
                         info,
