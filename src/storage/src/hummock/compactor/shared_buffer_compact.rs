@@ -22,7 +22,7 @@ use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use foyer::CacheHint;
 use futures::future::try_join;
-use futures::{FutureExt, StreamExt, TryFutureExt, stream};
+use futures::{FutureExt, StreamExt, stream};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{EPOCH_LEN, FullKey, FullKeyTracker, UserKey};
@@ -69,37 +69,43 @@ pub async fn compact(
     let mut old_value_payload = Vec::with_capacity(payload.len());
     for imm in payload {
         if table_ids_with_old_value.contains(&imm.table_id) {
-            log_store_new_value_payload.push(imm.clone());
             if imm.has_old_value() {
-                old_value_payload.push(imm);
+                old_value_payload.push(imm.clone());
             }
+            log_store_new_value_payload.push(imm);
         } else {
             assert!(!imm.has_old_value());
             non_log_store_new_value_payload.push(imm);
         }
     }
     let non_log_store_new_value_future = async {
-        compact_shared_buffer::<true>(
-            context.clone(),
-            sstable_object_id_manager.clone(),
-            compaction_catalog_manager_ref.clone(),
-            non_log_store_new_value_payload,
-        )
-        .map_ok(move |results| results.into_iter())
-        .instrument_await("shared_buffer_compact_non_log_store_new_value")
-        .await
+        if non_log_store_new_value_payload.is_empty() {
+            Ok(vec![])
+        } else {
+            compact_shared_buffer::<true>(
+                context.clone(),
+                sstable_object_id_manager.clone(),
+                compaction_catalog_manager_ref.clone(),
+                non_log_store_new_value_payload,
+            )
+            .instrument_await("shared_buffer_compact_non_log_store_new_value")
+            .await
+        }
     };
 
     let log_store_new_value_future = async {
-        compact_shared_buffer::<true>(
-            context.clone(),
-            sstable_object_id_manager.clone(),
-            compaction_catalog_manager_ref.clone(),
-            log_store_new_value_payload,
-        )
-        .map_ok(move |results| results.into_iter())
-        .instrument_await("shared_buffer_compact_log_store_new_value")
-        .await
+        if log_store_new_value_payload.is_empty() {
+            Ok(vec![])
+        } else {
+            compact_shared_buffer::<true>(
+                context.clone(),
+                sstable_object_id_manager.clone(),
+                compaction_catalog_manager_ref.clone(),
+                log_store_new_value_payload,
+            )
+            .instrument_await("shared_buffer_compact_log_store_new_value")
+            .await
+        }
     };
 
     let old_value_future = async {
@@ -124,9 +130,9 @@ pub async fn compact(
     )
     .await?;
 
-    let new_value_ssts = non_log_store_new_value_ssts
-        .chain(log_store_new_value_ssts)
-        .collect_vec();
+    let mut new_value_ssts = non_log_store_new_value_ssts;
+    new_value_ssts.extend(log_store_new_value_ssts);
+
     Ok(UploadTaskOutput {
         new_value_ssts,
         old_value_ssts,
