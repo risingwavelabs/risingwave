@@ -183,7 +183,7 @@ pub struct FrontendOpts {
     /// CREATE MATERIALIZED VIEW ... WITH ( `cloud.serverless_backfill_enabled=true` )
     /// Feature disabled by default.
     #[clap(long, env = "RW_SBC_ADDR", default_value = "")]
-    pub sbc_addr: String,
+    pub serverless_backfill_controller_addr: String,
 }
 
 impl risingwave_common::opts::Opts for FrontendOpts {

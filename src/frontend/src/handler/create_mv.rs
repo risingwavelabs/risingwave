@@ -237,7 +237,7 @@ pub async fn handle_create_mv_bound(
 
     let (table, graph, dependencies, resource_group) = {
         let mut with_options = get_with_options(handler_args.clone());
-        let resource_group = with_options.remove(&RESOURCE_GROUP_KEY.to_owned());
+        let mut resource_group = with_options.remove(&RESOURCE_GROUP_KEY.to_owned());
 
         let is_serverless_backfill = with_options
             .remove(&CLOUD_SERVERLESS_BACKFILL_ENABLED.to_owned())
@@ -272,7 +272,7 @@ pub async fn handle_create_mv_bound(
             )));
         }
 
-	if is_serverless_backfill {
+        if is_serverless_backfill {
             match provision_resource_group(sbc_addr).await {
                 Err(e) => {
                     return Err(RwError::from(ProtocolError(format!(
